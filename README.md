@@ -72,11 +72,19 @@ Create or edit `~/.cursor/mcp.json`:
 
 **Replace `/absolute/path/to/your/project`** with your actual project path.
 
-### 5. Restart Cursor
+### 5. Add Cursor Rules (Optional but Recommended)
+
+Copy the contents of [`CURSOR_RULES_TEMPLATE.md`](./CURSOR_RULES_TEMPLATE.md) to `.cursor/rules` in your project. This teaches Cursor how to effectively use Lien's semantic search capabilities.
+
+```bash
+cp /path/to/lien/CURSOR_RULES_TEMPLATE.md /your/project/.cursor/rules
+```
+
+### 6. Restart Cursor
 
 Restart Cursor to load the new MCP configuration.
 
-### 6. Test It Out!
+### 7. Test It Out!
 
 In Cursor chat, try queries like:
 
