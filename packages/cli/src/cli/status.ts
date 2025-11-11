@@ -2,12 +2,21 @@ import chalk from 'chalk';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 import { configExists } from '../config/loader.js';
 
 export async function statusCommand() {
   const rootDir = process.cwd();
   const projectName = path.basename(rootDir);
-  const indexPath = path.join(os.homedir(), '.lien', 'indices', projectName);
+  
+  // Use same hashing logic as VectorDB to show correct path
+  const pathHash = crypto
+    .createHash('md5')
+    .update(rootDir)
+    .digest('hex')
+    .substring(0, 8);
+  
+  const indexPath = path.join(os.homedir(), '.lien', 'indices', `${projectName}-${pathHash}`);
   
   console.log(chalk.bold('Lien Status\n'));
   

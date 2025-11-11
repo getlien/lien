@@ -1,6 +1,7 @@
 import * as lancedb from 'vectordb';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 import { SearchResult, VectorDBInterface } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
@@ -12,13 +13,22 @@ export class VectorDB implements VectorDBInterface {
   private readonly tableName = 'code_chunks';
   
   constructor(projectRoot: string) {
-    // Store in user's home directory under ~/.lien/indices/{projectName}
+    // Store in user's home directory under ~/.lien/indices/{projectName-hash}
     const projectName = path.basename(projectRoot);
+    
+    // Create unique identifier from full path to prevent collisions
+    // This ensures projects with same name in different locations get separate indices
+    const pathHash = crypto
+      .createHash('md5')
+      .update(projectRoot)
+      .digest('hex')
+      .substring(0, 8);
+    
     this.dbPath = path.join(
       os.homedir(),
       '.lien',
       'indices',
-      projectName
+      `${projectName}-${pathHash}`
     );
   }
   
