@@ -1,0 +1,70 @@
+{
+  "name": "@liendev/lien",
+  "version": "0.1.0",
+  "description": "Local semantic code search for AI assistants via MCP",
+  "type": "module",
+  "bin": {
+    "lien": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alfhenderson/lien.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://lien.dev",
+  "bugs": {
+    "url": "https://github.com/alfhenderson/lien/issues"
+  },
+  "scripts": {
+    "build": "tsup && chmod +x dist/index.js && sed -i '' '1s/^/#!\\/usr\\/bin\\/env node\\n/' dist/index.js",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "semantic-search",
+    "codebase",
+    "ai",
+    "cursor",
+    "code-intelligence",
+    "vector-search",
+    "embeddings",
+    "local-first",
+    "privacy"
+  ],
+  "author": "Alf Henderson",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.5.0",
+    "@xenova/transformers": "^2.17.0",
+    "vectordb": "^0.4.0",
+    "commander": "^12.0.0",
+    "chokidar": "^3.6.0",
+    "glob": "^10.3.0",
+    "ignore": "^5.3.0",
+    "ora": "^8.0.0",
+    "chalk": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "tsup": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

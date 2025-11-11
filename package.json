@@ -1,0 +1,39 @@
+{
+  "name": "lien-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lien - Local semantic code search for AI assistants",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alfhenderson/lien.git"
+  },
+  "homepage": "https://lien.dev",
+  "bugs": {
+    "url": "https://github.com/alfhenderson/lien/issues"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/cli",
+    "dev": "npm run dev -w packages/cli",
+    "typecheck": "npm run typecheck -w packages/cli",
+    "clean": "rm -rf packages/*/dist"
+  },
+  "keywords": [
+    "mcp",
+    "semantic-search",
+    "codebase",
+    "ai",
+    "cursor",
+    "code-intelligence",
+    "vector-search",
+    "local-first"
+  ],
+  "author": "Alf Henderson",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

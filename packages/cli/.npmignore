@@ -1,0 +1,9 @@
+# Source files
+src/
+tsconfig.json
+tsup.config.ts
+
+# Tests
+**/*.test.ts
+**/*.spec.ts
+
