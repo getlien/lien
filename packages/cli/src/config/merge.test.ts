@@ -25,7 +25,7 @@ describe('deepMergeConfig', () => {
   it('should merge mcp config while preserving defaults', () => {
     const userConfig: Partial<LienConfig> = {
       mcp: {
-        port: 4000,
+        port: 8080,
         transport: 'stdio' as const,
         autoIndexOnFirstRun: false,
       },
@@ -33,7 +33,7 @@ describe('deepMergeConfig', () => {
 
     const result = deepMergeConfig(defaultConfig, userConfig);
 
-    expect(result.mcp.port).toBe(4000);
+    expect(result.mcp.port).toBe(8080);
     expect(result.mcp.transport).toBe('stdio');
     expect(result.mcp.autoIndexOnFirstRun).toBe(false);
   });
@@ -126,7 +126,7 @@ describe('detectNewFields', () => {
   it('should detect nested new fields', () => {
     const existing: Partial<LienConfig> = {
       mcp: {
-        port: 3000,
+        port: 7133,
         transport: 'stdio' as const,
         // Missing autoIndexOnFirstRun
       },
@@ -172,7 +172,7 @@ describe('detectNewFields', () => {
         exclude: [],
       },
       mcp: {
-        port: 3000,
+        port: 7133,
         transport: 'stdio' as const,
         autoIndexOnFirstRun: true,
       },
@@ -188,7 +188,7 @@ describe('detectNewFields', () => {
   it('should detect new nested config options', () => {
     const oldConfig: Partial<LienConfig> = {
       mcp: {
-        port: 3000,
+        port: 7133,
         transport: 'stdio' as const,
         // Missing autoIndexOnFirstRun
       },

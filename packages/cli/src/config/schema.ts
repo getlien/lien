@@ -71,7 +71,7 @@ export const defaultConfig: LienConfig = {
     embeddingBatchSize: 50,
   },
   mcp: {
-    port: 3000,
+    port: 7133, // LIEN in leetspeak
     transport: 'stdio',
     autoIndexOnFirstRun: true, // Enabled by default
   },

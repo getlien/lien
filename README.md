@@ -162,7 +162,7 @@ The `.lien.config.json` file allows you to customize indexing behavior:
     "chunkOverlap": 10
   },
   "mcp": {
-    "port": 3000,
+    "port": 7133,
     "transport": "stdio"
   }
 }
