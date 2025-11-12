@@ -200,7 +200,7 @@ List all indexed functions and classes, optionally filtered.
 
 ### Performance
 - **Concurrent indexing** (4 files at once by default) for 3-4x faster indexing
-- **True batch embedding** (5-10x faster than sequential processing)
+- **Parallel embedding processing** within batches for optimal throughput
 - First query may be slower (loading embeddings)
 - Subsequent queries are fast (<500ms)
 - Results are ranked by semantic relevance

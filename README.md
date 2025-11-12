@@ -183,10 +183,10 @@ The `.lien.config.json` file allows you to customize indexing behavior:
 
 ## Performance Tuning
 
-Lien uses **concurrent indexing** and **true batch embedding** for optimal performance:
+Lien uses **concurrent indexing** and **parallel embedding** for optimal performance:
 
-- **Concurrent file processing**: Multiple files processed simultaneously
-- **True batch embedding**: All chunks in a batch sent to the model in a single call (5-10x faster than sequential)
+- **Concurrent file processing**: Multiple files processed simultaneously  
+- **Parallel embedding processing**: Embeddings generated concurrently within batches
 
 You can optimize performance based on your hardware:
 
