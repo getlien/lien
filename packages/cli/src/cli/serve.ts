@@ -7,7 +7,7 @@ export async function serveCommand(options: { port?: string; watch?: boolean }) 
   
   try {
     // Log to stderr since stdout is for MCP protocol
-    showBanner('Local semantic code search for AI assistants');
+    showBanner();
     console.error(chalk.bold('Starting MCP server...\n'));
     
     await startMCPServer({
