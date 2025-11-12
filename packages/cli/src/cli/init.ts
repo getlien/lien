@@ -3,6 +3,7 @@ import path from 'path';
 import chalk from 'chalk';
 import { defaultConfig, LienConfig } from '../config/schema.js';
 import { deepMergeConfig, detectNewFields } from '../config/merge.js';
+import { showCompactBanner } from '../utils/banner.js';
 
 export async function initCommand(options: { upgrade?: boolean } = {}) {
   const configPath = path.join(process.cwd(), '.lien.config.json');
@@ -32,6 +33,12 @@ export async function initCommand(options: { upgrade?: boolean } = {}) {
     if (configExists && options.upgrade) {
       await upgradeConfig(configPath);
       return;
+    }
+    
+    // Show banner for new initialization
+    if (!configExists) {
+      showCompactBanner();
+      console.log(chalk.bold('Initializing Lien...\n'));
     }
     
     // Create new config file

@@ -1,12 +1,14 @@
 import chalk from 'chalk';
 import { startMCPServer } from '../mcp/server.js';
+import { showBanner } from '../utils/banner.js';
 
 export async function serveCommand(options: { port?: string; watch?: boolean }) {
   const rootDir = process.cwd();
   
   try {
     // Log to stderr since stdout is for MCP protocol
-    console.error(chalk.bold('Starting Lien MCP server...\n'));
+    showBanner('Local semantic code search for AI assistants');
+    console.error(chalk.bold('Starting MCP server...\n'));
     
     await startMCPServer({
       rootDir,

@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { configExists, loadConfig } from '../config/loader.js';
 import { isGitRepo, getCurrentBranch, getCurrentCommit } from '../git/utils.js';
 import { readVersionFile } from '../vectordb/version.js';
+import { showCompactBanner } from '../utils/banner.js';
 
 export async function statusCommand() {
   const rootDir = process.cwd();
@@ -20,7 +21,8 @@ export async function statusCommand() {
   
   const indexPath = path.join(os.homedir(), '.lien', 'indices', `${projectName}-${pathHash}`);
   
-  console.log(chalk.bold('Lien Status\n'));
+  showCompactBanner();
+  console.log(chalk.bold('Status\n'));
   
   // Check if config exists
   const hasConfig = await configExists(rootDir);
