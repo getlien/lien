@@ -7,14 +7,20 @@ import {
 import { tools } from './tools.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
+import { GitStateTracker } from '../git/tracker.js';
+import { indexMultipleFiles, indexSingleFile } from '../indexer/incremental.js';
+import { loadConfig } from '../config/loader.js';
+import { isGitAvailable, isGitRepo } from '../git/utils.js';
+import { FileWatcher } from '../watcher/index.js';
 
 export interface MCPServerOptions {
   rootDir: string;
   verbose?: boolean;
+  watch?: boolean;
 }
 
 export async function startMCPServer(options: MCPServerOptions): Promise<void> {
-  const { rootDir, verbose } = options;
+  const { rootDir, verbose, watch } = options;
   
   // Log to stderr (stdout is reserved for MCP protocol)
   const log = (message: string) => {
@@ -251,16 +257,141 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     }
   });
   
-  // Handle shutdown gracefully
-  process.on('SIGINT', () => {
-    log('Shutting down MCP server...');
-    process.exit(0);
-  });
+  // Load configuration for git detection settings
+  const config = await loadConfig(rootDir);
   
-  process.on('SIGTERM', () => {
+  // Initialize git detection if enabled
+  let gitTracker: GitStateTracker | null = null;
+  let gitPollInterval: NodeJS.Timeout | null = null;
+  let fileWatcher: FileWatcher | null = null;
+  
+  if (config.gitDetection.enabled) {
+    const gitAvailable = await isGitAvailable();
+    const isRepo = await isGitRepo(rootDir);
+    
+    if (gitAvailable && isRepo) {
+      log('✓ Detected git repository');
+      gitTracker = new GitStateTracker(rootDir, vectorDB.dbPath);
+      
+      // Check for git changes on startup
+      try {
+        log('Checking for git changes...');
+        const changedFiles = await gitTracker.initialize();
+        
+        if (changedFiles && changedFiles.length > 0) {
+          log(`🌿 Git changes detected: ${changedFiles.length} files changed`);
+          log('Reindexing changed files...');
+          
+          const count = await indexMultipleFiles(
+            changedFiles,
+            vectorDB,
+            embeddings,
+            config,
+            { verbose }
+          );
+          
+          log(`✓ Reindexed ${count} files`);
+        } else {
+          log('✓ Index is up to date with git state');
+        }
+      } catch (error) {
+        log(`Warning: Failed to check git state on startup: ${error}`);
+      }
+      
+      // Start background polling for git changes
+      log(`✓ Git detection enabled (checking every ${config.gitDetection.pollIntervalMs / 1000}s)`);
+      
+      gitPollInterval = setInterval(async () => {
+        try {
+          const changedFiles = await gitTracker!.detectChanges();
+          
+          if (changedFiles && changedFiles.length > 0) {
+            log(`🌿 Git change detected: ${changedFiles.length} files changed`);
+            log('Reindexing in background...');
+            
+            // Don't await - run in background
+            indexMultipleFiles(
+              changedFiles,
+              vectorDB,
+              embeddings,
+              config,
+              { verbose }
+            ).then(count => {
+              log(`✓ Background reindex complete: ${count} files`);
+            }).catch(error => {
+              log(`Warning: Background reindex failed: ${error}`);
+            });
+          }
+        } catch (error) {
+          log(`Warning: Git detection check failed: ${error}`);
+        }
+      }, config.gitDetection.pollIntervalMs);
+    } else {
+      if (!gitAvailable) {
+        log('Git not available - git detection disabled');
+      } else if (!isRepo) {
+        log('Not a git repository - git detection disabled');
+      }
+    }
+  } else {
+    log('Git detection disabled by configuration');
+  }
+  
+  // Initialize file watching if enabled (opt-in)
+  const fileWatchingEnabled = watch || config.fileWatching.enabled;
+  
+  if (fileWatchingEnabled) {
+    log('👀 Starting file watcher...');
+    fileWatcher = new FileWatcher(rootDir, config);
+    
+    try {
+      await fileWatcher.start(async (event) => {
+        const { type, filepath } = event;
+        
+        if (type === 'unlink') {
+          // File deleted
+          log(`🗑️  File deleted: ${filepath}`);
+          try {
+            await vectorDB.deleteByFile(filepath);
+            log(`✓ Removed ${filepath} from index`);
+          } catch (error) {
+            log(`Warning: Failed to remove ${filepath}: ${error}`);
+          }
+        } else {
+          // File added or changed
+          const action = type === 'add' ? 'added' : 'changed';
+          log(`📝 File ${action}: ${filepath}`);
+          
+          // Reindex in background
+          indexSingleFile(filepath, vectorDB, embeddings, config, { verbose })
+            .catch((error) => {
+              log(`Warning: Failed to reindex ${filepath}: ${error}`);
+            });
+        }
+      });
+      
+      const watchedCount = fileWatcher.getWatchedFiles().length;
+      log(`✓ File watching enabled (watching ${watchedCount} files)`);
+    } catch (error) {
+      log(`Warning: Failed to start file watcher: ${error}`);
+      fileWatcher = null;
+    }
+  }
+  
+  // Handle shutdown gracefully
+  const cleanup = async () => {
     log('Shutting down MCP server...');
+    if (gitPollInterval) {
+      clearInterval(gitPollInterval);
+    }
+    if (fileWatcher) {
+      await fileWatcher.stop();
+    }
     process.exit(0);
-  });
+  };
+  
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
   
   // Connect to stdio transport
   const transport = new StdioServerTransport();

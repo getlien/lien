@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { startMCPServer } from '../mcp/server.js';
 
-export async function serveCommand(options: { port?: string }) {
+export async function serveCommand(options: { port?: string; watch?: boolean }) {
   const rootDir = process.cwd();
   
   try {
@@ -11,6 +11,7 @@ export async function serveCommand(options: { port?: string }) {
     await startMCPServer({
       rootDir,
       verbose: true,
+      watch: options.watch,
     });
   } catch (error) {
     console.error(chalk.red('Failed to start MCP server:'), error);

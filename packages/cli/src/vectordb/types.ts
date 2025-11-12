@@ -11,5 +11,7 @@ export interface VectorDBInterface {
   insertBatch(vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
   search(queryVector: Float32Array, limit?: number): Promise<SearchResult[]>;
   clear(): Promise<void>;
+  deleteByFile(filepath: string): Promise<void>;
+  updateFile(filepath: string, vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
 }
 

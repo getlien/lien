@@ -12,6 +12,14 @@ export interface LienConfig {
     port: number;
     transport: 'stdio' | 'socket';
   };
+  gitDetection: {
+    enabled: boolean;
+    pollIntervalMs: number;
+  };
+  fileWatching: {
+    enabled: boolean;
+    debounceMs: number;
+  };
 }
 
 export const defaultConfig: LienConfig = {
@@ -64,6 +72,14 @@ export const defaultConfig: LienConfig = {
   mcp: {
     port: 3000,
     transport: 'stdio',
+  },
+  gitDetection: {
+    enabled: true, // Enabled by default
+    pollIntervalMs: 10000, // Check every 10 seconds
+  },
+  fileWatching: {
+    enabled: false, // Opt-in feature
+    debounceMs: 1000, // Wait 1 second after last change
   },
 };
 

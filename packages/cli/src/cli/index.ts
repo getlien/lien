@@ -26,6 +26,7 @@ program
   .command('serve')
   .description('Start the MCP server for Cursor integration')
   .option('-p, --port <port>', 'Port number (for future use)', '3000')
+  .option('-w, --watch', 'Enable file watching for real-time reindexing')
   .action(serveCommand);
 
 program

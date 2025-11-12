@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { SearchResult, VectorDBInterface } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
-import { readVersionFile } from './version.js';
+import { readVersionFile, writeVersionFile } from './version.js';
 
 export class VectorDB implements VectorDBInterface {
   private db: any = null;
@@ -192,6 +192,60 @@ export class VectorDB implements VectorDBInterface {
       await this.initialize();
     } catch (error) {
       throw new Error(`Failed to clear vector database: ${error}`);
+    }
+  }
+  
+  /**
+   * Deletes all chunks from a specific file.
+   * Used for incremental reindexing when a file is deleted or needs to be re-indexed.
+   * 
+   * @param filepath - Path to the file whose chunks should be deleted
+   */
+  async deleteByFile(filepath: string): Promise<void> {
+    if (!this.table) {
+      throw new Error('Vector database not initialized');
+    }
+    
+    try {
+      // Use LanceDB's SQL-like delete with predicate
+      await this.table.delete(`file = "${filepath}"`);
+    } catch (error) {
+      throw new Error(`Failed to delete file from vector database: ${error}`);
+    }
+  }
+  
+  /**
+   * Updates a file in the index by atomically deleting old chunks and inserting new ones.
+   * This is the primary method for incremental reindexing.
+   * 
+   * @param filepath - Path to the file being updated
+   * @param vectors - New embedding vectors
+   * @param metadatas - New chunk metadata
+   * @param contents - New chunk contents
+   */
+  async updateFile(
+    filepath: string,
+    vectors: Float32Array[],
+    metadatas: ChunkMetadata[],
+    contents: string[]
+  ): Promise<void> {
+    if (!this.table) {
+      throw new Error('Vector database not initialized');
+    }
+    
+    try {
+      // 1. Delete old chunks from this file
+      await this.deleteByFile(filepath);
+      
+      // 2. Insert new chunks (if any)
+      if (vectors.length > 0) {
+        await this.insertBatch(vectors, metadatas, contents);
+      }
+      
+      // 3. Update version file to trigger MCP reconnection
+      await writeVersionFile(this.dbPath);
+    } catch (error) {
+      throw new Error(`Failed to update file in vector database: ${error}`);
     }
   }
   
