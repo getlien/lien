@@ -5,6 +5,8 @@ export interface LienConfig {
     include: string[];
     chunkSize: number;
     chunkOverlap: number;
+    concurrency: number;
+    embeddingBatchSize: number;
   };
   mcp: {
     port: number;
@@ -56,6 +58,8 @@ export const defaultConfig: LienConfig = {
     ],
     chunkSize: 75,
     chunkOverlap: 10,
+    concurrency: 4,
+    embeddingBatchSize: 50,
   },
   mcp: {
     port: 3000,

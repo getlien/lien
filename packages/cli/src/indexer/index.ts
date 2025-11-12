@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import ora from 'ora';
 import chalk from 'chalk';
+import pLimit from 'p-limit';
 import { scanCodebase } from './scanner.js';
 import { chunkFile } from './chunker.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
@@ -11,6 +12,11 @@ import { CodeChunk } from './types.js';
 export interface IndexingOptions {
   rootDir?: string;
   verbose?: boolean;
+}
+
+interface ChunkWithContent {
+  chunk: CodeChunk;
+  content: string;
 }
 
 export async function indexCodebase(options: IndexingOptions = {}): Promise<void> {
@@ -49,62 +55,97 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     await vectorDB.initialize();
     spinner.succeed('Vector database initialized');
     
-    // 5. Process files
-    spinner.start('Processing files...');
-    let processedChunks = 0;
-    let processedFiles = 0;
-    const batchSize = 10;
-    const startTime = Date.now();
+    // 5. Process files concurrently
+    const concurrency = config.indexing.concurrency;
+    const batchSize = config.indexing.embeddingBatchSize;
     
-    for (const file of files) {
-      try {
-        const content = await fs.readFile(file, 'utf-8');
-        const chunks = chunkFile(file, content, {
-          chunkSize: config.indexing.chunkSize,
-          chunkOverlap: config.indexing.chunkOverlap,
-        });
+    spinner.start(`Processing files with ${concurrency}x concurrency...`);
+    
+    const startTime = Date.now();
+    let processedFiles = 0;
+    let processedChunks = 0;
+    
+    // Accumulator for chunks across multiple files
+    const chunkAccumulator: ChunkWithContent[] = [];
+    const limit = pLimit(concurrency);
+    
+    // Function to process accumulated chunks
+    const processAccumulatedChunks = async () => {
+      if (chunkAccumulator.length === 0) return;
+      
+      const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
+      
+      // Process in batches
+      for (let i = 0; i < toProcess.length; i += batchSize) {
+        const batch = toProcess.slice(i, Math.min(i + batchSize, toProcess.length));
         
-        if (chunks.length === 0) {
-          continue;
-        }
+        const texts = batch.map(item => item.content);
+        const embeddingVectors = await embeddings.embedBatch(texts);
         
-        // Process chunks in batches
-        for (let i = 0; i < chunks.length; i += batchSize) {
-          const batch = chunks.slice(i, Math.min(i + batchSize, chunks.length));
-          const texts = batch.map(c => c.content);
+        await vectorDB.insertBatch(
+          embeddingVectors,
+          batch.map(item => item.chunk.metadata),
+          texts
+        );
+        
+        processedChunks += batch.length;
+      }
+    };
+    
+    // Process files with concurrency limit
+    const filePromises = files.map((file) =>
+      limit(async () => {
+        try {
+          const content = await fs.readFile(file, 'utf-8');
+          const chunks = chunkFile(file, content, {
+            chunkSize: config.indexing.chunkSize,
+            chunkOverlap: config.indexing.chunkOverlap,
+          });
           
-          // Generate embeddings
-          const embeddingVectors = await embeddings.embedBatch(texts);
+          if (chunks.length === 0) {
+            processedFiles++;
+            return;
+          }
           
-          // Store in vector DB
-          await vectorDB.insertBatch(
-            embeddingVectors,
-            batch.map(c => c.metadata),
-            texts
-          );
+          // Add chunks to accumulator
+          for (const chunk of chunks) {
+            chunkAccumulator.push({
+              chunk,
+              content: chunk.content,
+            });
+          }
           
-          processedChunks += batch.length;
+          // Process when batch is large enough
+          if (chunkAccumulator.length >= batchSize) {
+            await processAccumulatedChunks();
+          }
+          
+          processedFiles++;
           
           // Update progress
           const elapsed = (Date.now() - startTime) / 1000;
           const rate = processedFiles / elapsed;
-          const eta = Math.round((files.length - processedFiles) / rate);
+          const eta = rate > 0 ? Math.round((files.length - processedFiles) / rate) : 0;
           
-          spinner.text = `Indexed ${processedFiles}/${files.length} files (${processedChunks} chunks) | ETA: ${eta}s`;
+          spinner.text = `Indexed ${processedFiles}/${files.length} files (${processedChunks} chunks) | ${concurrency}x concurrency | ETA: ${eta}s`;
+        } catch (error) {
+          if (options.verbose) {
+            console.error(chalk.yellow(`\n⚠️  Skipping ${file}: ${error}`));
+          }
+          processedFiles++;
         }
-        
-        processedFiles++;
-      } catch (error) {
-        if (options.verbose) {
-          console.error(chalk.yellow(`\n⚠️  Skipping ${file}: ${error}`));
-        }
-        // Continue with next file
-      }
-    }
+      })
+    );
+    
+    // Wait for all files to be processed
+    await Promise.all(filePromises);
+    
+    // Process remaining chunks
+    await processAccumulatedChunks();
     
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
     spinner.succeed(
-      `Indexed ${processedFiles} files (${processedChunks} chunks) in ${totalTime}s`
+      `Indexed ${processedFiles} files (${processedChunks} chunks) in ${totalTime}s using ${concurrency}x concurrency`
     );
     
     console.log(chalk.dim('\nNext step: Run'), chalk.bold('lien serve'), chalk.dim('to start the MCP server'));
