@@ -33,3 +33,10 @@ Thumbs.db
 # Misc
 *.orig
 
+# Private business documentation (DO NOT COMMIT)
+PRIVATE-*.md
+business-strategy.md
+monetization-plan.md
+competitive-analysis.md
+.private/
+
