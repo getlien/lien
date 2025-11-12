@@ -11,6 +11,7 @@ export interface LienConfig {
   mcp: {
     port: number;
     transport: 'stdio' | 'socket';
+    autoIndexOnFirstRun: boolean;
   };
   gitDetection: {
     enabled: boolean;
@@ -72,6 +73,7 @@ export const defaultConfig: LienConfig = {
   mcp: {
     port: 3000,
     transport: 'stdio',
+    autoIndexOnFirstRun: true, // Enabled by default
   },
   gitDetection: {
     enabled: true, // Enabled by default

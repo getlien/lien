@@ -13,5 +13,6 @@ export interface VectorDBInterface {
   clear(): Promise<void>;
   deleteByFile(filepath: string): Promise<void>;
   updateFile(filepath: string, vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
+  hasData(): Promise<boolean>;
 }
 

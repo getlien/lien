@@ -20,6 +20,14 @@ export async function loadConfig(rootDir: string = process.cwd()): Promise<LienC
         ...defaultConfig.mcp,
         ...userConfig.mcp,
       },
+      gitDetection: {
+        ...defaultConfig.gitDetection,
+        ...userConfig.gitDetection,
+      },
+      fileWatching: {
+        ...defaultConfig.fileWatching,
+        ...userConfig.fileWatching,
+      },
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {

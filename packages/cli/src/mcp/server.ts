@@ -257,8 +257,30 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     }
   });
   
-  // Load configuration for git detection settings
+  // Load configuration for auto-indexing, git detection, and file watching
   const config = await loadConfig(rootDir);
+  
+  // Check if this is the first run (no data in index) and auto-index if needed
+  const hasIndex = await vectorDB.hasData();
+  
+  if (!hasIndex && config.mcp.autoIndexOnFirstRun) {
+    log('📦 No index found - running initial indexing...');
+    log('⏱️  This may take 5-20 minutes depending on project size');
+    
+    try {
+      // Import indexCodebase function
+      const { indexCodebase } = await import('../indexer/index.js');
+      await indexCodebase({ rootDir, verbose: true });
+      log('✅ Initial indexing complete!');
+    } catch (error) {
+      log(`⚠️  Initial indexing failed: ${error}`);
+      log('You can manually run: lien index');
+      // Don't exit - server can still start, just won't have data
+    }
+  } else if (!hasIndex) {
+    log('⚠️  No index found. Auto-indexing is disabled in config.');
+    log('Run "lien index" to index your codebase.');
+  }
   
   // Initialize git detection if enabled
   let gitTracker: GitStateTracker | null = null;

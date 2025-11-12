@@ -292,6 +292,45 @@ export class VectorDB implements VectorDBInterface {
     }
   }
   
+  /**
+   * Checks if the database contains real indexed data.
+   * Used to detect first run and trigger auto-indexing.
+   * 
+   * @returns true if database has real code chunks, false if empty or only schema rows
+   */
+  async hasData(): Promise<boolean> {
+    if (!this.table) {
+      return false;
+    }
+    
+    try {
+      const count = await this.table.countRows();
+      
+      // Check if table is empty
+      if (count === 0) {
+        return false;
+      }
+      
+      // Check if all rows are empty (schema rows only)
+      // Sample a few rows to verify they contain real data
+      const sample = await this.table
+        .search(Array(EMBEDDING_DIMENSION).fill(0))
+        .limit(Math.min(count, 5))
+        .execute();
+      
+      const hasRealData = sample.some((r: any) => 
+        r.content && 
+        r.content !== '__SCHEMA_ROW__' && 
+        r.content.trim().length > 0
+      );
+      
+      return hasRealData;
+    } catch {
+      // If any error occurs, assume no data
+      return false;
+    }
+  }
+  
   static async load(projectRoot: string): Promise<VectorDB> {
     const db = new VectorDB(projectRoot);
     await db.initialize();
