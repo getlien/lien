@@ -5,12 +5,13 @@ import chalk from 'chalk';
 const VERSION = '0.1.0';
 
 /**
- * Wrap text in a box with optional footer lines
+ * Wrap text in a box with optional footer lines (fixed width based on main content)
  */
 function wrapInBox(text: string, footerLines: string[] = [], padding = 1): string {
   const lines = text.split('\n').filter(line => line.trim().length > 0);
-  const allLines = [...lines, ...footerLines];
-  const maxLength = Math.max(...allLines.map(line => line.length));
+  
+  // Use only the main content (logo) to determine box width
+  const maxLength = Math.max(...lines.map(line => line.length));
   
   const horizontalBorder = '─'.repeat(maxLength + padding * 2);
   const top = `┌${horizontalBorder}┐`;
@@ -25,9 +26,40 @@ function wrapInBox(text: string, footerLines: string[] = [], padding = 1): strin
   // Add separator and footer if provided
   if (footerLines.length > 0) {
     const separator = `├${horizontalBorder}┤`;
-    const paddedFooter = footerLines.map(line => {
-      const padRight = ' '.repeat(maxLength - line.length + padding);
+    
+    // Wrap footer lines to fit the box width
+    const wrappedFooter: string[] = [];
+    for (const line of footerLines) {
+      if (line.length <= maxLength) {
+        // Center short lines
+        const totalPad = maxLength - line.length;
+        const leftPad = Math.floor(totalPad / 2);
+        const rightPad = totalPad - leftPad;
+        wrappedFooter.push(' '.repeat(leftPad) + line + ' '.repeat(rightPad));
+      } else {
+        // Wrap long lines
+        const words = line.split(' ');
+        let currentLine = '';
+        
+        for (const word of words) {
+          if (currentLine.length + word.length + 1 <= maxLength) {
+            currentLine += (currentLine ? ' ' : '') + word;
+          } else {
+            if (currentLine) {
+              wrappedFooter.push(currentLine.padEnd(maxLength));
+            }
+            currentLine = word;
+          }
+        }
+        if (currentLine) {
+          wrappedFooter.push(currentLine.padEnd(maxLength));
+        }
+      }
+    }
+    
+    const paddedFooter = wrappedFooter.map(line => {
       const padLeft = ' '.repeat(padding);
+      const padRight = ' '.repeat(padding);
       return `│${padLeft}${line}${padRight}│`;
     });
     
