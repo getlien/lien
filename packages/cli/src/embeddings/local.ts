@@ -60,25 +60,11 @@ export class LocalEmbeddings implements EmbeddingService {
     }
     
     try {
-      // Use true batch processing: pass entire array to model in single call
-      // This is 5-10x faster than individual calls due to vectorization
-      const output = await this.extractor(texts, {
-        pooling: 'mean',
-        normalize: true,
-      });
-      
-      // transformers.js returns a tensor with shape [batch_size, embedding_dim]
-      // We need to extract each row as a separate Float32Array
-      const batchSize = texts.length;
-      const embeddingDim = output.dims[1];
-      const results: Float32Array[] = [];
-      
-      for (let i = 0; i < batchSize; i++) {
-        const start = i * embeddingDim;
-        const end = start + embeddingDim;
-        results.push(output.data.slice(start, end));
-      }
-      
+      // Process embeddings with Promise.all for concurrent execution
+      // Each call is sequential but Promise.all allows task interleaving
+      const results = await Promise.all(
+        texts.map(text => this.embed(text))
+      );
       return results;
     } catch (error) {
       throw new Error(`Failed to generate batch embeddings: ${error}`);
