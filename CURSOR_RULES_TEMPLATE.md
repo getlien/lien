@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+---
+
 # Lien MCP Integration Rules
 
 This project uses **Lien** - a local semantic code search MCP server. You MUST use Lien tools proactively to understand the codebase before making changes.
@@ -198,5 +202,14 @@ list_functions({
 
 ---
 
-Copy this entire file to `.cursor/rules` in your project root to enable these guidelines.
+## Setup Instructions
+
+Copy this entire file to `.cursor/rules` in your project root:
+
+```bash
+# From your project directory
+cp /path/to/lien/CURSOR_RULES_TEMPLATE.md .cursor/rules
+```
+
+The `alwaysApply: true` frontmatter ensures Cursor uses Lien for all files in your project.
 
