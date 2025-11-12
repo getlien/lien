@@ -39,11 +39,13 @@ export class VectorDB implements VectorDBInterface {
       try {
         this.table = await this.db.openTable(this.tableName);
       } catch {
-        // Table doesn't exist, create it with schema
+        // Table doesn't exist, create it with empty data (just for schema)
+        // LanceDB requires at least one row to infer schema, so we create it empty
+        // and will delete this dummy row after first real insertion
         const schema = [
           {
             vector: Array(EMBEDDING_DIMENSION).fill(0),
-            content: '',
+            content: '__SCHEMA_ROW__', // Mark as schema row for deletion
             file: '',
             startLine: 0,
             endLine: 0,
@@ -85,6 +87,18 @@ export class VectorDB implements VectorDBInterface {
       }));
       
       await this.table.add(records);
+      
+      // On first insertion, clean up the schema row if it exists
+      // This is a one-time cleanup after table creation
+      try {
+        const count = await this.table.countRows();
+        if (count > records.length) {
+          // Delete rows where content is __SCHEMA_ROW__
+          await this.table.delete('content = "__SCHEMA_ROW__"');
+        }
+      } catch {
+        // Ignore cleanup errors - not critical
+      }
     } catch (error) {
       throw new Error(`Failed to insert batch into vector database: ${error}`);
     }
@@ -99,22 +113,35 @@ export class VectorDB implements VectorDBInterface {
     }
     
     try {
+      // Request more results than needed to account for filtering
       const results = await this.table
         .search(Array.from(queryVector))
-        .limit(limit)
+        .limit(limit + 10) // Get extra in case we filter some out
         .execute();
       
-      return results.map((r: any) => ({
-        content: r.content,
-        metadata: {
-          file: r.file,
-          startLine: r.startLine,
-          endLine: r.endLine,
-          type: r.type,
-          language: r.language,
-        },
-        score: r._distance ?? 0,
-      }));
+      // Filter out schema rows and empty content, then map to SearchResult
+      const filtered = results
+        .filter((r: any) => 
+          r.content && 
+          r.content !== '__SCHEMA_ROW__' && 
+          r.content.trim().length > 0 &&
+          r.file && 
+          r.file.length > 0
+        )
+        .slice(0, limit) // Take only the requested number after filtering
+        .map((r: any) => ({
+          content: r.content,
+          metadata: {
+            file: r.file,
+            startLine: r.startLine,
+            endLine: r.endLine,
+            type: r.type,
+            language: r.language,
+          },
+          score: r._distance ?? 0,
+        }));
+      
+      return filtered;
     } catch (error) {
       const errorMsg = String(error);
       
