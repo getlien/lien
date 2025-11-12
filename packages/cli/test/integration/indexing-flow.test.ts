@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDir, cleanupTestDir, createTestFile } from '../helpers/test-db.js';
 import { MockEmbeddings } from '../helpers/mock-embeddings.js';
 import { VectorDB } from '../../src/vectordb/lancedb.js';
-import { scanFiles } from '../../src/indexer/scanner.js';
+import { scanCodebase } from '../../src/indexer/scanner.js';
 import { chunkFile } from '../../src/indexer/chunker.js';
 import fs from 'fs/promises';
 
@@ -38,9 +38,10 @@ export function calculateProduct(a: number, b: number): number {
     await createTestFile(testDir, 'math.ts', testCode);
 
     // Step 1: Scan files
-    const files = await scanFiles(testDir, {
-      include: ['**/*.ts'],
-      exclude: [],
+    const files = await scanCodebase({
+      rootDir: testDir,
+      includePatterns: ['**/*.ts'],
+      excludePatterns: [],
     });
     expect(files).toHaveLength(1);
     expect(files[0]).toContain('math.ts');
@@ -57,7 +58,7 @@ export function calculateProduct(a: number, b: number): number {
 
     // Step 4: Insert into vector DB
     const metadatas = chunks.map(chunk => chunk.metadata);
-    await vectorDB.insert(vectors, metadatas, texts);
+    await vectorDB.insertBatch(vectors, metadatas, texts);
 
     // Step 5: Search for relevant code
     const queryVector = await embeddings.embed('function that adds numbers');
@@ -74,9 +75,10 @@ export function calculateProduct(a: number, b: number): number {
     await createTestFile(testDir, 'constants.ts', 'export const API_URL = "https://api.example.com";');
 
     // Scan files
-    const files = await scanFiles(testDir, {
-      include: ['**/*.ts'],
-      exclude: [],
+    const files = await scanCodebase({
+      rootDir: testDir,
+      includePatterns: ['**/*.ts'],
+      excludePatterns: [],
     });
     expect(files).toHaveLength(2);
 
@@ -87,7 +89,7 @@ export function calculateProduct(a: number, b: number): number {
       const texts = chunks.map(chunk => chunk.content);
       const vectors = await embeddings.embedBatch(texts);
       const metadatas = chunks.map(chunk => chunk.metadata);
-      await vectorDB.insert(vectors, metadatas, texts);
+      await vectorDB.insertBatch(vectors, metadatas, texts);
     }
 
     // Search
@@ -106,9 +108,10 @@ export function calculateProduct(a: number, b: number): number {
     await createTestFile(testDir, '.gitignore', 'node_modules/');
 
     // Scan files
-    const files = await scanFiles(testDir, {
-      include: ['**/*.ts', '**/*.js'],
-      exclude: [],
+    const files = await scanCodebase({
+      rootDir: testDir,
+      includePatterns: ['**/*.ts', '**/*.js'],
+      excludePatterns: [],
     });
 
     // Should include src/index.ts but not node_modules files

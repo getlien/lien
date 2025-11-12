@@ -6,7 +6,10 @@ describe('chunkFile', () => {
     const code = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join('\n');
     const chunks = chunkFile('test.ts', code, { chunkSize: 3, chunkOverlap: 1 });
 
-    expect(chunks).toHaveLength(4);
+    // With 10 lines, chunkSize=3, overlap=1:
+    // Chunk 1: lines 1-3, Chunk 2: lines 3-5, Chunk 3: lines 5-7, 
+    // Chunk 4: lines 7-9, Chunk 5: lines 9-10 = 5 chunks
+    expect(chunks).toHaveLength(5);
     expect(chunks[0].content).toContain('line 1');
     expect(chunks[0].content).toContain('line 3');
   });
@@ -98,7 +101,10 @@ describe('chunkText', () => {
     const text = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join('\n');
     const chunks = chunkText(text, { chunkSize: 3, chunkOverlap: 1 });
 
-    expect(chunks).toHaveLength(4);
+    // With 10 lines, chunkSize=3, overlap=1:
+    // Chunk 1: lines 1-3, Chunk 2: lines 3-5, Chunk 3: lines 5-7, 
+    // Chunk 4: lines 7-9, Chunk 5: lines 9-10 = 5 chunks
+    expect(chunks).toHaveLength(5);
     expect(chunks[0]).toContain('line 1');
     expect(chunks[0]).toContain('line 3');
   });

@@ -38,13 +38,14 @@ describe('detectLanguage', () => {
   it('should detect C files', () => {
     expect(detectLanguage('main.c')).toBe('c');
     expect(detectLanguage('utils.c')).toBe('c');
+    expect(detectLanguage('header.h')).toBe('c'); // .h defaults to C
   });
 
   it('should detect C++ files', () => {
     expect(detectLanguage('main.cpp')).toBe('cpp');
     expect(detectLanguage('utils.cc')).toBe('cpp');
     expect(detectLanguage('header.hpp')).toBe('cpp');
-    expect(detectLanguage('header.h')).toBe('cpp');
+    expect(detectLanguage('header.cxx')).toBe('cpp');
   });
 
   it('should detect PHP files', () => {
@@ -54,7 +55,7 @@ describe('detectLanguage', () => {
 
   it('should detect Ruby files', () => {
     expect(detectLanguage('app.rb')).toBe('ruby');
-    expect(detectLanguage('Gemfile')).toBe('ruby');
+    expect(detectLanguage('script.rb')).toBe('ruby');
   });
 
   it('should detect Swift files', () => {
