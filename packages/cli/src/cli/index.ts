@@ -14,6 +14,7 @@ program
 program
   .command('init')
   .description('Initialize Lien in the current directory')
+  .option('-u, --upgrade', 'Upgrade existing config with new options')
   .action(initCommand);
 
 program

@@ -1,0 +1,66 @@
+import { LienConfig } from './schema.js';
+
+/**
+ * Deep merges user config with defaults, preserving user customizations.
+ * User values always take precedence over defaults.
+ * 
+ * @param defaults - The default configuration
+ * @param user - The user's partial configuration
+ * @returns Complete merged configuration
+ */
+export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>): LienConfig {
+  return {
+    version: user.version ?? defaults.version,
+    indexing: {
+      ...defaults.indexing,
+      ...user.indexing,
+    },
+    mcp: {
+      ...defaults.mcp,
+      ...user.mcp,
+    },
+    gitDetection: {
+      ...defaults.gitDetection,
+      ...user.gitDetection,
+    },
+    fileWatching: {
+      ...defaults.fileWatching,
+      ...user.fileWatching,
+    },
+  };
+}
+
+/**
+ * Detects new fields that exist in the 'after' config but not in the 'before' config.
+ * Returns a list of human-readable field paths.
+ * 
+ * @param before - The existing config (potentially missing fields)
+ * @param after - The complete config with all fields
+ * @returns Array of new field paths (e.g., ["mcp.autoIndexOnFirstRun", "gitDetection"])
+ */
+export function detectNewFields(before: any, after: any): string[] {
+  const newFields: string[] = [];
+
+  // Check top-level sections
+  for (const key of Object.keys(after)) {
+    if (!(key in before)) {
+      newFields.push(key);
+      continue;
+    }
+
+    // Check nested fields for object sections
+    if (typeof after[key] === 'object' && after[key] !== null && !Array.isArray(after[key])) {
+      const beforeSection = before[key] || {};
+      const afterSection = after[key];
+
+      for (const nestedKey of Object.keys(afterSection)) {
+        if (!(nestedKey in beforeSection)) {
+          newFields.push(`${key}.${nestedKey}`);
+        }
+      }
+    }
+  }
+
+  return newFields;
+}
+

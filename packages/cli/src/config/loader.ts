@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { LienConfig, defaultConfig } from './schema.js';
+import { deepMergeConfig } from './merge.js';
 
 export async function loadConfig(rootDir: string = process.cwd()): Promise<LienConfig> {
   const configPath = path.join(rootDir, '.lien.config.json');
@@ -9,26 +10,8 @@ export async function loadConfig(rootDir: string = process.cwd()): Promise<LienC
     const configContent = await fs.readFile(configPath, 'utf-8');
     const userConfig = JSON.parse(configContent) as Partial<LienConfig>;
     
-    // Merge with defaults
-    return {
-      version: userConfig.version ?? defaultConfig.version,
-      indexing: {
-        ...defaultConfig.indexing,
-        ...userConfig.indexing,
-      },
-      mcp: {
-        ...defaultConfig.mcp,
-        ...userConfig.mcp,
-      },
-      gitDetection: {
-        ...defaultConfig.gitDetection,
-        ...userConfig.gitDetection,
-      },
-      fileWatching: {
-        ...defaultConfig.fileWatching,
-        ...userConfig.fileWatching,
-      },
-    };
+    // Use the shared merge function for consistency
+    return deepMergeConfig(defaultConfig, userConfig);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // Config doesn't exist, return defaults
