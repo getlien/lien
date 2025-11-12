@@ -116,6 +116,38 @@ export class VectorDB implements VectorDBInterface {
         score: r._distance ?? 0,
       }));
     } catch (error) {
+      const errorMsg = String(error);
+      
+      // Detect corrupted index or missing data files (common after reindexing)
+      if (errorMsg.includes('Not found:') || errorMsg.includes('.lance')) {
+        // Attempt to reconnect - index may have been rebuilt
+        try {
+          await this.initialize();
+          
+          // Retry search with fresh connection
+          const results = await this.table
+            .search(Array.from(queryVector))
+            .limit(limit)
+            .execute();
+          
+          return results.map((r: any) => ({
+            content: r.content,
+            metadata: {
+              file: r.file,
+              startLine: r.startLine,
+              endLine: r.endLine,
+              type: r.type,
+              language: r.language,
+            },
+            score: r._distance ?? 0,
+          }));
+        } catch (retryError) {
+          throw new Error(
+            `Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory. Error: ${retryError}`
+          );
+        }
+      }
+      
       throw new Error(`Failed to search vector database: ${error}`);
     }
   }
