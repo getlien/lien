@@ -30,6 +30,12 @@ function wrapInBox(text: string, footerLines: string[] = [], padding = 1): strin
     // Wrap footer lines to fit the box width
     const wrappedFooter: string[] = [];
     for (const line of footerLines) {
+      // Handle empty lines (spacers)
+      if (line.length === 0) {
+        wrappedFooter.push(' '.repeat(maxLength));
+        continue;
+      }
+      
       if (line.length <= maxLength) {
         // Center short lines
         const totalPad = maxLength - line.length;
@@ -83,6 +89,7 @@ export function showBanner(subtitle?: string): void {
   const footerLines: string[] = [];
   if (subtitle) {
     footerLines.push(subtitle);
+    footerLines.push(''); // Empty line between subtitle and version
   }
   footerLines.push(`v${VERSION}`);
 
@@ -105,6 +112,7 @@ export function showCompactBanner(subtitle?: string): void {
   const footerLines: string[] = [];
   if (subtitle) {
     footerLines.push(subtitle);
+    footerLines.push(''); // Empty line between subtitle and version
   }
   footerLines.push(`v${VERSION}`);
 
