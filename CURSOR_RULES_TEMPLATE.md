@@ -195,11 +195,15 @@ List all indexed functions and classes, optionally filtered.
   - After pulling major changes
   - Adding new files or modules
   - Weekly for active projects
+- Concurrent indexing is enabled by default (4 files at once)
+- Adjust concurrency in `.lien.config.json` based on your hardware
 
 ### Performance
+- **Concurrent indexing** (4 files at once by default) for 3-4x faster indexing
 - First query may be slower (loading embeddings)
 - Subsequent queries are fast (<500ms)
 - Results are ranked by semantic relevance
+- Configurable via `.lien.config.json` (concurrency and batch sizes)
 
 ### Limitations
 - Searches code semantically, not by exact text match

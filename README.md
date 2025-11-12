@@ -177,7 +177,46 @@ The `.lien.config.json` file allows you to customize indexing behavior:
 - **`indexing.include`**: Glob patterns to include in indexing
 - **`indexing.chunkSize`**: Number of lines per chunk (default: 75)
 - **`indexing.chunkOverlap`**: Overlapping lines between chunks (default: 10)
+- **`indexing.concurrency`**: Files processed in parallel (default: 4)
+- **`indexing.embeddingBatchSize`**: Chunks per embedding batch (default: 50)
 - **`mcp.transport`**: MCP transport type (currently only "stdio" supported)
+
+## Performance Tuning
+
+Lien uses concurrent indexing by default for faster processing. You can optimize performance based on your hardware:
+
+```json
+{
+  "indexing": {
+    "concurrency": 4,           // Files processed in parallel (1-8 recommended)
+    "embeddingBatchSize": 50    // Chunks per batch (10-100 recommended)
+  }
+}
+```
+
+### Recommendations
+
+**Based on CPU Cores:**
+- **4-8 cores**: Use concurrency 4-6
+- **8+ cores**: Use concurrency 6-8
+- **2-4 cores**: Use concurrency 2-3
+
+**Based on RAM:**
+- **16GB+**: Default settings work well
+- **8-16GB**: Reduce concurrency to 2-3
+- **<8GB**: Use concurrency 1-2, batchSize 25
+
+**Based on Storage:**
+- **SSD**: Higher concurrency benefits more (6-8)
+- **HDD**: Moderate concurrency (2-4)
+
+**Performance Impact:**
+- Default settings (concurrency: 4, batchSize: 50): **3-4x faster** than sequential
+- Higher concurrency: Better for projects with many small files
+- Larger batch sizes: Better GPU/CPU utilization, more memory usage
+
+**Sequential Mode:**
+If you prefer sequential processing, set `concurrency: 1` in your config.
 
 ## MCP Tools
 
