@@ -5,12 +5,15 @@ import crypto from 'crypto';
 import { SearchResult, VectorDBInterface } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
+import { readVersionFile } from './version.js';
 
 export class VectorDB implements VectorDBInterface {
   private db: any = null;
   private table: any = null;
-  private dbPath: string;
+  public readonly dbPath: string;
   private readonly tableName = 'code_chunks';
+  private lastVersionCheck: number = 0;
+  private currentVersion: number = 0;
   
   constructor(projectRoot: string) {
     // Store in user's home directory under ~/.lien/indices/{projectName-hash}
@@ -189,6 +192,49 @@ export class VectorDB implements VectorDBInterface {
       await this.initialize();
     } catch (error) {
       throw new Error(`Failed to clear vector database: ${error}`);
+    }
+  }
+  
+  /**
+   * Checks if the index version has changed since last check.
+   * Uses caching to minimize I/O overhead (checks at most once per second).
+   * 
+   * @returns true if version has changed, false otherwise
+   */
+  async checkVersion(): Promise<boolean> {
+    const now = Date.now();
+    
+    // Cache version checks for 1 second to minimize I/O
+    if (now - this.lastVersionCheck < 1000) {
+      return false;
+    }
+    
+    this.lastVersionCheck = now;
+    
+    try {
+      const version = await readVersionFile(this.dbPath);
+      
+      if (version > this.currentVersion) {
+        this.currentVersion = version;
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      // If we can't read version file, don't reconnect
+      return false;
+    }
+  }
+  
+  /**
+   * Reconnects to the database by reinitializing the connection.
+   * Used when the index has been rebuilt/reindexed.
+   */
+  async reconnect(): Promise<void> {
+    try {
+      await this.initialize();
+    } catch (error) {
+      throw new Error(`Failed to reconnect to vector database: ${error}`);
     }
   }
   

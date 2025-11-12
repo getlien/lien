@@ -8,6 +8,7 @@ import { LocalEmbeddings } from '../embeddings/local.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { loadConfig } from '../config/loader.js';
 import { CodeChunk } from './types.js';
+import { writeVersionFile } from '../vectordb/version.js';
 
 export interface IndexingOptions {
   rootDir?: string;
@@ -142,6 +143,10 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     
     // Process remaining chunks
     await processAccumulatedChunks();
+    
+    // Write version file to mark successful completion
+    // This allows the MCP server to detect when reindexing is complete
+    await writeVersionFile(vectorDB.dbPath);
     
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
     spinner.succeed(

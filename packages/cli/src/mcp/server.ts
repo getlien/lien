@@ -60,6 +60,21 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     tools,
   }));
   
+  // Helper function to check version and reconnect if needed
+  const checkAndReconnect = async () => {
+    try {
+      const versionChanged = await vectorDB.checkVersion();
+      if (versionChanged) {
+        log('Index version changed, reconnecting to database...');
+        await vectorDB.reconnect();
+        log('Reconnected to updated index');
+      }
+    } catch (error) {
+      // Log but don't throw - fall back to existing connection
+      log(`Version check failed: ${error}`);
+    }
+  };
+  
   // Register tool call handler
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
@@ -73,6 +88,9 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           const limit = (args.limit as number) || 5;
           
           log(`Searching for: "${query}"`);
+          
+          // Check if index has been updated and reconnect if needed
+          await checkAndReconnect();
           
           const queryEmbedding = await embeddings.embed(query);
           const results = await vectorDB.search(queryEmbedding, limit);
@@ -95,6 +113,9 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           
           log(`Finding similar code...`);
           
+          // Check if index has been updated and reconnect if needed
+          await checkAndReconnect();
+          
           const codeEmbedding = await embeddings.embed(code);
           const results = await vectorDB.search(codeEmbedding, limit);
           
@@ -115,6 +136,9 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           const includeRelated = (args.includeRelated as boolean) ?? true;
           
           log(`Getting context for: ${filepath}`);
+          
+          // Check if index has been updated and reconnect if needed
+          await checkAndReconnect();
           
           // Search for chunks from this file by embedding the filepath
           // This is a simple approach; could be improved with metadata filtering
@@ -158,6 +182,9 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           const language = args.language as string | undefined;
           
           log('Listing functions...');
+          
+          // Check if index has been updated and reconnect if needed
+          await checkAndReconnect();
           
           // For MVP, we'll search for common function/class keywords
           const searchTerms = language 
