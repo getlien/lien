@@ -36,3 +36,8 @@ Thumbs.db
 # Private documentation
 .private/
 
+# Test artifacts
+test-tmp/
+coverage/
+.vitest/
+

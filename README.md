@@ -358,6 +358,59 @@ Contributions are welcome! Please read our contributing guidelines (coming soon)
 
 MIT License - see [LICENSE](./LICENSE) for details.
 
+## Testing
+
+Lien includes comprehensive test coverage for core functionality.
+
+### Running Tests
+
+```bash
+# Run tests once
+cd packages/cli
+npm test
+
+# Watch mode (runs tests on file changes)
+npm run test:watch
+
+# Interactive UI
+npm run test:ui
+
+# Generate coverage report
+npm run test:coverage
+```
+
+### Test Structure
+
+```
+packages/cli/
+├── src/
+│   ├── indexer/
+│   │   ├── chunker.ts
+│   │   └── chunker.test.ts         # Unit tests next to code
+│   └── ...
+└── test/
+    ├── integration/
+    │   └── indexing-flow.test.ts   # Integration tests
+    ├── helpers/
+    │   ├── mock-embeddings.ts      # Test utilities
+    │   └── test-db.ts
+    └── fixtures/
+        └── sample-code/             # Test data
+```
+
+### Coverage Goals
+
+- Unit tests: 60%+ coverage of core logic
+- Integration tests: Key flows (scan → chunk → embed → store → search)
+- CI: Automated testing on all PRs
+
+### Contributing Tests
+
+When contributing, please:
+- Add unit tests for new functions
+- Add integration tests for new features
+- Ensure all tests pass before submitting PR
+
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/alfhenderson/lien/issues)

@@ -29,6 +29,9 @@ jobs:
       - name: Type check
         run: npm run typecheck --workspace=packages/cli
       
+      - name: Run tests
+        run: npm run test --workspace=packages/cli
+      
       - name: Build
         run: npm run build
       
