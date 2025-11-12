@@ -22,7 +22,7 @@ function wrapInBox(text: string, padding = 1): string {
 }
 
 /**
- * Display the Lien ASCII art banner (uses stderr for MCP server)
+ * Display the gorgeous ANSI Shadow banner (uses stderr for MCP server)
  * @param subtitle Optional subtitle to show below the banner
  */
 export function showBanner(subtitle?: string): void {
@@ -43,17 +43,23 @@ export function showBanner(subtitle?: string): void {
 }
 
 /**
- * Display a compact version of the Lien logo (uses stdout for CLI commands)
+ * Display the gorgeous ANSI Shadow banner (uses stdout for CLI commands)
+ * @param subtitle Optional subtitle to show below the banner
  */
-export function showCompactBanner(): void {
+export function showCompactBanner(subtitle?: string): void {
   const banner = figlet.textSync('LIEN', {
-    font: 'Standard',
+    font: 'ANSI Shadow',
     horizontalLayout: 'fitted',
     verticalLayout: 'fitted',
   });
 
   const boxedBanner = wrapInBox(banner.trim());
   console.log(chalk.cyan(boxedBanner));
-  console.log(); // Empty line
+  
+  if (subtitle) {
+    console.log(chalk.dim(`\n  ${subtitle}\n`));
+  } else {
+    console.log(); // Empty line
+  }
 }
 
