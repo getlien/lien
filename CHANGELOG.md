@@ -2,6 +2,15 @@
 
 All notable changes to Lien will be documented in this file.
 
+## [0.1.9] - 2025-01-13
+
+### Fixed
+- **Improved automatic reconnection after reindex**: Enhanced the reconnection logic to properly close and reload database connections. Added background polling every 2 seconds to detect index updates, so Cursor no longer needs to be restarted after reindexing.
+  - `VectorDB.reconnect()` now forces a complete connection reset by nulling db/table before reinitializing
+  - `VectorDB.initialize()` now caches the initial version to prevent false positives
+  - Added background version check polling (every 2s) independent of tool calls
+  - MCP server automatically reconnects within 2 seconds of any reindex operation
+
 ## [0.1.8] - 2025-01-13
 
 ### Fixed

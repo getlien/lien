@@ -65,6 +65,14 @@ export class VectorDB implements VectorDBInterface {
         await this.db.createTable(this.tableName, schema);
         this.table = await this.db.openTable(this.tableName);
       }
+      
+      // Read and cache the current version
+      try {
+        this.currentVersion = await readVersionFile(this.dbPath);
+      } catch {
+        // Version file doesn't exist yet, will be created on first index
+        this.currentVersion = 0;
+      }
     } catch (error) {
       throw new Error(`Failed to initialize vector database: ${error}`);
     }
@@ -303,9 +311,15 @@ export class VectorDB implements VectorDBInterface {
   /**
    * Reconnects to the database by reinitializing the connection.
    * Used when the index has been rebuilt/reindexed.
+   * Forces a complete reload from disk by closing existing connections first.
    */
   async reconnect(): Promise<void> {
     try {
+      // Close existing connections to force reload from disk
+      this.table = null;
+      this.db = null;
+      
+      // Reinitialize with fresh connection
       await this.initialize();
     } catch (error) {
       throw new Error(`Failed to reconnect to vector database: ${error}`);

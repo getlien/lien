@@ -96,6 +96,22 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     }
   };
   
+  // Start background polling for version changes (every 2 seconds)
+  // This ensures we reconnect as soon as possible after reindex, even if no tool calls are made
+  const versionCheckInterval = setInterval(async () => {
+    await checkAndReconnect();
+  }, 2000);
+  
+  // Clean up interval on process exit
+  process.on('SIGINT', () => {
+    clearInterval(versionCheckInterval);
+    process.exit(0);
+  });
+  process.on('SIGTERM', () => {
+    clearInterval(versionCheckInterval);
+    process.exit(0);
+  });
+  
   // Register tool call handler
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
@@ -182,24 +198,12 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             detectionMethod: fileChunks[0].metadata.detectionMethod ?? null,
           } : null;
           
-          // Debug: log what we got from the database
-          if (fileChunks.length > 0) {
-            log(`[DEBUG] First chunk metadata for ${filepath}:`);
-            log(`  isTest: ${fileChunks[0].metadata.isTest}`);
-            log(`  relatedTests: ${JSON.stringify(fileChunks[0].metadata.relatedTests)}`);
-            log(`  relatedSources: ${JSON.stringify(fileChunks[0].metadata.relatedSources)}`);
-            log(`  testFramework: ${fileChunks[0].metadata.testFramework}`);
-            log(`  detectionMethod: ${fileChunks[0].metadata.detectionMethod}`);
-          }
-          
           // Only include test associations if we have actual data (not from old index)
           const hasTestData = testAssociations && (
             testAssociations.isTest === true || 
             testAssociations.relatedTests.length > 0 || 
             testAssociations.relatedSources.length > 0
           );
-          
-          log(`[DEBUG] hasTestData: ${hasTestData}`);
           
           if (includeRelated && fileChunks.length > 0) {
             // Get related chunks by searching with the first chunk's content
