@@ -36,6 +36,7 @@ program
   .command('index')
   .description('Index the codebase for semantic search')
   .option('-w, --watch', 'Watch for changes and re-index automatically')
+  .option('-v, --verbose', 'Show detailed logging during indexing')
   .action(indexCommand);
 
 program
@@ -53,7 +54,8 @@ program
 program
   .command('reindex')
   .description('Clear index and re-index the entire codebase')
-  .action(async () => {
+  .option('-v, --verbose', 'Show detailed logging during indexing')
+  .action(async (options) => {
     const { showCompactBanner } = await import('../utils/banner.js');
     const chalk = (await import('chalk')).default;
     const { VectorDB } = await import('../vectordb/lancedb.js');
@@ -70,7 +72,7 @@ program
       
       await indexCodebase({
         rootDir: process.cwd(),
-        verbose: true,
+        verbose: options.verbose || false,
       });
     } catch (error) {
       console.error(chalk.red('Error during re-indexing:'), error);

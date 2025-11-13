@@ -2,6 +2,15 @@
 
 All notable changes to Lien will be documented in this file.
 
+## [0.1.6] - 2025-01-13
+
+### Added
+- **`--verbose` flag for indexing commands**: Added `-v, --verbose` flag to `lien index` and `lien reindex` commands. Shows detailed logging including:
+  - First 5 successful source→test associations
+  - First 5 successful test→source associations  
+  - Sample file paths when no associations are found
+  - Helps debug test detection issues in Laravel and other frameworks
+
 ## [0.1.5] - 2025-01-13
 
 ### Fixed

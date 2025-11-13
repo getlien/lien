@@ -32,10 +32,11 @@ async function analyzeTestAssociations(
   files: string[],
   rootDir: string,
   config: any,
-  spinner: ora.Ora
+  spinner: ora.Ora,
+  verbose: boolean = false
 ): Promise<Map<string, TestAssociation>> {
   // Pass 1: Convention-based (all languages)
-  const associations = findTestsByConvention(files);
+  const associations = findTestsByConvention(files, verbose);
   
   // Pass 2: Import analysis (Tier 1 only, if enabled)
   if (config.indexing.useImportAnalysis) {
@@ -52,7 +53,7 @@ async function analyzeTestAssociations(
 /**
  * Convention-based test detection for all 12 languages
  */
-function findTestsByConvention(files: string[]): Map<string, TestAssociation> {
+function findTestsByConvention(files: string[], verbose: boolean = false): Map<string, TestAssociation> {
   // Separate test files from source files
   const testFiles: string[] = [];
   const sourceFiles: string[] = [];
@@ -69,9 +70,17 @@ function findTestsByConvention(files: string[]): Map<string, TestAssociation> {
   const associations = new Map<string, TestAssociation>();
   
   // Build associations: source → tests
+  let sourcesWithTests = 0;
   for (const sourceFile of sourceFiles) {
     const language = detectLanguage(sourceFile);
     const relatedTests = findTestFiles(sourceFile, language, testFiles);
+    
+    if (verbose && relatedTests.length > 0) {
+      sourcesWithTests++;
+      if (sourcesWithTests <= 5) {
+        console.log(chalk.gray(`[Verbose] ${sourceFile} → ${relatedTests.join(', ')}`));
+      }
+    }
     
     associations.set(sourceFile, {
       file: sourceFile,
@@ -82,9 +91,17 @@ function findTestsByConvention(files: string[]): Map<string, TestAssociation> {
   }
   
   // Build associations: test → sources (bidirectional)
+  let testsWithSources = 0;
   for (const testFile of testFiles) {
     const language = detectLanguage(testFile);
     const relatedSources = findSourceFiles(testFile, language, sourceFiles);
+    
+    if (verbose && relatedSources.length > 0) {
+      testsWithSources++;
+      if (testsWithSources <= 5) {
+        console.log(chalk.gray(`[Verbose] ${testFile} → ${relatedSources.join(', ')}`));
+      }
+    }
     
     associations.set(testFile, {
       file: testFile,
@@ -158,7 +175,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       spinner.start('Analyzing test associations...');
       // Convert absolute paths to relative for test pattern matching
       const relativeFiles = files.map(f => path.relative(rootDir, f));
-      const relativeAssociations = await analyzeTestAssociations(relativeFiles, rootDir, config, spinner);
+      const relativeAssociations = await analyzeTestAssociations(relativeFiles, rootDir, config, spinner, verbose);
       
       // Convert back to absolute paths for the map keys
       for (const [relPath, association] of relativeAssociations.entries()) {
@@ -174,6 +191,21 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       const testFileCount = Array.from(testAssociations.values()).filter(a => a.isTest).length;
       const sourceWithTestsCount = Array.from(testAssociations.values()).filter(a => !a.isTest && a.relatedTests.length > 0).length;
       spinner.succeed(`Found ${testFileCount} test files with ${sourceWithTestsCount} source files that have tests`);
+      
+      if (verbose && sourceWithTestsCount === 0 && testFileCount > 0) {
+        // Show debug info when verbose is enabled
+        const sampleTest = relativeFiles.find(f => {
+          const lang = detectLanguage(f);
+          return isTestFile(f, lang);
+        });
+        const sampleSource = relativeFiles.find(f => {
+          const lang = detectLanguage(f);
+          return !isTestFile(f, lang);
+        });
+        console.log(chalk.yellow(`\n[Verbose] No source→test associations found`));
+        if (sampleTest) console.log(chalk.gray(`[Verbose] Sample test file: ${sampleTest}`));
+        if (sampleSource) console.log(chalk.gray(`[Verbose] Sample source file: ${sampleSource}\n`));
+      }
     }
     
     // 4. Initialize embeddings model
