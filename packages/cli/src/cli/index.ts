@@ -30,6 +30,8 @@ program
   .command('init')
   .description('Initialize Lien in the current directory')
   .option('-u, --upgrade', 'Upgrade existing config with new options')
+  .option('-y, --yes', 'Skip interactive prompts and use defaults')
+  .option('-p, --path <path>', 'Path to initialize (defaults to current directory)')
   .action(initCommand);
 
 program

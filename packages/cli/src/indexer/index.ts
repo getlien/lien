@@ -216,10 +216,10 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       // Fall back to legacy scanning for old configs
       const legacyConfig = config as any;
       files = await scanCodebase({
-        rootDir,
+      rootDir,
         includePatterns: legacyConfig.indexing?.include || [],
         excludePatterns: legacyConfig.indexing?.exclude || [],
-      });
+    });
     }
     
     if (files.length === 0) {
