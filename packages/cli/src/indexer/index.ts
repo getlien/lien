@@ -37,31 +37,32 @@ function findOwningFramework(
   verbose: boolean = false
 ): FrameworkInstance | null {
   
-  // Sort by path depth (deepest first) to handle nested frameworks
-  const sorted = [...frameworks].sort((a, b) => 
+  // Separate root framework from specific frameworks
+  const rootFramework = frameworks.find(fw => fw.path === '.');
+  const specificFrameworks = frameworks.filter(fw => fw.path !== '.');
+  
+  // Sort specific frameworks by path depth (deepest first)
+  const sorted = specificFrameworks.sort((a, b) => 
     b.path.split('/').length - a.path.split('/').length
   );
   
   if (verbose && filePath.includes('CognitoServiceTest')) {
     console.log(chalk.cyan(`[DEBUG findOwningFramework] Finding owner for: ${filePath}`));
-    console.log(chalk.cyan(`  Frameworks (sorted by depth):`));
+    console.log(chalk.cyan(`  Specific frameworks (sorted by depth):`));
     for (const fw of sorted) {
       console.log(chalk.cyan(`    - ${fw.name} at "${fw.path}" (enabled: ${fw.enabled})`));
     }
+    if (rootFramework) {
+      console.log(chalk.cyan(`  Root framework (fallback): ${rootFramework.name} at "."`));
+    }
   }
   
+  // Check specific frameworks first
   for (const fw of sorted) {
     if (verbose && filePath.includes('CognitoServiceTest')) {
-      console.log(chalk.cyan(`  Checking ${fw.name}...`));
+      console.log(chalk.cyan(`  Checking ${fw.name} at "${fw.path}"...`));
     }
     
-    if (fw.path === '.') {
-      // Root framework matches everything not matched by deeper frameworks
-      if (verbose && filePath.includes('CognitoServiceTest')) {
-        console.log(chalk.cyan(`    ✓ Matched root framework: ${fw.name}`));
-      }
-      return fw;
-    }
     if (filePath.startsWith(fw.path + '/')) {
       if (verbose && filePath.includes('CognitoServiceTest')) {
         console.log(chalk.cyan(`    ✓ Matched framework: ${fw.name}`));
@@ -70,6 +71,14 @@ function findOwningFramework(
     } else if (verbose && filePath.includes('CognitoServiceTest')) {
       console.log(chalk.cyan(`    ✗ "${filePath}" doesn't start with "${fw.path}/"`));
     }
+  }
+  
+  // Fall back to root framework if no specific framework matched
+  if (rootFramework) {
+    if (verbose && filePath.includes('CognitoServiceTest')) {
+      console.log(chalk.cyan(`  ✓ Using fallback root framework: ${rootFramework.name}`));
+    }
+    return rootFramework;
   }
   
   return null;
