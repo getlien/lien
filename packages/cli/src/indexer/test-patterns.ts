@@ -439,6 +439,16 @@ export function findSourceFiles(
   const testBasename = path.basename(normalizedTest);
   const testDir = path.dirname(normalizedTest);
   const matches: string[] = [];
+  
+  // Debug: log what we're processing
+  const verbose = process.env.LIEN_VERBOSE === 'true';
+  if (verbose) {
+    console.log(`[DEBUG findSourceFiles] Processing test: ${testFile}`);
+    console.log(`[DEBUG findSourceFiles]   normalizedTest: ${normalizedTest}`);
+    console.log(`[DEBUG findSourceFiles]   frameworkPath: ${frameworkPath}`);
+    console.log(`[DEBUG findSourceFiles]   testBasename: ${testBasename}`);
+    console.log(`[DEBUG findSourceFiles]   testDir: ${testDir}`);
+  }
 
   // Extract base name by removing test patterns
   let baseName = getNameWithoutExtension(testBasename, language);
@@ -466,18 +476,30 @@ export function findSourceFiles(
   }
 
   const languageExts = getLanguageExtensions(language);
+  
+  if (verbose) {
+    console.log(`[DEBUG findSourceFiles]   extracted baseName: ${baseName}`);
+    console.log(`[DEBUG findSourceFiles]   languageExts: ${languageExts.join(', ')}`);
+    console.log(`[DEBUG findSourceFiles]   testPatterns.extensions: ${testPatterns.extensions.join(', ')}`);
+    console.log(`[DEBUG findSourceFiles]   testPatterns.suffixes: ${testPatterns.suffixes.join(', ')}`);
+  }
 
   // Strategy 1: Co-located source file
   for (const langExt of languageExts) {
     const candidate = path.join(testDir, baseName + langExt);
+    if (verbose) {
+      console.log(`[DEBUG findSourceFiles]   Strategy 1 checking: ${candidate} (exists: ${normalizedFiles.includes(candidate)})`);
+    }
     if (normalizedFiles.includes(candidate) && !isTestFile(addFrameworkPrefix(candidate, frameworkPath), language)) {
+      if (verbose) {
+        console.log(`[DEBUG findSourceFiles]   ✓ Found co-located source: ${candidate}`);
+      }
       matches.push(candidate);
     }
   }
 
   // Strategy 2: Source in src/lib directories
   const sourceDirs = ['src', 'lib', 'app', 'core', 'main'];
-  const testDirParts = testDir.split(path.sep);
   
   for (const sourceDir of sourceDirs) {
     // Try to maintain subdirectory structure
@@ -486,7 +508,13 @@ export function findSourceFiles(
     
     for (const langExt of languageExts) {
       const candidate = path.join(sourceDir, relativeDir, baseName + langExt);
+      if (verbose) {
+        console.log(`[DEBUG findSourceFiles]   Strategy 2a checking: ${candidate} (exists: ${normalizedFiles.includes(candidate)})`);
+      }
       if (normalizedFiles.includes(candidate) && !isTestFile(addFrameworkPrefix(candidate, frameworkPath), language)) {
+        if (verbose) {
+          console.log(`[DEBUG findSourceFiles]   ✓ Found in source dir with subdirs: ${candidate}`);
+        }
         matches.push(candidate);
       }
     }
@@ -494,25 +522,46 @@ export function findSourceFiles(
     // Try flat structure
     for (const langExt of languageExts) {
       const candidate = path.join(sourceDir, baseName + langExt);
+      if (verbose) {
+        console.log(`[DEBUG findSourceFiles]   Strategy 2b checking: ${candidate} (exists: ${normalizedFiles.includes(candidate)})`);
+      }
       if (normalizedFiles.includes(candidate) && !isTestFile(addFrameworkPrefix(candidate, frameworkPath), language)) {
+        if (verbose) {
+          console.log(`[DEBUG findSourceFiles]   ✓ Found in source dir (flat): ${candidate}`);
+        }
         matches.push(candidate);
       }
     }
   }
 
   // Strategy 3: Search entire framework codebase for matching basename
+  if (verbose) {
+    console.log(`[DEBUG findSourceFiles]   Strategy 3: Searching all ${normalizedFiles.length} files for basename match...`);
+  }
   for (const file of normalizedFiles) {
     if (isTestFile(addFrameworkPrefix(file, frameworkPath), language)) continue;
     
     const fileBaseName = getBaseName(file);
     if (fileBaseName === baseName) {
+      if (verbose) {
+        console.log(`[DEBUG findSourceFiles]   ✓ Found via Strategy 3: ${file}`);
+      }
       matches.push(file);
     }
   }
 
   // Remove duplicates and add framework prefix back
   const uniqueMatches = [...new Set(matches)];
-  return uniqueMatches.map(m => addFrameworkPrefix(m, frameworkPath));
+  const result = uniqueMatches.map(m => addFrameworkPrefix(m, frameworkPath));
+  
+  if (verbose) {
+    console.log(`[DEBUG findSourceFiles] ✓ Total: Found ${result.length} source file(s) for ${testFile}`);
+    if (result.length > 0) {
+      console.log(`[DEBUG findSourceFiles]   → ${result.join(', ')}`);
+    }
+  }
+  
+  return result;
 }
 
 /**
