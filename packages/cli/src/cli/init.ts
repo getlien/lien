@@ -190,7 +190,7 @@ async function createNewConfig(rootDir: string, options: InitOptions) {
       {
         type: 'confirm',
         name: 'installCursorRules',
-        message: 'Install recommended Cursor rules (.cursor/rules)?',
+        message: 'Install recommended Cursor rules?',
         default: true,
       },
     ]);
@@ -200,14 +200,36 @@ async function createNewConfig(rootDir: string, options: InitOptions) {
         const cursorRulesDir = path.join(rootDir, '.cursor');
         await fs.mkdir(cursorRulesDir, { recursive: true });
         
-        // Template is at repo root, need to go up from cli/src/cli to root
-        const templatePath = path.join(__dirname, '../../../CURSOR_RULES_TEMPLATE.md');
-        const targetPath = path.join(cursorRulesDir, 'rules');
+        // Find template - it's in the package root (same dir as package.json)
+        // When compiled: dist/cli/init.js -> go up to package root
+        const templatePath = path.join(__dirname, '../../CURSOR_RULES_TEMPLATE.md');
         
-        await fs.copyFile(templatePath, targetPath);
-        console.log(chalk.green('✓ Installed Cursor rules'));
+        // Check if .cursor/rules exists and is a directory
+        const rulesPath = path.join(cursorRulesDir, 'rules');
+        let targetPath: string;
+        let isDirectory = false;
+        
+        try {
+          const stats = await fs.stat(rulesPath);
+          isDirectory = stats.isDirectory();
+        } catch {
+          // Doesn't exist, that's fine
+        }
+        
+        if (isDirectory) {
+          // .cursor/rules is a directory, create lien.mdc inside it
+          targetPath = path.join(rulesPath, 'lien.mdc');
+          await fs.copyFile(templatePath, targetPath);
+          console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
+        } else {
+          // .cursor/rules doesn't exist or is a file, create/overwrite it
+          targetPath = rulesPath;
+          await fs.copyFile(templatePath, targetPath);
+          console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules'));
+        }
       } catch (error) {
-        console.log(chalk.yellow('⚠️  Could not install Cursor rules (template not found)'));
+        console.log(chalk.yellow('⚠️  Could not install Cursor rules'));
+        console.log(chalk.dim(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`));
         console.log(chalk.dim('You can manually copy CURSOR_RULES_TEMPLATE.md to .cursor/rules'));
       }
     }

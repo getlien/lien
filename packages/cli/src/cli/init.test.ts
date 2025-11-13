@@ -313,5 +313,20 @@ describe('initCommand', () => {
       const exists = await fs.access(cursorRulesDir).then(() => true).catch(() => false);
       expect(exists).toBe(true);
     });
+    
+    it('should handle .cursor/rules as a directory', async () => {
+      // Create .cursor/rules as a directory
+      const rulesDir = path.join(testDir, '.cursor/rules');
+      await fs.mkdir(rulesDir, { recursive: true });
+      await fs.writeFile(path.join(rulesDir, 'existing.mdc'), '# Existing rules');
+      
+      // Verify it's a directory
+      const stats = await fs.stat(rulesDir);
+      expect(stats.isDirectory()).toBe(true);
+      
+      // Verify existing file is preserved
+      const existingFile = await fs.readFile(path.join(rulesDir, 'existing.mdc'), 'utf-8');
+      expect(existingFile).toContain('Existing rules');
+    });
   });
 });

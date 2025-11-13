@@ -41,6 +41,8 @@ This creates a `.lien.config.json` file with framework-aware settings. During in
 - Select which frameworks to enable
 - Customize framework settings (optional)
 - Install recommended Cursor rules (optional but recommended)
+  - Creates `.cursor/rules` if it doesn't exist
+  - Creates `.cursor/rules/lien.mdc` if `.cursor/rules` is already a directory
 
 ### 2. Index Your Codebase
 

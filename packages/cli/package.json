@@ -16,7 +16,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CURSOR_RULES_TEMPLATE.md"
   ],
   "repository": {
     "type": "git",
