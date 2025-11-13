@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.3.0] - 2025-11-13
+
+### Added
+- **Framework plugin architecture with monorepo support**
+
+
 
 ## [0.3.0] - 2025-01-14
 
