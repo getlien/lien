@@ -3,7 +3,7 @@ import path from 'path';
 import ora from 'ora';
 import chalk from 'chalk';
 import pLimit from 'p-limit';
-import { scanCodebase, detectLanguage } from './scanner.js';
+import { scanCodebase, scanCodebaseWithFrameworks, detectLanguage } from './scanner.js';
 import { chunkFile } from './chunker.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
 import { VectorDB } from '../vectordb/lancedb.js';
@@ -12,6 +12,7 @@ import { CodeChunk, TestAssociation } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { isTestFile, findTestFiles, findSourceFiles, detectTestFramework } from './test-patterns.js';
 import { analyzeImports } from './import-analyzer.js';
+import type { LienConfig, FrameworkInstance } from '../config/schema.js';
 
 export interface IndexingOptions {
   rootDir?: string;
@@ -24,6 +25,34 @@ interface ChunkWithContent {
 }
 
 /**
+ * Determine which framework owns a given file path
+ * @param filePath - Relative file path from project root
+ * @param frameworks - Array of framework instances
+ * @returns The owning framework, or null if no match
+ */
+function findOwningFramework(
+  filePath: string,
+  frameworks: FrameworkInstance[]
+): FrameworkInstance | null {
+  // Sort by path depth (deepest first) to handle nested frameworks
+  const sorted = [...frameworks].sort((a, b) => 
+    b.path.split('/').length - a.path.split('/').length
+  );
+  
+  for (const fw of sorted) {
+    if (fw.path === '.') {
+      // Root framework matches everything not matched by deeper frameworks
+      return fw;
+    }
+    if (filePath.startsWith(fw.path + '/')) {
+      return fw;
+    }
+  }
+  
+  return null;
+}
+
+/**
  * Two-pass test detection system:
  * Pass 1: Convention-based for all 12 languages (~80% accuracy)
  * Pass 2: Import analysis for Tier 1 only (~90% accuracy)
@@ -31,15 +60,17 @@ interface ChunkWithContent {
 async function analyzeTestAssociations(
   files: string[],
   rootDir: string,
-  config: any,
+  config: LienConfig,
   spinner: ora.Ora,
   verbose: boolean = false
 ): Promise<Map<string, TestAssociation>> {
   // Pass 1: Convention-based (all languages)
-  const associations = findTestsByConvention(files, verbose);
+  const associations = findTestsByConvention(files, config.frameworks, verbose);
   
   // Pass 2: Import analysis (Tier 1 only, if enabled)
-  if (config.indexing.useImportAnalysis) {
+  // Note: Legacy configs don't have frameworks array, skip import analysis for them
+  const hasLegacyConfig = !config.frameworks || config.frameworks.length === 0;
+  if (!hasLegacyConfig && (config as any).indexing?.useImportAnalysis) {
     const tier1Languages = ['typescript', 'javascript', 'python', 'go', 'php'];
     const importAssociations = await analyzeImports(files, tier1Languages, rootDir);
     
@@ -52,8 +83,13 @@ async function analyzeTestAssociations(
 
 /**
  * Convention-based test detection for all 12 languages
+ * Now framework-aware for monorepo support
  */
-function findTestsByConvention(files: string[], verbose: boolean = false): Map<string, TestAssociation> {
+function findTestsByConvention(
+  files: string[], 
+  frameworks: FrameworkInstance[], 
+  verbose: boolean = false
+): Map<string, TestAssociation> {
   // Separate test files from source files
   const testFiles: string[] = [];
   const sourceFiles: string[] = [];
@@ -73,7 +109,14 @@ function findTestsByConvention(files: string[], verbose: boolean = false): Map<s
   let sourcesWithTests = 0;
   for (const sourceFile of sourceFiles) {
     const language = detectLanguage(sourceFile);
-    const relatedTests = findTestFiles(sourceFile, language, testFiles);
+    
+    // Determine which framework owns this file
+    const framework = findOwningFramework(sourceFile, frameworks);
+    const frameworkPath = framework?.path || '.';
+    const patterns = framework?.config.testPatterns;
+    
+    // Find tests within the same framework
+    const relatedTests = findTestFiles(sourceFile, language, files, frameworkPath, patterns);
     
     if (verbose && relatedTests.length > 0) {
       sourcesWithTests++;
@@ -94,7 +137,14 @@ function findTestsByConvention(files: string[], verbose: boolean = false): Map<s
   let testsWithSources = 0;
   for (const testFile of testFiles) {
     const language = detectLanguage(testFile);
-    const relatedSources = findSourceFiles(testFile, language, sourceFiles);
+    
+    // Determine which framework owns this test file
+    const framework = findOwningFramework(testFile, frameworks);
+    const frameworkPath = framework?.path || '.';
+    const patterns = framework?.config.testPatterns;
+    
+    // Find sources within the same framework
+    const relatedSources = findSourceFiles(testFile, language, files, frameworkPath, patterns);
     
     if (verbose && relatedSources.length > 0) {
       testsWithSources++;
@@ -155,13 +205,22 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     spinner.text = 'Loading configuration...';
     const config = await loadConfig(rootDir);
     
-    // 2. Scan for files
+    // 2. Scan for files (framework-aware if frameworks configured)
     spinner.text = 'Scanning codebase...';
-    const files = await scanCodebase({
-      rootDir,
-      includePatterns: config.indexing.include,
-      excludePatterns: config.indexing.exclude,
-    });
+    let files: string[];
+    
+    if (config.frameworks && config.frameworks.length > 0) {
+      // Use framework-aware scanning for new configs
+      files = await scanCodebaseWithFrameworks(rootDir, config);
+    } else {
+      // Fall back to legacy scanning for old configs
+      const legacyConfig = config as any;
+      files = await scanCodebase({
+        rootDir,
+        includePatterns: legacyConfig.indexing?.include || [],
+        excludePatterns: legacyConfig.indexing?.exclude || [],
+      });
+    }
     
     if (files.length === 0) {
       spinner.fail('No files found to index');
@@ -172,7 +231,10 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     
     // 3. Analyze test associations (if enabled)
     let testAssociations = new Map<string, TestAssociation>();
-    if (config.indexing.indexTests) {
+    const hasFrameworks = config.frameworks && config.frameworks.length > 0;
+    const indexTests = hasFrameworks || (config as any).indexing?.indexTests;
+    
+    if (indexTests && hasFrameworks) {
       spinner.start('Analyzing test associations...');
       // Convert absolute paths to relative for test pattern matching
       const relativeFiles = files.map(f => path.relative(rootDir, f));
@@ -222,8 +284,8 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     spinner.succeed('Vector database initialized');
     
     // 6. Process files concurrently
-    const concurrency = config.indexing.concurrency;
-    const batchSize = config.indexing.embeddingBatchSize;
+    const concurrency = config.core?.concurrency || (config as any).indexing?.concurrency || 4;
+    const batchSize = config.core?.embeddingBatchSize || (config as any).indexing?.embeddingBatchSize || 50;
     
     spinner.start(`Processing files with ${concurrency}x concurrency...`);
     
@@ -263,9 +325,12 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       limit(async () => {
         try {
           const content = await fs.readFile(file, 'utf-8');
+          const chunkSize = config.core?.chunkSize || (config as any).indexing?.chunkSize || 75;
+          const chunkOverlap = config.core?.chunkOverlap || (config as any).indexing?.chunkOverlap || 10;
+          
           const chunks = chunkFile(file, content, {
-            chunkSize: config.indexing.chunkSize,
-            chunkOverlap: config.indexing.chunkOverlap,
+            chunkSize,
+            chunkOverlap,
           });
           
           if (chunks.length === 0) {
