@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import { defaultConfig, LienConfig } from '../config/schema.js';
 import { deepMergeConfig, detectNewFields } from '../config/merge.js';
 import { showCompactBanner } from '../utils/banner.js';
+import { needsMigration, migrateConfig } from '../config/migration.js';
 
 export async function initCommand(options: { upgrade?: boolean } = {}) {
   const configPath = path.join(process.cwd(), '.lien.config.json');
@@ -66,30 +67,40 @@ async function upgradeConfig(configPath: string) {
     
     // 2. Read existing config
     const existingContent = await fs.readFile(configPath, 'utf-8');
-    const existingConfig = JSON.parse(existingContent) as Partial<LienConfig>;
+    const existingConfig = JSON.parse(existingContent);
     
-    // 3. Detect what's new
-    const newFields = detectNewFields(existingConfig, defaultConfig);
+    let upgradedConfig: LienConfig;
+    let migrated = false;
     
-    // 4. Merge with defaults (user values take precedence)
-    const upgradedConfig = deepMergeConfig(defaultConfig, existingConfig);
+    // 3. Check if migration is needed (v0.2.0 -> v0.3.0)
+    if (needsMigration(existingConfig)) {
+      console.log(chalk.blue('🔄 Migrating config from v0.2.0 to v0.3.0...'));
+      upgradedConfig = migrateConfig(existingConfig);
+      migrated = true;
+    } else {
+      // Just merge with defaults for v0.3.0 configs
+      const newFields = detectNewFields(existingConfig, defaultConfig);
+      upgradedConfig = deepMergeConfig(defaultConfig, existingConfig as Partial<LienConfig>);
+      
+      if (newFields.length > 0) {
+        console.log(chalk.dim('\nNew options added:'));
+        newFields.forEach(field => console.log(chalk.dim('  •'), chalk.bold(field)));
+      }
+    }
     
-    // 5. Write upgraded config
+    // 4. Write upgraded config
     await fs.writeFile(
       configPath,
       JSON.stringify(upgradedConfig, null, 2) + '\n',
       'utf-8'
     );
     
-    // 6. Show results
+    // 5. Show results
     console.log(chalk.green('✓ Config upgraded successfully'));
     console.log(chalk.dim('Backup saved to:'), backupPath);
     
-    if (newFields.length > 0) {
-      console.log(chalk.dim('\nNew options added:'));
-      newFields.forEach(field => console.log(chalk.dim('  •'), chalk.bold(field)));
-    } else {
-      console.log(chalk.dim('\nNo new options to add (already up to date)'));
+    if (migrated) {
+      console.log(chalk.dim('\n📝 Your config now uses the framework-based structure.'));
     }
   } catch (error) {
     console.error(chalk.red('Error upgrading config:'), error);

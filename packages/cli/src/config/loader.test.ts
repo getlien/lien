@@ -30,9 +30,11 @@ describe('Config Loader', () => {
     
     it('should load and merge user config with defaults', async () => {
       const userConfig = {
-        indexing: {
+        version: '0.3.0',
+        core: {
           chunkSize: 2000,
         },
+        frameworks: [], // Explicitly include frameworks to avoid migration
       };
       
       const configPath = path.join(testDir, '.lien.config.json');
@@ -40,17 +42,35 @@ describe('Config Loader', () => {
       
       const config = await loadConfig(testDir);
       
-      expect(config.indexing.chunkSize).toBe(2000);
-      expect(config.indexing.chunkOverlap).toBe(defaultConfig.indexing.chunkOverlap);
-      expect(config.indexing.include).toEqual(defaultConfig.indexing.include);
+      expect(config.core.chunkSize).toBe(2000);
+      expect(config.core.chunkOverlap).toBe(defaultConfig.core.chunkOverlap);
+      expect(config.frameworks).toEqual(defaultConfig.frameworks);
     });
     
     it('should merge nested config properties correctly', async () => {
       const userConfig = {
-        indexing: {
-          exclude: ['custom-exclude/**'],
+        version: '0.3.0',
+        core: {
           chunkSize: 3000,
         },
+        frameworks: [
+          {
+            name: 'nodejs',
+            path: '.',
+            enabled: true,
+            config: {
+              include: ['**/*.ts'],
+              exclude: ['custom-exclude/**'],
+              testPatterns: {
+                directories: ['**/__tests__/**'],
+                extensions: ['.test.'],
+                prefixes: ['test_'],
+                suffixes: ['_test'],
+                frameworks: [],
+              },
+            },
+          },
+        ],
         fileWatching: {
           enabled: false,
         },
@@ -61,9 +81,9 @@ describe('Config Loader', () => {
       
       const config = await loadConfig(testDir);
       
-      expect(config.indexing.exclude).toEqual(['custom-exclude/**']);
-      expect(config.indexing.chunkSize).toBe(3000);
-      expect(config.indexing.chunkOverlap).toBe(defaultConfig.indexing.chunkOverlap);
+      expect(config.frameworks[0].config.exclude).toEqual(['custom-exclude/**']);
+      expect(config.core.chunkSize).toBe(3000);
+      expect(config.core.chunkOverlap).toBe(defaultConfig.core.chunkOverlap);
       expect(config.fileWatching.enabled).toBe(false);
       expect(config.fileWatching.debounceMs).toBe(defaultConfig.fileWatching.debounceMs);
     });
@@ -80,14 +100,33 @@ describe('Config Loader', () => {
       await fs.writeFile(configPath, '{}');
       
       const config = await loadConfig(testDir);
-      expect(config).toEqual(defaultConfig);
+      // Empty config just merges with defaults - no migration needed
+      expect(config.version).toBe('0.3.0');
+      expect(config.frameworks).toEqual(defaultConfig.frameworks);
+      expect(config.core).toEqual(defaultConfig.core);
     });
     
     it('should merge arrays correctly (replace, not concatenate)', async () => {
       const userConfig = {
-        indexing: {
-          include: ['src/**/*.ts'],
-        },
+        version: '0.3.0',
+        frameworks: [
+          {
+            name: 'nodejs',
+            path: '.',
+            enabled: true,
+            config: {
+              include: ['src/**/*.ts'],
+              exclude: [],
+              testPatterns: {
+                directories: [],
+                extensions: [],
+                prefixes: [],
+                suffixes: [],
+                frameworks: [],
+              },
+            },
+          },
+        ],
       };
       
       const configPath = path.join(testDir, '.lien.config.json');
@@ -96,7 +135,47 @@ describe('Config Loader', () => {
       const config = await loadConfig(testDir);
       
       // Arrays should be replaced, not merged
-      expect(config.indexing.include).toEqual(['src/**/*.ts']);
+      expect(config.frameworks[0].config.include).toEqual(['src/**/*.ts']);
+    });
+    
+    it('should auto-migrate v0.2.0 config to v0.3.0', async () => {
+      const oldConfig = {
+        version: '0.2.0',
+        indexing: {
+          include: ['**/*.ts'],
+          exclude: ['node_modules'],
+          chunkSize: 100,
+          chunkOverlap: 20,
+          concurrency: 8,
+          embeddingBatchSize: 100,
+          indexTests: false,
+          useImportAnalysis: true,
+        },
+        mcp: {
+          port: 8080,
+          transport: 'socket',
+          autoIndexOnFirstRun: false,
+        },
+      };
+      
+      const configPath = path.join(testDir, '.lien.config.json');
+      await fs.writeFile(configPath, JSON.stringify(oldConfig, null, 2));
+      
+      const config = await loadConfig(testDir);
+      
+      // Should be migrated to v0.3.0
+      expect(config.version).toBe('0.3.0');
+      expect(config.core.chunkSize).toBe(100);
+      expect(config.core.chunkOverlap).toBe(20);
+      expect(config.mcp.port).toBe(8080);
+      expect(config.frameworks).toHaveLength(1);
+      expect(config.frameworks[0].name).toBe('generic');
+      expect(config.frameworks[0].config.include).toEqual(['**/*.ts']);
+      
+      // Verify backup was created
+      const backupPath = `${configPath}.v0.2.0.backup`;
+      const backupExists = await fs.access(backupPath).then(() => true).catch(() => false);
+      expect(backupExists).toBe(true);
     });
   });
   

@@ -87,25 +87,34 @@ describe('initCommand', () => {
   
   describe('upgrade mode', () => {
     it('should upgrade existing config when --upgrade flag is used', async () => {
-      // Create old config with missing fields
+      // Create old v0.2.0 config with missing fields
       const configPath = path.join(testDir, '.lien.config.json');
       const oldConfig = {
+        version: '0.2.0',
         indexing: {
           chunkSize: 800,
-          // Missing other fields
+          chunkOverlap: 10,
+          concurrency: 4,
+          embeddingBatchSize: 50,
+          include: ['**/*.ts'],
+          exclude: [],
+          indexTests: false,
+          useImportAnalysis: true,
         },
       };
       await fs.writeFile(configPath, JSON.stringify(oldConfig, null, 2));
       
       await initCommand({ upgrade: true });
       
-      // Config should be upgraded with new fields but keep custom values
+      // Config should be migrated to v0.3.0 with new structure
       const content = await fs.readFile(configPath, 'utf-8');
       const config = JSON.parse(content);
       
-      expect(config.indexing.chunkSize).toBe(800); // Preserved
-      expect(config.indexing.chunkOverlap).toBeDefined(); // Added
-      expect(config.indexing.include).toBeDefined(); // Added
+      expect(config.version).toBe('0.3.0');
+      expect(config.core.chunkSize).toBe(800); // Preserved
+      expect(config.core.chunkOverlap).toBe(10); // Preserved
+      expect(config.frameworks).toHaveLength(1); // Migrated to generic framework
+      expect(config.frameworks[0].name).toBe('generic');
       expect(config.fileWatching).toBeDefined(); // Added
     });
     
@@ -140,11 +149,16 @@ describe('initCommand', () => {
     it('should preserve user customizations during upgrade', async () => {
       const configPath = path.join(testDir, '.lien.config.json');
       const customConfig = {
+        version: '0.2.0',
         indexing: {
           chunkSize: 2000,
           chunkOverlap: 400,
+          concurrency: 4,
+          embeddingBatchSize: 50,
           include: ['custom/**/*.ts'],
           exclude: ['custom-exclude/**'],
+          indexTests: false,
+          useImportAnalysis: true,
         },
       };
       await fs.writeFile(configPath, JSON.stringify(customConfig, null, 2));
@@ -154,11 +168,13 @@ describe('initCommand', () => {
       const content = await fs.readFile(configPath, 'utf-8');
       const config = JSON.parse(content);
       
-      // User values should be preserved
-      expect(config.indexing.chunkSize).toBe(2000);
-      expect(config.indexing.chunkOverlap).toBe(400);
-      expect(config.indexing.include).toEqual(['custom/**/*.ts']);
-      expect(config.indexing.exclude).toEqual(['custom-exclude/**']);
+      // User values should be preserved in new structure
+      expect(config.version).toBe('0.3.0');
+      expect(config.core.chunkSize).toBe(2000);
+      expect(config.core.chunkOverlap).toBe(400);
+      expect(config.frameworks).toHaveLength(1);
+      expect(config.frameworks[0].config.include).toEqual(['custom/**/*.ts']);
+      expect(config.frameworks[0].config.exclude).toEqual(['custom-exclude/**']);
     });
     
     it('should handle invalid JSON in existing config', async () => {

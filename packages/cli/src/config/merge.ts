@@ -11,9 +11,9 @@ import { LienConfig } from './schema.js';
 export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>): LienConfig {
   return {
     version: user.version ?? defaults.version,
-    indexing: {
-      ...defaults.indexing,
-      ...user.indexing,
+    core: {
+      ...defaults.core,
+      ...user.core,
     },
     mcp: {
       ...defaults.mcp,
@@ -27,6 +27,7 @@ export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>)
       ...defaults.fileWatching,
       ...user.fileWatching,
     },
+    frameworks: user.frameworks ?? defaults.frameworks,
   };
 }
 

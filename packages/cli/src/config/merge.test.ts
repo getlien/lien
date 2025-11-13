@@ -3,23 +3,21 @@ import { deepMergeConfig, detectNewFields } from './merge.js';
 import { LienConfig, defaultConfig } from './schema.js';
 
 describe('deepMergeConfig', () => {
-  it('should merge indexing config while preserving defaults', () => {
+  it('should merge core config while preserving defaults', () => {
     const userConfig: Partial<LienConfig> = {
-      indexing: {
+      core: {
         chunkSize: 100,
         chunkOverlap: 20,
         concurrency: 8,
         embeddingBatchSize: 100,
-        include: ['**/*.ts'],
-        exclude: [],
       },
     };
 
     const result = deepMergeConfig(defaultConfig, userConfig);
 
-    expect(result.indexing.chunkSize).toBe(100);
-    expect(result.indexing.concurrency).toBe(8);
-    expect(result.indexing.chunkOverlap).toBe(20);
+    expect(result.core.chunkSize).toBe(100);
+    expect(result.core.concurrency).toBe(8);
+    expect(result.core.chunkOverlap).toBe(20);
   });
 
   it('should merge mcp config while preserving defaults', () => {
@@ -40,16 +38,16 @@ describe('deepMergeConfig', () => {
 
   it('should preserve default values for unspecified fields', () => {
     const userConfig: Partial<LienConfig> = {
-      indexing: {
-        ...defaultConfig.indexing,
+      core: {
+        ...defaultConfig.core,
         chunkSize: 100,
       },
     };
 
     const result = deepMergeConfig(defaultConfig, userConfig);
 
-    expect(result.indexing.chunkSize).toBe(100);
-    expect(result.indexing.chunkOverlap).toBe(defaultConfig.indexing.chunkOverlap);
+    expect(result.core.chunkSize).toBe(100);
+    expect(result.core.chunkOverlap).toBe(defaultConfig.core.chunkOverlap);
     expect(result.mcp).toEqual(defaultConfig.mcp);
     expect(result.gitDetection).toEqual(defaultConfig.gitDetection);
   });
@@ -66,14 +64,14 @@ describe('deepMergeConfig', () => {
     const userConfig: Partial<LienConfig> = {
       gitDetection: {
         enabled: false,
-        pollInterval: 10000,
+        pollIntervalMs: 10000,
       },
     };
 
     const result = deepMergeConfig(defaultConfig, userConfig);
 
     expect(result.gitDetection.enabled).toBe(false);
-    expect(result.gitDetection.pollInterval).toBe(10000);
+    expect(result.gitDetection.pollIntervalMs).toBe(10000);
   });
 
   it('should merge fileWatching config', () => {
@@ -92,28 +90,45 @@ describe('deepMergeConfig', () => {
 
   it('should work with actual Lien config', () => {
     const userConfig: Partial<LienConfig> = {
-      indexing: {
+      core: {
         chunkSize: 100,
         chunkOverlap: 20,
         concurrency: 8,
         embeddingBatchSize: 100,
-        include: ['**/*.ts'],
-        exclude: [],
       },
+      frameworks: [
+        {
+          name: 'nodejs',
+          path: '.',
+          enabled: true,
+          config: {
+            include: ['**/*.ts'],
+            exclude: [],
+            testPatterns: {
+              directories: [],
+              extensions: [],
+              prefixes: [],
+              suffixes: [],
+              frameworks: [],
+            },
+          },
+        },
+      ],
     };
 
     const result = deepMergeConfig(defaultConfig, userConfig);
 
-    expect(result.indexing.chunkSize).toBe(100);
-    expect(result.indexing.concurrency).toBe(8);
+    expect(result.core.chunkSize).toBe(100);
+    expect(result.core.concurrency).toBe(8);
     expect(result.mcp.port).toBe(defaultConfig.mcp.port); // Default preserved
+    expect(result.frameworks).toHaveLength(1);
   });
 });
 
 describe('detectNewFields', () => {
   it('should detect top-level new fields', () => {
     const existing: Partial<LienConfig> = {
-      indexing: defaultConfig.indexing,
+      core: defaultConfig.core,
       mcp: defaultConfig.mcp,
     };
     
@@ -130,9 +145,10 @@ describe('detectNewFields', () => {
         transport: 'stdio' as const,
         // Missing autoIndexOnFirstRun
       },
-      indexing: defaultConfig.indexing,
+      core: defaultConfig.core,
       gitDetection: defaultConfig.gitDetection,
       fileWatching: defaultConfig.fileWatching,
+      frameworks: defaultConfig.frameworks,
     };
     
     const newFields = detectNewFields(existing, defaultConfig);
@@ -150,8 +166,8 @@ describe('detectNewFields', () => {
   it('should not report fields that exist with different values', () => {
     const existing: Partial<LienConfig> = {
       ...defaultConfig,
-      indexing: {
-        ...defaultConfig.indexing,
+      core: {
+        ...defaultConfig.core,
         chunkSize: 100, // Different value
       },
     };
@@ -163,19 +179,18 @@ describe('detectNewFields', () => {
 
   it('should work with actual Lien config upgrades', () => {
     const oldConfig: Partial<LienConfig> = {
-      indexing: {
+      core: {
         chunkSize: 75,
         chunkOverlap: 10,
         concurrency: 4,
         embeddingBatchSize: 50,
-        include: [],
-        exclude: [],
       },
       mcp: {
         port: 7133,
         transport: 'stdio' as const,
         autoIndexOnFirstRun: true,
       },
+      frameworks: [],
       // Missing gitDetection and fileWatching (new fields)
     };
 
