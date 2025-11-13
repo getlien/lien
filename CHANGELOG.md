@@ -2,6 +2,11 @@
 
 All notable changes to Lien will be documented in this file.
 
+## [0.1.5] - 2025-01-13
+
+### Fixed
+- **Test association detection now visible during indexing**: Added clear output showing how many test files and source-test associations were found during indexing. This helps debug test detection issues.
+
 ## [0.1.4] - 2025-01-13
 
 ### Changed

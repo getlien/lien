@@ -35,12 +35,10 @@ async function analyzeTestAssociations(
   spinner: ora.Ora
 ): Promise<Map<string, TestAssociation>> {
   // Pass 1: Convention-based (all languages)
-  spinner.text = 'Analyzing test associations (conventions)...';
   const associations = findTestsByConvention(files);
   
   // Pass 2: Import analysis (Tier 1 only, if enabled)
   if (config.indexing.useImportAnalysis) {
-    spinner.text = 'Refining with import analysis (Tier 1 languages)...';
     const tier1Languages = ['typescript', 'javascript', 'python', 'go', 'php'];
     const importAssociations = await analyzeImports(files, tier1Languages, rootDir);
     
@@ -48,7 +46,6 @@ async function analyzeTestAssociations(
     mergeTestAssociations(associations, importAssociations);
   }
   
-  spinner.text = `Found ${associations.size} file associations`;
   return associations;
 }
 
@@ -158,6 +155,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     // 3. Analyze test associations (if enabled)
     let testAssociations = new Map<string, TestAssociation>();
     if (config.indexing.indexTests) {
+      spinner.start('Analyzing test associations...');
       // Convert absolute paths to relative for test pattern matching
       const relativeFiles = files.map(f => path.relative(rootDir, f));
       const relativeAssociations = await analyzeTestAssociations(relativeFiles, rootDir, config, spinner);
@@ -172,6 +170,10 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           relatedSources: association.relatedSources ? association.relatedSources.map(s => path.join(rootDir, s)) : [],
         });
       }
+      
+      const testFileCount = Array.from(testAssociations.values()).filter(a => a.isTest).length;
+      const sourceWithTestsCount = Array.from(testAssociations.values()).filter(a => !a.isTest && a.relatedTests.length > 0).length;
+      spinner.succeed(`Found ${testFileCount} test files with ${sourceWithTestsCount} source files that have tests`);
     }
     
     // 4. Initialize embeddings model
