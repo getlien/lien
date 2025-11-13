@@ -1,6 +1,17 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.3.3] - 2025-11-13
+
+### Fixed
+- **Laravel test files are now correctly indexed**
+  - Critical regression fix: Added `tests/**/*.php` to Laravel framework's include patterns
+  - Previously, Laravel test files were completely skipped during scanning
+  - This caused "Found 0 test files" message for Laravel projects
+  - Now Laravel projects correctly index test files and detect test associations
+  - Regression was introduced in v0.3.0's framework-aware rewrite
+
+
 ## [0.3.2] - 2025-11-13
 
 ### Fixed
