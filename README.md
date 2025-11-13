@@ -43,7 +43,7 @@ This creates a `.lien.config.json` file with framework-aware settings. During in
 - Install recommended Cursor rules (optional but recommended)
   - Creates `.cursor/rules` if it doesn't exist
   - Creates `.cursor/rules/lien.mdc` if `.cursor/rules` is already a directory
-  - **Preserves existing rules**: If `.cursor/rules` exists as a file, Lien will offer to convert it to a directory structure, saving your original rules as `custom.md` and adding Lien rules as `lien.mdc`
+  - **Preserves existing rules**: If `.cursor/rules` exists as a file, Lien will offer to convert it to a directory structure, saving your original rules as `project.mdc` and adding Lien rules as `lien.mdc`
 
 ### 2. Index Your Codebase
 

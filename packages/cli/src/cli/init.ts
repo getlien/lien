@@ -247,12 +247,12 @@ async function createNewConfig(rootDir: string, options: InitOptions) {
             await fs.unlink(rulesPath);
             // 3. Create rules as a directory
             await fs.mkdir(rulesPath);
-            // 4. Save original rules as custom.md
-            await fs.writeFile(path.join(rulesPath, 'custom.md'), existingRules);
+            // 4. Save original rules as project.mdc
+            await fs.writeFile(path.join(rulesPath, 'project.mdc'), existingRules);
             // 5. Add Lien rules as lien.mdc
             await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
             console.log(chalk.green('✓ Converted .cursor/rules to directory'));
-            console.log(chalk.green('  - Your original rules: .cursor/rules/custom.md'));
+            console.log(chalk.green('  - Your project rules: .cursor/rules/project.mdc'));
             console.log(chalk.green('  - Lien rules: .cursor/rules/lien.mdc'));
           } else {
             console.log(chalk.dim('Skipped Cursor rules installation (preserving existing file)'));
