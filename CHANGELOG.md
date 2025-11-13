@@ -2,6 +2,14 @@
 
 All notable changes to Lien will be documented in this file.
 
+## [0.1.10] - 2025-01-13
+
+### Added
+- **Index version metadata in tool responses**: All MCP tools now include `indexInfo` field with `indexVersion` (timestamp) and `indexDate` (human-readable) in their responses. This makes it easy to verify that Cursor is using the latest reindexed data without needing to restart.
+  - Added `getCurrentVersion()` and `getVersionDate()` methods to `VectorDB`
+  - All tools (`semantic_search`, `find_similar`, `get_file_context`, `list_functions`) now return index metadata
+  - Example output: `"indexInfo": { "indexVersion": 1704845454321, "indexDate": "1/13/2025, 3:34:14 PM" }`
+
 ## [0.1.9] - 2025-01-13
 
 ### Fixed

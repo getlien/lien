@@ -327,6 +327,27 @@ export class VectorDB implements VectorDBInterface {
   }
   
   /**
+   * Gets the current index version (timestamp of last reindex).
+   * 
+   * @returns Version timestamp, or 0 if unknown
+   */
+  getCurrentVersion(): number {
+    return this.currentVersion;
+  }
+  
+  /**
+   * Gets the current index version as a human-readable date string.
+   * 
+   * @returns Formatted date string, or 'Unknown' if no version
+   */
+  getVersionDate(): string {
+    if (this.currentVersion === 0) {
+      return 'Unknown';
+    }
+    return new Date(this.currentVersion).toLocaleString();
+  }
+  
+  /**
    * Checks if the database contains real indexed data.
    * Used to detect first run and trigger auto-indexing.
    * 

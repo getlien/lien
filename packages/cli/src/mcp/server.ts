@@ -96,6 +96,12 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     }
   };
   
+  // Helper to get current index metadata for responses
+  const getIndexMetadata = () => ({
+    indexVersion: vectorDB.getCurrentVersion(),
+    indexDate: vectorDB.getVersionDate(),
+  });
+  
   // Start background polling for version changes (every 2 seconds)
   // This ensures we reconnect as soon as possible after reindex, even if no tool calls are made
   const versionCheckInterval = setInterval(async () => {
@@ -134,11 +140,16 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           
           log(`Found ${results.length} results`);
           
+          const response = {
+            indexInfo: getIndexMetadata(),
+            results,
+          };
+          
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(results, null, 2),
+                text: JSON.stringify(response, null, 2),
               },
             ],
           };
@@ -158,11 +169,16 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           
           log(`Found ${results.length} similar chunks`);
           
+          const response = {
+            indexInfo: getIndexMetadata(),
+            results,
+          };
+          
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(results, null, 2),
+                text: JSON.stringify(response, null, 2),
               },
             ],
           };
@@ -222,6 +238,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           
           // Format response with test associations
           const response: any = {
+            indexInfo: getIndexMetadata(),
             file: filepath,
             chunks: results,
           };
@@ -287,11 +304,16 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           
           log(`Found ${filtered.length} functions/classes`);
           
+          const response = {
+            indexInfo: getIndexMetadata(),
+            results: filtered,
+          };
+          
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(filtered, null, 2),
+                text: JSON.stringify(response, null, 2),
               },
             ],
           };
