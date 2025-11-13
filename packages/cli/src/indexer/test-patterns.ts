@@ -364,8 +364,12 @@ export function findTestFiles(
       const targetFilename = baseName + ext;
       const matchingFiles = normalizedFiles.filter(f => {
         // Check if file contains the test directory in its path and ends with target filename
+        // Handle both simple dirs ("tests") and nested dirs ("tests/Feature")
         const pathParts = f.split(path.sep);
-        return pathParts.includes(testDir) && f.endsWith(targetFilename);
+        const isInTestDir = testDir.includes('/') 
+          ? f.includes(testDir + '/')  // Nested: check if path includes "tests/Feature/"
+          : pathParts.includes(testDir);  // Simple: check if "tests" is in parts
+        return isInTestDir && f.endsWith(targetFilename);
       });
       matches.push(...matchingFiles);
     }
