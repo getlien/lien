@@ -2,6 +2,14 @@
 
 All notable changes to Lien will be documented in this file.
 
+## [0.1.7] - 2025-01-13
+
+### Fixed
+- **[CRITICAL] Source→Test associations now work for Laravel and monorepo structures**: Fixed test file discovery for projects where paths include parent directories (e.g., `cognito-backend/tests/Unit/UserTest.php`). Now correctly finds tests regardless of path prefix.
+  - Changed from `f.startsWith('tests/')` to `pathParts.includes('tests')`
+  - Fixes issue where test→source worked but source→test didn't
+  - Laravel projects now fully supported with both directions working
+
 ## [0.1.6] - 2025-01-13
 
 ### Added

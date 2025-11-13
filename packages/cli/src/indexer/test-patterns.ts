@@ -245,9 +245,12 @@ export function findTestFiles(
     // and other frameworks that organize by test type rather than source structure
     for (const ext of patterns.extensions) {
       const targetFilename = baseName + ext;
-      const matchingFiles = allFiles.filter(f => 
-        f.startsWith(testDir + '/') && f.endsWith(targetFilename)
-      );
+      const matchingFiles = allFiles.filter(f => {
+        // Check if file contains the test directory in its path and ends with target filename
+        // Handles both "tests/Unit/UserTest.php" and "cognito-backend/tests/Unit/UserTest.php"
+        const pathParts = f.split(path.sep);
+        return pathParts.includes(testDir) && f.endsWith(targetFilename);
+      });
       matches.push(...matchingFiles);
     }
   }
