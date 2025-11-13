@@ -148,7 +148,6 @@ fi
 # Stage changes
 echo -e "${YELLOW}📦 Staging changes...${NC}"
 git add packages/cli/package.json
-git add packages/cli/dist/
 [ -f "CHANGELOG.md" ] && git add CHANGELOG.md
 
 # Commit
