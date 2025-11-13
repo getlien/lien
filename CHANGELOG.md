@@ -2,6 +2,14 @@
 
 All notable changes to Lien will be documented in this file.
 
+## [0.1.8] - 2025-01-13
+
+### Fixed
+- **[CRITICAL] Test associations now returned by all MCP tools**: Fixed `VectorDB.search()` to include test association metadata fields (`isTest`, `relatedTests`, `relatedSources`, `testFramework`, `detectionMethod`) in search results. Previously, these fields were stored in the database but not returned by the search function, causing MCP tools to show "Test associations not available" even after reindexing.
+  - This was the root cause of test associations appearing empty in `semantic_search` and `get_file_context`
+  - Fixed both the main search path and the retry/reconnection path
+  - No reindexing required - existing indices will now work correctly
+
 ## [0.1.7] - 2025-01-13
 
 ### Fixed

@@ -150,6 +150,11 @@ export class VectorDB implements VectorDBInterface {
             endLine: r.endLine,
             type: r.type,
             language: r.language,
+            isTest: r.isTest,
+            relatedTests: r.relatedTests,
+            relatedSources: r.relatedSources,
+            testFramework: r.testFramework,
+            detectionMethod: r.detectionMethod,
           },
           score: r._distance ?? 0,
         }));
@@ -178,6 +183,11 @@ export class VectorDB implements VectorDBInterface {
               endLine: r.endLine,
               type: r.type,
               language: r.language,
+              isTest: r.isTest,
+              relatedTests: r.relatedTests,
+              relatedSources: r.relatedSources,
+              testFramework: r.testFramework,
+              detectionMethod: r.detectionMethod,
             },
             score: r._distance ?? 0,
           }));
