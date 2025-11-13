@@ -255,6 +255,44 @@ describe('Config Migration', () => {
       expect(newConfig.frameworks[0].config.testPatterns.directories).toContain('**/tests/**');
       expect(newConfig.frameworks[0].config.testPatterns.directories).toContain('**/test/**');
     });
+    
+    it('should remove test file patterns from exclude list during migration', () => {
+      const oldConfigWithTests: Partial<LegacyLienConfig> = {
+        version: '0.2.0',
+        indexing: {
+          include: ['**/*.ts'],
+          exclude: [
+            'node_modules/**',
+            '**/*.test.ts',     // Should be removed
+            '**/*.spec.ts',     // Should be removed
+            '**/test/**',       // Should be removed
+            'dist/**',
+          ],
+          chunkSize: 75,
+          chunkOverlap: 10,
+          concurrency: 4,
+          embeddingBatchSize: 50,
+          indexTests: false,
+          useImportAnalysis: false,
+        },
+      };
+      
+      const migrated = migrateConfig(oldConfigWithTests);
+      
+      // Test patterns should be removed from exclude list
+      expect(migrated.frameworks[0].config.exclude).not.toContain('**/*.test.ts');
+      expect(migrated.frameworks[0].config.exclude).not.toContain('**/*.spec.ts');
+      expect(migrated.frameworks[0].config.exclude).not.toContain('**/test/**');
+      
+      // Non-test patterns should be preserved
+      expect(migrated.frameworks[0].config.exclude).toContain('node_modules/**');
+      expect(migrated.frameworks[0].config.exclude).toContain('dist/**');
+      
+      // Test patterns should be in testPatterns config
+      expect(migrated.frameworks[0].config.testPatterns.directories).toContain('**/test/**');
+      expect(migrated.frameworks[0].config.testPatterns.extensions).toContain('.test.');
+      expect(migrated.frameworks[0].config.testPatterns.extensions).toContain('.spec.');
+    });
   });
 
   describe('migrateConfigFile', () => {
