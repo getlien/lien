@@ -7,6 +7,8 @@ export interface LienConfig {
     chunkOverlap: number;
     concurrency: number;
     embeddingBatchSize: number;
+    indexTests: boolean;
+    useImportAnalysis: boolean;
   };
   mcp: {
     port: number;
@@ -28,14 +30,6 @@ export const defaultConfig: LienConfig = {
   indexing: {
     exclude: [
       'node_modules/**',
-      '**/*.test.ts',
-      '**/*.test.tsx',
-      '**/*.test.js',
-      '**/*.test.jsx',
-      '**/*.spec.ts',
-      '**/*.spec.tsx',
-      '**/*.spec.js',
-      '**/*.spec.jsx',
       'dist/**',
       'build/**',
       'coverage/**',
@@ -69,6 +63,8 @@ export const defaultConfig: LienConfig = {
     chunkOverlap: 10,
     concurrency: 4,
     embeddingBatchSize: 50,
+    indexTests: true,
+    useImportAnalysis: true,
   },
   mcp: {
     port: 7133, // LIEN in leetspeak

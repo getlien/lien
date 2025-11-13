@@ -52,7 +52,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   const server = new Server(
     {
       name: 'lien',
-      version: '0.1.0',
+      version: '0.1.3',
     },
     {
       capabilities: {
@@ -158,6 +158,22 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           
           let results = fileChunks;
           
+          // Extract test associations from metadata
+          const testAssociations = fileChunks.length > 0 ? {
+            isTest: fileChunks[0].metadata.isTest ?? false,
+            relatedTests: fileChunks[0].metadata.relatedTests ?? [],
+            relatedSources: fileChunks[0].metadata.relatedSources ?? [],
+            testFramework: fileChunks[0].metadata.testFramework ?? null,
+            detectionMethod: fileChunks[0].metadata.detectionMethod ?? null,
+          } : null;
+          
+          // Only include test associations if we have actual data (not from old index)
+          const hasTestData = testAssociations && (
+            testAssociations.isTest === true || 
+            testAssociations.relatedTests.length > 0 || 
+            testAssociations.relatedSources.length > 0
+          );
+          
           if (includeRelated && fileChunks.length > 0) {
             // Get related chunks by searching with the first chunk's content
             const relatedEmbedding = await embeddings.embed(fileChunks[0].content);
@@ -173,11 +189,24 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           
           log(`Found ${results.length} chunks`);
           
+          // Format response with test associations
+          const response: any = {
+            file: filepath,
+            chunks: results,
+          };
+          
+          if (hasTestData) {
+            response.testAssociations = testAssociations;
+          } else if (fileChunks.length > 0) {
+            // Index doesn't have test association data - inform user to reindex
+            response.note = 'Test associations not available. Run "lien reindex" to enable test detection.';
+          }
+          
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(results, null, 2),
+                text: JSON.stringify(response, null, 2),
               },
             ],
           };

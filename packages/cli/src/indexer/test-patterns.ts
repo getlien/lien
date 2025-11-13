@@ -1,0 +1,465 @@
+import path from 'path';
+
+/**
+ * Language-specific test patterns for detecting and associating test files
+ */
+
+export interface LanguageTestPattern {
+  // File extensions for test files
+  extensions: string[];
+  // Common test directories
+  directories: string[];
+  // Test file prefixes (e.g., "test_")
+  prefixes: string[];
+  // Test file suffixes (e.g., ".test", ".spec")
+  suffixes: string[];
+  // Test frameworks for detection
+  frameworks: string[];
+}
+
+/**
+ * Comprehensive test patterns for 12 languages
+ */
+export const LANGUAGE_TEST_PATTERNS: Record<string, LanguageTestPattern> = {
+  // Tier 1: TypeScript/JavaScript, Python, Go, PHP
+  typescript: {
+    extensions: ['.test.ts', '.test.tsx', '.spec.ts', '.spec.tsx'],
+    directories: ['test', 'tests', '__tests__', 'spec', 'specs'],
+    prefixes: [],
+    suffixes: ['.test', '.spec'],
+    frameworks: ['jest', 'vitest', 'mocha', 'jasmine', 'ava'],
+  },
+  javascript: {
+    extensions: ['.test.js', '.test.jsx', '.spec.js', '.spec.jsx', '.test.mjs', '.test.cjs'],
+    directories: ['test', 'tests', '__tests__', 'spec', 'specs'],
+    prefixes: [],
+    suffixes: ['.test', '.spec'],
+    frameworks: ['jest', 'vitest', 'mocha', 'jasmine', 'ava'],
+  },
+  python: {
+    extensions: [], // Python tests detected by prefix/suffix/directory only
+    directories: ['test', 'tests', '__tests__', 'spec', 'specs'],
+    prefixes: ['test_'],
+    suffixes: ['_test'],
+    frameworks: ['pytest', 'unittest', 'nose', 'doctest'],
+  },
+  go: {
+    extensions: ['_test.go'],
+    directories: [],
+    prefixes: [],
+    suffixes: ['_test'],
+    frameworks: ['testing', 'testify'],
+  },
+  php: {
+    extensions: ['Test.php'],
+    directories: ['test', 'tests', 'Tests', 'spec', 'specs'],
+    prefixes: [],
+    suffixes: ['Test'],
+    frameworks: ['phpunit', 'pest', 'codeception'],
+  },
+
+  // Tier 2: Java, Rust, C#, Ruby
+  java: {
+    extensions: ['Test.java', 'Tests.java'],
+    directories: ['test', 'tests', 'src/test'],
+    prefixes: [],
+    suffixes: ['Test', 'Tests'],
+    frameworks: ['junit', 'testng', 'mockito'],
+  },
+  rust: {
+    extensions: [], // Rust tests detected by directory or _test suffix
+    directories: ['tests'],
+    prefixes: [],
+    suffixes: ['_test'],
+    frameworks: ['cargo-test'],
+  },
+  csharp: {
+    extensions: ['Test.cs', 'Tests.cs'],
+    directories: ['test', 'tests', 'Test', 'Tests'],
+    prefixes: [],
+    suffixes: ['Test', 'Tests'],
+    frameworks: ['nunit', 'xunit', 'mstest'],
+  },
+  ruby: {
+    extensions: ['_test.rb', '_spec.rb'],
+    directories: ['test', 'tests', 'spec', 'specs'],
+    prefixes: ['test_'],
+    suffixes: ['_test', '_spec'],
+    frameworks: ['minitest', 'rspec', 'test-unit'],
+  },
+
+  // Tier 3: Kotlin, Swift, Scala, C/C++
+  kotlin: {
+    extensions: ['Test.kt', 'Tests.kt'],
+    directories: ['test', 'tests', 'src/test'],
+    prefixes: [],
+    suffixes: ['Test', 'Tests'],
+    frameworks: ['junit', 'kotlintest', 'spek'],
+  },
+  swift: {
+    extensions: ['Test.swift', 'Tests.swift'],
+    directories: ['Tests', 'test', 'tests'],
+    prefixes: [],
+    suffixes: ['Test', 'Tests'],
+    frameworks: ['xctest', 'quick', 'nimble'],
+  },
+  scala: {
+    extensions: ['Test.scala', 'Spec.scala'],
+    directories: ['test', 'tests', 'src/test'],
+    prefixes: [],
+    suffixes: ['Test', 'Spec'],
+    frameworks: ['scalatest', 'specs2', 'munit'],
+  },
+  c: {
+    extensions: ['_test.c', '_tests.c'],
+    directories: ['test', 'tests'],
+    prefixes: ['test_'],
+    suffixes: ['_test', '_tests'],
+    frameworks: ['unity', 'cmocka', 'check'],
+  },
+  cpp: {
+    extensions: ['_test.cpp', '_tests.cpp', 'Test.cpp', 'Tests.cpp'],
+    directories: ['test', 'tests'],
+    prefixes: ['test_'],
+    suffixes: ['_test', '_tests', 'Test', 'Tests'],
+    frameworks: ['gtest', 'catch2', 'boost-test'],
+  },
+};
+
+/**
+ * Check if a file is a test file based on language-specific patterns
+ */
+export function isTestFile(filepath: string, language: string): boolean {
+  const patterns = LANGUAGE_TEST_PATTERNS[language];
+  if (!patterns) {
+    return false;
+  }
+
+  const basename = path.basename(filepath);
+  const dirname = path.dirname(filepath);
+  const parts = dirname.split(path.sep);
+
+  // Check if file matches test extension patterns
+  for (const ext of patterns.extensions) {
+    if (basename.endsWith(ext)) {
+      return true;
+    }
+  }
+
+  // Check if file is in a test directory
+  for (const testDir of patterns.directories) {
+    if (parts.includes(testDir)) {
+      // File is in a test directory, check if it matches language extension
+      const languageExtensions = getLanguageExtensions(language);
+      if (languageExtensions.some(ext => basename.endsWith(ext))) {
+        return true;
+      }
+    }
+  }
+
+  // Check prefix patterns (e.g., test_example.py)
+  const nameWithoutExt = getNameWithoutExtension(basename, language);
+  for (const prefix of patterns.prefixes) {
+    if (nameWithoutExt.startsWith(prefix)) {
+      return true;
+    }
+  }
+
+  // Check suffix patterns (e.g., example_test.py)
+  for (const suffix of patterns.suffixes) {
+    if (nameWithoutExt.endsWith(suffix)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Find test files associated with a source file
+ */
+export function findTestFiles(
+  sourceFile: string,
+  language: string,
+  allFiles: string[]
+): string[] {
+  const patterns = LANGUAGE_TEST_PATTERNS[language];
+  if (!patterns) {
+    return [];
+  }
+
+  const baseName = getBaseName(sourceFile);
+  const sourceDir = path.dirname(sourceFile);
+  const matches: string[] = [];
+
+  // Strategy 1: Co-located tests (same directory)
+  // Example: src/Button.tsx → src/Button.test.tsx
+  for (const ext of patterns.extensions) {
+    const candidate = path.join(sourceDir, baseName + ext);
+    if (allFiles.includes(candidate)) {
+      matches.push(candidate);
+    }
+  }
+
+  // Apply suffix patterns for co-located tests
+  for (const suffix of patterns.suffixes) {
+    const languageExts = getLanguageExtensions(language);
+    for (const langExt of languageExts) {
+      // Co-located (same directory as source)
+      const candidate = path.join(sourceDir, baseName + suffix + langExt);
+      if (allFiles.includes(candidate)) {
+        matches.push(candidate);
+      }
+
+      // At project root (for files like calculator_test.py at root)
+      const atRoot = baseName + suffix + langExt;
+      if (allFiles.includes(atRoot)) {
+        matches.push(atRoot);
+      }
+    }
+  }
+
+  // Strategy 2: Parallel directory structure
+  // Example: src/components/Button.tsx → tests/components/Button.test.tsx
+  for (const testDir of patterns.directories) {
+    const relativePath = getRelativePathFromSrc(sourceFile);
+    const relativeDir = path.dirname(relativePath);
+    
+    for (const ext of patterns.extensions) {
+      const candidate = path.join(testDir, relativeDir, baseName + ext);
+      if (allFiles.includes(candidate)) {
+        matches.push(candidate);
+      }
+    }
+
+    // Also try without subdirectory nesting (flat structure)
+    for (const ext of patterns.extensions) {
+      const candidate = path.join(testDir, baseName + ext);
+      if (allFiles.includes(candidate)) {
+        matches.push(candidate);
+      }
+    }
+
+    // Strategy 2b: Search test directory recursively for matching filename
+    // This handles Laravel-style organization (tests/Feature/, tests/Unit/)
+    // and other frameworks that organize by test type rather than source structure
+    for (const ext of patterns.extensions) {
+      const targetFilename = baseName + ext;
+      const matchingFiles = allFiles.filter(f => 
+        f.startsWith(testDir + '/') && f.endsWith(targetFilename)
+      );
+      matches.push(...matchingFiles);
+    }
+  }
+
+  // Strategy 3: Prefix patterns (Python, C, etc.)
+  for (const prefix of patterns.prefixes) {
+    const languageExts = getLanguageExtensions(language);
+    for (const langExt of languageExts) {
+      // Co-located (same directory as source)
+      const colocated = path.join(sourceDir, prefix + baseName + langExt);
+      if (allFiles.includes(colocated)) {
+        matches.push(colocated);
+      }
+
+      // At project root (for files like test_calculator.py at root)
+      const atRoot = prefix + baseName + langExt;
+      if (allFiles.includes(atRoot)) {
+        matches.push(atRoot);
+      }
+
+      // In test directories
+      for (const testDir of patterns.directories) {
+        const inTestDir = path.join(testDir, prefix + baseName + langExt);
+        if (allFiles.includes(inTestDir)) {
+          matches.push(inTestDir);
+        }
+      }
+    }
+  }
+
+  // Remove duplicates
+  return [...new Set(matches)];
+}
+
+/**
+ * Find source files associated with a test file (reverse operation)
+ */
+export function findSourceFiles(
+  testFile: string,
+  language: string,
+  allFiles: string[]
+): string[] {
+  const patterns = LANGUAGE_TEST_PATTERNS[language];
+  if (!patterns) {
+    return [];
+  }
+
+  const testBasename = path.basename(testFile);
+  const testDir = path.dirname(testFile);
+  const matches: string[] = [];
+
+  // Extract base name by removing test patterns
+  let baseName = getNameWithoutExtension(testBasename, language);
+  
+  // Remove test extensions
+  for (const ext of patterns.extensions) {
+    if (testBasename.endsWith(ext)) {
+      baseName = testBasename.slice(0, -ext.length);
+      break;
+    }
+  }
+
+  // Remove test suffixes
+  for (const suffix of patterns.suffixes) {
+    if (baseName.endsWith(suffix)) {
+      baseName = baseName.slice(0, -suffix.length);
+    }
+  }
+
+  // Remove test prefixes
+  for (const prefix of patterns.prefixes) {
+    if (baseName.startsWith(prefix)) {
+      baseName = baseName.slice(prefix.length);
+    }
+  }
+
+  const languageExts = getLanguageExtensions(language);
+
+  // Strategy 1: Co-located source file
+  for (const langExt of languageExts) {
+    const candidate = path.join(testDir, baseName + langExt);
+    if (allFiles.includes(candidate) && !isTestFile(candidate, language)) {
+      matches.push(candidate);
+    }
+  }
+
+  // Strategy 2: Source in src/lib directories
+  const sourceDirs = ['src', 'lib', 'app', 'core', 'main'];
+  const testDirParts = testDir.split(path.sep);
+  
+  for (const sourceDir of sourceDirs) {
+    // Try to maintain subdirectory structure
+    const relativePath = getRelativePathFromTest(testFile);
+    const relativeDir = path.dirname(relativePath);
+    
+    for (const langExt of languageExts) {
+      const candidate = path.join(sourceDir, relativeDir, baseName + langExt);
+      if (allFiles.includes(candidate) && !isTestFile(candidate, language)) {
+        matches.push(candidate);
+      }
+    }
+
+    // Try flat structure
+    for (const langExt of languageExts) {
+      const candidate = path.join(sourceDir, baseName + langExt);
+      if (allFiles.includes(candidate) && !isTestFile(candidate, language)) {
+        matches.push(candidate);
+      }
+    }
+  }
+
+  // Strategy 3: Search entire codebase for matching basename
+  for (const file of allFiles) {
+    if (isTestFile(file, language)) continue;
+    
+    const fileBaseName = getBaseName(file);
+    if (fileBaseName === baseName) {
+      matches.push(file);
+    }
+  }
+
+  // Remove duplicates
+  return [...new Set(matches)];
+}
+
+/**
+ * Detect test framework from file content (optional enhancement)
+ */
+export function detectTestFramework(content: string, language: string): string | undefined {
+  const patterns = LANGUAGE_TEST_PATTERNS[language];
+  if (!patterns) {
+    return undefined;
+  }
+
+  for (const framework of patterns.frameworks) {
+    // Simple pattern matching for framework imports/usage
+    const frameworkPattern = new RegExp(`\\b${framework}\\b`, 'i');
+    if (frameworkPattern.test(content)) {
+      return framework;
+    }
+  }
+
+  return undefined;
+}
+
+// Helper functions
+
+function getBaseName(filepath: string): string {
+  const basename = path.basename(filepath);
+  const lastDot = basename.lastIndexOf('.');
+  if (lastDot === -1) return basename;
+  
+  // Handle double extensions like .test.ts
+  const secondLastDot = basename.lastIndexOf('.', lastDot - 1);
+  if (secondLastDot !== -1) {
+    const possiblePattern = basename.slice(secondLastDot, lastDot);
+    if (['.test', '.spec', '_test', '_spec'].includes(possiblePattern)) {
+      return basename.slice(0, secondLastDot);
+    }
+  }
+  
+  return basename.slice(0, lastDot);
+}
+
+function getNameWithoutExtension(basename: string, language: string): string {
+  const exts = getLanguageExtensions(language);
+  for (const ext of exts) {
+    if (basename.endsWith(ext)) {
+      return basename.slice(0, -ext.length);
+    }
+  }
+  return basename;
+}
+
+function getLanguageExtensions(language: string): string[] {
+  const extMap: Record<string, string[]> = {
+    typescript: ['.ts', '.tsx'],
+    javascript: ['.js', '.jsx', '.mjs', '.cjs'],
+    python: ['.py'],
+    go: ['.go'],
+    php: ['.php'],
+    java: ['.java'],
+    rust: ['.rs'],
+    csharp: ['.cs'],
+    ruby: ['.rb'],
+    kotlin: ['.kt'],
+    swift: ['.swift'],
+    scala: ['.scala'],
+    c: ['.c', '.h'],
+    cpp: ['.cpp', '.cc', '.cxx', '.hpp', '.h'],
+  };
+  return extMap[language] || [];
+}
+
+function getRelativePathFromSrc(filepath: string): string {
+  const parts = filepath.split(path.sep);
+  const srcIndex = parts.findIndex(p => ['src', 'lib', 'app', 'core', 'main'].includes(p));
+  if (srcIndex !== -1) {
+    return parts.slice(srcIndex + 1).join(path.sep);
+  }
+  return filepath;
+}
+
+function getRelativePathFromTest(filepath: string): string {
+  const patterns = Object.values(LANGUAGE_TEST_PATTERNS)
+    .flatMap(p => p.directories);
+  
+  const parts = filepath.split(path.sep);
+  const testIndex = parts.findIndex(p => patterns.includes(p));
+  if (testIndex !== -1) {
+    return parts.slice(testIndex + 1).join(path.sep);
+  }
+  return filepath;
+}
+

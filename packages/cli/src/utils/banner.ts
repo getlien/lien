@@ -1,9 +1,27 @@
 import figlet from 'figlet';
 import chalk from 'chalk';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+// Get package.json dynamically
+// In development: src/utils/banner.ts -> ../../package.json
+// In production (bundled): dist/index.js -> ../package.json
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const require = createRequire(import.meta.url);
+
+// Try production path first (dist -> package.json), then dev path
+let packageJson;
+try {
+  packageJson = require(join(__dirname, '../package.json'));
+} catch {
+  packageJson = require(join(__dirname, '../../package.json'));
+}
 
 // Package info
-const PACKAGE_NAME = '@liendev/lien';
-const VERSION = '0.1.0';
+const PACKAGE_NAME = packageJson.name;
+const VERSION = packageJson.version;
 
 /**
  * Wrap text in a box with a footer line

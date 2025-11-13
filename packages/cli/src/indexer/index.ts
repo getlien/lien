@@ -1,14 +1,17 @@
 import fs from 'fs/promises';
+import path from 'path';
 import ora from 'ora';
 import chalk from 'chalk';
 import pLimit from 'p-limit';
-import { scanCodebase } from './scanner.js';
+import { scanCodebase, detectLanguage } from './scanner.js';
 import { chunkFile } from './chunker.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { loadConfig } from '../config/loader.js';
-import { CodeChunk } from './types.js';
+import { CodeChunk, TestAssociation } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
+import { isTestFile, findTestFiles, findSourceFiles, detectTestFramework } from './test-patterns.js';
+import { analyzeImports } from './import-analyzer.js';
 
 export interface IndexingOptions {
   rootDir?: string;
@@ -18,6 +21,114 @@ export interface IndexingOptions {
 interface ChunkWithContent {
   chunk: CodeChunk;
   content: string;
+}
+
+/**
+ * Two-pass test detection system:
+ * Pass 1: Convention-based for all 12 languages (~80% accuracy)
+ * Pass 2: Import analysis for Tier 1 only (~90% accuracy)
+ */
+async function analyzeTestAssociations(
+  files: string[],
+  rootDir: string,
+  config: any,
+  spinner: ora.Ora
+): Promise<Map<string, TestAssociation>> {
+  // Pass 1: Convention-based (all languages)
+  spinner.text = 'Analyzing test associations (conventions)...';
+  const associations = findTestsByConvention(files);
+  
+  // Pass 2: Import analysis (Tier 1 only, if enabled)
+  if (config.indexing.useImportAnalysis) {
+    spinner.text = 'Refining with import analysis (Tier 1 languages)...';
+    const tier1Languages = ['typescript', 'javascript', 'python', 'go', 'php'];
+    const importAssociations = await analyzeImports(files, tier1Languages, rootDir);
+    
+    // Merge: imports add missed associations and override convention where found
+    mergeTestAssociations(associations, importAssociations);
+  }
+  
+  spinner.text = `Found ${associations.size} file associations`;
+  return associations;
+}
+
+/**
+ * Convention-based test detection for all 12 languages
+ */
+function findTestsByConvention(files: string[]): Map<string, TestAssociation> {
+  // Separate test files from source files
+  const testFiles: string[] = [];
+  const sourceFiles: string[] = [];
+  
+  for (const file of files) {
+    const language = detectLanguage(file);
+    if (isTestFile(file, language)) {
+      testFiles.push(file);
+    } else {
+      sourceFiles.push(file);
+    }
+  }
+  
+  const associations = new Map<string, TestAssociation>();
+  
+  // Build associations: source → tests
+  for (const sourceFile of sourceFiles) {
+    const language = detectLanguage(sourceFile);
+    const relatedTests = findTestFiles(sourceFile, language, testFiles);
+    
+    associations.set(sourceFile, {
+      file: sourceFile,
+      relatedTests,
+      isTest: false,
+      detectionMethod: 'convention'
+    });
+  }
+  
+  // Build associations: test → sources (bidirectional)
+  for (const testFile of testFiles) {
+    const language = detectLanguage(testFile);
+    const relatedSources = findSourceFiles(testFile, language, sourceFiles);
+    
+    associations.set(testFile, {
+      file: testFile,
+      relatedSources,
+      isTest: true,
+      detectionMethod: 'convention'
+    });
+  }
+  
+  return associations;
+}
+
+/**
+ * Merge import-based associations with convention-based ones
+ */
+function mergeTestAssociations(
+  conventionAssociations: Map<string, TestAssociation>,
+  importAssociations: Map<string, string[]>
+): void {
+  for (const [file, importedFiles] of importAssociations) {
+    const existing = conventionAssociations.get(file);
+    if (existing) {
+      // Merge imported files into existing associations
+      if (existing.isTest) {
+        // For test files, add to relatedSources
+        const combined = new Set([...(existing.relatedSources || []), ...importedFiles]);
+        existing.relatedSources = Array.from(combined);
+      } else {
+        // For source files, check if any imports are test files
+        for (const importedFile of importedFiles) {
+          const importedAssoc = conventionAssociations.get(importedFile);
+          if (importedAssoc?.isTest) {
+            const combined = new Set([...(existing.relatedTests || []), importedFile]);
+            existing.relatedTests = Array.from(combined);
+          }
+        }
+      }
+      // Mark as enhanced by imports
+      existing.detectionMethod = 'import';
+    }
+  }
 }
 
 export async function indexCodebase(options: IndexingOptions = {}): Promise<void> {
@@ -44,19 +155,38 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     
     spinner.text = `Found ${files.length} files`;
     
-    // 3. Initialize embeddings model
+    // 3. Analyze test associations (if enabled)
+    let testAssociations = new Map<string, TestAssociation>();
+    if (config.indexing.indexTests) {
+      // Convert absolute paths to relative for test pattern matching
+      const relativeFiles = files.map(f => path.relative(rootDir, f));
+      const relativeAssociations = await analyzeTestAssociations(relativeFiles, rootDir, config, spinner);
+      
+      // Convert back to absolute paths for the map keys
+      for (const [relPath, association] of relativeAssociations.entries()) {
+        const absPath = path.join(rootDir, relPath);
+        testAssociations.set(absPath, {
+          ...association,
+          file: absPath,
+          relatedTests: association.relatedTests ? association.relatedTests.map(t => path.join(rootDir, t)) : [],
+          relatedSources: association.relatedSources ? association.relatedSources.map(s => path.join(rootDir, s)) : [],
+        });
+      }
+    }
+    
+    // 4. Initialize embeddings model
     spinner.text = 'Loading embedding model (this may take a minute on first run)...';
     const embeddings = new LocalEmbeddings();
     await embeddings.initialize();
     spinner.succeed('Embedding model loaded');
     
-    // 4. Initialize vector database
+    // 5. Initialize vector database
     spinner.start('Initializing vector database...');
     const vectorDB = new VectorDB(rootDir);
     await vectorDB.initialize();
     spinner.succeed('Vector database initialized');
     
-    // 5. Process files concurrently
+    // 6. Process files concurrently
     const concurrency = config.indexing.concurrency;
     const batchSize = config.indexing.embeddingBatchSize;
     
@@ -106,6 +236,23 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           if (chunks.length === 0) {
             processedFiles++;
             return;
+          }
+          
+          // Enrich chunks with test association metadata
+          const association = testAssociations.get(file);
+          if (association) {
+            const language = detectLanguage(file);
+            const testFramework = association.isTest 
+              ? detectTestFramework(content, language) 
+              : undefined;
+            
+            for (const chunk of chunks) {
+              chunk.metadata.isTest = association.isTest;
+              chunk.metadata.relatedTests = association.relatedTests;
+              chunk.metadata.relatedSources = association.relatedSources;
+              chunk.metadata.testFramework = testFramework;
+              chunk.metadata.detectionMethod = association.detectionMethod;
+            }
           }
           
           // Add chunks to accumulator

@@ -9,7 +9,7 @@ export const program = new Command();
 program
   .name('lien')
   .description('Local semantic code search for AI assistants via MCP')
-  .version('0.1.0');
+  .version('0.1.3');
 
 program
   .command('init')
@@ -39,9 +39,12 @@ program
   .command('reindex')
   .description('Clear index and re-index the entire codebase')
   .action(async () => {
+    const { showCompactBanner } = await import('../utils/banner.js');
     const chalk = (await import('chalk')).default;
     const { VectorDB } = await import('../vectordb/lancedb.js');
     const { indexCodebase } = await import('../indexer/index.js');
+    
+    showCompactBanner();
     
     try {
       console.log(chalk.yellow('Clearing existing index...'));

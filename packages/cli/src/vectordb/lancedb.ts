@@ -54,6 +54,11 @@ export class VectorDB implements VectorDBInterface {
             endLine: 0,
             type: '',
             language: '',
+            isTest: false,
+            relatedTests: [''], // Dummy array to establish type
+            relatedSources: [''], // Dummy array to establish type
+            testFramework: '',
+            detectionMethod: '',
           },
         ];
         
@@ -87,6 +92,11 @@ export class VectorDB implements VectorDBInterface {
         endLine: metadatas[i].endLine,
         type: metadatas[i].type,
         language: metadatas[i].language,
+        isTest: metadatas[i].isTest ?? false,
+        relatedTests: metadatas[i].relatedTests || [],
+        relatedSources: metadatas[i].relatedSources || [],
+        testFramework: metadatas[i].testFramework || '',
+        detectionMethod: metadatas[i].detectionMethod || '',
       }));
       
       await this.table.add(records);

@@ -9,11 +9,25 @@ export interface ChunkMetadata {
   endLine: number;
   type: 'function' | 'class' | 'block';
   language: string;
+  isTest?: boolean;
+  relatedTests?: string[];
+  relatedSources?: string[];
+  testFramework?: string;
+  detectionMethod?: 'convention' | 'import';
 }
 
 export interface ScanOptions {
   rootDir: string;
   includePatterns?: string[];
   excludePatterns?: string[];
+}
+
+export interface TestAssociation {
+  file: string;
+  isTest: boolean;
+  relatedTests?: string[];
+  relatedSources?: string[];
+  testFramework?: string;
+  detectionMethod: 'convention' | 'import';
 }
 
