@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.3.5] - 2025-11-13
+
+### Fixed
+- **Root framework matching in monorepos**
+
+
 
 ## [0.3.5] - 2025-11-13
 
