@@ -4,6 +4,9 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { tools } from './tools.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
@@ -12,6 +15,18 @@ import { indexMultipleFiles, indexSingleFile } from '../indexer/incremental.js';
 import { loadConfig } from '../config/loader.js';
 import { isGitAvailable, isGitRepo } from '../git/utils.js';
 import { FileWatcher } from '../watcher/index.js';
+
+// Get version from package.json dynamically
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const require = createRequire(import.meta.url);
+
+let packageJson;
+try {
+  packageJson = require(join(__dirname, '../package.json'));
+} catch {
+  packageJson = require(join(__dirname, '../../package.json'));
+}
 
 export interface MCPServerOptions {
   rootDir: string;
@@ -52,7 +67,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   const server = new Server(
     {
       name: 'lien',
-      version: '0.1.3',
+      version: packageJson.version,
     },
     {
       capabilities: {

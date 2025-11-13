@@ -1,15 +1,30 @@
 import { Command } from 'commander';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { initCommand } from './init.js';
 import { statusCommand } from './status.js';
 import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
+
+// Get version from package.json dynamically
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const require = createRequire(import.meta.url);
+
+let packageJson;
+try {
+  packageJson = require(join(__dirname, '../package.json'));
+} catch {
+  packageJson = require(join(__dirname, '../../package.json'));
+}
 
 export const program = new Command();
 
 program
   .name('lien')
   .description('Local semantic code search for AI assistants via MCP')
-  .version('0.1.3');
+  .version(packageJson.version);
 
 program
   .command('init')

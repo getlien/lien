@@ -2,6 +2,11 @@
 
 All notable changes to Lien will be documented in this file.
 
+## [0.1.4] - 2025-01-13
+
+### Changed
+- **All version strings now read from package.json**: CLI version (`--version`), MCP server version, and banner version all dynamically read from `package.json`. No more hardcoded version strings to update manually.
+
 ## [0.1.3] - 2025-01-13
 
 ### Fixed
