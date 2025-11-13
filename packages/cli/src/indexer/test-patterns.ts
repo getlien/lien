@@ -421,12 +421,17 @@ export function findSourceFiles(
   frameworkPath: string = '.',
   patterns?: TestPatternConfig
 ): string[] {
+  const verbose = process.env.LIEN_VERBOSE === 'true';
+  
   // Use framework-specific patterns if provided, otherwise fall back to language patterns
   const testPatterns = patterns 
     ? testPatternConfigToLanguagePattern(patterns)
     : LANGUAGE_TEST_PATTERNS[language];
   
   if (!testPatterns) {
+    if (verbose) {
+      console.log(`[DEBUG findSourceFiles] No test patterns found for language: ${language}`);
+    }
     return [];
   }
 
@@ -441,7 +446,6 @@ export function findSourceFiles(
   const matches: string[] = [];
   
   // Debug: log what we're processing
-  const verbose = process.env.LIEN_VERBOSE === 'true';
   if (verbose) {
     console.log(`[DEBUG findSourceFiles] Processing test: ${testFile}`);
     console.log(`[DEBUG findSourceFiles]   normalizedTest: ${normalizedTest}`);

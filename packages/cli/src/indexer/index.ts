@@ -135,6 +135,12 @@ function findTestsByConvention(
   
   // Build associations: test → sources (bidirectional)
   let testsWithSources = 0;
+  
+  if (verbose && testFiles.length > 0) {
+    console.log(chalk.cyan(`\n[DEBUG] Building test→source associations for ${testFiles.length} test files...`));
+    console.log(chalk.cyan(`[DEBUG] LIEN_VERBOSE env var: ${process.env.LIEN_VERBOSE}`));
+  }
+  
   for (const testFile of testFiles) {
     const language = detectLanguage(testFile);
     
@@ -142,6 +148,14 @@ function findTestsByConvention(
     const framework = findOwningFramework(testFile, frameworks);
     const frameworkPath = framework?.path || '.';
     const patterns = framework?.config.testPatterns;
+    
+    if (verbose && testFiles.indexOf(testFile) < 3) {
+      console.log(chalk.cyan(`\n[DEBUG] Processing test #${testFiles.indexOf(testFile) + 1}: ${testFile}`));
+      console.log(chalk.cyan(`  language: ${language}`));
+      console.log(chalk.cyan(`  framework: ${framework?.name || 'none'}`));
+      console.log(chalk.cyan(`  frameworkPath: ${frameworkPath}`));
+      console.log(chalk.cyan(`  patterns: ${patterns ? 'yes' : 'no'}`));
+    }
     
     // Find sources within the same framework
     const relatedSources = findSourceFiles(testFile, language, files, frameworkPath, patterns);
