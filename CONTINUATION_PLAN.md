@@ -118,13 +118,18 @@ export async function scanCodebaseWithFrameworks(
 
 ### **PHASE 4: Path-Aware Indexing (CONTINUE)**
 
-#### Task 4.2: Update Test Pattern Matching ⏳
+#### Task 4.2: Update Test Pattern Matching ✅ COMPLETED
 **File:** `packages/cli/src/indexer/test-patterns.ts`
 
-**Current State:**
-- Functions like `findTestFiles()` and `findSourceFiles()` work but are NOT path-aware
-- They assume all files are at the same root level
-- No framework context passed to matching logic
+**Completed:** 2025-11-13
+**Commit:** ab18bb4
+
+**Implementation:**
+- ✅ Added `frameworkPath` and `patterns` parameters to `findTestFiles()` and `findSourceFiles()`
+- ✅ Implemented path normalization helpers (`normalizePathForFramework`, `addFrameworkPrefix`)
+- ✅ Added framework boundary enforcement to prevent cross-framework matches
+- ✅ Added 18 new monorepo test scenarios (all 55 tests passing)
+- ✅ Maintained backward compatibility with default parameters
 
 **Required Changes:**
 
@@ -976,8 +981,8 @@ npm run release minor
 **Next Session Start Here:**
 
 1. ✅ ~~Phase 4.1: Scanner~~ (DONE)
-2. **Phase 4.2: Test Pattern Matching** ← START HERE
-3. **Phase 4.3: Index Orchestration**
+2. ✅ ~~Phase 4.2: Test Pattern Matching~~ (DONE - commit ab18bb4)
+3. **Phase 4.3: Index Orchestration** ← START HERE
 4. **Phase 5.1: Config Migration**
 5. **Phase 5.2: Enhanced Init**
 6. **Phase 6.1: Monorepo Integration Test**
