@@ -34,18 +34,40 @@ function findOwningFramework(
   filePath: string,
   frameworks: FrameworkInstance[]
 ): FrameworkInstance | null {
+  const verbose = process.env.LIEN_VERBOSE === 'true';
+  
   // Sort by path depth (deepest first) to handle nested frameworks
   const sorted = [...frameworks].sort((a, b) => 
     b.path.split('/').length - a.path.split('/').length
   );
   
+  if (verbose && filePath.includes('CognitoServiceTest')) {
+    console.log(chalk.cyan(`[DEBUG findOwningFramework] Finding owner for: ${filePath}`));
+    console.log(chalk.cyan(`  Frameworks (sorted by depth):`));
+    for (const fw of sorted) {
+      console.log(chalk.cyan(`    - ${fw.name} at "${fw.path}" (enabled: ${fw.enabled})`));
+    }
+  }
+  
   for (const fw of sorted) {
+    if (verbose && filePath.includes('CognitoServiceTest')) {
+      console.log(chalk.cyan(`  Checking ${fw.name}...`));
+    }
+    
     if (fw.path === '.') {
       // Root framework matches everything not matched by deeper frameworks
+      if (verbose && filePath.includes('CognitoServiceTest')) {
+        console.log(chalk.cyan(`    ✓ Matched root framework: ${fw.name}`));
+      }
       return fw;
     }
     if (filePath.startsWith(fw.path + '/')) {
+      if (verbose && filePath.includes('CognitoServiceTest')) {
+        console.log(chalk.cyan(`    ✓ Matched framework: ${fw.name}`));
+      }
       return fw;
+    } else if (verbose && filePath.includes('CognitoServiceTest')) {
+      console.log(chalk.cyan(`    ✗ "${filePath}" doesn't start with "${fw.path}/"`));
     }
   }
   
