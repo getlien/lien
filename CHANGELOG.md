@@ -1,6 +1,20 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.3.2] - 2025-11-13
+
+### Fixed
+- **Cursor rules installation now works correctly in ES modules**
+  - Fixed `__dirname is not defined` error by using `fileURLToPath` and `import.meta.url`
+  - Corrected template path resolution from compiled `dist/` directory
+  
+- **Existing `.cursor/rules` files are now preserved**
+  - Prompts user to convert file to directory structure (preserves original content)
+  - Saves original rules as `.cursor/rules/project.mdc`
+  - Adds Lien rules as `.cursor/rules/lien.mdc`
+  - Never overwrites user's custom rules without explicit consent
+
+
 ## [0.3.1] - 2025-11-13
 
 ### Fixed
