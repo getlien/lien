@@ -28,13 +28,14 @@ interface ChunkWithContent {
  * Determine which framework owns a given file path
  * @param filePath - Relative file path from project root
  * @param frameworks - Array of framework instances
+ * @param verbose - Enable debug logging
  * @returns The owning framework, or null if no match
  */
 function findOwningFramework(
   filePath: string,
-  frameworks: FrameworkInstance[]
+  frameworks: FrameworkInstance[],
+  verbose: boolean = false
 ): FrameworkInstance | null {
-  const verbose = process.env.LIEN_VERBOSE === 'true';
   
   // Sort by path depth (deepest first) to handle nested frameworks
   const sorted = [...frameworks].sort((a, b) => 
@@ -133,7 +134,7 @@ function findTestsByConvention(
     const language = detectLanguage(sourceFile);
     
     // Determine which framework owns this file
-    const framework = findOwningFramework(sourceFile, frameworks);
+    const framework = findOwningFramework(sourceFile, frameworks, verbose);
     const frameworkPath = framework?.path || '.';
     const patterns = framework?.config.testPatterns;
     
@@ -160,14 +161,13 @@ function findTestsByConvention(
   
   if (verbose && testFiles.length > 0) {
     console.log(chalk.cyan(`\n[DEBUG] Building test→source associations for ${testFiles.length} test files...`));
-    console.log(chalk.cyan(`[DEBUG] LIEN_VERBOSE env var: ${process.env.LIEN_VERBOSE}`));
   }
   
   for (const testFile of testFiles) {
     const language = detectLanguage(testFile);
     
     // Determine which framework owns this test file
-    const framework = findOwningFramework(testFile, frameworks);
+    const framework = findOwningFramework(testFile, frameworks, verbose);
     const frameworkPath = framework?.path || '.';
     const patterns = framework?.config.testPatterns;
     
@@ -180,7 +180,7 @@ function findTestsByConvention(
     }
     
     // Find sources within the same framework
-    const relatedSources = findSourceFiles(testFile, language, files, frameworkPath, patterns);
+    const relatedSources = findSourceFiles(testFile, language, files, frameworkPath, patterns, verbose);
     
     if (verbose && relatedSources.length > 0) {
       testsWithSources++;

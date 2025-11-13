@@ -419,9 +419,9 @@ export function findSourceFiles(
   language: string,
   allFiles: string[],
   frameworkPath: string = '.',
-  patterns?: TestPatternConfig
+  patterns?: TestPatternConfig,
+  verbose: boolean = false
 ): string[] {
-  const verbose = process.env.LIEN_VERBOSE === 'true';
   
   // Use framework-specific patterns if provided, otherwise fall back to language patterns
   const testPatterns = patterns 

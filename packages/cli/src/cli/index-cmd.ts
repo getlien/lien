@@ -5,11 +5,6 @@ import { showCompactBanner } from '../utils/banner.js';
 export async function indexCommand(options: { watch?: boolean; verbose?: boolean }) {
   showCompactBanner();
   
-  // Enable debug output in test-patterns.ts when verbose mode is on
-  if (options.verbose) {
-    process.env.LIEN_VERBOSE = 'true';
-  }
-  
   try {
     await indexCodebase({
       rootDir: process.cwd(),
