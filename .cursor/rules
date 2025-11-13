@@ -93,3 +93,20 @@
 - If multiple related changes, use multiple commits with clear progression
 - Rebuild (`npm run build`) after source changes before committing dist/
 
+## Version Bumping & Releases
+- **ALWAYS bump version and commit when making user-facing changes**
+- Use semantic versioning (MAJOR.MINOR.PATCH):
+  - **PATCH** (0.1.X → 0.1.X+1): Bug fixes, small improvements, no breaking changes
+  - **MINOR** (0.X.0 → 0.X+1.0): New features, backwards compatible
+  - **MAJOR** (X.0.0 → X+1.0.0): Breaking changes, major rewrites
+- **Use the automated script**: `npm run release -- patch|minor|major "Commit message"`
+  - Example: `npm run release -- patch "fix: improve reconnection logic"`
+  - Script handles: version bump, build, changelog entry, commit, and git tag
+- Update CHANGELOG.md with:
+  - Version number and date
+  - Category (Added/Changed/Deprecated/Removed/Fixed/Security)
+  - Clear description of what changed and why
+  - Breaking changes clearly marked
+- Create git tag for each version: `v0.1.10`
+- Only tag after successful build and commit
+

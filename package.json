@@ -18,7 +18,8 @@
     "build": "npm run build -w packages/cli",
     "dev": "npm run dev -w packages/cli",
     "typecheck": "npm run typecheck -w packages/cli",
-    "clean": "rm -rf packages/*/dist"
+    "clean": "rm -rf packages/*/dist",
+    "release": "./scripts/release.sh"
   },
   "keywords": [
     "mcp",

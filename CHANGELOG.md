@@ -2,6 +2,25 @@
 
 All notable changes to Lien will be documented in this file.
 
+## [0.2.0] - 2025-01-13
+
+### Added
+- **Automated release script**: New `npm run release` command handles version bumping, building, changelog updates, commits, and git tags automatically
+  - Supports patch, minor, and major version bumps
+  - Follows semantic versioning and conventional commits
+  - Updates CHANGELOG.md automatically
+  - Example: `npm run release -- patch "fix: bug description"`
+- **Development guidelines**: Added comprehensive CONTRIBUTING.md with:
+  - Release process documentation
+  - Development workflow guide
+  - Testing guidelines
+  - Code review checklist
+- **Updated .cursor/rules**: Added detailed versioning and release guidelines for AI-assisted development
+
+### Changed
+- Enhanced README with Contributing & Development section
+- Added release script to root package.json
+
 ## [0.1.10] - 2025-01-13
 
 ### Added

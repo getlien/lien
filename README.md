@@ -479,6 +479,46 @@ When contributing, please:
 - Add integration tests for new features
 - Ensure all tests pass before submitting PR
 
+## Contributing & Development
+
+We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines.
+
+### Quick Start for Contributors
+
+```bash
+# Clone and setup
+git clone https://github.com/alfhenderson/lien.git
+cd lien
+npm install
+npm run build
+
+# Make changes
+# ... edit files ...
+
+# Test locally
+cd packages/cli && npm link
+lien --help
+
+# Release (automated)
+npm run release -- patch "fix: your bug fix"
+npm run release -- minor "feat: your new feature"
+```
+
+### Release Process
+
+Lien uses an automated release script that handles:
+- ✅ Version bumping (semantic versioning)
+- ✅ Building the project
+- ✅ Updating CHANGELOG.md
+- ✅ Creating git commit and tag
+
+**Example:**
+```bash
+npm run release -- patch "fix: improve reconnection logic"
+```
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for full details on the development workflow.
+
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/alfhenderson/lien/issues)
