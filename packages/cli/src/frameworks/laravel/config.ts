@@ -15,6 +15,7 @@ export async function generateLaravelConfig(
       'config/**/*.php',
       'database/**/*.php',
       'resources/**/*.php',
+      'tests/**/*.php',
       '*.php',
     ],
     exclude: [
