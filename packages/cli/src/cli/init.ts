@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { defaultConfig, LienConfig, FrameworkInstance } from '../config/schema.js';
@@ -8,6 +9,10 @@ import { showCompactBanner } from '../utils/banner.js';
 import { needsMigration, migrateConfig } from '../config/migration.js';
 import { detectAllFrameworks } from '../frameworks/detector-service.js';
 import { getFrameworkDetector } from '../frameworks/registry.js';
+
+// ES module equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export interface InitOptions {
   upgrade?: boolean;
@@ -201,8 +206,9 @@ async function createNewConfig(rootDir: string, options: InitOptions) {
         await fs.mkdir(cursorRulesDir, { recursive: true });
         
         // Find template - it's in the package root (same dir as package.json)
-        // When compiled: dist/cli/init.js -> go up to package root
-        const templatePath = path.join(__dirname, '../../CURSOR_RULES_TEMPLATE.md');
+        // When compiled: everything bundles to dist/index.js, so __dirname is dist/
+        // Go up one level from dist/ to reach package root
+        const templatePath = path.join(__dirname, '../CURSOR_RULES_TEMPLATE.md');
         
         // Check if .cursor/rules exists and is a directory
         const rulesPath = path.join(cursorRulesDir, 'rules');
