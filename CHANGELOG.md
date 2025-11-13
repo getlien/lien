@@ -1,6 +1,17 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+
+## [0.3.5] - 2025-11-13
+
+### Fixed
+- **Critical monorepo framework matching bug**
+  - Root framework at `.` was being checked before specific frameworks
+  - This caused files in `cognito-backend/` to match the root Node.js framework instead of the Laravel framework
+  - **Impact**: Laravel tests in monorepos were assigned Node.js test patterns, preventing test associations from working
+  - **Solution**: Root framework is now checked last as a fallback, after all specific frameworks are evaluated
+  - Added comprehensive debug output for verbose mode to diagnose framework matching issues
+
 ## [0.3.4] - 2025-11-13
 
 ### Fixed
