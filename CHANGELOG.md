@@ -23,6 +23,7 @@ All notable changes to Lien will be documented in this file.
 - **Per-Framework .gitignore**: Each framework can have its own .gitignore rules
 - **Improved Scanner**: Framework-specific file scanning with proper path resolution
 - **Interactive Configuration**: `lien init` now provides guided setup with framework selection
+- **Automatic Cursor Rules Installation**: `lien init` now offers to install recommended Cursor rules automatically
 
 ### 🔧 Breaking Changes
 - **Config Schema Change**: `.lien.config.json` now uses `frameworks` array instead of flat `indexing` config
@@ -38,10 +39,11 @@ All notable changes to Lien will be documented in this file.
 - Added migration instructions for v0.2.0 users
 
 ### 🧪 Testing
-- Added 20 new integration tests (262 total, up from 242)
+- Added 22 new integration tests (264 total, up from 242)
 - Added monorepo framework integration tests (8 tests)
 - Added test pattern filtering tests (7 tests)
 - Added E2E workflow tests (5 tests)
+- Added Cursor rules installation tests (2 tests)
 - All tests pass with <5s execution time
 
 ### 🏗️ Architecture
