@@ -1,6 +1,24 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.3.4] - 2025-11-13
+
+### Fixed
+- **Laravel test associations now work correctly with nested test directories**
+  - Fixed critical bugs preventing test→source associations for Laravel projects
+  - Helper files in test directories (TestCase.php, traits, helpers) no longer counted as tests
+  - PHP/Java now require explicit "Test" suffix even when in test directories
+  - Nested test directories like `tests/Feature/` and `tests/Unit/` now properly detected
+  - Fixed both `isTestFile()` and `findTestFiles()` to handle paths like "tests/Feature"
+  
+- **Three major bugs fixed**:
+  1. **Helper file exclusion**: Files like `tests/TestCase.php` were incorrectly identified as tests. Now requires "Test" suffix for PHP/Java while preserving Python's directory-only detection.
+  2. **Nested directory detection in `isTestFile()`**: Paths like "tests/Feature" weren't matched because `parts.includes("tests/Feature")` fails when path is split by `/`.
+  3. **Nested directory matching in `findTestFiles()`**: Same bug prevented test association logic from finding tests in `tests/Feature/` and `tests/Unit/` subdirectories.
+
+- **Impact**: Laravel projects went from "0 source files that have tests" to working test associations! 🎉
+
+
 ## [0.3.3] - 2025-11-13
 
 ### Fixed
