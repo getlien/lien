@@ -83,32 +83,44 @@ export interface FrameworkInstance {
 ✓ Returns confidence: high if all Laravel markers present
 ```
 
-### Phase 4: Path-Aware Indexing (PARTIAL) ✓
+### Phase 4: Path-Aware Indexing ✅ COMPLETED
+**Status:** All tasks completed (4.1, 4.2, 4.3)
+**Completed:** 2025-11-13
+
 **Files Modified:**
 1. `packages/cli/src/indexer/scanner.ts` - NEW `scanCodebaseWithFrameworks()`
+2. `packages/cli/src/indexer/test-patterns.ts` - Framework-aware test matching
+3. `packages/cli/src/indexer/index.ts` - Framework-aware orchestration
 
 **Key Implementation:**
 ```typescript
-// scanner.ts: NEW function
+// scanner.ts: Framework-aware scanning
 export async function scanCodebaseWithFrameworks(
+  rootDir: string,
   config: LienConfig
-): Promise<Map<string, string>> {
-  const allFiles = new Map<string, string>();
+): Promise<string[]>
 
-  for (const fw of config.frameworks) {
-    const fwFiles = await scanFramework(fw, config.core.projectRoot);
-    for (const [path, lang] of fwFiles) {
-      allFiles.set(path, lang);
-    }
-  }
+// test-patterns.ts: Framework context parameters
+export function findTestFiles(
+  sourceFile: string,
+  language: string,
+  allFiles: string[],
+  frameworkPath: string = '.',
+  patterns?: TestPatternConfig
+): string[]
 
-  return allFiles;
-}
+// index.ts: Framework ownership determination
+function findOwningFramework(
+  filePath: string,
+  frameworks: FrameworkInstance[]
+): FrameworkInstance | null
 
 // Handles:
 ✓ Per-framework .gitignore loading
 ✓ Path prefixing (e.g., "cognito-backend/app/Models/User.php")
 ✓ Framework-specific include/exclude patterns
+✓ Framework boundary enforcement in test matching
+✓ Test associations respect framework contexts
 ✓ Backwards compatibility via legacy scanCodebase()
 ```
 
@@ -201,12 +213,19 @@ Expected behavior:
 
 ---
 
-#### Task 4.3: Update Index Orchestration ⏳
+#### Task 4.3: Update Index Orchestration ✅ COMPLETED
 **File:** `packages/cli/src/indexer/index.ts`
 
-**Current State:**
-- `indexCodebase()` calls `scanCodebase()` (old, non-framework-aware)
-- Test association analysis doesn't know about framework boundaries
+**Completed:** 2025-11-13
+**Commit:** 27e7cdc
+
+**Implementation:**
+- ✅ Implemented `findOwningFramework()` helper (sorts by depth, matches deepest first)
+- ✅ Updated `indexCodebase()` to use `scanCodebaseWithFrameworks()` when frameworks configured
+- ✅ Updated `analyzeTestAssociations()` to accept frameworks parameter
+- ✅ Updated `findTestsByConvention()` to pass framework context to test pattern functions
+- ✅ Added fallback logic for legacy configs (config.indexing vs config.core)
+- ✅ All indexer tests passing
 
 **Required Changes:**
 
@@ -982,8 +1001,8 @@ npm run release minor
 
 1. ✅ ~~Phase 4.1: Scanner~~ (DONE)
 2. ✅ ~~Phase 4.2: Test Pattern Matching~~ (DONE - commit ab18bb4)
-3. **Phase 4.3: Index Orchestration** ← START HERE
-4. **Phase 5.1: Config Migration**
+3. ✅ ~~Phase 4.3: Index Orchestration~~ (DONE - commit 27e7cdc)
+4. **Phase 5.1: Config Migration** ← START HERE
 5. **Phase 5.2: Enhanced Init**
 6. **Phase 6.1: Monorepo Integration Test**
 7. **Phase 6.2: Lien Self-Test**
