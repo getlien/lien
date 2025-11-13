@@ -149,7 +149,13 @@ export function isTestFile(filepath: string, language: string): boolean {
 
   // Check if file is in a test directory
   for (const testDir of patterns.directories) {
-    if (parts.includes(testDir)) {
+    // Handle both simple dirs ("tests") and nested dirs ("tests/Feature")
+    // For nested dirs, check if the dirname includes the path
+    const isInTestDir = testDir.includes('/') 
+      ? dirname.includes(testDir)  // Nested: check if "tests/Feature" is in the path
+      : parts.includes(testDir);   // Simple: check if "tests" is in the parts
+    
+    if (isInTestDir) {
       // File is in a test directory
       // Check if language has "suffix-style" test extensions (like Test.php)
       // vs "additive" extensions (like .test.ts)
