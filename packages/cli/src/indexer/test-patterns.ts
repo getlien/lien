@@ -1,4 +1,5 @@
 import path from 'path';
+import type { TestPatternConfig } from '../config/schema.js';
 
 /**
  * Language-specific test patterns for detecting and associating test files
@@ -176,44 +177,117 @@ export function isTestFile(filepath: string, language: string): boolean {
 }
 
 /**
+ * Helper: Normalize path by stripping framework prefix
+ * @param file - File path (e.g., "cognito-backend/app/Models/User.php")
+ * @param fwPath - Framework path (e.g., "cognito-backend" or ".")
+ * @returns Relative path within framework (e.g., "app/Models/User.php")
+ */
+function normalizePathForFramework(file: string, fwPath: string): string {
+  // If framework is at root, no change needed
+  if (fwPath === '.') return file;
+  
+  // Strip framework prefix to get relative path within framework
+  // e.g., "cognito-backend/app/Models/User.php" → "app/Models/User.php"
+  if (file.startsWith(fwPath + '/')) {
+    return file.slice(fwPath.length + 1);
+  }
+  
+  // File doesn't have framework prefix (shouldn't happen in practice)
+  return file;
+}
+
+/**
+ * Helper: Add framework prefix to a path
+ * @param file - Relative path within framework (e.g., "app/Models/User.php")
+ * @param fwPath - Framework path (e.g., "cognito-backend" or ".")
+ * @returns Full path from project root (e.g., "cognito-backend/app/Models/User.php")
+ */
+function addFrameworkPrefix(file: string, fwPath: string): string {
+  // If framework is at root, no change needed
+  if (fwPath === '.') return file;
+  
+  // Add framework prefix
+  return `${fwPath}/${file}`;
+}
+
+/**
+ * Helper: Convert TestPatternConfig to LanguageTestPattern
+ */
+function testPatternConfigToLanguagePattern(config: TestPatternConfig): LanguageTestPattern {
+  return {
+    extensions: config.extensions,
+    directories: config.directories,
+    prefixes: config.prefixes,
+    suffixes: config.suffixes,
+    frameworks: config.frameworks,
+  };
+}
+
+/**
  * Find test files associated with a source file
+ * @param sourceFile - Source file path (relative to project root)
+ * @param language - Programming language
+ * @param allFiles - All files in the project (relative to project root)
+ * @param frameworkPath - Framework path (e.g., "." for root, "cognito-backend" for subfolder)
+ * @param patterns - Optional framework-specific test patterns (overrides language defaults)
  */
 export function findTestFiles(
   sourceFile: string,
   language: string,
-  allFiles: string[]
+  allFiles: string[],
+  frameworkPath: string = '.',
+  patterns?: TestPatternConfig
 ): string[] {
-  const patterns = LANGUAGE_TEST_PATTERNS[language];
-  if (!patterns) {
+  // Use framework-specific patterns if provided, otherwise fall back to language patterns
+  const testPatterns = patterns 
+    ? testPatternConfigToLanguagePattern(patterns)
+    : LANGUAGE_TEST_PATTERNS[language];
+  
+  if (!testPatterns) {
     return [];
   }
 
-  const baseName = getBaseName(sourceFile);
-  const sourceDir = path.dirname(sourceFile);
+  // Normalize paths relative to framework
+  const normalizedSource = normalizePathForFramework(sourceFile, frameworkPath);
+  const normalizedFiles = allFiles
+    .filter(f => {
+      if (frameworkPath === '.') {
+        // At root, include all files that don't belong to other frameworks
+        // (i.e., files that don't start with a subfolder that looks like a framework path)
+        // For now, include all files since we can't determine which are framework roots
+        return true;
+      }
+      // For non-root frameworks, only include files within this framework
+      return f.startsWith(frameworkPath + '/');
+    })
+    .map(f => normalizePathForFramework(f, frameworkPath));
+
+  const baseName = getBaseName(normalizedSource);
+  const sourceDir = path.dirname(normalizedSource);
   const matches: string[] = [];
 
   // Strategy 1: Co-located tests (same directory)
   // Example: src/Button.tsx → src/Button.test.tsx
-  for (const ext of patterns.extensions) {
+  for (const ext of testPatterns.extensions) {
     const candidate = path.join(sourceDir, baseName + ext);
-    if (allFiles.includes(candidate)) {
+    if (normalizedFiles.includes(candidate)) {
       matches.push(candidate);
     }
   }
 
   // Apply suffix patterns for co-located tests
-  for (const suffix of patterns.suffixes) {
+  for (const suffix of testPatterns.suffixes) {
     const languageExts = getLanguageExtensions(language);
     for (const langExt of languageExts) {
       // Co-located (same directory as source)
       const candidate = path.join(sourceDir, baseName + suffix + langExt);
-      if (allFiles.includes(candidate)) {
+      if (normalizedFiles.includes(candidate)) {
         matches.push(candidate);
       }
 
-      // At project root (for files like calculator_test.py at root)
+      // At framework root (for files like calculator_test.py at root)
       const atRoot = baseName + suffix + langExt;
-      if (allFiles.includes(atRoot)) {
+      if (normalizedFiles.includes(atRoot)) {
         matches.push(atRoot);
       }
     }
@@ -221,21 +295,21 @@ export function findTestFiles(
 
   // Strategy 2: Parallel directory structure
   // Example: src/components/Button.tsx → tests/components/Button.test.tsx
-  for (const testDir of patterns.directories) {
-    const relativePath = getRelativePathFromSrc(sourceFile);
+  for (const testDir of testPatterns.directories) {
+    const relativePath = getRelativePathFromSrc(normalizedSource);
     const relativeDir = path.dirname(relativePath);
     
-    for (const ext of patterns.extensions) {
+    for (const ext of testPatterns.extensions) {
       const candidate = path.join(testDir, relativeDir, baseName + ext);
-      if (allFiles.includes(candidate)) {
+      if (normalizedFiles.includes(candidate)) {
         matches.push(candidate);
       }
     }
 
     // Also try without subdirectory nesting (flat structure)
-    for (const ext of patterns.extensions) {
+    for (const ext of testPatterns.extensions) {
       const candidate = path.join(testDir, baseName + ext);
-      if (allFiles.includes(candidate)) {
+      if (normalizedFiles.includes(candidate)) {
         matches.push(candidate);
       }
     }
@@ -243,11 +317,10 @@ export function findTestFiles(
     // Strategy 2b: Search test directory recursively for matching filename
     // This handles Laravel-style organization (tests/Feature/, tests/Unit/)
     // and other frameworks that organize by test type rather than source structure
-    for (const ext of patterns.extensions) {
+    for (const ext of testPatterns.extensions) {
       const targetFilename = baseName + ext;
-      const matchingFiles = allFiles.filter(f => {
+      const matchingFiles = normalizedFiles.filter(f => {
         // Check if file contains the test directory in its path and ends with target filename
-        // Handles both "tests/Unit/UserTest.php" and "cognito-backend/tests/Unit/UserTest.php"
         const pathParts = f.split(path.sep);
         return pathParts.includes(testDir) && f.endsWith(targetFilename);
       });
@@ -256,57 +329,75 @@ export function findTestFiles(
   }
 
   // Strategy 3: Prefix patterns (Python, C, etc.)
-  for (const prefix of patterns.prefixes) {
+  for (const prefix of testPatterns.prefixes) {
     const languageExts = getLanguageExtensions(language);
     for (const langExt of languageExts) {
       // Co-located (same directory as source)
       const colocated = path.join(sourceDir, prefix + baseName + langExt);
-      if (allFiles.includes(colocated)) {
+      if (normalizedFiles.includes(colocated)) {
         matches.push(colocated);
       }
 
-      // At project root (for files like test_calculator.py at root)
+      // At framework root (for files like test_calculator.py at root)
       const atRoot = prefix + baseName + langExt;
-      if (allFiles.includes(atRoot)) {
+      if (normalizedFiles.includes(atRoot)) {
         matches.push(atRoot);
       }
 
       // In test directories
-      for (const testDir of patterns.directories) {
+      for (const testDir of testPatterns.directories) {
         const inTestDir = path.join(testDir, prefix + baseName + langExt);
-        if (allFiles.includes(inTestDir)) {
+        if (normalizedFiles.includes(inTestDir)) {
           matches.push(inTestDir);
         }
       }
     }
   }
 
-  // Remove duplicates
-  return [...new Set(matches)];
+  // Remove duplicates and add framework prefix back
+  const uniqueMatches = [...new Set(matches)];
+  return uniqueMatches.map(m => addFrameworkPrefix(m, frameworkPath));
 }
 
 /**
  * Find source files associated with a test file (reverse operation)
+ * @param testFile - Test file path (relative to project root)
+ * @param language - Programming language
+ * @param allFiles - All files in the project (relative to project root)
+ * @param frameworkPath - Framework path (e.g., "." for root, "cognito-backend" for subfolder)
+ * @param patterns - Optional framework-specific test patterns (overrides language defaults)
  */
 export function findSourceFiles(
   testFile: string,
   language: string,
-  allFiles: string[]
+  allFiles: string[],
+  frameworkPath: string = '.',
+  patterns?: TestPatternConfig
 ): string[] {
-  const patterns = LANGUAGE_TEST_PATTERNS[language];
-  if (!patterns) {
+  // Use framework-specific patterns if provided, otherwise fall back to language patterns
+  const testPatterns = patterns 
+    ? testPatternConfigToLanguagePattern(patterns)
+    : LANGUAGE_TEST_PATTERNS[language];
+  
+  if (!testPatterns) {
     return [];
   }
 
-  const testBasename = path.basename(testFile);
-  const testDir = path.dirname(testFile);
+  // Normalize paths relative to framework
+  const normalizedTest = normalizePathForFramework(testFile, frameworkPath);
+  const normalizedFiles = allFiles
+    .filter(f => f.startsWith(frameworkPath === '.' ? '' : frameworkPath + '/') || frameworkPath === '.')
+    .map(f => normalizePathForFramework(f, frameworkPath));
+
+  const testBasename = path.basename(normalizedTest);
+  const testDir = path.dirname(normalizedTest);
   const matches: string[] = [];
 
   // Extract base name by removing test patterns
   let baseName = getNameWithoutExtension(testBasename, language);
   
   // Remove test extensions
-  for (const ext of patterns.extensions) {
+  for (const ext of testPatterns.extensions) {
     if (testBasename.endsWith(ext)) {
       baseName = testBasename.slice(0, -ext.length);
       break;
@@ -314,14 +405,14 @@ export function findSourceFiles(
   }
 
   // Remove test suffixes
-  for (const suffix of patterns.suffixes) {
+  for (const suffix of testPatterns.suffixes) {
     if (baseName.endsWith(suffix)) {
       baseName = baseName.slice(0, -suffix.length);
     }
   }
 
   // Remove test prefixes
-  for (const prefix of patterns.prefixes) {
+  for (const prefix of testPatterns.prefixes) {
     if (baseName.startsWith(prefix)) {
       baseName = baseName.slice(prefix.length);
     }
@@ -332,7 +423,7 @@ export function findSourceFiles(
   // Strategy 1: Co-located source file
   for (const langExt of languageExts) {
     const candidate = path.join(testDir, baseName + langExt);
-    if (allFiles.includes(candidate) && !isTestFile(candidate, language)) {
+    if (normalizedFiles.includes(candidate) && !isTestFile(addFrameworkPrefix(candidate, frameworkPath), language)) {
       matches.push(candidate);
     }
   }
@@ -343,12 +434,12 @@ export function findSourceFiles(
   
   for (const sourceDir of sourceDirs) {
     // Try to maintain subdirectory structure
-    const relativePath = getRelativePathFromTest(testFile);
+    const relativePath = getRelativePathFromTest(normalizedTest);
     const relativeDir = path.dirname(relativePath);
     
     for (const langExt of languageExts) {
       const candidate = path.join(sourceDir, relativeDir, baseName + langExt);
-      if (allFiles.includes(candidate) && !isTestFile(candidate, language)) {
+      if (normalizedFiles.includes(candidate) && !isTestFile(addFrameworkPrefix(candidate, frameworkPath), language)) {
         matches.push(candidate);
       }
     }
@@ -356,15 +447,15 @@ export function findSourceFiles(
     // Try flat structure
     for (const langExt of languageExts) {
       const candidate = path.join(sourceDir, baseName + langExt);
-      if (allFiles.includes(candidate) && !isTestFile(candidate, language)) {
+      if (normalizedFiles.includes(candidate) && !isTestFile(addFrameworkPrefix(candidate, frameworkPath), language)) {
         matches.push(candidate);
       }
     }
   }
 
-  // Strategy 3: Search entire codebase for matching basename
-  for (const file of allFiles) {
-    if (isTestFile(file, language)) continue;
+  // Strategy 3: Search entire framework codebase for matching basename
+  for (const file of normalizedFiles) {
+    if (isTestFile(addFrameworkPrefix(file, frameworkPath), language)) continue;
     
     const fileBaseName = getBaseName(file);
     if (fileBaseName === baseName) {
@@ -372,8 +463,9 @@ export function findSourceFiles(
     }
   }
 
-  // Remove duplicates
-  return [...new Set(matches)];
+  // Remove duplicates and add framework prefix back
+  const uniqueMatches = [...new Set(matches)];
+  return uniqueMatches.map(m => addFrameworkPrefix(m, frameworkPath));
 }
 
 /**
