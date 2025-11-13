@@ -136,7 +136,17 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           await checkAndReconnect();
           
           const queryEmbedding = await embeddings.embed(query);
-          const results = await vectorDB.search(queryEmbedding, limit);
+          const rawResults = await vectorDB.search(queryEmbedding, limit);
+          
+          // Filter out empty strings from test association arrays
+          const results = rawResults.map(r => ({
+            ...r,
+            metadata: {
+              ...r.metadata,
+              relatedTests: (r.metadata.relatedTests ?? []).filter((t: string) => t && t.trim().length > 0),
+              relatedSources: (r.metadata.relatedSources ?? []).filter((s: string) => s && s.trim().length > 0),
+            },
+          }));
           
           log(`Found ${results.length} results`);
           
@@ -165,7 +175,17 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           await checkAndReconnect();
           
           const codeEmbedding = await embeddings.embed(code);
-          const results = await vectorDB.search(codeEmbedding, limit);
+          const rawResults = await vectorDB.search(codeEmbedding, limit);
+          
+          // Filter out empty strings from test association arrays
+          const results = rawResults.map(r => ({
+            ...r,
+            metadata: {
+              ...r.metadata,
+              relatedTests: (r.metadata.relatedTests ?? []).filter((t: string) => t && t.trim().length > 0),
+              relatedSources: (r.metadata.relatedSources ?? []).filter((s: string) => s && s.trim().length > 0),
+            },
+          }));
           
           log(`Found ${results.length} similar chunks`);
           
@@ -208,8 +228,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           // Extract test associations from metadata
           const testAssociations = fileChunks.length > 0 ? {
             isTest: fileChunks[0].metadata.isTest ?? false,
-            relatedTests: fileChunks[0].metadata.relatedTests ?? [],
-            relatedSources: fileChunks[0].metadata.relatedSources ?? [],
+            relatedTests: (fileChunks[0].metadata.relatedTests ?? []).filter((t: string) => t && t.trim().length > 0),
+            relatedSources: (fileChunks[0].metadata.relatedSources ?? []).filter((s: string) => s && s.trim().length > 0),
             testFramework: fileChunks[0].metadata.testFramework ?? null,
             detectionMethod: fileChunks[0].metadata.detectionMethod ?? null,
           } : null;

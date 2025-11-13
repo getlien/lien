@@ -1,12 +1,16 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
-## [0.3.5] - 2025-11-13
+
+## [0.3.6] - 2025-11-13
 
 ### Fixed
-- **Root framework matching in monorepos**
-
-
+- **Test associations now correctly returned by MCP server**
+  - Critical fix: MCP server was not filtering out empty strings from `relatedTests` and `relatedSources` arrays
+  - The dummy schema row in LanceDB stores arrays with empty strings (`['']`), which were being returned in results
+  - This caused `get_file_context` to think test associations were missing even when they existed
+  - Now all MCP tools (`semantic_search`, `find_similar`, `get_file_context`) filter out empty strings from test association arrays
+  - **No reindexing required** - existing indices will now work correctly with this fix
 
 ## [0.3.5] - 2025-11-13
 
