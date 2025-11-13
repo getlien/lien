@@ -34,25 +34,26 @@ npx @liendev/lien init
 
 ```bash
 cd /path/to/your/project
-lien init
+lien init  # Detects frameworks automatically
 ```
 
-This creates a `.lien.config.json` file with default settings.
+This creates a `.lien.config.json` file with framework-aware settings.
 
-### 2. Start the MCP Server
+### 2. Index Your Codebase
+
+```bash
+lien index
+```
+
+### 3. Start the MCP Server
 
 ```bash
 lien serve
 ```
 
-**Note:** On first run, Lien will automatically index your codebase. This may take 5-20 minutes depending on project size. The embedding model (~100MB) will be downloaded on first use.
+**Note:** On first run, Lien will automatically index your codebase if you skip step 2. This may take 5-20 minutes depending on project size. The embedding model (~100MB) will be downloaded on first use.
 
-If you prefer to pre-index before starting the server, run:
-```bash
-lien index
-```
-
-### 3. Configure Cursor
+### 4. Configure Cursor
 
 Create or edit `~/.cursor/mcp.json`:
 
@@ -70,7 +71,7 @@ Create or edit `~/.cursor/mcp.json`:
 
 **Replace `/absolute/path/to/your/project`** with your actual project path.
 
-### 4. Add Cursor Rules (Optional but Recommended)
+### 5. Add Cursor Rules (Optional but Recommended)
 
 Copy the contents of [`CURSOR_RULES_TEMPLATE.md`](./CURSOR_RULES_TEMPLATE.md) to `.cursor/rules` in your project. This teaches Cursor how to effectively use Lien's semantic search capabilities.
 
@@ -78,11 +79,11 @@ Copy the contents of [`CURSOR_RULES_TEMPLATE.md`](./CURSOR_RULES_TEMPLATE.md) to
 cp /path/to/lien/CURSOR_RULES_TEMPLATE.md /your/project/.cursor/rules
 ```
 
-### 5. Restart Cursor
+### 6. Restart Cursor
 
 Restart Cursor to load the new MCP configuration.
 
-### 6. Test It Out!
+### 7. Test It Out!
 
 In Cursor chat, try queries like:
 
@@ -91,14 +92,84 @@ In Cursor chat, try queries like:
 - "Show me database connection code"
 - "List all API endpoints"
 
+## Monorepo Support
+
+Lien supports indexing multiple frameworks within a single repository:
+
+```bash
+# Example monorepo structure
+my-app/
+  ├── src/                  # Node.js/TypeScript
+  │   ├── utils.ts
+  │   └── utils.test.ts
+  ├── backend/              # Laravel
+  │   ├── app/Models/
+  │   └── tests/Unit/
+  └── .lien.config.json
+
+# Run lien init from the root
+cd my-app
+lien init  # Detects both Node.js and Laravel
+
+# Generated config:
+{
+  "frameworks": [
+    {
+      "name": "nodejs",
+      "path": ".",
+      "config": { /* Node.js patterns */ }
+    },
+    {
+      "name": "laravel",
+      "path": "backend",
+      "config": { /* Laravel patterns */ }
+    }
+  ]
+}
+```
+
+Lien will:
+- Index files from both frameworks
+- Apply framework-specific test patterns
+- Associate tests correctly within framework boundaries
+
+### Supported Frameworks
+
+- **Node.js/TypeScript**: Automatic detection via `package.json`, supports Jest, Vitest, Mocha, AVA
+- **Laravel/PHP**: Automatic detection via `composer.json`, supports PHPUnit, Pest
+
+More frameworks coming soon! See [CONTRIBUTING.md](./CONTRIBUTING.md) to add support for your framework.
+
+## Migrating from v0.2.0
+
+If you have an existing `.lien.config.json` from v0.2.0:
+
+```bash
+# Automatic migration on first load
+lien index  # or any command that loads config
+
+# Manual upgrade via init
+lien init --upgrade
+```
+
+Your old config will be:
+- Backed up to `.lien.config.json.v0.2.0.backup`
+- Converted to a single "generic" framework at root
+- Fully compatible with v0.3.0 features
+
+All your custom settings (chunk size, concurrency, exclusions, etc.) are preserved during migration.
+
 ## CLI Commands
 
 ### `lien init`
 
-Initialize Lien in the current directory. Creates `.lien.config.json`.
+Initialize Lien in the current directory. Detects frameworks and creates `.lien.config.json`.
 
 ```bash
 lien init
+
+# Upgrade existing config
+lien init --upgrade
 ```
 
 ### `lien index`

@@ -189,6 +189,156 @@ Update `CHANGELOG.md` with every release following [Keep a Changelog](https://ke
 - Improved error handling for missing index files
 ```
 
+## Adding a New Framework
+
+Lien's framework plugin system makes it easy to add support for new languages and frameworks. Here's how to add support for a new framework (e.g., Django, Ruby on Rails):
+
+### 1. Create Framework Directory
+
+```
+packages/cli/src/frameworks/myframework/
+  ├── detector.ts         # Detection logic
+  ├── config.ts          # Default configuration
+  └── test-patterns.ts   # Test file patterns
+```
+
+### 2. Implement detector.ts
+
+```typescript
+import fs from 'fs/promises';
+import path from 'path';
+import { FrameworkDetector, DetectionResult } from '../types.js';
+import { generateMyFrameworkConfig } from './config.js';
+
+export const myframeworkDetector: FrameworkDetector = {
+  name: 'myframework',
+  
+  async detect(rootDir: string, relativePath: string): Promise<DetectionResult> {
+    const fullPath = path.join(rootDir, relativePath);
+    const result: DetectionResult = {
+      detected: false,
+      name: 'myframework',
+      path: relativePath,
+      confidence: 'low',
+      evidence: [],
+    };
+    
+    // Check for framework markers (e.g., package files, config files)
+    const markerPath = path.join(fullPath, 'myframework.json');
+    try {
+      await fs.access(markerPath);
+      result.detected = true;
+      result.confidence = 'high';
+      result.evidence.push('Found myframework.json');
+    } catch {
+      return result;
+    }
+    
+    // Add more detection logic...
+    
+    return result;
+  },
+  
+  async generateConfig(rootDir: string, relativePath: string) {
+    return generateMyFrameworkConfig(rootDir, relativePath);
+  },
+};
+```
+
+### 3. Implement config.ts
+
+```typescript
+import { FrameworkConfig } from '../../config/schema.js';
+import { myframeworkTestPatterns } from './test-patterns.js';
+
+export async function generateMyFrameworkConfig(
+  rootDir: string,
+  relativePath: string
+): Promise<FrameworkConfig> {
+  return {
+    include: [
+      'src/**/*.myext',
+      'lib/**/*.myext',
+    ],
+    exclude: [
+      'vendor/**',
+      'build/**',
+      'dist/**',
+    ],
+    testPatterns: myframeworkTestPatterns,
+  };
+}
+```
+
+### 4. Implement test-patterns.ts
+
+```typescript
+import { TestPatternConfig } from '../../config/schema.js';
+
+export const myframeworkTestPatterns: TestPatternConfig = {
+  directories: ['tests', 'spec'],
+  extensions: ['.test.myext', '.spec.myext'],
+  prefixes: ['test_'],
+  suffixes: ['_test', '.test'],
+  frameworks: ['mytest', 'myspec'],
+};
+```
+
+### 5. Register in registry.ts
+
+```typescript
+// packages/cli/src/frameworks/registry.ts
+import { myframeworkDetector } from './myframework/detector.js';
+
+// Add to the detectors array
+registerFramework(myframeworkDetector);
+```
+
+### 6. Add Integration Tests
+
+Create `packages/cli/test/integration/myframework.test.ts`:
+
+```typescript
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { detectAllFrameworks } from '../../src/frameworks/detector-service.js';
+
+describe('MyFramework Detection', () => {
+  it('detects myframework in project', async () => {
+    // Test detection logic...
+  });
+  
+  it('generates correct config', async () => {
+    // Test config generation...
+  });
+});
+```
+
+### 7. Submit Pull Request
+
+Your PR should include:
+- Detector implementation with high-quality detection logic
+- Default config and test patterns
+- Integration tests with >80% coverage
+- Documentation update in README.md (add to Supported Frameworks section)
+- Example usage if the framework has unique requirements
+
+### Testing Your Framework Plugin
+
+```bash
+# Build
+npm run build
+
+# Test detection
+lien init --path /path/to/myframework/project
+
+# Verify config generation
+cat /path/to/myframework/project/.lien.config.json
+
+# Run integration tests
+cd packages/cli
+npm test -- test/integration/myframework.test.ts
+```
+
 ## Code Review
 
 All contributions should:

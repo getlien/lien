@@ -2,6 +2,84 @@
 
 All notable changes to Lien will be documented in this file.
 
+## [0.3.0] - 2025-01-14
+
+### 🚀 Major Features
+
+#### Framework Plugin Architecture
+- **Monorepo Support**: Index multiple frameworks in a single repository with proper isolation
+- **Path-Aware Indexing**: Each framework maintains its own include/exclude patterns and test detection rules
+- **Smart Framework Detection**: Automatically detects Node.js, Laravel, and more via project markers
+- **Interactive `lien init`**: Guided setup with framework recommendations and customization prompts
+
+#### Supported Frameworks (Launch)
+- **Node.js/TypeScript**: Automatic detection via `package.json`, supports Jest, Vitest, Mocha, AVA test patterns
+- **Laravel/PHP**: Automatic detection via `composer.json`, supports PHPUnit, Pest test patterns
+- **Generic**: Fallback support for any codebase with customizable patterns
+
+### ✨ Enhancements
+- **Automatic Config Migration**: Seamless upgrade from v0.2.0 to v0.3.0 with backup creation
+- **Framework-Aware Test Association**: Test detection respects framework boundaries in monorepos
+- **Per-Framework .gitignore**: Each framework can have its own .gitignore rules
+- **Improved Scanner**: Framework-specific file scanning with proper path resolution
+- **Interactive Configuration**: `lien init` now provides guided setup with framework selection
+
+### 🔧 Breaking Changes
+- **Config Schema Change**: `.lien.config.json` now uses `frameworks` array instead of flat `indexing` config
+  - Old configs are automatically migrated with backup saved to `.lien.config.json.v0.2.0.backup`
+  - No manual intervention required - migration happens on first config load
+  - All custom settings (chunk size, concurrency, exclusions) are preserved
+  - New format enables monorepo support and per-framework configuration
+
+### 📚 Documentation
+- Added comprehensive monorepo usage guide in README
+- Added framework plugin development guide in CONTRIBUTING.md
+- Updated Quick Start with new initialization flow
+- Added migration instructions for v0.2.0 users
+
+### 🧪 Testing
+- Added 20 new integration tests (262 total, up from 242)
+- Added monorepo framework integration tests (8 tests)
+- Added test pattern filtering tests (7 tests)
+- Added E2E workflow tests (5 tests)
+- All tests pass with <5s execution time
+
+### 🏗️ Architecture
+- New framework plugin system in `packages/cli/src/frameworks/`
+  - Pluggable detector interface for extensibility
+  - Per-framework configuration generation
+  - Framework-specific test pattern definitions
+- Config migration system for backwards compatibility
+- Deep merge utility for config upgrades
+
+### 🔄 Migration Notes
+
+**Upgrading from v0.2.0:**
+
+Your config will be automatically migrated on first use. The old config format:
+```json
+{
+  "version": "0.2.0",
+  "indexing": { "include": [...], "exclude": [...] }
+}
+```
+
+Becomes:
+```json
+{
+  "version": "0.3.0",
+  "frameworks": [
+    {
+      "name": "generic",
+      "path": ".",
+      "config": { "include": [...], "exclude": [...] }
+    }
+  ]
+}
+```
+
+No action required - just run any Lien command and migration will happen automatically.
+
 ## [0.2.0] - 2025-01-13
 
 ### Added
