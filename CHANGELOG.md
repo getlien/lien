@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.3.6] - 2025-11-13
+
+### Fixed
+- **Test associations in MCP responses**
+
+
 
 ## [0.3.6] - 2025-11-13
 

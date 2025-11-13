@@ -1,6 +1,6 @@
 {
   "name": "@liendev/lien",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Local semantic code search for AI assistants via MCP",
   "type": "module",
   "bin": {
