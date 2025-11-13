@@ -147,6 +147,7 @@ function mergeTestAssociations(
 
 export async function indexCodebase(options: IndexingOptions = {}): Promise<void> {
   const rootDir = options.rootDir ?? process.cwd();
+  const verbose = options.verbose ?? false;
   const spinner = ora('Starting indexing process...').start();
   
   try {

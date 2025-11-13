@@ -11,6 +11,9 @@ All notable changes to Lien will be documented in this file.
   - Sample file paths when no associations are found
   - Helps debug test detection issues in Laravel and other frameworks
 
+### Fixed
+- **Crash when using verbose flag**: Fixed ReferenceError where `verbose` variable wasn't being extracted from options parameter
+
 ## [0.1.5] - 2025-01-13
 
 ### Fixed
