@@ -328,5 +328,25 @@ describe('initCommand', () => {
       const existingFile = await fs.readFile(path.join(rulesDir, 'existing.mdc'), 'utf-8');
       expect(existingFile).toContain('Existing rules');
     });
+    
+    it('should not overwrite existing .cursor/rules file without prompt', async () => {
+      // Create .cursor/rules as a file with custom content
+      const cursorRulesDir = path.join(testDir, '.cursor');
+      await fs.mkdir(cursorRulesDir, { recursive: true });
+      const rulesPath = path.join(cursorRulesDir, 'rules');
+      const customRules = '# My Custom Rules\n\nDo not overwrite this!';
+      await fs.writeFile(rulesPath, customRules);
+      
+      // Run init with --yes (should NOT prompt and should NOT overwrite)
+      await initCommand({ yes: true });
+      
+      // Verify original file is still a file (not converted)
+      const stats = await fs.stat(rulesPath);
+      expect(stats.isFile()).toBe(true);
+      
+      // Verify content is unchanged
+      const content = await fs.readFile(rulesPath, 'utf-8');
+      expect(content).toBe(customRules);
+    });
   });
 });

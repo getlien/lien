@@ -210,25 +210,55 @@ async function createNewConfig(rootDir: string, options: InitOptions) {
         // Go up one level from dist/ to reach package root
         const templatePath = path.join(__dirname, '../CURSOR_RULES_TEMPLATE.md');
         
-        // Check if .cursor/rules exists and is a directory
         const rulesPath = path.join(cursorRulesDir, 'rules');
         let targetPath: string;
         let isDirectory = false;
-        
+        let isFile = false;
+
         try {
           const stats = await fs.stat(rulesPath);
           isDirectory = stats.isDirectory();
+          isFile = stats.isFile();
         } catch {
           // Doesn't exist, that's fine
         }
-        
+
         if (isDirectory) {
-          // .cursor/rules is a directory, create lien.mdc inside it
+          // .cursor/rules is already a directory, create lien.mdc inside it
           targetPath = path.join(rulesPath, 'lien.mdc');
           await fs.copyFile(templatePath, targetPath);
           console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
+        } else if (isFile) {
+          // .cursor/rules exists as a file - ask to convert to directory structure
+          const { convertToDir } = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'convertToDir',
+              message: 'Existing .cursor/rules file found. Convert to directory and preserve your rules?',
+              default: true,
+            },
+          ]);
+
+          if (convertToDir) {
+            // Convert file to directory structure
+            // 1. Read existing rules
+            const existingRules = await fs.readFile(rulesPath, 'utf-8');
+            // 2. Delete the file
+            await fs.unlink(rulesPath);
+            // 3. Create rules as a directory
+            await fs.mkdir(rulesPath);
+            // 4. Save original rules as custom.md
+            await fs.writeFile(path.join(rulesPath, 'custom.md'), existingRules);
+            // 5. Add Lien rules as lien.mdc
+            await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
+            console.log(chalk.green('✓ Converted .cursor/rules to directory'));
+            console.log(chalk.green('  - Your original rules: .cursor/rules/custom.md'));
+            console.log(chalk.green('  - Lien rules: .cursor/rules/lien.mdc'));
+          } else {
+            console.log(chalk.dim('Skipped Cursor rules installation (preserving existing file)'));
+          }
         } else {
-          // .cursor/rules doesn't exist or is a file, create/overwrite it
+          // .cursor/rules doesn't exist, create it as a file
           targetPath = rulesPath;
           await fs.copyFile(templatePath, targetPath);
           console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules'));
