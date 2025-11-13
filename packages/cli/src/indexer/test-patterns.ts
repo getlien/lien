@@ -150,10 +150,47 @@ export function isTestFile(filepath: string, language: string): boolean {
   // Check if file is in a test directory
   for (const testDir of patterns.directories) {
     if (parts.includes(testDir)) {
-      // File is in a test directory, check if it matches language extension
+      // File is in a test directory
+      // Check if language has "suffix-style" test extensions (like Test.php)
+      // vs "additive" extensions (like .test.ts)
+      // Key difference: "Test.php" has no dot before Test, while ".test.ts" has a dot before test
       const languageExtensions = getLanguageExtensions(language);
-      if (languageExtensions.some(ext => basename.endsWith(ext))) {
-        return true;
+      const hasSuffixStyleExtensions = patterns.extensions.some(testExt => {
+        // Check if any language extension is at the end
+        const langExt = languageExtensions.find(ext => testExt.endsWith(ext));
+        if (!langExt) return false;
+        
+        // Get the part before the language extension
+        const prefix = testExt.slice(0, -langExt.length);
+        // If prefix doesn't start with a dot, it's a suffix-style (like "Test" in "Test.php")
+        // If prefix starts with a dot, it's additive (like ".test" in ".test.ts")
+        return prefix.length > 0 && !prefix.startsWith('.');
+      });
+      
+      if (hasSuffixStyleExtensions) {
+        // Language uses suffix-style extensions (PHP Test.php, Java Test.java)
+        // Require explicit suffix patterns to avoid matching helper files
+        const nameWithoutExt = getNameWithoutExtension(basename, language);
+        
+        // Check suffixes
+        for (const suffix of patterns.suffixes) {
+          if (nameWithoutExt.endsWith(suffix)) {
+            return true;
+          }
+        }
+        
+        // Check prefixes
+        for (const prefix of patterns.prefixes) {
+          if (nameWithoutExt.startsWith(prefix)) {
+            return true;
+          }
+        }
+      } else {
+        // Language uses additive extensions (.test.ts) OR no extensions (Python)
+        // Any language file in test dir is a test
+        if (languageExtensions.some(ext => basename.endsWith(ext))) {
+          return true;
+        }
       }
     }
   }

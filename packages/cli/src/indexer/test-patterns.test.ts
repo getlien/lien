@@ -62,9 +62,18 @@ describe('isTestFile', () => {
       expect(isTestFile('MathTest.php', 'php')).toBe(true);
     });
 
-    it('should detect files in test directories', () => {
-      expect(isTestFile('tests/Calculator.php', 'php')).toBe(true);
-      expect(isTestFile('Tests/Math.php', 'php')).toBe(true);
+    it('should detect files in test directories with Test suffix', () => {
+      // PHP requires explicit Test suffix - just being in tests/ dir is not enough
+      // This prevents base classes, traits, and helpers from being counted as tests
+      expect(isTestFile('tests/CalculatorTest.php', 'php')).toBe(true);
+      expect(isTestFile('Tests/MathTest.php', 'php')).toBe(true);
+    });
+
+    it('should NOT detect helper files in test directories without Test suffix', () => {
+      // Files like TestCase.php, helpers, traits should not be test files
+      expect(isTestFile('tests/TestCase.php', 'php')).toBe(false);
+      expect(isTestFile('tests/Calculator.php', 'php')).toBe(false);
+      expect(isTestFile('tests/Traits/WithAuth.php', 'php')).toBe(false);
     });
 
     it('should not detect regular source files', () => {
@@ -79,8 +88,16 @@ describe('isTestFile', () => {
       expect(isTestFile('MathTests.java', 'java')).toBe(true);
     });
 
-    it('should detect files in test directories', () => {
-      expect(isTestFile('src/test/Calculator.java', 'java')).toBe(true);
+    it('should detect files in test directories with Test suffix', () => {
+      // Java requires explicit Test suffix - just being in test/ dir is not enough
+      expect(isTestFile('src/test/CalculatorTest.java', 'java')).toBe(true);
+      expect(isTestFile('src/test/MathTests.java', 'java')).toBe(true);
+    });
+
+    it('should NOT detect helper files in test directories without Test suffix', () => {
+      // Base classes and helpers should not be test files
+      expect(isTestFile('src/test/TestBase.java', 'java')).toBe(false);
+      expect(isTestFile('src/test/Calculator.java', 'java')).toBe(false);
     });
 
     it('should not detect regular source files', () => {
