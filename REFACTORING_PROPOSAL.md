@@ -668,6 +668,83 @@ If issues arise:
 3. Do we want to support custom matching strategies via plugins?
 4. Should validation be optional (dev mode only) for performance?
 
+## Versioning Strategy
+
+### Target Version: **v0.4.0** (Minor Release)
+
+This refactoring will be released as **v0.4.0**, not v1.0.0, for the following reasons:
+
+#### Why v0.4.0 (Minor)?
+
+1. **✅ No Breaking Changes**
+   - All public APIs remain unchanged
+   - CLI commands work the same way
+   - Config files are fully compatible
+   - MCP tools have identical behavior
+
+2. **✅ Internal Improvements**
+   - Architecture refactoring is internal-only
+   - Users see better performance, not different behavior
+   - Semantic versioning: internal changes = minor bump
+
+3. **✅ Not Ready for 1.0 Yet**
+   - Want to ship a few more features first
+   - Need more real-world testing
+   - v1.0.0 should signal "mature and stable for everyone"
+   - Still in active development phase
+
+#### Version History Context
+
+- **v0.3.6** - Fixed empty string filtering in MCP responses
+- **v0.3.7** - Fixed critical path format mismatch bug
+- **v0.4.0** - This refactoring (type-safe paths, TestAssociationManager)
+- **v0.5.0+** - Future features (TBD)
+- **v1.0.0** - Stable release (when we're confident it's production-ready for everyone)
+
+#### CHANGELOG for v0.4.0
+
+```markdown
+## [0.4.0] - 2025-11-15
+
+### Added
+- Type-safe path system to prevent path format bugs at compile time
+- `TestAssociationManager` class for better code organization
+- Comprehensive validation to catch association errors early
+- Statistics API for debugging test associations
+
+### Changed
+- **[Internal]** Refactored test association logic (no API changes)
+- **[Performance]** 2-3x faster framework file lookups via caching
+- **[Performance]** Reduced complexity from O(n×m) to O(n) for framework detection
+
+### Fixed
+- Improved error messages with better context
+- Better debugging output in verbose mode
+
+### Developer Experience
+- Easier to unit test association logic
+- Clearer separation of concerns
+- Type safety prevents entire class of bugs
+
+### Migration
+No changes required. Simply upgrade and you're done:
+```bash
+npm install -g @liendev/lien@latest
+```
+
+Test associations will work better with no code changes needed.
+```
+
+#### Why Not v1.0.0?
+
+While the refactoring is solid, we want to:
+- Ship more features in v0.5.x, v0.6.x, etc.
+- Gather more real-world usage data
+- Ensure rock-solid stability across many projects
+- Reserve v1.0.0 for when we're **absolutely confident** it's production-ready
+
+v1.0.0 is a **commitment** to API stability and should be earned through proven reliability.
+
 ## References
 
 - **Bug Fix PR:** v0.3.7 - Path format mismatch
@@ -680,6 +757,7 @@ If issues arise:
 
 ---
 
+**Target Version:** v0.4.0 (Minor)
 **Status:** Ready for implementation
 **Estimated Effort:** 2-3 days (including tests)
 **Risk Level:** Low (can implement in parallel, no breaking changes)
