@@ -15,6 +15,12 @@ export interface VectorDBInterface {
     pattern?: string;
     limit?: number;
   }): Promise<SearchResult[]>;
+  querySymbols(options: {
+    language?: string;
+    pattern?: string;
+    symbolType?: 'function' | 'class' | 'interface';
+    limit?: number;
+  }): Promise<SearchResult[]>;
   clear(): Promise<void>;
   deleteByFile(filepath: string): Promise<void>;
   updateFile(filepath: string, vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;

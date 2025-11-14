@@ -14,6 +14,12 @@ export interface ChunkMetadata {
   relatedSources?: string[];
   testFramework?: string;
   detectionMethod?: 'convention' | 'import';
+  // NEW: Extracted symbols for direct querying
+  symbols?: {
+    functions: string[];
+    classes: string[];
+    interfaces: string[];
+  };
 }
 
 export interface ScanOptions {

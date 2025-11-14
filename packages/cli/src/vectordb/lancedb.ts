@@ -59,6 +59,10 @@ export class VectorDB implements VectorDBInterface {
             relatedSources: [''], // Dummy array to establish type
             testFramework: '',
             detectionMethod: '',
+            // NEW: Symbol extraction fields
+            functionNames: [''],
+            classNames: [''],
+            interfaceNames: [''],
           },
         ];
         
@@ -105,6 +109,10 @@ export class VectorDB implements VectorDBInterface {
         relatedSources: metadatas[i].relatedSources || [],
         testFramework: metadatas[i].testFramework || '',
         detectionMethod: metadatas[i].detectionMethod || '',
+        // NEW: Symbol extraction fields
+        functionNames: metadatas[i].symbols?.functions || [],
+        classNames: metadatas[i].symbols?.classes || [],
+        interfaceNames: metadatas[i].symbols?.interfaces || [],
       }));
       
       await this.table.add(records);
@@ -274,6 +282,89 @@ export class VectorDB implements VectorDBInterface {
       }));
     } catch (error) {
       throw new Error(`Failed to scan with filter: ${error}`);
+    }
+  }
+  
+  async querySymbols(options: {
+    language?: string;
+    pattern?: string;
+    symbolType?: 'function' | 'class' | 'interface';
+    limit?: number;
+  }): Promise<SearchResult[]> {
+    if (!this.table) {
+      throw new Error('Vector database not initialized');
+    }
+    
+    const { language, pattern, symbolType, limit = 50 } = options;
+    
+    try {
+      // Use vector search with zero vector to get a large sample
+      const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
+      const query = this.table.search(zeroVector)
+        .where('content != "__SCHEMA_ROW__"')
+        .where('file != ""')
+        .limit(Math.max(limit * 10, 500)); // Get a large sample to ensure we have enough after symbol filtering
+      
+      const results = await query.execute();
+      
+      // Filter in JavaScript for more precise control
+      let filtered = results.filter((r: any) => {
+        // Basic validation
+        if (!r.content || r.content.trim().length === 0 || r.content === '__SCHEMA_ROW__') {
+          return false;
+        }
+        if (!r.file || r.file.length === 0) {
+          return false;
+        }
+        
+        // Language filter
+        if (language && (!r.language || r.language.toLowerCase() !== language.toLowerCase())) {
+          return false;
+        }
+        
+        // Get relevant symbol names based on symbolType
+        const symbols = symbolType === 'function' ? (r.functionNames || []) :
+                       symbolType === 'class' ? (r.classNames || []) :
+                       symbolType === 'interface' ? (r.interfaceNames || []) :
+                       [...(r.functionNames || []), ...(r.classNames || []), ...(r.interfaceNames || [])];
+        
+        // Must have at least one symbol
+        if (symbols.length === 0) {
+          return false;
+        }
+        
+        // Pattern filter on symbol names
+        if (pattern) {
+          const regex = new RegExp(pattern, 'i');
+          return symbols.some((s: string) => regex.test(s));
+        }
+        
+        return true;
+      });
+      
+      return filtered.slice(0, limit).map((r: any) => ({
+        content: r.content,
+        metadata: {
+          file: r.file,
+          startLine: r.startLine,
+          endLine: r.endLine,
+          type: r.type,
+          language: r.language,
+          isTest: r.isTest,
+          relatedTests: r.relatedTests || [],
+          relatedSources: r.relatedSources || [],
+          testFramework: r.testFramework || '',
+          detectionMethod: r.detectionMethod || '',
+          symbols: {
+            functions: r.functionNames || [],
+            classes: r.classNames || [],
+            interfaces: r.interfaceNames || [],
+          },
+        },
+        score: 0,
+      }));
+    } catch (error) {
+      throw new Error(`Failed to query symbols: ${error}`);
     }
   }
   

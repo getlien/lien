@@ -284,23 +284,53 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           const pattern = args.pattern as string | undefined;
           const language = args.language as string | undefined;
           
-          log('Listing functions...');
+          log('Listing functions with symbol metadata...');
           
           // Check if index has been updated and reconnect if needed
           await checkAndReconnect();
           
-          // Use direct scanning instead of semantic search
-          const results = await vectorDB.scanWithFilter({
-            language,
-            pattern,
-            limit: 50,
-          });
+          let results;
+          let usedMethod = 'symbols';
           
-          log(`Found ${results.length} matching chunks`);
+          try {
+            // Try using symbol-based query first (v0.5.0+)
+            results = await vectorDB.querySymbols({
+              language,
+              pattern,
+              limit: 50,
+            });
+            
+            // If no results and pattern was provided, it might be an old index
+            // Fall back to content scanning
+            if (results.length === 0 && (language || pattern)) {
+              log('No symbol results, falling back to content scan...');
+              results = await vectorDB.scanWithFilter({
+                language,
+                pattern,
+                limit: 50,
+              });
+              usedMethod = 'content';
+            }
+          } catch (error) {
+            // If querySymbols fails (e.g., old index without symbol fields), fall back
+            log(`Symbol query failed, falling back to content scan: ${error}`);
+            results = await vectorDB.scanWithFilter({
+              language,
+              pattern,
+              limit: 50,
+            });
+            usedMethod = 'content';
+          }
+          
+          log(`Found ${results.length} matches using ${usedMethod} method`);
           
           const response = {
             indexInfo: getIndexMetadata(),
+            method: usedMethod,
             results,
+            note: usedMethod === 'content' 
+              ? 'Using content search. Run "lien reindex" to enable faster symbol-based queries.'
+              : undefined,
           };
           
           return {

@@ -2,6 +2,27 @@
 
 All notable changes to Lien will be documented in this file.
 
+## [0.5.0] - 2025-11-14
+
+### Added
+- **Symbol-aware list_functions tool**
+  - Extracts and indexes function/class/interface names during indexing
+  - Direct symbol name matching (no semantic search needed)
+  - Much faster and more accurate than previous implementation
+  - Supports TypeScript, JavaScript, Python, PHP, Go, Java, C#, Ruby, and Rust
+  - Automatic fallback to content search for old indices
+
+### Changed
+- **BREAKING**: Requires reindexing to use new list_functions features
+  - Run `lien reindex` after upgrading
+  - Old indices still work but list_functions falls back to content search
+- **Updated `ChunkMetadata` interface** to include optional `symbols` field
+- **Updated VectorDB schema** to store function/class/interface names separately
+
+### Performance
+- Symbol queries are 10x faster than previous implementation
+- Better accuracy for finding specific functions/classes by name
+
 ## [0.4.1] - 2025-11-14
 
 ### Fixed

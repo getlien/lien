@@ -1,6 +1,7 @@
 import path from 'path';
 import { CodeChunk } from './types.js';
 import { detectLanguage } from './scanner.js';
+import { extractSymbols } from './symbol-extractor.js';
 
 export interface ChunkOptions {
   chunkSize?: number;
@@ -34,6 +35,9 @@ export function chunkFile(
       continue;
     }
     
+    // Extract symbols from the chunk
+    const symbols = extractSymbols(chunkContent, language);
+    
     chunks.push({
       content: chunkContent,
       metadata: {
@@ -42,6 +46,7 @@ export function chunkFile(
         endLine: endLine,
         type: 'block', // MVP: all chunks are 'block' type
         language,
+        symbols,
       },
     });
     

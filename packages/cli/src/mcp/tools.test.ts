@@ -103,7 +103,7 @@ describe('MCP Tools Schema', () => {
       
       expect(tool).toBeDefined();
       expect(tool!.name).toBe('list_functions');
-      expect(tool!.description).toContain('code chunks');
+      expect(tool!.description.toLowerCase()).toMatch(/function|class|interface/);
       expect(tool!.inputSchema.type).toBe('object');
       expect(tool!.inputSchema.properties).toHaveProperty('pattern');
       expect(tool!.inputSchema.properties).toHaveProperty('language');
