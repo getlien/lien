@@ -40,4 +40,6 @@ Thumbs.db
 test-tmp/
 coverage/
 .vitest/
+.test-git-*
+.test-watcher-*
 
