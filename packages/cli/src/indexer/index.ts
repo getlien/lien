@@ -148,7 +148,7 @@ function findTestsByConvention(
     const patterns = framework?.config.testPatterns;
     
     // Find tests within the same framework
-    const relatedTests = findTestFiles(sourceFile, language, files, frameworkPath, patterns);
+    const relatedTests = findTestFiles(sourceFile, language, files, frameworkPath, patterns, verbose);
     
     if (verbose && relatedTests.length > 0) {
       sourcesWithTests++;
@@ -285,16 +285,8 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       const relativeFiles = files.map(f => path.relative(rootDir, f));
       const relativeAssociations = await analyzeTestAssociations(relativeFiles, rootDir, config, spinner, verbose);
       
-      // Convert back to absolute paths for the map keys
-      for (const [relPath, association] of relativeAssociations.entries()) {
-        const absPath = path.join(rootDir, relPath);
-        testAssociations.set(absPath, {
-          ...association,
-          file: absPath,
-          relatedTests: association.relatedTests ? association.relatedTests.map(t => path.join(rootDir, t)) : [],
-          relatedSources: association.relatedSources ? association.relatedSources.map(s => path.join(rootDir, s)) : [],
-        });
-      }
+      // Keep paths relative (matching the files array format)
+      testAssociations = relativeAssociations;
       
       const testFileCount = Array.from(testAssociations.values()).filter(a => a.isTest).length;
       const sourceWithTestsCount = Array.from(testAssociations.values()).filter(a => !a.isTest && a.relatedTests.length > 0).length;

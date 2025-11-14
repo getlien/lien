@@ -279,7 +279,8 @@ export function findTestFiles(
   language: string,
   allFiles: string[],
   frameworkPath: string = '.',
-  patterns?: TestPatternConfig
+  patterns?: TestPatternConfig,
+  verbose: boolean = false
 ): string[] {
   // Use framework-specific patterns if provided, otherwise fall back to language patterns
   const testPatterns = patterns 
