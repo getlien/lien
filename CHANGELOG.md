@@ -1,6 +1,37 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+
+## [0.4.0] - 2025-11-14
+
+### Added
+- Type-safe path system to prevent path format bugs at compile time
+- `TestAssociationManager` class for better code organization
+- Comprehensive validation to catch association errors early
+- Statistics API for debugging test associations
+
+### Changed
+- **[Internal]** Refactored test association logic (no API changes)
+- **[Performance]** 2-3x faster framework file lookups via caching
+- **[Performance]** Reduced complexity from O(n×m) to O(n) for framework detection
+
+### Fixed
+- Improved error messages with better context
+- Better debugging output in verbose mode
+
+### Developer Experience
+- Easier to unit test association logic
+- Clearer separation of concerns
+- Type safety prevents entire class of bugs
+
+### Migration
+No changes required. Simply upgrade:
+```bash
+npm install -g @liendev/lien@latest
+```
+
+Test associations will work better with no code changes needed.
+
 ## [0.3.7] - 2025-11-14
 
 ### Fixed
