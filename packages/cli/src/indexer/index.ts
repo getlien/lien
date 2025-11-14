@@ -10,7 +10,7 @@ import { VectorDB } from '../vectordb/lancedb.js';
 import { loadConfig } from '../config/loader.js';
 import { CodeChunk, TestAssociation } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
-import { isTestFile, findTestFiles, findSourceFiles, detectTestFramework, findOwningFramework } from './test-patterns.js';
+import { detectTestFramework } from './test-patterns.js';
 import { analyzeImports } from './import-analyzer.js';
 import { TestAssociationManager } from './test-association-manager.js';
 import { toRelativePath } from '../types/paths.js';
@@ -77,101 +77,8 @@ async function analyzeTestAssociations(
   return manager.getAssociations();
 }
 
-/**
- * Convention-based test detection for all 12 languages
- * Now framework-aware for monorepo support
- */
-function findTestsByConvention(
-  files: string[], 
-  frameworks: FrameworkInstance[], 
-  verbose: boolean = false
-): Map<string, TestAssociation> {
-  // Separate test files from source files
-  const testFiles: string[] = [];
-  const sourceFiles: string[] = [];
-  
-  for (const file of files) {
-    const language = detectLanguage(file);
-    if (isTestFile(file, language)) {
-      testFiles.push(file);
-    } else {
-      sourceFiles.push(file);
-    }
-  }
-  
-  const associations = new Map<string, TestAssociation>();
-  
-  // Build associations: source → tests
-  let sourcesWithTests = 0;
-  for (const sourceFile of sourceFiles) {
-    const language = detectLanguage(sourceFile);
-    
-    // Determine which framework owns this file
-    const framework = findOwningFramework(sourceFile, frameworks, verbose);
-    const frameworkPath = framework?.path || '.';
-    const patterns = framework?.config.testPatterns;
-    
-    // Find tests within the same framework
-    const relatedTests = findTestFiles(sourceFile, language, files, frameworkPath, patterns, verbose);
-    
-    if (verbose && relatedTests.length > 0) {
-      sourcesWithTests++;
-      if (sourcesWithTests <= 5) {
-        console.log(chalk.gray(`[Verbose] ${sourceFile} → ${relatedTests.join(', ')}`));
-      }
-    }
-    
-    associations.set(sourceFile, {
-      file: sourceFile,
-      relatedTests,
-      isTest: false,
-      detectionMethod: 'convention'
-    });
-  }
-  
-  // Build associations: test → sources (bidirectional)
-  let testsWithSources = 0;
-  
-  if (verbose && testFiles.length > 0) {
-    console.log(chalk.cyan(`\n[DEBUG] Building test→source associations for ${testFiles.length} test files...`));
-  }
-  
-  for (const testFile of testFiles) {
-    const language = detectLanguage(testFile);
-    
-    // Determine which framework owns this test file
-    const framework = findOwningFramework(testFile, frameworks, verbose);
-    const frameworkPath = framework?.path || '.';
-    const patterns = framework?.config.testPatterns;
-    
-    if (verbose && testFiles.indexOf(testFile) < 3) {
-      console.log(chalk.cyan(`\n[DEBUG] Processing test #${testFiles.indexOf(testFile) + 1}: ${testFile}`));
-      console.log(chalk.cyan(`  language: ${language}`));
-      console.log(chalk.cyan(`  framework: ${framework?.name || 'none'}`));
-      console.log(chalk.cyan(`  frameworkPath: ${frameworkPath}`));
-      console.log(chalk.cyan(`  patterns: ${patterns ? 'yes' : 'no'}`));
-    }
-    
-    // Find sources within the same framework
-    const relatedSources = findSourceFiles(testFile, language, files, frameworkPath, patterns, verbose);
-    
-    if (verbose && relatedSources.length > 0) {
-      testsWithSources++;
-      if (testsWithSources <= 5) {
-        console.log(chalk.gray(`[Verbose] ${testFile} → ${relatedSources.join(', ')}`));
-      }
-    }
-    
-    associations.set(testFile, {
-      file: testFile,
-      relatedSources,
-      isTest: true,
-      detectionMethod: 'convention'
-    });
-  }
-  
-  return associations;
-}
+// findTestsByConvention has been replaced by TestAssociationManager
+// (see test-association-manager.ts)
 
 /**
  * Merge import-based associations with convention-based ones
