@@ -80,20 +80,36 @@ find_similar({
 - Consistency: ensure new code matches existing patterns
 - Duplication detection
 
-### `list_functions`
-**Use for codebase overview and pattern matching.**
+### `list_functions` ⚡ NEW in v0.5.0
+**Fast symbol-based search for functions, classes, and interfaces by name.**
 
 ```typescript
 list_functions({
-  pattern: "handle.*",  // optional regex
-  language: "typescript"  // optional filter
+  pattern: ".*Controller.*",  // regex to match symbol names
+  language: "php"  // optional language filter
 })
 ```
 
+**How it works:**
+- Extracts and indexes function/class/interface names during indexing
+- Direct symbol name matching (not semantic search)
+- **10x faster** than semantic search for finding specific symbols
+- Automatic fallback for old indices
+
 **Use for:**
-- Getting structural overview
-- Finding all functions/classes matching a naming pattern
-- Understanding code organization
+- Finding all classes matching a pattern (e.g., `.*Controller.*`, `.*Service$`)
+- Getting structural overview of functions/classes
+- Discovering API endpoints, handlers, or utilities by name pattern
+- Understanding code organization and naming conventions
+
+**Best practices:**
+- Use regex patterns that match naming conventions: `.*Controller.*`, `handle.*`, `get.*`
+- Combine with language filter for large codebases: `language: "typescript"`
+- For best results: run `lien reindex` after upgrading to v0.5.0
+
+**When to use `list_functions` vs `semantic_search`:**
+- ✅ Use `list_functions` when you know the naming pattern (e.g., "all Controllers")
+- ✅ Use `semantic_search` when searching by functionality (e.g., "handles authentication")
 
 **Note on Test Associations:**
 All Lien tools automatically include test association metadata. When you use `get_file_context` or `semantic_search`, the results include:
@@ -156,6 +172,19 @@ All Lien tools automatically include test association metadata. When you use `ge
 4. Analyze and suggest improvements
 ```
 
+### Pattern 7: Finding All Classes/Functions by Name Pattern ⚡ NEW
+```
+1. list_functions({ pattern: ".*Controller.*", language: "php" })
+2. Review the list of matching classes
+3. Use get_file_context on specific files for deeper investigation
+4. Answer user's structural/architectural questions
+```
+
+**Example queries:**
+- "Show me all Controllers" → `list_functions({ pattern: ".*Controller.*" })`
+- "What Services exist?" → `list_functions({ pattern: ".*Service.*" })`
+- "Find all API handlers" → `list_functions({ pattern: "handle.*" })`
+
 ---
 
 ## Decision Tree: Lien vs Other Tools
@@ -165,6 +194,14 @@ All Lien tools automatically include test association metadata. When you use `ge
 ✅ You need to understand what code exists before editing
 ✅ Looking for patterns, implementations, handlers, validators, etc.
 ✅ Exploring unfamiliar parts of codebase
+✅ Searching by what code **does** (behavior, functionality)
+
+### Use `list_functions` when: ⚡ NEW
+✅ User asks "show me all Controllers" or similar structural queries
+✅ Looking for classes/functions matching a **naming pattern**
+✅ Getting architectural overview (all Services, all Handlers, etc.)
+✅ Searching by what code is **named** (symbol names, not behavior)
+✅ Need fast results for known naming conventions
 
 ### Use `grep` when:
 ✅ User provides exact function/variable name to find
