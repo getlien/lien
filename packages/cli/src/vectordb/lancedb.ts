@@ -210,6 +210,73 @@ export class VectorDB implements VectorDBInterface {
     }
   }
   
+  async scanWithFilter(options: {
+    language?: string;
+    pattern?: string;
+    limit?: number;
+  }): Promise<SearchResult[]> {
+    if (!this.table) {
+      throw new Error('Vector database not initialized');
+    }
+    
+    const { language, pattern, limit = 100 } = options;
+    
+    try {
+      // Use vector search with zero vector to get a large sample
+      // This is a workaround since LanceDB doesn't have a direct scan API
+      const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
+      const query = this.table.search(zeroVector)
+        .where('content != "__SCHEMA_ROW__"')
+        .where('file != ""')
+        .limit(Math.max(limit * 5, 200)); // Get a larger sample to ensure we have enough after filtering
+      
+      const results = await query.execute();
+      
+      // Filter in JavaScript for more reliable filtering
+      let filtered = results.filter((r: any) => 
+        r.content && 
+        r.content.trim().length > 0 &&
+        r.content !== '__SCHEMA_ROW__' &&
+        r.file && 
+        r.file.length > 0
+      );
+      
+      // Apply language filter
+      if (language) {
+        filtered = filtered.filter((r: any) => 
+          r.language && r.language.toLowerCase() === language.toLowerCase()
+        );
+      }
+      
+      // Apply regex pattern filter
+      if (pattern) {
+        const regex = new RegExp(pattern, 'i');
+        filtered = filtered.filter((r: any) =>
+          regex.test(r.content) || regex.test(r.file)
+        );
+      }
+      
+      return filtered.slice(0, limit).map((r: any) => ({
+        content: r.content,
+        metadata: {
+          file: r.file,
+          startLine: r.startLine,
+          endLine: r.endLine,
+          type: r.type,
+          language: r.language,
+          isTest: r.isTest,
+          relatedTests: r.relatedTests || [],
+          relatedSources: r.relatedSources || [],
+          testFramework: r.testFramework || '',
+          detectionMethod: r.detectionMethod || '',
+        },
+        score: 0,
+      }));
+    } catch (error) {
+      throw new Error(`Failed to scan with filter: ${error}`);
+    }
+  }
+  
   async clear(): Promise<void> {
     if (!this.db) {
       throw new Error('Vector database not initialized');

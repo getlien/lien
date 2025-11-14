@@ -2,6 +2,14 @@
 
 All notable changes to Lien will be documented in this file.
 
+## [0.4.1] - 2025-11-14
+
+### Fixed
+- **list_functions tool now works correctly**
+  - Replaced broken semantic search approach with SQL-based filtering
+  - Now properly filters by language and regex pattern
+  - Note: Still searches content, not extracted symbols (proper fix coming in v0.5.0)
+
 ## [0.4.0] - 2025-11-14
 
 ### Added

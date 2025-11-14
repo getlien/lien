@@ -289,44 +289,18 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           // Check if index has been updated and reconnect if needed
           await checkAndReconnect();
           
-          // For MVP, we'll search for common function/class keywords
-          const searchTerms = language 
-            ? [`${language} function`, `${language} class`]
-            : ['function', 'class', 'def ', 'func ', 'interface'];
+          // Use direct scanning instead of semantic search
+          const results = await vectorDB.scanWithFilter({
+            language,
+            pattern,
+            limit: 50,
+          });
           
-          const allResults: any[] = [];
-          
-          for (const term of searchTerms) {
-            const termEmbedding = await embeddings.embed(term);
-            const results = await vectorDB.search(termEmbedding, 20);
-            allResults.push(...results);
-          }
-          
-          // Remove duplicates and filter by pattern if provided
-          const uniqueResults = Array.from(
-            new Map(allResults.map(r => [r.metadata.file + r.metadata.startLine, r])).values()
-          );
-          
-          let filtered = uniqueResults;
-          
-          if (pattern) {
-            const regex = new RegExp(pattern, 'i');
-            filtered = uniqueResults.filter(r => 
-              regex.test(r.content) || regex.test(r.metadata.file)
-            );
-          }
-          
-          if (language) {
-            filtered = filtered.filter(r => 
-              r.metadata.language.toLowerCase() === language.toLowerCase()
-            );
-          }
-          
-          log(`Found ${filtered.length} functions/classes`);
+          log(`Found ${results.length} matching chunks`);
           
           const response = {
             indexInfo: getIndexMetadata(),
-            results: filtered,
+            results,
           };
           
           return {

@@ -58,17 +58,17 @@ export const tools = [
   },
   {
     name: 'list_functions',
-    description: 'List all indexed functions and classes in the codebase (or filter by pattern)',
+    description: 'List indexed code chunks filtered by language and/or regex pattern (Beta: searches content, not extracted symbols)',
     inputSchema: {
       type: 'object',
       properties: {
         pattern: {
           type: 'string',
-          description: 'Optional regex pattern to filter results',
+          description: 'Optional regex pattern to filter content (e.g., ".*Service$", "class.*Controller")',
         },
         language: {
           type: 'string',
-          description: 'Optional language filter (e.g., "typescript", "python")',
+          description: 'Optional language filter (e.g., "typescript", "python", "php")',
         },
       },
     },

@@ -75,8 +75,8 @@ async function analyzeTestAssociations(
   }
   
   return manager.getAssociations();
-}
-
+    }
+    
 // findTestsByConvention has been replaced by TestAssociationManager
 // (see test-association-manager.ts)
 
