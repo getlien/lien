@@ -12,6 +12,8 @@ import { CodeChunk, TestAssociation } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { isTestFile, findTestFiles, findSourceFiles, detectTestFramework, findOwningFramework } from './test-patterns.js';
 import { analyzeImports } from './import-analyzer.js';
+import { TestAssociationManager } from './test-association-manager.js';
+import { toRelativePath } from '../types/paths.js';
 import type { LienConfig, FrameworkInstance } from '../config/schema.js';
 
 export interface IndexingOptions {
@@ -30,6 +32,8 @@ interface ChunkWithContent {
  * Two-pass test detection system:
  * Pass 1: Convention-based for all 12 languages (~80% accuracy)
  * Pass 2: Import analysis for Tier 1 only (~90% accuracy)
+ * 
+ * Updated to use TestAssociationManager for better performance and maintainability
  */
 async function analyzeTestAssociations(
   files: string[],
@@ -38,8 +42,18 @@ async function analyzeTestAssociations(
   spinner: ora.Ora,
   verbose: boolean = false
 ): Promise<Map<string, TestAssociation>> {
-  // Pass 1: Convention-based (all languages)
-  const associations = findTestsByConvention(files, config.frameworks, verbose);
+  // Convert to type-safe relative paths
+  // This will throw if any paths are accidentally absolute
+  const relativeFiles = files.map(f => toRelativePath(f));
+  
+  // Build associations using the manager (Pass 1: Convention-based)
+  const manager = new TestAssociationManager(
+    relativeFiles,
+    config.frameworks,
+    verbose
+  );
+  
+  manager.buildAssociations();
   
   // Pass 2: Import analysis (Tier 1 only, if enabled)
   // Note: Legacy configs don't have frameworks array, skip import analysis for them
@@ -49,10 +63,18 @@ async function analyzeTestAssociations(
     const importAssociations = await analyzeImports(files, tier1Languages, rootDir);
     
     // Merge: imports add missed associations and override convention where found
-    mergeTestAssociations(associations, importAssociations);
+    mergeTestAssociations(manager.getAssociations(), importAssociations);
   }
   
-  return associations;
+  if (verbose) {
+    const stats = manager.getStats();
+    console.log(chalk.cyan('\n[Statistics]'));
+    console.log(chalk.cyan(`  Total files: ${stats.totalFiles}`));
+    console.log(chalk.cyan(`  Source files: ${stats.sourceFiles} (${stats.sourcesWithTests} with tests)`));
+    console.log(chalk.cyan(`  Test files: ${stats.testFiles} (${stats.testsWithSources} found sources)`));
+  }
+  
+  return manager.getAssociations();
 }
 
 /**
