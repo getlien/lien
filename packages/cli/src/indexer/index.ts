@@ -10,7 +10,7 @@ import { VectorDB } from '../vectordb/lancedb.js';
 import { loadConfig } from '../config/loader.js';
 import { CodeChunk, TestAssociation } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
-import { isTestFile, findTestFiles, findSourceFiles, detectTestFramework } from './test-patterns.js';
+import { isTestFile, findTestFiles, findSourceFiles, detectTestFramework, findOwningFramework } from './test-patterns.js';
 import { analyzeImports } from './import-analyzer.js';
 import type { LienConfig, FrameworkInstance } from '../config/schema.js';
 
@@ -24,65 +24,7 @@ interface ChunkWithContent {
   content: string;
 }
 
-/**
- * Determine which framework owns a given file path
- * @param filePath - Relative file path from project root
- * @param frameworks - Array of framework instances
- * @param verbose - Enable debug logging
- * @returns The owning framework, or null if no match
- */
-function findOwningFramework(
-  filePath: string,
-  frameworks: FrameworkInstance[],
-  verbose: boolean = false
-): FrameworkInstance | null {
-  
-  // Separate root framework from specific frameworks
-  const rootFramework = frameworks.find(fw => fw.path === '.');
-  const specificFrameworks = frameworks.filter(fw => fw.path !== '.');
-  
-  // Sort specific frameworks by path depth (deepest first)
-  const sorted = specificFrameworks.sort((a, b) => 
-    b.path.split('/').length - a.path.split('/').length
-  );
-  
-  if (verbose && filePath.includes('CognitoServiceTest')) {
-    console.log(chalk.cyan(`[DEBUG findOwningFramework] Finding owner for: ${filePath}`));
-    console.log(chalk.cyan(`  Specific frameworks (sorted by depth):`));
-    for (const fw of sorted) {
-      console.log(chalk.cyan(`    - ${fw.name} at "${fw.path}" (enabled: ${fw.enabled})`));
-    }
-    if (rootFramework) {
-      console.log(chalk.cyan(`  Root framework (fallback): ${rootFramework.name} at "."`));
-    }
-  }
-  
-  // Check specific frameworks first
-  for (const fw of sorted) {
-    if (verbose && filePath.includes('CognitoServiceTest')) {
-      console.log(chalk.cyan(`  Checking ${fw.name} at "${fw.path}"...`));
-    }
-    
-    if (filePath.startsWith(fw.path + '/')) {
-      if (verbose && filePath.includes('CognitoServiceTest')) {
-        console.log(chalk.cyan(`    ✓ Matched framework: ${fw.name}`));
-      }
-      return fw;
-    } else if (verbose && filePath.includes('CognitoServiceTest')) {
-      console.log(chalk.cyan(`    ✗ "${filePath}" doesn't start with "${fw.path}/"`));
-    }
-  }
-  
-  // Fall back to root framework if no specific framework matched
-  if (rootFramework) {
-    if (verbose && filePath.includes('CognitoServiceTest')) {
-      console.log(chalk.cyan(`  ✓ Using fallback root framework: ${rootFramework.name}`));
-    }
-    return rootFramework;
-  }
-  
-  return null;
-}
+// findOwningFramework is now imported from test-patterns.js
 
 /**
  * Two-pass test detection system:

@@ -1,5 +1,5 @@
 import path from 'path';
-import type { TestPatternConfig } from '../config/schema.js';
+import type { TestPatternConfig, FrameworkInstance } from '../config/schema.js';
 
 /**
  * Language-specific test patterns for detecting and associating test files
@@ -253,18 +253,6 @@ function addFrameworkPrefix(file: string, fwPath: string): string {
   return `${fwPath}/${file}`;
 }
 
-/**
- * Helper: Convert TestPatternConfig to LanguageTestPattern
- */
-function testPatternConfigToLanguagePattern(config: TestPatternConfig): LanguageTestPattern {
-  return {
-    extensions: config.extensions,
-    directories: config.directories,
-    prefixes: config.prefixes,
-    suffixes: config.suffixes,
-    frameworks: config.frameworks,
-  };
-}
 
 /**
  * Find test files associated with a source file
@@ -591,7 +579,59 @@ export function detectTestFramework(content: string, language: string): string |
 
 // Helper functions
 
-function getBaseName(filepath: string): string {
+/**
+ * Determine which framework owns a given file path
+ * @param filePath - Relative file path from project root
+ * @param frameworks - Array of framework instances
+ * @param verbose - Enable debug logging
+ * @returns The owning framework, or null if no match
+ */
+export function findOwningFramework(
+  filePath: string,
+  frameworks: FrameworkInstance[],
+  verbose: boolean = false
+): FrameworkInstance | null {
+  
+  // Separate root framework from specific frameworks
+  const rootFramework = frameworks.find(fw => fw.path === '.');
+  const specificFrameworks = frameworks.filter(fw => fw.path !== '.');
+  
+  // Sort specific frameworks by path depth (deepest first)
+  const sorted = specificFrameworks.sort((a, b) => 
+    b.path.split('/').length - a.path.split('/').length
+  );
+  
+  // Check specific frameworks first
+  for (const fw of sorted) {
+    if (filePath.startsWith(fw.path + '/')) {
+      return fw;
+    }
+  }
+  
+  // Fall back to root framework if no specific framework matched
+  if (rootFramework) {
+    return rootFramework;
+  }
+  
+  return null;
+}
+
+/**
+ * Convert TestPatternConfig to LanguageTestPattern
+ */
+export function testPatternConfigToLanguagePattern(
+  config: TestPatternConfig
+): LanguageTestPattern {
+  return {
+    extensions: config.extensions,
+    directories: config.directories,
+    prefixes: config.prefixes,
+    suffixes: config.suffixes,
+    frameworks: config.frameworks,
+  };
+}
+
+export function getBaseName(filepath: string): string {
   const basename = path.basename(filepath);
   const lastDot = basename.lastIndexOf('.');
   if (lastDot === -1) return basename;
@@ -618,7 +658,7 @@ function getNameWithoutExtension(basename: string, language: string): string {
   return basename;
 }
 
-function getLanguageExtensions(language: string): string[] {
+export function getLanguageExtensions(language: string): string[] {
   const extMap: Record<string, string[]> = {
     typescript: ['.ts', '.tsx'],
     javascript: ['.js', '.jsx', '.mjs', '.cjs'],
