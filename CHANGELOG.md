@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.3.7] - 2025-11-14
+
+### Fixed
+- **Test associations path mismatch**
+
+
 ## [0.3.6] - 2025-11-13
 
 ### Fixed
