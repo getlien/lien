@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.5.3] - 2025-11-16
+
+### Fixed
+- **Resolve all TypeScript type errors and warnings**
+
+
 ## [0.5.2] - 2025-11-16
 
 ### Fixed
