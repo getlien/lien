@@ -45,10 +45,14 @@ export async function indexSingleFile(
     // Read file content
     const content = await fs.readFile(filepath, 'utf-8');
     
+    // Get chunk settings (support both v0.3.0 and legacy v0.2.0 configs)
+    const chunkSize = config.core?.chunkSize || (config as any).indexing?.chunkSize || 75;
+    const chunkOverlap = config.core?.chunkOverlap || (config as any).indexing?.chunkOverlap || 10;
+    
     // Chunk the file
     const chunks = chunkFile(filepath, content, {
-      chunkSize: config.indexing.chunkSize,
-      chunkOverlap: config.indexing.chunkOverlap,
+      chunkSize,
+      chunkOverlap,
     });
     
     if (chunks.length === 0) {

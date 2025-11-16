@@ -442,7 +442,7 @@ Run `lien index` to create the index first.
 The embedding model downloads on first run. Ensure you have:
 - Internet connection (first run only)
 - ~100MB free disk space
-- Node.js 18+ installed
+- Node.js 22+ installed
 
 ### Cursor doesn't show Lien tools
 
