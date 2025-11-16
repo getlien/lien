@@ -7,7 +7,7 @@ import { scanCodebase, scanCodebaseWithFrameworks, detectLanguage } from './scan
 import { chunkFile } from './chunker.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
 import { VectorDB } from '../vectordb/lancedb.js';
-import { loadConfig } from '../config/loader.js';
+import { configService } from '../config/service.js';
 import { CodeChunk, TestAssociation } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { detectTestFramework, isTestFile } from './test-patterns.js';
@@ -119,7 +119,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
   try {
     // 1. Load configuration
     spinner.text = 'Loading configuration...';
-    const config = await loadConfig(rootDir);
+    const config = await configService.load(rootDir);
     
     // 2. Scan for files (framework-aware if frameworks configured)
     spinner.text = 'Scanning codebase...';

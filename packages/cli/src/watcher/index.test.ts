@@ -13,14 +13,25 @@ describe('FileWatcher', () => {
     testDir = path.join(process.cwd(), '.test-watcher-' + Date.now());
     await fs.mkdir(testDir, { recursive: true });
     
-    // Create a custom config for testing
+    // Create a custom config for testing (modern format)
     const config = {
       ...defaultConfig,
-      indexing: {
-        ...defaultConfig.indexing,
-        include: ['**/*.txt'],
-        exclude: ['**/*.ignore'],
-      },
+      frameworks: [{
+        name: 'test',
+        path: '.',
+        enabled: true,
+        config: {
+          include: ['**/*.txt'],
+          exclude: ['**/*.ignore'],
+          testPatterns: {
+            directories: [],
+            extensions: [],
+            prefixes: [],
+            suffixes: [],
+            frameworks: [],
+          },
+        },
+      }],
       fileWatching: {
         enabled: true,
         debounceMs: 100, // Shorter for tests

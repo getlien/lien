@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import { configExists, loadConfig } from '../config/loader.js';
+import { configService } from '../config/service.js';
 import { isGitRepo, getCurrentBranch, getCurrentCommit } from '../git/utils.js';
 import { readVersionFile } from '../vectordb/version.js';
 import { showCompactBanner } from '../utils/banner.js';
@@ -26,7 +26,7 @@ export async function statusCommand() {
   console.log(chalk.bold('Status\n'));
   
   // Check if config exists
-  const hasConfig = await configExists(rootDir);
+  const hasConfig = await configService.exists(rootDir);
   console.log(chalk.dim('Configuration:'), hasConfig ? chalk.green('✓ Found') : chalk.red('✗ Not initialized'));
   
   if (!hasConfig) {
@@ -69,7 +69,7 @@ export async function statusCommand() {
   
   // Load and show configuration settings
   try {
-    const config = await loadConfig(rootDir);
+    const config = await configService.load(rootDir);
     
     console.log(chalk.bold('\nFeatures:'));
     

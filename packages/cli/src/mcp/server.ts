@@ -12,7 +12,7 @@ import { VectorDB } from '../vectordb/lancedb.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
 import { GitStateTracker } from '../git/tracker.js';
 import { indexMultipleFiles, indexSingleFile } from '../indexer/incremental.js';
-import { loadConfig } from '../config/loader.js';
+import { configService } from '../config/service.js';
 import { isGitAvailable, isGitRepo } from '../git/utils.js';
 import { FileWatcher } from '../watcher/index.js';
 import { VERSION_CHECK_INTERVAL_MS } from '../constants.js';
@@ -373,7 +373,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   });
   
   // Load configuration for auto-indexing, git detection, and file watching
-  const config = await loadConfig(rootDir);
+  const config = await configService.load(rootDir);
   
   // Check if this is the first run (no data in index) and auto-index if needed
   const hasIndex = await vectorDB.hasData();

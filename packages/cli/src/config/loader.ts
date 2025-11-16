@@ -4,6 +4,10 @@ import { LienConfig, defaultConfig } from './schema.js';
 import { deepMergeConfig } from './merge.js';
 import { needsMigration, migrateConfigFile } from './migration.js';
 
+/**
+ * @deprecated Use ConfigService.load() instead. This function is kept for backward compatibility.
+ * @see ConfigService
+ */
 export async function loadConfig(rootDir: string = process.cwd()): Promise<LienConfig> {
   const configPath = path.join(rootDir, '.lien.config.json');
   
@@ -37,6 +41,10 @@ export async function loadConfig(rootDir: string = process.cwd()): Promise<LienC
   }
 }
 
+/**
+ * @deprecated Use ConfigService.exists() instead. This function is kept for backward compatibility.
+ * @see ConfigService
+ */
 export async function configExists(rootDir: string = process.cwd()): Promise<boolean> {
   const configPath = path.join(rootDir, '.lien.config.json');
   try {
