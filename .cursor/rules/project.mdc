@@ -1,249 +1,646 @@
----
-alwaysApply: true
----
+# Lien Project - Cursor Rules
 
-# Lien MCP Integration Rules
+## Project Overview
+You are working on **Lien** - a local-first semantic code search tool that provides context to AI coding assistants via MCP (Model Context Protocol).
 
-This project uses **Lien** - a local semantic code search MCP server. You MUST use Lien tools proactively to understand the codebase before making changes.
+**Key Facts:**
+- Brand: Lien (French for "link/connection")
+- Domain: lien.dev
+- Default Port: 7133 (L=7, I=1, E=3, N=3)
+- License: MIT License
+- Target: TypeScript/Node.js CLI tool (monorepo structure)
+- Package: @liendev/lien
+- Current Version: 0.5.0
 
-## Core Rules
+## Core Principles
 
-### ALWAYS Use Lien When:
-1. **Before reading any file** - Use `semantic_search` or `get_file_context` to understand what you're looking for
-2. **User asks about code location** - Use `semantic_search` before grepping
-3. **User asks "how does X work"** - Use `semantic_search` to find implementations
-4. **Before making changes** - Use `get_file_context` to understand dependencies and see test coverage
-5. **User asks for examples** - Use `find_similar` to locate patterns
-6. **Exploring unfamiliar code** - Use `semantic_search` with broad queries first
-7. **Working with tests** - Check metadata in search results for test associations
+### KISS (Keep It Simple, Stupid)
+- Prefer simple solutions over clever ones
+- Write code that junior developers can understand
+- Avoid unnecessary abstractions
+- Default to straightforward implementations
+- Question complexity - "Can this be simpler?"
 
-### NEVER:
-1. Skip Lien and go straight to reading files when you don't know the codebase
-2. Use grep when the user is asking about functionality (use semantic search instead)
-3. Make assumptions about code location without searching first
-4. Edit files without getting context via `get_file_context`
+### YAGNI (You Aren't Gonna Need It)
+- Don't build features "just in case"
+- Implement only what's needed for current requirements
+- Resist gold-plating and over-engineering
+- Wait for actual need before adding functionality
+- Delete unused code aggressively
 
----
+### DRY (Don't Repeat Yourself)
+- Extract repeated logic into shared functions
+- But: Don't abstract too early (wait for 3rd use)
+- Duplication is better than wrong abstraction
+- Keep related code co-located when it makes sense
 
-## MCP Tools Reference
+### Single Responsibility Principle
+- Each function/class should do ONE thing well
+- If you can't explain what a function does in one sentence, split it
+- Files should have a clear, singular purpose
 
-### `semantic_search` - PRIMARY TOOL
-**Use this FIRST for almost all code understanding tasks.**
+### Fail Fast
+- Validate inputs early
+- Throw errors immediately when something is wrong
+- Don't let bad data propagate through the system
+- Use TypeScript types to catch errors at compile time
 
+## Code Style & Standards
+
+### TypeScript
 ```typescript
-semantic_search({
-  query: "natural language description of what you're looking for",
-  limit: 5  // increase to 10-15 for broad exploration
-})
+// ✅ Good: Clear, typed, simple
+async function indexFile(filepath: string): Promise<CodeChunk[]> {
+  const content = await fs.readFile(filepath, 'utf-8');
+  return chunkFile(filepath, content);
+}
+
+// ❌ Bad: Overly clever, hard to understand
+const indexFile = (fp: string) => 
+  fs.readFile(fp, 'utf-8').then(c => chunkFile(fp, c));
 ```
 
-**Use for:**
-- "Where is X implemented?" → `semantic_search({ query: "X implementation" })`
-- "How does Y work?" → `semantic_search({ query: "Y functionality" })`
-- Finding patterns, features, utilities, handlers, validators, etc.
-- Understanding architecture before making changes
+### Naming Conventions
+- **Variables/Functions:** camelCase (`indexFile`, `vectorDB`)
+- **Classes/Interfaces:** PascalCase (`VectorDB`, `CodeChunk`)
+- **Constants:** UPPER_SNAKE_CASE (`DEFAULT_PORT`, `MAX_CHUNK_SIZE`)
+- **Files:** kebab-case (`vector-db.ts`, `code-chunker.ts`)
+- **Be descriptive:** `getUserById` not `get`, `calculateEmbedding` not `calc`
 
-**Query tips:**
-- Use full sentences describing what the code does
-- Focus on behavior: "handles user authentication", "validates email input"
-- Not exact names: search semantically, not syntactically
+### File Organization
+```
+lien/
+├── packages/
+│   └── cli/                    # Main CLI package
+│       ├── src/
+│       │   ├── cli/            # CLI commands (init, index, serve, status)
+│       │   ├── mcp/            # MCP server implementation
+│       │   ├── indexer/        # Code indexing, chunking, test associations
+│       │   ├── embeddings/     # Local embedding generation
+│       │   ├── vectordb/       # LanceDB vector storage
+│       │   ├── config/         # Configuration management & migration
+│       │   ├── frameworks/     # Framework detection (Node.js, Laravel)
+│       │   ├── git/            # Git integration and tracking
+│       │   ├── watcher/        # File watching (planned)
+│       │   ├── types/          # Shared TypeScript types
+│       │   └── utils/          # Utilities and helpers
+│       ├── test/
+│       │   ├── integration/    # Integration tests
+│       │   ├── helpers/        # Test utilities
+│       │   └── fixtures/       # Test data
+│       └── package.json
+├── scripts/                    # Release and automation scripts
+└── package.json                # Root monorepo config
+```
 
-### `get_file_context`
-**Use BEFORE editing any file you haven't read yet.**
-
+### Imports
 ```typescript
-get_file_context({
-  filepath: "relative/path/to/file.ts",
-  includeRelated: true  // default, gets related chunks
-})
+// ✅ Good: Organized, clear sections
+// Node built-ins first
+import fs from 'fs/promises';
+import path from 'path';
+
+// External dependencies
+import { Command } from 'commander';
+import ora from 'ora';
+
+// Internal modules
+import { VectorDB } from '../vectordb/lancedb.js';
+import { LocalEmbeddings } from '../embeddings/local.js';
+import type { CodeChunk, IndexOptions } from '../types/index.js';
+
+// ❌ Bad: Random order, unclear
+import { VectorDB } from '../vectordb/lancedb.js';
+import path from 'path';
+import type { CodeChunk } from '../types/index.js';
+import ora from 'ora';
 ```
 
-**MANDATORY for:**
-- Before making any file edits
-- Understanding file dependencies and relationships
-- Getting full context of what a file does
+## Development Workflow
 
-**Pro tip:** Use after `semantic_search` identifies the right file
+### Before Every Commit - Health Checks (MANDATORY)
 
-### `find_similar`
-**Use for finding patterns and ensuring consistency.**
+**1. Type Check**
+```bash
+npm run typecheck
+# Must pass with 0 errors
+```
 
+**2. Build**
+```bash
+npm run build
+# Must compile successfully
+```
+
+**3. Test**
+```bash
+npm test
+# All tests must pass
+```
+
+### Git Commit Messages
+Follow Conventional Commits:
+```bash
+# Format: <type>(<scope>): <subject>
+
+# Types:
+feat: New feature
+fix: Bug fix
+docs: Documentation only
+style: Code style (formatting, missing semicolons, etc)
+refactor: Code change that neither fixes bug nor adds feature
+perf: Performance improvement
+test: Adding tests
+chore: Maintenance (deps, build, etc)
+
+# Examples:
+feat(mcp): add semantic_search tool
+fix(indexer): handle binary files gracefully
+docs(readme): add installation instructions
+refactor(vectordb): simplify query interface
+perf(embeddings): batch embed operations
+chore(deps): update transformers.js to 2.17.1
+```
+
+### Branch Naming
+```bash
+# Format: <type>/<short-description>
+
+feature/mcp-server
+fix/binary-file-crash
+docs/api-documentation
+refactor/vector-db-interface
+```
+
+## Error Handling
+
+### Always Handle Errors Explicitly
 ```typescript
-find_similar({
-  code: "function example() { ... }",
-  limit: 5
-})
+// ✅ Good: Clear error handling
+async function indexCodebase(rootDir: string): Promise<void> {
+  try {
+    const files = await scanCodebase({ rootDir });
+    
+    for (const file of files) {
+      try {
+        const content = await fs.readFile(file, 'utf-8');
+        await processFile(file, content);
+      } catch (error) {
+        // Log but continue with other files
+        console.warn(`Skipping ${file}: ${error.message}`);
+      }
+    }
+  } catch (error) {
+    // Fatal error - re-throw with context
+    throw new Error(`Failed to index codebase: ${error.message}`);
+  }
+}
+
+// ❌ Bad: Silent failures
+async function indexCodebase(rootDir: string) {
+  const files = await scanCodebase({ rootDir });
+  for (const file of files) {
+    await processFile(file); // What if this fails?
+  }
+}
 ```
 
-**Use for:**
-- Refactoring: find all similar implementations
-- Consistency: ensure new code matches existing patterns
-- Duplication detection
-
-### `list_functions`
-**Use for codebase overview and pattern matching.**
-
+### User-Facing Error Messages
 ```typescript
-list_functions({
-  pattern: "handle.*",  // optional regex
-  language: "typescript"  // optional filter
-})
+// ✅ Good: Helpful, actionable
+throw new Error(
+  'Failed to initialize vector database. ' +
+  'Please ensure you have write permissions to ~/.lien/'
+);
+
+// ❌ Bad: Cryptic, unhelpful
+throw new Error('DB init failed');
 ```
 
-**Use for:**
-- Getting structural overview
-- Finding all functions/classes matching a naming pattern
-- Understanding code organization
+## Performance Guidelines
 
-**Note on Test Associations:**
-All Lien tools automatically include test association metadata. When you use `get_file_context` or `semantic_search`, the results include:
-- `metadata.isTest`: Whether the file is a test
-- `metadata.relatedTests`: Array of associated test files
-- `metadata.relatedSources`: Array of source files (if it's a test)
-- `metadata.testFramework`: Detected framework (jest, pytest, etc.)
-- `metadata.detectionMethod`: How associations were found
+### Profile Before Optimizing
+```typescript
+// Don't optimize without measuring first
+// Use console.time for quick profiling:
 
----
-
-## Workflow Patterns (FOLLOW THESE)
-
-### Pattern 1: User Asks "Where is X?"
-```
-1. semantic_search({ query: "X functionality" })
-2. Review results, identify file(s)
-3. get_file_context({ filepath: "identified/file.ts" })
-4. Answer with specific information
+console.time('indexing');
+await indexCodebase(rootDir);
+console.timeEnd('indexing');
+// indexing: 2341.234ms
 ```
 
-### Pattern 2: User Asks to Edit/Change Code
-```
-1. semantic_search({ query: "area being modified" })
-2. get_file_context({ filepath: "target/file.ts" })
-3. find_similar({ code: "existing pattern" }) // if ensuring consistency
-4. Make changes with full context
-```
+### Batch Operations
+```typescript
+// ✅ Good: Batch for efficiency
+async function embedBatch(texts: string[]): Promise<Float32Array[]> {
+  // Process 10 at a time
+  const batchSize = 10;
+  const results: Float32Array[] = [];
+  
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const batch = texts.slice(i, i + batchSize);
+    const embeddings = await Promise.all(
+      batch.map(text => this.embed(text))
+    );
+    results.push(...embeddings);
+  }
+  
+  return results;
+}
 
-### Pattern 3: User Asks "How Does X Work?"
-```
-1. semantic_search({ query: "X implementation", limit: 10 })
-2. Review top results
-3. get_file_context for key files
-4. Explain with references to actual code locations
-```
-
-### Pattern 4: Debugging or Understanding Error
-```
-1. semantic_search({ query: "error handling for [area]" })
-2. semantic_search({ query: "[specific error type] handling" })
-3. get_file_context for relevant files
-4. Provide analysis
-```
-
-### Pattern 5: Modifying Source Code (Test-Aware)
-```
-1. semantic_search({ query: "functionality being modified" })
-2. get_file_context({ filepath: "target/file.ts" })
-3. Check testAssociations in response to see which tests cover this code
-4. Make changes
-5. Remind user to run the associated tests
+// ❌ Bad: One at a time (slow)
+async function embedBatch(texts: string[]): Promise<Float32Array[]> {
+  const results: Float32Array[] = [];
+  for (const text of texts) {
+    results.push(await this.embed(text)); // Sequential, slow
+  }
+  return results;
+}
 ```
 
-### Pattern 6: Understanding Test Coverage
+### Memory Consciousness
+```typescript
+// ✅ Good: Stream large files
+import { createReadStream } from 'fs';
+
+async function processLargeFile(filepath: string) {
+  const stream = createReadStream(filepath, { encoding: 'utf-8' });
+  // Process in chunks
+}
+
+// ❌ Bad: Load entire file into memory
+const content = await fs.readFile(filepath, 'utf-8'); // Could be GBs
 ```
-1. get_file_context({ filepath: "src/component.ts" })
-2. Review testAssociations field in response
-3. Use get_file_context for each test file to understand coverage
-4. Analyze and suggest improvements
+
+## Testing Philosophy
+
+### Test the Public API
+```typescript
+// ✅ Good: Test behavior, not implementation
+describe('VectorDB', () => {
+  it('should return similar results for similar queries', async () => {
+    const db = new VectorDB('/tmp/test');
+    await db.initialize();
+    
+    const vector1 = [0.1, 0.2, 0.3];
+    await db.insert([vector1], [{ content: 'test' }]);
+    
+    const results = await db.search([0.11, 0.21, 0.31], 1);
+    expect(results).toHaveLength(1);
+    expect(results[0].score).toBeGreaterThan(0.9);
+  });
+});
+
+// ❌ Bad: Testing internal implementation
+it('should call _formatVector internally', () => {
+  // Don't test private methods
+});
 ```
 
----
+### Keep Tests Simple
+```typescript
+// ✅ Good: Clear, single assertion
+it('should chunk file into 75-line blocks', () => {
+  const content = 'line1\n'.repeat(150);
+  const chunks = chunkFile('test.ts', content);
+  
+  expect(chunks).toHaveLength(2);
+});
 
-## Decision Tree: Lien vs Other Tools
+// ❌ Bad: Multiple unrelated assertions
+it('should do everything', () => {
+  // Tests too many things at once
+  expect(chunks.length).toBe(2);
+  expect(chunks[0].metadata.language).toBe('typescript');
+  expect(db.insert).toHaveBeenCalled();
+  // ... 10 more assertions
+});
+```
 
-### Use `semantic_search` when:
-✅ User asks about functionality, features, or "how X works"
-✅ You need to understand what code exists before editing
-✅ Looking for patterns, implementations, handlers, validators, etc.
-✅ Exploring unfamiliar parts of codebase
+## Documentation
 
-### Use `grep` when:
-✅ User provides exact function/variable name to find
-✅ Looking for specific string literals or imports
-✅ Finding all occurrences of exact text
+### README First
+- Update README.md when adding new features
+- Include examples of common use cases
+- Keep installation instructions up-to-date
 
-### Use `get_file_context` when:
-✅ You identified a file via search and need to understand it
-✅ About to edit a file (MANDATORY)
-✅ Need to understand file relationships and dependencies
+### Code Comments
+```typescript
+// ✅ Good: Explain WHY, not WHAT
+// Use overlap to ensure context isn't lost at chunk boundaries
+const overlap = 10;
 
-### Use `find_similar` when:
-✅ Refactoring multiple similar pieces of code
-✅ Ensuring new code matches existing patterns
-✅ Finding duplicated logic
+// ❌ Bad: State the obvious
+// Set overlap to 10
+const overlap = 10;
 
-### Check test associations when:
-✅ Before modifying any source file (use `get_file_context` to see testAssociations)
-✅ User asks "what tests cover this?" (use `semantic_search` and check metadata)
-✅ Understanding what a test file is testing (use `get_file_context` on the test file)
-✅ Working on bug fixes (search results include test metadata)
+// ✅ Good: Document complex logic
+/**
+ * Chunks code file into overlapping segments for better semantic search.
+ * 
+ * Overlap ensures that code spanning chunk boundaries isn't lost.
+ * For example, a function definition at line 74 will appear in both
+ * the chunk ending at line 75 and the chunk starting at line 65.
+ * 
+ * @param filepath - Path to the source file
+ * @param content - File contents as string
+ * @returns Array of code chunks with metadata
+ */
+function chunkFile(filepath: string, content: string): CodeChunk[] {
+  // Implementation
+}
+```
 
----
+### JSDoc for Public APIs
+```typescript
+// ✅ Good: Document all public functions
+/**
+ * Initializes the vector database at the specified path.
+ * 
+ * Creates necessary directories and tables if they don't exist.
+ * Safe to call multiple times (idempotent).
+ * 
+ * @throws {Error} If path is not writable
+ */
+async initialize(): Promise<void> {
+  // Implementation
+}
+```
 
-## Query Construction Guide
+## Dependencies
 
-### Good Semantic Queries (DO THIS):
-- "handles user authentication"
-- "validates email addresses" 
-- "processes payment transactions"
-- "parses JSON responses"
-- "middleware for authorization"
-- "React components with form state"
-- "database migration scripts"
-- "API endpoints for user data"
+### Minimize Dependencies
+```typescript
+// ✅ Good: Use Node.js built-ins when possible
+import { readFile } from 'fs/promises';
 
-### Bad Queries (DON'T DO THIS):
-- "auth" (too vague)
-- "validateEmail" (use grep for exact names)
-- "line 234" (Lien doesn't work with line numbers)
-- "code" (way too generic)
+// ❌ Bad: Add dependency for simple task
+import fs from 'fs-extra'; // Do we really need this?
+```
 
-### Query Formula:
-`[action verb] + [domain object] + [optional context]`
-- "handles authentication for API requests"
-- "validates user input in forms"
-- "caches API responses from external services"
+### Audit Before Adding
+Before `npm install <package>`:
+1. Check weekly downloads (>100k preferred)
+2. Check last update date (<6 months preferred)
+3. Check open issues count
+4. Check license (must be compatible)
+5. Check bundle size (https://bundlephobia.com)
 
----
+### Lock Dependencies
+```json
+// ✅ Good: Exact versions for stability
+{
+  "dependencies": {
+    "commander": "12.0.0",
+    "chalk": "5.3.0"
+  }
+}
 
-## Performance Notes
+// ❌ Bad: Ranges can break builds
+{
+  "dependencies": {
+    "commander": "^12.0.0", // Could install 12.9.9 later
+  }
+}
+```
 
-- First query loads embeddings (~1-2s), subsequent queries are fast (<500ms)
-- Increase `limit` to 10-15 for broad exploration
-- Results are ranked by semantic relevance (trust the ranking)
-- User can re-index with `lien reindex` if results seem stale
-- **Test associations**: Lien automatically detects test-source relationships across 12 languages using convention-based patterns and import analysis
+## Security
 
----
+### Never Commit Secrets
+```bash
+# Add to .gitignore
+.env
+.env.local
+*.pem
+*.key
+config/secrets.json
+```
 
-## Key Principles
+### Validate User Input
+```typescript
+// ✅ Good: Validate and sanitize
+function setPort(port: string): number {
+  const parsed = parseInt(port, 10);
+  
+  if (isNaN(parsed) || parsed < 1024 || parsed > 65535) {
+    throw new Error('Port must be between 1024 and 65535');
+  }
+  
+  return parsed;
+}
 
-1. **Search First, Read Second**: Use Lien before reading files blindly
-2. **Semantic Over Syntactic**: Think about what code *does*, not what it's *named*
-3. **Context Before Changes**: Always get file context before editing
-4. **Test-Aware Development**: Check testAssociations in results to understand test coverage
-5. **Trust the Results**: Semantic search finds relevant code even with different naming
-6. **Chain Your Tools**: semantic_search → get_file_context (includes testAssociations) → make changes is a powerful pattern
+// ❌ Bad: Trust user input
+function setPort(port: string): number {
+  return parseInt(port); // Could be NaN, negative, etc.
+}
+```
 
----
+## Current Status (v0.5.0)
 
-## Setup Instructions
+### ✅ Implemented Features
+- CLI commands (init, index, serve, status, reindex)
+- File scanning with .gitignore support
+- Line-based chunking with overlap
+- Local embeddings (transformers.js with all-MiniLM-L6-v2)
+- LanceDB integration for vector storage
+- MCP server with 4 tools (semantic_search, find_similar, get_file_context, list_functions)
+- Progress indicators and user-friendly CLI
+- Test association with two-pass detection (convention + import analysis)
+- Framework detection and monorepo support (Node.js, Laravel)
+- Configuration file with migration support
+- Cursor rules installation during init
+- Comprehensive test coverage
 
-Copy this entire file to `.cursor/rules` in your project root:
+### 🚧 Roadmap (v0.6+)
+- ❌ Tree-sitter parsing for better code understanding
+- ❌ Incremental indexing / watch mode for real-time updates
+- ❌ Multi-repo support
+- ❌ Web dashboard for visualization
+- ❌ Team features and collaboration
+- ❌ GitHub PR review integration
+- ❌ Multiple embedding model options
+- ❌ Cloud sync (optional)
+
+### Decision Framework
+When tempted to add a feature, ask:
+1. Is this needed for MVP? (No → defer)
+2. Can users work around this? (Yes → defer)
+3. Can we add this later without breaking changes? (Yes → defer)
+4. Is this critical for the core value prop? (No → defer)
+
+## Common Patterns
+
+### Loading Spinners
+```typescript
+import ora from 'ora';
+
+const spinner = ora('Indexing codebase...').start();
+
+try {
+  await indexCodebase(rootDir);
+  spinner.succeed('Indexed successfully');
+} catch (error) {
+  spinner.fail(`Indexing failed: ${error.message}`);
+  throw error;
+}
+```
+
+### Configuration Loading
+```typescript
+// Load with sensible defaults
+const config = {
+  ...defaultConfig,
+  ...loadUserConfig(),
+};
+```
+
+### Graceful Degradation
+```typescript
+// Try best, fall back gracefully
+try {
+  const gitignore = await fs.readFile('.gitignore', 'utf-8');
+  ig.add(gitignore);
+} catch {
+  // No .gitignore, that's fine - use defaults
+  console.log('No .gitignore found, using default exclusions');
+}
+```
+
+## When in Doubt
+
+1. **Prefer readability over cleverness**
+2. **Make it work, then make it good, then (maybe) make it fast**
+3. **Delete code rather than comment it out**
+4. **Ask: "Will I understand this in 6 months?"**
+5. **Test on real codebases early and often**
+
+## Release Process
+
+Lien uses an automated release script (`scripts/release.sh`) that handles:
+- ✅ Version bumping (semantic versioning)
+- ✅ Building the project
+- ✅ Updating CHANGELOG.md
+- ✅ Creating git commit and tag
+- ✅ Rollback on build failure
+
+### Usage
 
 ```bash
-# From your project directory
-cp /path/to/lien/CURSOR_RULES_TEMPLATE.md .cursor/rules
+npm run release -- <bump_type> "<commit_message>"
 ```
 
-The `alwaysApply: true` frontmatter ensures Cursor uses Lien for all files in your project.
+**Bump types:**
+- `patch` - Bug fixes (0.5.0 → 0.5.1)
+- `minor` - New features (0.5.0 → 0.6.0)
+- `major` - Breaking changes (0.5.0 → 1.0.0)
 
+**Examples:**
+
+```bash
+# Bug fix
+npm run release -- patch "fix: improve reconnection logic"
+
+# New feature
+npm run release -- minor "feat: add Python test detection"
+
+# Breaking change
+npm run release -- major "BREAKING: new API structure"
+```
+
+### What the Script Does
+
+1. **Validates** uncommitted changes (warns if any)
+2. **Bumps** version in `packages/cli/package.json`
+3. **Builds** the project (`npm run build`)
+4. **Updates** CHANGELOG.md with categorized entry
+5. **Commits** changes with version tag
+6. **Creates** git tag (e.g., `v0.5.1`)
+7. **Shows** next steps for pushing
+
+### After Release
+
+```bash
+# Push commit and tag to GitHub
+git push origin main
+git push origin v0.5.1  # Replace with your version
+```
+
+### Commit Message Format
+
+Follow Conventional Commits for automatic changelog categorization:
+
+```
+<type>(<scope>): <description>
+
+Types:
+- feat:     New feature     → CHANGELOG: "Added"
+- fix:      Bug fix        → CHANGELOG: "Fixed"
+- perf:     Performance    → CHANGELOG: "Fixed"
+- docs:     Documentation  → CHANGELOG: "Documentation"
+- refactor: Code refactor  → CHANGELOG: "Changed"
+- style:    Code style     → CHANGELOG: "Changed"
+- test:     Tests          → CHANGELOG: "Changed"
+- chore:    Maintenance    → CHANGELOG: "Changed"
+```
+
+### Troubleshooting
+
+**Build fails during release:**
+The script automatically rolls back the version change. Fix the build issue and try again.
+
+**Uncommitted changes warning:**
+Commit or stash your changes first, or type `y` to continue anyway (not recommended).
+
+## Pre-Commit Checklist
+
+Before every `git commit`:
+- [ ] Run `npm run typecheck` (0 errors)
+- [ ] Run `npm run build` (successful)
+- [ ] Run `npm test` (all tests pass)
+- [ ] Test manually if changes affect CLI
+- [ ] Update README if adding features
+- [ ] Commit message follows convention
+
+## Package.json Scripts Reference
+
+**Root Level (monorepo):**
+```json
+{
+  "scripts": {
+    "build": "npm run build -w packages/cli",
+    "dev": "npm run dev -w packages/cli",
+    "typecheck": "npm run typecheck -w packages/cli",
+    "clean": "rm -rf packages/*/dist",
+    "release": "./scripts/release.sh"
+  }
+}
+```
+
+**CLI Package (packages/cli):**
+```json
+{
+  "scripts": {
+    "build": "tsup && chmod +x dist/index.js && sed -i '' '1s/^/#!\\/usr\\/bin\\/env node\\n/' dist/index.js",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage"
+  }
+}
+```
+
+## Remember
+
+**Ship early, ship often.**
+
+Perfect is the enemy of done. Get the MVP working, get it into users' hands, iterate based on feedback.
+
+The best code is code that solves real problems for real users.
+
+---
+
+*"Any fool can write code that a computer can understand. Good programmers write code that humans can understand."* - Martin Fowler
