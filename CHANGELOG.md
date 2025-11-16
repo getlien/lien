@@ -5,7 +5,19 @@ All notable changes to Lien will be documented in this file.
 
 ### Changed
 - **feat!: remove test association system**
+BREAKING CHANGE: Test files are now indexed as regular code files and appear naturally in semantic search results. This simplifies the codebase by ~2,000 lines and eliminates an entire class of bugs.
 
+Removed:
+- Test association metadata fields (isTest, relatedTests, relatedSources, testFramework, detectionMethod)
+- TestPatternConfig from framework configuration  
+- Legacy indexTests and useImportAnalysis config options
+- ~2,000 lines of test pattern matching and association logic
+
+Changed:
+- Simplified indexer by removing test association analysis
+- Simplified vector database schema (removed 5 test-related fields)
+- Simplified MCP server responses
+- Updated documentation to reflect new approach
 
 ## [0.5.3] - 2025-11-16
 
