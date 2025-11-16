@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import { initCommand } from './init.js';
-import { defaultConfig } from '../config/schema.js';
+// import { defaultConfig } from '../config/schema.js'; // Unused
 
 describe('initCommand', () => {
   let testDir: string;

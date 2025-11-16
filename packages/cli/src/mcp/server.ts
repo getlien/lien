@@ -22,7 +22,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const require = createRequire(import.meta.url);
 
-let packageJson;
+let packageJson: { name: string; version: string };
 try {
   packageJson = require(join(__dirname, '../package.json'));
 } catch {
@@ -128,8 +128,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
       
       switch (name) {
         case 'semantic_search': {
-          const query = args.query as string;
-          const limit = (args.limit as number) || 5;
+          const query = args?.query as string;
+          const limit = (args?.limit as number) || 5;
           
           log(`Searching for: "${query}"`);
           
@@ -167,8 +167,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
         }
         
         case 'find_similar': {
-          const code = args.code as string;
-          const limit = (args.limit as number) || 5;
+          const code = args?.code as string;
+          const limit = (args?.limit as number) || 5;
           
           log(`Finding similar code...`);
           
@@ -206,8 +206,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
         }
         
         case 'get_file_context': {
-          const filepath = args.filepath as string;
-          const includeRelated = (args.includeRelated as boolean) ?? true;
+          const filepath = args?.filepath as string;
+          const includeRelated = (args?.includeRelated as boolean) ?? true;
           
           log(`Getting context for: ${filepath}`);
           
@@ -290,8 +290,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
         }
         
         case 'list_functions': {
-          const pattern = args.pattern as string | undefined;
-          const language = args.language as string | undefined;
+          const pattern = args?.pattern as string | undefined;
+          const language = args?.language as string | undefined;
           
           log('Listing functions with symbol metadata...');
           

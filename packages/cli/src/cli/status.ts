@@ -35,10 +35,10 @@ export async function statusCommand() {
   }
   
   // Check if index exists
-  let indexExists = false;
+  let _indexExists = false;
   try {
     const stats = await fs.stat(indexPath);
-    indexExists = true;
+    _indexExists = true;
     console.log(chalk.dim('Index location:'), indexPath);
     console.log(chalk.dim('Index status:'), chalk.green('✓ Exists'));
     

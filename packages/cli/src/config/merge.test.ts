@@ -143,8 +143,7 @@ describe('detectNewFields', () => {
       mcp: {
         port: 7133,
         transport: 'stdio' as const,
-        // Missing autoIndexOnFirstRun
-      },
+      } as any, // Type assertion to allow missing optional fields for testing
       core: defaultConfig.core,
       gitDetection: defaultConfig.gitDetection,
       fileWatching: defaultConfig.fileWatching,
@@ -205,8 +204,7 @@ describe('detectNewFields', () => {
       mcp: {
         port: 7133,
         transport: 'stdio' as const,
-        // Missing autoIndexOnFirstRun
-      },
+      } as any, // Type assertion to allow missing optional fields for testing
     };
 
     const newFields = detectNewFields(oldConfig, defaultConfig);

@@ -125,7 +125,7 @@ export class VectorDB implements VectorDBInterface {
       // Create table if it doesn't exist, otherwise add to existing table
       if (!this.table) {
         // Let LanceDB createTable handle type inference from the data
-        this.table = await this.db.createTable(this.tableName, records);
+        this.table = await this.db.createTable(this.tableName, records) as LanceDBTable;
       } else {
         await this.table.add(records);
       }
@@ -150,7 +150,7 @@ export class VectorDB implements VectorDBInterface {
         .execute();
       
       // Filter out empty content, then map to SearchResult
-      const filtered = (results as DBRecord[])
+      const filtered = (results as unknown as DBRecord[])
         .filter((r: DBRecord) => 
           r.content && 
           r.content.trim().length > 0 &&
@@ -164,7 +164,7 @@ export class VectorDB implements VectorDBInterface {
             file: r.file,
             startLine: r.startLine,
             endLine: r.endLine,
-            type: r.type,
+            type: r.type as 'function' | 'class' | 'block',
             language: r.language,
             isTest: r.isTest,
             relatedTests: r.relatedTests,
@@ -191,13 +191,13 @@ export class VectorDB implements VectorDBInterface {
             .limit(limit)
             .execute();
           
-          return results.map((r: DBRecord) => ({
+          return (results as unknown as DBRecord[]).map((r: DBRecord) => ({
             content: r.content,
             metadata: {
               file: r.file,
               startLine: r.startLine,
               endLine: r.endLine,
-              type: r.type,
+              type: r.type as 'function' | 'class' | 'block',
               language: r.language,
               isTest: r.isTest,
               relatedTests: r.relatedTests,
@@ -241,7 +241,7 @@ export class VectorDB implements VectorDBInterface {
       const results = await query.execute();
       
       // Filter in JavaScript for more reliable filtering
-      let filtered = results.filter((r: DBRecord) => 
+      let filtered = (results as unknown as DBRecord[]).filter((r: DBRecord) => 
         r.content && 
         r.content.trim().length > 0 &&
         r.file && 
@@ -269,7 +269,7 @@ export class VectorDB implements VectorDBInterface {
           file: r.file,
           startLine: r.startLine,
           endLine: r.endLine,
-          type: r.type,
+          type: r.type as 'function' | 'class' | 'block',
           language: r.language,
           isTest: r.isTest,
           relatedTests: r.relatedTests || [],
@@ -306,7 +306,7 @@ export class VectorDB implements VectorDBInterface {
       const results = await query.execute();
       
       // Filter in JavaScript for more precise control
-      let filtered = results.filter((r: DBRecord) => {
+      let filtered = (results as unknown as DBRecord[]).filter((r: DBRecord) => {
         // Basic validation
         if (!r.content || r.content.trim().length === 0) {
           return false;
@@ -346,7 +346,7 @@ export class VectorDB implements VectorDBInterface {
           file: r.file,
           startLine: r.startLine,
           endLine: r.endLine,
-          type: r.type,
+          type: r.type as 'function' | 'class' | 'block',
           language: r.language,
           isTest: r.isTest,
           relatedTests: r.relatedTests || [],
@@ -533,7 +533,7 @@ export class VectorDB implements VectorDBInterface {
         .limit(Math.min(count, 5))
         .execute();
       
-      const hasRealData = sample.some((r: DBRecord) => 
+      const hasRealData = (sample as unknown as DBRecord[]).some((r: DBRecord) => 
         r.content && 
         r.content.trim().length > 0
       );
