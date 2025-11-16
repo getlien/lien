@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.6.0] - 2025-11-16
+
+### Changed
+- **feat!: remove test association system**
+
+
 ## [0.5.3] - 2025-11-16
 
 ### Fixed
