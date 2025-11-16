@@ -1,13 +1,15 @@
-import { pipeline, env } from '@xenova/transformers';
+import { pipeline, env, type FeatureExtractionPipeline } from '@xenova/transformers';
 import { EmbeddingService } from './types.js';
+import { EmbeddingError, wrapError } from '../errors/index.js';
+import { DEFAULT_EMBEDDING_MODEL } from '../constants.js';
 
 // Configure transformers.js to cache models locally
 env.allowRemoteModels = true;
 env.allowLocalModels = true;
 
 export class LocalEmbeddings implements EmbeddingService {
-  private extractor: any = null;
-  private readonly modelName = 'Xenova/all-MiniLM-L6-v2';
+  private extractor: FeatureExtractionPipeline | null = null;
+  private readonly modelName = DEFAULT_EMBEDDING_MODEL;
   private initPromise: Promise<void> | null = null;
   
   async initialize(): Promise<void> {
@@ -23,10 +25,10 @@ export class LocalEmbeddings implements EmbeddingService {
     this.initPromise = (async () => {
       try {
         // This downloads ~100MB on first run, then caches in ~/.cache/huggingface
-        this.extractor = await pipeline('feature-extraction', this.modelName);
-      } catch (error) {
+        this.extractor = await pipeline('feature-extraction', this.modelName) as FeatureExtractionPipeline;
+      } catch (error: unknown) {
         this.initPromise = null;
-        throw new Error(`Failed to initialize embedding model: ${error}`);
+        throw wrapError(error, 'Failed to initialize embedding model');
       }
     })();
     
@@ -37,7 +39,7 @@ export class LocalEmbeddings implements EmbeddingService {
     await this.initialize();
     
     if (!this.extractor) {
-      throw new Error('Embedding model not initialized');
+      throw new EmbeddingError('Embedding model not initialized');
     }
     
     try {
@@ -47,8 +49,8 @@ export class LocalEmbeddings implements EmbeddingService {
       });
       
       return output.data as Float32Array;
-    } catch (error) {
-      throw new Error(`Failed to generate embedding: ${error}`);
+    } catch (error: unknown) {
+      throw wrapError(error, 'Failed to generate embedding', { textLength: text.length });
     }
   }
   
@@ -56,7 +58,7 @@ export class LocalEmbeddings implements EmbeddingService {
     await this.initialize();
     
     if (!this.extractor) {
-      throw new Error('Embedding model not initialized');
+      throw new EmbeddingError('Embedding model not initialized');
     }
     
     try {
@@ -66,8 +68,8 @@ export class LocalEmbeddings implements EmbeddingService {
         texts.map(text => this.embed(text))
       );
       return results;
-    } catch (error) {
-      throw new Error(`Failed to generate batch embeddings: ${error}`);
+    } catch (error: unknown) {
+      throw wrapError(error, 'Failed to generate batch embeddings', { batchSize: texts.length });
     }
   }
 }

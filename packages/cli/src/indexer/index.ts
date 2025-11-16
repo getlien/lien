@@ -10,11 +10,12 @@ import { VectorDB } from '../vectordb/lancedb.js';
 import { loadConfig } from '../config/loader.js';
 import { CodeChunk, TestAssociation } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
-import { detectTestFramework } from './test-patterns.js';
+import { detectTestFramework, isTestFile } from './test-patterns.js';
 import { analyzeImports } from './import-analyzer.js';
 import { TestAssociationManager } from './test-association-manager.js';
 import { toRelativePath } from '../types/paths.js';
-import type { LienConfig, FrameworkInstance } from '../config/schema.js';
+import type { LienConfig } from '../config/schema.js';
+import { isLegacyConfig, isModernConfig } from '../config/schema.js';
 
 export interface IndexingOptions {
   rootDir?: string;
@@ -56,9 +57,8 @@ async function analyzeTestAssociations(
   manager.buildAssociations();
   
   // Pass 2: Import analysis (Tier 1 only, if enabled)
-  // Note: Legacy configs don't have frameworks array, skip import analysis for them
-  const hasLegacyConfig = !config.frameworks || config.frameworks.length === 0;
-  if (!hasLegacyConfig && (config as any).indexing?.useImportAnalysis) {
+  // Note: Legacy configs with useImportAnalysis are supported for backward compatibility
+  if (isLegacyConfig(config) && config.indexing.useImportAnalysis) {
     const tier1Languages = ['typescript', 'javascript', 'python', 'go', 'php'];
     const importAssociations = await analyzeImports(files, tier1Languages, rootDir);
     
@@ -125,17 +125,23 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     spinner.text = 'Scanning codebase...';
     let files: string[];
     
-    if (config.frameworks && config.frameworks.length > 0) {
+    if (isModernConfig(config) && config.frameworks.length > 0) {
       // Use framework-aware scanning for new configs
       files = await scanCodebaseWithFrameworks(rootDir, config);
-    } else {
+    } else if (isLegacyConfig(config)) {
       // Fall back to legacy scanning for old configs
-      const legacyConfig = config as any;
       files = await scanCodebase({
-      rootDir,
-        includePatterns: legacyConfig.indexing?.include || [],
-        excludePatterns: legacyConfig.indexing?.exclude || [],
-    });
+        rootDir,
+        includePatterns: config.indexing.include,
+        excludePatterns: config.indexing.exclude,
+      });
+    } else {
+      // Modern config with no frameworks - use empty patterns
+      files = await scanCodebase({
+        rootDir,
+        includePatterns: [],
+        excludePatterns: [],
+      });
     }
     
     if (files.length === 0) {
@@ -147,8 +153,8 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     
     // 3. Analyze test associations (if enabled)
     let testAssociations = new Map<string, TestAssociation>();
-    const hasFrameworks = config.frameworks && config.frameworks.length > 0;
-    const indexTests = hasFrameworks || (config as any).indexing?.indexTests;
+    const hasFrameworks = isModernConfig(config) && config.frameworks.length > 0;
+    const indexTests = hasFrameworks || (isLegacyConfig(config) && config.indexing.indexTests);
     
     if (indexTests && hasFrameworks) {
       spinner.start('Analyzing test associations...');
@@ -192,8 +198,12 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     spinner.succeed('Vector database initialized');
     
     // 6. Process files concurrently
-    const concurrency = config.core?.concurrency || (config as any).indexing?.concurrency || 4;
-    const batchSize = config.core?.embeddingBatchSize || (config as any).indexing?.embeddingBatchSize || 50;
+    const concurrency = isModernConfig(config) 
+      ? config.core.concurrency 
+      : (isLegacyConfig(config) ? config.indexing.concurrency : 4);
+    const batchSize = isModernConfig(config)
+      ? config.core.embeddingBatchSize
+      : (isLegacyConfig(config) ? config.indexing.embeddingBatchSize : 50);
     
     spinner.start(`Processing files with ${concurrency}x concurrency...`);
     
@@ -233,8 +243,12 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       limit(async () => {
         try {
           const content = await fs.readFile(file, 'utf-8');
-          const chunkSize = config.core?.chunkSize || (config as any).indexing?.chunkSize || 75;
-          const chunkOverlap = config.core?.chunkOverlap || (config as any).indexing?.chunkOverlap || 10;
+          const chunkSize = isModernConfig(config)
+            ? config.core.chunkSize
+            : (isLegacyConfig(config) ? config.indexing.chunkSize : 75);
+          const chunkOverlap = isModernConfig(config)
+            ? config.core.chunkOverlap
+            : (isLegacyConfig(config) ? config.indexing.chunkOverlap : 10);
           
           const chunks = chunkFile(file, content, {
             chunkSize,

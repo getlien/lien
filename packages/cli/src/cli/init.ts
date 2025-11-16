@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-import { defaultConfig, LienConfig, FrameworkInstance } from '../config/schema.js';
+import { defaultConfig, LienConfig, FrameworkInstance, FrameworkConfig } from '../config/schema.js';
 import { deepMergeConfig, detectNewFields } from '../config/merge.js';
 import { showCompactBanner } from '../utils/banner.js';
 import { needsMigration, migrateConfig } from '../config/migration.js';
@@ -174,7 +174,8 @@ async function createNewConfig(rootDir: string, options: InitOptions) {
       
       let finalConfig = frameworkConfig;
       if (shouldCustomize) {
-        finalConfig = await promptForCustomization(det.name, frameworkConfig);
+        const customized = await promptForCustomization(det.name, frameworkConfig);
+        finalConfig = { ...frameworkConfig, ...customized };
       } else {
         const pathDisplay = det.path === '.' ? 'root' : det.path;
         console.log(chalk.dim(`  → Using defaults for ${det.name} at ${pathDisplay}`));
@@ -290,7 +291,7 @@ async function createNewConfig(rootDir: string, options: InitOptions) {
   console.log(chalk.dim('  3. Configure Cursor to use the MCP server (see README.md)'));
 }
 
-async function promptForCustomization(frameworkName: string, config: any): Promise<any> {
+async function promptForCustomization(frameworkName: string, config: FrameworkConfig): Promise<Partial<FrameworkConfig>> {
   console.log(chalk.bold(`\nCustomizing ${frameworkName} settings:`));
   
   const answers = await inquirer.prompt([

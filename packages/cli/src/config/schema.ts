@@ -1,3 +1,14 @@
+import {
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_CONCURRENCY,
+  DEFAULT_EMBEDDING_BATCH_SIZE,
+  DEFAULT_PORT,
+  DEFAULT_GIT_POLL_INTERVAL_MS,
+  DEFAULT_DEBOUNCE_MS,
+  CURRENT_CONFIG_VERSION,
+} from '../constants.js';
+
 /**
  * Framework-specific test pattern configuration
  */
@@ -87,29 +98,51 @@ export interface LegacyLienConfig {
 }
 
 /**
+ * Type guard to check if a config is the legacy format
+ * @param config - Config object to check
+ * @returns True if config is LegacyLienConfig
+ */
+export function isLegacyConfig(
+  config: LienConfig | LegacyLienConfig
+): config is LegacyLienConfig {
+  return 'indexing' in config && !('frameworks' in config);
+}
+
+/**
+ * Type guard to check if a config is the modern format
+ * @param config - Config object to check
+ * @returns True if config is LienConfig
+ */
+export function isModernConfig(
+  config: LienConfig | LegacyLienConfig
+): config is LienConfig {
+  return 'frameworks' in config;
+}
+
+/**
  * Default configuration with empty frameworks array
  * Frameworks should be detected and added via lien init
  */
 export const defaultConfig: LienConfig = {
-  version: '0.3.0',
+  version: CURRENT_CONFIG_VERSION,
   core: {
-    chunkSize: 75,
-    chunkOverlap: 10,
-    concurrency: 4,
-    embeddingBatchSize: 50,
+    chunkSize: DEFAULT_CHUNK_SIZE,
+    chunkOverlap: DEFAULT_CHUNK_OVERLAP,
+    concurrency: DEFAULT_CONCURRENCY,
+    embeddingBatchSize: DEFAULT_EMBEDDING_BATCH_SIZE,
   },
   mcp: {
-    port: 7133, // LIEN in leetspeak
+    port: DEFAULT_PORT,
     transport: 'stdio',
     autoIndexOnFirstRun: true,
   },
   gitDetection: {
     enabled: true,
-    pollIntervalMs: 10000, // Check every 10 seconds
+    pollIntervalMs: DEFAULT_GIT_POLL_INTERVAL_MS,
   },
   fileWatching: {
     enabled: false, // Opt-in feature
-    debounceMs: 1000,
+    debounceMs: DEFAULT_DEBOUNCE_MS,
   },
   frameworks: [], // Will be populated by lien init via framework detection
 };

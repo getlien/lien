@@ -39,7 +39,7 @@ export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>)
  * @param after - The complete config with all fields
  * @returns Array of new field paths (e.g., ["mcp.autoIndexOnFirstRun", "gitDetection"])
  */
-export function detectNewFields(before: any, after: any): string[] {
+export function detectNewFields(before: Record<string, any>, after: Record<string, any>): string[] {
   const newFields: string[] = [];
 
   // Check top-level sections
@@ -51,8 +51,8 @@ export function detectNewFields(before: any, after: any): string[] {
 
     // Check nested fields for object sections
     if (typeof after[key] === 'object' && after[key] !== null && !Array.isArray(after[key])) {
-      const beforeSection = before[key] || {};
-      const afterSection = after[key];
+      const beforeSection = (before[key] as Record<string, any>) || {};
+      const afterSection = after[key] as Record<string, any>;
 
       for (const nestedKey of Object.keys(afterSection)) {
         if (!(nestedKey in beforeSection)) {

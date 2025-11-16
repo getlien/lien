@@ -6,10 +6,36 @@ import { SearchResult, VectorDBInterface } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { readVersionFile, writeVersionFile } from './version.js';
+import { DatabaseError, wrapError } from '../errors/index.js';
+
+type LanceDBConnection = Awaited<ReturnType<typeof lancedb.connect>>;
+type LanceDBTable = Awaited<ReturnType<LanceDBConnection['openTable']>>;
+
+/**
+ * Database record structure as stored in LanceDB
+ */
+interface DBRecord {
+  vector: number[];
+  content: string;
+  file: string;
+  startLine: number;
+  endLine: number;
+  type: string;
+  language: string;
+  isTest: boolean;
+  relatedTests: string[];
+  relatedSources: string[];
+  testFramework: string;
+  detectionMethod: string;
+  functionNames: string[];
+  classNames: string[];
+  interfaceNames: string[];
+  _distance?: number; // Added by LanceDB for search results
+}
 
 export class VectorDB implements VectorDBInterface {
-  private db: any = null;
-  private table: any = null;
+  private db: LanceDBConnection | null = null;
+  private table: LanceDBTable | null = null;
   public readonly dbPath: string;
   private readonly tableName = 'code_chunks';
   private lastVersionCheck: number = 0;
@@ -77,8 +103,8 @@ export class VectorDB implements VectorDBInterface {
         // Version file doesn't exist yet, will be created on first index
         this.currentVersion = 0;
       }
-    } catch (error) {
-      throw new Error(`Failed to initialize vector database: ${error}`);
+    } catch (error: unknown) {
+      throw wrapError(error, 'Failed to initialize vector database', { dbPath: this.dbPath });
     }
   }
   
@@ -88,11 +114,15 @@ export class VectorDB implements VectorDBInterface {
     contents: string[]
   ): Promise<void> {
     if (!this.table) {
-      throw new Error('Vector database not initialized');
+      throw new DatabaseError('Vector database not initialized');
     }
     
     if (vectors.length !== metadatas.length || vectors.length !== contents.length) {
-      throw new Error('Vectors, metadatas, and contents arrays must have the same length');
+      throw new DatabaseError('Vectors, metadatas, and contents arrays must have the same length', {
+        vectorsLength: vectors.length,
+        metadatasLength: metadatas.length,
+        contentsLength: contents.length,
+      });
     }
     
     try {
@@ -129,7 +159,7 @@ export class VectorDB implements VectorDBInterface {
         // Ignore cleanup errors - not critical
       }
     } catch (error) {
-      throw new Error(`Failed to insert batch into vector database: ${error}`);
+      throw wrapError(error, 'Failed to insert batch into vector database');
     }
   }
   
@@ -138,7 +168,7 @@ export class VectorDB implements VectorDBInterface {
     limit: number = 5
   ): Promise<SearchResult[]> {
     if (!this.table) {
-      throw new Error('Vector database not initialized');
+      throw new DatabaseError('Vector database not initialized');
     }
     
     try {
@@ -149,8 +179,8 @@ export class VectorDB implements VectorDBInterface {
         .execute();
       
       // Filter out schema rows and empty content, then map to SearchResult
-      const filtered = results
-        .filter((r: any) => 
+      const filtered = (results as DBRecord[])
+        .filter((r: DBRecord) => 
           r.content && 
           r.content !== '__SCHEMA_ROW__' && 
           r.content.trim().length > 0 &&
@@ -158,7 +188,7 @@ export class VectorDB implements VectorDBInterface {
           r.file.length > 0
         )
         .slice(0, limit) // Take only the requested number after filtering
-        .map((r: any) => ({
+        .map((r: DBRecord) => ({
           content: r.content,
           metadata: {
             file: r.file,
@@ -191,7 +221,7 @@ export class VectorDB implements VectorDBInterface {
             .limit(limit)
             .execute();
           
-          return results.map((r: any) => ({
+          return results.map((r: DBRecord) => ({
             content: r.content,
             metadata: {
               file: r.file,
@@ -207,14 +237,15 @@ export class VectorDB implements VectorDBInterface {
             },
             score: r._distance ?? 0,
           }));
-        } catch (retryError) {
-          throw new Error(
-            `Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory. Error: ${retryError}`
+        } catch (retryError: unknown) {
+          throw new DatabaseError(
+            `Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory.`,
+            { originalError: retryError }
           );
         }
       }
       
-      throw new Error(`Failed to search vector database: ${error}`);
+      throw wrapError(error, 'Failed to search vector database');
     }
   }
   
@@ -224,7 +255,7 @@ export class VectorDB implements VectorDBInterface {
     limit?: number;
   }): Promise<SearchResult[]> {
     if (!this.table) {
-      throw new Error('Vector database not initialized');
+      throw new DatabaseError('Vector database not initialized');
     }
     
     const { language, pattern, limit = 100 } = options;
@@ -241,7 +272,7 @@ export class VectorDB implements VectorDBInterface {
       const results = await query.execute();
       
       // Filter in JavaScript for more reliable filtering
-      let filtered = results.filter((r: any) => 
+      let filtered = results.filter((r: DBRecord) => 
         r.content && 
         r.content.trim().length > 0 &&
         r.content !== '__SCHEMA_ROW__' &&
@@ -251,7 +282,7 @@ export class VectorDB implements VectorDBInterface {
       
       // Apply language filter
       if (language) {
-        filtered = filtered.filter((r: any) => 
+        filtered = filtered.filter((r: DBRecord) => 
           r.language && r.language.toLowerCase() === language.toLowerCase()
         );
       }
@@ -259,12 +290,12 @@ export class VectorDB implements VectorDBInterface {
       // Apply regex pattern filter
       if (pattern) {
         const regex = new RegExp(pattern, 'i');
-        filtered = filtered.filter((r: any) =>
+        filtered = filtered.filter((r: DBRecord) =>
           regex.test(r.content) || regex.test(r.file)
         );
       }
       
-      return filtered.slice(0, limit).map((r: any) => ({
+      return filtered.slice(0, limit).map((r: DBRecord) => ({
         content: r.content,
         metadata: {
           file: r.file,
@@ -281,7 +312,7 @@ export class VectorDB implements VectorDBInterface {
         score: 0,
       }));
     } catch (error) {
-      throw new Error(`Failed to scan with filter: ${error}`);
+      throw wrapError(error, 'Failed to scan with filter');
     }
   }
   
@@ -292,7 +323,7 @@ export class VectorDB implements VectorDBInterface {
     limit?: number;
   }): Promise<SearchResult[]> {
     if (!this.table) {
-      throw new Error('Vector database not initialized');
+      throw new DatabaseError('Vector database not initialized');
     }
     
     const { language, pattern, symbolType, limit = 50 } = options;
@@ -308,7 +339,7 @@ export class VectorDB implements VectorDBInterface {
       const results = await query.execute();
       
       // Filter in JavaScript for more precise control
-      let filtered = results.filter((r: any) => {
+      let filtered = results.filter((r: DBRecord) => {
         // Basic validation
         if (!r.content || r.content.trim().length === 0 || r.content === '__SCHEMA_ROW__') {
           return false;
@@ -342,7 +373,7 @@ export class VectorDB implements VectorDBInterface {
         return true;
       });
       
-      return filtered.slice(0, limit).map((r: any) => ({
+      return filtered.slice(0, limit).map((r: DBRecord) => ({
         content: r.content,
         metadata: {
           file: r.file,
@@ -364,20 +395,20 @@ export class VectorDB implements VectorDBInterface {
         score: 0,
       }));
     } catch (error) {
-      throw new Error(`Failed to query symbols: ${error}`);
+      throw wrapError(error, 'Failed to query symbols');
     }
   }
   
   async clear(): Promise<void> {
     if (!this.db) {
-      throw new Error('Vector database not initialized');
+      throw new DatabaseError('Vector database not initialized');
     }
     
     try {
       await this.db.dropTable(this.tableName);
       await this.initialize();
     } catch (error) {
-      throw new Error(`Failed to clear vector database: ${error}`);
+      throw wrapError(error, 'Failed to clear vector database');
     }
   }
   
@@ -389,14 +420,14 @@ export class VectorDB implements VectorDBInterface {
    */
   async deleteByFile(filepath: string): Promise<void> {
     if (!this.table) {
-      throw new Error('Vector database not initialized');
+      throw new DatabaseError('Vector database not initialized');
     }
     
     try {
       // Use LanceDB's SQL-like delete with predicate
       await this.table.delete(`file = "${filepath}"`);
     } catch (error) {
-      throw new Error(`Failed to delete file from vector database: ${error}`);
+      throw wrapError(error, 'Failed to delete file from vector database');
     }
   }
   
@@ -416,7 +447,7 @@ export class VectorDB implements VectorDBInterface {
     contents: string[]
   ): Promise<void> {
     if (!this.table) {
-      throw new Error('Vector database not initialized');
+      throw new DatabaseError('Vector database not initialized');
     }
     
     try {
@@ -431,7 +462,7 @@ export class VectorDB implements VectorDBInterface {
       // 3. Update version file to trigger MCP reconnection
       await writeVersionFile(this.dbPath);
     } catch (error) {
-      throw new Error(`Failed to update file in vector database: ${error}`);
+      throw wrapError(error, 'Failed to update file in vector database');
     }
   }
   
@@ -480,7 +511,7 @@ export class VectorDB implements VectorDBInterface {
       // Reinitialize with fresh connection
       await this.initialize();
     } catch (error) {
-      throw new Error(`Failed to reconnect to vector database: ${error}`);
+      throw wrapError(error, 'Failed to reconnect to vector database');
     }
   }
   
@@ -531,7 +562,7 @@ export class VectorDB implements VectorDBInterface {
         .limit(Math.min(count, 5))
         .execute();
       
-      const hasRealData = sample.some((r: any) => 
+      const hasRealData = sample.some((r: DBRecord) => 
         r.content && 
         r.content !== '__SCHEMA_ROW__' && 
         r.content.trim().length > 0

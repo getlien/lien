@@ -1,9 +1,8 @@
 import fs from 'fs/promises';
-import path from 'path';
 import { chunkFile } from './chunker.js';
-import { LocalEmbeddings } from '../embeddings/local.js';
+import { EmbeddingService } from '../embeddings/types.js';
 import { VectorDB } from '../vectordb/lancedb.js';
-import { LienConfig } from '../config/schema.js';
+import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
 
 export interface IncrementalIndexOptions {
   verbose?: boolean;
@@ -23,8 +22,8 @@ export interface IncrementalIndexOptions {
 export async function indexSingleFile(
   filepath: string,
   vectorDB: VectorDB,
-  embeddings: LocalEmbeddings,
-  config: LienConfig,
+  embeddings: EmbeddingService,
+  config: LienConfig | LegacyLienConfig,
   options: IncrementalIndexOptions = {}
 ): Promise<void> {
   const { verbose } = options;
@@ -46,8 +45,12 @@ export async function indexSingleFile(
     const content = await fs.readFile(filepath, 'utf-8');
     
     // Get chunk settings (support both v0.3.0 and legacy v0.2.0 configs)
-    const chunkSize = config.core?.chunkSize || (config as any).indexing?.chunkSize || 75;
-    const chunkOverlap = config.core?.chunkOverlap || (config as any).indexing?.chunkOverlap || 10;
+    const chunkSize = isModernConfig(config)
+      ? config.core.chunkSize
+      : (isLegacyConfig(config) ? config.indexing.chunkSize : 75);
+    const chunkOverlap = isModernConfig(config)
+      ? config.core.chunkOverlap
+      : (isLegacyConfig(config) ? config.indexing.chunkOverlap : 10);
     
     // Chunk the file
     const chunks = chunkFile(filepath, content, {
@@ -99,8 +102,8 @@ export async function indexSingleFile(
 export async function indexMultipleFiles(
   filepaths: string[],
   vectorDB: VectorDB,
-  embeddings: LocalEmbeddings,
-  config: LienConfig,
+  embeddings: EmbeddingService,
+  config: LienConfig | LegacyLienConfig,
   options: IncrementalIndexOptions = {}
 ): Promise<number> {
   const { verbose } = options;

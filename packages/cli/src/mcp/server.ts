@@ -15,6 +15,7 @@ import { indexMultipleFiles, indexSingleFile } from '../indexer/incremental.js';
 import { loadConfig } from '../config/loader.js';
 import { isGitAvailable, isGitRepo } from '../git/utils.js';
 import { FileWatcher } from '../watcher/index.js';
+import { VERSION_CHECK_INTERVAL_MS } from '../constants.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -106,7 +107,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   // This ensures we reconnect as soon as possible after reindex, even if no tool calls are made
   const versionCheckInterval = setInterval(async () => {
     await checkAndReconnect();
-  }, 2000);
+  }, VERSION_CHECK_INTERVAL_MS);
   
   // Clean up interval on process exit
   process.on('SIGINT', () => {
@@ -257,7 +258,15 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           log(`Found ${results.length} chunks`);
           
           // Format response with test associations
-          const response: any = {
+          interface FileContextResponse {
+            indexInfo: ReturnType<typeof getIndexMetadata>;
+            file: string;
+            chunks: typeof results;
+            testAssociations?: typeof testAssociations;
+            note?: string;
+          }
+          
+          const response: FileContextResponse = {
             indexInfo: getIndexMetadata(),
             file: filepath,
             chunks: results,

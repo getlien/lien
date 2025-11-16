@@ -1,4 +1,3 @@
-import path from 'path';
 import { CodeChunk } from './types.js';
 import { detectLanguage } from './scanner.js';
 import { extractSymbols } from './symbol-extractor.js';

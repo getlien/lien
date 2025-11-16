@@ -1,5 +1,5 @@
 import chokidar from 'chokidar';
-import { LienConfig } from '../config/schema.js';
+import { LienConfig, LegacyLienConfig, isLegacyConfig, isModernConfig } from '../config/schema.js';
 
 export interface FileChangeEvent {
   type: 'add' | 'change' | 'unlink';
@@ -15,11 +15,11 @@ export type FileChangeHandler = (event: FileChangeEvent) => void | Promise<void>
 export class FileWatcher {
   private watcher: chokidar.FSWatcher | null = null;
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
-  private config: LienConfig;
+  private config: LienConfig | LegacyLienConfig;
   private rootDir: string;
   private onChangeHandler: FileChangeHandler | null = null;
   
-  constructor(rootDir: string, config: LienConfig) {
+  constructor(rootDir: string, config: LienConfig | LegacyLienConfig) {
     this.rootDir = rootDir;
     this.config = config;
   }
@@ -36,10 +36,26 @@ export class FileWatcher {
     
     this.onChangeHandler = handler;
     
+    // Get watch patterns based on config type
+    let includePatterns: string[];
+    let excludePatterns: string[];
+    
+    if (isLegacyConfig(this.config)) {
+      includePatterns = this.config.indexing.include;
+      excludePatterns = this.config.indexing.exclude;
+    } else if (isModernConfig(this.config)) {
+      // For modern configs, aggregate patterns from all frameworks
+      includePatterns = this.config.frameworks.flatMap(f => f.config.include);
+      excludePatterns = this.config.frameworks.flatMap(f => f.config.exclude);
+    } else {
+      includePatterns = ['**/*'];
+      excludePatterns = [];
+    }
+    
     // Configure chokidar
-    this.watcher = chokidar.watch(this.config.indexing.include, {
+    this.watcher = chokidar.watch(includePatterns, {
       cwd: this.rootDir,
-      ignored: this.config.indexing.exclude,
+      ignored: excludePatterns,
       persistent: true,
       ignoreInitial: true, // Don't trigger for existing files
       awaitWriteFinish: {
