@@ -68,32 +68,9 @@ export class VectorDB implements VectorDBInterface {
       try {
         this.table = await this.db.openTable(this.tableName);
       } catch {
-        // Table doesn't exist, create it with empty data (just for schema)
-        // LanceDB requires at least one row to infer schema, so we create it empty
-        // and will delete this dummy row after first real insertion
-        const schema = [
-          {
-            vector: Array(EMBEDDING_DIMENSION).fill(0),
-            content: '__SCHEMA_ROW__', // Mark as schema row for deletion
-            file: '',
-            startLine: 0,
-            endLine: 0,
-            type: '',
-            language: '',
-            isTest: false,
-            relatedTests: [''], // Dummy array to establish type
-            relatedSources: [''], // Dummy array to establish type
-            testFramework: '',
-            detectionMethod: '',
-            // NEW: Symbol extraction fields
-            functionNames: [''],
-            classNames: [''],
-            interfaceNames: [''],
-          },
-        ];
-        
-        await this.db.createTable(this.tableName, schema);
-        this.table = await this.db.openTable(this.tableName);
+        // Table doesn't exist yet - will be created on first insert
+        // Set table to null to signal it needs creation
+        this.table = null;
       }
       
       // Read and cache the current version
@@ -113,7 +90,7 @@ export class VectorDB implements VectorDBInterface {
     metadatas: ChunkMetadata[],
     contents: string[]
   ): Promise<void> {
-    if (!this.table) {
+    if (!this.db) {
       throw new DatabaseError('Vector database not initialized');
     }
     
@@ -135,28 +112,22 @@ export class VectorDB implements VectorDBInterface {
         type: metadatas[i].type,
         language: metadatas[i].language,
         isTest: metadatas[i].isTest ?? false,
-        relatedTests: metadatas[i].relatedTests || [],
-        relatedSources: metadatas[i].relatedSources || [],
+        // Ensure arrays have at least empty string for Arrow type inference
+        relatedTests: (metadatas[i].relatedTests && metadatas[i].relatedTests.length > 0) ? metadatas[i].relatedTests : [''],
+        relatedSources: (metadatas[i].relatedSources && metadatas[i].relatedSources.length > 0) ? metadatas[i].relatedSources : [''],
         testFramework: metadatas[i].testFramework || '',
         detectionMethod: metadatas[i].detectionMethod || '',
-        // NEW: Symbol extraction fields
-        functionNames: metadatas[i].symbols?.functions || [],
-        classNames: metadatas[i].symbols?.classes || [],
-        interfaceNames: metadatas[i].symbols?.interfaces || [],
+        functionNames: (metadatas[i].symbols?.functions && metadatas[i].symbols.functions.length > 0) ? metadatas[i].symbols.functions : [''],
+        classNames: (metadatas[i].symbols?.classes && metadatas[i].symbols.classes.length > 0) ? metadatas[i].symbols.classes : [''],
+        interfaceNames: (metadatas[i].symbols?.interfaces && metadatas[i].symbols.interfaces.length > 0) ? metadatas[i].symbols.interfaces : [''],
       }));
       
-      await this.table.add(records);
-      
-      // On first insertion, clean up the schema row if it exists
-      // This is a one-time cleanup after table creation
-      try {
-        const count = await this.table.countRows();
-        if (count > records.length) {
-          // Delete rows where content is __SCHEMA_ROW__
-          await this.table.delete('content = "__SCHEMA_ROW__"');
-        }
-      } catch {
-        // Ignore cleanup errors - not critical
+      // Create table if it doesn't exist, otherwise add to existing table
+      if (!this.table) {
+        // Let LanceDB createTable handle type inference from the data
+        this.table = await this.db.createTable(this.tableName, records);
+      } else {
+        await this.table.add(records);
       }
     } catch (error) {
       throw wrapError(error, 'Failed to insert batch into vector database');
@@ -178,11 +149,10 @@ export class VectorDB implements VectorDBInterface {
         .limit(limit + 10) // Get extra in case we filter some out
         .execute();
       
-      // Filter out schema rows and empty content, then map to SearchResult
+      // Filter out empty content, then map to SearchResult
       const filtered = (results as DBRecord[])
         .filter((r: DBRecord) => 
           r.content && 
-          r.content !== '__SCHEMA_ROW__' && 
           r.content.trim().length > 0 &&
           r.file && 
           r.file.length > 0
@@ -265,7 +235,6 @@ export class VectorDB implements VectorDBInterface {
       // This is a workaround since LanceDB doesn't have a direct scan API
       const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
       const query = this.table.search(zeroVector)
-        .where('content != "__SCHEMA_ROW__"')
         .where('file != ""')
         .limit(Math.max(limit * 5, 200)); // Get a larger sample to ensure we have enough after filtering
       
@@ -275,7 +244,6 @@ export class VectorDB implements VectorDBInterface {
       let filtered = results.filter((r: DBRecord) => 
         r.content && 
         r.content.trim().length > 0 &&
-        r.content !== '__SCHEMA_ROW__' &&
         r.file && 
         r.file.length > 0
       );
@@ -332,7 +300,6 @@ export class VectorDB implements VectorDBInterface {
       // Use vector search with zero vector to get a large sample
       const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
       const query = this.table.search(zeroVector)
-        .where('content != "__SCHEMA_ROW__"')
         .where('file != ""')
         .limit(Math.max(limit * 10, 500)); // Get a large sample to ensure we have enough after symbol filtering
       
@@ -341,7 +308,7 @@ export class VectorDB implements VectorDBInterface {
       // Filter in JavaScript for more precise control
       let filtered = results.filter((r: DBRecord) => {
         // Basic validation
-        if (!r.content || r.content.trim().length === 0 || r.content === '__SCHEMA_ROW__') {
+        if (!r.content || r.content.trim().length === 0) {
           return false;
         }
         if (!r.file || r.file.length === 0) {
@@ -405,8 +372,12 @@ export class VectorDB implements VectorDBInterface {
     }
     
     try {
-      await this.db.dropTable(this.tableName);
-      await this.initialize();
+      // Drop table if it exists
+      if (this.table) {
+        await this.db.dropTable(this.tableName);
+      }
+      // Set table to null - will be recreated on first insert
+      this.table = null;
     } catch (error) {
       throw wrapError(error, 'Failed to clear vector database');
     }
@@ -564,7 +535,6 @@ export class VectorDB implements VectorDBInterface {
       
       const hasRealData = sample.some((r: DBRecord) => 
         r.content && 
-        r.content !== '__SCHEMA_ROW__' && 
         r.content.trim().length > 0
       );
       
