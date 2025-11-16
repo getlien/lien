@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.5.2] - 2025-11-16
+
+### Fixed
+- **Upgrade vectordb to 0.21.2 and resolve type errors**
+
+
 ## [0.5.1] - 2025-11-16
 
 ### Changed
