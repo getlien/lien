@@ -174,7 +174,7 @@ describe('FileWatcher', () => {
     
     it('should handle async handlers', async () => {
       let handlerCalled = false;
-      const handler = async (event: FileChangeEvent) => {
+      const handler = async (_event: FileChangeEvent) => {
         await new Promise(resolve => setTimeout(resolve, 50));
         handlerCalled = true;
       };

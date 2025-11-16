@@ -23,7 +23,7 @@ export interface SearchResultResponse {
  */
 export interface FileTestAssociation {
   isTest: boolean;
-  framework?: string;
+  testFramework?: string;
   relatedTests?: string[];
   relatedSources?: string[];
   detectionMethod?: string;
@@ -89,7 +89,7 @@ export function createIndexMetadata(
 export function createFileTestAssociation(association: TestAssociation): FileTestAssociation {
   return {
     isTest: association.isTest,
-    framework: association.framework,
+    testFramework: association.testFramework,
     relatedTests: association.relatedTests,
     relatedSources: association.relatedSources,
     detectionMethod: association.detectionMethod,

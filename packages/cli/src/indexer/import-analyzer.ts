@@ -63,7 +63,7 @@ export function extractImports(fileContent: string, language: string): string[] 
 export function resolveImportPath(
   importPath: string,
   fromFile: string,
-  rootDir: string,
+  _rootDir: string,
   language: string
 ): string | null {
   // Handle absolute/relative paths
@@ -153,7 +153,7 @@ export async function analyzeTestImports(
 export async function analyzeImports(
   files: string[],
   tier1Languages: string[],
-  rootDir: string
+  _rootDir: string
 ): Promise<Map<string, string[]>> {
   const associations = new Map<string, string[]>();
 
@@ -179,7 +179,7 @@ export async function analyzeImports(
         const resolved: string[] = [];
 
         for (const importPath of imports) {
-          const resolvedPath = resolveImportPath(importPath, file, rootDir, language);
+          const resolvedPath = resolveImportPath(importPath, file, _rootDir, language);
           if (resolvedPath) {
             // Check if it matches any file in our list
             for (const candidateFile of langFiles) {

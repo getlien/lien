@@ -7,7 +7,7 @@ import { configService } from '../config/service.js';
 import { isGitRepo, getCurrentBranch, getCurrentCommit } from '../git/utils.js';
 import { readVersionFile } from '../vectordb/version.js';
 import { showCompactBanner } from '../utils/banner.js';
-import { isModernConfig, isLegacyConfig } from '../config/schema.js';
+import { isModernConfig } from '../config/schema.js';
 
 export async function statusCommand() {
   const rootDir = process.cwd();
@@ -35,10 +35,8 @@ export async function statusCommand() {
   }
   
   // Check if index exists
-  let _indexExists = false;
   try {
     const stats = await fs.stat(indexPath);
-    _indexExists = true;
     console.log(chalk.dim('Index location:'), indexPath);
     console.log(chalk.dim('Index status:'), chalk.green('✓ Exists'));
     
@@ -122,11 +120,6 @@ export async function statusCommand() {
       console.log(chalk.dim('Batch size:'), config.core.embeddingBatchSize);
       console.log(chalk.dim('Chunk size:'), config.core.chunkSize);
       console.log(chalk.dim('Chunk overlap:'), config.core.chunkOverlap);
-    } else if (isLegacyConfig(config)) {
-      console.log(chalk.dim('Concurrency:'), config.indexing.concurrency);
-      console.log(chalk.dim('Batch size:'), config.indexing.embeddingBatchSize);
-      console.log(chalk.dim('Chunk size:'), config.indexing.chunkSize);
-      console.log(chalk.dim('Chunk overlap:'), config.indexing.chunkOverlap);
     }
     
   } catch (error) {

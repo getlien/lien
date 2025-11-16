@@ -268,7 +268,7 @@ export function findTestFiles(
   allFiles: string[],
   frameworkPath: string = '.',
   patterns?: TestPatternConfig,
-  verbose: boolean = false
+  _verbose: boolean = false
 ): string[] {
   // Use framework-specific patterns if provided, otherwise fall back to language patterns
   const testPatterns = patterns 
@@ -589,7 +589,7 @@ export function detectTestFramework(content: string, language: string): string |
 export function findOwningFramework(
   filePath: string,
   frameworks: FrameworkInstance[],
-  verbose: boolean = false
+  _verbose: boolean = false
 ): FrameworkInstance | null {
   
   // Separate root framework from specific frameworks

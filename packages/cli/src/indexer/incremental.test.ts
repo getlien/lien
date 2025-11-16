@@ -4,7 +4,7 @@ import path from 'path';
 import { indexSingleFile, indexMultipleFiles } from './incremental.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { MockEmbeddings } from '../../test/helpers/mock-embeddings.js';
-import { createTestDir, cleanupTestDir, createTestVectorDB } from '../../test/helpers/test-db.js';
+import { createTestDir, cleanupTestDir } from '../../test/helpers/test-db.js';
 import { defaultConfig } from '../config/schema.js';
 
 describe('Incremental Indexing', () => {
@@ -25,14 +25,6 @@ describe('Incremental Indexing', () => {
   });
   
   afterEach(async () => {
-    // Close vectorDB if it has a close method
-    if (vectorDB && typeof vectorDB.close === 'function') {
-      try {
-        await vectorDB.close();
-      } catch {
-        // Ignore errors on cleanup
-      }
-    }
     await cleanupTestDir(testDir);
   });
   
@@ -137,8 +129,8 @@ describe('Incremental Indexing', () => {
       
       const customConfig = {
         ...defaultConfig,
-        indexing: {
-          ...defaultConfig.indexing,
+        core: {
+          ...defaultConfig.core,
           chunkSize: 200,
           chunkOverlap: 50,
         },

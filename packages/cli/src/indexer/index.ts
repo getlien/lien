@@ -40,7 +40,7 @@ async function analyzeTestAssociations(
   files: string[],
   rootDir: string,
   config: LienConfig,
-  spinner: ora.Ora,
+  _spinner: ReturnType<typeof ora>,
   verbose: boolean = false
 ): Promise<Map<string, TestAssociation>> {
   // Convert to type-safe relative paths
@@ -166,7 +166,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       testAssociations = relativeAssociations;
       
       const testFileCount = Array.from(testAssociations.values()).filter(a => a.isTest).length;
-      const sourceWithTestsCount = Array.from(testAssociations.values()).filter(a => !a.isTest && a.relatedTests.length > 0).length;
+      const sourceWithTestsCount = Array.from(testAssociations.values()).filter(a => !a.isTest && (a.relatedTests?.length ?? 0) > 0).length;
       spinner.succeed(`Found ${testFileCount} test files with ${sourceWithTestsCount} source files that have tests`);
       
       if (verbose && sourceWithTestsCount === 0 && testFileCount > 0) {
@@ -200,10 +200,10 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     // 6. Process files concurrently
     const concurrency = isModernConfig(config) 
       ? config.core.concurrency 
-      : (isLegacyConfig(config) ? config.indexing.concurrency : 4);
+      : 4;
     const batchSize = isModernConfig(config)
       ? config.core.embeddingBatchSize
-      : (isLegacyConfig(config) ? config.indexing.embeddingBatchSize : 50);
+      : 50;
     
     spinner.start(`Processing files with ${concurrency}x concurrency...`);
     
@@ -245,10 +245,10 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           const content = await fs.readFile(file, 'utf-8');
           const chunkSize = isModernConfig(config)
             ? config.core.chunkSize
-            : (isLegacyConfig(config) ? config.indexing.chunkSize : 75);
+            : 75;
           const chunkOverlap = isModernConfig(config)
             ? config.core.chunkOverlap
-            : (isLegacyConfig(config) ? config.indexing.chunkOverlap : 10);
+            : 10;
           
           const chunks = chunkFile(file, content, {
             chunkSize,

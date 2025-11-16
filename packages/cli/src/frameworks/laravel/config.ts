@@ -5,8 +5,8 @@ import { laravelTestPatterns } from './test-patterns.js';
  * Generate Laravel framework configuration
  */
 export async function generateLaravelConfig(
-  rootDir: string,
-  relativePath: string
+  _rootDir: string,
+  _relativePath: string
 ): Promise<FrameworkConfig> {
   return {
     include: [

@@ -170,7 +170,7 @@ export class VectorDB implements VectorDBInterface {
             relatedTests: r.relatedTests,
             relatedSources: r.relatedSources,
             testFramework: r.testFramework,
-            detectionMethod: r.detectionMethod,
+            detectionMethod: r.detectionMethod as 'convention' | 'import' | undefined,
           },
           score: r._distance ?? 0,
         }));
@@ -203,7 +203,7 @@ export class VectorDB implements VectorDBInterface {
               relatedTests: r.relatedTests,
               relatedSources: r.relatedSources,
               testFramework: r.testFramework,
-              detectionMethod: r.detectionMethod,
+              detectionMethod: r.detectionMethod as 'convention' | 'import' | undefined,
             },
             score: r._distance ?? 0,
           }));
@@ -275,7 +275,7 @@ export class VectorDB implements VectorDBInterface {
           relatedTests: r.relatedTests || [],
           relatedSources: r.relatedSources || [],
           testFramework: r.testFramework || '',
-          detectionMethod: r.detectionMethod || '',
+          detectionMethod: (r.detectionMethod as 'convention' | 'import') || undefined,
         },
         score: 0,
       }));
@@ -352,7 +352,7 @@ export class VectorDB implements VectorDBInterface {
           relatedTests: r.relatedTests || [],
           relatedSources: r.relatedSources || [],
           testFramework: r.testFramework || '',
-          detectionMethod: r.detectionMethod || '',
+          detectionMethod: (r.detectionMethod as 'convention' | 'import') || undefined,
           symbols: {
             functions: r.functionNames || [],
             classes: r.classNames || [],

@@ -5,9 +5,6 @@ import path from 'path';
 import os from 'os';
 import { detectAllFrameworks } from '../../src/frameworks/detector-service.js';
 import { getFrameworkDetector } from '../../src/frameworks/registry.js';
-import { indexCodebase } from '../../src/indexer/index.js';
-import { VectorDB } from '../../src/vectordb/lancedb.js';
-import { MockEmbeddings } from '../helpers/mock-embeddings.js';
 import { LienConfig, FrameworkInstance, defaultConfig } from '../../src/config/schema.js';
 import { loadConfig } from '../../src/config/loader.js';
 import { migrateConfig } from '../../src/config/migration.js';
@@ -73,10 +70,10 @@ test('calculator addition', () => {
     for (const detection of detections) {
       const detector = getFrameworkDetector(detection.name);
       if (detector) {
-        const config = await detector.generateConfig(testDir, detection);
+        const config = await detector.generateConfig(testDir, detection.path);
         frameworks.push({
           name: detection.name,
-          path: detection.path,
+          path: detection.path || '.',
           enabled: true,
           config,
         });
@@ -195,10 +192,10 @@ test('calculator addition', () => {
     for (const detection of initialDetections) {
       const detector = getFrameworkDetector(detection.name);
       if (detector) {
-        const config = await detector.generateConfig(testDir, detection);
+        const config = await detector.generateConfig(testDir, detection.path);
         initialFrameworks.push({
           name: detection.name,
-          path: detection.path,
+          path: detection.path || '.',
           enabled: true,
           config,
         });
@@ -241,10 +238,10 @@ test('calculator addition', () => {
     for (const detection of updatedDetections) {
       const detector = getFrameworkDetector(detection.name);
       if (detector) {
-        const config = await detector.generateConfig(testDir, detection);
+        const config = await detector.generateConfig(testDir, detection.path);
         updatedFrameworks.push({
           name: detection.name,
-          path: detection.path,
+          path: detection.path || '.',
           enabled: true,
           config,
         });

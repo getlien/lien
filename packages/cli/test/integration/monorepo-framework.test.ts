@@ -6,9 +6,6 @@ import os from 'os';
 import { detectAllFrameworks } from '../../src/frameworks/detector-service.js';
 import { getFrameworkDetector } from '../../src/frameworks/registry.js';
 import { scanCodebaseWithFrameworks } from '../../src/indexer/scanner.js';
-import { indexCodebase } from '../../src/indexer/index.js';
-import { VectorDB } from '../../src/vectordb/lancedb.js';
-import { MockEmbeddings } from '../helpers/mock-embeddings.js';
 import { LienConfig, FrameworkInstance } from '../../src/config/schema.js';
 
 describe('Monorepo Framework Integration', () => {
@@ -87,10 +84,10 @@ describe('Monorepo Framework Integration', () => {
     for (const detection of detections) {
       const detector = getFrameworkDetector(detection.name);
       if (detector) {
-        const config = await detector.generateConfig(testDir, detection);
+        const config = await detector.generateConfig(testDir, detection.path);
         frameworks.push({
           name: detection.name,
-          path: detection.path,
+          path: detection.path || '.',
           enabled: true,
           config,
         });
@@ -117,10 +114,10 @@ describe('Monorepo Framework Integration', () => {
     for (const detection of detections) {
       const detector = getFrameworkDetector(detection.name);
       if (detector) {
-        const config = await detector.generateConfig(testDir, detection);
+        const config = await detector.generateConfig(testDir, detection.path);
         frameworks.push({
           name: detection.name,
-          path: detection.path,
+          path: detection.path || '.',
           enabled: true,
           config,
         });
@@ -182,10 +179,10 @@ describe('Monorepo Framework Integration', () => {
     for (const detection of detections) {
       const detector = getFrameworkDetector(detection.name);
       if (detector) {
-        const config = await detector.generateConfig(testDir, detection);
+        const config = await detector.generateConfig(testDir, detection.path);
         frameworks.push({
           name: detection.name,
-          path: detection.path,
+          path: detection.path || '.',
           enabled: true,
           config,
         });
@@ -233,24 +230,15 @@ describe('Monorepo Framework Integration', () => {
     for (const detection of detections) {
       const detector = getFrameworkDetector(detection.name);
       if (detector) {
-        const config = await detector.generateConfig(testDir, detection);
+        const config = await detector.generateConfig(testDir, detection.path);
         frameworks.push({
           name: detection.name,
-          path: detection.path,
+          path: detection.path || '.',
           enabled: true,
           config,
         });
       }
     }
-
-    const embeddings = new MockEmbeddings();
-    await embeddings.initialize();
-
-    // Index with temporary embeddings override
-    await indexCodebase({
-      rootDir: testDir,
-      verbose: false,
-    });
 
     // Note: Real indexing needs LocalEmbeddings, so this test just verifies
     // the config structure and file scanning works
@@ -289,10 +277,10 @@ describe('Monorepo Framework Integration', () => {
     for (const detection of detections) {
       const detector = getFrameworkDetector(detection.name);
       if (detector) {
-        const config = await detector.generateConfig(testDir, detection);
+        const config = await detector.generateConfig(testDir, detection.path);
         frameworks.push({
           name: detection.name,
-          path: detection.path,
+          path: detection.path || '.',
           enabled: true,
           config,
         });
@@ -337,10 +325,10 @@ describe('Monorepo Framework Integration', () => {
     for (const detection of detections) {
       const detector = getFrameworkDetector(detection.name);
       if (detector) {
-        const config = await detector.generateConfig(testDir, detection);
+        const config = await detector.generateConfig(testDir, detection.path);
         frameworks.push({
           name: detection.name,
-          path: detection.path,
+          path: detection.path || '.',
           enabled: detection.name === 'nodejs', // Disable Laravel
           config,
         });

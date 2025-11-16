@@ -5,8 +5,7 @@ import path from 'path';
 import os from 'os';
 import { scanCodebaseWithFrameworks } from '../../src/indexer/scanner.js';
 import { isTestFile, findTestFiles } from '../../src/indexer/test-patterns.js';
-import { detectLanguage } from '../../src/indexer/scanner.js';
-import { LienConfig, FrameworkInstance } from '../../src/config/schema.js';
+import { LienConfig } from '../../src/config/schema.js';
 import { nodejsTestPatterns } from '../../src/frameworks/nodejs/test-patterns.js';
 import { laravelTestPatterns } from '../../src/frameworks/laravel/test-patterns.js';
 

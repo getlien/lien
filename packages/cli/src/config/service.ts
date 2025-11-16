@@ -443,7 +443,7 @@ export class ConfigService {
   private validateMCPConfig(
     mcp: Partial<LienConfig['mcp']>,
     errors: string[],
-    warnings: string[]
+    _warnings: string[]
   ): void {
     if (mcp.port !== undefined) {
       if (typeof mcp.port !== 'number' || mcp.port < 1024 || mcp.port > 65535) {
@@ -470,7 +470,7 @@ export class ConfigService {
   private validateGitDetectionConfig(
     gitDetection: Partial<LienConfig['gitDetection']>,
     errors: string[],
-    warnings: string[]
+    _warnings: string[]
   ): void {
     if (gitDetection.enabled !== undefined) {
       if (typeof gitDetection.enabled !== 'boolean') {
@@ -482,7 +482,7 @@ export class ConfigService {
       if (typeof gitDetection.pollIntervalMs !== 'number' || gitDetection.pollIntervalMs < 100) {
         errors.push('gitDetection.pollIntervalMs must be at least 100ms');
       } else if (gitDetection.pollIntervalMs < 1000) {
-        warnings.push('gitDetection.pollIntervalMs is very short (<1s). This may impact performance');
+        _warnings.push('gitDetection.pollIntervalMs is very short (<1s). This may impact performance');
       }
     }
   }
@@ -565,7 +565,7 @@ export class ConfigService {
     config: any,
     prefix: string,
     errors: string[],
-    warnings: string[]
+    _warnings: string[]
   ): void {
     if (!config || typeof config !== 'object') {
       errors.push(`${prefix} must be an object`);

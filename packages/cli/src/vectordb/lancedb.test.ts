@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { VectorDB } from './lancedb.js';
-import { ChunkMetadata } from '../indexer/types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';

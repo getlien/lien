@@ -5,8 +5,8 @@ import { nodejsTestPatterns } from './test-patterns.js';
  * Generate Node.js framework configuration
  */
 export async function generateNodeJsConfig(
-  rootDir: string,
-  relativePath: string
+  _rootDir: string,
+  _relativePath: string
 ): Promise<FrameworkConfig> {
   return {
     include: [

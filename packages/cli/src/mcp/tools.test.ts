@@ -40,12 +40,12 @@ describe('MCP Tools Schema', () => {
     
     it('should have query as required field', () => {
       const tool = tools.find(t => t.name === 'semantic_search');
-      expect(tool!.inputSchema.required).toContain('query');
+      expect(tool?.inputSchema.required).toContain('query');
     });
     
     it('should have limit with default value', () => {
       const tool = tools.find(t => t.name === 'semantic_search');
-      expect(tool!.inputSchema.properties.limit.default).toBe(5);
+      expect(tool?.inputSchema.properties.limit?.default).toBe(5);
     });
   });
   
@@ -64,12 +64,12 @@ describe('MCP Tools Schema', () => {
     
     it('should have code as required field', () => {
       const tool = tools.find(t => t.name === 'find_similar');
-      expect(tool!.inputSchema.required).toContain('code');
+      expect(tool?.inputSchema.required).toContain('code');
     });
     
     it('should have limit with default value', () => {
       const tool = tools.find(t => t.name === 'find_similar');
-      expect(tool!.inputSchema.properties.limit.default).toBe(5);
+      expect(tool?.inputSchema.properties.limit?.default).toBe(5);
     });
   });
   
@@ -88,12 +88,12 @@ describe('MCP Tools Schema', () => {
     
     it('should have filepath as required field', () => {
       const tool = tools.find(t => t.name === 'get_file_context');
-      expect(tool!.inputSchema.required).toContain('filepath');
+      expect(tool?.inputSchema.required).toContain('filepath');
     });
     
     it('should have includeRelated with default value', () => {
       const tool = tools.find(t => t.name === 'get_file_context');
-      expect(tool!.inputSchema.properties.includeRelated.default).toBe(true);
+      expect(tool?.inputSchema.properties.includeRelated?.default).toBe(true);
     });
   });
   
@@ -117,8 +117,8 @@ describe('MCP Tools Schema', () => {
     
     it('should have pattern and language as optional strings', () => {
       const tool = tools.find(t => t.name === 'list_functions');
-      expect(tool!.inputSchema.properties.pattern.type).toBe('string');
-      expect(tool!.inputSchema.properties.language.type).toBe('string');
+      expect(tool?.inputSchema.properties.pattern?.type).toBe('string');
+      expect(tool?.inputSchema.properties.language?.type).toBe('string');
     });
   });
   
