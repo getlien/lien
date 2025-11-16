@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.5.1] - 2025-11-16
+
+### Changed
+- **Upgrade to Node.js 22.21.0 and fix incremental indexing**
+
+
 
 ## [0.5.0] - 2025-11-14
 
