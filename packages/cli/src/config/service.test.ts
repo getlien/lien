@@ -87,8 +87,6 @@ describe('ConfigService', () => {
           chunkOverlap: 15,
           concurrency: 6,
           embeddingBatchSize: 60,
-          indexTests: true,
-          useImportAnalysis: true,
         },
         mcp: {
           port: 7133,
@@ -178,8 +176,6 @@ describe('ConfigService', () => {
           chunkOverlap: 12,
           concurrency: 5,
           embeddingBatchSize: 45,
-          indexTests: false,
-          useImportAnalysis: false,
         },
       };
       
@@ -222,8 +218,6 @@ describe('ConfigService', () => {
           chunkOverlap: 10,
           concurrency: 4,
           embeddingBatchSize: 50,
-          indexTests: true,
-          useImportAnalysis: true,
         },
       };
       
@@ -390,13 +384,6 @@ describe('ConfigService', () => {
           config: {
             include: [],
             exclude: [],
-            testPatterns: {
-              directories: [],
-              extensions: [],
-              prefixes: [],
-              suffixes: [],
-              frameworks: [],
-            },
           },
         }],
       };
@@ -432,8 +419,6 @@ describe('ConfigService', () => {
           chunkOverlap: 10,
           concurrency: 4,
           embeddingBatchSize: 50,
-          indexTests: true,
-          useImportAnalysis: true,
         },
         mcp: {
           port: 7133,
@@ -544,8 +529,6 @@ describe('ConfigService', () => {
           chunkOverlap: 12,
           concurrency: 6,
           embeddingBatchSize: 55,
-          indexTests: true,
-          useImportAnalysis: true,
         },
         mcp: {
           port: 7200,

@@ -22,11 +22,6 @@ interface DBRecord {
   endLine: number;
   type: string;
   language: string;
-  isTest: boolean;
-  relatedTests: string[];
-  relatedSources: string[];
-  testFramework: string;
-  detectionMethod: string;
   functionNames: string[];
   classNames: string[];
   interfaceNames: string[];
@@ -111,12 +106,7 @@ export class VectorDB implements VectorDBInterface {
         endLine: metadatas[i].endLine,
         type: metadatas[i].type,
         language: metadatas[i].language,
-        isTest: metadatas[i].isTest ?? false,
         // Ensure arrays have at least empty string for Arrow type inference
-        relatedTests: (metadatas[i].relatedTests && metadatas[i].relatedTests.length > 0) ? metadatas[i].relatedTests : [''],
-        relatedSources: (metadatas[i].relatedSources && metadatas[i].relatedSources.length > 0) ? metadatas[i].relatedSources : [''],
-        testFramework: metadatas[i].testFramework || '',
-        detectionMethod: metadatas[i].detectionMethod || '',
         functionNames: (metadatas[i].symbols?.functions && metadatas[i].symbols.functions.length > 0) ? metadatas[i].symbols.functions : [''],
         classNames: (metadatas[i].symbols?.classes && metadatas[i].symbols.classes.length > 0) ? metadatas[i].symbols.classes : [''],
         interfaceNames: (metadatas[i].symbols?.interfaces && metadatas[i].symbols.interfaces.length > 0) ? metadatas[i].symbols.interfaces : [''],
@@ -166,11 +156,6 @@ export class VectorDB implements VectorDBInterface {
             endLine: r.endLine,
             type: r.type as 'function' | 'class' | 'block',
             language: r.language,
-            isTest: r.isTest,
-            relatedTests: r.relatedTests,
-            relatedSources: r.relatedSources,
-            testFramework: r.testFramework,
-            detectionMethod: r.detectionMethod as 'convention' | 'import' | undefined,
           },
           score: r._distance ?? 0,
         }));
@@ -199,11 +184,6 @@ export class VectorDB implements VectorDBInterface {
               endLine: r.endLine,
               type: r.type as 'function' | 'class' | 'block',
               language: r.language,
-              isTest: r.isTest,
-              relatedTests: r.relatedTests,
-              relatedSources: r.relatedSources,
-              testFramework: r.testFramework,
-              detectionMethod: r.detectionMethod as 'convention' | 'import' | undefined,
             },
             score: r._distance ?? 0,
           }));
@@ -271,11 +251,6 @@ export class VectorDB implements VectorDBInterface {
           endLine: r.endLine,
           type: r.type as 'function' | 'class' | 'block',
           language: r.language,
-          isTest: r.isTest,
-          relatedTests: r.relatedTests || [],
-          relatedSources: r.relatedSources || [],
-          testFramework: r.testFramework || '',
-          detectionMethod: (r.detectionMethod as 'convention' | 'import') || undefined,
         },
         score: 0,
       }));
@@ -348,11 +323,6 @@ export class VectorDB implements VectorDBInterface {
           endLine: r.endLine,
           type: r.type as 'function' | 'class' | 'block',
           language: r.language,
-          isTest: r.isTest,
-          relatedTests: r.relatedTests || [],
-          relatedSources: r.relatedSources || [],
-          testFramework: r.testFramework || '',
-          detectionMethod: (r.detectionMethod as 'convention' | 'import') || undefined,
           symbols: {
             functions: r.functionNames || [],
             classes: r.classNames || [],

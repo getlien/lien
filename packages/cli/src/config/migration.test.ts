@@ -88,8 +88,6 @@ describe('Config Migration', () => {
           chunkOverlap: 20,
           concurrency: 8,
           embeddingBatchSize: 100,
-          indexTests: false,
-          useImportAnalysis: true,
         },
         mcp: {
           port: 8080,
@@ -142,9 +140,6 @@ describe('Config Migration', () => {
         '**/node_modules/**',
         '**/dist/**',
       ]);
-
-      // Check test patterns configured based on indexTests: false
-      expect(newConfig.frameworks[0].config.testPatterns.directories).toContain('**/__tests__/**');
     });
 
     it('should handle partial config with missing fields', () => {
@@ -156,8 +151,6 @@ describe('Config Migration', () => {
           chunkOverlap: 5,
           concurrency: 2,
           embeddingBatchSize: 25,
-          indexTests: true,
-          useImportAnalysis: false,
         },
       };
 
@@ -167,9 +160,6 @@ describe('Config Migration', () => {
       expect(newConfig.core.chunkSize).toBe(50);
       expect(newConfig.frameworks).toHaveLength(1);
       expect(newConfig.frameworks[0].config.include).toEqual(['**/*.py']);
-
-      // Test patterns should be empty since indexTests: true
-      expect(newConfig.frameworks[0].config.testPatterns.directories).toEqual([]);
     });
 
     it('should handle empty config object', () => {
@@ -195,8 +185,6 @@ describe('Config Migration', () => {
           chunkOverlap: 10,
           concurrency: 4,
           embeddingBatchSize: 50,
-          indexTests: false,
-          useImportAnalysis: true,
         },
       };
 
@@ -214,84 +202,27 @@ describe('Config Migration', () => {
       ]);
     });
 
-    it('should handle indexTests true to disable test pattern exclusions', () => {
-      const oldConfig: Partial<LegacyLienConfig> = {
-        indexing: {
-          include: ['**/*.ts'],
-          exclude: [],
-          chunkSize: 75,
-          chunkOverlap: 10,
-          concurrency: 4,
-          embeddingBatchSize: 50,
-          indexTests: true,
-          useImportAnalysis: true,
-        },
-      };
-
-      const newConfig = migrateConfig(oldConfig);
-
-      // When indexTests is true, test pattern directories should be empty
-      expect(newConfig.frameworks[0].config.testPatterns.directories).toEqual([]);
-    });
-
-    it('should handle indexTests false to enable test pattern exclusions', () => {
-      const oldConfig: Partial<LegacyLienConfig> = {
-        indexing: {
-          include: ['**/*.ts'],
-          exclude: [],
-          chunkSize: 75,
-          chunkOverlap: 10,
-          concurrency: 4,
-          embeddingBatchSize: 50,
-          indexTests: false,
-          useImportAnalysis: true,
-        },
-      };
-
-      const newConfig = migrateConfig(oldConfig);
-
-      // When indexTests is false, test pattern directories should be populated
-      expect(newConfig.frameworks[0].config.testPatterns.directories).toContain('**/__tests__/**');
-      expect(newConfig.frameworks[0].config.testPatterns.directories).toContain('**/tests/**');
-      expect(newConfig.frameworks[0].config.testPatterns.directories).toContain('**/test/**');
-    });
-    
-    it('should remove test file patterns from exclude list during migration', () => {
+    it('should preserve exclude patterns during migration', () => {
       const oldConfigWithTests: Partial<LegacyLienConfig> = {
         version: '0.2.0',
         indexing: {
           include: ['**/*.ts'],
           exclude: [
             'node_modules/**',
-            '**/*.test.ts',     // Should be removed
-            '**/*.spec.ts',     // Should be removed
-            '**/test/**',       // Should be removed
             'dist/**',
           ],
           chunkSize: 75,
           chunkOverlap: 10,
           concurrency: 4,
           embeddingBatchSize: 50,
-          indexTests: false,
-          useImportAnalysis: false,
         },
       };
       
       const migrated = migrateConfig(oldConfigWithTests);
       
-      // Test patterns should be removed from exclude list
-      expect(migrated.frameworks[0].config.exclude).not.toContain('**/*.test.ts');
-      expect(migrated.frameworks[0].config.exclude).not.toContain('**/*.spec.ts');
-      expect(migrated.frameworks[0].config.exclude).not.toContain('**/test/**');
-      
       // Non-test patterns should be preserved
       expect(migrated.frameworks[0].config.exclude).toContain('node_modules/**');
       expect(migrated.frameworks[0].config.exclude).toContain('dist/**');
-      
-      // Test patterns should be in testPatterns config
-      expect(migrated.frameworks[0].config.testPatterns.directories).toContain('**/test/**');
-      expect(migrated.frameworks[0].config.testPatterns.extensions).toContain('.test.');
-      expect(migrated.frameworks[0].config.testPatterns.extensions).toContain('.spec.');
     });
   });
 
@@ -307,8 +238,6 @@ describe('Config Migration', () => {
           chunkOverlap: 10,
           concurrency: 4,
           embeddingBatchSize: 50,
-          indexTests: false,
-          useImportAnalysis: true,
         },
       };
 
@@ -396,8 +325,6 @@ describe('Config Migration', () => {
           chunkOverlap: 30,
           concurrency: 16,
           embeddingBatchSize: 200,
-          indexTests: true,
-          useImportAnalysis: false,
         },
         mcp: {
           port: 9999,

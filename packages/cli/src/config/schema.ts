@@ -10,23 +10,11 @@ import {
 } from '../constants.js';
 
 /**
- * Framework-specific test pattern configuration
- */
-export interface TestPatternConfig {
-  directories: string[];
-  extensions: string[];
-  prefixes: string[];
-  suffixes: string[];
-  frameworks: string[];
-}
-
-/**
  * Framework-specific configuration
  */
 export interface FrameworkConfig {
   include: string[];     // File patterns relative to framework path
   exclude: string[];     // Exclude patterns relative to framework path
-  testPatterns: TestPatternConfig;
 }
 
 /**
@@ -79,8 +67,6 @@ export interface LegacyLienConfig {
     chunkOverlap: number;
     concurrency: number;
     embeddingBatchSize: number;
-    indexTests: boolean;
-    useImportAnalysis: boolean;
   };
   mcp: {
     port: number;

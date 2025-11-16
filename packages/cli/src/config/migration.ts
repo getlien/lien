@@ -63,26 +63,13 @@ export function migrateConfig(oldConfig: Partial<LegacyLienConfig>): LienConfig 
 
   // Convert old indexing config to a single "generic" framework
   if (oldConfig.indexing) {
-    // Remove test file patterns from exclude list (v0.3.0 handles tests differently)
-    const testPatterns = [
-      '**/*.test.ts', '**/*.test.tsx', '**/*.test.js', '**/*.test.jsx',
-      '**/*.spec.ts', '**/*.spec.tsx', '**/*.spec.js', '**/*.spec.jsx',
-      '**/test/**', '**/tests/**', '**/__tests__/**',
-    ];
-    
-    const cleanExclude = (oldConfig.indexing.exclude ?? []).filter(
-      pattern => !testPatterns.some(testPattern => 
-        pattern === testPattern || pattern.includes('test')
-      )
-    );
-    
     const genericFramework: FrameworkInstance = {
       name: 'generic',
       path: '.',
       enabled: true,
       config: {
         include: oldConfig.indexing.include ?? ['**/*.{ts,tsx,js,jsx,py,go,rs,java,c,cpp,cs}'],
-        exclude: cleanExclude.length > 0 ? cleanExclude : [
+        exclude: oldConfig.indexing.exclude ?? [
           '**/node_modules/**',
           '**/dist/**',
           '**/build/**',
@@ -92,15 +79,6 @@ export function migrateConfig(oldConfig: Partial<LegacyLienConfig>): LienConfig 
           '**/.nuxt/**',
           '**/vendor/**',
         ],
-        testPatterns: {
-          // If indexTests was true, leave directories empty (index all tests)
-          // If indexTests was false, populate directories to exclude tests
-          directories: oldConfig.indexing.indexTests ? [] : ['**/__tests__/**', '**/tests/**', '**/test/**'],
-          extensions: ['.test.', '.spec.'],
-          prefixes: ['test_', 'test-'],
-          suffixes: ['_test', '-test', '.test', '.spec'],
-          frameworks: [],
-        },
       },
     };
 
@@ -123,13 +101,6 @@ export function migrateConfig(oldConfig: Partial<LegacyLienConfig>): LienConfig 
           '**/.nuxt/**',
           '**/vendor/**',
         ],
-        testPatterns: {
-          directories: ['**/__tests__/**', '**/tests/**', '**/test/**'],
-          extensions: ['.test.', '.spec.'],
-          prefixes: ['test_', 'test-'],
-          suffixes: ['_test', '-test', '.test', '.spec'],
-          frameworks: [],
-        },
       },
     };
 

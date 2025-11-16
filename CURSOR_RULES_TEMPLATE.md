@@ -12,10 +12,9 @@ This project uses **Lien** - a local semantic code search MCP server. You MUST u
 1. **Before reading any file** - Use `semantic_search` or `get_file_context` to understand what you're looking for
 2. **User asks about code location** - Use `semantic_search` before grepping
 3. **User asks "how does X work"** - Use `semantic_search` to find implementations
-4. **Before making changes** - Use `get_file_context` to understand dependencies and see test coverage
+4. **Before making changes** - Use `get_file_context` to understand dependencies
 5. **User asks for examples** - Use `find_similar` to locate patterns
 6. **Exploring unfamiliar code** - Use `semantic_search` with broad queries first
-7. **Working with tests** - Check metadata in search results for test associations
 
 ### NEVER:
 1. Skip Lien and go straight to reading files when you don't know the codebase
@@ -111,13 +110,7 @@ list_functions({
 - ✅ Use `list_functions` when you know the naming pattern (e.g., "all Controllers")
 - ✅ Use `semantic_search` when searching by functionality (e.g., "handles authentication")
 
-**Note on Test Associations:**
-All Lien tools automatically include test association metadata. When you use `get_file_context` or `semantic_search`, the results include:
-- `metadata.isTest`: Whether the file is a test
-- `metadata.relatedTests`: Array of associated test files
-- `metadata.relatedSources`: Array of source files (if it's a test)
-- `metadata.testFramework`: Detected framework (jest, pytest, etc.)
-- `metadata.detectionMethod`: How associations were found
+**Note:** Test files are indexed alongside source code and will naturally appear in semantic search results when relevant.
 
 ---
 

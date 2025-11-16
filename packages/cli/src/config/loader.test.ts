@@ -61,13 +61,6 @@ describe('Config Loader', () => {
             config: {
               include: ['**/*.ts'],
               exclude: ['custom-exclude/**'],
-              testPatterns: {
-                directories: ['**/__tests__/**'],
-                extensions: ['.test.'],
-                prefixes: ['test_'],
-                suffixes: ['_test'],
-                frameworks: [],
-              },
             },
           },
         ],
@@ -117,13 +110,6 @@ describe('Config Loader', () => {
             config: {
               include: ['src/**/*.ts'],
               exclude: [],
-              testPatterns: {
-                directories: [],
-                extensions: [],
-                prefixes: [],
-                suffixes: [],
-                frameworks: [],
-              },
             },
           },
         ],
@@ -148,8 +134,6 @@ describe('Config Loader', () => {
           chunkOverlap: 20,
           concurrency: 8,
           embeddingBatchSize: 100,
-          indexTests: false,
-          useImportAnalysis: true,
         },
         mcp: {
           port: 8080,

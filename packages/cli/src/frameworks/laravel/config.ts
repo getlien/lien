@@ -1,5 +1,4 @@
 import { FrameworkConfig } from '../../config/schema.js';
-import { laravelTestPatterns } from './test-patterns.js';
 
 /**
  * Generate Laravel framework configuration
@@ -25,7 +24,6 @@ export async function generateLaravelConfig(
       'public/**',
       'node_modules/**',
     ],
-    testPatterns: laravelTestPatterns,
   };
 }
 

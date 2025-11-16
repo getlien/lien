@@ -9,7 +9,6 @@ Lien is a local-first semantic code search tool that provides deep codebase cont
 - 🔒 **100% Local & Private** - Code never leaves your machine
 - 🚀 **Semantic Search** - Natural language queries to find relevant code
 - 🎯 **MCP Integration** - Works seamlessly with Cursor and other MCP-compatible tools
-- 🧪 **Test Association** - Automatically links tests with source code across 12 languages
 - ⚡ **Fast** - Queries return in <500ms, indexing completes in minutes
 - 🆓 **Free Forever** - No API costs, no subscriptions
 - 📦 **Zero Config** - Works out of the box with sensible defaults
@@ -349,71 +348,6 @@ List all indexed functions and classes (optionally filtered).
 ```
 List all functions matching "handle.*Request"
 ```
-
-## Test Association
-
-Lien automatically detects and links test files with their source code across **12 languages**: TypeScript/JavaScript, Python, Go, PHP, Java, Rust, C#, Ruby, Kotlin, Swift, Scala, and C/C++.
-
-### Two-Pass Detection System
-
-1. **Convention-based** (~80% accuracy): Uses language-specific patterns:
-   - **TypeScript/JS**: `.test.ts`, `.spec.ts`, `__tests__/` directory
-   - **Python**: `test_*.py`, `*_test.py`, `tests/` directory
-   - **Go**: `*_test.go`
-   - **PHP**: `*Test.php`, `tests/` directory
-   - **Java**: `*Test.java`, `src/test/` directory
-   - And more for all 12 languages
-
-2. **Import analysis** (~90% accuracy for Tier 1): For TypeScript/JavaScript, Python, Go, and PHP, Lien analyzes import statements to find additional associations missed by conventions.
-
-### Configuration
-
-Test association is enabled by default. To customize:
-
-```json
-{
-  "indexing": {
-    "indexTests": true,              // Enable test indexing (default: true)
-    "useImportAnalysis": true        // Enable import analysis (default: true)
-  }
-}
-```
-
-### Accessing Test Associations
-
-Test associations are automatically included in the metadata for all Lien tools:
-
-**Via `get_file_context`:**
-```typescript
-get_file_context({ filepath: "src/components/Button.tsx" })
-// Returns:
-{
-  file: "src/components/Button.tsx",
-  chunks: [...],
-  testAssociations: {
-    isTest: false,
-    relatedTests: ["tests/components/Button.test.tsx"],
-    testFramework: "jest",
-    detectionMethod: "convention"
-  }
-}
-```
-
-**Via `semantic_search`:**
-All search results include test association metadata in each chunk:
-```typescript
-semantic_search({ query: "Button component" })
-// Each result includes: metadata.isTest, metadata.relatedTests, etc.
-```
-
-**Natural language queries work too:**
-```
-"Show me the tests for Button.tsx"
-"What does this test file cover?"
-"Find the implementation that Button.test.tsx is testing"
-```
-
-Cursor will use semantic search to find the relevant code and automatically see the test associations in the metadata.
 
 ## How It Works
 

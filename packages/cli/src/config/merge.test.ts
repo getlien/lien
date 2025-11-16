@@ -104,13 +104,6 @@ describe('deepMergeConfig', () => {
           config: {
             include: ['**/*.ts'],
             exclude: [],
-            testPatterns: {
-              directories: [],
-              extensions: [],
-              prefixes: [],
-              suffixes: [],
-              frameworks: [],
-            },
           },
         },
       ],

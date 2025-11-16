@@ -593,13 +593,6 @@ export class ConfigService {
         }
       });
     }
-    
-    // Validate test patterns
-    if (!config.testPatterns) {
-      errors.push(`${prefix} missing required field: testPatterns`);
-    } else if (typeof config.testPatterns !== 'object') {
-      errors.push(`${prefix}.testPatterns must be an object`);
-    }
   }
 }
 

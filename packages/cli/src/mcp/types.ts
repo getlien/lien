@@ -1,5 +1,4 @@
 import { SearchResult } from '../vectordb/types.js';
-import { TestAssociation } from '../indexer/types.js';
 
 /**
  * Metadata about the index state
@@ -19,24 +18,12 @@ export interface SearchResultResponse {
 }
 
 /**
- * Test association information for file context
- */
-export interface FileTestAssociation {
-  isTest: boolean;
-  testFramework?: string;
-  relatedTests?: string[];
-  relatedSources?: string[];
-  detectionMethod?: string;
-}
-
-/**
  * Response for get_file_context tool
  */
 export interface FileContextResponse {
   indexInfo: IndexMetadata;
   file: string;
   chunks: SearchResult[];
-  testAssociations?: FileTestAssociation;
   note?: string;
 }
 
@@ -80,19 +67,6 @@ export function createIndexMetadata(
     lastIndexed,
     version,
     hasData,
-  };
-}
-
-/**
- * Helper to create test association from chunk metadata
- */
-export function createFileTestAssociation(association: TestAssociation): FileTestAssociation {
-  return {
-    isTest: association.isTest,
-    testFramework: association.testFramework,
-    relatedTests: association.relatedTests,
-    relatedSources: association.relatedSources,
-    detectionMethod: association.detectionMethod,
   };
 }
 

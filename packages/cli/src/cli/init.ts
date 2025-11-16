@@ -104,13 +104,6 @@ async function createNewConfig(rootDir: string, options: InitOptions) {
           '**/.nuxt/**',
           '**/vendor/**',
         ],
-        testPatterns: {
-          directories: ['**/__tests__/**', '**/tests/**', '**/test/**'],
-          extensions: ['.test.', '.spec.'],
-          prefixes: ['test_', 'test-'],
-          suffixes: ['_test', '-test', '.test', '.spec'],
-          frameworks: [],
-        },
       },
     });
   } else {
@@ -309,26 +302,11 @@ async function promptForCustomization(frameworkName: string, config: FrameworkCo
       default: config.exclude.join(', '),
       filter: (input: string) => input.split(',').map(s => s.trim()),
     },
-    {
-      type: 'confirm',
-      name: 'indexTests',
-      message: 'Index test files?',
-      default: config.testPatterns.directories.length === 0,
-    },
   ]);
   
   return {
     include: answers.include,
     exclude: answers.exclude,
-    testPatterns: answers.indexTests
-      ? {
-          directories: [],
-          extensions: [],
-          prefixes: [],
-          suffixes: [],
-          frameworks: [],
-        }
-      : config.testPatterns,
   };
 }
 

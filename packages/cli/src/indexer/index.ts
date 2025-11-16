@@ -1,20 +1,14 @@
 import fs from 'fs/promises';
-import path from 'path';
 import ora from 'ora';
 import chalk from 'chalk';
 import pLimit from 'p-limit';
-import { scanCodebase, scanCodebaseWithFrameworks, detectLanguage } from './scanner.js';
+import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
 import { chunkFile } from './chunker.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { configService } from '../config/service.js';
-import { CodeChunk, TestAssociation } from './types.js';
+import { CodeChunk } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
-import { detectTestFramework, isTestFile } from './test-patterns.js';
-import { analyzeImports } from './import-analyzer.js';
-import { TestAssociationManager } from './test-association-manager.js';
-import { toRelativePath } from '../types/paths.js';
-import type { LienConfig } from '../config/schema.js';
 import { isLegacyConfig, isModernConfig } from '../config/schema.js';
 
 export interface IndexingOptions {
@@ -27,93 +21,8 @@ interface ChunkWithContent {
   content: string;
 }
 
-// findOwningFramework is now imported from test-patterns.js
-
-/**
- * Two-pass test detection system:
- * Pass 1: Convention-based for all 12 languages (~80% accuracy)
- * Pass 2: Import analysis for Tier 1 only (~90% accuracy)
- * 
- * Updated to use TestAssociationManager for better performance and maintainability
- */
-async function analyzeTestAssociations(
-  files: string[],
-  rootDir: string,
-  config: LienConfig,
-  _spinner: ReturnType<typeof ora>,
-  verbose: boolean = false
-): Promise<Map<string, TestAssociation>> {
-  // Convert to type-safe relative paths
-  // This will throw if any paths are accidentally absolute
-  const relativeFiles = files.map(f => toRelativePath(f));
-  
-  // Build associations using the manager (Pass 1: Convention-based)
-  const manager = new TestAssociationManager(
-    relativeFiles,
-    config.frameworks,
-    verbose
-  );
-  
-  manager.buildAssociations();
-  
-  // Pass 2: Import analysis (Tier 1 only, if enabled)
-  // Note: Legacy configs with useImportAnalysis are supported for backward compatibility
-  if (isLegacyConfig(config) && config.indexing.useImportAnalysis) {
-    const tier1Languages = ['typescript', 'javascript', 'python', 'go', 'php'];
-    const importAssociations = await analyzeImports(files, tier1Languages, rootDir);
-    
-    // Merge: imports add missed associations and override convention where found
-    mergeTestAssociations(manager.getAssociations(), importAssociations);
-  }
-  
-  if (verbose) {
-    const stats = manager.getStats();
-    console.log(chalk.cyan('\n[Statistics]'));
-    console.log(chalk.cyan(`  Total files: ${stats.totalFiles}`));
-    console.log(chalk.cyan(`  Source files: ${stats.sourceFiles} (${stats.sourcesWithTests} with tests)`));
-    console.log(chalk.cyan(`  Test files: ${stats.testFiles} (${stats.testsWithSources} found sources)`));
-  }
-  
-  return manager.getAssociations();
-    }
-    
-// findTestsByConvention has been replaced by TestAssociationManager
-// (see test-association-manager.ts)
-
-/**
- * Merge import-based associations with convention-based ones
- */
-function mergeTestAssociations(
-  conventionAssociations: Map<string, TestAssociation>,
-  importAssociations: Map<string, string[]>
-): void {
-  for (const [file, importedFiles] of importAssociations) {
-    const existing = conventionAssociations.get(file);
-    if (existing) {
-      // Merge imported files into existing associations
-      if (existing.isTest) {
-        // For test files, add to relatedSources
-        const combined = new Set([...(existing.relatedSources || []), ...importedFiles]);
-        existing.relatedSources = Array.from(combined);
-      } else {
-        // For source files, check if any imports are test files
-        for (const importedFile of importedFiles) {
-          const importedAssoc = conventionAssociations.get(importedFile);
-          if (importedAssoc?.isTest) {
-            const combined = new Set([...(existing.relatedTests || []), importedFile]);
-            existing.relatedTests = Array.from(combined);
-          }
-        }
-      }
-      // Mark as enhanced by imports
-      existing.detectionMethod = 'import';
-    }
-  }
-}
-
 export async function indexCodebase(options: IndexingOptions = {}): Promise<void> {
   const rootDir = options.rootDir ?? process.cwd();
-  const verbose = options.verbose ?? false;
   const spinner = ora('Starting indexing process...').start();
   
   try {
@@ -151,53 +60,19 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     
     spinner.text = `Found ${files.length} files`;
     
-    // 3. Analyze test associations (if enabled)
-    let testAssociations = new Map<string, TestAssociation>();
-    const hasFrameworks = isModernConfig(config) && config.frameworks.length > 0;
-    const indexTests = hasFrameworks || (isLegacyConfig(config) && config.indexing.indexTests);
-    
-    if (indexTests && hasFrameworks) {
-      spinner.start('Analyzing test associations...');
-      // Convert absolute paths to relative for test pattern matching
-      const relativeFiles = files.map(f => path.relative(rootDir, f));
-      const relativeAssociations = await analyzeTestAssociations(relativeFiles, rootDir, config, spinner, verbose);
-      
-      // Keep paths relative (matching the files array format)
-      testAssociations = relativeAssociations;
-      
-      const testFileCount = Array.from(testAssociations.values()).filter(a => a.isTest).length;
-      const sourceWithTestsCount = Array.from(testAssociations.values()).filter(a => !a.isTest && (a.relatedTests?.length ?? 0) > 0).length;
-      spinner.succeed(`Found ${testFileCount} test files with ${sourceWithTestsCount} source files that have tests`);
-      
-      if (verbose && sourceWithTestsCount === 0 && testFileCount > 0) {
-        // Show debug info when verbose is enabled
-        const sampleTest = relativeFiles.find(f => {
-          const lang = detectLanguage(f);
-          return isTestFile(f, lang);
-        });
-        const sampleSource = relativeFiles.find(f => {
-          const lang = detectLanguage(f);
-          return !isTestFile(f, lang);
-        });
-        console.log(chalk.yellow(`\n[Verbose] No source→test associations found`));
-        if (sampleTest) console.log(chalk.gray(`[Verbose] Sample test file: ${sampleTest}`));
-        if (sampleSource) console.log(chalk.gray(`[Verbose] Sample source file: ${sampleSource}\n`));
-      }
-    }
-    
-    // 4. Initialize embeddings model
+    // 3. Initialize embeddings model
     spinner.text = 'Loading embedding model (this may take a minute on first run)...';
     const embeddings = new LocalEmbeddings();
     await embeddings.initialize();
     spinner.succeed('Embedding model loaded');
     
-    // 5. Initialize vector database
+    // 4. Initialize vector database
     spinner.start('Initializing vector database...');
     const vectorDB = new VectorDB(rootDir);
     await vectorDB.initialize();
     spinner.succeed('Vector database initialized');
     
-    // 6. Process files concurrently
+    // 5. Process files concurrently
     const concurrency = isModernConfig(config) 
       ? config.core.concurrency 
       : 4;
@@ -258,23 +133,6 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           if (chunks.length === 0) {
             processedFiles++;
             return;
-          }
-          
-          // Enrich chunks with test association metadata
-          const association = testAssociations.get(file);
-          if (association) {
-            const language = detectLanguage(file);
-            const testFramework = association.isTest 
-              ? detectTestFramework(content, language) 
-              : undefined;
-            
-            for (const chunk of chunks) {
-              chunk.metadata.isTest = association.isTest;
-              chunk.metadata.relatedTests = association.relatedTests;
-              chunk.metadata.relatedSources = association.relatedSources;
-              chunk.metadata.testFramework = testFramework;
-              chunk.metadata.detectionMethod = association.detectionMethod;
-            }
           }
           
           // Add chunks to accumulator

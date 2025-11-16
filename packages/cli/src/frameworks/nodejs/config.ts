@@ -1,5 +1,4 @@
 import { FrameworkConfig } from '../../config/schema.js';
-import { nodejsTestPatterns } from './test-patterns.js';
 
 /**
  * Generate Node.js framework configuration
@@ -35,7 +34,6 @@ export async function generateNodeJsConfig(
       '*.min.css',
       '*.bundle.js',
     ],
-    testPatterns: nodejsTestPatterns,
   };
 }
 

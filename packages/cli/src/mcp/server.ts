@@ -137,17 +137,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           await checkAndReconnect();
           
           const queryEmbedding = await embeddings.embed(query);
-          const rawResults = await vectorDB.search(queryEmbedding, limit);
-          
-          // Filter out empty strings from test association arrays
-          const results = rawResults.map(r => ({
-            ...r,
-            metadata: {
-              ...r.metadata,
-              relatedTests: (r.metadata.relatedTests ?? []).filter((t: string) => t && t.trim().length > 0),
-              relatedSources: (r.metadata.relatedSources ?? []).filter((s: string) => s && s.trim().length > 0),
-            },
-          }));
+          const results = await vectorDB.search(queryEmbedding, limit);
           
           log(`Found ${results.length} results`);
           
@@ -176,17 +166,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           await checkAndReconnect();
           
           const codeEmbedding = await embeddings.embed(code);
-          const rawResults = await vectorDB.search(codeEmbedding, limit);
-          
-          // Filter out empty strings from test association arrays
-          const results = rawResults.map(r => ({
-            ...r,
-            metadata: {
-              ...r.metadata,
-              relatedTests: (r.metadata.relatedTests ?? []).filter((t: string) => t && t.trim().length > 0),
-              relatedSources: (r.metadata.relatedSources ?? []).filter((s: string) => s && s.trim().length > 0),
-            },
-          }));
+          const results = await vectorDB.search(codeEmbedding, limit);
           
           log(`Found ${results.length} similar chunks`);
           
@@ -226,22 +206,6 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           
           let results = fileChunks;
           
-          // Extract test associations from metadata
-          const testAssociations = fileChunks.length > 0 ? {
-            isTest: fileChunks[0].metadata.isTest ?? false,
-            relatedTests: (fileChunks[0].metadata.relatedTests ?? []).filter((t: string) => t && t.trim().length > 0),
-            relatedSources: (fileChunks[0].metadata.relatedSources ?? []).filter((s: string) => s && s.trim().length > 0),
-            testFramework: fileChunks[0].metadata.testFramework ?? null,
-            detectionMethod: fileChunks[0].metadata.detectionMethod ?? null,
-          } : null;
-          
-          // Only include test associations if we have actual data (not from old index)
-          const hasTestData = testAssociations && (
-            testAssociations.isTest === true || 
-            testAssociations.relatedTests.length > 0 || 
-            testAssociations.relatedSources.length > 0
-          );
-          
           if (includeRelated && fileChunks.length > 0) {
             // Get related chunks by searching with the first chunk's content
             const relatedEmbedding = await embeddings.embed(fileChunks[0].content);
@@ -257,27 +221,11 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           
           log(`Found ${results.length} chunks`);
           
-          // Format response with test associations
-          interface FileContextResponse {
-            indexInfo: ReturnType<typeof getIndexMetadata>;
-            file: string;
-            chunks: typeof results;
-            testAssociations?: typeof testAssociations;
-            note?: string;
-          }
-          
-          const response: FileContextResponse = {
+          const response = {
             indexInfo: getIndexMetadata(),
             file: filepath,
             chunks: results,
           };
-          
-          if (hasTestData) {
-            response.testAssociations = testAssociations;
-          } else if (fileChunks.length > 0) {
-            // Index doesn't have test association data - inform user to reindex
-            response.note = 'Test associations not available. Run "lien reindex" to enable test detection.';
-          }
           
           return {
             content: [
