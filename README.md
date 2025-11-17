@@ -135,7 +135,7 @@ Lien will:
 ### Supported Frameworks
 
 - **Node.js/TypeScript**: Automatic detection via `package.json`, supports Jest, Vitest, Mocha, AVA
-- **Laravel/PHP**: Automatic detection via `composer.json`, supports PHPUnit, Pest
+- **Laravel/PHP**: Automatic detection via `composer.json`. Indexes PHP backend (`app/`, `routes/`, `config/`), frontend assets (`resources/js/**/*.{js,ts,jsx,tsx,vue}`), and Blade templates
 
 More frameworks coming soon! See [CONTRIBUTING.md](./CONTRIBUTING.md) to add support for your framework.
 
@@ -405,7 +405,12 @@ Lien is built with:
 - **transformers.js** for local embeddings (no external API calls)
 - **LanceDB** for vector storage
 - **MCP SDK** for Cursor integration
+
 - **Commander.js** for CLI
+
+### Supported Languages
+
+Lien indexes and understands code in: TypeScript, JavaScript (including JSX/TSX), Vue, Python, PHP, Go, Rust, Java, C/C++, Ruby, Swift, Kotlin, C#, and Scala.
 
 See [local-architecture.md](./local-architecture.md) for detailed architecture documentation.
 

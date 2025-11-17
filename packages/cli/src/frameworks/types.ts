@@ -19,6 +19,14 @@ export interface FrameworkDetector {
   name: string;          // Unique framework identifier
   
   /**
+   * Priority for conflict resolution (higher = takes precedence)
+   * - 100: Specific frameworks (Laravel, Rails, Django)
+   * - 50: Generic frameworks (Node.js, Python)
+   * - 0: Fallback/generic
+   */
+  priority?: number;
+  
+  /**
    * Detect if this framework exists at the given path
    * @param rootDir - Absolute path to project root
    * @param relativePath - Relative path from root to check (e.g., '.' or 'packages/cli')

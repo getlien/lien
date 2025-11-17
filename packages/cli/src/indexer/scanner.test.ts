@@ -53,6 +53,11 @@ describe('detectLanguage', () => {
     expect(detectLanguage('Router.php')).toBe('php');
   });
 
+  it('should detect Vue files', () => {
+    expect(detectLanguage('App.vue')).toBe('vue');
+    expect(detectLanguage('UserList.vue')).toBe('vue');
+  });
+
   it('should detect Ruby files', () => {
     expect(detectLanguage('app.rb')).toBe('ruby');
     expect(detectLanguage('script.rb')).toBe('ruby');

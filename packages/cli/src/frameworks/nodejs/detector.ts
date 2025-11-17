@@ -8,6 +8,7 @@ import { generateNodeJsConfig } from './config.js';
  */
 export const nodejsDetector: FrameworkDetector = {
   name: 'nodejs',
+  priority: 50, // Generic, yields to specific frameworks like Laravel
   
   async detect(rootDir: string, relativePath: string): Promise<DetectionResult> {
     const fullPath = path.join(rootDir, relativePath);

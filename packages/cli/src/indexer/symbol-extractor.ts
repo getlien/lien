@@ -54,6 +54,12 @@ export function extractSymbols(
       symbols.interfaces = extractPHPInterfaces(content);
       break;
     
+    case 'vue':
+      // Extract from <script> blocks (handles both Options API and Composition API)
+      symbols.functions = extractVueFunctions(content);
+      symbols.classes = extractVueComponents(content);
+      break;
+    
     case 'go':
       symbols.functions = extractGoFunctions(content);
       symbols.interfaces = extractGoInterfaces(content);
@@ -389,6 +395,56 @@ function extractRustFunctions(content: string): string[] {
   const traitMatches = content.matchAll(/(?:pub\s+)?trait\s+(\w+)/g);
   for (const match of traitMatches) {
     names.add(match[1]);
+  }
+  
+  return Array.from(names);
+}
+
+// Vue Functions
+function extractVueFunctions(content: string): string[] {
+  const names = new Set<string>();
+  
+  // Extract script content from Vue SFC
+  const scriptMatch = content.match(/<script[^>]*>([\s\S]*?)<\/script>/);
+  if (!scriptMatch) return [];
+  
+  const scriptContent = scriptMatch[1];
+  
+  // Composition API: const/function name = ...
+  const compositionMatches = scriptContent.matchAll(/(?:const|function)\s+(\w+)\s*=/g);
+  for (const match of compositionMatches) {
+    names.add(match[1]);
+  }
+  
+  // Options API methods
+  const methodMatches = scriptContent.matchAll(/(\w+)\s*\([^)]*\)\s*{/g);
+  for (const match of methodMatches) {
+    names.add(match[1]);
+  }
+  
+  return Array.from(names);
+}
+
+// Vue Components
+function extractVueComponents(content: string): string[] {
+  const names = new Set<string>();
+  
+  // Extract component name from filename convention or export
+  const scriptMatch = content.match(/<script[^>]*>([\s\S]*?)<\/script>/);
+  if (!scriptMatch) return [];
+  
+  const scriptContent = scriptMatch[1];
+  
+  // export default { name: 'ComponentName' }
+  const nameMatch = scriptContent.match(/name:\s*['"](\w+)['"]/);
+  if (nameMatch) {
+    names.add(nameMatch[1]);
+  }
+  
+  // defineComponent or <script setup> components
+  const defineComponentMatch = scriptContent.match(/defineComponent\s*\(/);
+  if (defineComponentMatch) {
+    names.add('VueComponent');
   }
   
   return Array.from(names);

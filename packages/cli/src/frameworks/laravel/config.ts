@@ -9,6 +9,7 @@ export async function generateLaravelConfig(
 ): Promise<FrameworkConfig> {
   return {
     include: [
+      // PHP backend
       'app/**/*.php',
       'routes/**/*.php',
       'config/**/*.php',
@@ -16,6 +17,14 @@ export async function generateLaravelConfig(
       'resources/**/*.php',
       'tests/**/*.php',
       '*.php',
+      // Frontend assets (Vue/React/Inertia)
+      'resources/js/**/*.js',
+      'resources/js/**/*.ts',
+      'resources/js/**/*.jsx',
+      'resources/js/**/*.tsx',
+      'resources/js/**/*.vue',
+      // Blade templates
+      'resources/views/**/*.blade.php',
     ],
     exclude: [
       'vendor/**',

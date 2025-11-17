@@ -8,6 +8,7 @@ import { generateLaravelConfig } from './config.js';
  */
 export const laravelDetector: FrameworkDetector = {
   name: 'laravel',
+  priority: 100, // Laravel takes precedence over Node.js
   
   async detect(rootDir: string, relativePath: string): Promise<DetectionResult> {
     const fullPath = path.join(rootDir, relativePath);

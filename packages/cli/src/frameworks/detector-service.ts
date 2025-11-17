@@ -42,17 +42,42 @@ async function detectAtPath(
   }
   visited.add(fullPath);
   
-  // Run all detectors
+  // Run all detectors and collect results
+  const detectedAtPath: Array<DetectionResult & { priority: number }> = [];
+  
   for (const detector of frameworkDetectors) {
     try {
       const result = await detector.detect(rootDir, relativePath);
       if (result.detected) {
-        results.push(result);
+        detectedAtPath.push({
+          ...result,
+          priority: detector.priority ?? 0,
+        });
       }
     } catch (error) {
       // Log error but continue with other detectors
       console.error(`Error running detector '${detector.name}' at ${relativePath}:`, error);
     }
+  }
+  
+  // Conflict resolution: if multiple frameworks detected at same path,
+  // only keep the highest priority one
+  if (detectedAtPath.length > 1) {
+    // Sort by priority (highest first)
+    detectedAtPath.sort((a, b) => b.priority - a.priority);
+    
+    // Keep only the highest priority framework
+    const winner = detectedAtPath[0];
+    results.push(winner);
+    
+    // Optional: Log what was skipped
+    const skipped = detectedAtPath.slice(1);
+    if (skipped.length > 0) {
+      const skippedNames = skipped.map(d => d.name).join(', ');
+      console.log(`  → Skipping ${skippedNames} at ${relativePath} (${winner.name} takes precedence)`);
+    }
+  } else if (detectedAtPath.length === 1) {
+    results.push(detectedAtPath[0]);
   }
 }
 

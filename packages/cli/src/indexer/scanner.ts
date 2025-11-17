@@ -158,6 +158,7 @@ export function detectLanguage(filepath: string): string {
     '.jsx': 'javascript',
     '.mjs': 'javascript',
     '.cjs': 'javascript',
+    '.vue': 'vue',
     '.py': 'python',
     '.go': 'go',
     '.rs': 'rust',
