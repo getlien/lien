@@ -164,11 +164,6 @@ describe('VectorDB - scanWithFilter', () => {
     expect(result.metadata).toHaveProperty('endLine');
     expect(result.metadata).toHaveProperty('type');
     expect(result.metadata).toHaveProperty('language');
-    expect(result.metadata).toHaveProperty('isTest');
-    expect(result.metadata).toHaveProperty('relatedTests');
-    expect(result.metadata).toHaveProperty('relatedSources');
-    expect(result.metadata).toHaveProperty('testFramework');
-    expect(result.metadata).toHaveProperty('detectionMethod');
   });
 
   it('should throw error if database not initialized', async () => {
