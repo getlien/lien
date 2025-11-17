@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.6.1] - 2025-11-17
+
+### Fixed
+- **Laravel takes precedence over Node.js, add frontend support**
+
+
 ## [0.6.0] - 2025-11-16
 
 ### Changed
