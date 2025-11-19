@@ -252,15 +252,16 @@ async function createNewConfig(rootDir: string, options: InitOptions) {
             console.log(chalk.dim('Skipped Cursor rules installation (preserving existing file)'));
           }
         } else {
-          // .cursor/rules doesn't exist, create it as a file
-          targetPath = rulesPath;
+          // .cursor/rules doesn't exist, create it as a directory
+          await fs.mkdir(rulesPath, { recursive: true });
+          targetPath = path.join(rulesPath, 'lien.mdc');
           await fs.copyFile(templatePath, targetPath);
-          console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules'));
+          console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
         }
       } catch (error) {
         console.log(chalk.yellow('⚠️  Could not install Cursor rules'));
         console.log(chalk.dim(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`));
-        console.log(chalk.dim('You can manually copy CURSOR_RULES_TEMPLATE.md to .cursor/rules'));
+        console.log(chalk.dim('You can manually copy CURSOR_RULES_TEMPLATE.md to .cursor/rules/lien.mdc'));
       }
     }
   }

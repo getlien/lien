@@ -12,10 +12,9 @@ This project uses **Lien** - a local semantic code search MCP server. You MUST u
 1. **Before reading any file** - Use `semantic_search` or `get_file_context` to understand what you're looking for
 2. **User asks about code location** - Use `semantic_search` before grepping
 3. **User asks "how does X work"** - Use `semantic_search` to find implementations
-4. **Before making changes** - Use `get_file_context` to understand dependencies and see test coverage
+4. **Before making changes** - Use `get_file_context` to understand dependencies
 5. **User asks for examples** - Use `find_similar` to locate patterns
 6. **Exploring unfamiliar code** - Use `semantic_search` with broad queries first
-7. **Working with tests** - Check metadata in search results for test associations
 
 ### NEVER:
 1. Skip Lien and go straight to reading files when you don't know the codebase
@@ -80,28 +79,38 @@ find_similar({
 - Consistency: ensure new code matches existing patterns
 - Duplication detection
 
-### `list_functions`
-**Use for codebase overview and pattern matching.**
+### `list_functions` ⚡ NEW in v0.5.0
+**Fast symbol-based search for functions, classes, and interfaces by name.**
 
 ```typescript
 list_functions({
-  pattern: "handle.*",  // optional regex
-  language: "typescript"  // optional filter
+  pattern: ".*Controller.*",  // regex to match symbol names
+  language: "php"  // optional language filter
 })
 ```
 
-**Use for:**
-- Getting structural overview
-- Finding all functions/classes matching a naming pattern
-- Understanding code organization
+**How it works:**
+- Extracts and indexes function/class/interface names during indexing
+- Direct symbol name matching (not semantic search)
+- **10x faster** than semantic search for finding specific symbols
+- Automatic fallback for old indices
 
-**Note on Test Associations:**
-All Lien tools automatically include test association metadata. When you use `get_file_context` or `semantic_search`, the results include:
-- `metadata.isTest`: Whether the file is a test
-- `metadata.relatedTests`: Array of associated test files
-- `metadata.relatedSources`: Array of source files (if it's a test)
-- `metadata.testFramework`: Detected framework (jest, pytest, etc.)
-- `metadata.detectionMethod`: How associations were found
+**Use for:**
+- Finding all classes matching a pattern (e.g., `.*Controller.*`, `.*Service$`)
+- Getting structural overview of functions/classes
+- Discovering API endpoints, handlers, or utilities by name pattern
+- Understanding code organization and naming conventions
+
+**Best practices:**
+- Use regex patterns that match naming conventions: `.*Controller.*`, `handle.*`, `get.*`
+- Combine with language filter for large codebases: `language: "typescript"`
+- For best results: run `lien reindex` after upgrading to v0.5.0
+
+**When to use `list_functions` vs `semantic_search`:**
+- ✅ Use `list_functions` when you know the naming pattern (e.g., "all Controllers")
+- ✅ Use `semantic_search` when searching by functionality (e.g., "handles authentication")
+
+**Note:** Test files are indexed alongside source code and will naturally appear in semantic search results when relevant.
 
 ---
 
@@ -156,6 +165,19 @@ All Lien tools automatically include test association metadata. When you use `ge
 4. Analyze and suggest improvements
 ```
 
+### Pattern 7: Finding All Classes/Functions by Name Pattern ⚡ NEW
+```
+1. list_functions({ pattern: ".*Controller.*", language: "php" })
+2. Review the list of matching classes
+3. Use get_file_context on specific files for deeper investigation
+4. Answer user's structural/architectural questions
+```
+
+**Example queries:**
+- "Show me all Controllers" → `list_functions({ pattern: ".*Controller.*" })`
+- "What Services exist?" → `list_functions({ pattern: ".*Service.*" })`
+- "Find all API handlers" → `list_functions({ pattern: "handle.*" })`
+
 ---
 
 ## Decision Tree: Lien vs Other Tools
@@ -165,6 +187,14 @@ All Lien tools automatically include test association metadata. When you use `ge
 ✅ You need to understand what code exists before editing
 ✅ Looking for patterns, implementations, handlers, validators, etc.
 ✅ Exploring unfamiliar parts of codebase
+✅ Searching by what code **does** (behavior, functionality)
+
+### Use `list_functions` when: ⚡ NEW
+✅ User asks "show me all Controllers" or similar structural queries
+✅ Looking for classes/functions matching a **naming pattern**
+✅ Getting architectural overview (all Services, all Handlers, etc.)
+✅ Searching by what code is **named** (symbol names, not behavior)
+✅ Need fast results for known naming conventions
 
 ### Use `grep` when:
 ✅ User provides exact function/variable name to find
@@ -221,6 +251,7 @@ All Lien tools automatically include test association metadata. When you use `ge
 - Increase `limit` to 10-15 for broad exploration
 - Results are ranked by semantic relevance (trust the ranking)
 - User can re-index with `lien reindex` if results seem stale
+- **Relevance categories**: All search results include a `relevance` field (`highly_relevant`, `relevant`, `loosely_related`, `not_relevant`) to help interpret search quality at a glance
 - **Test associations**: Lien automatically detects test-source relationships across 12 languages using convention-based patterns and import analysis
 
 ---
@@ -231,19 +262,22 @@ All Lien tools automatically include test association metadata. When you use `ge
 2. **Semantic Over Syntactic**: Think about what code *does*, not what it's *named*
 3. **Context Before Changes**: Always get file context before editing
 4. **Test-Aware Development**: Check testAssociations in results to understand test coverage
-5. **Trust the Results**: Semantic search finds relevant code even with different naming
+5. **Trust the Results**: Semantic search finds relevant code even with different naming. Use the `relevance` field (`highly_relevant`, `relevant`, `loosely_related`, `not_relevant`) to quickly assess result quality
 6. **Chain Your Tools**: semantic_search → get_file_context (includes testAssociations) → make changes is a powerful pattern
 
 ---
 
 ## Setup Instructions
 
-Copy this entire file to `.cursor/rules` in your project root:
+Create a `lien.mdc` file in your `.cursor/rules/` directory:
 
 ```bash
 # From your project directory
-cp /path/to/lien/CURSOR_RULES_TEMPLATE.md .cursor/rules
+mkdir -p .cursor/rules
+cp /path/to/lien/CURSOR_RULES_TEMPLATE.md .cursor/rules/lien.mdc
 ```
 
 The `alwaysApply: true` frontmatter ensures Cursor uses Lien for all files in your project.
+
+This approach allows you to have multiple rule files in `.cursor/rules/` without conflicts.
 
