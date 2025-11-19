@@ -411,6 +411,16 @@ The embedding model downloads on first run. Ensure you have:
 3. Restart Cursor completely
 4. Check Cursor's developer console for errors
 
+### New features not appearing after upgrade
+
+After upgrading Lien (e.g., `npm update -g @liendev/lien`), you must **restart Cursor** to load the new code:
+
+1. Quit Cursor completely
+2. Restart Cursor
+3. The MCP server will start with the updated Lien version
+
+**Note:** The auto-reconnect feature handles data changes (reindexing), but code changes (new features) require a server restart.
+
 ### Slow indexing
 
 - Exclude unnecessary directories in `.lien.config.json`
