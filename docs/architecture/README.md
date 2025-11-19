@@ -261,7 +261,21 @@ Our Mermaid diagrams follow these conventions:
 
 ## 🔄 Version History
 
-### v0.5.0 (Current)
+### v0.8.1 (Current)
+- ✅ Markdown file support for documentation search
+- ✅ CONCEPTUAL query improvements
+
+### v0.8.0
+- ✅ Query intent classification system
+- ✅ Intent-based boosting strategies
+
+### v0.7.0
+- ✅ Relevance scoring improvements
+
+### v0.6.0
+- ✅ Multiple feature enhancements
+
+### v0.5.0
 - ✅ All diagrams created
 - ✅ ConfigService refactoring documented
 - ✅ Test association system fully documented
@@ -283,7 +297,7 @@ If something in the architecture is unclear:
 
 ---
 
-**Last Updated:** November 16, 2025  
+**Last Updated:** November 19, 2025  
 **Maintained By:** Lien contributors  
 **Status:** ✅ Complete and up-to-date
 
