@@ -175,6 +175,65 @@ describe('Search Relevance Boosting', () => {
       const toolsFileIndex = results.findIndex(r => r.metadata.file.includes('tools.ts'));
       expect(toolsFileIndex).toBeLessThanOrEqual(1); // Should be #1 or #2
     });
+    
+    it('should give stronger boost to exact filename matches than partial matches', async () => {
+      const chunks = [
+        {
+          content: 'export const server = {};',
+          file: 'packages/cli/src/mcp/server.ts',
+          startLine: 1,
+          endLine: 1,
+          type: 'block' as const,
+          language: 'typescript',
+        },
+        {
+          content: 'export const serverConfig = {};',
+          file: 'packages/cli/src/config/server-config.ts',
+          startLine: 1,
+          endLine: 1,
+          type: 'block' as const,
+          language: 'typescript',
+        },
+        {
+          content: 'export const helper = {};',
+          file: 'packages/cli/src/utils/helper.ts',
+          startLine: 1,
+          endLine: 1,
+          type: 'block' as const,
+          language: 'typescript',
+        },
+      ];
+      
+      const texts = chunks.map(c => c.content);
+      const vectors = await embeddings.embedBatch(texts);
+      const metadatas = chunks.map(c => ({
+        file: c.file,
+        startLine: c.startLine,
+        endLine: c.endLine,
+        type: c.type,
+        language: c.language,
+      }));
+      
+      await vectorDB.insertBatch(vectors, metadatas, texts);
+      
+      // Query with "server" - should match exactly "server.ts" and partially "server-config.ts"
+      const query = 'server implementation';
+      const queryEmbedding = await embeddings.embed(query);
+      const results = await vectorDB.search(queryEmbedding, 3, query);
+      
+      // server.ts (exact match) should rank higher than server-config.ts (partial match)
+      const serverIndex = results.findIndex(r => r.metadata.file.endsWith('server.ts'));
+      const serverConfigIndex = results.findIndex(r => r.metadata.file.endsWith('server-config.ts'));
+      
+      expect(serverIndex).toBeGreaterThanOrEqual(0);
+      expect(serverConfigIndex).toBeGreaterThanOrEqual(0);
+      expect(serverIndex).toBeLessThan(serverConfigIndex); // Exact match should rank higher
+      
+      // Additionally, server.ts should have a better (lower) score
+      if (serverIndex >= 0 && serverConfigIndex >= 0) {
+        expect(results[serverIndex].score).toBeLessThan(results[serverConfigIndex].score);
+      }
+    });
   });
   
   describe('Combined Boosting', () => {

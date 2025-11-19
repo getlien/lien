@@ -45,6 +45,7 @@ function boostPathRelevance(
 /**
  * Boost relevance score based on filename matching.
  * If query tokens match the filename, significantly improve the score.
+ * Exact matches get stronger boost than partial matches.
  * 
  * @param query - Original search query
  * @param filepath - Path to the file
@@ -66,8 +67,13 @@ function boostFilenameRelevance(
     // Skip very short tokens
     if (token.length <= 2) continue;
     
-    if (filename.includes(token)) {
-      boostFactor *= 0.85; // 15% boost for filename match (stronger than path)
+    // Exact match: 30% boost (stronger signal)
+    if (filename === token) {
+      boostFactor *= 0.70;
+    }
+    // Partial match: 20% boost
+    else if (filename.includes(token)) {
+      boostFactor *= 0.80;
     }
   }
   
