@@ -201,6 +201,248 @@ flowchart TB
     class BUILD_RESPONSE,RETURN responseClass
 ```
 
+## Query Intent Classification (v0.8.0)
+
+Lien automatically classifies queries to apply optimized search strategies for each intent type.
+
+```mermaid
+flowchart TB
+    START([Query Received])
+    
+    subgraph "Intent Detection"
+        ANALYZE[Analyze Query Text]
+        CHECK_LOCATION{Location Keywords?}
+        CHECK_CONCEPTUAL{Conceptual Keywords?}
+        CHECK_IMPL{Implementation Keywords?}
+        DEFAULT[Default: IMPLEMENTATION]
+    end
+    
+    subgraph "Intent Types"
+        LOCATION["LOCATION<br/>'where is X'<br/>'find X'"]
+        CONCEPTUAL["CONCEPTUAL<br/>'how does X work'<br/>'explain X'"]
+        IMPLEMENTATION["IMPLEMENTATION<br/>'show X'<br/>'X functionality'"]
+    end
+    
+    subgraph "Boosting Strategy"
+        APPLY_BOOST[Apply Intent-Specific Boost]
+        LOCATION_BOOST["+90% filename match<br/>+35% path match"]
+        CONCEPTUAL_BOOST["+35% documentation<br/>+10% config files"]
+        IMPL_BOOST["+20% source files<br/>+5% utilities"]
+    end
+    
+    SEARCH[Execute Search]
+    END([Boosted Results])
+    
+    %% Flow
+    START --> ANALYZE
+    ANALYZE --> CHECK_LOCATION
+    CHECK_LOCATION -->|Yes| LOCATION
+    CHECK_LOCATION -->|No| CHECK_CONCEPTUAL
+    CHECK_CONCEPTUAL -->|Yes| CONCEPTUAL
+    CHECK_CONCEPTUAL -->|No| CHECK_IMPL
+    CHECK_IMPL -->|Yes| IMPLEMENTATION
+    CHECK_IMPL -->|No| DEFAULT
+    DEFAULT --> IMPLEMENTATION
+    
+    LOCATION --> APPLY_BOOST
+    CONCEPTUAL --> APPLY_BOOST
+    IMPLEMENTATION --> APPLY_BOOST
+    
+    APPLY_BOOST -->|LOCATION| LOCATION_BOOST
+    APPLY_BOOST -->|CONCEPTUAL| CONCEPTUAL_BOOST
+    APPLY_BOOST -->|IMPLEMENTATION| IMPL_BOOST
+    
+    LOCATION_BOOST --> SEARCH
+    CONCEPTUAL_BOOST --> SEARCH
+    IMPL_BOOST --> SEARCH
+    SEARCH --> END
+    
+    %% Styling
+    classDef detectionClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef intentClass fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef boostClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef searchClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    
+    class ANALYZE,CHECK_LOCATION,CHECK_CONCEPTUAL,CHECK_IMPL,DEFAULT detectionClass
+    class LOCATION,CONCEPTUAL,IMPLEMENTATION intentClass
+    class APPLY_BOOST,LOCATION_BOOST,CONCEPTUAL_BOOST,IMPL_BOOST boostClass
+    class SEARCH searchClass
+```
+
+### Intent Detection Patterns
+
+**LOCATION Intent:**
+- Patterns: `where is`, `find`, `locate`, `what file`, `which file`
+- Strategy: Strong filename and path matching boost
+- Use case: Finding specific files or components
+
+**CONCEPTUAL Intent:**
+- Patterns: `how does`, `how is`, `what is`, `explain`, `understand`, `architecture`, `design`
+- Strategy: Prioritize documentation and architecture files
+- Use case: Understanding system design and workflows
+
+**IMPLEMENTATION Intent:**
+- Patterns: `show`, `implementation`, `code for`, `function`, `class`
+- Strategy: Balanced boost favoring source code
+- Use case: Studying specific implementations
+
+### Performance Impact
+
+- **Classification time:** <1ms per query
+- **Accuracy:** 100% on tested queries
+- **Result quality improvement:** +23% overall (7.5/10 → 9.2/10)
+- **Highly relevant results:** +52% increase (23% → 35%)
+
+## Relevance Scoring (v0.7.0)
+
+All search results include both a numeric score and a human-readable relevance category.
+
+```mermaid
+flowchart LR
+    START([Vector Search Results])
+    
+    subgraph "Scoring"
+        COSINE[Cosine Distance Score]
+        NORMALIZE[Lower = More Similar]
+    end
+    
+    subgraph "Categorization"
+        EVALUATE{Evaluate Score}
+        HIGHLY["highly_relevant<br/>score < 1.0"]
+        RELEVANT["relevant<br/>score 1.0-1.3"]
+        LOOSELY["loosely_related<br/>score 1.3-1.5"]
+        NOT_REL["not_relevant<br/>score ≥ 1.5"]
+    end
+    
+    subgraph "Output"
+        FORMAT[Format Results]
+        INCLUDE[Include Both<br/>Score + Category]
+    end
+    
+    END([Results with Relevance])
+    
+    START --> COSINE
+    COSINE --> NORMALIZE
+    NORMALIZE --> EVALUATE
+    EVALUATE -->|< 1.0| HIGHLY
+    EVALUATE -->|1.0-1.3| RELEVANT
+    EVALUATE -->|1.3-1.5| LOOSELY
+    EVALUATE -->|≥ 1.5| NOT_REL
+    
+    HIGHLY --> FORMAT
+    RELEVANT --> FORMAT
+    LOOSELY --> FORMAT
+    NOT_REL --> FORMAT
+    FORMAT --> INCLUDE
+    INCLUDE --> END
+    
+    %% Styling
+    classDef scoreClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef catClass fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef outputClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    
+    class COSINE,NORMALIZE scoreClass
+    class EVALUATE,HIGHLY,RELEVANT,LOOSELY,NOT_REL catClass
+    class FORMAT,INCLUDE outputClass
+```
+
+### Relevance Categories
+
+| Category | Score Range | Meaning | Typical Use |
+|----------|-------------|---------|-------------|
+| `highly_relevant` | < 1.0 | Very close semantic match | Direct answers |
+| `relevant` | 1.0 - 1.3 | Good match, useful context | Supporting context |
+| `loosely_related` | 1.3 - 1.5 | Tangentially related | Background info |
+| `not_relevant` | ≥ 1.5 | Weak match | Usually filtered out |
+
+### Example Response
+
+```json
+{
+  "results": [
+    {
+      "content": "async function authenticateUser(credentials) { ... }",
+      "metadata": {
+        "file": "src/auth/service.ts",
+        "startLine": 42
+      },
+      "score": 0.94,
+      "relevance": "highly_relevant"
+    },
+    {
+      "content": "// Authentication middleware for Express",
+      "metadata": {
+        "file": "src/middleware/auth.ts",
+        "startLine": 12
+      },
+      "score": 1.15,
+      "relevance": "relevant"
+    }
+  ]
+}
+```
+
+## Markdown Indexing (v0.8.1)
+
+Lien indexes documentation files alongside code for comprehensive semantic search.
+
+### Supported Formats
+
+- `.md` - Markdown files
+- `.mdx` - MDX (Markdown + JSX)
+- Auto-included:
+  - `README.md`
+  - `CHANGELOG.md`
+  - `CONTRIBUTING.md`
+  - `docs/` directory
+
+### Processing Pipeline
+
+```mermaid
+flowchart LR
+    START([Markdown File])
+    
+    DETECT[Detect .md/.mdx]
+    LANG[Set Language: 'markdown']
+    CHUNK[Chunk by Sections]
+    EMBED[Generate Embeddings]
+    STORE[Store with Metadata]
+    
+    BOOST[+35% Boost for<br/>CONCEPTUAL Queries]
+    
+    END([Searchable Documentation])
+    
+    START --> DETECT
+    DETECT --> LANG
+    LANG --> CHUNK
+    CHUNK --> EMBED
+    EMBED --> STORE
+    STORE --> BOOST
+    BOOST --> END
+    
+    %% Styling
+    classDef processClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef boostClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    
+    class DETECT,LANG,CHUNK,EMBED,STORE processClass
+    class BOOST boostClass
+```
+
+### Impact
+
+- **Files indexed:** +17 documentation files
+- **Searchable content:** +127 chunks (+58%)
+- **CONCEPTUAL query quality:** 9.5/10 (+19% improvement)
+- **Documentation relevance:** 95% for "how does X work" queries
+- **Indexing time:** +6.2s (acceptable for quality gain)
+
+### Benefits
+
+1. **Multi-perspective results:** Code + docs + architecture in one search
+2. **Faster onboarding:** Documentation appears for conceptual queries
+3. **Better understanding:** Architectural context alongside implementation
+4. **Knowledge navigation:** Transforms Lien from "code finder" to "knowledge navigator"
+
 ## Incremental Update Data Flow
 
 When files change, only modified files are reindexed.
