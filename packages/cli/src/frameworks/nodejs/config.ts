@@ -21,6 +21,12 @@ export async function generateNodeJsConfig(
       '*.js',
       '*.mjs',
       '*.cjs',
+      '**/*.md',
+      '**/*.mdx',
+      'docs/**/*.md',
+      'README.md',
+      'CHANGELOG.md',
+      'CONTRIBUTING.md',
     ],
     exclude: [
       'node_modules/**',

@@ -25,6 +25,12 @@ export async function generateLaravelConfig(
       'resources/js/**/*.vue',
       // Blade templates
       'resources/views/**/*.blade.php',
+      // Documentation
+      '**/*.md',
+      '**/*.mdx',
+      'docs/**/*.md',
+      'README.md',
+      'CHANGELOG.md',
     ],
     exclude: [
       'vendor/**',

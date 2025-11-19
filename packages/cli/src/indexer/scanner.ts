@@ -123,7 +123,7 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
   // Determine patterns to search for
   const patterns = includePatterns.length > 0 
     ? includePatterns 
-    : ['**/*.{ts,tsx,js,jsx,py,go,rs,java,cpp,c,h}'];
+    : ['**/*.{ts,tsx,js,jsx,py,go,rs,java,cpp,c,h,md,mdx}'];
   
   // Find all code files
   const allFiles: string[] = [];
@@ -175,6 +175,9 @@ export function detectLanguage(filepath: string): string {
     '.kt': 'kotlin',
     '.cs': 'csharp',
     '.scala': 'scala',
+    '.md': 'markdown',
+    '.mdx': 'markdown',
+    '.markdown': 'markdown',
   };
   
   return languageMap[ext] || 'unknown';

@@ -37,7 +37,13 @@
           "*.ts",
           "*.js",
           "*.mjs",
-          "*.cjs"
+          "*.cjs",
+          "**/*.md",
+          "**/*.mdx",
+          "docs/**/*.md",
+          "README.md",
+          "CHANGELOG.md",
+          "CONTRIBUTING.md"
         ],
         "exclude": [
           "node_modules/**",
@@ -70,7 +76,13 @@
           "*.ts",
           "*.js",
           "*.mjs",
-          "*.cjs"
+          "*.cjs",
+          "**/*.md",
+          "**/*.mdx",
+          "docs/**/*.md",
+          "README.md",
+          "CHANGELOG.md",
+          "CONTRIBUTING.md"
         ],
         "exclude": [
           "node_modules/**",
