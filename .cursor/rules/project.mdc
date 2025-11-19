@@ -26,6 +26,38 @@ packages/cli/src/
 
 ---
 
+## Documentation Organization
+
+### Temporary Documentation Rule
+
+**ALL temporary documents MUST go in `.wip/` folder (gitignored).**
+
+Examples of temporary docs:
+- Dogfooding analysis and evaluations
+- Implementation plans and status reports
+- Code quality reviews and verification reports
+- Performance benchmarks and test results
+- Brainstorming and design exploration
+- Session notes and continuation plans
+
+**When AI assistant creates temporary documentation:**
+1. Always create in `.wip/` folder
+2. Use descriptive names with dates: `dogfooding-analysis-2025-11-19.md`
+3. Never create temporary docs in project root
+4. Extract key findings to permanent docs before session ends
+
+### Permanent Documentation
+
+These live in project root and are tracked in git:
+- `README.md` - Main project documentation
+- `CHANGELOG.md` - Release history (maintained by release script)
+- `CONTRIBUTING.md` - Contributor guidelines
+- `docs/` - Architecture and design documentation
+
+**Rule:** If it's temporary or experimental → `.wip/`. If it's permanent → root or `docs/`.
+
+---
+
 ## Core Principles
 
 ### KISS (Keep It Simple, Stupid)

@@ -40,6 +40,9 @@ Thumbs.db
 # Private documentation
 .private/
 
+# Work-in-progress documentation (temporary analysis, plans, reviews)
+.wip/
+
 # Test artifacts
 test-tmp/
 coverage/
