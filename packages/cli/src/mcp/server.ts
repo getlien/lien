@@ -137,7 +137,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           await checkAndReconnect();
           
           const queryEmbedding = await embeddings.embed(query);
-          const results = await vectorDB.search(queryEmbedding, limit);
+          const results = await vectorDB.search(queryEmbedding, limit, query);
           
           log(`Found ${results.length} results`);
           
@@ -166,7 +166,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           await checkAndReconnect();
           
           const codeEmbedding = await embeddings.embed(code);
-          const results = await vectorDB.search(codeEmbedding, limit);
+          // Pass code as query for relevance boosting
+          const results = await vectorDB.search(codeEmbedding, limit, code);
           
           log(`Found ${results.length} similar chunks`);
           
@@ -197,7 +198,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           // Search for chunks from this file by embedding the filepath
           // This is a simple approach; could be improved with metadata filtering
           const fileEmbedding = await embeddings.embed(filepath);
-          const allResults = await vectorDB.search(fileEmbedding, 50);
+          const allResults = await vectorDB.search(fileEmbedding, 50, filepath);
           
           // Filter results to only include chunks from the target file
           const fileChunks = allResults.filter(r => 
@@ -209,7 +210,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           if (includeRelated && fileChunks.length > 0) {
             // Get related chunks by searching with the first chunk's content
             const relatedEmbedding = await embeddings.embed(fileChunks[0].content);
-            const related = await vectorDB.search(relatedEmbedding, 5);
+            const related = await vectorDB.search(relatedEmbedding, 5, fileChunks[0].content);
             
             // Add related chunks that aren't from the same file
             const relatedOtherFiles = related.filter(r => 

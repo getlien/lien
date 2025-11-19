@@ -9,6 +9,99 @@ import { readVersionFile, writeVersionFile } from './version.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
 
+/**
+ * Boost relevance score based on path matching.
+ * If query tokens match directory names in the file path, improve the score.
+ * 
+ * @param query - Original search query
+ * @param filepath - Path to the file
+ * @param baseScore - Original distance score from vector search
+ * @returns Adjusted score (lower is better)
+ */
+function boostPathRelevance(
+  query: string,
+  filepath: string,
+  baseScore: number
+): number {
+  const queryTokens = query.toLowerCase().split(/\s+/);
+  const pathSegments = filepath.toLowerCase().split('/');
+  
+  let boostFactor = 1.0;
+  
+  // Check if query mentions any directory name in the path
+  for (const token of queryTokens) {
+    // Skip very short tokens (like "is", "a", etc.)
+    if (token.length <= 2) continue;
+    
+    // Check if this token appears in any path segment
+    if (pathSegments.some(seg => seg.includes(token))) {
+      boostFactor *= 0.9; // 10% boost (reduce distance)
+    }
+  }
+  
+  return baseScore * boostFactor;
+}
+
+/**
+ * Boost relevance score based on filename matching.
+ * If query tokens match the filename, significantly improve the score.
+ * 
+ * @param query - Original search query
+ * @param filepath - Path to the file
+ * @param baseScore - Original distance score from vector search
+ * @returns Adjusted score (lower is better)
+ */
+function boostFilenameRelevance(
+  query: string,
+  filepath: string,
+  baseScore: number
+): number {
+  const filename = path.basename(filepath, path.extname(filepath)).toLowerCase();
+  const queryTokens = query.toLowerCase().split(/\s+/);
+  
+  let boostFactor = 1.0;
+  
+  // Check if any query token matches the filename
+  for (const token of queryTokens) {
+    // Skip very short tokens
+    if (token.length <= 2) continue;
+    
+    if (filename.includes(token)) {
+      boostFactor *= 0.85; // 15% boost for filename match (stronger than path)
+    }
+  }
+  
+  return baseScore * boostFactor;
+}
+
+/**
+ * Apply all relevance boosting strategies to a search score.
+ * 
+ * @param query - Original search query (optional)
+ * @param filepath - Path to the file
+ * @param baseScore - Original distance score from vector search
+ * @returns Boosted score (lower is better)
+ */
+function applyRelevanceBoosting(
+  query: string | undefined,
+  filepath: string,
+  baseScore: number
+): number {
+  if (!query) {
+    return baseScore;
+  }
+  
+  let score = baseScore;
+  
+  // Apply path-based boosting
+  score = boostPathRelevance(query, filepath, score);
+  
+  // Apply filename-based boosting
+  score = boostFilenameRelevance(query, filepath, score);
+  
+  return score;
+}
+
 type LanceDBConnection = Awaited<ReturnType<typeof lancedb.connect>>;
 type LanceDBTable = Awaited<ReturnType<LanceDBConnection['openTable']>>;
 
@@ -127,20 +220,21 @@ export class VectorDB implements VectorDBInterface {
   
   async search(
     queryVector: Float32Array,
-    limit: number = 5
+    limit: number = 5,
+    query?: string
   ): Promise<SearchResult[]> {
     if (!this.table) {
       throw new DatabaseError('Vector database not initialized');
     }
     
     try {
-      // Request more results than needed to account for filtering
+      // Request more results than needed to account for filtering and re-ranking
       const results = await this.table
         .search(Array.from(queryVector))
-        .limit(limit + 10) // Get extra in case we filter some out
+        .limit(limit + 20) // Get extra for re-ranking after boosting
         .execute();
       
-      // Filter out empty content, then map to SearchResult
+      // Filter out empty content, apply boosting, then sort by boosted score
       const filtered = (results as unknown as DBRecord[])
         .filter((r: DBRecord) => 
           r.content && 
@@ -148,9 +242,10 @@ export class VectorDB implements VectorDBInterface {
           r.file && 
           r.file.length > 0
         )
-        .slice(0, limit) // Take only the requested number after filtering
         .map((r: DBRecord) => {
-          const score = r._distance ?? 0;
+          const baseScore = r._distance ?? 0;
+          const boostedScore = applyRelevanceBoosting(query, r.file, baseScore);
+          
           return {
             content: r.content,
             metadata: {
@@ -160,10 +255,12 @@ export class VectorDB implements VectorDBInterface {
               type: r.type as 'function' | 'class' | 'block',
               language: r.language,
             },
-            score,
-            relevance: calculateRelevance(score),
+            score: boostedScore,
+            relevance: calculateRelevance(boostedScore),
           };
-        });
+        })
+        .sort((a, b) => a.score - b.score) // Re-sort by boosted score
+        .slice(0, limit); // Take only the requested number after re-ranking
       
       return filtered;
     } catch (error) {
@@ -178,24 +275,35 @@ export class VectorDB implements VectorDBInterface {
           // Retry search with fresh connection
           const results = await this.table
             .search(Array.from(queryVector))
-            .limit(limit)
+            .limit(limit + 20)
             .execute();
           
-          return (results as unknown as DBRecord[]).map((r: DBRecord) => {
-            const score = r._distance ?? 0;
-            return {
-              content: r.content,
-              metadata: {
-                file: r.file,
-                startLine: r.startLine,
-                endLine: r.endLine,
-                type: r.type as 'function' | 'class' | 'block',
-                language: r.language,
-              },
-              score,
-              relevance: calculateRelevance(score),
-            };
-          });
+          return (results as unknown as DBRecord[])
+            .filter((r: DBRecord) => 
+              r.content && 
+              r.content.trim().length > 0 &&
+              r.file && 
+              r.file.length > 0
+            )
+            .map((r: DBRecord) => {
+              const baseScore = r._distance ?? 0;
+              const boostedScore = applyRelevanceBoosting(query, r.file, baseScore);
+              
+              return {
+                content: r.content,
+                metadata: {
+                  file: r.file,
+                  startLine: r.startLine,
+                  endLine: r.endLine,
+                  type: r.type as 'function' | 'class' | 'block',
+                  language: r.language,
+                },
+                score: boostedScore,
+                relevance: calculateRelevance(boostedScore),
+              };
+            })
+            .sort((a, b) => a.score - b.score)
+            .slice(0, limit);
         } catch (retryError: unknown) {
           throw new DatabaseError(
             `Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory.`,
