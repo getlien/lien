@@ -38,6 +38,12 @@ describe('MCP Tools Schema', () => {
       expect(tool!.inputSchema.required).toEqual(['query']);
     });
     
+    it('should mention relevance categories in description', () => {
+      const tool = tools.find(t => t.name === 'semantic_search');
+      expect(tool!.description).toContain('relevance category');
+      expect(tool!.description).toContain('highly_relevant');
+    });
+    
     it('should have query as required field', () => {
       const tool = tools.find(t => t.name === 'semantic_search');
       expect(tool?.inputSchema.required).toContain('query');
@@ -62,6 +68,11 @@ describe('MCP Tools Schema', () => {
       expect(tool!.inputSchema.required).toEqual(['code']);
     });
     
+    it('should mention relevance categories in description', () => {
+      const tool = tools.find(t => t.name === 'find_similar');
+      expect(tool!.description).toContain('relevance category');
+    });
+    
     it('should have code as required field', () => {
       const tool = tools.find(t => t.name === 'find_similar');
       expect(tool?.inputSchema.required).toContain('code');
@@ -84,6 +95,11 @@ describe('MCP Tools Schema', () => {
       expect(tool!.inputSchema.properties).toHaveProperty('filepath');
       expect(tool!.inputSchema.properties).toHaveProperty('includeRelated');
       expect(tool!.inputSchema.required).toEqual(['filepath']);
+    });
+    
+    it('should mention relevance categories in description', () => {
+      const tool = tools.find(t => t.name === 'get_file_context');
+      expect(tool!.description).toContain('relevance category');
     });
     
     it('should have filepath as required field', () => {

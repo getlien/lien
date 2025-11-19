@@ -165,6 +165,16 @@ describe('VectorDB - scanWithFilter', () => {
     expect(result.metadata).toHaveProperty('type');
     expect(result.metadata).toHaveProperty('language');
   });
+  
+  it('should include relevance field in results', async () => {
+    const results = await db.scanWithFilter({ language: 'typescript' });
+    
+    expect(results.length).toBeGreaterThan(0);
+    results.forEach(result => {
+      expect(result).toHaveProperty('relevance');
+      expect(['highly_relevant', 'relevant', 'loosely_related', 'not_relevant']).toContain(result.relevance);
+    });
+  });
 
   it('should throw error if database not initialized', async () => {
     const uninitializedDb = new VectorDB(testDir);

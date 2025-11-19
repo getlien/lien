@@ -349,6 +349,32 @@ List all indexed functions and classes (optionally filtered).
 List all functions matching "handle.*Request"
 ```
 
+### Understanding Relevance Categories
+
+All search tools (`semantic_search`, `find_similar`, `get_file_context`) include a **relevance category** alongside the numeric similarity score to help interpret search quality:
+
+| Category | Score Range | Meaning |
+|----------|-------------|---------|
+| `highly_relevant` | < 1.0 | Very close semantic match, top-quality result |
+| `relevant` | 1.0 - 1.3 | Good match, useful context for the query |
+| `loosely_related` | 1.3 - 1.5 | Tangentially related, may provide background context |
+| `not_relevant` | ≥ 1.5 | Weak match, likely not useful |
+
+**Example Response:**
+```json
+{
+  "results": [
+    {
+      "content": "async function authenticateUser(credentials) { ... }",
+      "score": 0.94,
+      "relevance": "highly_relevant"
+    }
+  ]
+}
+```
+
+Lower scores indicate higher semantic similarity (closer in vector space). The relevance categories make it easy to quickly assess result quality without needing to interpret raw distance scores.
+
 ## How It Works
 
 1. **Indexing**: Lien scans your codebase, chunks code into manageable pieces, and generates embeddings using a local ML model (all-MiniLM-L6-v2)

@@ -1,9 +1,11 @@
 import { ChunkMetadata } from '../indexer/types.js';
+import { RelevanceCategory } from './relevance.js';
 
 export interface SearchResult {
   content: string;
   metadata: ChunkMetadata;
   score: number;
+  relevance: RelevanceCategory;
 }
 
 export interface VectorDBInterface {

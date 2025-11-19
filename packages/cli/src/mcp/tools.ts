@@ -1,7 +1,7 @@
 export const tools = [
   {
     name: 'semantic_search',
-    description: 'Search the codebase semantically for relevant code using natural language',
+    description: 'Search the codebase semantically for relevant code using natural language. Results include a relevance category (highly_relevant, relevant, loosely_related, not_relevant) based on semantic similarity.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -20,7 +20,7 @@ export const tools = [
   },
   {
     name: 'find_similar',
-    description: 'Find code similar to a given code snippet',
+    description: 'Find code similar to a given code snippet. Results include a relevance category (highly_relevant, relevant, loosely_related, not_relevant) based on semantic similarity.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -39,7 +39,7 @@ export const tools = [
   },
   {
     name: 'get_file_context',
-    description: 'Get all chunks and related context for a specific file',
+    description: 'Get all chunks and related context for a specific file. Results include a relevance category (highly_relevant, relevant, loosely_related, not_relevant) based on semantic similarity.',
     inputSchema: {
       type: 'object',
       properties: {

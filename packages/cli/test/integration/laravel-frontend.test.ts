@@ -4,7 +4,7 @@ import path from 'path';
 import { mkdtemp } from 'fs/promises';
 import os from 'os';
 import { laravelDetector } from '../../src/frameworks/laravel/detector.js';
-import { scanCodebase } from '../../src/indexer/scanner.js';
+import { scanCodebaseWithFrameworks } from '../../src/indexer/scanner.js';
 import { detectLanguage } from '../../src/indexer/scanner.js';
 import type { LienConfig } from '../../src/config/schema.js';
 
@@ -140,10 +140,7 @@ const app = createApp({});`
     };
 
     // Scan codebase
-    const files = await scanCodebase({
-      rootDir: testDir,
-      config: fullConfig,
-    });
+    const files = await scanCodebaseWithFrameworks(testDir, fullConfig);
 
     // Should find all 3 files
     expect(files.length).toBe(3);

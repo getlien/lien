@@ -251,6 +251,7 @@ list_functions({
 - Increase `limit` to 10-15 for broad exploration
 - Results are ranked by semantic relevance (trust the ranking)
 - User can re-index with `lien reindex` if results seem stale
+- **Relevance categories**: All search results include a `relevance` field (`highly_relevant`, `relevant`, `loosely_related`, `not_relevant`) to help interpret search quality at a glance
 - **Test associations**: Lien automatically detects test-source relationships across 12 languages using convention-based patterns and import analysis
 
 ---
@@ -261,7 +262,7 @@ list_functions({
 2. **Semantic Over Syntactic**: Think about what code *does*, not what it's *named*
 3. **Context Before Changes**: Always get file context before editing
 4. **Test-Aware Development**: Check testAssociations in results to understand test coverage
-5. **Trust the Results**: Semantic search finds relevant code even with different naming
+5. **Trust the Results**: Semantic search finds relevant code even with different naming. Use the `relevance` field (`highly_relevant`, `relevant`, `loosely_related`, `not_relevant`) to quickly assess result quality
 6. **Chain Your Tools**: semantic_search → get_file_context (includes testAssociations) → make changes is a powerful pattern
 
 ---

@@ -7,6 +7,7 @@ import { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { readVersionFile, writeVersionFile } from './version.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
+import { calculateRelevance } from './relevance.js';
 
 type LanceDBConnection = Awaited<ReturnType<typeof lancedb.connect>>;
 type LanceDBTable = Awaited<ReturnType<LanceDBConnection['openTable']>>;
@@ -148,17 +149,21 @@ export class VectorDB implements VectorDBInterface {
           r.file.length > 0
         )
         .slice(0, limit) // Take only the requested number after filtering
-        .map((r: DBRecord) => ({
-          content: r.content,
-          metadata: {
-            file: r.file,
-            startLine: r.startLine,
-            endLine: r.endLine,
-            type: r.type as 'function' | 'class' | 'block',
-            language: r.language,
-          },
-          score: r._distance ?? 0,
-        }));
+        .map((r: DBRecord) => {
+          const score = r._distance ?? 0;
+          return {
+            content: r.content,
+            metadata: {
+              file: r.file,
+              startLine: r.startLine,
+              endLine: r.endLine,
+              type: r.type as 'function' | 'class' | 'block',
+              language: r.language,
+            },
+            score,
+            relevance: calculateRelevance(score),
+          };
+        });
       
       return filtered;
     } catch (error) {
@@ -176,17 +181,21 @@ export class VectorDB implements VectorDBInterface {
             .limit(limit)
             .execute();
           
-          return (results as unknown as DBRecord[]).map((r: DBRecord) => ({
-            content: r.content,
-            metadata: {
-              file: r.file,
-              startLine: r.startLine,
-              endLine: r.endLine,
-              type: r.type as 'function' | 'class' | 'block',
-              language: r.language,
-            },
-            score: r._distance ?? 0,
-          }));
+          return (results as unknown as DBRecord[]).map((r: DBRecord) => {
+            const score = r._distance ?? 0;
+            return {
+              content: r.content,
+              metadata: {
+                file: r.file,
+                startLine: r.startLine,
+                endLine: r.endLine,
+                type: r.type as 'function' | 'class' | 'block',
+                language: r.language,
+              },
+              score,
+              relevance: calculateRelevance(score),
+            };
+          });
         } catch (retryError: unknown) {
           throw new DatabaseError(
             `Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory.`,
@@ -243,17 +252,21 @@ export class VectorDB implements VectorDBInterface {
         );
       }
       
-      return filtered.slice(0, limit).map((r: DBRecord) => ({
-        content: r.content,
-        metadata: {
-          file: r.file,
-          startLine: r.startLine,
-          endLine: r.endLine,
-          type: r.type as 'function' | 'class' | 'block',
-          language: r.language,
-        },
-        score: 0,
-      }));
+      return filtered.slice(0, limit).map((r: DBRecord) => {
+        const score = 0;
+        return {
+          content: r.content,
+          metadata: {
+            file: r.file,
+            startLine: r.startLine,
+            endLine: r.endLine,
+            type: r.type as 'function' | 'class' | 'block',
+            language: r.language,
+          },
+          score,
+          relevance: calculateRelevance(score),
+        };
+      });
     } catch (error) {
       throw wrapError(error, 'Failed to scan with filter');
     }
@@ -315,22 +328,26 @@ export class VectorDB implements VectorDBInterface {
         return true;
       });
       
-      return filtered.slice(0, limit).map((r: DBRecord) => ({
-        content: r.content,
-        metadata: {
-          file: r.file,
-          startLine: r.startLine,
-          endLine: r.endLine,
-          type: r.type as 'function' | 'class' | 'block',
-          language: r.language,
-          symbols: {
-            functions: r.functionNames || [],
-            classes: r.classNames || [],
-            interfaces: r.interfaceNames || [],
+      return filtered.slice(0, limit).map((r: DBRecord) => {
+        const score = 0;
+        return {
+          content: r.content,
+          metadata: {
+            file: r.file,
+            startLine: r.startLine,
+            endLine: r.endLine,
+            type: r.type as 'function' | 'class' | 'block',
+            language: r.language,
+            symbols: {
+              functions: r.functionNames || [],
+              classes: r.classNames || [],
+              interfaces: r.interfaceNames || [],
+            },
           },
-        },
-        score: 0,
-      }));
+          score,
+          relevance: calculateRelevance(score),
+        };
+      });
     } catch (error) {
       throw wrapError(error, 'Failed to query symbols');
     }
