@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import {
@@ -28,8 +29,8 @@ describe('Git Utils', () => {
       isGitInstalled = false;
     }
     
-    // Create a temporary test directory
-    testDir = path.join(process.cwd(), '.test-git-' + Date.now());
+    // Create test directory in system temp
+    testDir = path.join(os.tmpdir(), 'lien-test-git-' + Date.now());
     await fs.mkdir(testDir, { recursive: true });
   });
   

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { GitStateTracker } from './tracker.js';
@@ -21,8 +22,8 @@ describe('GitStateTracker', () => {
       isGitInstalled = false;
     }
     
-    // Create test directories
-    testDir = path.join(process.cwd(), '.test-git-tracker-' + Date.now());
+    // Create test directories in system temp
+    testDir = path.join(os.tmpdir(), 'lien-test-git-tracker-' + Date.now());
     indexPath = path.join(testDir, '.lien');
     await fs.mkdir(testDir, { recursive: true });
     await fs.mkdir(indexPath, { recursive: true });

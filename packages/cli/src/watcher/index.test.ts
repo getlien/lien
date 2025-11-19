@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import { FileWatcher, FileChangeEvent } from './index.js';
 import { defaultConfig } from '../config/schema.js';
 
@@ -9,8 +10,8 @@ describe('FileWatcher', () => {
   let watcher: FileWatcher;
   
   beforeEach(async () => {
-    // Create test directory
-    testDir = path.join(process.cwd(), '.test-watcher-' + Date.now());
+    // Create test directory in system temp
+    testDir = path.join(os.tmpdir(), 'lien-test-watcher-' + Date.now());
     await fs.mkdir(testDir, { recursive: true });
     
     // Create a custom config for testing (modern format)
