@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.7.0] - 2025-11-19
+
+### Added
+- **Add relevance categories to search results**
+
+
 ## [0.6.1] - 2025-11-17
 
 ### Fixed
