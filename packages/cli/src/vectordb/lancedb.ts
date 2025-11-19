@@ -8,6 +8,120 @@ import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { readVersionFile, writeVersionFile } from './version.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
+import { QueryIntent, classifyQueryIntent } from './intent-classifier.js';
+
+/**
+ * Helper Functions for File Type Detection
+ */
+
+/**
+ * Check if a file is a documentation file.
+ * Matches common documentation patterns across different ecosystems.
+ * 
+ * @param filepath - Path to check
+ * @returns True if file is documentation
+ */
+function isDocumentationFile(filepath: string): boolean {
+  const lower = filepath.toLowerCase();
+  const filename = path.basename(filepath).toLowerCase();
+  
+  // README files
+  if (filename.startsWith('readme')) return true;
+  
+  // CHANGELOG files
+  if (filename.startsWith('changelog')) return true;
+  
+  // Markdown files (common for docs)
+  if (filename.endsWith('.md') || filename.endsWith('.mdx') || filename.endsWith('.markdown')) {
+    return true;
+  }
+  
+  // Documentation directories
+  if (
+    lower.includes('/docs/') ||
+    lower.includes('/documentation/') ||
+    lower.includes('/wiki/') ||
+    lower.includes('/.github/')
+  ) {
+    return true;
+  }
+  
+  // Architecture/workflow documentation
+  if (
+    lower.includes('architecture') ||
+    lower.includes('workflow') ||
+    lower.includes('/flow/')
+  ) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Check if a file is a test file.
+ * Matches common test file patterns.
+ * 
+ * @param filepath - Path to check
+ * @returns True if file is a test file
+ */
+function isTestFile(filepath: string): boolean {
+  const lower = filepath.toLowerCase();
+  
+  // Test directories
+  if (
+    lower.includes('/test/') ||
+    lower.includes('/tests/') ||
+    lower.includes('/__tests__/')
+  ) {
+    return true;
+  }
+  
+  // Test file naming patterns
+  if (
+    lower.includes('.test.') ||
+    lower.includes('.spec.') ||
+    lower.includes('_test.') ||
+    lower.includes('_spec.')
+  ) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Check if a file is a utility/helper file.
+ * Matches common utility file patterns.
+ * 
+ * @param filepath - Path to check
+ * @returns True if file is a utility file
+ */
+function isUtilityFile(filepath: string): boolean {
+  const lower = filepath.toLowerCase();
+  
+  // Utility directories
+  if (
+    lower.includes('/utils/') ||
+    lower.includes('/utilities/') ||
+    lower.includes('/helpers/') ||
+    lower.includes('/lib/')
+  ) {
+    return true;
+  }
+  
+  // Utility file naming patterns
+  if (
+    lower.includes('.util.') ||
+    lower.includes('.helper.') ||
+    lower.includes('-util.') ||
+    lower.includes('-helper.')
+  ) {
+    return true;
+  }
+  
+  return false;
+}
 
 /**
  * Boost relevance score based on path matching.
@@ -81,7 +195,182 @@ function boostFilenameRelevance(
 }
 
 /**
+ * Intent-Specific Boosting Strategies
+ */
+
+/**
+ * Boost relevance for LOCATION intent queries.
+ * 
+ * LOCATION queries (e.g., "where is the auth handler") need strong
+ * filename and path matching with penalties for test files.
+ * 
+ * Strategy:
+ * - Filename exact match: 40% boost
+ * - Filename partial match: 30% boost
+ * - Path match: 15% boost
+ * - Test file penalty: -10%
+ * 
+ * @param query - Original search query
+ * @param filepath - Path to the file
+ * @param baseScore - Original distance score from vector search
+ * @returns Boosted score (lower is better)
+ */
+function boostForLocationIntent(
+  query: string,
+  filepath: string,
+  baseScore: number
+): number {
+  let score = baseScore;
+  
+  // Apply strong filename boosting
+  const filename = path.basename(filepath, path.extname(filepath)).toLowerCase();
+  const queryTokens = query.toLowerCase().split(/\s+/);
+  
+  for (const token of queryTokens) {
+    if (token.length <= 2) continue;
+    
+    // Exact match: 40% boost (very strong for location queries)
+    if (filename === token) {
+      score *= 0.60;
+    }
+    // Partial match: 30% boost
+    else if (filename.includes(token)) {
+      score *= 0.70;
+    }
+  }
+  
+  // Apply path boosting
+  score = boostPathRelevance(query, filepath, score);
+  
+  // Penalize test files for location queries
+  // Users usually want production code, not tests
+  if (isTestFile(filepath)) {
+    score *= 1.10; // 10% penalty (higher score = worse)
+  }
+  
+  return score;
+}
+
+/**
+ * Boost relevance for CONCEPTUAL intent queries.
+ * 
+ * CONCEPTUAL queries (e.g., "how does authentication work") need
+ * documentation and architecture files boosted.
+ * 
+ * Strategy:
+ * - Documentation files: 35% boost
+ * - Architecture/flow files: Additional 10% boost
+ * - Utility files: 5% penalty
+ * - Reduced filename/path boosting: 10% filename, 5% path
+ * 
+ * @param query - Original search query
+ * @param filepath - Path to the file
+ * @param baseScore - Original distance score from vector search
+ * @returns Boosted score (lower is better)
+ */
+function boostForConceptualIntent(
+  query: string,
+  filepath: string,
+  baseScore: number
+): number {
+  let score = baseScore;
+  
+  // Strong boost for documentation files
+  if (isDocumentationFile(filepath)) {
+    score *= 0.65; // 35% boost
+    
+    // Extra boost for architecture/workflow documentation
+    const lower = filepath.toLowerCase();
+    if (
+      lower.includes('architecture') ||
+      lower.includes('workflow') ||
+      lower.includes('flow')
+    ) {
+      score *= 0.90; // Additional 10% boost
+    }
+  }
+  
+  // Light penalty for utility files (too low-level for conceptual queries)
+  if (isUtilityFile(filepath)) {
+    score *= 1.05; // 5% penalty
+  }
+  
+  // Apply reduced filename/path boosting (less important for conceptual queries)
+  const filename = path.basename(filepath, path.extname(filepath)).toLowerCase();
+  const queryTokens = query.toLowerCase().split(/\s+/);
+  
+  for (const token of queryTokens) {
+    if (token.length <= 2) continue;
+    
+    // Reduced filename boost: 10%
+    if (filename.includes(token)) {
+      score *= 0.90;
+    }
+  }
+  
+  // Reduced path boost: 5%
+  const pathSegments = filepath.toLowerCase().split(path.sep);
+  for (const token of queryTokens) {
+    if (token.length <= 2) continue;
+    
+    for (const segment of pathSegments) {
+      if (segment.includes(token)) {
+        score *= 0.95;
+        break;
+      }
+    }
+  }
+  
+  return score;
+}
+
+/**
+ * Boost relevance for IMPLEMENTATION intent queries.
+ * 
+ * IMPLEMENTATION queries (e.g., "how is authentication implemented")
+ * need balanced boosting with moderate test file boost to show usage.
+ * 
+ * Strategy:
+ * - Filename exact match: 30% boost
+ * - Filename partial match: 20% boost
+ * - Path match: 10% boost
+ * - Test files: 10% boost (to show real usage)
+ * 
+ * This is the default/balanced strategy.
+ * 
+ * @param query - Original search query
+ * @param filepath - Path to the file
+ * @param baseScore - Original distance score from vector search
+ * @returns Boosted score (lower is better)
+ */
+function boostForImplementationIntent(
+  query: string,
+  filepath: string,
+  baseScore: number
+): number {
+  let score = baseScore;
+  
+  // Apply standard filename boosting
+  score = boostFilenameRelevance(query, filepath, score);
+  
+  // Apply standard path boosting
+  score = boostPathRelevance(query, filepath, score);
+  
+  // Moderate boost for test files (they show real usage patterns)
+  if (isTestFile(filepath)) {
+    score *= 0.90; // 10% boost
+  }
+  
+  return score;
+}
+
+/**
  * Apply all relevance boosting strategies to a search score.
+ * 
+ * Uses query intent classification to apply appropriate boosting:
+ * - LOCATION: Strong filename/path boost, test penalty
+ * - CONCEPTUAL: Documentation boost, utility penalty
+ * - IMPLEMENTATION: Balanced boost with test file boost
  * 
  * @param query - Original search query (optional)
  * @param filepath - Path to the file
@@ -97,15 +386,24 @@ function applyRelevanceBoosting(
     return baseScore;
   }
   
-  let score = baseScore;
+  // Classify query intent
+  const intent = classifyQueryIntent(query);
   
-  // Apply path-based boosting
-  score = boostPathRelevance(query, filepath, score);
-  
-  // Apply filename-based boosting
-  score = boostFilenameRelevance(query, filepath, score);
-  
-  return score;
+  // Apply intent-specific boosting
+  switch (intent) {
+    case QueryIntent.LOCATION:
+      return boostForLocationIntent(query, filepath, baseScore);
+    
+    case QueryIntent.CONCEPTUAL:
+      return boostForConceptualIntent(query, filepath, baseScore);
+    
+    case QueryIntent.IMPLEMENTATION:
+      return boostForImplementationIntent(query, filepath, baseScore);
+    
+    default:
+      // Fallback to implementation strategy
+      return boostForImplementationIntent(query, filepath, baseScore);
+  }
 }
 
 type LanceDBConnection = Awaited<ReturnType<typeof lancedb.connect>>;
