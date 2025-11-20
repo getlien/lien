@@ -47,8 +47,7 @@ export default withMermaid(
       },
 
       socialLinks: [
-        { icon: 'github', link: 'https://github.com/getlien/lien' },
-        { icon: 'twitter', link: 'https://twitter.com/alfhenderson' }
+        { icon: 'github', link: 'https://github.com/getlien/lien' }
       ],
 
       footer: {

@@ -68,8 +68,7 @@ Contributions welcome! See **[CONTRIBUTING.md](./CONTRIBUTING.md)** for guidelin
 ## Support
 
 - 🐛 **[Issues](https://github.com/getlien/lien/issues)** - Report bugs or request features
-- 💬 **[Discussions](https://github.com/getlien/lien/discussions)** - Ask questions and share ideas  
-- 🐦 **[Twitter](https://twitter.com/alfhenderson)** - Follow for updates
+- 💬 **[Discussions](https://github.com/getlien/lien/discussions)** - Ask questions and share ideas
 
 ## License
 
