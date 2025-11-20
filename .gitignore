@@ -58,3 +58,4 @@ coverage/
 .test-git-*
 .test-watcher-*
 
+packages/cli/README.md
