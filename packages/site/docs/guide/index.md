@@ -72,7 +72,7 @@ Lien is built with modern, performant tools:
 
 Lien indexes and understands code in:
 - TypeScript, JavaScript (JSX/TSX), Vue
-- Python, PHP
+- Python, PHP, Liquid (Shopify)
 - Go, Rust
 - Java, C/C++
 - Ruby, Swift, Kotlin, C#, Scala

@@ -83,6 +83,12 @@ describe('detectLanguage', () => {
     expect(detectLanguage('App.scala')).toBe('scala');
   });
 
+  it('should detect Liquid files', () => {
+    expect(detectLanguage('product.liquid')).toBe('liquid');
+    expect(detectLanguage('theme.liquid')).toBe('liquid');
+    expect(detectLanguage('header.liquid')).toBe('liquid');
+  });
+
   it('should return unknown for unrecognized extensions', () => {
     expect(detectLanguage('file.txt')).toBe('unknown');
     expect(detectLanguage('image.png')).toBe('unknown');

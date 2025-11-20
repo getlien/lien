@@ -60,21 +60,56 @@ async function detectAtPath(
     }
   }
   
-  // Conflict resolution: if multiple frameworks detected at same path,
-  // only keep the highest priority one
+  // Conflict resolution: Allow multiple HIGH-confidence frameworks to coexist
+  // This enables hybrid projects (e.g., Shopify + Node.js, Laravel + Node.js)
   if (detectedAtPath.length > 1) {
-    // Sort by priority (highest first)
-    detectedAtPath.sort((a, b) => b.priority - a.priority);
+    // Separate frameworks by confidence level
+    const highConfidence = detectedAtPath.filter(d => d.confidence === 'high');
+    const mediumConfidence = detectedAtPath.filter(d => d.confidence === 'medium');
+    const lowConfidence = detectedAtPath.filter(d => d.confidence === 'low');
     
-    // Keep only the highest priority framework
-    const winner = detectedAtPath[0];
-    results.push(winner);
-    
-    // Optional: Log what was skipped
-    const skipped = detectedAtPath.slice(1);
-    if (skipped.length > 0) {
-      const skippedNames = skipped.map(d => d.name).join(', ');
-      console.log(`  → Skipping ${skippedNames} at ${relativePath} (${winner.name} takes precedence)`);
+    if (highConfidence.length > 1) {
+      // Multiple HIGH-confidence frameworks -> keep all (hybrid/monorepo behavior)
+      results.push(...highConfidence);
+      const names = highConfidence.map(d => d.name).join(' + ');
+      console.log(`  → Detected hybrid project: ${names}`);
+      
+      // Log skipped medium/low confidence detections
+      if (mediumConfidence.length > 0 || lowConfidence.length > 0) {
+        const skippedNames = [...mediumConfidence, ...lowConfidence].map(d => d.name).join(', ');
+        console.log(`  → Skipping lower confidence detections: ${skippedNames}`);
+      }
+    } else if (highConfidence.length === 1) {
+      // Only one HIGH-confidence framework
+      results.push(highConfidence[0]);
+      
+      // Log skipped medium/low confidence detections
+      if (mediumConfidence.length > 0 || lowConfidence.length > 0) {
+        const skippedNames = [...mediumConfidence, ...lowConfidence].map(d => d.name).join(', ');
+        console.log(`  → Skipping lower confidence detections: ${skippedNames}`);
+      }
+    } else if (mediumConfidence.length > 0) {
+      // No HIGH confidence, but have MEDIUM -> use priority system
+      detectedAtPath.sort((a, b) => b.priority - a.priority);
+      const winner = detectedAtPath[0];
+      results.push(winner);
+      
+      const skipped = detectedAtPath.slice(1);
+      if (skipped.length > 0) {
+        const skippedNames = skipped.map(d => d.name).join(', ');
+        console.log(`  → Skipping ${skippedNames} at ${relativePath} (${winner.name} takes precedence)`);
+      }
+    } else {
+      // Only LOW confidence -> use priority system
+      detectedAtPath.sort((a, b) => b.priority - a.priority);
+      const winner = detectedAtPath[0];
+      results.push(winner);
+      
+      const skipped = detectedAtPath.slice(1);
+      if (skipped.length > 0) {
+        const skippedNames = skipped.map(d => d.name).join(', ');
+        console.log(`  → Skipping ${skippedNames} at ${relativePath} (${winner.name} takes precedence)`);
+      }
     }
   } else if (detectedAtPath.length === 1) {
     results.push(detectedAtPath[0]);

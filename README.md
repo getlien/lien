@@ -57,9 +57,9 @@ lien index
 
 ## Supported Languages
 
-TypeScript • JavaScript • Vue • Python • PHP • Laravel • Go • Rust • Java • C/C++ • Ruby • Swift • Kotlin • C# • Scala • Markdown
+TypeScript • JavaScript • Vue • Python • PHP • Liquid • Go • Rust • Java • C/C++ • Ruby • Swift • Kotlin • C# • Scala • Markdown
 
-**Frameworks:** Node.js, Laravel (more coming soon!)
+**Frameworks:** Node.js, Laravel, Shopify (Liquid themes)
 
 ## Contributing
 

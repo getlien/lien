@@ -1,6 +1,7 @@
 import { FrameworkDetector } from './types.js';
 import { nodejsDetector } from './nodejs/detector.js';
 import { laravelDetector } from './laravel/detector.js';
+import { shopifyDetector } from './shopify/detector.js';
 
 /**
  * Registry of all available framework detectors
@@ -9,6 +10,7 @@ import { laravelDetector } from './laravel/detector.js';
 export const frameworkDetectors: FrameworkDetector[] = [
   nodejsDetector,
   laravelDetector,
+  shopifyDetector,
 ];
 
 /**

@@ -175,6 +175,7 @@ export function detectLanguage(filepath: string): string {
     '.kt': 'kotlin',
     '.cs': 'csharp',
     '.scala': 'scala',
+    '.liquid': 'liquid',
     '.md': 'markdown',
     '.mdx': 'markdown',
     '.markdown': 'markdown',
