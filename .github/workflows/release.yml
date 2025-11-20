@@ -28,10 +28,8 @@ jobs:
       - name: Build
         run: npm run build
       
-      - name: Publish to npm
-        run: npm publish --workspace=packages/cli --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm (with provenance)
+        run: npm publish --workspace=packages/cli --access public --provenance
       
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
