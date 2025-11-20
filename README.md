@@ -73,7 +73,7 @@ Contributions welcome! See **[CONTRIBUTING.md](./CONTRIBUTING.md)** for guidelin
 
 ## License
 
-MIT © [Alf Henderson](https://github.com/alfhenderson)
+MIT © [Alf Henderson](https://github.com/alfhen)
 
 ---
 
