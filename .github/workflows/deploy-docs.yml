@@ -33,8 +33,6 @@ jobs:
         run: npm install
 
       - name: Build VitePress site
-        env:
-          VITE_BASE_PATH: /lien/
         run: npm run docs:build
 
       - name: Upload artifact
