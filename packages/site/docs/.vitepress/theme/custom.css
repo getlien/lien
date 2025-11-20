@@ -1,0 +1,114 @@
+/* Custom styles for Mermaid diagrams */
+
+/* Make Mermaid diagrams larger and more readable */
+.mermaid {
+  display: flex;
+  justify-content: center;
+  margin: 2rem 0;
+  width: 100%;
+  overflow-x: auto;
+}
+
+.mermaid svg {
+  max-width: 100% !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 500px;
+}
+
+/* For very complex diagrams, allow them to be scrollable */
+.vp-doc .mermaid {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.vp-doc .mermaid svg {
+  max-width: none;
+  width: auto;
+  min-width: 100%;
+}
+
+/* Improve diagram text readability */
+.mermaid text {
+  font-family: var(--vp-font-family-base) !important;
+  font-size: 16px !important;
+  font-weight: 500 !important;
+}
+
+/* Make diagram boxes more visible and larger */
+.mermaid rect,
+.mermaid polygon,
+.mermaid circle {
+  stroke-width: 2px !important;
+}
+
+/* Dark mode improvements */
+.dark .mermaid rect,
+.dark .mermaid polygon {
+  fill: #1e1e1e !important;
+  stroke: #4a9eff !important;
+  stroke-width: 2px !important;
+}
+
+.dark .mermaid text {
+  fill: #e0e0e0 !important;
+}
+
+.dark .mermaid .node rect,
+.dark .mermaid .node polygon,
+.dark .mermaid .node circle {
+  fill: #2d2d2d !important;
+  stroke: #4a9eff !important;
+}
+
+.dark .mermaid .edgeLabel {
+  background-color: #1a1a1a !important;
+  color: #e0e0e0 !important;
+}
+
+.dark .mermaid line,
+.dark .mermaid path {
+  stroke: #4a9eff !important;
+}
+
+/* Add some spacing around diagrams */
+.vp-doc div[class*="language-mermaid"] {
+  margin: 2rem 0;
+  overflow-x: auto;
+}
+
+/* Interactive Background - Make content areas transparent to pointer events */
+/* This allows hovering logos behind the main content */
+.VPHero,
+.VPFeatures,
+.VPContent,
+.vp-doc {
+  pointer-events: none;
+}
+
+/* Re-enable pointer events for interactive elements */
+.VPHero a,
+.VPHero button,
+.VPHero input,
+.VPFeatures a,
+.VPFeatures button,
+.VPContent a,
+.VPContent button,
+.vp-doc a,
+.vp-doc button,
+.vp-doc input,
+.vp-doc textarea,
+.vp-doc pre,
+.vp-doc code,
+.VPNavBar,
+.VPNavBar *,
+.VPSidebar,
+.VPSidebar *,
+.VPLocalNav,
+.VPLocalNav *,
+.VPFooter,
+.VPFooter *,
+.DocSearch,
+.VPSwitch {
+  pointer-events: auto;
+}

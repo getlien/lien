@@ -21,12 +21,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/alfhenderson/lien.git",
+    "url": "https://github.com/getlien/lien.git",
     "directory": "packages/cli"
   },
   "homepage": "https://lien.dev",
   "bugs": {
-    "url": "https://github.com/alfhenderson/lien/issues"
+    "url": "https://github.com/getlien/lien/issues"
   },
   "scripts": {
     "build": "tsup && chmod +x dist/index.js && sed -i '' '1s/^/#!\\/usr\\/bin\\/env node\\n/' dist/index.js",

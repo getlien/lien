@@ -9,6 +9,14 @@ build/
 *.tsbuildinfo
 docs/
 
+# Exception: VitePress docs site
+!packages/site/docs/
+!docs/architecture/
+
+# VitePress build artifacts
+packages/site/docs/.vitepress/cache/
+packages/site/docs/.vitepress/dist/
+
 # Lien data
 .lien/
 

@@ -12,6 +12,7 @@ Lien is a local-first semantic code search tool that provides deep codebase cont
 - ⚡ **Fast** - Queries return in <500ms, indexing completes in minutes
 - 🆓 **Free Forever** - No API costs, no subscriptions
 - 📦 **Zero Config** - Works out of the box with sensible defaults
+- 🏗️ **Monorepo Support** - Index multiple frameworks in one repository
 
 ## Installation
 
@@ -59,21 +60,18 @@ lien serve
 
 ### 4. Configure Cursor
 
-Create or edit `~/.cursor/mcp.json`:
+Create `.cursor/mcp.json` in your project root:
 
 ```json
 {
   "mcpServers": {
     "lien": {
       "command": "lien",
-      "args": ["serve"],
-      "cwd": "/absolute/path/to/your/project"
+      "args": ["serve"]
     }
   }
 }
 ```
-
-**Replace `/absolute/path/to/your/project`** with your actual project path.
 
 **Note:** If you accepted the Cursor rules installation during `lien init`, your project already has `.cursor/rules` configured!
 
@@ -405,10 +403,9 @@ The embedding model downloads on first run. Ensure you have:
 
 ### Cursor doesn't show Lien tools
 
-1. Check `~/.cursor/mcp.json` is valid JSON
-2. Ensure the `cwd` path is absolute and correct
-3. Restart Cursor completely
-4. Check Cursor's developer console for errors
+1. Check `.cursor/mcp.json` in your project root exists and is valid JSON
+2. Restart Cursor completely
+3. Check Cursor's developer console for errors
 
 ### New features not appearing after upgrade
 
@@ -449,23 +446,9 @@ Lien indexes and understands code in: TypeScript, JavaScript (including JSX/TSX)
 
 See [local-architecture.md](./local-architecture.md) for detailed architecture documentation.
 
-## Roadmap
-
-### v0.2 (Coming Soon)
-- [ ] Incremental indexing (watch mode)
-- [ ] Tree-sitter for better code chunking
-- [ ] Multi-repo support
-- [ ] Web dashboard
-
-### v0.3 (Future)
-- [ ] GitHub PR review integration
-- [ ] Team features
-- [ ] Cloud sync (optional)
-- [ ] Advanced filtering and search
-
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines (coming soon).
+Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
 
 ## License
 
@@ -532,7 +515,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for de
 
 ```bash
 # Clone and setup
-git clone https://github.com/alfhenderson/lien.git
+git clone https://github.com/getlien/lien.git
 cd lien
 npm install
 npm run build
@@ -566,8 +549,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for full details on the development wor
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/alfhenderson/lien/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/alfhenderson/lien/discussions)
+- **Issues**: [GitHub Issues](https://github.com/getlien/lien/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/getlien/lien/discussions)
 - **Twitter**: [@alfhenderson](https://twitter.com/alfhenderson)
 
 ## Acknowledgments

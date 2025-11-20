@@ -276,7 +276,7 @@ Test associations will work better with no code changes needed.
 
 
 
-## [0.3.0] - 2025-01-14
+## [0.3.0] - 2025-11-14
 
 ### 🚀 Major Features
 
@@ -356,7 +356,7 @@ Becomes:
 
 No action required - just run any Lien command and migration will happen automatically.
 
-## [0.2.0] - 2025-01-13
+## [0.2.0] - 2025-11-13
 
 ### Added
 - **Automated release script**: New `npm run release` command handles version bumping, building, changelog updates, commits, and git tags automatically
@@ -375,15 +375,15 @@ No action required - just run any Lien command and migration will happen automat
 - Enhanced README with Contributing & Development section
 - Added release script to root package.json
 
-## [0.1.10] - 2025-01-13
+## [0.1.10] - 2025-11-13
 
 ### Added
 - **Index version metadata in tool responses**: All MCP tools now include `indexInfo` field with `indexVersion` (timestamp) and `indexDate` (human-readable) in their responses. This makes it easy to verify that Cursor is using the latest reindexed data without needing to restart.
   - Added `getCurrentVersion()` and `getVersionDate()` methods to `VectorDB`
   - All tools (`semantic_search`, `find_similar`, `get_file_context`, `list_functions`) now return index metadata
-  - Example output: `"indexInfo": { "indexVersion": 1704845454321, "indexDate": "1/13/2025, 3:34:14 PM" }`
+  - Example output: `"indexInfo": { "indexVersion": 1731534854321, "indexDate": "11/13/2025, 3:34:14 PM" }`
 
-## [0.1.9] - 2025-01-13
+## [0.1.9] - 2025-11-13
 
 ### Fixed
 - **Improved automatic reconnection after reindex**: Enhanced the reconnection logic to properly close and reload database connections. Added background polling every 2 seconds to detect index updates, so Cursor no longer needs to be restarted after reindexing.
@@ -392,7 +392,7 @@ No action required - just run any Lien command and migration will happen automat
   - Added background version check polling (every 2s) independent of tool calls
   - MCP server automatically reconnects within 2 seconds of any reindex operation
 
-## [0.1.8] - 2025-01-13
+## [0.1.8] - 2025-11-13
 
 ### Fixed
 - **[CRITICAL] Test associations now returned by all MCP tools**: Fixed `VectorDB.search()` to include test association metadata fields (`isTest`, `relatedTests`, `relatedSources`, `testFramework`, `detectionMethod`) in search results. Previously, these fields were stored in the database but not returned by the search function, causing MCP tools to show "Test associations not available" even after reindexing.
@@ -400,7 +400,7 @@ No action required - just run any Lien command and migration will happen automat
   - Fixed both the main search path and the retry/reconnection path
   - No reindexing required - existing indices will now work correctly
 
-## [0.1.7] - 2025-01-13
+## [0.1.7] - 2025-11-13
 
 ### Fixed
 - **[CRITICAL] Source→Test associations now work for Laravel and monorepo structures**: Fixed test file discovery for projects where paths include parent directories (e.g., `cognito-backend/tests/Unit/UserTest.php`). Now correctly finds tests regardless of path prefix.
@@ -408,7 +408,7 @@ No action required - just run any Lien command and migration will happen automat
   - Fixes issue where test→source worked but source→test didn't
   - Laravel projects now fully supported with both directions working
 
-## [0.1.6] - 2025-01-13
+## [0.1.6] - 2025-11-13
 
 ### Added
 - **`--verbose` flag for indexing commands**: Added `-v, --verbose` flag to `lien index` and `lien reindex` commands. Shows detailed logging including:
@@ -420,22 +420,22 @@ No action required - just run any Lien command and migration will happen automat
 ### Fixed
 - **Crash when using verbose flag**: Fixed ReferenceError where `verbose` variable wasn't being extracted from options parameter
 
-## [0.1.5] - 2025-01-13
+## [0.1.5] - 2025-11-13
 
 ### Fixed
 - **Test association detection now visible during indexing**: Added clear output showing how many test files and source-test associations were found during indexing. This helps debug test detection issues.
 
-## [0.1.4] - 2025-01-13
+## [0.1.4] - 2025-11-13
 
 ### Changed
 - **All version strings now read from package.json**: CLI version (`--version`), MCP server version, and banner version all dynamically read from `package.json`. No more hardcoded version strings to update manually.
 
-## [0.1.3] - 2025-01-13
+## [0.1.3] - 2025-11-13
 
 ### Fixed
 - **TypeError during reindexing**: Fixed "Cannot read properties of undefined (reading 'map')" error when converting test association paths. Added proper null/undefined checks for `relatedTests` and `relatedSources` arrays.
 
-## [0.1.2] - 2025-01-13
+## [0.1.2] - 2025-11-13
 
 ### Fixed
 - **[CRITICAL] Test associations were never being calculated**: The indexer was using absolute file paths but test pattern matching expected relative paths. This meant NO test associations were being detected for ANY files. Now paths are properly converted to relative before pattern matching, and converted back to absolute for storage.
@@ -461,11 +461,11 @@ No action required - just run any Lien command and migration will happen automat
 ### Migration
 **Important:** If you have an existing index, you must run `lien reindex` in your project to enable test associations. The automatic reconnection will detect and reload the new index - **no need to restart Cursor**.
 
-## [0.1.1] - 2025-01-13
+## [0.1.1] - 2025-11-13
 
 _This version was skipped - all changes rolled into 0.1.2 after discovering critical bugs during testing._
 
-## [0.1.0] - 2025-01-12
+## [0.1.0] - 2025-11-12
 
 ### Added
 - Initial release

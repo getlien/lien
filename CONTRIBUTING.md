@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Lien! This document provides guid
 
 ```bash
 # Clone the repository
-git clone https://github.com/alfhenderson/lien.git
+git clone https://github.com/getlien/lien.git
 cd lien
 
 # Install dependencies
