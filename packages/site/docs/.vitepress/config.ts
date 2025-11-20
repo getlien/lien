@@ -10,7 +10,7 @@ export default withMermaid(
     description: 'Local-first semantic code search for AI assistants',
     
     head: [
-      ['link', { rel: 'icon', href: '/favicon.ico' }],
+      ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
       ['meta', { name: 'theme-color', content: '#646cff' }],
       ['meta', { name: 'og:type', content: 'website' }],
       ['meta', { name: 'og:locale', content: 'en' }],
