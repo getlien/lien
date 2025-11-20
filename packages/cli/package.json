@@ -29,7 +29,7 @@
     "url": "https://github.com/getlien/lien/issues"
   },
   "scripts": {
-    "build": "tsup && chmod +x dist/index.js && sed -i '' '1s/^/#!\\/usr\\/bin\\/env node\\n/' dist/index.js",
+    "build": "tsup && chmod +x dist/index.js",
     "dev": "tsup --watch",
     "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit",
