@@ -4,6 +4,7 @@ import { withMermaid } from 'vitepress-plugin-mermaid'
 // https://vitepress.dev/reference/site-config
 export default withMermaid(
   defineConfig({
+    base: '/lien/',
     title: 'Lien',
     description: 'Local-first semantic code search for AI assistants',
     
