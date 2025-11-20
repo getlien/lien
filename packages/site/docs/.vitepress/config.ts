@@ -4,7 +4,8 @@ import { withMermaid } from 'vitepress-plugin-mermaid'
 // https://vitepress.dev/reference/site-config
 export default withMermaid(
   defineConfig({
-    base: '/lien/',
+    // Use /lien/ for GitHub Pages subdomain, / for custom domain
+    base: process.env.VITE_BASE_PATH || '/',
     title: 'Lien',
     description: 'Local-first semantic code search for AI assistants',
     
