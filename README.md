@@ -444,8 +444,6 @@ Lien is built with:
 
 Lien indexes and understands code in: TypeScript, JavaScript (including JSX/TSX), Vue, Python, PHP, Go, Rust, Java, C/C++, Ruby, Swift, Kotlin, C#, and Scala.
 
-See [local-architecture.md](./local-architecture.md) for detailed architecture documentation.
-
 ## Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
