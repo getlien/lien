@@ -471,7 +471,11 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
   
-  // Also listen for stdin closing (when parent process dies without sending signals)
+  // Resume stdin to ensure it emits 'end' event when parent closes
+  // Without resume(), stdin remains paused and won't detect parent termination
+  process.stdin.resume();
+  
+  // Listen for stdin closing (when parent process dies without sending signals)
   // This handles cases where Cursor quits without properly signaling child processes
   process.stdin.on('end', () => {
     log('stdin closed, parent process likely terminated');
