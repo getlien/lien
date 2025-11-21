@@ -54,6 +54,7 @@ For detailed technical architecture, flow diagrams, and implementation details, 
 Lien automatically detects your project structure:
 - **Node.js/TypeScript** - via package.json
 - **Laravel/PHP** - via composer.json
+- **Shopify Themes** - via config/settings_schema.json
 - **Monorepos** - Multiple frameworks in one repo (e.g., Node.js frontend + Laravel backend)
 
 Each framework gets appropriate test patterns, file exclusions, and indexing strategies!

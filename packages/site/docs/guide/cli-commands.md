@@ -18,7 +18,7 @@ lien init [options]
 
 ### Behavior
 
-1. Detects frameworks in your project (Node.js, Laravel, etc.)
+1. Detects frameworks in your project (Node.js, Laravel, Shopify, etc.)
 2. Creates `.lien.config.json` with framework-specific settings
 3. Offers to install Cursor rules to `.cursor/rules/lien.mdc`
 4. Prompts for customization (optional)

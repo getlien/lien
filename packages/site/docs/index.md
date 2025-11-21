@@ -36,7 +36,7 @@ features:
   
   - icon: 📦
     title: Framework-Aware
-    details: Auto-detects frameworks (Node.js, Laravel) with zero config. Full monorepo support - index multiple frameworks in one repo seamlessly.
+    details: Auto-detects frameworks (Node.js, Laravel, Shopify) with zero config. Full monorepo support - index multiple frameworks in one repo seamlessly.
 ---
 
 ## Quick Start

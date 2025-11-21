@@ -21,6 +21,7 @@ This will:
 Lien automatically detects:
 - **Node.js/TypeScript**: via `package.json`
 - **Laravel/PHP**: via `composer.json`
+- **Shopify Themes**: via `config/settings_schema.json`
 
 During initialization, you'll be prompted to:
 - Select which frameworks to enable
