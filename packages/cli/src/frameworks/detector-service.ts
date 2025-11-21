@@ -70,7 +70,9 @@ async function detectAtPath(
     
     if (highConfidence.length > 1) {
       // Multiple HIGH-confidence frameworks -> keep all (hybrid/monorepo behavior)
-      results.push(...highConfidence);
+      // Strip internal priority property before adding to results
+      const cleanResults = highConfidence.map(({ priority, ...result }) => result);
+      results.push(...cleanResults);
       const names = highConfidence.map(d => d.name).join(' + ');
       console.log(`  → Detected hybrid project: ${names}`);
       
@@ -81,7 +83,8 @@ async function detectAtPath(
       }
     } else if (highConfidence.length === 1) {
       // Only one HIGH-confidence framework
-      results.push(highConfidence[0]);
+      const { priority, ...result } = highConfidence[0];
+      results.push(result);
       
       // Log skipped medium/low confidence detections
       if (mediumConfidence.length > 0 || lowConfidence.length > 0) {
@@ -91,7 +94,7 @@ async function detectAtPath(
     } else if (mediumConfidence.length > 0) {
       // No HIGH confidence, but have MEDIUM -> use priority system
       detectedAtPath.sort((a, b) => b.priority - a.priority);
-      const winner = detectedAtPath[0];
+      const { priority, ...winner } = detectedAtPath[0];
       results.push(winner);
       
       const skipped = detectedAtPath.slice(1);
@@ -102,7 +105,7 @@ async function detectAtPath(
     } else {
       // Only LOW confidence -> use priority system
       detectedAtPath.sort((a, b) => b.priority - a.priority);
-      const winner = detectedAtPath[0];
+      const { priority, ...winner } = detectedAtPath[0];
       results.push(winner);
       
       const skipped = detectedAtPath.slice(1);
@@ -112,7 +115,8 @@ async function detectAtPath(
       }
     }
   } else if (detectedAtPath.length === 1) {
-    results.push(detectedAtPath[0]);
+    const { priority, ...result } = detectedAtPath[0];
+    results.push(result);
   }
 }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
-import { detectAllFrameworks } from '../../packages/cli/src/frameworks/detector-service.js';
+import { detectAllFrameworks } from '../../src/frameworks/detector-service.js';
 
 describe('Shopify + Node.js Hybrid Theme', () => {
   let testDir: string;
@@ -66,12 +66,12 @@ describe('Shopify + Node.js Hybrid Theme', () => {
     // Should detect BOTH frameworks
     expect(results).toHaveLength(2);
     
-    const frameworkNames = results.map(r => r.name).sort();
+    const frameworkNames = results.map((r) => r.name).sort();
     expect(frameworkNames).toEqual(['nodejs', 'shopify']);
     
     // Both should have HIGH confidence
-    const shopify = results.find(r => r.name === 'shopify');
-    const nodejs = results.find(r => r.name === 'nodejs');
+    const shopify = results.find((r) => r.name === 'shopify');
+    const nodejs = results.find((r) => r.name === 'nodejs');
     
     expect(shopify).toBeDefined();
     expect(shopify?.confidence).toBe('high');
@@ -144,7 +144,7 @@ describe('Shopify + Node.js Hybrid Theme', () => {
     const results = await detectAllFrameworks(testDir);
     
     expect(results.length).toBeGreaterThan(0);
-    const shopify = results.find(r => r.name === 'shopify');
+    const shopify = results.find((r) => r.name === 'shopify');
     expect(shopify).toBeDefined();
   });
   
