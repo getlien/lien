@@ -101,7 +101,7 @@ test('calculator addition', () => {
     expect(loadedConfig.frameworks[0].name).toBe('nodejs');
 
     // Step 5: Verify structure is correct for indexing
-    expect(loadedConfig.frameworks[0].config.include).toContain('src/**/*.ts');
+    expect(loadedConfig.frameworks[0].config.include).toContain('**/*.ts');
   }, 10000);
 
   it('migrates v0.2.0 config → index → search workflow', async () => {

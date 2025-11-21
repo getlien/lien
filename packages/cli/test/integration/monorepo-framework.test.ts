@@ -98,7 +98,7 @@ describe('Monorepo Framework Integration', () => {
 
     const nodejs = frameworks.find(f => f.name === 'nodejs');
     expect(nodejs).toBeDefined();
-    expect(nodejs?.config.include).toContain('src/**/*.ts');
+    expect(nodejs?.config.include).toContain('**/*.ts');
     expect(nodejs?.config.exclude).toContain('node_modules/**');
 
     const laravel = frameworks.find(f => f.name === 'laravel');
