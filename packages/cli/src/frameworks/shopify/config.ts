@@ -13,8 +13,7 @@ export async function generateShopifyConfig(
       'layout/**/*.liquid',
       'sections/**/*.liquid',
       'snippets/**/*.liquid',
-      'templates/**/*.liquid',
-      'templates/**/**/*.liquid', // For nested dirs like templates/customers/
+      'templates/**/*.liquid', // Matches any nesting level (e.g., templates/customers/account.liquid)
       
       // Theme editor blocks (Online Store 2.0)
       'blocks/**/*.liquid',
