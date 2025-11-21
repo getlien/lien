@@ -82,23 +82,29 @@ export const shopifyDetector: FrameworkDetector = {
       // Optional file
     }
     
-    // Determine detection confidence
+    // Determine detection confidence with early returns
     // High: Has settings_schema.json + 2+ directories
-    // Medium: Has theme.liquid + 1+ directory, OR has settings_schema alone
-    // Low: Has only directories but no strong markers
-    
     if (hasSettingsSchema && foundDirs >= 2) {
       result.detected = true;
       result.confidence = 'high';
-    } else if (hasSettingsSchema || (hasThemeLayout && foundDirs >= 1)) {
-      result.detected = true;
-      result.confidence = 'medium';
-    } else if (foundDirs >= 3) {
-      // Has 3+ typical directories but no strong markers - still might be Shopify
-      result.detected = true;
-      result.confidence = 'medium';
+      return result;
     }
     
+    // Medium: Has settings_schema alone, OR has theme.liquid + 1+ directory
+    if (hasSettingsSchema || (hasThemeLayout && foundDirs >= 1)) {
+      result.detected = true;
+      result.confidence = 'medium';
+      return result;
+    }
+    
+    // Medium: Has 3+ typical directories but no strong markers
+    if (foundDirs >= 3) {
+      result.detected = true;
+      result.confidence = 'medium';
+      return result;
+    }
+    
+    // Not detected
     return result;
   },
   
