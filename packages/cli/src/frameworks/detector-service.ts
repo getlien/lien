@@ -107,13 +107,13 @@ async function detectAtPath(
       // Only LOW confidence -> use priority system
       lowConfidence.sort((a, b) => b.priority - a.priority);
       const { priority, ...winner } = lowConfidence[0];
-      results.push(winner);
-      
+    results.push(winner);
+    
       // Skipped = remaining low confidence
       const skipped = lowConfidence.slice(1);
-      if (skipped.length > 0) {
-        const skippedNames = skipped.map(d => d.name).join(', ');
-        console.log(`  → Skipping ${skippedNames} at ${relativePath} (${winner.name} takes precedence)`);
+    if (skipped.length > 0) {
+      const skippedNames = skipped.map(d => d.name).join(', ');
+      console.log(`  → Skipping ${skippedNames} at ${relativePath} (${winner.name} takes precedence)`);
       }
     }
   } else if (detectedAtPath.length === 1) {

@@ -17,12 +17,12 @@ export async function generateLaravelConfig(
       'resources/**/*.php',
       'tests/**/*.php',
       '*.php',
-      // Frontend assets (Vue/React/Inertia)
-      'resources/js/**/*.js',
-      'resources/js/**/*.ts',
-      'resources/js/**/*.jsx',
-      'resources/js/**/*.tsx',
-      'resources/js/**/*.vue',
+      // Frontend assets (Vue/React/Inertia) - Broadened for flexibility
+      '**/*.js',
+      '**/*.ts',
+      '**/*.jsx',
+      '**/*.tsx',
+      '**/*.vue',
       // Blade templates
       'resources/views/**/*.blade.php',
       // Documentation
