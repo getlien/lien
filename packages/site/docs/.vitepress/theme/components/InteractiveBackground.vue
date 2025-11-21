@@ -32,8 +32,9 @@ const logos = ref([
   { icon: 'https://cdn.simpleicons.org/vuedotjs/4FC08D', name: 'Vue', x: 38, y: 14, vx: -0.08, vy: -0.06, isHovered: false },
   { icon: 'https://cdn.simpleicons.org/python/3776AB', name: 'Python', x: 52, y: 16, vx: 0.06, vy: 0.08, isHovered: false },
   { icon: 'https://cdn.simpleicons.org/php/777BB4', name: 'PHP', x: 68, y: 13, vx: -0.09, vy: 0.06, isHovered: false },
-  { icon: 'https://cdn.simpleicons.org/laravel/FF2D20', name: 'Laravel', x: 82, y: 17, vx: 0.08, vy: -0.09, isHovered: false },
-  { icon: 'https://cursor.sh/brand/icon.svg', name: 'Cursor', x: 92, y: 14, vx: -0.07, vy: 0.08, isHovered: false },
+  { icon: 'https://cdn.simpleicons.org/shopify/7AB55C', name: 'Shopify', x: 75, y: 19, vx: 0.07, vy: 0.08, isHovered: false },
+  { icon: 'https://cdn.simpleicons.org/laravel/FF2D20', name: 'Laravel', x: 87, y: 17, vx: 0.08, vy: -0.09, isHovered: false },
+  { icon: 'https://cursor.sh/brand/icon.svg', name: 'Cursor', x: 93, y: 14, vx: -0.07, vy: 0.08, isHovered: false },
   
   // Row 2 - Middle
   { icon: 'https://cdn.simpleicons.org/rust/000000', name: 'Rust', x: 12, y: 38, vx: 0.09, vy: -0.06, isHovered: false },
