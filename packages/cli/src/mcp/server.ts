@@ -471,19 +471,21 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
   
-  // Resume stdin to ensure it emits 'end' event when parent closes
-  // Without resume(), stdin remains paused and won't detect parent termination
-  process.stdin.resume();
-  
-  // Listen for stdin closing (when parent process dies without sending signals)
-  // This handles cases where Cursor quits without properly signaling child processes
-  process.stdin.on('end', () => {
-    log('stdin closed, parent process likely terminated');
-    cleanup().catch(() => process.exit(0));
-  });
-  
   // Connect to stdio transport
   const transport = new StdioServerTransport();
+  
+  // Use SDK's transport callbacks for parent process detection
+  // This avoids conflicts with the transport's stdin management
+  transport.onclose = () => {
+    log('Transport closed, parent process likely terminated');
+    cleanup().catch(() => process.exit(0));
+  };
+  
+  transport.onerror = (error) => {
+    log(`Transport error: ${error}`);
+    // Transport will close after error, onclose will handle cleanup
+  };
+  
   await server.connect(transport);
   
   log('MCP server started and listening on stdio');
