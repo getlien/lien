@@ -29,16 +29,24 @@ export async function generateNodeJsConfig(
       '.next/**',
       '.nuxt/**',
       '.vite/**',
+      '.lien/**',
       'out/**',
       '*.min.js',
       '*.min.css',
       '*.bundle.js',
-      // Exclude common build/cache directories
+      
+      // Test artifacts (source files are indexed, but not output)
+      'playwright-report/**',
+      'test-results/**',
+      
+      // Build/generated artifacts
+      '__generated__/**',
+      
+      // Common build/cache directories
       '.cache/**',
       '.turbo/**',
       '.vercel/**',
       '.netlify/**',
-      '__generated__/**',
     ],
   };
 }
