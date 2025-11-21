@@ -20,7 +20,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
       
       - name: Install dependencies
         run: npm install
@@ -30,8 +29,6 @@ jobs:
       
       - name: Publish to npm (with provenance)
         run: npm publish --workspace=packages/cli --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
