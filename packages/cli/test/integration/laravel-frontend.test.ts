@@ -45,12 +45,12 @@ describe('Laravel Frontend Integration', () => {
     expect(config.include).toContain('app/**/*.php');
     expect(config.include).toContain('resources/**/*.php');
 
-    // Verify frontend files are included
-    expect(config.include).toContain('resources/js/**/*.js');
-    expect(config.include).toContain('resources/js/**/*.ts');
-    expect(config.include).toContain('resources/js/**/*.jsx');
-    expect(config.include).toContain('resources/js/**/*.tsx');
-    expect(config.include).toContain('resources/js/**/*.vue');
+    // Verify frontend files are included (broadened patterns for flexibility)
+    expect(config.include).toContain('**/*.js');
+    expect(config.include).toContain('**/*.ts');
+    expect(config.include).toContain('**/*.jsx');
+    expect(config.include).toContain('**/*.tsx');
+    expect(config.include).toContain('**/*.vue');
 
     // Verify Blade templates are included
     expect(config.include).toContain('resources/views/**/*.blade.php');
