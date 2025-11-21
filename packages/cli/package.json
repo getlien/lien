@@ -4,7 +4,7 @@
   "description": "Local semantic code search for AI assistants via MCP",
   "type": "module",
   "bin": {
-    "lien": "dist/index.js"
+    "lien": "./dist/index.js"
   },
   "main": "./dist/index.js",
   "exports": {
