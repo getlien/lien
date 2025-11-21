@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.10.0] - 2025-11-21
+
+### Added
+- **Add Shopify Liquid theme support with MCP stability fixes**
+
+
 ## [0.9.1] - 2025-11-20
 
 ### Fixed
