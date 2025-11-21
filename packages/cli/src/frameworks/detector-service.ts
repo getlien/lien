@@ -93,22 +93,24 @@ async function detectAtPath(
       }
     } else if (mediumConfidence.length > 0) {
       // No HIGH confidence, but have MEDIUM -> use priority system
-      detectedAtPath.sort((a, b) => b.priority - a.priority);
-      const { priority, ...winner } = detectedAtPath[0];
+      mediumConfidence.sort((a, b) => b.priority - a.priority);
+      const { priority, ...winner } = mediumConfidence[0];
       results.push(winner);
       
-      const skipped = detectedAtPath.slice(1);
+      // Skipped = remaining medium + all low confidence
+      const skipped = [...mediumConfidence.slice(1), ...lowConfidence];
       if (skipped.length > 0) {
         const skippedNames = skipped.map(d => d.name).join(', ');
         console.log(`  → Skipping ${skippedNames} at ${relativePath} (${winner.name} takes precedence)`);
       }
-    } else {
+    } else if (lowConfidence.length > 0) {
       // Only LOW confidence -> use priority system
-      detectedAtPath.sort((a, b) => b.priority - a.priority);
-      const { priority, ...winner } = detectedAtPath[0];
+      lowConfidence.sort((a, b) => b.priority - a.priority);
+      const { priority, ...winner } = lowConfidence[0];
       results.push(winner);
       
-      const skipped = detectedAtPath.slice(1);
+      // Skipped = remaining low confidence
+      const skipped = lowConfidence.slice(1);
       if (skipped.length > 0) {
         const skippedNames = skipped.map(d => d.name).join(', ');
         console.log(`  → Skipping ${skippedNames} at ${relativePath} (${winner.name} takes precedence)`);
