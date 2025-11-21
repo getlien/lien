@@ -16,7 +16,7 @@ describe('Framework Priority/Conflict Resolution', () => {
     await fs.rm(testDir, { recursive: true, force: true });
   });
 
-  it('should detect Laravel instead of Node.js when both markers exist', async () => {
+  it('should detect both Laravel and Node.js when both markers exist (hybrid)', async () => {
     // Create Laravel directory with BOTH package.json and composer.json
     // (Laravel uses package.json for Vite/npm to compile frontend assets)
     await fs.mkdir(path.join(testDir, 'backend'), { recursive: true });
@@ -41,10 +41,12 @@ describe('Framework Priority/Conflict Resolution', () => {
     // Detect frameworks
     const results = await detectAllFrameworks(testDir);
 
-    // Should only detect Laravel, NOT Node.js
-    expect(results.length).toBe(1);
-    expect(results[0].name).toBe('laravel');
-    expect(results[0].path).toBe('backend');
+    // Should detect BOTH Laravel and Node.js (hybrid project)
+    // This is correct for modern Laravel projects with Vite
+    expect(results.length).toBe(2);
+    expect(results.map(r => r.name).sort()).toEqual(['laravel', 'nodejs']);
+    expect(results.every(r => r.path === 'backend')).toBe(true);
+    expect(results.every(r => r.confidence === 'high')).toBe(true);
   });
 
   it('should detect Node.js when no higher-priority framework exists', async () => {
@@ -135,13 +137,15 @@ describe('Framework Priority/Conflict Resolution', () => {
     const results = await detectAllFrameworks(testDir);
 
     // Should detect:
-    // - Laravel at api/ (NOT Node.js, despite package.json)
+    // - Laravel + Node.js at api/ (hybrid - Laravel with Vite)
     // - Node.js at web/
     // - Node.js at root (for workspace management)
-    expect(results.length).toBe(3);
+    expect(results.length).toBe(4);
     
-    const apiFramework = results.find(r => r.path === 'api');
-    expect(apiFramework?.name).toBe('laravel');
+    // Check api/ has both Laravel and Node.js (hybrid)
+    const apiFrameworks = results.filter(r => r.path === 'api');
+    expect(apiFrameworks.length).toBe(2);
+    expect(apiFrameworks.map(f => f.name).sort()).toEqual(['laravel', 'nodejs']);
     
     const webFramework = results.find(r => r.path === 'web');
     expect(webFramework?.name).toBe('nodejs');

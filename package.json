@@ -5,7 +5,7 @@
   "description": "Lien - Local semantic code search for AI assistants",
   "repository": {
     "type": "git",
-    "url": "https://github.com/getlien/lien.git"
+    "url": "git+https://github.com/getlien/lien.git"
   },
   "homepage": "https://lien.dev",
   "bugs": {
@@ -40,4 +40,3 @@
     "node": ">=22.21.0"
   }
 }
-

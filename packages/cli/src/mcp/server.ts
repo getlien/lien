@@ -109,16 +109,6 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     await checkAndReconnect();
   }, VERSION_CHECK_INTERVAL_MS);
   
-  // Clean up interval on process exit
-  process.on('SIGINT', () => {
-    clearInterval(versionCheckInterval);
-    process.exit(0);
-  });
-  process.on('SIGTERM', () => {
-    clearInterval(versionCheckInterval);
-    process.exit(0);
-  });
-  
   // Register tool call handler
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
@@ -467,6 +457,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   // Handle shutdown gracefully
   const cleanup = async () => {
     log('Shutting down MCP server...');
+    clearInterval(versionCheckInterval);
     if (gitPollInterval) {
       clearInterval(gitPollInterval);
     }
@@ -476,11 +467,25 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     process.exit(0);
   };
   
+  // Listen for termination signals
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
   
   // Connect to stdio transport
   const transport = new StdioServerTransport();
+  
+  // Use SDK's transport callbacks for parent process detection
+  // This avoids conflicts with the transport's stdin management
+  transport.onclose = () => {
+    log('Transport closed, parent process likely terminated');
+    cleanup().catch(() => process.exit(0));
+  };
+  
+  transport.onerror = (error) => {
+    log(`Transport error: ${error}`);
+    // Transport will close after error, onclose will handle cleanup
+  };
+  
   await server.connect(transport);
   
   log('MCP server started and listening on stdio');

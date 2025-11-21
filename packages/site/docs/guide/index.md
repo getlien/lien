@@ -21,6 +21,7 @@ Integrate with Cursor and other MCP-compatible tools to give AI assistants deep 
 Automatically detects and adapts to your project structure:
 - **Node.js/TypeScript**: Package.json detection, Jest/Vitest/Mocha support
 - **Laravel/PHP**: Composer detection, blade templates, frontend assets
+- **Shopify**: Liquid theme detection, hybrid themes with Vue/React
 - **Monorepo**: Multiple frameworks in one repository
 
 ## How Does It Work?
@@ -72,7 +73,7 @@ Lien is built with modern, performant tools:
 
 Lien indexes and understands code in:
 - TypeScript, JavaScript (JSX/TSX), Vue
-- Python, PHP
+- Python, PHP, Liquid
 - Go, Rust
 - Java, C/C++
 - Ruby, Swift, Kotlin, C#, Scala

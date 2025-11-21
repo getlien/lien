@@ -38,6 +38,21 @@ export async function generateLaravelConfig(
       'bootstrap/cache/**',
       'public/**',
       'node_modules/**',
+      'dist/**',
+      'build/**',
+      
+      // Test artifacts (source files are indexed, but not output)
+      'playwright-report/**',
+      'test-results/**',
+      'coverage/**',
+      
+      // Build/generated artifacts
+      '__generated__/**',
+      
+      // Frontend build outputs
+      '.vite/**',
+      '.nuxt/**',
+      '.next/**',
     ],
   };
 }

@@ -122,6 +122,54 @@ Automatically detected via `composer.json`:
 }
 ```
 
+#### Shopify (Liquid)
+
+Automatically detected via `config/settings_schema.json`:
+
+```json
+{
+  "name": "shopify",
+  "path": ".",
+  "config": {
+    "indexing": {
+      "include": [
+        "layout/**/*.liquid",
+        "sections/**/*.liquid",
+        "snippets/**/*.liquid",
+        "templates/**/*.liquid",
+        "blocks/**/*.liquid",
+        "assets/**/*.{js,css,scss}.liquid",
+        "config/*.json"
+      ],
+      "exclude": [
+        "node_modules/**",
+        "dist/**",
+        "__generated__/**"
+      ]
+    }
+  }
+}
+```
+
+**Hybrid Shopify + Node.js themes**: Modern Shopify themes often include a Vue.js or React frontend alongside Liquid templates. Lien automatically detects and indexes both frameworks when they coexist:
+
+```json
+{
+  "frameworks": [
+    {
+      "name": "shopify",
+      "path": ".",
+      "config": { /* Liquid templates */ }
+    },
+    {
+      "name": "nodejs",
+      "path": ".",
+      "config": { /* Vue/React frontend */ }
+    }
+  ]
+}
+```
+
 ## Indexing Options
 
 ### Global Settings
