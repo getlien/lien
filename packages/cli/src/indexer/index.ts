@@ -195,16 +195,20 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     };
     
     // Start a periodic timer to update the spinner independently
+    const SPINNER_UPDATE_INTERVAL_MS = 200;  // How often to update spinner
+    const MESSAGE_ROTATION_INTERVAL_MS = 8000;  // How often to rotate message
+    const MESSAGE_ROTATION_TICKS = Math.floor(MESSAGE_ROTATION_INTERVAL_MS / SPINNER_UPDATE_INTERVAL_MS);
+    
     let messageRotationCounter = 0;
     updateInterval = setInterval(() => {
-      // Rotate witty message every 8 seconds (40 ticks at 200ms)
+      // Rotate witty message periodically
       messageRotationCounter++;
-      if (messageRotationCounter % 40 === 0) {
+      if (messageRotationCounter % MESSAGE_ROTATION_TICKS === 0) {
         progressState.wittyMessage = getIndexingMessage();
       }
       
       spinner.text = `${progressState.processedFiles}/${progressState.totalFiles} files | ${progressState.wittyMessage}`;
-    }, 200); // Update every 200ms for smooth animation
+    }, SPINNER_UPDATE_INTERVAL_MS);
     
     // Function to process accumulated chunks
     const processAccumulatedChunks = async () => {

@@ -2,21 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { INDEX_FORMAT_VERSION } from '../constants.js';
 import { GitState } from '../git/tracker.js';
-import { createRequire } from 'module';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-// Get package version dynamically
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const require = createRequire(import.meta.url);
-
-let packageJson: { version: string };
-try {
-  packageJson = require(join(__dirname, '../package.json'));
-} catch {
-  packageJson = require(join(__dirname, '../../package.json'));
-}
+import { getPackageVersion } from '../utils/version.js';
 
 const MANIFEST_FILE = 'manifest.json';
 
@@ -122,7 +108,7 @@ export class ManifestManager {
       const manifestToSave: IndexManifest = {
         ...manifest,
         formatVersion: INDEX_FORMAT_VERSION,
-        lienVersion: packageJson.version,
+        lienVersion: getPackageVersion(),
         lastIndexed: Date.now(),
       };
       
@@ -309,7 +295,7 @@ export class ManifestManager {
   private createEmpty(): IndexManifest {
     return {
       formatVersion: INDEX_FORMAT_VERSION,
-      lienVersion: packageJson.version,
+      lienVersion: getPackageVersion(),
       configVersion: '0.3.0',  // Will be updated from config when saved
       lastIndexed: Date.now(),
       files: {},

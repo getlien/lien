@@ -5,7 +5,7 @@
 
 const INDEXING_MESSAGES = [
   'Teaching AI to read your spaghetti code...',
-  'Convincing the LLM your variable names make sense...',
+  'Convincing the LLM that your variable names make sense...',
   'Indexing your TODO comments (so many TODOs)...',
   'Building semantic links faster than you can say "grep"...',
   'Making your codebase searchable (the good, the bad, and the ugly)...',
