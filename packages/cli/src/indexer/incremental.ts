@@ -161,6 +161,8 @@ export async function indexMultipleFiles(
           console.error(`[Lien] Note: ${filepath} not in index`);
         }
       }
+      // Count as successfully processed (we handled the deletion)
+      successCount++;
       continue;
     }
     
