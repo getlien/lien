@@ -202,8 +202,20 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
         progressState.currentOperation = `Generating embeddings (${i + batch.length}/${totalToProcess})`;
         progressState.pendingChunks = totalToProcess - (i + batch.length);
         
+        // Process embeddings in micro-batches to prevent event loop blocking
+        // Transformers.js is CPU-intensive, so we yield control periodically
         const texts = batch.map(item => item.content);
-        const embeddingVectors = await embeddings.embedBatch(texts);
+        const embeddingVectors: Float32Array[] = [];
+        const microBatchSize = 10; // Process 10 at a time, then yield
+        
+        for (let j = 0; j < texts.length; j += microBatchSize) {
+          const microBatch = texts.slice(j, Math.min(j + microBatchSize, texts.length));
+          const microResults = await embeddings.embedBatch(microBatch);
+          embeddingVectors.push(...microResults);
+          
+          // Yield to event loop so spinner can update
+          await new Promise(resolve => setImmediate(resolve));
+        }
         
         processedChunks += batch.length;
         progressState.processedChunks = processedChunks;
@@ -216,6 +228,9 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           batch.map(item => item.chunk.metadata),
           texts
         );
+        
+        // Yield after DB insertion too
+        await new Promise(resolve => setImmediate(resolve));
       }
       
       progressState.currentOperation = 'Processing files...';

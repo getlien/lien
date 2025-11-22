@@ -75,8 +75,21 @@ export async function indexSingleFile(
     }
     
     // Generate embeddings for all chunks
+    // Use micro-batching to prevent event loop blocking
     const texts = chunks.map(c => c.content);
-    const vectors = await embeddings.embedBatch(texts);
+    const vectors: Float32Array[] = [];
+    const microBatchSize = 10;
+    
+    for (let j = 0; j < texts.length; j += microBatchSize) {
+      const microBatch = texts.slice(j, Math.min(j + microBatchSize, texts.length));
+      const microResults = await embeddings.embedBatch(microBatch);
+      vectors.push(...microResults);
+      
+      // Yield to event loop for responsiveness
+      if (texts.length > microBatchSize) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+    }
     
     // Update file in database (atomic: delete old + insert new)
     await vectorDB.updateFile(
@@ -187,8 +200,21 @@ export async function indexMultipleFiles(
       }
       
       // Generate embeddings for all chunks
+      // Use micro-batching to prevent event loop blocking on large files
       const texts = chunks.map(c => c.content);
-      const vectors = await embeddings.embedBatch(texts);
+      const vectors: Float32Array[] = [];
+      const microBatchSize = 10;
+      
+      for (let j = 0; j < texts.length; j += microBatchSize) {
+        const microBatch = texts.slice(j, Math.min(j + microBatchSize, texts.length));
+        const microResults = await embeddings.embedBatch(microBatch);
+        vectors.push(...microResults);
+        
+        // Yield to event loop for responsiveness
+        if (texts.length > microBatchSize) {
+          await new Promise(resolve => setImmediate(resolve));
+        }
+      }
       
       // Delete old chunks if they exist (ignore errors if file not in index yet)
       try {
