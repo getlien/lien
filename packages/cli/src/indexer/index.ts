@@ -190,9 +190,6 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     const progressState = {
       processedFiles: 0,
       totalFiles: files.length,
-      processedChunks: 0,
-      currentOperation: 'Processing files...',
-      pendingChunks: 0,
       wittyMessage: getIndexingMessage(),
     };
     
@@ -209,7 +206,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
         progressState.wittyMessage = getIndexingMessage();
       }
       
-      spinner.text = `${progressState.processedFiles}/${progressState.totalFiles} files | ${progressState.wittyMessage} | ${progressState.processedChunks} chunks | ETA: ${eta}s`;
+      spinner.text = `${progressState.processedFiles}/${progressState.totalFiles} files | ${progressState.wittyMessage} | ETA: ${eta}s`;
     }, 200); // Update every 200ms for smooth animation
     
     // Function to process accumulated chunks
@@ -217,7 +214,6 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       if (chunkAccumulator.length === 0) return;
       
       const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
-      const totalToProcess = toProcess.length;
       
       // Process embeddings in smaller batches AND insert incrementally to keep UI responsive
       for (let i = 0; i < toProcess.length; i += embeddingBatchSize) {
@@ -225,7 +221,6 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
         
         // Update shared state (spinner updates automatically via interval)
         progressState.wittyMessage = getEmbeddingMessage();
-        progressState.pendingChunks = totalToProcess - (i + batch.length);
         
         // Process embeddings in micro-batches to prevent event loop blocking
         // Transformers.js is CPU-intensive, so we yield control periodically
@@ -243,7 +238,6 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
         }
         
         processedChunks += batch.length;
-        progressState.processedChunks = processedChunks;
         
         // Update state before DB insertion
         progressState.wittyMessage = `Inserting ${batch.length} chunks into vector space...`;
@@ -300,7 +294,6 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           
           processedFiles++;
           progressState.processedFiles = processedFiles;
-          progressState.pendingChunks = chunkAccumulator.length;
           
           // Process when batch is large enough (use smaller batch for responsiveness)
           if (chunkAccumulator.length >= vectorDBBatchSize) {
@@ -320,7 +313,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     await Promise.all(filePromises);
     
     // Process remaining chunks
-    progressState.currentOperation = 'Processing final chunks...';
+    progressState.wittyMessage = 'Processing final chunks...';
     await processAccumulatedChunks();
     
     // Stop the progress update interval
