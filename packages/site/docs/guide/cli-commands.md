@@ -47,26 +47,42 @@ If `.cursor/rules` exists as a file, Lien will offer to convert it to a director
 
 ## lien index
 
-Index your codebase for semantic search.
+Index your codebase for semantic search. **Automatically uses incremental indexing** to only process changed files.
 
 ```bash
-lien index
+lien index [options]
 ```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--force` | Force full reindex (skip incremental mode) |
+| `--verbose` | Show detailed logging during indexing |
 
 ### Behavior
 
-1. Scans files based on framework configuration
-2. Chunks code into semantic units
-3. Generates embeddings using local ML model
-4. Stores in `~/.lien/indices/[project-hash]/`
-5. Detects test associations
+1. **Checks for changes** (if manifest exists from previous index)
+   - Git-based detection (fast, accurate)
+   - Falls back to mtime comparison if not a git repo
+2. **Only indexes changed files** (10-100x faster!)
+3. Chunks code into semantic units
+4. Generates embeddings using local ML model
+5. Stores in `~/.lien/indices/[project-hash]/`
+6. Updates index manifest for future incremental runs
 
 ### Performance
 
-Indexing time depends on project size:
+**Initial index** (full):
 - **Small** (1k files): ~5 minutes
-- **Medium** (10k files): ~20 minutes
+- **Medium** (10k files): ~15-20 minutes
 - **Large** (50k files): ~30-60 minutes
+
+**Incremental reindex** (typical):
+- **Single file edit**: < 2 seconds ⚡
+- **Small changes (5-10 files)**: < 5 seconds ⚡
+- **Feature branch (50 files)**: ~15-20 seconds
+- **Large refactor (500 files)**: ~1-2 minutes
 
 ### First Run
 
@@ -93,11 +109,18 @@ On first run, Lien downloads the embedding model (~100MB). This requires an inte
 
 ## lien serve
 
-Start the MCP server for AI assistant integration.
+Start the MCP server for AI assistant integration. **Automatically watches for file changes** and reindexes in the background.
 
 ```bash
-lien serve
+lien serve [options]
 ```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--no-watch` | Disable file watching for this session |
+| `--root <path>` | Root directory to serve (defaults to current directory) |
 
 ### Behavior
 
@@ -105,10 +128,33 @@ lien serve
 2. Checks if index exists (auto-indexes if missing)
 3. Starts MCP server on stdio transport
 4. Listens for tool requests from Cursor
+5. **Watches for file changes** and automatically reindexes (< 2 seconds per file!)
+6. Detects git commits and reindexes changed files in background
 
 ### Auto-Indexing
 
 If no index exists, `lien serve` will automatically run indexing on first start. This may take 5-20 minutes depending on project size.
+
+### File Watching
+
+File watching is **enabled by default** for instant updates:
+- Detects when you save a file in your editor
+- Automatically reindexes in < 2 seconds
+- No manual `lien index` needed!
+
+To disable for a session:
+```bash
+lien serve --no-watch
+```
+
+To disable permanently, set in `.lien.config.json`:
+```json
+{
+  "fileWatching": {
+    "enabled": false
+  }
+}
+```
 
 ::: tip
 Usually run via Cursor's MCP configuration, not manually.
