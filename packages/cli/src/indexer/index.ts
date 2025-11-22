@@ -13,8 +13,6 @@ import { isLegacyConfig, isModernConfig } from '../config/schema.js';
 import { ManifestManager } from './manifest.js';
 import { detectChanges } from './change-detector.js';
 import { indexMultipleFiles } from './incremental.js';
-import { GitStateTracker } from '../git/tracker.js';
-import { isGitAvailable, isGitRepo } from '../git/utils.js';
 
 export interface IndexingOptions {
   rootDir?: string;
@@ -49,18 +47,8 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       const savedManifest = await manifest.load();
       
       if (savedManifest) {
-        // Initialize git tracker if available
-        let gitTracker: GitStateTracker | null = null;
-        const gitAvailable = await isGitAvailable();
-        const isRepo = await isGitRepo(rootDir);
-        
-        if (gitAvailable && isRepo) {
-          gitTracker = new GitStateTracker(rootDir, vectorDB.dbPath);
-          await gitTracker.initialize();
-        }
-        
-        // Detect changes
-        const changes = await detectChanges(rootDir, vectorDB, gitTracker, config);
+        // Detect changes using mtime
+        const changes = await detectChanges(rootDir, vectorDB, config);
         
         if (changes.reason !== 'full') {
           const totalChanges = changes.added.length + changes.modified.length;

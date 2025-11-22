@@ -4,7 +4,6 @@ import { EmbeddingService } from '../embeddings/types.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
 import { ManifestManager } from './manifest.js';
-import { ParallelFileReader } from './file-reader.js';
 
 export interface IncrementalIndexOptions {
   verbose?: boolean;
@@ -106,7 +105,7 @@ export async function indexSingleFile(
 
 /**
  * Indexes multiple files incrementally.
- * Processes files sequentially to avoid overwhelming the embedding model.
+ * Processes files sequentially for simplicity and reliability.
  * 
  * @param filepaths - Array of absolute file paths to index
  * @param vectorDB - Initialized VectorDB instance
@@ -125,22 +124,16 @@ export async function indexMultipleFiles(
   const { verbose } = options;
   let successCount = 0;
   
-  // Use parallel file reading for better performance
-  const concurrency = isModernConfig(config)
-    ? config.core.concurrency
-    : 4;
-  
-  const fileReader = new ParallelFileReader(concurrency);
-  const fileContents = await fileReader.readFiles(filepaths);
-  
   // Batch manifest updates for performance
   const manifestEntries: Array<{ filepath: string; chunkCount: number }> = [];
   
-  // Process each file with its content
+  // Process each file sequentially (simple and reliable)
   for (const filepath of filepaths) {
-    const content = fileContents.get(filepath);
-    
-    if (!content) {
+    // Try to read the file
+    let content: string;
+    try {
+      content = await fs.readFile(filepath, 'utf-8');
+    } catch (error) {
       // File doesn't exist or couldn't be read - delete from index
       if (verbose) {
         console.error(`[Lien] File not readable: ${filepath}`);
@@ -155,8 +148,6 @@ export async function indexMultipleFiles(
           console.error(`[Lien] Note: ${filepath} not in index`);
         }
       }
-      // Count as successful processing (handled deletion)
-      successCount++;
       continue;
     }
     

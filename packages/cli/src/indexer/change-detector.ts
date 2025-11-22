@@ -1,6 +1,5 @@
 import fs from 'fs/promises';
 import { VectorDB } from '../vectordb/lancedb.js';
-import { GitStateTracker } from '../git/tracker.js';
 import { ManifestManager } from './manifest.js';
 import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
 import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
@@ -12,26 +11,21 @@ export interface ChangeDetectionResult {
   added: string[];      // New files not in previous index
   modified: string[];   // Existing files that have been modified
   deleted: string[];    // Files that were indexed but no longer exist
-  reason: 'git' | 'mtime' | 'full';  // How changes were detected
+  reason: 'mtime' | 'full';  // How changes were detected
 }
 
 /**
- * Detects which files have changed since last indexing.
- * Uses a multi-tiered strategy:
- * 1. Git-based detection (fast, accurate, requires git)
- * 2. mtime-based detection (slower, works everywhere)
- * 3. Full reindex (no manifest exists)
+ * Detects which files have changed since last indexing using file modification times.
+ * Simple, reliable, and works everywhere without dependencies.
  * 
  * @param rootDir - Root directory of the project
  * @param vectorDB - Initialized VectorDB instance
- * @param gitTracker - Optional GitStateTracker (if git available)
  * @param config - Lien configuration
  * @returns Change detection result
  */
 export async function detectChanges(
   rootDir: string,
   vectorDB: VectorDB,
-  gitTracker: GitStateTracker | null,
   config: LienConfig | LegacyLienConfig
 ): Promise<ChangeDetectionResult> {
   const manifest = new ManifestManager(vectorDB.dbPath);
@@ -48,29 +42,7 @@ export async function detectChanges(
     };
   }
   
-  // Try git-based detection first (fastest)
-  if (gitTracker && savedManifest.gitState) {
-    try {
-      const gitChanges = await gitTracker.detectChanges();
-      
-      if (gitChanges && gitChanges.length > 0) {
-        return await categorizeGitChanges(gitChanges, savedManifest, rootDir);
-      }
-      
-      // No git changes detected
-      return {
-        added: [],
-        modified: [],
-        deleted: [],
-        reason: 'git',
-      };
-    } catch (error) {
-      console.error(`[Lien] Git detection failed: ${error}`);
-      // Fall through to mtime-based detection
-    }
-  }
-  
-  // Fallback to mtime-based detection
+  // Use mtime-based detection (simple and reliable)
   return await mtimeBasedDetection(rootDir, savedManifest, config);
 }
 
@@ -96,51 +68,6 @@ async function getAllFiles(
       excludePatterns: [],
     });
   }
-}
-
-/**
- * Categorizes git changes into added, modified, and deleted
- */
-async function categorizeGitChanges(
-  gitChanges: string[],
-  savedManifest: any,
-  rootDir: string
-): Promise<ChangeDetectionResult> {
-  const added: string[] = [];
-  const modified: string[] = [];
-  const deleted: string[] = [];
-  
-  for (const filepath of gitChanges) {
-    // Resolve to absolute path if relative
-    const absolutePath = filepath.startsWith('/')
-      ? filepath
-      : `${rootDir}/${filepath}`;
-    
-    // Check if file exists
-    try {
-      await fs.access(absolutePath);
-      
-      // File exists - either added or modified
-      if (savedManifest.files[absolutePath]) {
-        modified.push(absolutePath);
-      } else {
-        added.push(absolutePath);
-      }
-    } catch {
-      // File doesn't exist - it was deleted
-      if (savedManifest.files[absolutePath]) {
-        deleted.push(absolutePath);
-      }
-      // If it's not in manifest and doesn't exist, ignore it
-    }
-  }
-  
-  return {
-    added,
-    modified,
-    deleted,
-    reason: 'git',
-  };
 }
 
 /**
