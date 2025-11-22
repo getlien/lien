@@ -196,9 +196,9 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     // Start a periodic timer to update the spinner independently
     let messageRotationCounter = 0;
     updateInterval = setInterval(() => {
-      // Rotate witty message every 3 seconds (15 ticks at 200ms)
+      // Rotate witty message every 8 seconds (40 ticks at 200ms)
       messageRotationCounter++;
-      if (messageRotationCounter % 15 === 0) {
+      if (messageRotationCounter % 40 === 0) {
         progressState.wittyMessage = getIndexingMessage();
       }
       
