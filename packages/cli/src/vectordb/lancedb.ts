@@ -495,6 +495,32 @@ export class VectorDB implements VectorDBInterface {
       });
     }
     
+    // Split large batches into smaller chunks for better reliability
+    // Maximum batch size of 1000 records
+    const MAX_BATCH_SIZE = 1000;
+    
+    if (vectors.length > MAX_BATCH_SIZE) {
+      // Split into smaller batches
+      for (let i = 0; i < vectors.length; i += MAX_BATCH_SIZE) {
+        const batchVectors = vectors.slice(i, Math.min(i + MAX_BATCH_SIZE, vectors.length));
+        const batchMetadata = metadatas.slice(i, Math.min(i + MAX_BATCH_SIZE, vectors.length));
+        const batchContents = contents.slice(i, Math.min(i + MAX_BATCH_SIZE, vectors.length));
+        
+        await this._insertBatchInternal(batchVectors, batchMetadata, batchContents);
+      }
+    } else {
+      await this._insertBatchInternal(vectors, metadatas, contents);
+    }
+  }
+  
+  /**
+   * Internal method to insert a single batch with retry logic
+   */
+  private async _insertBatchInternal(
+    vectors: Float32Array[],
+    metadatas: ChunkMetadata[],
+    contents: string[]
+  ): Promise<void> {
     try {
       const records = vectors.map((vector, i) => ({
         vector: Array.from(vector),
@@ -513,12 +539,30 @@ export class VectorDB implements VectorDBInterface {
       // Create table if it doesn't exist, otherwise add to existing table
       if (!this.table) {
         // Let LanceDB createTable handle type inference from the data
-        this.table = await this.db.createTable(this.tableName, records) as LanceDBTable;
+        this.table = await this.db!.createTable(this.tableName, records) as LanceDBTable;
       } else {
         await this.table.add(records);
       }
     } catch (error) {
-      throw wrapError(error, 'Failed to insert batch into vector database');
+      // Retry with smaller batches on failure
+      if (vectors.length > 1) {
+        const half = Math.floor(vectors.length / 2);
+        
+        // Split in half and retry
+        await this._insertBatchInternal(
+          vectors.slice(0, half),
+          metadatas.slice(0, half),
+          contents.slice(0, half)
+        );
+        await this._insertBatchInternal(
+          vectors.slice(half),
+          metadatas.slice(half),
+          contents.slice(half)
+        );
+      } else {
+        // Single record failed - throw error
+        throw wrapError(error, 'Failed to insert batch into vector database');
+      }
     }
   }
   

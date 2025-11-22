@@ -3,6 +3,8 @@ import { chunkFile } from './chunker.js';
 import { EmbeddingService } from '../embeddings/types.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
+import { ManifestManager } from './manifest.js';
+import { ParallelFileReader } from './file-reader.js';
 
 export interface IncrementalIndexOptions {
   verbose?: boolean;
@@ -33,11 +35,14 @@ export async function indexSingleFile(
     try {
       await fs.access(filepath);
     } catch {
-      // File doesn't exist - delete from index
+      // File doesn't exist - delete from index and manifest
       if (verbose) {
         console.error(`[Lien] File deleted: ${filepath}`);
       }
       await vectorDB.deleteByFile(filepath);
+      
+      const manifest = new ManifestManager(vectorDB.dbPath);
+      await manifest.removeFile(filepath);
       return;
     }
     
@@ -59,11 +64,14 @@ export async function indexSingleFile(
     });
     
     if (chunks.length === 0) {
-      // Empty file - remove from index
+      // Empty file - remove from index and manifest
       if (verbose) {
         console.error(`[Lien] Empty file: ${filepath}`);
       }
       await vectorDB.deleteByFile(filepath);
+      
+      const manifest = new ManifestManager(vectorDB.dbPath);
+      await manifest.removeFile(filepath);
       return;
     }
     
@@ -78,6 +86,14 @@ export async function indexSingleFile(
       chunks.map(c => c.metadata),
       texts
     );
+    
+    // Update manifest after successful indexing
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    await manifest.updateFile(filepath, {
+      filepath,
+      lastModified: Date.now(),
+      chunkCount: chunks.length,
+    });
     
     if (verbose) {
       console.error(`[Lien] ✓ Updated ${filepath} (${chunks.length} chunks)`);
@@ -109,15 +125,107 @@ export async function indexMultipleFiles(
   const { verbose } = options;
   let successCount = 0;
   
+  // Use parallel file reading for better performance
+  const concurrency = isModernConfig(config)
+    ? config.core.concurrency
+    : 4;
+  
+  const fileReader = new ParallelFileReader(concurrency);
+  const fileContents = await fileReader.readFiles(filepaths);
+  
+  // Process each file with its content
   for (const filepath of filepaths) {
+    const content = fileContents.get(filepath);
+    
+    if (!content) {
+      // File doesn't exist or couldn't be read - delete from index
+      if (verbose) {
+        console.error(`[Lien] File not readable: ${filepath}`);
+      }
+      try {
+        await vectorDB.deleteByFile(filepath);
+        const manifest = new ManifestManager(vectorDB.dbPath);
+        await manifest.removeFile(filepath);
+      } catch (error) {
+        // Ignore errors if file wasn't in index
+        if (verbose) {
+          console.error(`[Lien] Note: ${filepath} not in index`);
+        }
+      }
+      // Count as successful processing (handled deletion)
+      successCount++;
+      continue;
+    }
+    
     try {
-      await indexSingleFile(filepath, vectorDB, embeddings, config, options);
+      // Get chunk settings
+      const chunkSize = isModernConfig(config)
+        ? config.core.chunkSize
+        : (isLegacyConfig(config) ? config.indexing.chunkSize : 75);
+      const chunkOverlap = isModernConfig(config)
+        ? config.core.chunkOverlap
+        : (isLegacyConfig(config) ? config.indexing.chunkOverlap : 10);
+      
+      // Chunk the file
+      const chunks = chunkFile(filepath, content, {
+        chunkSize,
+        chunkOverlap,
+      });
+      
+      if (chunks.length === 0) {
+        // Empty file - remove from index and manifest
+        if (verbose) {
+          console.error(`[Lien] Empty file: ${filepath}`);
+        }
+        try {
+          await vectorDB.deleteByFile(filepath);
+          const manifest = new ManifestManager(vectorDB.dbPath);
+          await manifest.removeFile(filepath);
+        } catch (error) {
+          // Ignore errors if file wasn't in index
+          if (verbose) {
+            console.error(`[Lien] Note: ${filepath} not in index`);
+          }
+        }
+        // Count as successful processing (handled empty file)
+        successCount++;
+        continue;
+      }
+      
+      // Generate embeddings for all chunks
+      const texts = chunks.map(c => c.content);
+      const vectors = await embeddings.embedBatch(texts);
+      
+      // Delete old chunks if they exist (ignore errors if file not in index yet)
+      try {
+        await vectorDB.deleteByFile(filepath);
+      } catch (error) {
+        // Ignore - file might not be in index yet
+      }
+      
+      // Insert new chunks
+      await vectorDB.insertBatch(
+        vectors,
+        chunks.map(c => c.metadata),
+        texts
+      );
+      
+      // Update manifest after successful indexing
+      const manifest = new ManifestManager(vectorDB.dbPath);
+      await manifest.updateFile(filepath, {
+        filepath,
+        lastModified: Date.now(),
+        chunkCount: chunks.length,
+      });
+      
+      if (verbose) {
+        console.error(`[Lien] ✓ Updated ${filepath} (${chunks.length} chunks)`);
+      }
+      
       successCount++;
     } catch (error) {
-      // Error already logged in indexSingleFile
-      if (verbose) {
-        console.error(`[Lien] Failed to process ${filepath}`);
-      }
+      // Log error but don't throw - we want to continue with other files
+      console.error(`[Lien] ⚠️  Failed to index ${filepath}: ${error}`);
     }
   }
   

@@ -7,13 +7,19 @@ import { chunkFile } from './chunker.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { configService } from '../config/service.js';
-import { CodeChunk } from './types.js';
+import { CodeChunk, ChunkMetadata } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { isLegacyConfig, isModernConfig } from '../config/schema.js';
+import { ManifestManager } from './manifest.js';
+import { detectChanges } from './change-detector.js';
+import { indexMultipleFiles } from './incremental.js';
+import { GitStateTracker } from '../git/tracker.js';
+import { isGitAvailable, isGitRepo } from '../git/utils.js';
 
 export interface IndexingOptions {
   rootDir?: string;
   verbose?: boolean;
+  force?: boolean;  // Force full reindex, skip incremental
 }
 
 interface ChunkWithContent {
@@ -29,6 +35,91 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     // 1. Load configuration
     spinner.text = 'Loading configuration...';
     const config = await configService.load(rootDir);
+    
+    // 1.5. Initialize vector database early (needed for manifest)
+    spinner.text = 'Initializing vector database...';
+    const vectorDB = new VectorDB(rootDir);
+    await vectorDB.initialize();
+    
+    // 1.6. Try incremental indexing if manifest exists and not forced
+    if (!options.force) {
+      spinner.text = 'Checking for changes...';
+      const manifest = new ManifestManager(vectorDB.dbPath);
+      const savedManifest = await manifest.load();
+      
+      if (savedManifest) {
+        // Initialize git tracker if available
+        let gitTracker: GitStateTracker | null = null;
+        const gitAvailable = await isGitAvailable();
+        const isRepo = await isGitRepo(rootDir);
+        
+        if (gitAvailable && isRepo) {
+          gitTracker = new GitStateTracker(rootDir, vectorDB.dbPath);
+          await gitTracker.initialize();
+        }
+        
+        // Detect changes
+        const changes = await detectChanges(rootDir, vectorDB, gitTracker, config);
+        
+        if (changes.reason !== 'full') {
+          const totalChanges = changes.added.length + changes.modified.length;
+          const totalDeleted = changes.deleted.length;
+          
+          if (totalChanges === 0 && totalDeleted === 0) {
+            spinner.succeed('No changes detected - index is up to date!');
+            return;
+          }
+          
+          spinner.succeed(
+            `Detected changes: ${totalChanges} files to index, ${totalDeleted} to remove (${changes.reason} detection)`
+          );
+          
+          // Initialize embeddings for incremental update
+          spinner.start('Loading embedding model...');
+          const embeddings = new LocalEmbeddings();
+          await embeddings.initialize();
+          spinner.succeed('Embedding model loaded');
+          
+          // Handle deletions
+          if (totalDeleted > 0) {
+            spinner.start(`Removing ${totalDeleted} deleted files...`);
+            for (const filepath of changes.deleted) {
+              await vectorDB.deleteByFile(filepath);
+              await manifest.removeFile(filepath);
+            }
+            spinner.succeed(`Removed ${totalDeleted} deleted files`);
+          }
+          
+          // Handle additions and modifications
+          if (totalChanges > 0) {
+            spinner.start(`Reindexing ${totalChanges} changed files...`);
+            const filesToIndex = [...changes.added, ...changes.modified];
+            const count = await indexMultipleFiles(
+              filesToIndex,
+              vectorDB,
+              embeddings,
+              config,
+              { verbose: options.verbose }
+            );
+            
+            // Update version file to trigger MCP reconnection
+            await writeVersionFile(vectorDB.dbPath);
+            
+            spinner.succeed(
+              `Incremental reindex complete: ${count}/${totalChanges} files indexed successfully`
+            );
+          }
+          
+          console.log(chalk.dim('\nNext step: Run'), chalk.bold('lien serve'), chalk.dim('to start the MCP server'));
+          return; // Exit early - incremental index complete!
+        }
+        
+        // If we get here, changes.reason === 'full', so continue with full index below
+        spinner.text = 'Full reindex required...';
+      }
+    } else {
+      spinner.text = 'Force flag enabled, performing full reindex...';
+    }
     
     // 2. Scan for files (framework-aware if frameworks configured)
     spinner.text = 'Scanning codebase...';
@@ -66,19 +157,15 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     await embeddings.initialize();
     spinner.succeed('Embedding model loaded');
     
-    // 4. Initialize vector database
-    spinner.start('Initializing vector database...');
-    const vectorDB = new VectorDB(rootDir);
-    await vectorDB.initialize();
-    spinner.succeed('Vector database initialized');
-    
     // 5. Process files concurrently
     const concurrency = isModernConfig(config) 
       ? config.core.concurrency 
       : 4;
-    const batchSize = isModernConfig(config)
+    const embeddingBatchSize = isModernConfig(config)
       ? config.core.embeddingBatchSize
       : 50;
+    // Use larger batch size for Vector DB inserts (up to 1000)
+    const vectorDBBatchSize = 1000;
     
     spinner.start(`Processing files with ${concurrency}x concurrency...`);
     
@@ -90,26 +177,38 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     const chunkAccumulator: ChunkWithContent[] = [];
     const limit = pLimit(concurrency);
     
+    // Track successfully indexed files for manifest
+    const indexedFileEntries: Array<{ filepath: string; chunkCount: number }> = [];
+    
     // Function to process accumulated chunks
     const processAccumulatedChunks = async () => {
       if (chunkAccumulator.length === 0) return;
       
       const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
       
-      // Process in batches
-      for (let i = 0; i < toProcess.length; i += batchSize) {
-        const batch = toProcess.slice(i, Math.min(i + batchSize, toProcess.length));
+      // Process embeddings in smaller batches (memory constraint)
+      // But accumulate for larger Vector DB inserts
+      const vectorsToInsert: Float32Array[] = [];
+      const metadataToInsert: ChunkMetadata[] = [];
+      const contentsToInsert: string[] = [];
+      
+      for (let i = 0; i < toProcess.length; i += embeddingBatchSize) {
+        const batch = toProcess.slice(i, Math.min(i + embeddingBatchSize, toProcess.length));
         
         const texts = batch.map(item => item.content);
         const embeddingVectors = await embeddings.embedBatch(texts);
         
-        await vectorDB.insertBatch(
-          embeddingVectors,
-          batch.map(item => item.chunk.metadata),
-          texts
-        );
+        // Accumulate for larger DB insert
+        vectorsToInsert.push(...embeddingVectors);
+        metadataToInsert.push(...batch.map(item => item.chunk.metadata));
+        contentsToInsert.push(...texts);
         
         processedChunks += batch.length;
+      }
+      
+      // Insert all at once (VectorDB.insertBatch handles large batches internally)
+      if (vectorsToInsert.length > 0) {
+        await vectorDB.insertBatch(vectorsToInsert, metadataToInsert, contentsToInsert);
       }
     };
     
@@ -143,8 +242,14 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
             });
           }
           
-          // Process when batch is large enough
-          if (chunkAccumulator.length >= batchSize) {
+          // Track this file for manifest
+          indexedFileEntries.push({
+            filepath: file,
+            chunkCount: chunks.length,
+          });
+          
+          // Process when batch is large enough (use larger batch for efficiency)
+          if (chunkAccumulator.length >= vectorDBBatchSize) {
             await processAccumulatedChunks();
           }
           
@@ -170,6 +275,18 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     
     // Process remaining chunks
     await processAccumulatedChunks();
+    
+    // Save manifest with all indexed files
+    spinner.start('Saving index manifest...');
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    await manifest.updateFiles(
+      indexedFileEntries.map(entry => ({
+        filepath: entry.filepath,
+        lastModified: Date.now(),
+        chunkCount: entry.chunkCount,
+      }))
+    );
+    spinner.succeed('Manifest saved');
     
     // Write version file to mark successful completion
     // This allows the MCP server to detect when reindexing is complete

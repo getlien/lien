@@ -29,3 +29,11 @@ export const DEFAULT_DEBOUNCE_MS = 1000;
 // Configuration version
 export const CURRENT_CONFIG_VERSION = '0.3.0';
 
+// Index format version - bump on ANY breaking change to indexing
+// Examples that require version bump:
+// - Chunking algorithm changes
+// - Embedding model changes (e.g., switch from all-MiniLM-L6-v2 to another model)
+// - Vector DB schema changes (new metadata fields)
+// - Metadata structure changes
+export const INDEX_FORMAT_VERSION = 1;
+

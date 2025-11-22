@@ -127,7 +127,7 @@ export const defaultConfig: LienConfig = {
     pollIntervalMs: DEFAULT_GIT_POLL_INTERVAL_MS,
   },
   fileWatching: {
-    enabled: false, // Opt-in feature
+    enabled: true, // Enabled by default (fast with incremental indexing!)
     debounceMs: DEFAULT_DEBOUNCE_MS,
   },
   frameworks: [], // Will be populated by lien init via framework detection
