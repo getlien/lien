@@ -13,6 +13,7 @@ import { isLegacyConfig, isModernConfig } from '../config/schema.js';
 import { ManifestManager } from './manifest.js';
 import { detectChanges } from './change-detector.js';
 import { indexMultipleFiles } from './incremental.js';
+import { getIndexingMessage, getEmbeddingMessage, getModelLoadingMessage } from '../utils/loading-messages.js';
 
 export interface IndexingOptions {
   rootDir?: string;
@@ -64,7 +65,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           );
           
           // Initialize embeddings for incremental update
-          spinner.start('Loading embedding model...');
+          spinner.start(getModelLoadingMessage());
           const embeddings = new LocalEmbeddings();
           await embeddings.initialize();
           spinner.succeed('Embedding model loaded');
@@ -157,7 +158,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     spinner.text = `Found ${files.length} files`;
     
     // 3. Initialize embeddings model
-    spinner.text = 'Loading embedding model (this may take a minute on first run)...';
+    spinner.text = getModelLoadingMessage();
     const embeddings = new LocalEmbeddings();
     await embeddings.initialize();
     spinner.succeed('Embedding model loaded');
@@ -192,15 +193,23 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       processedChunks: 0,
       currentOperation: 'Processing files...',
       pendingChunks: 0,
+      wittyMessage: getIndexingMessage(),
     };
     
     // Start a periodic timer to update the spinner independently
+    let messageRotationCounter = 0;
     updateInterval = setInterval(() => {
       const elapsed = (Date.now() - startTime) / 1000;
       const rate = progressState.processedFiles / elapsed;
       const eta = rate > 0 ? Math.round((progressState.totalFiles - progressState.processedFiles) / rate) : 0;
       
-      spinner.text = `${progressState.processedFiles}/${progressState.totalFiles} files | ${progressState.currentOperation} | ${progressState.processedChunks} chunks | ETA: ${eta}s`;
+      // Rotate witty message every 3 seconds (15 ticks at 200ms)
+      messageRotationCounter++;
+      if (messageRotationCounter % 15 === 0) {
+        progressState.wittyMessage = getIndexingMessage();
+      }
+      
+      spinner.text = `${progressState.processedFiles}/${progressState.totalFiles} files | ${progressState.wittyMessage} | ${progressState.processedChunks} chunks | ETA: ${eta}s`;
     }, 200); // Update every 200ms for smooth animation
     
     // Function to process accumulated chunks
@@ -215,7 +224,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
         const batch = toProcess.slice(i, Math.min(i + embeddingBatchSize, toProcess.length));
         
         // Update shared state (spinner updates automatically via interval)
-        progressState.currentOperation = `Generating embeddings (${i + batch.length}/${totalToProcess})`;
+        progressState.wittyMessage = getEmbeddingMessage();
         progressState.pendingChunks = totalToProcess - (i + batch.length);
         
         // Process embeddings in micro-batches to prevent event loop blocking
@@ -237,7 +246,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
         progressState.processedChunks = processedChunks;
         
         // Update state before DB insertion
-        progressState.currentOperation = `Inserting ${batch.length} chunks`;
+        progressState.wittyMessage = `Inserting ${batch.length} chunks into vector space...`;
         
         await vectorDB.insertBatch(
           embeddingVectors,
@@ -249,7 +258,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
         await new Promise(resolve => setImmediate(resolve));
       }
       
-      progressState.currentOperation = 'Processing files...';
+      progressState.wittyMessage = getIndexingMessage();
     };
     
     // Process files with concurrency limit
