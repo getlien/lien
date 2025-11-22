@@ -56,39 +56,3 @@ program
   .description('Show indexing status and statistics')
   .action(statusCommand);
 
-program
-  .command('reindex')
-  .description('Clear index and re-index the entire codebase')
-  .option('-v, --verbose', 'Show detailed logging during indexing')
-  .action(async (options) => {
-    const { showCompactBanner } = await import('../utils/banner.js');
-    const chalk = (await import('chalk')).default;
-    const { VectorDB } = await import('../vectordb/lancedb.js');
-    const { ManifestManager } = await import('../indexer/manifest.js');
-    const { indexCodebase } = await import('../indexer/index.js');
-    
-    showCompactBanner();
-    
-    try {
-      console.log(chalk.yellow('Clearing existing index and manifest...'));
-      const vectorDB = new VectorDB(process.cwd());
-      await vectorDB.initialize();
-      await vectorDB.clear();
-      
-      // Also clear manifest
-      const manifest = new ManifestManager(vectorDB.dbPath);
-      await manifest.clear();
-      
-      console.log(chalk.green('✓ Index and manifest cleared\n'));
-      
-      await indexCodebase({
-        rootDir: process.cwd(),
-        verbose: options.verbose || false,
-        force: true,  // Force full reindex
-      });
-    } catch (error) {
-      console.error(chalk.red('Error during re-indexing:'), error);
-      process.exit(1);
-    }
-  });
-

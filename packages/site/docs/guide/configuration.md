@@ -332,7 +332,7 @@ Each framework defines test patterns:
 1. **Start with defaults**: The generated config works well for most projects
 2. **Exclude build artifacts**: Always exclude `node_modules`, `dist`, `build`
 3. **Adjust for hardware**: Tune concurrency and batch size based on your machine
-4. **Re-index after changes**: Run `lien reindex` after updating the config
+4. **Re-index after changes**: Run `lien index --force` after updating the config
 5. **Test patterns matter**: Include all test file patterns your project uses
 
 ## Example Configurations
