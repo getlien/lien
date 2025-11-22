@@ -67,7 +67,8 @@ let currentEmbeddingIndex = 0;
 let currentModelIndex = 0;
 
 /**
- * Get a random witty message for the indexing process
+ * Get the next witty message for the indexing process.
+ * Messages are returned sequentially in a round-robin fashion.
  */
 export function getIndexingMessage(): string {
   const message = INDEXING_MESSAGES[currentIndexingIndex % INDEXING_MESSAGES.length];
@@ -76,7 +77,8 @@ export function getIndexingMessage(): string {
 }
 
 /**
- * Get a random witty message for the embedding generation process
+ * Get the next witty message for the embedding generation process.
+ * Messages are returned sequentially in a round-robin fashion.
  */
 export function getEmbeddingMessage(): string {
   const message = EMBEDDING_MESSAGES[currentEmbeddingIndex % EMBEDDING_MESSAGES.length];
@@ -85,7 +87,8 @@ export function getEmbeddingMessage(): string {
 }
 
 /**
- * Get a random witty message for the model loading process
+ * Get the next witty message for the model loading process.
+ * Messages are returned sequentially in a round-robin fashion.
  */
 export function getModelLoadingMessage(): string {
   const message = MODEL_LOADING_MESSAGES[currentModelIndex % MODEL_LOADING_MESSAGES.length];
