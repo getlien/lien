@@ -583,7 +583,7 @@ export class VectorDB implements VectorDBInterface {
     
     // If any small batches failed, throw error with details
     if (failedRecords.length > 0) {
-      const totalFailed = failedRecords.reduce((sum, b) => sum + b.vectors.length, 0);
+      const totalFailed = failedRecords.reduce((sum, batch) => sum + batch.vectors.length, 0);
       throw new DatabaseError(
         `Failed to insert ${totalFailed} record(s) after retry attempts`,
         {

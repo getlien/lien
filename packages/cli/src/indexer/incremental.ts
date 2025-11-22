@@ -123,12 +123,15 @@ export async function indexSingleFile(
  * Indexes multiple files incrementally.
  * Processes files sequentially for simplicity and reliability.
  * 
+ * Note: This function counts both successfully indexed files AND successfully
+ * handled deletions (files that don't exist but were removed from the index).
+ * 
  * @param filepaths - Array of absolute file paths to index
  * @param vectorDB - Initialized VectorDB instance
  * @param embeddings - Initialized embeddings service
  * @param config - Lien configuration
  * @param options - Optional settings
- * @returns Number of successfully indexed files
+ * @returns Number of successfully processed files (indexed or deleted)
  */
 export async function indexMultipleFiles(
   filepaths: string[],
@@ -138,7 +141,7 @@ export async function indexMultipleFiles(
   options: IncrementalIndexOptions = {}
 ): Promise<number> {
   const { verbose } = options;
-  let successCount = 0;
+  let processedCount = 0;
   
   // Batch manifest updates for performance
   const manifestEntries: Array<{ filepath: string; chunkCount: number; mtime: number }> = [];
@@ -168,7 +171,7 @@ export async function indexMultipleFiles(
         }
       }
       // Count as successfully processed (we handled the deletion)
-      successCount++;
+      processedCount++;
       continue;
     }
     
@@ -203,7 +206,7 @@ export async function indexMultipleFiles(
           }
         }
         // Count as successful processing (handled empty file)
-        successCount++;
+        processedCount++;
         continue;
       }
       
@@ -248,7 +251,7 @@ export async function indexMultipleFiles(
         console.error(`[Lien] ✓ Updated ${filepath} (${chunks.length} chunks)`);
       }
       
-      successCount++;
+      processedCount++;
     } catch (error) {
       // Log error but don't throw - we want to continue with other files
       console.error(`[Lien] ⚠️  Failed to index ${filepath}: ${error}`);
@@ -267,6 +270,6 @@ export async function indexMultipleFiles(
     );
   }
   
-  return successCount;
+  return processedCount;
 }
 
