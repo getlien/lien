@@ -134,6 +134,8 @@ export class ManifestManager {
       await this.save(manifest);
     }).catch(error => {
       console.error(`[Lien] Failed to update manifest for ${filepath}: ${error}`);
+      // Return to reset lock - don't let errors block future operations
+      return undefined;
     });
     
     // Wait for this operation to complete
@@ -156,6 +158,8 @@ export class ManifestManager {
       await this.save(manifest);
     }).catch(error => {
       console.error(`[Lien] Failed to remove manifest entry for ${filepath}: ${error}`);
+      // Return to reset lock - don't let errors block future operations
+      return undefined;
     });
     
     // Wait for this operation to complete
@@ -180,6 +184,8 @@ export class ManifestManager {
       await this.save(manifest);
     }).catch(error => {
       console.error(`[Lien] Failed to update manifest for ${entries.length} files: ${error}`);
+      // Return to reset lock - don't let errors block future operations
+      return undefined;
     });
     
     // Wait for this operation to complete
@@ -202,6 +208,8 @@ export class ManifestManager {
       await this.save(manifest);
     }).catch(error => {
       console.error(`[Lien] Failed to update git state in manifest: ${error}`);
+      // Return to reset lock - don't let errors block future operations
+      return undefined;
     });
     
     // Wait for this operation to complete
