@@ -199,12 +199,13 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     const MESSAGE_ROTATION_INTERVAL_MS = 8000;  // How often to rotate message
     const MESSAGE_ROTATION_TICKS = Math.floor(MESSAGE_ROTATION_INTERVAL_MS / SPINNER_UPDATE_INTERVAL_MS);
     
-    let messageRotationCounter = 0;
+    let spinnerTick = 0;
     updateInterval = setInterval(() => {
       // Rotate witty message periodically
-      messageRotationCounter++;
-      if (messageRotationCounter % MESSAGE_ROTATION_TICKS === 0) {
+      spinnerTick++;
+      if (spinnerTick >= MESSAGE_ROTATION_TICKS) {
         progressState.wittyMessage = getIndexingMessage();
+        spinnerTick = 0;  // Reset counter to prevent unbounded growth
       }
       
       spinner.text = `${progressState.processedFiles}/${progressState.totalFiles} files | ${progressState.wittyMessage}`;
