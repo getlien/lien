@@ -43,8 +43,9 @@ export async function serveCommand(options: { port?: string; watch?: boolean; no
       console.error(chalk.dim('    Use --no-watch to disable file watching\n'));
     }
     
-    // Determine file watching state: --no-watch overrides config
-    const watch = options.noWatch ? false : undefined;  // undefined = use config default
+    // Determine file watching state
+    // Priority: --no-watch > --watch (deprecated) > config default
+    const watch = options.noWatch ? false : options.watch ? true : undefined;
     
     await startMCPServer({
       rootDir,
