@@ -7,7 +7,7 @@ import { chunkFile } from './chunker.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { configService } from '../config/service.js';
-import { CodeChunk, ChunkMetadata } from './types.js';
+import { CodeChunk } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { isLegacyConfig, isModernConfig } from '../config/schema.js';
 import { ManifestManager } from './manifest.js';
@@ -164,8 +164,8 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     const embeddingBatchSize = isModernConfig(config)
       ? config.core.embeddingBatchSize
       : 50;
-    // Use larger batch size for Vector DB inserts (but not too large to avoid UI freezes)
-    const vectorDBBatchSize = 250;
+    // Use smaller batch size to keep UI responsive (process more frequently)
+    const vectorDBBatchSize = 100;
     
     spinner.start(`Processing files with ${concurrency}x concurrency...`);
     
@@ -185,37 +185,30 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       if (chunkAccumulator.length === 0) return;
       
       const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
+      const totalToProcess = toProcess.length;
       
-      // Process embeddings in smaller batches (memory constraint)
-      // But accumulate for larger Vector DB inserts
-      const vectorsToInsert: Float32Array[] = [];
-      const metadataToInsert: ChunkMetadata[] = [];
-      const contentsToInsert: string[] = [];
-      
+      // Process embeddings in smaller batches AND insert incrementally to keep UI responsive
       for (let i = 0; i < toProcess.length; i += embeddingBatchSize) {
         const batch = toProcess.slice(i, Math.min(i + embeddingBatchSize, toProcess.length));
+        
+        // Update progress before embedding
+        const elapsed = (Date.now() - startTime) / 1000;
+        const rate = processedFiles / elapsed;
+        const eta = rate > 0 ? Math.round((files.length - processedFiles) / rate) : 0;
+        spinner.text = `${processedFiles}/${files.length} files | Generating embeddings ${i + batch.length}/${totalToProcess} | ETA: ${eta}s`;
         
         const texts = batch.map(item => item.content);
         const embeddingVectors = await embeddings.embedBatch(texts);
         
-        // Accumulate for larger DB insert
-        vectorsToInsert.push(...embeddingVectors);
-        metadataToInsert.push(...batch.map(item => item.chunk.metadata));
-        contentsToInsert.push(...texts);
-        
         processedChunks += batch.length;
         
-        // Update progress after each embedding batch
-        const elapsed = (Date.now() - startTime) / 1000;
-        const rate = processedFiles / elapsed;
-        const eta = rate > 0 ? Math.round((files.length - processedFiles) / rate) : 0;
-        spinner.text = `Processing ${processedFiles}/${files.length} files (${processedChunks} chunks) | Embedding batch ${i}/${toProcess.length} | ETA: ${eta}s`;
-      }
-      
-      // Insert all at once (VectorDB.insertBatch handles large batches internally)
-      if (vectorsToInsert.length > 0) {
-        spinner.text = `Inserting ${vectorsToInsert.length} chunks into Vector DB...`;
-        await vectorDB.insertBatch(vectorsToInsert, metadataToInsert, contentsToInsert);
+        // Insert immediately (smaller, more frequent inserts for responsive UI)
+        spinner.text = `${processedFiles}/${files.length} files | Inserting ${batch.length} chunks | ${processedChunks} total`;
+        await vectorDB.insertBatch(
+          embeddingVectors,
+          batch.map(item => item.chunk.metadata),
+          texts
+        );
       }
     };
     
@@ -255,19 +248,19 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
             chunkCount: chunks.length,
           });
           
-          // Process when batch is large enough (use larger batch for efficiency)
-          if (chunkAccumulator.length >= vectorDBBatchSize) {
-            await processAccumulatedChunks();
-          }
-          
           processedFiles++;
           
-          // Update progress
+          // Update progress immediately after each file
           const elapsed = (Date.now() - startTime) / 1000;
           const rate = processedFiles / elapsed;
           const eta = rate > 0 ? Math.round((files.length - processedFiles) / rate) : 0;
           
-          spinner.text = `Indexed ${processedFiles}/${files.length} files (${processedChunks} chunks) | ${concurrency}x concurrency | ETA: ${eta}s`;
+          spinner.text = `Indexed ${processedFiles}/${files.length} files (${processedChunks} chunks, ${chunkAccumulator.length} pending) | ETA: ${eta}s`;
+          
+          // Process when batch is large enough (use smaller batch for responsiveness)
+          if (chunkAccumulator.length >= vectorDBBatchSize) {
+            await processAccumulatedChunks();
+          }
         } catch (error) {
           if (options.verbose) {
             console.error(chalk.yellow(`\n⚠️  Skipping ${file}: ${error}`));
