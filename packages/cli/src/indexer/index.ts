@@ -164,8 +164,8 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     const embeddingBatchSize = isModernConfig(config)
       ? config.core.embeddingBatchSize
       : 50;
-    // Use larger batch size for Vector DB inserts (up to 1000)
-    const vectorDBBatchSize = 1000;
+    // Use larger batch size for Vector DB inserts (but not too large to avoid UI freezes)
+    const vectorDBBatchSize = 250;
     
     spinner.start(`Processing files with ${concurrency}x concurrency...`);
     
@@ -204,10 +204,17 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
         contentsToInsert.push(...texts);
         
         processedChunks += batch.length;
+        
+        // Update progress after each embedding batch
+        const elapsed = (Date.now() - startTime) / 1000;
+        const rate = processedFiles / elapsed;
+        const eta = rate > 0 ? Math.round((files.length - processedFiles) / rate) : 0;
+        spinner.text = `Processing ${processedFiles}/${files.length} files (${processedChunks} chunks) | Embedding batch ${i}/${toProcess.length} | ETA: ${eta}s`;
       }
       
       // Insert all at once (VectorDB.insertBatch handles large batches internally)
       if (vectorsToInsert.length > 0) {
+        spinner.text = `Inserting ${vectorsToInsert.length} chunks into Vector DB...`;
         await vectorDB.insertBatch(vectorsToInsert, metadataToInsert, contentsToInsert);
       }
     };

@@ -133,6 +133,9 @@ export async function indexMultipleFiles(
   const fileReader = new ParallelFileReader(concurrency);
   const fileContents = await fileReader.readFiles(filepaths);
   
+  // Batch manifest updates for performance
+  const manifestEntries: Array<{ filepath: string; chunkCount: number }> = [];
+  
   // Process each file with its content
   for (const filepath of filepaths) {
     const content = fileContents.get(filepath);
@@ -210,11 +213,9 @@ export async function indexMultipleFiles(
         texts
       );
       
-      // Update manifest after successful indexing
-      const manifest = new ManifestManager(vectorDB.dbPath);
-      await manifest.updateFile(filepath, {
+      // Queue manifest update (batch at end)
+      manifestEntries.push({
         filepath,
-        lastModified: Date.now(),
         chunkCount: chunks.length,
       });
       
@@ -227,6 +228,18 @@ export async function indexMultipleFiles(
       // Log error but don't throw - we want to continue with other files
       console.error(`[Lien] ⚠️  Failed to index ${filepath}: ${error}`);
     }
+  }
+  
+  // Batch update manifest at the end (much faster than updating after each file)
+  if (manifestEntries.length > 0) {
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    await manifest.updateFiles(
+      manifestEntries.map(entry => ({
+        filepath: entry.filepath,
+        lastModified: Date.now(),
+        chunkCount: entry.chunkCount,
+      }))
+    );
   }
   
   return successCount;
