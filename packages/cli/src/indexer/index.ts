@@ -184,7 +184,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     const limit = pLimit(concurrency);
     
     // Track successfully indexed files for manifest
-    const indexedFileEntries: Array<{ filepath: string; chunkCount: number }> = [];
+    const indexedFileEntries: Array<{ filepath: string; chunkCount: number; mtime: number }> = [];
     
     // Shared state for progress updates (decoupled from actual work)
     const progressState = {
@@ -255,6 +255,8 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     const filePromises = files.map((file) =>
       limit(async () => {
         try {
+          // Get file stats to capture actual modification time
+          const stats = await fs.stat(file);
           const content = await fs.readFile(file, 'utf-8');
           const chunkSize = isModernConfig(config)
             ? config.core.chunkSize
@@ -282,10 +284,11 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
             });
           }
           
-          // Track this file for manifest
+          // Track this file for manifest with actual file mtime
           indexedFileEntries.push({
             filepath: file,
             chunkCount: chunks.length,
+            mtime: stats.mtimeMs,
           });
           
           processedFiles++;
@@ -321,7 +324,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     await manifest.updateFiles(
       indexedFileEntries.map(entry => ({
         filepath: entry.filepath,
-        lastModified: Date.now(),
+        lastModified: entry.mtime, // Use actual file mtime for accurate change detection
         chunkCount: entry.chunkCount,
       }))
     );

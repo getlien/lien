@@ -99,11 +99,14 @@ export async function indexSingleFile(
       texts
     );
     
+    // Get actual file mtime for manifest
+    const stats = await fs.stat(filepath);
+    
     // Update manifest after successful indexing
     const manifest = new ManifestManager(vectorDB.dbPath);
     await manifest.updateFile(filepath, {
       filepath,
-      lastModified: Date.now(),
+      lastModified: stats.mtimeMs, // Use actual file mtime
       chunkCount: chunks.length,
     });
     
@@ -138,13 +141,16 @@ export async function indexMultipleFiles(
   let successCount = 0;
   
   // Batch manifest updates for performance
-  const manifestEntries: Array<{ filepath: string; chunkCount: number }> = [];
+  const manifestEntries: Array<{ filepath: string; chunkCount: number; mtime: number }> = [];
   
   // Process each file sequentially (simple and reliable)
   for (const filepath of filepaths) {
-    // Try to read the file
+    // Try to read the file and get its stats
     let content: string;
+    let fileMtime: number;
     try {
+      const stats = await fs.stat(filepath);
+      fileMtime = stats.mtimeMs;
       content = await fs.readFile(filepath, 'utf-8');
     } catch (error) {
       // File doesn't exist or couldn't be read - delete from index
@@ -232,10 +238,11 @@ export async function indexMultipleFiles(
         texts
       );
       
-      // Queue manifest update (batch at end)
+      // Queue manifest update (batch at end) with actual file mtime
       manifestEntries.push({
         filepath,
         chunkCount: chunks.length,
+        mtime: fileMtime,
       });
       
       if (verbose) {
@@ -255,7 +262,7 @@ export async function indexMultipleFiles(
     await manifest.updateFiles(
       manifestEntries.map(entry => ({
         filepath: entry.filepath,
-        lastModified: Date.now(),
+        lastModified: entry.mtime, // Use actual file mtime for accurate change detection
         chunkCount: entry.chunkCount,
       }))
     );
