@@ -415,7 +415,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   }
   
   // Initialize file watching if enabled
-  // Priority: CLI flag (watch) > config setting
+  // Priority: CLI flag if explicitly set (true/false), otherwise use config default
   const fileWatchingEnabled = watch !== undefined ? watch : config.fileWatching.enabled;
   
   if (fileWatchingEnabled) {
