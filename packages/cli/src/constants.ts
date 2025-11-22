@@ -12,6 +12,11 @@ export const DEFAULT_CHUNK_OVERLAP = 10;
 export const DEFAULT_CONCURRENCY = 4;
 export const DEFAULT_EMBEDDING_BATCH_SIZE = 50;
 
+// Micro-batching for event loop yielding
+// Process N embeddings at a time, then yield to event loop
+// This prevents UI freezing during CPU-intensive embedding generation
+export const EMBEDDING_MICRO_BATCH_SIZE = 10;
+
 // Embedding model configuration
 export const EMBEDDING_DIMENSIONS = 384; // all-MiniLM-L6-v2
 export const DEFAULT_EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2';

@@ -14,6 +14,7 @@ import { ManifestManager } from './manifest.js';
 import { detectChanges } from './change-detector.js';
 import { indexMultipleFiles } from './incremental.js';
 import { getIndexingMessage, getEmbeddingMessage, getModelLoadingMessage } from '../utils/loading-messages.js';
+import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
 
 export interface IndexingOptions {
   rootDir?: string;
@@ -222,10 +223,9 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
         // Transformers.js is CPU-intensive, so we yield control periodically
         const texts = batch.map(item => item.content);
         const embeddingVectors: Float32Array[] = [];
-        const microBatchSize = 10; // Process 10 at a time, then yield
         
-        for (let j = 0; j < texts.length; j += microBatchSize) {
-          const microBatch = texts.slice(j, Math.min(j + microBatchSize, texts.length));
+        for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
+          const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
           const microResults = await embeddings.embedBatch(microBatch);
           embeddingVectors.push(...microResults);
           

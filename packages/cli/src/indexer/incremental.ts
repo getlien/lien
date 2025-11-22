@@ -4,6 +4,7 @@ import { EmbeddingService } from '../embeddings/types.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
 import { ManifestManager } from './manifest.js';
+import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
 
 export interface IncrementalIndexOptions {
   verbose?: boolean;
@@ -78,15 +79,14 @@ export async function indexSingleFile(
     // Use micro-batching to prevent event loop blocking
     const texts = chunks.map(c => c.content);
     const vectors: Float32Array[] = [];
-    const microBatchSize = 10;
     
-    for (let j = 0; j < texts.length; j += microBatchSize) {
-      const microBatch = texts.slice(j, Math.min(j + microBatchSize, texts.length));
+    for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
+      const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
       const microResults = await embeddings.embedBatch(microBatch);
       vectors.push(...microResults);
       
       // Yield to event loop for responsiveness
-      if (texts.length > microBatchSize) {
+      if (texts.length > EMBEDDING_MICRO_BATCH_SIZE) {
         await new Promise(resolve => setImmediate(resolve));
       }
     }
@@ -211,15 +211,14 @@ export async function indexMultipleFiles(
       // Use micro-batching to prevent event loop blocking on large files
       const texts = chunks.map(c => c.content);
       const vectors: Float32Array[] = [];
-      const microBatchSize = 10;
       
-      for (let j = 0; j < texts.length; j += microBatchSize) {
-        const microBatch = texts.slice(j, Math.min(j + microBatchSize, texts.length));
+      for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
+        const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
         const microResults = await embeddings.embedBatch(microBatch);
         vectors.push(...microResults);
         
         // Yield to event loop for responsiveness
-        if (texts.length > microBatchSize) {
+        if (texts.length > EMBEDDING_MICRO_BATCH_SIZE) {
           await new Promise(resolve => setImmediate(resolve));
         }
       }
