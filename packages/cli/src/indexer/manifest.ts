@@ -21,7 +21,6 @@ export interface FileEntry {
 export interface IndexManifest {
   formatVersion: number;      // Index format version for compatibility checking
   lienVersion: string;         // Lien package version (for reference)
-  configVersion: string;       // Config file version
   lastIndexed: number;         // Timestamp of last indexing operation
   gitState?: GitState;         // Last known git state
   files: Record<string, FileEntry>;  // Map of filepath -> FileEntry (stored as object for JSON)
@@ -296,7 +295,6 @@ export class ManifestManager {
     return {
       formatVersion: INDEX_FORMAT_VERSION,
       lienVersion: getPackageVersion(),
-      configVersion: '0.3.0',  // Will be updated from config when saved
       lastIndexed: Date.now(),
       files: {},
     };

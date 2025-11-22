@@ -520,8 +520,6 @@ export class VectorDB implements VectorDBInterface {
     metadatas: ChunkMetadata[],
     contents: string[]
   ): Promise<void> {
-    // Minimum batch size to prevent excessive splitting (use constant)
-    
     // Queue of batches to process (start with the full batch)
     interface BatchToProcess {
       vectors: Float32Array[];
