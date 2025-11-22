@@ -196,17 +196,13 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     // Start a periodic timer to update the spinner independently
     let messageRotationCounter = 0;
     updateInterval = setInterval(() => {
-      const elapsed = (Date.now() - startTime) / 1000;
-      const rate = progressState.processedFiles / elapsed;
-      const eta = rate > 0 ? Math.round((progressState.totalFiles - progressState.processedFiles) / rate) : 0;
-      
       // Rotate witty message every 3 seconds (15 ticks at 200ms)
       messageRotationCounter++;
       if (messageRotationCounter % 15 === 0) {
         progressState.wittyMessage = getIndexingMessage();
       }
       
-      spinner.text = `${progressState.processedFiles}/${progressState.totalFiles} files | ${progressState.wittyMessage} | ETA: ${eta}s`;
+      spinner.text = `${progressState.processedFiles}/${progressState.totalFiles} files | ${progressState.wittyMessage}`;
     }, 200); // Update every 200ms for smooth animation
     
     // Function to process accumulated chunks
