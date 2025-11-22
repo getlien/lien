@@ -255,8 +255,8 @@ export async function indexMultipleFiles(
     } catch (error) {
       // Log error but don't throw - we want to continue with other files
       console.error(`[Lien] ⚠️  Failed to index ${filepath}: ${error}`);
+      }
     }
-  }
   
   // Batch update manifest at the end (much faster than updating after each file)
   if (manifestEntries.length > 0) {

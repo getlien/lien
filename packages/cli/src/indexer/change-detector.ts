@@ -60,10 +60,20 @@ export async function detectChanges(
         (currentState.branch !== savedManifest.gitState.branch ||
          currentState.commit !== savedManifest.gitState.commit)) {
       const allFiles = await getAllFiles(rootDir, config);
+      const currentFileSet = new Set(allFiles);
+      
+      // Compute deleted files: files in old manifest but not in new branch
+      const deleted: string[] = [];
+      for (const filepath of Object.keys(savedManifest.files)) {
+        if (!currentFileSet.has(filepath)) {
+          deleted.push(filepath);
+        }
+      }
+      
       return {
         added: allFiles,
         modified: [],
-        deleted: [],
+        deleted,
         reason: 'git-state-changed',
       };
     }
