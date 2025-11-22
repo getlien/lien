@@ -99,6 +99,22 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
             );
           }
           
+          // Update git state after incremental indexing (for branch switch detection)
+          const { isGitAvailable, isGitRepo } = await import('../git/utils.js');
+          const { GitStateTracker } = await import('../git/tracker.js');
+          const gitAvailable = await isGitAvailable();
+          const isRepo = await isGitRepo(rootDir);
+          
+          if (gitAvailable && isRepo) {
+            const gitTracker = new GitStateTracker(rootDir, vectorDB.dbPath);
+            await gitTracker.initialize();
+            const gitState = gitTracker.getState();
+            if (gitState) {
+              const manifest = new ManifestManager(vectorDB.dbPath);
+              await manifest.updateGitState(gitState);
+            }
+          }
+          
           console.log(chalk.dim('\nNext step: Run'), chalk.bold('lien serve'), chalk.dim('to start the MCP server'));
           return; // Exit early - incremental index complete!
         }
@@ -311,6 +327,22 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
         chunkCount: entry.chunkCount,
       }))
     );
+    
+    // Save git state if in a git repo (for branch switch detection)
+    const { isGitAvailable, isGitRepo } = await import('../git/utils.js');
+    const { GitStateTracker } = await import('../git/tracker.js');
+    const gitAvailable = await isGitAvailable();
+    const isRepo = await isGitRepo(rootDir);
+    
+    if (gitAvailable && isRepo) {
+      const gitTracker = new GitStateTracker(rootDir, vectorDB.dbPath);
+      await gitTracker.initialize();
+      const gitState = gitTracker.getState();
+      if (gitState) {
+        await manifest.updateGitState(gitState);
+      }
+    }
+    
     spinner.succeed('Manifest saved');
     
     // Write version file to mark successful completion

@@ -3,6 +3,8 @@ import { VectorDB } from '../vectordb/lancedb.js';
 import { ManifestManager } from './manifest.js';
 import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
 import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
+import { GitStateTracker } from '../git/tracker.js';
+import { isGitAvailable, isGitRepo } from '../git/utils.js';
 
 /**
  * Result of change detection, categorized by type of change
@@ -11,12 +13,12 @@ export interface ChangeDetectionResult {
   added: string[];      // New files not in previous index
   modified: string[];   // Existing files that have been modified
   deleted: string[];    // Files that were indexed but no longer exist
-  reason: 'mtime' | 'full';  // How changes were detected
+  reason: 'mtime' | 'full' | 'git-state-changed';  // How changes were detected
 }
 
 /**
- * Detects which files have changed since last indexing using file modification times.
- * Simple, reliable, and works everywhere without dependencies.
+ * Detects which files have changed since last indexing.
+ * Uses git state detection to handle branch switches, then falls back to mtime.
  * 
  * @param rootDir - Root directory of the project
  * @param vectorDB - Initialized VectorDB instance
@@ -42,7 +44,32 @@ export async function detectChanges(
     };
   }
   
-  // Use mtime-based detection (simple and reliable)
+  // Check if git state has changed (branch switch, new commits)
+  // This is critical because git doesn't always update mtimes when checking out files
+  const gitAvailable = await isGitAvailable();
+  const isRepo = await isGitRepo(rootDir);
+  
+  if (gitAvailable && isRepo && savedManifest.gitState) {
+    const gitTracker = new GitStateTracker(rootDir, vectorDB.dbPath);
+    await gitTracker.initialize();
+    
+    const currentState = gitTracker.getState();
+    
+    // If branch or commit changed, force full reindex (mtime detection would miss changes)
+    if (currentState && 
+        (currentState.branch !== savedManifest.gitState.branch ||
+         currentState.commit !== savedManifest.gitState.commit)) {
+      const allFiles = await getAllFiles(rootDir, config);
+      return {
+        added: allFiles,
+        modified: [],
+        deleted: [],
+        reason: 'git-state-changed',
+      };
+    }
+  }
+  
+  // Use mtime-based detection for file-level changes
   return await mtimeBasedDetection(rootDir, savedManifest, config);
 }
 
