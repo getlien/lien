@@ -17,6 +17,12 @@ export const DEFAULT_EMBEDDING_BATCH_SIZE = 50;
 // This prevents UI freezing during CPU-intensive embedding generation
 export const EMBEDDING_MICRO_BATCH_SIZE = 10;
 
+// Vector database batch size limits
+// Maximum batch size before splitting (prevents LanceDB errors on very large batches)
+export const VECTOR_DB_MAX_BATCH_SIZE = 1000;
+// Minimum batch size for retry logic (stop splitting below this size)
+export const VECTOR_DB_MIN_BATCH_SIZE = 10;
+
 // Embedding model configuration
 export const EMBEDDING_DIMENSIONS = 384; // all-MiniLM-L6-v2
 export const DEFAULT_EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2';

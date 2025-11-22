@@ -9,6 +9,7 @@ import { readVersionFile, writeVersionFile } from './version.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
 import { QueryIntent, classifyQueryIntent } from './intent-classifier.js';
+import { VECTOR_DB_MAX_BATCH_SIZE, VECTOR_DB_MIN_BATCH_SIZE } from '../constants.js';
 
 /**
  * Helper Functions for File Type Detection
@@ -496,15 +497,12 @@ export class VectorDB implements VectorDBInterface {
     }
     
     // Split large batches into smaller chunks for better reliability
-    // Maximum batch size of 1000 records
-    const MAX_BATCH_SIZE = 1000;
-    
-    if (vectors.length > MAX_BATCH_SIZE) {
+    if (vectors.length > VECTOR_DB_MAX_BATCH_SIZE) {
       // Split into smaller batches
-      for (let i = 0; i < vectors.length; i += MAX_BATCH_SIZE) {
-        const batchVectors = vectors.slice(i, Math.min(i + MAX_BATCH_SIZE, vectors.length));
-        const batchMetadata = metadatas.slice(i, Math.min(i + MAX_BATCH_SIZE, vectors.length));
-        const batchContents = contents.slice(i, Math.min(i + MAX_BATCH_SIZE, vectors.length));
+      for (let i = 0; i < vectors.length; i += VECTOR_DB_MAX_BATCH_SIZE) {
+        const batchVectors = vectors.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
+        const batchMetadata = metadatas.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
+        const batchContents = contents.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
         
         await this._insertBatchInternal(batchVectors, batchMetadata, batchContents);
       }
@@ -522,8 +520,7 @@ export class VectorDB implements VectorDBInterface {
     metadatas: ChunkMetadata[],
     contents: string[]
   ): Promise<void> {
-    // Minimum batch size to prevent excessive splitting
-    const MIN_BATCH_SIZE = 10;
+    // Minimum batch size to prevent excessive splitting (use constant)
     
     // Queue of batches to process (start with the full batch)
     interface BatchToProcess {
@@ -562,8 +559,8 @@ export class VectorDB implements VectorDBInterface {
           await this.table.add(records);
         }
       } catch (error) {
-        // If batch has more than MIN_BATCH_SIZE records, split and retry
-        if (batch.vectors.length > MIN_BATCH_SIZE) {
+        // If batch has more than min size records, split and retry
+        if (batch.vectors.length > VECTOR_DB_MIN_BATCH_SIZE) {
           const half = Math.floor(batch.vectors.length / 2);
           
           // Split in half and add back to queue

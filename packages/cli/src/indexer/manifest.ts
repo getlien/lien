@@ -54,6 +54,12 @@ export class ManifestManager {
   private indexPath: string;
   
   /**
+   * Promise-based lock to prevent race conditions during concurrent updates.
+   * Ensures read-modify-write operations are atomic.
+   */
+  private updateLock = Promise.resolve();
+  
+  /**
    * Creates a new ManifestManager
    * @param indexPath - Path to the index directory (same as VectorDB path)
    */
@@ -129,56 +135,92 @@ export class ManifestManager {
   }
   
   /**
-   * Adds or updates a file entry in the manifest
+   * Adds or updates a file entry in the manifest.
+   * Protected by lock to prevent race conditions during concurrent updates.
    * 
    * @param filepath - Path to the file
    * @param entry - File entry metadata
    */
   async updateFile(filepath: string, entry: FileEntry): Promise<void> {
-    const manifest = await this.load() || this.createEmpty();
-    manifest.files[filepath] = entry;
-    await this.save(manifest);
+    // Chain this operation to the lock to ensure atomicity
+    this.updateLock = this.updateLock.then(async () => {
+      const manifest = await this.load() || this.createEmpty();
+      manifest.files[filepath] = entry;
+      await this.save(manifest);
+    }).catch(error => {
+      console.error(`[Lien] Failed to update manifest for ${filepath}: ${error}`);
+    });
+    
+    // Wait for this operation to complete
+    await this.updateLock;
   }
   
   /**
-   * Removes a file entry from the manifest
+   * Removes a file entry from the manifest.
+   * Protected by lock to prevent race conditions during concurrent updates.
    * 
    * @param filepath - Path to the file to remove
    */
   async removeFile(filepath: string): Promise<void> {
-    const manifest = await this.load();
-    if (!manifest) return;
+    // Chain this operation to the lock to ensure atomicity
+    this.updateLock = this.updateLock.then(async () => {
+      const manifest = await this.load();
+      if (!manifest) return;
+      
+      delete manifest.files[filepath];
+      await this.save(manifest);
+    }).catch(error => {
+      console.error(`[Lien] Failed to remove manifest entry for ${filepath}: ${error}`);
+    });
     
-    delete manifest.files[filepath];
-    await this.save(manifest);
+    // Wait for this operation to complete
+    await this.updateLock;
   }
   
   /**
-   * Updates multiple files at once (more efficient than individual updates)
+   * Updates multiple files at once (more efficient than individual updates).
+   * Protected by lock to prevent race conditions during concurrent updates.
    * 
    * @param entries - Array of file entries to update
    */
   async updateFiles(entries: FileEntry[]): Promise<void> {
-    const manifest = await this.load() || this.createEmpty();
+    // Chain this operation to the lock to ensure atomicity
+    this.updateLock = this.updateLock.then(async () => {
+      const manifest = await this.load() || this.createEmpty();
+      
+      for (const entry of entries) {
+        manifest.files[entry.filepath] = entry;
+      }
+      
+      await this.save(manifest);
+    }).catch(error => {
+      console.error(`[Lien] Failed to update manifest for ${entries.length} files: ${error}`);
+    });
     
-    for (const entry of entries) {
-      manifest.files[entry.filepath] = entry;
-    }
-    
-    await this.save(manifest);
+    // Wait for this operation to complete
+    await this.updateLock;
   }
   
   /**
-   * Updates the git state in the manifest
+   * Updates the git state in the manifest.
+   * Protected by lock to prevent race conditions during concurrent updates.
    * 
    * @param gitState - Current git state
    */
   async updateGitState(gitState: GitState): Promise<void> {
-    const manifest = await this.load();
-    if (!manifest) return;
+    // Chain this operation to the lock to ensure atomicity
+    this.updateLock = this.updateLock.then(async () => {
+      const manifest = await this.load();
+      if (!manifest) return;
+      
+      manifest.gitState = gitState;
+      await this.save(manifest);
+    }).catch(error => {
+      console.error(`[Lien] Failed to update git state in manifest: ${error}`);
+    });
     
-    manifest.gitState = gitState;
-    await this.save(manifest);
+    // Wait for this operation to complete
+    await this.updateLock;
   }
   
   /**
