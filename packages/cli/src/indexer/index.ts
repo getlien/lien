@@ -30,6 +30,7 @@ interface ChunkWithContent {
 export async function indexCodebase(options: IndexingOptions = {}): Promise<void> {
   const rootDir = options.rootDir ?? process.cwd();
   const spinner = ora('Starting indexing process...').start();
+  let updateInterval: NodeJS.Timeout | undefined;
   
   try {
     // 1. Load configuration
@@ -180,6 +181,24 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     // Track successfully indexed files for manifest
     const indexedFileEntries: Array<{ filepath: string; chunkCount: number }> = [];
     
+    // Shared state for progress updates (decoupled from actual work)
+    const progressState = {
+      processedFiles: 0,
+      totalFiles: files.length,
+      processedChunks: 0,
+      currentOperation: 'Processing files...',
+      pendingChunks: 0,
+    };
+    
+    // Start a periodic timer to update the spinner independently
+    updateInterval = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const rate = progressState.processedFiles / elapsed;
+      const eta = rate > 0 ? Math.round((progressState.totalFiles - progressState.processedFiles) / rate) : 0;
+      
+      spinner.text = `${progressState.processedFiles}/${progressState.totalFiles} files | ${progressState.currentOperation} | ${progressState.processedChunks} chunks | ETA: ${eta}s`;
+    }, 200); // Update every 200ms for smooth animation
+    
     // Function to process accumulated chunks
     const processAccumulatedChunks = async () => {
       if (chunkAccumulator.length === 0) return;
@@ -191,25 +210,27 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
       for (let i = 0; i < toProcess.length; i += embeddingBatchSize) {
         const batch = toProcess.slice(i, Math.min(i + embeddingBatchSize, toProcess.length));
         
-        // Update progress before embedding
-        const elapsed = (Date.now() - startTime) / 1000;
-        const rate = processedFiles / elapsed;
-        const eta = rate > 0 ? Math.round((files.length - processedFiles) / rate) : 0;
-        spinner.text = `${processedFiles}/${files.length} files | Generating embeddings ${i + batch.length}/${totalToProcess} | ETA: ${eta}s`;
+        // Update shared state (spinner updates automatically via interval)
+        progressState.currentOperation = `Generating embeddings (${i + batch.length}/${totalToProcess})`;
+        progressState.pendingChunks = totalToProcess - (i + batch.length);
         
         const texts = batch.map(item => item.content);
         const embeddingVectors = await embeddings.embedBatch(texts);
         
         processedChunks += batch.length;
+        progressState.processedChunks = processedChunks;
         
-        // Insert immediately (smaller, more frequent inserts for responsive UI)
-        spinner.text = `${processedFiles}/${files.length} files | Inserting ${batch.length} chunks | ${processedChunks} total`;
+        // Update state before DB insertion
+        progressState.currentOperation = `Inserting ${batch.length} chunks`;
+        
         await vectorDB.insertBatch(
           embeddingVectors,
           batch.map(item => item.chunk.metadata),
           texts
         );
       }
+      
+      progressState.currentOperation = 'Processing files...';
     };
     
     // Process files with concurrency limit
@@ -231,6 +252,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           
           if (chunks.length === 0) {
             processedFiles++;
+            progressState.processedFiles = processedFiles;
             return;
           }
           
@@ -249,13 +271,8 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           });
           
           processedFiles++;
-          
-          // Update progress immediately after each file
-          const elapsed = (Date.now() - startTime) / 1000;
-          const rate = processedFiles / elapsed;
-          const eta = rate > 0 ? Math.round((files.length - processedFiles) / rate) : 0;
-          
-          spinner.text = `Indexed ${processedFiles}/${files.length} files (${processedChunks} chunks, ${chunkAccumulator.length} pending) | ETA: ${eta}s`;
+          progressState.processedFiles = processedFiles;
+          progressState.pendingChunks = chunkAccumulator.length;
           
           // Process when batch is large enough (use smaller batch for responsiveness)
           if (chunkAccumulator.length >= vectorDBBatchSize) {
@@ -266,6 +283,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
             console.error(chalk.yellow(`\n⚠️  Skipping ${file}: ${error}`));
           }
           processedFiles++;
+          progressState.processedFiles = processedFiles;
         }
       })
     );
@@ -274,7 +292,11 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     await Promise.all(filePromises);
     
     // Process remaining chunks
+    progressState.currentOperation = 'Processing final chunks...';
     await processAccumulatedChunks();
+    
+    // Stop the progress update interval
+    clearInterval(updateInterval);
     
     // Save manifest with all indexed files
     spinner.start('Saving index manifest...');
@@ -299,6 +321,10 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     
     console.log(chalk.dim('\nNext step: Run'), chalk.bold('lien serve'), chalk.dim('to start the MCP server'));
   } catch (error) {
+    // Make sure to clear interval on error too
+    if (updateInterval) {
+      clearInterval(updateInterval);
+    }
     spinner.fail(`Indexing failed: ${error}`);
     throw error;
   }
