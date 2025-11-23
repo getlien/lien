@@ -4,7 +4,7 @@ import { ManifestManager, IndexManifest } from './manifest.js';
 import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
 import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
 import { GitStateTracker } from '../git/tracker.js';
-import { isGitAvailable, isGitRepo } from '../git/utils.js';
+import { isGitAvailable, isGitRepo, getChangedFiles } from '../git/utils.js';
 
 /**
  * Result of change detection, categorized by type of change
@@ -55,27 +55,81 @@ export async function detectChanges(
     
     const currentState = gitTracker.getState();
     
-    // If branch or commit changed, force full reindex (mtime detection would miss changes)
+    // If branch or commit changed, use git to detect which files actually changed
     if (currentState && 
         (currentState.branch !== savedManifest.gitState.branch ||
          currentState.commit !== savedManifest.gitState.commit)) {
-      const allFiles = await getAllFiles(rootDir, config);
-      const currentFileSet = new Set(allFiles);
       
-      // Compute deleted files: files in old manifest but not in new branch
-      const deleted: string[] = [];
-      for (const filepath of Object.keys(savedManifest.files)) {
-        if (!currentFileSet.has(filepath)) {
-          deleted.push(filepath);
+      try {
+        // Get files that changed between old and new commit using git diff
+        const changedFilesPaths = await getChangedFiles(
+          rootDir,
+          savedManifest.gitState.commit,
+          currentState.commit
+        );
+        const changedFilesSet = new Set(changedFilesPaths);
+        
+        // Get all current files to determine new files and deletions
+        const allFiles = await getAllFiles(rootDir, config);
+        const currentFileSet = new Set(allFiles);
+        
+        const added: string[] = [];
+        const modified: string[] = [];
+        const deleted: string[] = [];
+        
+        // Categorize changed files
+        for (const filepath of changedFilesPaths) {
+          if (currentFileSet.has(filepath)) {
+            // File exists - check if it's new or modified
+            if (savedManifest.files[filepath]) {
+              modified.push(filepath);
+            } else {
+              added.push(filepath);
+            }
+          }
+          // If file doesn't exist in current set, it will be caught by deletion logic below
         }
+        
+        // Find truly new files (not in git diff, but not in old manifest)
+        for (const filepath of allFiles) {
+          if (!savedManifest.files[filepath] && !changedFilesSet.has(filepath)) {
+            added.push(filepath);
+          }
+        }
+        
+        // Compute deleted files: files in old manifest but not in new branch
+        for (const filepath of Object.keys(savedManifest.files)) {
+          if (!currentFileSet.has(filepath)) {
+            deleted.push(filepath);
+          }
+        }
+        
+        return {
+          added,
+          modified,
+          deleted,
+          reason: 'git-state-changed',
+        };
+      } catch (error) {
+        // If git diff fails, fall back to full reindex
+        console.warn(`[Lien] Git diff failed, falling back to full reindex: ${error}`);
+        const allFiles = await getAllFiles(rootDir, config);
+        const currentFileSet = new Set(allFiles);
+        
+        const deleted: string[] = [];
+        for (const filepath of Object.keys(savedManifest.files)) {
+          if (!currentFileSet.has(filepath)) {
+            deleted.push(filepath);
+          }
+        }
+        
+        return {
+          added: allFiles,
+          modified: [],
+          deleted,
+          reason: 'git-state-changed',
+        };
       }
-      
-      return {
-        added: allFiles,
-        modified: [],
-        deleted,
-        reason: 'git-state-changed',
-      };
     }
   }
   
