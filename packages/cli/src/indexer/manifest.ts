@@ -146,13 +146,19 @@ export class ManifestManager {
    * Removes a file entry from the manifest.
    * Protected by lock to prevent race conditions during concurrent updates.
    * 
+   * Note: If the manifest doesn't exist, this is a no-op (not an error).
+   * This can happen legitimately after clearing the index or on fresh installs.
+   * 
    * @param filepath - Path to the file to remove
    */
   async removeFile(filepath: string): Promise<void> {
     // Chain this operation to the lock to ensure atomicity
     this.updateLock = this.updateLock.then(async () => {
       const manifest = await this.load();
-      if (!manifest) return;
+      if (!manifest) {
+        // No manifest exists - nothing to remove from (expected in some scenarios)
+        return;
+      }
       
       delete manifest.files[filepath];
       await this.save(manifest);
