@@ -4,9 +4,7 @@
         "command": "node",
         "args": [
           "/Users/alfhenderson/Code/lien/packages/cli/dist/index.js",
-          "serve",
-          "--root",
-          "/Users/alfhenderson/Code/kodus-ai"
+          "serve"
         ]
       }
     }
