@@ -352,9 +352,6 @@ describe('Change Detector', () => {
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Initial"', { cwd: testDir });
       
-      const { stdout: commit1 } = await execAsync('git rev-parse HEAD', { cwd: testDir });
-      const validCommit = commit1.trim();
-      
       // Create manifest with git state but invalid commit
       const savedManifest = createEmptyManifest();
       const stats = await fs.stat(file1);

@@ -272,43 +272,47 @@ describe('Incremental Indexing', () => {
       }
     );
 
-    it('should continue indexing other files when one file fails', async () => {
-      const goodFile1 = path.join(testDir, 'good1.ts');
-      const badFile = path.join(testDir, 'bad.ts');
-      const goodFile2 = path.join(testDir, 'good2.ts');
-      
-      await fs.writeFile(goodFile1, 'export function good1() {}');
-      await fs.writeFile(badFile, 'export function bad() {}');
-      await fs.writeFile(goodFile2, 'export function good2() {}');
-      
-      // Make middle file unreadable
-      await fs.chmod(badFile, 0o000);
-      
-      try {
-        const count = await indexMultipleFiles(
-          [goodFile1, badFile, goodFile2],
-          vectorDB,
-          embeddings,
-          defaultConfig,
-          { verbose: false }
-        );
+    // Skip on Windows (chmod doesn't work the same) and when running as root (bypasses permissions)
+    it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+      'should continue indexing other files when one file fails',
+      async () => {
+        const goodFile1 = path.join(testDir, 'good1.ts');
+        const badFile = path.join(testDir, 'bad.ts');
+        const goodFile2 = path.join(testDir, 'good2.ts');
         
-        // Should process all files (bad file is counted as processed via deletion)
-        expect(count).toBe(3);
+        await fs.writeFile(goodFile1, 'export function good1() {}');
+        await fs.writeFile(badFile, 'export function bad() {}');
+        await fs.writeFile(goodFile2, 'export function good2() {}');
         
-        // Verify good files were indexed
-        const results = await vectorDB.scanWithFilter({});
-        const filenames = results.map(r => path.basename(r.metadata.file));
-        expect(filenames).toContain('good1.ts');
-        expect(filenames).toContain('good2.ts');
-      } finally {
+        // Make middle file unreadable
+        await fs.chmod(badFile, 0o000);
+        
         try {
-          await fs.chmod(badFile, 0o644);
-        } catch {
-          // Ignore cleanup errors
+          const count = await indexMultipleFiles(
+            [goodFile1, badFile, goodFile2],
+            vectorDB,
+            embeddings,
+            defaultConfig,
+            { verbose: false }
+          );
+          
+          // Should process all files (bad file is counted as processed via deletion)
+          expect(count).toBe(3);
+          
+          // Verify good files were indexed
+          const results = await vectorDB.scanWithFilter({});
+          const filenames = results.map(r => path.basename(r.metadata.file));
+          expect(filenames).toContain('good1.ts');
+          expect(filenames).toContain('good2.ts');
+        } finally {
+          try {
+            await fs.chmod(badFile, 0o644);
+          } catch {
+            // Ignore cleanup errors
+          }
         }
       }
-    });
+    );
 
     it('should handle files that become deleted during indexing', async () => {
       const testFile = path.join(testDir, 'disappearing.ts');
