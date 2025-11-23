@@ -541,27 +541,27 @@ export class VectorDB implements VectorDBInterface {
       
       try {
         const records = batch.vectors.map((vector, i) => ({
-        vector: Array.from(vector),
+          vector: Array.from(vector),
           content: batch.contents[i],
           file: batch.metadatas[i].file,
           startLine: batch.metadatas[i].startLine,
           endLine: batch.metadatas[i].endLine,
           type: batch.metadatas[i].type,
           language: batch.metadatas[i].language,
-        // Ensure arrays have at least empty string for Arrow type inference
+          // Ensure arrays have at least empty string for Arrow type inference
           functionNames: (batch.metadatas[i].symbols?.functions && batch.metadatas[i].symbols.functions.length > 0) ? batch.metadatas[i].symbols.functions : [''],
           classNames: (batch.metadatas[i].symbols?.classes && batch.metadatas[i].symbols.classes.length > 0) ? batch.metadatas[i].symbols.classes : [''],
           interfaceNames: (batch.metadatas[i].symbols?.interfaces && batch.metadatas[i].symbols.interfaces.length > 0) ? batch.metadatas[i].symbols.interfaces : [''],
-      }));
-      
-      // Create table if it doesn't exist, otherwise add to existing table
-      if (!this.table) {
-        // Let LanceDB createTable handle type inference from the data
+        }));
+        
+        // Create table if it doesn't exist, otherwise add to existing table
+        if (!this.table) {
+          // Let LanceDB createTable handle type inference from the data
           this.table = await this.db!.createTable(this.tableName, records) as LanceDBTable;
-      } else {
-        await this.table.add(records);
-      }
-    } catch (error) {
+        } else {
+          await this.table.add(records);
+        }
+      } catch (error) {
         // If batch has more than min size records, split and retry
         if (batch.vectors.length > VECTOR_DB_MIN_BATCH_SIZE) {
           const half = Math.floor(batch.vectors.length / 2);
