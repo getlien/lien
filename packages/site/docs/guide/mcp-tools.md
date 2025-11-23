@@ -282,7 +282,7 @@ Run `lien index` in your project directory first.
 ### "No results found"
 - Try broader queries
 - Check if the code is indexed (not in exclude patterns)
-- Re-index: `lien reindex`
+- Rebuild the index: `lien index --force`
 
 ### "Invalid file path"
 Use paths relative to project root, not absolute paths.

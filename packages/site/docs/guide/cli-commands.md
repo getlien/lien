@@ -47,26 +47,50 @@ If `.cursor/rules` exists as a file, Lien will offer to convert it to a director
 
 ## lien index
 
-Index your codebase for semantic search.
+Index your codebase for semantic search. **Automatically uses incremental indexing** to only process changed files.
 
 ```bash
-lien index
+lien index [options]
 ```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--force` | Clear existing index and rebuild from scratch |
+| `--verbose` | Show detailed logging during indexing |
 
 ### Behavior
 
-1. Scans files based on framework configuration
-2. Chunks code into semantic units
-3. Generates embeddings using local ML model
-4. Stores in `~/.lien/indices/[project-hash]/`
-5. Detects test associations
+**Without `--force` (default - incremental mode):**
+
+1. **Checks for changes** (if manifest exists from previous index)
+   - mtime-based detection (simple and reliable)
+2. **Only indexes changed files** (17x faster!)
+3. Chunks code into semantic units
+4. Generates embeddings using local ML model
+5. Stores in `~/.lien/indices/[project-hash]/`
+6. Updates index manifest for future incremental runs
+
+**With `--force` (clean rebuild):**
+
+1. **Deletes existing index and manifest** (clean slate)
+2. Scans entire codebase
+3. Indexes all files from scratch
+4. Use when: config changed, stale results, or corrupted index
 
 ### Performance
 
-Indexing time depends on project size:
+**Initial index** (full):
 - **Small** (1k files): ~5 minutes
-- **Medium** (10k files): ~20 minutes
+- **Medium** (10k files): ~15-20 minutes
 - **Large** (50k files): ~30-60 minutes
+
+**Incremental reindex** (typical):
+- **Single file edit**: < 2 seconds ⚡
+- **Small changes (5-10 files)**: < 5 seconds ⚡
+- **Feature branch (50 files)**: ~15-20 seconds
+- **Large refactor (500 files)**: ~1-2 minutes
 
 ### First Run
 
@@ -93,11 +117,18 @@ On first run, Lien downloads the embedding model (~100MB). This requires an inte
 
 ## lien serve
 
-Start the MCP server for AI assistant integration.
+Start the MCP server for AI assistant integration. **Automatically watches for file changes** and reindexes in the background.
 
 ```bash
-lien serve
+lien serve [options]
 ```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--no-watch` | Disable file watching for this session |
+| `--root <path>` | Root directory to serve (defaults to current directory) |
 
 ### Behavior
 
@@ -105,10 +136,33 @@ lien serve
 2. Checks if index exists (auto-indexes if missing)
 3. Starts MCP server on stdio transport
 4. Listens for tool requests from Cursor
+5. **Watches for file changes** and automatically reindexes (< 2 seconds per file!)
+6. Detects git commits and reindexes changed files in background
 
 ### Auto-Indexing
 
 If no index exists, `lien serve` will automatically run indexing on first start. This may take 5-20 minutes depending on project size.
+
+### File Watching
+
+File watching is **enabled by default** for instant updates:
+- Detects when you save a file in your editor
+- Automatically reindexes in < 2 seconds
+- No manual `lien index` needed!
+
+To disable for a session:
+```bash
+lien serve --no-watch
+```
+
+To disable permanently, set in `.lien.config.json`:
+```json
+{
+  "fileWatching": {
+    "enabled": false
+  }
+}
+```
 
 ::: tip
 Usually run via Cursor's MCP configuration, not manually.
@@ -129,31 +183,6 @@ Add to `~/.cursor/mcp.json`:
   }
 }
 ```
-
-## lien reindex
-
-Clear existing index and rebuild from scratch.
-
-```bash
-lien reindex
-```
-
-### When to Use
-
-- After major codebase changes
-- When search results seem stale
-- After changing configuration
-- To fix corrupted index
-
-### Behavior
-
-1. Deletes existing index in `~/.lien/indices/[project-hash]/`
-2. Runs full indexing from scratch
-3. Same process as `lien index`
-
-::: warning
-This operation cannot be undone. The old index will be permanently deleted.
-:::
 
 ## lien status
 
@@ -216,9 +245,8 @@ Options:
 
 Commands:
   init [options]     Initialize Lien in current directory
-  index              Index your codebase
-  serve              Start MCP server
-  reindex            Clear and rebuild index
+  index [options]    Index your codebase
+  serve [options]    Start MCP server
   status             Show indexing status
   help [command]     display help for command
 ```
@@ -270,7 +298,7 @@ lien index
 
 ```bash
 # Edit .lien.config.json
-lien reindex
+lien index --force
 ```
 
 ### Checking Status
@@ -289,7 +317,7 @@ npm update -g @liendev/lien
 ## Tips
 
 1. **Run init once**: Each project needs `lien init` only once
-2. **Reindex after major changes**: Large refactors or config updates
+2. **Force rebuild when needed**: Use `lien index --force` after config changes
 3. **Check status first**: Use `lien status` to verify index state
 4. **Watch the output**: Indexing progress shows potential issues
 5. **Use absolute paths**: In MCP config, always use absolute paths

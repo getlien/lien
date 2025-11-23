@@ -9,6 +9,7 @@ import { readVersionFile, writeVersionFile } from './version.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
 import { QueryIntent, classifyQueryIntent } from './intent-classifier.js';
+import { VECTOR_DB_MAX_BATCH_SIZE, VECTOR_DB_MIN_BATCH_SIZE } from '../constants.js';
 
 /**
  * Helper Functions for File Type Detection
@@ -495,30 +496,105 @@ export class VectorDB implements VectorDBInterface {
       });
     }
     
-    try {
-      const records = vectors.map((vector, i) => ({
-        vector: Array.from(vector),
-        content: contents[i],
-        file: metadatas[i].file,
-        startLine: metadatas[i].startLine,
-        endLine: metadatas[i].endLine,
-        type: metadatas[i].type,
-        language: metadatas[i].language,
-        // Ensure arrays have at least empty string for Arrow type inference
-        functionNames: (metadatas[i].symbols?.functions && metadatas[i].symbols.functions.length > 0) ? metadatas[i].symbols.functions : [''],
-        classNames: (metadatas[i].symbols?.classes && metadatas[i].symbols.classes.length > 0) ? metadatas[i].symbols.classes : [''],
-        interfaceNames: (metadatas[i].symbols?.interfaces && metadatas[i].symbols.interfaces.length > 0) ? metadatas[i].symbols.interfaces : [''],
-      }));
-      
-      // Create table if it doesn't exist, otherwise add to existing table
-      if (!this.table) {
-        // Let LanceDB createTable handle type inference from the data
-        this.table = await this.db.createTable(this.tableName, records) as LanceDBTable;
-      } else {
-        await this.table.add(records);
+    // Handle empty batch gracefully
+    if (vectors.length === 0) {
+      return;
+    }
+    
+    // Split large batches into smaller chunks for better reliability
+    if (vectors.length > VECTOR_DB_MAX_BATCH_SIZE) {
+      // Split into smaller batches
+      for (let i = 0; i < vectors.length; i += VECTOR_DB_MAX_BATCH_SIZE) {
+        const batchVectors = vectors.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
+        const batchMetadata = metadatas.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
+        const batchContents = contents.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
+        
+        await this._insertBatchInternal(batchVectors, batchMetadata, batchContents);
       }
-    } catch (error) {
-      throw wrapError(error, 'Failed to insert batch into vector database');
+    } else {
+      await this._insertBatchInternal(vectors, metadatas, contents);
+    }
+  }
+  
+  /**
+   * Internal method to insert a single batch with iterative retry logic.
+   * Uses a queue-based approach to avoid deep recursion on large batch failures.
+   */
+  private async _insertBatchInternal(
+    vectors: Float32Array[],
+    metadatas: ChunkMetadata[],
+    contents: string[]
+  ): Promise<void> {
+    // Queue of batches to process (start with the full batch)
+    interface BatchToProcess {
+      vectors: Float32Array[];
+      metadatas: ChunkMetadata[];
+      contents: string[];
+    }
+    
+    const queue: BatchToProcess[] = [{ vectors, metadatas, contents }];
+    const failedRecords: BatchToProcess[] = [];
+    
+    // Process batches iteratively
+    while (queue.length > 0) {
+      const batch = queue.shift()!;
+      
+      try {
+        const records = batch.vectors.map((vector, i) => ({
+          vector: Array.from(vector),
+          content: batch.contents[i],
+          file: batch.metadatas[i].file,
+          startLine: batch.metadatas[i].startLine,
+          endLine: batch.metadatas[i].endLine,
+          type: batch.metadatas[i].type,
+          language: batch.metadatas[i].language,
+          // Ensure arrays have at least empty string for Arrow type inference
+          functionNames: (batch.metadatas[i].symbols?.functions && batch.metadatas[i].symbols.functions.length > 0) ? batch.metadatas[i].symbols.functions : [''],
+          classNames: (batch.metadatas[i].symbols?.classes && batch.metadatas[i].symbols.classes.length > 0) ? batch.metadatas[i].symbols.classes : [''],
+          interfaceNames: (batch.metadatas[i].symbols?.interfaces && batch.metadatas[i].symbols.interfaces.length > 0) ? batch.metadatas[i].symbols.interfaces : [''],
+        }));
+        
+        // Create table if it doesn't exist, otherwise add to existing table
+        if (!this.table) {
+          // Let LanceDB createTable handle type inference from the data
+          this.table = await this.db!.createTable(this.tableName, records) as LanceDBTable;
+        } else {
+          await this.table.add(records);
+        }
+      } catch (error) {
+        // If batch has more than min size records, split and retry
+        if (batch.vectors.length > VECTOR_DB_MIN_BATCH_SIZE) {
+          const half = Math.floor(batch.vectors.length / 2);
+          
+          // Split in half and add back to queue
+          queue.push({
+            vectors: batch.vectors.slice(0, half),
+            metadatas: batch.metadatas.slice(0, half),
+            contents: batch.contents.slice(0, half),
+          });
+          queue.push({
+            vectors: batch.vectors.slice(half),
+            metadatas: batch.metadatas.slice(half),
+            contents: batch.contents.slice(half),
+          });
+        } else {
+          // Small batch failed - collect for final error report
+          failedRecords.push(batch);
+        }
+      }
+    }
+    
+    // If any small batches failed, throw error with details
+    if (failedRecords.length > 0) {
+      const totalFailed = failedRecords.reduce((sum, batch) => sum + batch.vectors.length, 0);
+      throw new DatabaseError(
+        `Failed to insert ${totalFailed} record(s) after retry attempts`,
+        {
+          failedBatches: failedRecords.length,
+          totalRecords: totalFailed,
+          sampleFile: failedRecords[0].metadatas[0].file,
+        }
+      );
     }
   }
   

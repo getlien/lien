@@ -4,7 +4,7 @@ import path from 'path';
 import { startMCPServer } from '../mcp/server.js';
 import { showBanner } from '../utils/banner.js';
 
-export async function serveCommand(options: { port?: string; watch?: boolean; root?: string }) {
+export async function serveCommand(options: { port?: string; watch?: boolean; noWatch?: boolean; root?: string }) {
   const rootDir = options.root ? path.resolve(options.root) : process.cwd();
   
   try {
@@ -37,10 +37,20 @@ export async function serveCommand(options: { port?: string; watch?: boolean; ro
       console.error(chalk.dim(`Serving from: ${rootDir}\n`));
     }
     
+    // Handle deprecated --watch flag
+    if (options.watch) {
+      console.error(chalk.yellow('⚠️  --watch flag is deprecated (file watching is now default)'));
+      console.error(chalk.dim('    Use --no-watch to disable file watching\n'));
+    }
+    
+    // Determine file watching state
+    // Priority: --no-watch > --watch (deprecated) > config default
+    const watch = options.noWatch ? false : options.watch ? true : undefined;
+    
     await startMCPServer({
       rootDir,
       verbose: true,
-      watch: options.watch,
+      watch,
     });
   } catch (error) {
     console.error(chalk.red('Failed to start MCP server:'), error);

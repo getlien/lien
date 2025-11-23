@@ -13,6 +13,7 @@ import { LocalEmbeddings } from '../embeddings/local.js';
 import { GitStateTracker } from '../git/tracker.js';
 import { indexMultipleFiles, indexSingleFile } from '../indexer/incremental.js';
 import { configService } from '../config/service.js';
+import { ManifestManager } from '../indexer/manifest.js';
 import { isGitAvailable, isGitRepo } from '../git/utils.js';
 import { FileWatcher } from '../watcher/index.js';
 import { VERSION_CHECK_INTERVAL_MS } from '../constants.js';
@@ -413,8 +414,9 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     log('Git detection disabled by configuration');
   }
   
-  // Initialize file watching if enabled (opt-in)
-  const fileWatchingEnabled = watch || config.fileWatching.enabled;
+  // Initialize file watching if enabled
+  // Priority: CLI flag if explicitly set (true/false), otherwise use config default
+  const fileWatchingEnabled = watch !== undefined ? watch : config.fileWatching.enabled;
   
   if (fileWatchingEnabled) {
     log('👀 Starting file watcher...');
@@ -429,6 +431,11 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           log(`🗑️  File deleted: ${filepath}`);
           try {
             await vectorDB.deleteByFile(filepath);
+            
+            // Update manifest
+            const manifest = new ManifestManager(vectorDB.dbPath);
+            await manifest.removeFile(filepath);
+            
             log(`✓ Removed ${filepath} from index`);
           } catch (error) {
             log(`Warning: Failed to remove ${filepath}: ${error}`);

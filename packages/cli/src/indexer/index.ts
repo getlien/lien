@@ -10,10 +10,16 @@ import { configService } from '../config/service.js';
 import { CodeChunk } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { isLegacyConfig, isModernConfig } from '../config/schema.js';
+import { ManifestManager } from './manifest.js';
+import { detectChanges } from './change-detector.js';
+import { indexMultipleFiles } from './incremental.js';
+import { getIndexingMessage, getEmbeddingMessage, getModelLoadingMessage } from '../utils/loading-messages.js';
+import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
 
 export interface IndexingOptions {
   rootDir?: string;
   verbose?: boolean;
+  force?: boolean;  // Force full reindex, skip incremental
 }
 
 interface ChunkWithContent {
@@ -24,11 +30,109 @@ interface ChunkWithContent {
 export async function indexCodebase(options: IndexingOptions = {}): Promise<void> {
   const rootDir = options.rootDir ?? process.cwd();
   const spinner = ora('Starting indexing process...').start();
+  let updateInterval: NodeJS.Timeout | undefined;
   
   try {
     // 1. Load configuration
     spinner.text = 'Loading configuration...';
     const config = await configService.load(rootDir);
+    
+    // 1.5. Initialize vector database early (needed for manifest)
+    spinner.text = 'Initializing vector database...';
+    const vectorDB = new VectorDB(rootDir);
+    await vectorDB.initialize();
+    
+    // 1.6. Try incremental indexing if manifest exists and not forced
+    if (!options.force) {
+      spinner.text = 'Checking for changes...';
+      const manifest = new ManifestManager(vectorDB.dbPath);
+      const savedManifest = await manifest.load();
+      
+      if (savedManifest) {
+        // Detect changes using mtime
+        const changes = await detectChanges(rootDir, vectorDB, config);
+        
+        if (changes.reason !== 'full') {
+          const totalChanges = changes.added.length + changes.modified.length;
+          const totalDeleted = changes.deleted.length;
+          
+          if (totalChanges === 0 && totalDeleted === 0) {
+            spinner.succeed('No changes detected - index is up to date!');
+            return;
+          }
+          
+          spinner.succeed(
+            `Detected changes: ${totalChanges} files to index, ${totalDeleted} to remove (${changes.reason} detection)`
+          );
+          
+          // Initialize embeddings for incremental update
+          spinner.start(getModelLoadingMessage());
+          const embeddings = new LocalEmbeddings();
+          await embeddings.initialize();
+          spinner.succeed('Embedding model loaded');
+          
+          // Handle deletions
+          if (totalDeleted > 0) {
+            spinner.start(`Removing ${totalDeleted} deleted files...`);
+            let removedCount = 0;
+            for (const filepath of changes.deleted) {
+              try {
+                await vectorDB.deleteByFile(filepath);
+                await manifest.removeFile(filepath);
+                removedCount++;
+              } catch (err) {
+                spinner.warn(`Failed to remove file "${filepath}": ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
+            spinner.succeed(`Removed ${removedCount}/${totalDeleted} deleted files`);
+          }
+          
+          // Handle additions and modifications
+          if (totalChanges > 0) {
+            spinner.start(`Reindexing ${totalChanges} changed files...`);
+            const filesToIndex = [...changes.added, ...changes.modified];
+            const count = await indexMultipleFiles(
+              filesToIndex,
+              vectorDB,
+              embeddings,
+              config,
+              { verbose: options.verbose }
+            );
+            
+            // Update version file to trigger MCP reconnection
+            await writeVersionFile(vectorDB.dbPath);
+            
+            spinner.succeed(
+              `Incremental reindex complete: ${count}/${totalChanges} files indexed successfully`
+            );
+          }
+          
+          // Update git state after incremental indexing (for branch switch detection)
+          const { isGitAvailable, isGitRepo } = await import('../git/utils.js');
+          const { GitStateTracker } = await import('../git/tracker.js');
+          const gitAvailable = await isGitAvailable();
+          const isRepo = await isGitRepo(rootDir);
+          
+          if (gitAvailable && isRepo) {
+            const gitTracker = new GitStateTracker(rootDir, vectorDB.dbPath);
+            await gitTracker.initialize();
+            const gitState = gitTracker.getState();
+            if (gitState) {
+              // Reuse existing manifest instance
+              await manifest.updateGitState(gitState);
+            }
+          }
+          
+          console.log(chalk.dim('\nNext step: Run'), chalk.bold('lien serve'), chalk.dim('to start the MCP server'));
+          return; // Exit early - incremental index complete!
+        }
+        
+        // If we get here, changes.reason === 'full', so continue with full index below
+        spinner.text = 'Full reindex required...';
+      }
+    } else {
+      spinner.text = 'Force flag enabled, performing full reindex...';
+    }
     
     // 2. Scan for files (framework-aware if frameworks configured)
     spinner.text = 'Scanning codebase...';
@@ -61,24 +165,20 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     spinner.text = `Found ${files.length} files`;
     
     // 3. Initialize embeddings model
-    spinner.text = 'Loading embedding model (this may take a minute on first run)...';
+    spinner.text = getModelLoadingMessage();
     const embeddings = new LocalEmbeddings();
     await embeddings.initialize();
     spinner.succeed('Embedding model loaded');
-    
-    // 4. Initialize vector database
-    spinner.start('Initializing vector database...');
-    const vectorDB = new VectorDB(rootDir);
-    await vectorDB.initialize();
-    spinner.succeed('Vector database initialized');
     
     // 5. Process files concurrently
     const concurrency = isModernConfig(config) 
       ? config.core.concurrency 
       : 4;
-    const batchSize = isModernConfig(config)
+    const embeddingBatchSize = isModernConfig(config)
       ? config.core.embeddingBatchSize
       : 50;
+    // Use smaller batch size to keep UI responsive (process more frequently)
+    const vectorDBBatchSize = 100;
     
     spinner.start(`Processing files with ${concurrency}x concurrency...`);
     
@@ -90,18 +190,64 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     const chunkAccumulator: ChunkWithContent[] = [];
     const limit = pLimit(concurrency);
     
+    // Track successfully indexed files for manifest
+    const indexedFileEntries: Array<{ filepath: string; chunkCount: number; mtime: number }> = [];
+    
+    // Shared state for progress updates (decoupled from actual work)
+    const progressState = {
+      processedFiles: 0,
+      totalFiles: files.length,
+      wittyMessage: getIndexingMessage(),
+    };
+    
+    // Start a periodic timer to update the spinner independently
+    const SPINNER_UPDATE_INTERVAL_MS = 200;  // How often to update spinner
+    const MESSAGE_ROTATION_INTERVAL_MS = 8000;  // How often to rotate message
+    const MESSAGE_ROTATION_TICKS = Math.floor(MESSAGE_ROTATION_INTERVAL_MS / SPINNER_UPDATE_INTERVAL_MS);
+    
+    let spinnerTick = 0;
+    updateInterval = setInterval(() => {
+      // Rotate witty message periodically
+      spinnerTick++;
+      if (spinnerTick >= MESSAGE_ROTATION_TICKS) {
+        progressState.wittyMessage = getIndexingMessage();
+        spinnerTick = 0;  // Reset counter to prevent unbounded growth
+      }
+      
+      spinner.text = `${progressState.processedFiles}/${progressState.totalFiles} files | ${progressState.wittyMessage}`;
+    }, SPINNER_UPDATE_INTERVAL_MS);
+    
     // Function to process accumulated chunks
     const processAccumulatedChunks = async () => {
       if (chunkAccumulator.length === 0) return;
       
       const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
       
-      // Process in batches
-      for (let i = 0; i < toProcess.length; i += batchSize) {
-        const batch = toProcess.slice(i, Math.min(i + batchSize, toProcess.length));
+      // Process embeddings in smaller batches AND insert incrementally to keep UI responsive
+      for (let i = 0; i < toProcess.length; i += embeddingBatchSize) {
+        const batch = toProcess.slice(i, Math.min(i + embeddingBatchSize, toProcess.length));
         
+        // Update shared state (spinner updates automatically via interval)
+        progressState.wittyMessage = getEmbeddingMessage();
+        
+        // Process embeddings in micro-batches to prevent event loop blocking
+        // Transformers.js is CPU-intensive, so we yield control periodically
         const texts = batch.map(item => item.content);
-        const embeddingVectors = await embeddings.embedBatch(texts);
+        const embeddingVectors: Float32Array[] = [];
+        
+        for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
+          const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
+          const microResults = await embeddings.embedBatch(microBatch);
+          embeddingVectors.push(...microResults);
+          
+          // Yield to event loop so spinner can update
+          await new Promise(resolve => setImmediate(resolve));
+        }
+        
+        processedChunks += batch.length;
+        
+        // Update state before DB insertion
+        progressState.wittyMessage = `Inserting ${batch.length} chunks into vector space...`;
         
         await vectorDB.insertBatch(
           embeddingVectors,
@@ -109,14 +255,19 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           texts
         );
         
-        processedChunks += batch.length;
+        // Yield after DB insertion too
+        await new Promise(resolve => setImmediate(resolve));
       }
+      
+      progressState.wittyMessage = getIndexingMessage();
     };
     
     // Process files with concurrency limit
     const filePromises = files.map((file) =>
       limit(async () => {
         try {
+          // Get file stats to capture actual modification time
+          const stats = await fs.stat(file);
           const content = await fs.readFile(file, 'utf-8');
           const chunkSize = isModernConfig(config)
             ? config.core.chunkSize
@@ -132,6 +283,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           
           if (chunks.length === 0) {
             processedFiles++;
+            progressState.processedFiles = processedFiles;
             return;
           }
           
@@ -143,24 +295,26 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
             });
           }
           
-          // Process when batch is large enough
-          if (chunkAccumulator.length >= batchSize) {
-            await processAccumulatedChunks();
-          }
+          // Track this file for manifest with actual file mtime
+          indexedFileEntries.push({
+            filepath: file,
+            chunkCount: chunks.length,
+            mtime: stats.mtimeMs,
+          });
           
           processedFiles++;
+          progressState.processedFiles = processedFiles;
           
-          // Update progress
-          const elapsed = (Date.now() - startTime) / 1000;
-          const rate = processedFiles / elapsed;
-          const eta = rate > 0 ? Math.round((files.length - processedFiles) / rate) : 0;
-          
-          spinner.text = `Indexed ${processedFiles}/${files.length} files (${processedChunks} chunks) | ${concurrency}x concurrency | ETA: ${eta}s`;
+          // Process when batch is large enough (use smaller batch for responsiveness)
+          if (chunkAccumulator.length >= vectorDBBatchSize) {
+            await processAccumulatedChunks();
+          }
         } catch (error) {
           if (options.verbose) {
             console.error(chalk.yellow(`\n⚠️  Skipping ${file}: ${error}`));
           }
           processedFiles++;
+          progressState.processedFiles = processedFiles;
         }
       })
     );
@@ -169,7 +323,39 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     await Promise.all(filePromises);
     
     // Process remaining chunks
+    progressState.wittyMessage = 'Processing final chunks...';
     await processAccumulatedChunks();
+    
+    // Stop the progress update interval
+    clearInterval(updateInterval);
+    
+    // Save manifest with all indexed files
+    spinner.start('Saving index manifest...');
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    await manifest.updateFiles(
+      indexedFileEntries.map(entry => ({
+        filepath: entry.filepath,
+        lastModified: entry.mtime, // Use actual file mtime for accurate change detection
+        chunkCount: entry.chunkCount,
+      }))
+    );
+    
+    // Save git state if in a git repo (for branch switch detection)
+    const { isGitAvailable, isGitRepo } = await import('../git/utils.js');
+    const { GitStateTracker } = await import('../git/tracker.js');
+    const gitAvailable = await isGitAvailable();
+    const isRepo = await isGitRepo(rootDir);
+    
+    if (gitAvailable && isRepo) {
+      const gitTracker = new GitStateTracker(rootDir, vectorDB.dbPath);
+      await gitTracker.initialize();
+      const gitState = gitTracker.getState();
+      if (gitState) {
+        await manifest.updateGitState(gitState);
+      }
+    }
+    
+    spinner.succeed('Manifest saved');
     
     // Write version file to mark successful completion
     // This allows the MCP server to detect when reindexing is complete
@@ -182,6 +368,10 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
     
     console.log(chalk.dim('\nNext step: Run'), chalk.bold('lien serve'), chalk.dim('to start the MCP server'));
   } catch (error) {
+    // Make sure to clear interval on error too
+    if (updateInterval) {
+      clearInterval(updateInterval);
+    }
     spinner.fail(`Indexing failed: ${error}`);
     throw error;
   }

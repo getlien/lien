@@ -197,7 +197,7 @@ You don't need to manually run `lien serve` with Cursor - it starts automaticall
 
 ### Results not relevant
 
-- Try re-indexing: `lien reindex`
+- Try rebuilding the index: `lien index --force`
 - Adjust chunk size in config (larger chunks = more context)
 - Be more specific in your queries
 
