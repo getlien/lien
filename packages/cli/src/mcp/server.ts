@@ -24,6 +24,7 @@ import {
   GetFileContextSchema,
   ListFunctionsSchema,
 } from './schemas/index.js';
+import { LienError, LienErrorCode } from '../errors/index.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -123,7 +124,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     
     log(`Handling tool call: ${name}`);
     
-    switch (name) {
+    try {
+      switch (name) {
       case 'semantic_search':
         return await wrapToolHandler(
           SemanticSearchSchema,
@@ -267,7 +269,40 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
         )(args);
       
       default:
-        throw new Error(`Unknown tool: ${name}`);
+        throw new LienError(
+          `Unknown tool: ${name}`,
+          LienErrorCode.INVALID_INPUT,
+          { requestedTool: name, availableTools: tools.map(t => t.name) },
+          'medium',
+          false,
+          false
+        );
+      }
+    } catch (error) {
+      // Handle errors at the switch level (e.g., unknown tool)
+      if (error instanceof LienError) {
+        return {
+          isError: true,
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify(error.toJSON(), null, 2),
+          }],
+        };
+      }
+      
+      // Unexpected error
+      console.error(`Unexpected error handling tool call ${name}:`, error);
+      return {
+        isError: true,
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            error: error instanceof Error ? error.message : 'Unknown error',
+            code: LienErrorCode.INTERNAL_ERROR,
+            tool: name,
+          }, null, 2),
+        }],
+      };
     }
   });
   
