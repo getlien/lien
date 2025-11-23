@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import { VectorDB } from '../vectordb/lancedb.js';
-import { ManifestManager } from './manifest.js';
+import { ManifestManager, IndexManifest } from './manifest.js';
 import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
 import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
 import { GitStateTracker } from '../git/tracker.js';
@@ -112,7 +112,7 @@ async function getAllFiles(
  */
 async function mtimeBasedDetection(
   rootDir: string,
-  savedManifest: any,
+  savedManifest: IndexManifest,
   config: LienConfig | LegacyLienConfig
 ): Promise<ChangeDetectionResult> {
   const added: string[] = [];
