@@ -246,27 +246,31 @@ describe('Incremental Indexing', () => {
   });
 
   describe('Error Handling', () => {
-    it('should handle file read permission errors gracefully', async () => {
-      const testFile = path.join(testDir, 'no-permission.ts');
-      await fs.writeFile(testFile, 'export function test() {}');
-      
-      // Make file unreadable (chmod 000)
-      await fs.chmod(testFile, 0o000);
-      
-      try {
-        // Should not throw - should handle error gracefully
-        await expect(
-          indexSingleFile(testFile, vectorDB, embeddings, defaultConfig, { verbose: false })
-        ).resolves.not.toThrow();
-      } finally {
-        // Restore permissions for cleanup
+    // Skip on Windows (chmod doesn't work the same) and when running as root (bypasses permissions)
+    it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+      'should handle file read permission errors gracefully',
+      async () => {
+        const testFile = path.join(testDir, 'no-permission.ts');
+        await fs.writeFile(testFile, 'export function test() {}');
+        
+        // Make file unreadable (chmod 000)
+        await fs.chmod(testFile, 0o000);
+        
         try {
-          await fs.chmod(testFile, 0o644);
-        } catch {
-          // Ignore cleanup errors
+          // Should not throw - should handle error gracefully
+          await expect(
+            indexSingleFile(testFile, vectorDB, embeddings, defaultConfig, { verbose: false })
+          ).resolves.not.toThrow();
+        } finally {
+          // Restore permissions for cleanup
+          try {
+            await fs.chmod(testFile, 0o644);
+          } catch {
+            // Ignore cleanup errors
+          }
         }
       }
-    });
+    );
 
     it('should continue indexing other files when one file fails', async () => {
       const goodFile1 = path.join(testDir, 'good1.ts');
