@@ -5,8 +5,7 @@
         "args": [
           "/Users/alfhenderson/Code/lien/packages/cli/dist/index.js",
           "serve"
-        ],
-        "cwd": "/Users/alfhenderson/Code/lien"
+        ]
       }
     }
   }

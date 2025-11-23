@@ -17,6 +17,14 @@ import { ManifestManager } from '../indexer/manifest.js';
 import { isGitAvailable, isGitRepo } from '../git/utils.js';
 import { FileWatcher } from '../watcher/index.js';
 import { VERSION_CHECK_INTERVAL_MS } from '../constants.js';
+import { wrapToolHandler } from './utils/tool-wrapper.js';
+import {
+  SemanticSearchSchema,
+  FindSimilarSchema,
+  GetFileContextSchema,
+  ListFunctionsSchema,
+} from './schemas/index.js';
+import { LienError, LienErrorCode } from '../errors/index.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -114,200 +122,186 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     
+    log(`Handling tool call: ${name}`);
+    
     try {
-      log(`Handling tool call: ${name}`);
-      
       switch (name) {
-        case 'semantic_search': {
-          const query = args?.query as string;
-          const limit = (args?.limit as number) || 5;
-          
-          log(`Searching for: "${query}"`);
-          
-          // Check if index has been updated and reconnect if needed
-          await checkAndReconnect();
-          
-          const queryEmbedding = await embeddings.embed(query);
-          const results = await vectorDB.search(queryEmbedding, limit, query);
-          
-          log(`Found ${results.length} results`);
-          
-          const response = {
-            indexInfo: getIndexMetadata(),
-            results,
-          };
-          
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(response, null, 2),
-              },
-            ],
-          };
-        }
-        
-        case 'find_similar': {
-          const code = args?.code as string;
-          const limit = (args?.limit as number) || 5;
-          
-          log(`Finding similar code...`);
-          
-          // Check if index has been updated and reconnect if needed
-          await checkAndReconnect();
-          
-          const codeEmbedding = await embeddings.embed(code);
-          // Pass code as query for relevance boosting
-          const results = await vectorDB.search(codeEmbedding, limit, code);
-          
-          log(`Found ${results.length} similar chunks`);
-          
-          const response = {
-            indexInfo: getIndexMetadata(),
-            results,
-          };
-          
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(response, null, 2),
-              },
-            ],
-          };
-        }
-        
-        case 'get_file_context': {
-          const filepath = args?.filepath as string;
-          const includeRelated = (args?.includeRelated as boolean) ?? true;
-          
-          log(`Getting context for: ${filepath}`);
-          
-          // Check if index has been updated and reconnect if needed
-          await checkAndReconnect();
-          
-          // Search for chunks from this file by embedding the filepath
-          // This is a simple approach; could be improved with metadata filtering
-          const fileEmbedding = await embeddings.embed(filepath);
-          const allResults = await vectorDB.search(fileEmbedding, 50, filepath);
-          
-          // Filter results to only include chunks from the target file
-          const fileChunks = allResults.filter(r => 
-            r.metadata.file.includes(filepath) || filepath.includes(r.metadata.file)
-          );
-          
-          let results = fileChunks;
-          
-          if (includeRelated && fileChunks.length > 0) {
-            // Get related chunks by searching with the first chunk's content
-            const relatedEmbedding = await embeddings.embed(fileChunks[0].content);
-            const related = await vectorDB.search(relatedEmbedding, 5, fileChunks[0].content);
+      case 'semantic_search':
+        return await wrapToolHandler(
+          SemanticSearchSchema,
+          async (validatedArgs) => {
+            log(`Searching for: "${validatedArgs.query}"`);
             
-            // Add related chunks that aren't from the same file
-            const relatedOtherFiles = related.filter(r => 
-              !r.metadata.file.includes(filepath) && !filepath.includes(r.metadata.file)
+            // Check if index has been updated and reconnect if needed
+            await checkAndReconnect();
+            
+            const queryEmbedding = await embeddings.embed(validatedArgs.query);
+            const results = await vectorDB.search(queryEmbedding, validatedArgs.limit, validatedArgs.query);
+            
+            log(`Found ${results.length} results`);
+            
+            return {
+              indexInfo: getIndexMetadata(),
+              results,
+            };
+          }
+        )(args);
+      
+      case 'find_similar':
+        return await wrapToolHandler(
+          FindSimilarSchema,
+          async (validatedArgs) => {
+            log(`Finding similar code...`);
+            
+            // Check if index has been updated and reconnect if needed
+            await checkAndReconnect();
+            
+            const codeEmbedding = await embeddings.embed(validatedArgs.code);
+            // Pass code as query for relevance boosting
+            const results = await vectorDB.search(codeEmbedding, validatedArgs.limit, validatedArgs.code);
+            
+            log(`Found ${results.length} similar chunks`);
+            
+            return {
+              indexInfo: getIndexMetadata(),
+              results,
+            };
+          }
+        )(args);
+      
+      case 'get_file_context':
+        return await wrapToolHandler(
+          GetFileContextSchema,
+          async (validatedArgs) => {
+            log(`Getting context for: ${validatedArgs.filepath}`);
+            
+            // Check if index has been updated and reconnect if needed
+            await checkAndReconnect();
+            
+            // Search for chunks from this file by embedding the filepath
+            // This is a simple approach; could be improved with metadata filtering
+            const fileEmbedding = await embeddings.embed(validatedArgs.filepath);
+            const allResults = await vectorDB.search(fileEmbedding, 50, validatedArgs.filepath);
+            
+            // Filter results to only include chunks from the target file
+            const fileChunks = allResults.filter(r => 
+              r.metadata.file.includes(validatedArgs.filepath) || validatedArgs.filepath.includes(r.metadata.file)
             );
             
-            results = [...fileChunks, ...relatedOtherFiles];
-          }
-          
-          log(`Found ${results.length} chunks`);
-          
-          const response = {
-            indexInfo: getIndexMetadata(),
-            file: filepath,
-            chunks: results,
-          };
-          
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(response, null, 2),
-              },
-            ],
-          };
-        }
-        
-        case 'list_functions': {
-          const pattern = args?.pattern as string | undefined;
-          const language = args?.language as string | undefined;
-          
-          log('Listing functions with symbol metadata...');
-          
-          // Check if index has been updated and reconnect if needed
-          await checkAndReconnect();
-          
-          let results;
-          let usedMethod = 'symbols';
-          
-          try {
-            // Try using symbol-based query first (v0.5.0+)
-            results = await vectorDB.querySymbols({
-              language,
-              pattern,
-              limit: 50,
-            });
+            let results = fileChunks;
             
-            // If no results and pattern was provided, it might be an old index
-            // Fall back to content scanning
-            if (results.length === 0 && (language || pattern)) {
-              log('No symbol results, falling back to content scan...');
+            if (validatedArgs.includeRelated && fileChunks.length > 0) {
+              // Get related chunks by searching with the first chunk's content
+              const relatedEmbedding = await embeddings.embed(fileChunks[0].content);
+              const related = await vectorDB.search(relatedEmbedding, 5, fileChunks[0].content);
+              
+              // Add related chunks that aren't from the same file
+              const relatedOtherFiles = related.filter(r => 
+                !r.metadata.file.includes(validatedArgs.filepath) && !validatedArgs.filepath.includes(r.metadata.file)
+              );
+              
+              results = [...fileChunks, ...relatedOtherFiles];
+            }
+            
+            log(`Found ${results.length} chunks`);
+            
+            return {
+              indexInfo: getIndexMetadata(),
+              file: validatedArgs.filepath,
+              chunks: results,
+            };
+          }
+        )(args);
+      
+      case 'list_functions':
+        return await wrapToolHandler(
+          ListFunctionsSchema,
+          async (validatedArgs) => {
+            log('Listing functions with symbol metadata...');
+            
+            // Check if index has been updated and reconnect if needed
+            await checkAndReconnect();
+            
+            let results;
+            let usedMethod = 'symbols';
+            
+            try {
+              // Try using symbol-based query first (v0.5.0+)
+              results = await vectorDB.querySymbols({
+                language: validatedArgs.language,
+                pattern: validatedArgs.pattern,
+                limit: 50,
+              });
+              
+              // If no results and pattern was provided, it might be an old index
+              // Fall back to content scanning
+              if (results.length === 0 && (validatedArgs.language || validatedArgs.pattern)) {
+                log('No symbol results, falling back to content scan...');
+                results = await vectorDB.scanWithFilter({
+                  language: validatedArgs.language,
+                  pattern: validatedArgs.pattern,
+                  limit: 50,
+                });
+                usedMethod = 'content';
+              }
+            } catch (error) {
+              // If querySymbols fails (e.g., old index without symbol fields), fall back
+              log(`Symbol query failed, falling back to content scan: ${error}`);
               results = await vectorDB.scanWithFilter({
-                language,
-                pattern,
+                language: validatedArgs.language,
+                pattern: validatedArgs.pattern,
                 limit: 50,
               });
               usedMethod = 'content';
             }
-          } catch (error) {
-            // If querySymbols fails (e.g., old index without symbol fields), fall back
-            log(`Symbol query failed, falling back to content scan: ${error}`);
-            results = await vectorDB.scanWithFilter({
-              language,
-              pattern,
-              limit: 50,
-            });
-            usedMethod = 'content';
+            
+            log(`Found ${results.length} matches using ${usedMethod} method`);
+            
+            return {
+              indexInfo: getIndexMetadata(),
+              method: usedMethod,
+              results,
+              note: usedMethod === 'content' 
+                ? 'Using content search. Run "lien reindex" to enable faster symbol-based queries.'
+                : undefined,
+            };
           }
-          
-          log(`Found ${results.length} matches using ${usedMethod} method`);
-          
-          const response = {
-            indexInfo: getIndexMetadata(),
-            method: usedMethod,
-            results,
-            note: usedMethod === 'content' 
-              ? 'Using content search. Run "lien reindex" to enable faster symbol-based queries.'
-              : undefined,
-          };
-          
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(response, null, 2),
-              },
-            ],
-          };
-        }
-        
-        default:
-          throw new Error(`Unknown tool: ${name}`);
+        )(args);
+      
+      default:
+        throw new LienError(
+          `Unknown tool: ${name}`,
+          LienErrorCode.INVALID_INPUT,
+          { requestedTool: name, availableTools: tools.map(t => t.name) },
+          'medium',
+          false,
+          false
+        );
       }
     } catch (error) {
-      console.error(`Error handling tool call ${name}:`, error);
+      // Handle errors at the switch level (e.g., unknown tool)
+      if (error instanceof LienError) {
+        return {
+          isError: true,
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify(error.toJSON(), null, 2),
+          }],
+        };
+      }
+      
+      // Unexpected error
+      console.error(`Unexpected error handling tool call ${name}:`, error);
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              error: String(error),
-              tool: name,
-            }),
-          },
-        ],
         isError: true,
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            error: error instanceof Error ? error.message : 'Unknown error',
+            code: LienErrorCode.INTERNAL_ERROR,
+            tool: name,
+          }, null, 2),
+        }],
       };
     }
   });

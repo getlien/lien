@@ -114,6 +114,73 @@ list_functions({
 
 ---
 
+## Input Validation & Error Handling
+
+Lien uses Zod schemas for runtime type-safe validation of all tool inputs. This provides:
+- **Automatic validation** of all parameters before tool execution
+- **Rich error messages** with field-level feedback
+- **Type safety** with full TypeScript inference
+- **Consistent error structure** across all tools
+
+### Understanding Validation Errors
+
+When you provide invalid parameters, you'll receive a structured error response:
+
+```json
+{
+  "error": "Invalid parameters",
+  "code": "INVALID_INPUT",
+  "details": [
+    {
+      "field": "query",
+      "message": "Query must be at least 3 characters"
+    },
+    {
+      "field": "limit",
+      "message": "Limit cannot exceed 50"
+    }
+  ]
+}
+```
+
+### Common Validation Rules
+
+**semantic_search:**
+- `query`: 3-500 characters (required)
+- `limit`: 1-50 (default: 5)
+
+**find_similar:**
+- `code`: minimum 10 characters (required)
+- `limit`: 1-20 (default: 5)
+
+**get_file_context:**
+- `filepath`: cannot be empty (required)
+- `includeRelated`: boolean (default: true)
+
+**list_functions:**
+- `pattern`: optional regex string
+- `language`: optional language filter
+
+### Error Codes
+
+Lien uses structured error codes for programmatic error handling:
+
+- `INVALID_INPUT` - Parameter validation failed
+- `FILE_NOT_FOUND` - Requested file doesn't exist in index
+- `INDEX_NOT_FOUND` - No index found (run `lien index`)
+- `INDEX_CORRUPTED` - Index is corrupted (run `lien reindex`)
+- `EMBEDDING_GENERATION_FAILED` - Embedding model failed (retryable)
+- `INTERNAL_ERROR` - Unexpected internal error
+
+### Best Practices
+
+1. **Always provide required fields**: Check tool schemas for required parameters
+2. **Respect validation limits**: Don't exceed max values for `limit` parameters
+3. **Use descriptive queries**: Avoid very short or vague queries
+4. **Handle validation errors gracefully**: Parse error details to understand what went wrong
+
+---
+
 ## Workflow Patterns (FOLLOW THESE)
 
 ### Pattern 1: User Asks "Where is X?"
