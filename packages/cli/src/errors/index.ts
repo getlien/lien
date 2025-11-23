@@ -1,11 +1,24 @@
+import { LienErrorCode } from './codes.js';
+
+// Re-export for consumers
+export { LienErrorCode } from './codes.js';
+
+/**
+ * Severity levels for errors
+ */
+export type ErrorSeverity = 'low' | 'medium' | 'high' | 'critical';
+
 /**
  * Base error class for all Lien-specific errors
  */
 export class LienError extends Error {
   constructor(
     message: string,
-    public readonly code: string,
-    public readonly context?: Record<string, unknown>
+    public readonly code: LienErrorCode,
+    public readonly context?: Record<string, unknown>,
+    public readonly severity: ErrorSeverity = 'medium',
+    public readonly recoverable: boolean = true,
+    public readonly retryable: boolean = false
   ) {
     super(message);
     this.name = 'LienError';
@@ -15,6 +28,33 @@ export class LienError extends Error {
       Error.captureStackTrace(this, this.constructor);
     }
   }
+  
+  /**
+   * Serialize error to JSON for MCP responses
+   */
+  toJSON() {
+    return {
+      error: this.message,
+      code: this.code,
+      severity: this.severity,
+      recoverable: this.recoverable,
+      context: this.context,
+    };
+  }
+  
+  /**
+   * Check if this error is retryable
+   */
+  isRetryable(): boolean {
+    return this.retryable;
+  }
+  
+  /**
+   * Check if this error is recoverable
+   */
+  isRecoverable(): boolean {
+    return this.recoverable;
+  }
 }
 
 /**
@@ -22,7 +62,7 @@ export class LienError extends Error {
  */
 export class ConfigError extends LienError {
   constructor(message: string, context?: Record<string, unknown>) {
-    super(message, 'CONFIG_ERROR', context);
+    super(message, LienErrorCode.CONFIG_INVALID, context, 'medium', true, false);
     this.name = 'ConfigError';
   }
 }
@@ -36,7 +76,7 @@ export class IndexingError extends LienError {
     public readonly file?: string,
     context?: Record<string, unknown>
   ) {
-    super(message, 'INDEXING_ERROR', { ...context, file });
+    super(message, LienErrorCode.INTERNAL_ERROR, { ...context, file }, 'medium', true, false);
     this.name = 'IndexingError';
   }
 }
@@ -46,7 +86,7 @@ export class IndexingError extends LienError {
  */
 export class EmbeddingError extends LienError {
   constructor(message: string, context?: Record<string, unknown>) {
-    super(message, 'EMBEDDING_ERROR', context);
+    super(message, LienErrorCode.EMBEDDING_GENERATION_FAILED, context, 'high', true, true);
     this.name = 'EmbeddingError';
   }
 }
@@ -56,7 +96,7 @@ export class EmbeddingError extends LienError {
  */
 export class DatabaseError extends LienError {
   constructor(message: string, context?: Record<string, unknown>) {
-    super(message, 'DATABASE_ERROR', context);
+    super(message, LienErrorCode.INTERNAL_ERROR, context, 'high', true, true);
     this.name = 'DatabaseError';
   }
 }
@@ -78,7 +118,7 @@ export function wrapError(
   
   const wrappedError = new LienError(
     `${context}: ${message}`,
-    'WRAPPED_ERROR',
+    LienErrorCode.INTERNAL_ERROR,
     additionalContext
   );
   

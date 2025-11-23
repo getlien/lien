@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { tools } from './tools.js';
+import { 
+  SemanticSearchSchema, 
+  FindSimilarSchema, 
+  GetFileContextSchema, 
+  ListFunctionsSchema 
+} from './schemas/index.js';
 
 describe('MCP Tools Schema', () => {
   describe('tools array', () => {
@@ -32,10 +38,11 @@ describe('MCP Tools Schema', () => {
       expect(tool).toBeDefined();
       expect(tool!.name).toBe('semantic_search');
       expect(tool!.description).toContain('semantic');
-      expect(tool!.inputSchema.type).toBe('object');
-      expect(tool!.inputSchema.properties).toHaveProperty('query');
-      expect(tool!.inputSchema.properties).toHaveProperty('limit');
-      expect(tool!.inputSchema.required).toEqual(['query']);
+      const schema = tool!.inputSchema as any;
+      expect(schema.type).toBe('object');
+      expect(schema.properties).toHaveProperty('query');
+      expect(schema.properties).toHaveProperty('limit');
+      expect(schema.required).toEqual(['query']);
     });
     
     it('should mention relevance categories in description', () => {
@@ -46,12 +53,14 @@ describe('MCP Tools Schema', () => {
     
     it('should have query as required field', () => {
       const tool = tools.find(t => t.name === 'semantic_search');
-      expect(tool?.inputSchema.required).toContain('query');
+      const schema = tool?.inputSchema as any;
+      expect(schema.required).toContain('query');
     });
     
     it('should have limit with default value', () => {
       const tool = tools.find(t => t.name === 'semantic_search');
-      expect(tool?.inputSchema.properties.limit?.default).toBe(5);
+      const schema = tool?.inputSchema as any;
+      expect(schema.properties.limit?.default).toBe(5);
     });
   });
   
@@ -62,10 +71,11 @@ describe('MCP Tools Schema', () => {
       expect(tool).toBeDefined();
       expect(tool!.name).toBe('find_similar');
       expect(tool!.description).toContain('similar');
-      expect(tool!.inputSchema.type).toBe('object');
-      expect(tool!.inputSchema.properties).toHaveProperty('code');
-      expect(tool!.inputSchema.properties).toHaveProperty('limit');
-      expect(tool!.inputSchema.required).toEqual(['code']);
+      const schema = tool!.inputSchema as any;
+      expect(schema.type).toBe('object');
+      expect(schema.properties).toHaveProperty('code');
+      expect(schema.properties).toHaveProperty('limit');
+      expect(schema.required).toEqual(['code']);
     });
     
     it('should mention relevance categories in description', () => {
@@ -75,12 +85,14 @@ describe('MCP Tools Schema', () => {
     
     it('should have code as required field', () => {
       const tool = tools.find(t => t.name === 'find_similar');
-      expect(tool?.inputSchema.required).toContain('code');
+      const schema = tool?.inputSchema as any;
+      expect(schema.required).toContain('code');
     });
     
     it('should have limit with default value', () => {
       const tool = tools.find(t => t.name === 'find_similar');
-      expect(tool?.inputSchema.properties.limit?.default).toBe(5);
+      const schema = tool?.inputSchema as any;
+      expect(schema.properties.limit?.default).toBe(5);
     });
   });
   
@@ -91,10 +103,11 @@ describe('MCP Tools Schema', () => {
       expect(tool).toBeDefined();
       expect(tool!.name).toBe('get_file_context');
       expect(tool!.description).toContain('file');
-      expect(tool!.inputSchema.type).toBe('object');
-      expect(tool!.inputSchema.properties).toHaveProperty('filepath');
-      expect(tool!.inputSchema.properties).toHaveProperty('includeRelated');
-      expect(tool!.inputSchema.required).toEqual(['filepath']);
+      const schema = tool!.inputSchema as any;
+      expect(schema.type).toBe('object');
+      expect(schema.properties).toHaveProperty('filepath');
+      expect(schema.properties).toHaveProperty('includeRelated');
+      expect(schema.required).toEqual(['filepath']);
     });
     
     it('should mention relevance categories in description', () => {
@@ -104,12 +117,14 @@ describe('MCP Tools Schema', () => {
     
     it('should have filepath as required field', () => {
       const tool = tools.find(t => t.name === 'get_file_context');
-      expect(tool?.inputSchema.required).toContain('filepath');
+      const schema = tool?.inputSchema as any;
+      expect(schema.required).toContain('filepath');
     });
     
     it('should have includeRelated with default value', () => {
       const tool = tools.find(t => t.name === 'get_file_context');
-      expect(tool?.inputSchema.properties.includeRelated?.default).toBe(true);
+      const schema = tool?.inputSchema as any;
+      expect(schema.properties.includeRelated?.default).toBe(true);
     });
   });
   
@@ -120,37 +135,42 @@ describe('MCP Tools Schema', () => {
       expect(tool).toBeDefined();
       expect(tool!.name).toBe('list_functions');
       expect(tool!.description.toLowerCase()).toMatch(/function|class|interface/);
-      expect(tool!.inputSchema.type).toBe('object');
-      expect(tool!.inputSchema.properties).toHaveProperty('pattern');
-      expect(tool!.inputSchema.properties).toHaveProperty('language');
+      const schema = tool!.inputSchema as any;
+      expect(schema.type).toBe('object');
+      expect(schema.properties).toHaveProperty('pattern');
+      expect(schema.properties).toHaveProperty('language');
     });
     
     it('should have optional parameters', () => {
       const tool = tools.find(t => t.name === 'list_functions');
+      const schema = tool!.inputSchema as any;
       // No required fields for this tool
-      expect(tool!.inputSchema.required).toBeUndefined();
+      expect(schema.required).toBeUndefined();
     });
     
     it('should have pattern and language as optional strings', () => {
       const tool = tools.find(t => t.name === 'list_functions');
-      expect(tool?.inputSchema.properties.pattern?.type).toBe('string');
-      expect(tool?.inputSchema.properties.language?.type).toBe('string');
+      const schema = tool?.inputSchema as any;
+      expect(schema.properties.pattern?.type).toBe('string');
+      expect(schema.properties.language?.type).toBe('string');
     });
   });
   
   describe('schema validation', () => {
     it('should have valid JSON Schema format', () => {
       tools.forEach(tool => {
-        expect(tool.inputSchema).toHaveProperty('type');
-        expect(tool.inputSchema.type).toBe('object');
-        expect(tool.inputSchema).toHaveProperty('properties');
-        expect(typeof tool.inputSchema.properties).toBe('object');
+        const schema = tool.inputSchema as any;
+        expect(schema).toHaveProperty('type');
+        expect(schema.type).toBe('object');
+        expect(schema).toHaveProperty('properties');
+        expect(typeof schema.properties).toBe('object');
       });
     });
     
     it('should have descriptions for all properties', () => {
       tools.forEach(tool => {
-        Object.values(tool.inputSchema.properties).forEach((prop: any) => {
+        const schema = tool.inputSchema as any;
+        Object.values(schema.properties).forEach((prop: any) => {
           expect(prop).toHaveProperty('description');
           expect(typeof prop.description).toBe('string');
           expect(prop.description.length).toBeGreaterThan(0);
@@ -159,13 +179,112 @@ describe('MCP Tools Schema', () => {
     });
     
     it('should have valid types for all properties', () => {
-      const validTypes = ['string', 'number', 'boolean', 'object', 'array'];
+      const validTypes = ['string', 'number', 'boolean', 'object', 'array', 'integer'];
       
       tools.forEach(tool => {
-        Object.values(tool.inputSchema.properties).forEach((prop: any) => {
+        const schema = tool.inputSchema as any;
+        Object.values(schema.properties).forEach((prop: any) => {
           expect(prop).toHaveProperty('type');
           expect(validTypes).toContain(prop.type);
         });
+      });
+    });
+  });
+  
+  describe('Zod schema validation integration', () => {
+    describe('semantic_search validation', () => {
+      it('should accept valid input', () => {
+        const valid = SemanticSearchSchema.safeParse({
+          query: 'test query',
+          limit: 10
+        });
+        expect(valid.success).toBe(true);
+      });
+      
+      it('should reject invalid input', () => {
+        const invalid = SemanticSearchSchema.safeParse({
+          query: 'ab', // too short
+          limit: 10
+        });
+        expect(invalid.success).toBe(false);
+      });
+      
+      it('should apply defaults', () => {
+        const result = SemanticSearchSchema.parse({ query: 'test' });
+        expect(result.limit).toBe(5);
+      });
+    });
+    
+    describe('find_similar validation', () => {
+      it('should accept valid input', () => {
+        const valid = FindSimilarSchema.safeParse({
+          code: 'const x = 1;',
+          limit: 10
+        });
+        expect(valid.success).toBe(true);
+      });
+      
+      it('should reject short code', () => {
+        const invalid = FindSimilarSchema.safeParse({
+          code: 'short'
+        });
+        expect(invalid.success).toBe(false);
+      });
+      
+      it('should apply defaults', () => {
+        const result = FindSimilarSchema.parse({ code: 'const x = 1;' });
+        expect(result.limit).toBe(5);
+      });
+    });
+    
+    describe('get_file_context validation', () => {
+      it('should accept valid input', () => {
+        const valid = GetFileContextSchema.safeParse({
+          filepath: 'src/index.ts',
+          includeRelated: false
+        });
+        expect(valid.success).toBe(true);
+      });
+      
+      it('should reject empty filepath', () => {
+        const invalid = GetFileContextSchema.safeParse({
+          filepath: ''
+        });
+        expect(invalid.success).toBe(false);
+      });
+      
+      it('should apply defaults', () => {
+        const result = GetFileContextSchema.parse({ filepath: 'test.ts' });
+        expect(result.includeRelated).toBe(true);
+      });
+    });
+    
+    describe('list_functions validation', () => {
+      it('should accept all optional parameters', () => {
+        const valid = ListFunctionsSchema.safeParse({});
+        expect(valid.success).toBe(true);
+      });
+      
+      it('should accept pattern only', () => {
+        const valid = ListFunctionsSchema.safeParse({
+          pattern: '.*Controller.*'
+        });
+        expect(valid.success).toBe(true);
+      });
+      
+      it('should accept language only', () => {
+        const valid = ListFunctionsSchema.safeParse({
+          language: 'typescript'
+        });
+        expect(valid.success).toBe(true);
+      });
+      
+      it('should accept both parameters', () => {
+        const valid = ListFunctionsSchema.safeParse({
+          pattern: '.*Service$',
+          language: 'python'
+        });
+        expect(valid.success).toBe(true);
       });
     });
   });
