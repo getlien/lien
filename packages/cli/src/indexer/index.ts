@@ -74,11 +74,17 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           // Handle deletions
           if (totalDeleted > 0) {
             spinner.start(`Removing ${totalDeleted} deleted files...`);
+            let removedCount = 0;
             for (const filepath of changes.deleted) {
-              await vectorDB.deleteByFile(filepath);
-              await manifest.removeFile(filepath);
+              try {
+                await vectorDB.deleteByFile(filepath);
+                await manifest.removeFile(filepath);
+                removedCount++;
+              } catch (err) {
+                spinner.warn(`Failed to remove file "${filepath}": ${err instanceof Error ? err.message : String(err)}`);
+              }
             }
-            spinner.succeed(`Removed ${totalDeleted} deleted files`);
+            spinner.succeed(`Removed ${removedCount}/${totalDeleted} deleted files`);
           }
           
           // Handle additions and modifications
