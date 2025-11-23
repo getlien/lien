@@ -201,8 +201,7 @@ export class ManifestManager {
   async updateGitState(gitState: GitState): Promise<void> {
     // Chain this operation to the lock to ensure atomicity
     this.updateLock = this.updateLock.then(async () => {
-      const manifest = await this.load();
-      if (!manifest) return;
+      const manifest = await this.load() || this.createEmpty();
       
       manifest.gitState = gitState;
       await this.save(manifest);
