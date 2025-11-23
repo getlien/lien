@@ -5,9 +5,86 @@ import { VectorDB } from '../vectordb/lancedb.js';
 import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
 import { ManifestManager } from './manifest.js';
 import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
+import { CodeChunk } from './types.js';
 
 export interface IncrementalIndexOptions {
   verbose?: boolean;
+}
+
+/**
+ * Result of processing a file's content into chunks and embeddings.
+ */
+interface ProcessFileResult {
+  chunkCount: number;
+  vectors: Float32Array[];
+  chunks: CodeChunk[];
+  texts: string[];
+}
+
+/**
+ * Shared helper that processes file content into chunks and embeddings.
+ * This is the core logic shared between indexSingleFile and indexMultipleFiles.
+ * 
+ * Returns null for empty files (0 chunks), which callers should handle appropriately.
+ * 
+ * @param filepath - Path to the file being processed
+ * @param content - File content
+ * @param embeddings - Embeddings service
+ * @param config - Lien configuration
+ * @param verbose - Whether to log verbose output
+ * @returns ProcessFileResult for non-empty files, null for empty files
+ */
+async function processFileContent(
+  filepath: string,
+  content: string,
+  embeddings: EmbeddingService,
+  config: LienConfig | LegacyLienConfig,
+  verbose: boolean
+): Promise<ProcessFileResult | null> {
+  // Get chunk settings (support both v0.3.0 and legacy v0.2.0 configs)
+  const chunkSize = isModernConfig(config)
+    ? config.core.chunkSize
+    : (isLegacyConfig(config) ? config.indexing.chunkSize : 75);
+  const chunkOverlap = isModernConfig(config)
+    ? config.core.chunkOverlap
+    : (isLegacyConfig(config) ? config.indexing.chunkOverlap : 10);
+  
+  // Chunk the file
+  const chunks = chunkFile(filepath, content, {
+    chunkSize,
+    chunkOverlap,
+  });
+  
+  if (chunks.length === 0) {
+    // Empty file - return null so caller can handle appropriately
+    if (verbose) {
+      console.error(`[Lien] Empty file: ${filepath}`);
+    }
+    return null;
+  }
+  
+  // Generate embeddings for all chunks
+  // Use micro-batching to prevent event loop blocking
+  const texts = chunks.map(c => c.content);
+  const vectors: Float32Array[] = [];
+  
+  for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
+    const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
+    const microResults = await embeddings.embedBatch(microBatch);
+    vectors.push(...microResults);
+    
+    // Yield to event loop for responsiveness
+    if (texts.length > EMBEDDING_MICRO_BATCH_SIZE) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+  }
+  
+  return {
+    chunkCount: chunks.length,
+    vectors,
+    chunks,
+    texts,
+  };
 }
 
 /**
@@ -49,30 +126,16 @@ export async function indexSingleFile(
     // Read file content
     const content = await fs.readFile(filepath, 'utf-8');
     
-    // Get chunk settings (support both v0.3.0 and legacy v0.2.0 configs)
-    const chunkSize = isModernConfig(config)
-      ? config.core.chunkSize
-      : (isLegacyConfig(config) ? config.indexing.chunkSize : 75);
-    const chunkOverlap = isModernConfig(config)
-      ? config.core.chunkOverlap
-      : (isLegacyConfig(config) ? config.indexing.chunkOverlap : 10);
+    // Process file content (chunking + embeddings) - shared logic
+    const result = await processFileContent(filepath, content, embeddings, config, verbose || false);
     
-    // Chunk the file
-    const chunks = chunkFile(filepath, content, {
-      chunkSize,
-      chunkOverlap,
-    });
+    // Get actual file mtime for manifest
+    const stats = await fs.stat(filepath);
+    const manifest = new ManifestManager(vectorDB.dbPath);
     
-    if (chunks.length === 0) {
-      // Empty file - remove from vector DB but keep in manifest
-      if (verbose) {
-        console.error(`[Lien] Empty file: ${filepath}`);
-      }
+    if (result === null) {
+      // Empty file - remove from vector DB but keep in manifest with chunkCount: 0
       await vectorDB.deleteByFile(filepath);
-      
-      // Get file mtime and keep in manifest with chunkCount: 0 to prevent re-detection
-      const stats = await fs.stat(filepath);
-      const manifest = new ManifestManager(vectorDB.dbPath);
       await manifest.updateFile(filepath, {
         filepath,
         lastModified: stats.mtimeMs,
@@ -81,43 +144,23 @@ export async function indexSingleFile(
       return;
     }
     
-    // Generate embeddings for all chunks
-    // Use micro-batching to prevent event loop blocking
-    const texts = chunks.map(c => c.content);
-    const vectors: Float32Array[] = [];
-    
-    for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
-      const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
-      const microResults = await embeddings.embedBatch(microBatch);
-      vectors.push(...microResults);
-      
-      // Yield to event loop for responsiveness
-      if (texts.length > EMBEDDING_MICRO_BATCH_SIZE) {
-        await new Promise(resolve => setImmediate(resolve));
-      }
-    }
-    
-    // Update file in database (atomic: delete old + insert new)
+    // Non-empty file - update in database (atomic: delete old + insert new)
     await vectorDB.updateFile(
       filepath,
-      vectors,
-      chunks.map(c => c.metadata),
-      texts
+      result.vectors,
+      result.chunks.map(c => c.metadata),
+      result.texts
     );
     
-    // Get actual file mtime for manifest
-    const stats = await fs.stat(filepath);
-    
     // Update manifest after successful indexing
-    const manifest = new ManifestManager(vectorDB.dbPath);
     await manifest.updateFile(filepath, {
       filepath,
-      lastModified: stats.mtimeMs, // Use actual file mtime
-      chunkCount: chunks.length,
+      lastModified: stats.mtimeMs,
+      chunkCount: result.chunkCount,
     });
     
     if (verbose) {
-      console.error(`[Lien] ✓ Updated ${filepath} (${chunks.length} chunks)`);
+      console.error(`[Lien] ✓ Updated ${filepath} (${result.chunkCount} chunks)`);
     }
   } catch (error) {
     // Log error but don't throw - we want to continue with other files
@@ -182,32 +225,18 @@ export async function indexMultipleFiles(
     }
     
     try {
-      // Get chunk settings
-      const chunkSize = isModernConfig(config)
-        ? config.core.chunkSize
-        : (isLegacyConfig(config) ? config.indexing.chunkSize : 75);
-      const chunkOverlap = isModernConfig(config)
-        ? config.core.chunkOverlap
-        : (isLegacyConfig(config) ? config.indexing.chunkOverlap : 10);
+      // Process file content (chunking + embeddings) - shared logic
+      const result = await processFileContent(filepath, content, embeddings, config, verbose || false);
       
-      // Chunk the file
-      const chunks = chunkFile(filepath, content, {
-        chunkSize,
-        chunkOverlap,
-      });
-      
-      if (chunks.length === 0) {
-        // Empty file - remove from vector DB but keep in manifest
-        if (verbose) {
-          console.error(`[Lien] Empty file: ${filepath}`);
-        }
+      if (result === null) {
+        // Empty file - remove from vector DB but keep in manifest with chunkCount: 0
         try {
           await vectorDB.deleteByFile(filepath);
         } catch (error) {
           // Ignore errors if file wasn't in index
         }
         
-        // Keep empty files in manifest with chunkCount: 0 to prevent re-detection
+        // Update manifest immediately for empty files (not batched)
         const manifest = new ManifestManager(vectorDB.dbPath);
         await manifest.updateFile(filepath, {
           filepath,
@@ -220,23 +249,7 @@ export async function indexMultipleFiles(
         continue;
       }
       
-      // Generate embeddings for all chunks
-      // Use micro-batching to prevent event loop blocking on large files
-      const texts = chunks.map(c => c.content);
-      const vectors: Float32Array[] = [];
-      
-      for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
-        const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
-        const microResults = await embeddings.embedBatch(microBatch);
-        vectors.push(...microResults);
-        
-        // Yield to event loop for responsiveness
-        if (texts.length > EMBEDDING_MICRO_BATCH_SIZE) {
-          await new Promise(resolve => setImmediate(resolve));
-        }
-      }
-      
-      // Delete old chunks if they exist (ignore errors if file not in index yet)
+      // Non-empty file - delete old chunks if they exist
       try {
         await vectorDB.deleteByFile(filepath);
       } catch (error) {
@@ -245,20 +258,20 @@ export async function indexMultipleFiles(
       
       // Insert new chunks
       await vectorDB.insertBatch(
-        vectors,
-        chunks.map(c => c.metadata),
-        texts
+        result.vectors,
+        result.chunks.map(c => c.metadata),
+        result.texts
       );
       
       // Queue manifest update (batch at end) with actual file mtime
       manifestEntries.push({
         filepath,
-        chunkCount: chunks.length,
+        chunkCount: result.chunkCount,
         mtime: fileMtime,
       });
       
       if (verbose) {
-        console.error(`[Lien] ✓ Updated ${filepath} (${chunks.length} chunks)`);
+        console.error(`[Lien] ✓ Updated ${filepath} (${result.chunkCount} chunks)`);
       }
       
       processedCount++;
