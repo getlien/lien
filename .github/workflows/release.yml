@@ -20,6 +20,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      
+      - name: Update npm to support OIDC
+        run: npm install -g npm@latest
       
       - name: Install dependencies
         run: npm install
@@ -27,8 +31,8 @@ jobs:
       - name: Build
         run: npm run build
       
-      - name: Publish to npm (with provenance)
-        run: npm publish --workspace=packages/cli --access public --provenance
+      - name: Publish to npm (with OIDC trusted publishing)
+        run: npm publish --workspace=packages/cli --access public
       
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
