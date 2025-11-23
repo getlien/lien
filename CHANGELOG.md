@@ -1,6 +1,19 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.12.0] - 2025-11-23
+
+### Added
+- **Add Zod schema validation with structured error handling
+
+- Add comprehensive Zod schemas for all 4 MCP tools
+- Implement structured error codes and enhanced error classes
+- Provide detailed validation with field-level feedback
+- Update documentation with validation guide
+
+BREAKING CHANGE: Tool validation is now stricter and error format has changed to structured JSON**
+
+
 ## [0.11.0] - 2025-11-23
 
 ### Added
