@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.11.0] - 2025-11-23
+
+### Added
+- **Incremental indexing with 17x speedup and git-based change detection**
+
+
 ## [0.10.0] - 2025-11-21
 
 ### Added
