@@ -112,7 +112,7 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
             await gitTracker.initialize();
             const gitState = gitTracker.getState();
             if (gitState) {
-              const manifest = new ManifestManager(vectorDB.dbPath);
+              // Reuse existing manifest instance
               await manifest.updateGitState(gitState);
             }
           }

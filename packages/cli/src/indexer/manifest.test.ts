@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ManifestManager } from './manifest.js';
 import { createTestDir, cleanupTestDir } from '../../test/helpers/test-db.js';
-import path from 'path';
 
 describe('ManifestManager', () => {
   let testDir: string;
@@ -22,6 +21,7 @@ describe('ManifestManager', () => {
       const gitState = {
         branch: 'main',
         commit: 'abc123',
+        timestamp: Date.now(),
       };
       
       // Update git state on non-existent manifest
@@ -42,6 +42,7 @@ describe('ManifestManager', () => {
       const gitState = {
         branch: 'feature',
         commit: 'def456',
+        timestamp: Date.now(),
       };
       
       // Update git state
