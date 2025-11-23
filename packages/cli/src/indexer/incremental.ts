@@ -191,20 +191,24 @@ export async function indexMultipleFiles(
       });
       
       if (chunks.length === 0) {
-        // Empty file - remove from index and manifest
+        // Empty file - remove from vector DB but keep in manifest
         if (verbose) {
           console.error(`[Lien] Empty file: ${filepath}`);
         }
         try {
           await vectorDB.deleteByFile(filepath);
-          const manifest = new ManifestManager(vectorDB.dbPath);
-          await manifest.removeFile(filepath);
         } catch (error) {
           // Ignore errors if file wasn't in index
-          if (verbose) {
-            console.error(`[Lien] Note: ${filepath} not in index`);
-          }
         }
+        
+        // Keep empty files in manifest with chunkCount: 0 to prevent re-detection
+        const manifest = new ManifestManager(vectorDB.dbPath);
+        await manifest.updateFile(filepath, {
+          filepath,
+          lastModified: fileMtime,
+          chunkCount: 0,
+        });
+        
         // Count as successful processing (handled empty file)
         processedCount++;
         continue;
