@@ -496,6 +496,11 @@ export class VectorDB implements VectorDBInterface {
       });
     }
     
+    // Handle empty batch gracefully
+    if (vectors.length === 0) {
+      return;
+    }
+    
     // Split large batches into smaller chunks for better reliability
     if (vectors.length > VECTOR_DB_MAX_BATCH_SIZE) {
       // Split into smaller batches
