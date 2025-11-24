@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { LienConfig, defaultConfig } from './schema.js';
 import { deepMergeConfig } from './merge.js';
-import { needsMigration, migrateConfigFile } from './migration.js';
+import { MigrationManager } from './migration-manager.js';
 
 /**
  * @deprecated Use ConfigService.load() instead. This function is kept for backward compatibility.
@@ -16,18 +16,10 @@ export async function loadConfig(rootDir: string = process.cwd()): Promise<LienC
     const userConfig = JSON.parse(configContent);
     
     // Check if migration is needed
-    if (needsMigration(userConfig)) {
+    const migrationManager = new MigrationManager(rootDir);
+    if (await migrationManager.needsMigration()) {
       console.log('🔄 Migrating config from v0.2.0 to v0.3.0...');
-      
-      const result = await migrateConfigFile(rootDir);
-      
-      if (result.migrated && result.backupPath) {
-        const backupFilename = path.basename(result.backupPath);
-        console.log(`✅ Migration complete! Backup saved as ${backupFilename}`);
-        console.log('📝 Your config now uses the framework-based structure.');
-      }
-      
-      return result.config;
+      return await migrationManager.autoMigrate();
     }
     
     // Use the shared merge function for consistency

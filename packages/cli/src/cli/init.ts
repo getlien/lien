@@ -4,12 +4,10 @@ import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { defaultConfig, LienConfig, FrameworkInstance, FrameworkConfig } from '../config/schema.js';
-import { deepMergeConfig, detectNewFields } from '../config/merge.js';
 import { showCompactBanner } from '../utils/banner.js';
-import { needsMigration, migrateConfig } from '../config/migration.js';
+import { MigrationManager } from '../config/migration-manager.js';
 import { detectAllFrameworks } from '../frameworks/detector-service.js';
 import { getFrameworkDetector } from '../frameworks/registry.js';
-import { CURRENT_CONFIG_VERSION } from '../constants.js';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -37,7 +35,8 @@ export async function initCommand(options: InitOptions = {}) {
     
     // Handle upgrade scenario
     if (configExists && options.upgrade) {
-      await upgradeConfig(configPath);
+      const migrationManager = new MigrationManager(rootDir);
+      await migrationManager.upgradeInteractive();
       return;
     }
     
@@ -312,59 +311,4 @@ async function promptForCustomization(frameworkName: string, config: FrameworkCo
   };
 }
 
-async function upgradeConfig(configPath: string) {
-  try {
-    // 1. Read existing config
-    const existingContent = await fs.readFile(configPath, 'utf-8');
-    const existingConfig = JSON.parse(existingContent);
-    
-    // 2. Check if any changes are needed
-    const migrationNeeded = needsMigration(existingConfig);
-    const newFields = migrationNeeded ? [] : detectNewFields(existingConfig, defaultConfig);
-    const hasChanges = migrationNeeded || newFields.length > 0;
-    
-    if (!hasChanges) {
-      console.log(chalk.green('✓ Config is already up to date'));
-      console.log(chalk.dim('No changes needed'));
-      return;
-    }
-    
-    // 3. Backup existing config (only if changes are needed)
-    const backupPath = `${configPath}.backup`;
-    await fs.copyFile(configPath, backupPath);
-    
-    // 4. Perform upgrade
-    let upgradedConfig: LienConfig;
-    let migrated = false;
-    
-    if (migrationNeeded) {
-      console.log(chalk.blue(`🔄 Migrating config from v0.2.0 to v${CURRENT_CONFIG_VERSION}...`));
-      upgradedConfig = migrateConfig(existingConfig);
-      migrated = true;
-    } else {
-      // Just merge with defaults for current version configs
-      upgradedConfig = deepMergeConfig(defaultConfig, existingConfig as Partial<LienConfig>);
-      
-      console.log(chalk.dim('\nNew options added:'));
-      newFields.forEach(field => console.log(chalk.dim('  •'), chalk.bold(field)));
-    }
-    
-    // 5. Write upgraded config
-    await fs.writeFile(
-      configPath,
-      JSON.stringify(upgradedConfig, null, 2) + '\n',
-      'utf-8'
-    );
-    
-    // 6. Show results
-    console.log(chalk.green('✓ Config upgraded successfully'));
-    console.log(chalk.dim('Backup saved to:'), backupPath);
-    
-    if (migrated) {
-      console.log(chalk.dim('\n📝 Your config now uses the framework-based structure.'));
-    }
-  } catch (error) {
-    console.error(chalk.red('Error upgrading config:'), error);
-    throw error;
-  }
-}
+// Removed: upgradeConfig function is now handled by MigrationManager.upgradeInteractive()
