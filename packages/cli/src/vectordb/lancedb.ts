@@ -149,7 +149,7 @@ export class VectorDB implements VectorDBInterface {
     if (!this.table) {
       throw new DatabaseError('Vector database not initialized');
     }
-    return maintenanceOps.deleteByFile(this.table, filepath);
+    await maintenanceOps.deleteByFile(this.table, filepath);
   }
   
   async updateFile(
