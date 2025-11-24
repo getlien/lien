@@ -195,6 +195,19 @@ const simpleValidators = functions.filter(r => (r.metadata.parameters?.length ||
 - For unsupported languages, Lien automatically falls back to line-based chunking
 - No disruption to existing workflows
 
+### Known Limitations
+
+**Very large files (1000+ lines):**
+- Tree-sitter may fail with "Invalid argument" error on extremely large files
+- When this occurs, Lien automatically falls back to line-based chunking
+- This is a known Tree-sitter limitation with very large syntax trees
+- Fallback behavior is configurable via `astFallback` setting
+
+**Resilient parsing:**
+- Tree-sitter is designed to produce best-effort ASTs even for invalid syntax
+- Parse errors are rare; most malformed code still produces usable chunks
+- The `astFallback: 'error'` option mainly catches edge cases like large file errors
+
 ### Configuration
 
 Control AST behavior in `.lien.config.json`:

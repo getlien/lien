@@ -73,7 +73,11 @@ export function isASTSupported(filePath: string): boolean {
 }
 
 /**
- * Parse source code into an AST
+ * Parse source code into an AST using Tree-sitter
+ * 
+ * **Known Limitation:** Tree-sitter may throw "Invalid argument" errors on very large files
+ * (1000+ lines). This is a limitation of Tree-sitter's internal buffer handling. When this
+ * occurs, callers should fall back to line-based chunking (handled automatically by chunker.ts).
  * 
  * @param content - Source code to parse
  * @param language - Programming language

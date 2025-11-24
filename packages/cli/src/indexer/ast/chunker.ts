@@ -11,10 +11,19 @@ export interface ASTChunkOptions {
 /**
  * Chunk a file using AST-based semantic boundaries
  * 
+ * Uses Tree-sitter to parse code into an AST and extract semantic chunks
+ * (functions, classes, methods) that respect code structure.
+ * 
+ * **Known Limitations:**
+ * - Tree-sitter may fail with "Invalid argument" error on very large files (1000+ lines)
+ * - When this occurs, Lien automatically falls back to line-based chunking
+ * - Configure fallback behavior via `chunking.astFallback` ('line-based' or 'error')
+ * 
  * @param filepath - Path to the file
  * @param content - File content
  * @param options - Chunking options
  * @returns Array of AST-aware chunks
+ * @throws Error if AST parsing fails and astFallback is 'error'
  */
 export function chunkByAST(
   filepath: string,
