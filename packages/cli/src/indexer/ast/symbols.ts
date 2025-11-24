@@ -2,7 +2,146 @@ import type Parser from 'tree-sitter';
 import type { SymbolInfo } from './types.js';
 
 /**
- * Extract symbol information from an AST node
+ * Type for symbol extractor functions
+ */
+type SymbolExtractor = (
+  node: Parser.SyntaxNode,
+  content: string,
+  parentClass?: string
+) => SymbolInfo | null;
+
+/**
+ * Extract function declaration info (function_declaration, function)
+ */
+function extractFunctionInfo(
+  node: Parser.SyntaxNode,
+  content: string,
+  parentClass?: string
+): SymbolInfo | null {
+  const nameNode = node.childForFieldName('name');
+  if (!nameNode) return null;
+  
+  return {
+    name: nameNode.text,
+    type: parentClass ? 'method' : 'function',
+    startLine: node.startPosition.row + 1,
+    endLine: node.endPosition.row + 1,
+    parentClass,
+    signature: extractSignature(node, content),
+    parameters: extractParameters(node, content),
+    returnType: extractReturnType(node, content),
+    complexity: calculateComplexity(node),
+  };
+}
+
+/**
+ * Extract arrow function or function expression info
+ */
+function extractArrowFunctionInfo(
+  node: Parser.SyntaxNode,
+  content: string,
+  parentClass?: string
+): SymbolInfo | null {
+  // Try to find variable name for arrow functions
+  const parent = node.parent;
+  let name = 'anonymous';
+  
+  if (parent?.type === 'variable_declarator') {
+    const nameNode = parent.childForFieldName('name');
+    name = nameNode?.text || 'anonymous';
+  }
+  
+  return {
+    name,
+    type: parentClass ? 'method' : 'function',
+    startLine: node.startPosition.row + 1,
+    endLine: node.endPosition.row + 1,
+    parentClass,
+    signature: extractSignature(node, content),
+    parameters: extractParameters(node, content),
+    complexity: calculateComplexity(node),
+  };
+}
+
+/**
+ * Extract method definition info
+ */
+function extractMethodInfo(
+  node: Parser.SyntaxNode,
+  content: string,
+  parentClass?: string
+): SymbolInfo | null {
+  const nameNode = node.childForFieldName('name');
+  if (!nameNode) return null;
+  
+  return {
+    name: nameNode.text,
+    type: 'method',
+    startLine: node.startPosition.row + 1,
+    endLine: node.endPosition.row + 1,
+    parentClass,
+    signature: extractSignature(node, content),
+    parameters: extractParameters(node, content),
+    returnType: extractReturnType(node, content),
+    complexity: calculateComplexity(node),
+  };
+}
+
+/**
+ * Extract class declaration info
+ */
+function extractClassInfo(
+  node: Parser.SyntaxNode,
+  _content: string,
+  _parentClass?: string
+): SymbolInfo | null {
+  const nameNode = node.childForFieldName('name');
+  if (!nameNode) return null;
+  
+  return {
+    name: nameNode.text,
+    type: 'class',
+    startLine: node.startPosition.row + 1,
+    endLine: node.endPosition.row + 1,
+    signature: `class ${nameNode.text}`,
+  };
+}
+
+/**
+ * Extract interface declaration info (TypeScript)
+ */
+function extractInterfaceInfo(
+  node: Parser.SyntaxNode,
+  _content: string,
+  _parentClass?: string
+): SymbolInfo | null {
+  const nameNode = node.childForFieldName('name');
+  if (!nameNode) return null;
+  
+  return {
+    name: nameNode.text,
+    type: 'interface',
+    startLine: node.startPosition.row + 1,
+    endLine: node.endPosition.row + 1,
+    signature: `interface ${nameNode.text}`,
+  };
+}
+
+/**
+ * Map of AST node types to their specialized extractors
+ */
+const symbolExtractors: Record<string, SymbolExtractor> = {
+  'function_declaration': extractFunctionInfo,
+  'function': extractFunctionInfo,
+  'arrow_function': extractArrowFunctionInfo,
+  'function_expression': extractArrowFunctionInfo,
+  'method_definition': extractMethodInfo,
+  'class_declaration': extractClassInfo,
+  'interface_declaration': extractInterfaceInfo,
+};
+
+/**
+ * Extract symbol information from an AST node using specialized extractors
  * 
  * @param node - AST node to extract info from
  * @param content - Source code content
@@ -14,96 +153,8 @@ export function extractSymbolInfo(
   content: string,
   parentClass?: string
 ): SymbolInfo | null {
-  const type = node.type;
-  
-  // Function declaration
-  if (type === 'function_declaration' || type === 'function') {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return null;
-    
-    return {
-      name: nameNode.text,
-      type: parentClass ? 'method' : 'function',
-      startLine: node.startPosition.row + 1,
-      endLine: node.endPosition.row + 1,
-      parentClass,
-      signature: extractSignature(node, content),
-      parameters: extractParameters(node, content),
-      returnType: extractReturnType(node, content),
-      complexity: calculateComplexity(node),
-    };
-  }
-  
-  // Arrow function / function expression
-  if (type === 'arrow_function' || type === 'function_expression') {
-    // Try to find variable name for arrow functions
-    const parent = node.parent;
-    let name = 'anonymous';
-    
-    if (parent?.type === 'variable_declarator') {
-      const nameNode = parent.childForFieldName('name');
-      name = nameNode?.text || 'anonymous';
-    }
-    
-    return {
-      name,
-      type: parentClass ? 'method' : 'function',
-      startLine: node.startPosition.row + 1,
-      endLine: node.endPosition.row + 1,
-      parentClass,
-      signature: extractSignature(node, content),
-      parameters: extractParameters(node, content),
-      complexity: calculateComplexity(node),
-    };
-  }
-  
-  // Method definition
-  if (type === 'method_definition') {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return null;
-    
-    return {
-      name: nameNode.text,
-      type: 'method',
-      startLine: node.startPosition.row + 1,
-      endLine: node.endPosition.row + 1,
-      parentClass,
-      signature: extractSignature(node, content),
-      parameters: extractParameters(node, content),
-      returnType: extractReturnType(node, content),
-      complexity: calculateComplexity(node),
-    };
-  }
-  
-  // Class declaration
-  if (type === 'class_declaration') {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return null;
-    
-    return {
-      name: nameNode.text,
-      type: 'class',
-      startLine: node.startPosition.row + 1,
-      endLine: node.endPosition.row + 1,
-      signature: `class ${nameNode.text}`,
-    };
-  }
-  
-  // Interface declaration (TypeScript)
-  if (type === 'interface_declaration') {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return null;
-    
-    return {
-      name: nameNode.text,
-      type: 'interface',
-      startLine: node.startPosition.row + 1,
-      endLine: node.endPosition.row + 1,
-      signature: `interface ${nameNode.text}`,
-    };
-  }
-  
-  return null;
+  const extractor = symbolExtractors[node.type];
+  return extractor ? extractor(node, content, parentClass) : null;
 }
 
 /**
