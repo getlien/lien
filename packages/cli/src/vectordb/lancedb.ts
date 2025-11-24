@@ -98,7 +98,10 @@ export class VectorDB implements VectorDBInterface {
         // Attempt to reconnect - index may have been rebuilt
         try {
           await this.initialize();
-          return await queryOps.search(this.table!, queryVector, limit, query);
+          if (!this.table) {
+            throw new DatabaseError('Vector database not initialized after reconnection');
+          }
+          return await queryOps.search(this.table, queryVector, limit, query);
         } catch (retryError: unknown) {
           throw new DatabaseError(
             `Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory.`,
@@ -116,7 +119,10 @@ export class VectorDB implements VectorDBInterface {
     pattern?: string;
     limit?: number;
   }): Promise<SearchResult[]> {
-    return queryOps.scanWithFilter(this.table!, options);
+    if (!this.table) {
+      throw new DatabaseError('Vector database not initialized');
+    }
+    return queryOps.scanWithFilter(this.table, options);
   }
   
   async querySymbols(options: {
@@ -125,16 +131,25 @@ export class VectorDB implements VectorDBInterface {
     symbolType?: 'function' | 'class' | 'interface';
     limit?: number;
   }): Promise<SearchResult[]> {
-    return queryOps.querySymbols(this.table!, options);
+    if (!this.table) {
+      throw new DatabaseError('Vector database not initialized');
+    }
+    return queryOps.querySymbols(this.table, options);
   }
   
   async clear(): Promise<void> {
-    await maintenanceOps.clear(this.db!, this.table, this.tableName);
+    if (!this.db) {
+      throw new DatabaseError('Vector database not initialized');
+    }
+    await maintenanceOps.clear(this.db, this.table, this.tableName);
     this.table = null;
   }
   
   async deleteByFile(filepath: string): Promise<void> {
-    return maintenanceOps.deleteByFile(this.table!, filepath);
+    if (!this.table) {
+      throw new DatabaseError('Vector database not initialized');
+    }
+    return maintenanceOps.deleteByFile(this.table, filepath);
   }
   
   async updateFile(
@@ -143,8 +158,11 @@ export class VectorDB implements VectorDBInterface {
     metadatas: ChunkMetadata[],
     contents: string[]
   ): Promise<void> {
+    if (!this.db) {
+      throw new DatabaseError('Vector database not initialized');
+    }
     this.table = await maintenanceOps.updateFile(
-      this.db!,
+      this.db,
       this.table,
       this.tableName,
       this.dbPath,
