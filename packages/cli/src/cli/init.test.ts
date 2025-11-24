@@ -54,7 +54,7 @@ describe('initCommand', () => {
       const content = await fs.readFile(configPath, 'utf-8');
       const config = JSON.parse(content);
       
-      expect(config.version).toBe('0.3.0');
+      expect(config.version).toBe('0.12.0');
       expect(config.frameworks).toBeDefined();
       expect(Array.isArray(config.frameworks)).toBe(true);
     });
@@ -150,7 +150,7 @@ describe('initCommand', () => {
       const content = await fs.readFile(configPath, 'utf-8');
       const config = JSON.parse(content);
       
-      expect(config.version).toBe('0.3.0');
+      expect(config.version).toBe('0.12.0');
       expect(config.core.chunkSize).toBe(800); // Preserved
       expect(config.core.chunkOverlap).toBe(10); // Preserved
       expect(config.frameworks).toHaveLength(1); // Migrated to generic framework
@@ -221,7 +221,7 @@ describe('initCommand', () => {
       const config = JSON.parse(content);
       
       // User values should be preserved in new structure
-      expect(config.version).toBe('0.3.0');
+      expect(config.version).toBe('0.12.0');
       expect(config.core.chunkSize).toBe(2000);
       expect(config.core.chunkOverlap).toBe(400);
       expect(config.frameworks).toHaveLength(1);

@@ -1,6 +1,7 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+
 ## [0.12.0] - 2025-11-23
 
 ### Added

@@ -38,6 +38,10 @@ export interface LienConfig {
     concurrency: number;
     embeddingBatchSize: number;
   };
+  chunking: {
+    useAST: boolean;          // Enable AST-based chunking (v0.13.0)
+    astFallback: 'line-based' | 'error';  // Fallback strategy on AST errors
+  };
   mcp: {
     port: number;
     transport: 'stdio' | 'socket';
@@ -116,6 +120,10 @@ export const defaultConfig: LienConfig = {
     chunkOverlap: DEFAULT_CHUNK_OVERLAP,
     concurrency: DEFAULT_CONCURRENCY,
     embeddingBatchSize: DEFAULT_EMBEDDING_BATCH_SIZE,
+  },
+  chunking: {
+    useAST: true,              // AST-based chunking enabled by default (v0.13.0)
+    astFallback: 'line-based', // Fallback to line-based on errors
   },
   mcp: {
     port: DEFAULT_PORT,

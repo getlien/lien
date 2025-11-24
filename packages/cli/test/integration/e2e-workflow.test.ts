@@ -150,7 +150,7 @@ test('calculator addition', () => {
     const migratedConfig = await loadConfig(testDir);
 
     // Step 3: Verify migration
-    expect(migratedConfig.version).toBe('0.3.0');
+    expect(migratedConfig.version).toBe('0.12.0');
     expect(migratedConfig.frameworks).toHaveLength(1);
     expect(migratedConfig.frameworks[0].name).toBe('generic');
     expect(migratedConfig.frameworks[0].path).toBe('.');
@@ -289,6 +289,10 @@ test('calculator addition', () => {
         concurrency: 2,
         embeddingBatchSize: 25,
       },
+      chunking: {
+        useAST: true,
+        astFallback: 'line-based',
+      },
       mcp: {
         port: 7133,
         transport: 'stdio',
@@ -365,7 +369,7 @@ test('calculator addition', () => {
     const migratedConfig = migrateConfig(customV020Config);
 
     // Verify all customizations are preserved
-    expect(migratedConfig.version).toBe('0.3.0');
+    expect(migratedConfig.version).toBe('0.12.0');
     expect(migratedConfig.core.chunkSize).toBe(100);
     expect(migratedConfig.core.chunkOverlap).toBe(15);
     expect(migratedConfig.core.concurrency).toBe(8);

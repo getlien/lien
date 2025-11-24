@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "lien": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/lien/packages/cli/dist/index.js",
+        "serve"
+      ]
+    }
+  }
+}
+
