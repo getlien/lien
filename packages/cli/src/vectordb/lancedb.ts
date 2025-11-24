@@ -69,6 +69,9 @@ export class VectorDB implements VectorDBInterface {
     metadatas: ChunkMetadata[],
     contents: string[]
   ): Promise<void> {
+    if (!this.db) {
+      throw new DatabaseError('Vector database not initialized');
+    }
     this.table = await batchOps.insertBatch(
       this.db,
       this.table,
