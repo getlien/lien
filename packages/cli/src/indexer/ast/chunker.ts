@@ -274,7 +274,7 @@ function createChunk(
       file: filepath,
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
-      type: symbolInfo?.type === 'class' ? 'class' : 'function',
+      type: symbolInfo == null ? 'block' : (symbolInfo.type === 'class' ? 'class' : 'function'),
       language,
       // Legacy symbols field for backward compatibility
       symbols,

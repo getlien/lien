@@ -424,7 +424,7 @@ interface DBRecord {
   functionNames: string[];
   classNames: string[];
   interfaceNames: string[];
-  // AST-derived metadata (v0.14.0)
+  // AST-derived metadata (v0.13.0)
   symbolName?: string;
   symbolType?: string;
   parentClass?: string;
@@ -834,7 +834,7 @@ export class VectorDB implements VectorDBInterface {
                        symbolType === 'interface' ? (r.interfaceNames || []) :
                        [...(r.functionNames || []), ...(r.classNames || []), ...(r.interfaceNames || [])];
         
-        // Also check AST-derived symbolName (v0.14.0)
+        // Also check AST-derived symbolName (v0.13.0)
         const astSymbolName = r.symbolName || '';
         
         // Must have at least one symbol from either source
