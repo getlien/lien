@@ -13,7 +13,6 @@ export interface MigrationResult {
   migrated: boolean;
   backupPath?: string;
   config: LienConfig;
-  newFields?: string[];
 }
 
 /**
