@@ -15,7 +15,7 @@ export async function insertBatch(
   vectors: Float32Array[],
   metadatas: ChunkMetadata[],
   contents: string[]
-): Promise<LanceDBTable> {
+): Promise<LanceDBTable | null> {
   if (!db) {
     throw new DatabaseError('Vector database not initialized');
   }
@@ -28,9 +28,9 @@ export async function insertBatch(
     });
   }
   
-  // Handle empty batch gracefully
+  // Handle empty batch gracefully - return table as-is (could be null)
   if (vectors.length === 0) {
-    return table!;
+    return table;
   }
   
   // Split large batches into smaller chunks
@@ -43,7 +43,10 @@ export async function insertBatch(
       
       currentTable = await insertBatchInternal(db, currentTable, tableName, batchVectors, batchMetadata, batchContents);
     }
-    return currentTable!;
+    if (!currentTable) {
+      throw new DatabaseError('Failed to create table during batch insert');
+    }
+    return currentTable;
   } else {
     return insertBatchInternal(db, table, tableName, vectors, metadatas, contents);
   }
@@ -59,7 +62,7 @@ async function insertBatchInternal(
   vectors: Float32Array[],
   metadatas: ChunkMetadata[],
   contents: string[]
-): Promise<LanceDBTable> {
+): Promise<LanceDBTable | null> {
   interface BatchToProcess {
     vectors: Float32Array[];
     metadatas: ChunkMetadata[];
@@ -72,7 +75,8 @@ async function insertBatchInternal(
   
   // Process batches iteratively
   while (queue.length > 0) {
-    const batch = queue.shift()!;
+    const batch = queue.shift();
+    if (!batch) break; // Should never happen due to while condition, but satisfies type checker
     
     try {
       const records = batch.vectors.map((vector, i) => ({
@@ -139,6 +143,9 @@ async function insertBatchInternal(
     );
   }
   
-  return currentTable!;
+  if (!currentTable) {
+    throw new DatabaseError('Failed to create table during batch insert');
+  }
+  return currentTable;
 }
 
