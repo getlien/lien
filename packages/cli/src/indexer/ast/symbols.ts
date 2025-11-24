@@ -109,10 +109,10 @@ export function extractSymbolInfo(
 /**
  * Extract function/method signature
  */
-function extractSignature(node: Parser.SyntaxNode, _content: string): string {
+function extractSignature(node: Parser.SyntaxNode, content: string): string {
   // Get the first line of the function (up to opening brace or arrow)
   const startLine = node.startPosition.row;
-  const lines = _content.split('\n');
+  const lines = content.split('\n');
   let signature = lines[startLine] || '';
   
   // If signature spans multiple lines, try to get up to the opening brace
