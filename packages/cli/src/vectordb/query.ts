@@ -454,6 +454,30 @@ export async function scanWithFilter(
 }
 
 /**
+ * Helper to check if a record matches the requested symbol type
+ */
+function matchesSymbolType(
+  record: DBRecord,
+  symbolType: 'function' | 'class' | 'interface',
+  symbols: string[]
+): boolean {
+  // If AST-based symbolType exists, use it (more accurate)
+  if (record.symbolType) {
+    if (symbolType === 'function') {
+      return record.symbolType === 'function' || record.symbolType === 'method';
+    } else if (symbolType === 'class') {
+      return record.symbolType === 'class';
+    } else if (symbolType === 'interface') {
+      return record.symbolType === 'interface';
+    }
+    return false;
+  }
+  
+  // Fallback: check if pre-AST symbols array has valid entries
+  return symbols.length > 0 && symbols.some((s: string) => s.length > 0 && s !== '');
+}
+
+/**
  * Query symbols (functions, classes, interfaces)
  */
 export async function querySymbols(
@@ -511,36 +535,14 @@ export async function querySymbols(
         if (!nameMatches) return false;
         
         if (symbolType) {
-          if (r.symbolType) {
-            if (symbolType === 'function') {
-              return r.symbolType === 'function' || r.symbolType === 'method';
-            } else if (symbolType === 'class') {
-              return r.symbolType === 'class';
-            } else if (symbolType === 'interface') {
-              return r.symbolType === 'interface';
-            }
-            return false;
-          }
-          
-          return nameMatches;
+          return matchesSymbolType(r, symbolType, symbols);
         }
         
         return nameMatches;
       }
       
       if (symbolType) {
-        if (r.symbolType) {
-          if (symbolType === 'function') {
-            return r.symbolType === 'function' || r.symbolType === 'method';
-          } else if (symbolType === 'class') {
-            return r.symbolType === 'class';
-          } else if (symbolType === 'interface') {
-            return r.symbolType === 'interface';
-          }
-          return false;
-        }
-        
-        return symbols.length > 0 && symbols.some((s: string) => s.length > 0 && s !== '');
+        return matchesSymbolType(r, symbolType, symbols);
       }
       
       return true;
