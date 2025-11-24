@@ -4,7 +4,7 @@ import { chunkFile, chunkText } from './chunker.js';
 describe('chunkFile', () => {
   it('should split code into chunks of specified size', () => {
     const code = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join('\n');
-    const chunks = chunkFile('test.ts', code, { chunkSize: 3, chunkOverlap: 1 });
+    const chunks = chunkFile('test.ts', code, { chunkSize: 3, chunkOverlap: 1, useAST: false });
 
     // With 10 lines, chunkSize=3, overlap=1:
     // Chunk 1: lines 1-3, Chunk 2: lines 3-5, Chunk 3: lines 5-7, 
@@ -16,7 +16,7 @@ describe('chunkFile', () => {
 
   it('should handle overlap correctly', () => {
     const code = 'line1\nline2\nline3\nline4\nline5';
-    const chunks = chunkFile('test.ts', code, { chunkSize: 3, chunkOverlap: 1 });
+    const chunks = chunkFile('test.ts', code, { chunkSize: 3, chunkOverlap: 1, useAST: false });
 
     expect(chunks).toHaveLength(2);
     // First chunk: lines 1-3
@@ -29,7 +29,7 @@ describe('chunkFile', () => {
 
   it('should generate correct metadata for each chunk', () => {
     const code = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join('\n');
-    const chunks = chunkFile('test.ts', code, { chunkSize: 5, chunkOverlap: 0 });
+    const chunks = chunkFile('test.ts', code, { chunkSize: 5, chunkOverlap: 0, useAST: false });
 
     expect(chunks[0].metadata.file).toBe('test.ts');
     expect(chunks[0].metadata.startLine).toBe(1);
@@ -78,7 +78,7 @@ describe('chunkFile', () => {
 
   it('should use default chunk size and overlap', () => {
     const code = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join('\n');
-    const chunks = chunkFile('test.ts', code);
+    const chunks = chunkFile('test.ts', code, { useAST: false });
 
     // Default chunkSize is 75, chunkOverlap is 10
     expect(chunks[0].metadata.endLine).toBe(75);
@@ -87,7 +87,7 @@ describe('chunkFile', () => {
 
   it('should handle files smaller than chunk size', () => {
     const code = 'line1\nline2\nline3';
-    const chunks = chunkFile('test.ts', code, { chunkSize: 100, chunkOverlap: 10 });
+    const chunks = chunkFile('test.ts', code, { chunkSize: 100, chunkOverlap: 10, useAST: false });
 
     expect(chunks).toHaveLength(1);
     expect(chunks[0].content).toBe(code);

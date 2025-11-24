@@ -1,11 +1,11 @@
 {
-    "mcpServers": {
-      "lien": {
-        "command": "node",
-        "args": [
-          "/Users/alfhenderson/Code/lien/packages/cli/dist/index.js",
-          "serve"
-        ]
-      }
+  "mcpServers": {
+    "lien": {
+      "command": "node",
+      "args": [
+        "/Users/alfhenderson/Code/lien/packages/cli/dist/index.js",
+        "serve"
+      ]
     }
   }
+}

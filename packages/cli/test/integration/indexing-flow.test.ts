@@ -66,7 +66,10 @@ export function calculateProduct(a: number, b: number): number {
 
     // Verify results
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0].content).toContain('calculateSum');
+    // With AST chunking, both functions are separate chunks
+    // Check that calculateSum is in the results (may not be first due to semantic similarity)
+    const hasCalculateSum = results.some(r => r.content.includes('calculateSum'));
+    expect(hasCalculateSum).toBe(true);
   });
 
   it('should handle multiple files', async () => {

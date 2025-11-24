@@ -37,7 +37,10 @@ export const DEFAULT_GIT_POLL_INTERVAL_MS = 10000; // Check every 10 seconds
 // File watching
 export const DEFAULT_DEBOUNCE_MS = 1000;
 
-// Configuration version
+// Configuration schema version (bumped when config format changes)
+// Note: This tracks config schema changes, not package version
+// v0.3.0: Added frameworks support
+// v0.14.0: Added chunking configuration
 export const CURRENT_CONFIG_VERSION = '0.14.0';
 
 // Index format version - bump on ANY breaking change to indexing

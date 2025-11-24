@@ -45,18 +45,26 @@ describe('Config Migration', () => {
       expect(needsMigration(oldConfig)).toBe(true);
     });
 
-    it('should return false for v0.3.0 config with frameworks', () => {
+    it('should return false for v0.14.0 config with frameworks and chunking', () => {
       const newConfig = {
-        version: '0.3.0',
+        version: '0.14.0',
         frameworks: [],
+        chunking: {
+          useAST: true,
+          astFallback: 'line-based' as const,
+        },
       };
 
       expect(needsMigration(newConfig)).toBe(false);
     });
 
-    it('should return false for config with empty frameworks array', () => {
+    it('should return false for config with empty frameworks array and chunking', () => {
       const newConfig = {
         frameworks: [],
+        chunking: {
+          useAST: true,
+          astFallback: 'line-based' as const,
+        },
       };
 
       expect(needsMigration(newConfig)).toBe(false);
@@ -107,7 +115,7 @@ describe('Config Migration', () => {
       const newConfig = migrateConfig(oldConfig);
 
       // Check version updated
-      expect(newConfig.version).toBe('0.3.0');
+      expect(newConfig.version).toBe('0.14.0');
 
       // Check core settings migrated
       expect(newConfig.core.chunkSize).toBe(100);
@@ -156,7 +164,7 @@ describe('Config Migration', () => {
 
       const newConfig = migrateConfig(oldConfig);
 
-      expect(newConfig.version).toBe('0.3.0');
+      expect(newConfig.version).toBe('0.14.0');
       expect(newConfig.core.chunkSize).toBe(50);
       expect(newConfig.frameworks).toHaveLength(1);
       expect(newConfig.frameworks[0].config.include).toEqual(['**/*.py']);
@@ -167,7 +175,7 @@ describe('Config Migration', () => {
 
       const newConfig = migrateConfig(oldConfig);
 
-      expect(newConfig.version).toBe('0.3.0');
+      expect(newConfig.version).toBe('0.14.0');
       expect(newConfig.frameworks).toHaveLength(1);
       expect(newConfig.frameworks[0].name).toBe('generic');
       
@@ -261,14 +269,14 @@ describe('Config Migration', () => {
       // Verify new config is migrated
       const newConfigContent = await fs.readFile(configPath, 'utf-8');
       const newConfig = JSON.parse(newConfigContent);
-      expect(newConfig.version).toBe('0.3.0');
+      expect(newConfig.version).toBe('0.14.0');
       expect(newConfig.frameworks).toHaveLength(1);
     });
 
     it('should not migrate already migrated config', async () => {
       const configPath = path.join(tempDir, '.lien.config.json');
       const newConfig: LienConfig = {
-        version: '0.14.0',
+        version: '0.12.0',
         core: {
           chunkSize: 75,
           chunkOverlap: 10,
@@ -314,7 +322,7 @@ describe('Config Migration', () => {
       const result = await migrateConfigFile(tempDir);
 
       expect(result.migrated).toBe(false);
-      expect(result.config.version).toBe('0.3.0');
+      expect(result.config.version).toBe('0.14.0');
       expect(result.config.frameworks).toEqual([]);
     });
 

@@ -30,11 +30,15 @@ describe('Config Loader', () => {
     
     it('should load and merge user config with defaults', async () => {
       const userConfig = {
-        version: '0.3.0',
+        version: '0.14.0',
         core: {
           chunkSize: 2000,
         },
         frameworks: [], // Explicitly include frameworks to avoid migration
+        chunking: {
+          useAST: true,
+          astFallback: 'line-based',
+        },
       };
       
       const configPath = path.join(testDir, '.lien.config.json');
@@ -94,7 +98,7 @@ describe('Config Loader', () => {
       
       const config = await loadConfig(testDir);
       // Empty config just merges with defaults - no migration needed
-      expect(config.version).toBe('0.3.0');
+      expect(config.version).toBe('0.14.0');
       expect(config.frameworks).toEqual(defaultConfig.frameworks);
       expect(config.core).toEqual(defaultConfig.core);
     });
@@ -148,7 +152,7 @@ describe('Config Loader', () => {
       const config = await loadConfig(testDir);
       
       // Should be migrated to v0.3.0
-      expect(config.version).toBe('0.3.0');
+      expect(config.version).toBe('0.14.0');
       expect(config.core.chunkSize).toBe(100);
       expect(config.core.chunkOverlap).toBe(20);
       expect(config.mcp.port).toBe(8080);

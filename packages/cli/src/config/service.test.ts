@@ -108,7 +108,7 @@ describe('ConfigService', () => {
       
       const config = await service.load(testDir);
       
-      // Should be migrated to v0.3.0
+      // Should be migrated to v0.14.0
       expect(config.version).toBe('0.14.0');
       expect(config.frameworks).toBeDefined();
       expect(config.core.chunkSize).toBe(100);
@@ -244,9 +244,9 @@ describe('ConfigService', () => {
       expect(service.needsMigration(legacyConfig)).toBe(true);
     });
     
-    it('should return false for v0.14.0 config with frameworks and chunking', () => {
+    it('should return false for v0.12.0 config with frameworks and chunking', () => {
       const modernConfig = {
-        version: '0.14.0',
+        version: '0.12.0',
         frameworks: [],
         chunking: {
           useAST: true,
