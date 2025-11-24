@@ -3,9 +3,10 @@
     "lien": {
       "command": "node",
       "args": [
-        "/Users/alfhenderson/Code/lien/packages/cli/dist/index.js",
+        "/absolute/path/to/lien/packages/cli/dist/index.js",
         "serve"
       ]
     }
   }
 }
+
