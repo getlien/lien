@@ -7,6 +7,11 @@ type LanceDBTable = any;
 
 /**
  * Insert a batch of vectors into the database
+ * 
+ * @returns The table instance after insertion, or null only when:
+ *          - vectors.length === 0 AND table === null (no-op case)
+ *          For non-empty batches, always returns a valid table or throws.
+ * @throws {DatabaseError} If database not initialized or insertion fails
  */
 export async function insertBatch(
   db: LanceDBConnection,
