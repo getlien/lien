@@ -276,7 +276,7 @@ describe('Config Migration', () => {
     it('should not migrate already migrated config', async () => {
       const configPath = path.join(tempDir, '.lien.config.json');
       const newConfig: LienConfig = {
-        version: '0.12.0',
+        version: '0.13.0',
         core: {
           chunkSize: 75,
           chunkOverlap: 10,
