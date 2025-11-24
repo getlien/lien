@@ -558,11 +558,11 @@ export async function querySymbols(
           endLine: r.endLine,
           type: r.type as 'function' | 'class' | 'block',
           language: r.language,
-      symbols: {
-        functions: (r.functionNames && r.functionNames.length > 0 && r.functionNames[0] !== '') ? r.functionNames : [],
-        classes: (r.classNames && r.classNames.length > 0 && r.classNames[0] !== '') ? r.classNames : [],
-        interfaces: (r.interfaceNames && r.interfaceNames.length > 0 && r.interfaceNames[0] !== '') ? r.interfaceNames : [],
-      },
+          symbols: {
+            functions: (r.functionNames && r.functionNames.length > 0 && r.functionNames[0] !== '') ? r.functionNames : [],
+            classes: (r.classNames && r.classNames.length > 0 && r.classNames[0] !== '') ? r.classNames : [],
+            interfaces: (r.interfaceNames && r.interfaceNames.length > 0 && r.interfaceNames[0] !== '') ? r.interfaceNames : [],
+          },
           // AST-derived metadata (v0.13.0)
           symbolName: r.symbolName || undefined,
           symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
