@@ -114,6 +114,102 @@ list_functions({
 
 ---
 
+## Enhanced Metadata (AST-Based) ⚡ NEW in v0.14.0
+
+Lien now uses **Abstract Syntax Tree (AST) parsing** for TypeScript/JavaScript files to provide rich code metadata:
+
+### Metadata Fields in Search Results
+
+All search results (`semantic_search`, `get_file_context`, `find_similar`, `list_functions`) now include enhanced metadata when available:
+
+```typescript
+{
+  content: "function validateEmail(email: string): boolean { ... }",
+  metadata: {
+    file: "src/validators.ts",
+    startLine: 45,
+    endLine: 60,
+    type: "function",  // 'function' | 'class' | 'block'
+    language: "typescript",
+    
+    // AST-derived metadata (NEW in v0.14.0):
+    symbolName: "validateEmail",              // Function/class name
+    symbolType: "function",                   // 'function' | 'method' | 'class' | 'interface'
+    parentClass: undefined,                   // For methods: parent class name
+    complexity: 3,                            // Cyclomatic complexity
+    parameters: ["email: string"],            // Function parameters
+    signature: "function validateEmail(email: string): boolean",  // Full signature
+    imports: ["@/utils/regex"]               // File imports (for context)
+  },
+  score: 0.85,
+  relevance: "highly_relevant"
+}
+```
+
+### AST Metadata Benefits
+
+1. **Never splits functions** - Chunks respect semantic boundaries (no mid-function splits)
+2. **Function context** - Know exactly which function you're looking at
+3. **Complexity metrics** - Identify complex functions that may need refactoring
+4. **Signature awareness** - See parameters and return types at a glance
+5. **Better AI context** - AI assistants get structured code information
+
+### Using AST Metadata
+
+**Find complex functions:**
+```typescript
+// Search for authentication logic
+const results = await semantic_search({ query: "authentication logic" });
+
+// Filter by complexity
+const complexFunctions = results.filter(r => (r.metadata.complexity || 0) > 5);
+```
+
+**Identify methods in a class:**
+```typescript
+// Get file context
+const context = await get_file_context({ filepath: "src/auth/AuthService.ts" });
+
+// Find all methods
+const methods = context.results.filter(r => r.metadata.symbolType === 'method');
+```
+
+**List functions with specific parameters:**
+```typescript
+const functions = await list_functions({ pattern: ".*validate.*", language: "typescript" });
+
+// Filter by parameter count
+const simpleValidators = functions.filter(r => (r.metadata.parameters?.length || 0) <= 2);
+```
+
+### AST Support
+
+**Currently supported:**
+- ✅ TypeScript (`.ts`, `.tsx`)
+- ✅ JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`)
+
+**Coming soon:**
+- 🔜 Python, Go, Rust, Java, PHP, and more
+
+**Fallback behavior:**
+- For unsupported languages, Lien automatically falls back to line-based chunking
+- No disruption to existing workflows
+
+### Configuration
+
+Control AST behavior in `.lien.config.json`:
+
+```json
+{
+  "chunking": {
+    "useAST": true,              // Enable AST-based chunking (default: true)
+    "astFallback": "line-based"  // Fallback strategy: 'line-based' | 'error'
+  }
+}
+```
+
+---
+
 ## Input Validation & Error Handling
 
 Lien uses Zod schemas for runtime type-safe validation of all tool inputs. This provides:

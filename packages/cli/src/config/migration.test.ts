@@ -268,12 +268,16 @@ describe('Config Migration', () => {
     it('should not migrate already migrated config', async () => {
       const configPath = path.join(tempDir, '.lien.config.json');
       const newConfig: LienConfig = {
-        version: '0.3.0',
+        version: '0.14.0',
         core: {
           chunkSize: 75,
           chunkOverlap: 10,
           concurrency: 4,
           embeddingBatchSize: 50,
+        },
+        chunking: {
+          useAST: true,
+          astFallback: 'line-based',
         },
         mcp: {
           port: 7133,

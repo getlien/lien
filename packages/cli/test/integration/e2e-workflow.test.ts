@@ -289,6 +289,10 @@ test('calculator addition', () => {
         concurrency: 2,
         embeddingBatchSize: 25,
       },
+      chunking: {
+        useAST: true,
+        astFallback: 'line-based',
+      },
       mcp: {
         port: 7133,
         transport: 'stdio',

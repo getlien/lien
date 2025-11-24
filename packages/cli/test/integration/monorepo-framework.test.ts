@@ -141,6 +141,10 @@ describe('Monorepo Framework Integration', () => {
         concurrency: 4,
         embeddingBatchSize: 50,
       },
+      chunking: {
+        useAST: true,
+        astFallback: 'line-based',
+      },
       mcp: {
         port: 7133,
         transport: 'stdio',
@@ -196,6 +200,10 @@ describe('Monorepo Framework Integration', () => {
         chunkOverlap: 10,
         concurrency: 4,
         embeddingBatchSize: 50,
+      },
+      chunking: {
+        useAST: true,
+        astFallback: 'line-based',
       },
       mcp: {
         port: 7133,
@@ -295,6 +303,10 @@ describe('Monorepo Framework Integration', () => {
         concurrency: 4,
         embeddingBatchSize: 50,
       },
+      chunking: {
+        useAST: true,
+        astFallback: 'line-based',
+      },
       mcp: {
         port: 7133,
         transport: 'stdio',
@@ -342,6 +354,10 @@ describe('Monorepo Framework Integration', () => {
         chunkOverlap: 10,
         concurrency: 4,
         embeddingBatchSize: 50,
+      },
+      chunking: {
+        useAST: true,
+        astFallback: 'line-based',
       },
       mcp: {
         port: 7133,

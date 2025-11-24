@@ -15,6 +15,10 @@ export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>)
       ...defaults.core,
       ...user.core,
     },
+    chunking: {
+      ...defaults.chunking,
+      ...user.chunking,
+    },
     mcp: {
       ...defaults.mcp,
       ...user.mcp,

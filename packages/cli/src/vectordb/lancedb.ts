@@ -424,6 +424,14 @@ interface DBRecord {
   functionNames: string[];
   classNames: string[];
   interfaceNames: string[];
+  // AST-derived metadata (v0.14.0)
+  symbolName?: string;
+  symbolType?: string;
+  parentClass?: string;
+  complexity?: number;
+  parameters?: string[];
+  signature?: string;
+  imports?: string[];
   _distance?: number; // Added by LanceDB for search results
 }
 
@@ -552,6 +560,14 @@ export class VectorDB implements VectorDBInterface {
           functionNames: (batch.metadatas[i].symbols?.functions && batch.metadatas[i].symbols.functions.length > 0) ? batch.metadatas[i].symbols.functions : [''],
           classNames: (batch.metadatas[i].symbols?.classes && batch.metadatas[i].symbols.classes.length > 0) ? batch.metadatas[i].symbols.classes : [''],
           interfaceNames: (batch.metadatas[i].symbols?.interfaces && batch.metadatas[i].symbols.interfaces.length > 0) ? batch.metadatas[i].symbols.interfaces : [''],
+          // AST-derived metadata (v0.14.0)
+          symbolName: batch.metadatas[i].symbolName || '',
+          symbolType: batch.metadatas[i].symbolType || '',
+          parentClass: batch.metadatas[i].parentClass || '',
+          complexity: batch.metadatas[i].complexity || 0,
+          parameters: (batch.metadatas[i].parameters && batch.metadatas[i].parameters.length > 0) ? batch.metadatas[i].parameters : [''],
+          signature: batch.metadatas[i].signature || '',
+          imports: (batch.metadatas[i].imports && batch.metadatas[i].imports.length > 0) ? batch.metadatas[i].imports : [''],
         }));
         
         // Create table if it doesn't exist, otherwise add to existing table
@@ -634,6 +650,14 @@ export class VectorDB implements VectorDBInterface {
               endLine: r.endLine,
               type: r.type as 'function' | 'class' | 'block',
               language: r.language,
+              // AST-derived metadata (v0.14.0)
+              symbolName: r.symbolName || undefined,
+              symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
+              parentClass: r.parentClass || undefined,
+              complexity: r.complexity || undefined,
+              parameters: (r.parameters && r.parameters.length > 0 && r.parameters[0] !== '') ? r.parameters : undefined,
+              signature: r.signature || undefined,
+              imports: (r.imports && r.imports.length > 0 && r.imports[0] !== '') ? r.imports : undefined,
             },
             score: boostedScore,
             relevance: calculateRelevance(boostedScore),
@@ -750,6 +774,14 @@ export class VectorDB implements VectorDBInterface {
             endLine: r.endLine,
             type: r.type as 'function' | 'class' | 'block',
             language: r.language,
+            // AST-derived metadata (v0.14.0)
+            symbolName: r.symbolName || undefined,
+            symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
+            parentClass: r.parentClass || undefined,
+            complexity: r.complexity || undefined,
+            parameters: (r.parameters && r.parameters.length > 0 && r.parameters[0] !== '') ? r.parameters : undefined,
+            signature: r.signature || undefined,
+            imports: (r.imports && r.imports.length > 0 && r.imports[0] !== '') ? r.imports : undefined,
           },
           score,
           relevance: calculateRelevance(score),
@@ -802,15 +834,20 @@ export class VectorDB implements VectorDBInterface {
                        symbolType === 'interface' ? (r.interfaceNames || []) :
                        [...(r.functionNames || []), ...(r.classNames || []), ...(r.interfaceNames || [])];
         
-        // Must have at least one symbol
-        if (symbols.length === 0) {
+        // Also check AST-derived symbolName (v0.14.0)
+        const astSymbolName = r.symbolName || '';
+        
+        // Must have at least one symbol from either source
+        if (symbols.length === 0 && !astSymbolName) {
           return false;
         }
         
         // Pattern filter on symbol names
         if (pattern) {
           const regex = new RegExp(pattern, 'i');
-          return symbols.some((s: string) => regex.test(s));
+          const matchesOldSymbols = symbols.some((s: string) => regex.test(s));
+          const matchesASTSymbol = regex.test(astSymbolName);
+          return matchesOldSymbols || matchesASTSymbol;
         }
         
         return true;
@@ -831,6 +868,14 @@ export class VectorDB implements VectorDBInterface {
               classes: r.classNames || [],
               interfaces: r.interfaceNames || [],
             },
+            // AST-derived metadata (v0.14.0)
+            symbolName: r.symbolName || undefined,
+            symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
+            parentClass: r.parentClass || undefined,
+            complexity: r.complexity || undefined,
+            parameters: (r.parameters && r.parameters.length > 0 && r.parameters[0] !== '') ? r.parameters : undefined,
+            signature: r.signature || undefined,
+            imports: (r.imports && r.imports.length > 0 && r.imports[0] !== '') ? r.imports : undefined,
           },
           score,
           relevance: calculateRelevance(score),

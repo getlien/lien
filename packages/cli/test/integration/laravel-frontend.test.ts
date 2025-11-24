@@ -116,6 +116,10 @@ const app = createApp({});`
         concurrency: 4,
         embeddingBatchSize: 50,
       },
+      chunking: {
+        useAST: true,
+        astFallback: 'line-based',
+      },
       mcp: {
         port: 7133,
         transport: 'stdio',

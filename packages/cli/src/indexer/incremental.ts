@@ -48,11 +48,15 @@ async function processFileContent(
   const chunkOverlap = isModernConfig(config)
     ? config.core.chunkOverlap
     : (isLegacyConfig(config) ? config.indexing.chunkOverlap : 10);
+  const useAST = isModernConfig(config)
+    ? config.chunking.useAST
+    : true;
   
   // Chunk the file
   const chunks = chunkFile(filepath, content, {
     chunkSize,
     chunkOverlap,
+    useAST,
   });
   
   if (chunks.length === 0) {

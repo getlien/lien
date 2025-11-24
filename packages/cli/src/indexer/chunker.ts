@@ -1,10 +1,12 @@
 import { CodeChunk } from './types.js';
 import { detectLanguage } from './scanner.js';
 import { extractSymbols } from './symbol-extractor.js';
+import { shouldUseAST, chunkByAST } from './ast/chunker.js';
 
 export interface ChunkOptions {
   chunkSize?: number;
   chunkOverlap?: number;
+  useAST?: boolean; // Flag to enable AST-based chunking
 }
 
 export function chunkFile(
@@ -12,8 +14,34 @@ export function chunkFile(
   content: string,
   options: ChunkOptions = {}
 ): CodeChunk[] {
-  const { chunkSize = 75, chunkOverlap = 10 } = options;
+  const { chunkSize = 75, chunkOverlap = 10, useAST = true } = options;
   
+  // Try AST-based chunking for supported languages
+  if (useAST && shouldUseAST(filepath)) {
+    try {
+      return chunkByAST(filepath, content, {
+        maxChunkSize: chunkSize,
+        minChunkSize: Math.floor(chunkSize / 10),
+      });
+    } catch (error) {
+      // Fallback to line-based chunking on AST errors
+      console.warn(`AST chunking failed for ${filepath}, falling back to line-based:`, error);
+    }
+  }
+  
+  // Line-based chunking (original implementation)
+  return chunkByLines(filepath, content, chunkSize, chunkOverlap);
+}
+
+/**
+ * Original line-based chunking implementation
+ */
+function chunkByLines(
+  filepath: string,
+  content: string,
+  chunkSize: number,
+  chunkOverlap: number
+): CodeChunk[] {
   const lines = content.split('\n');
   const chunks: CodeChunk[] = [];
   const language = detectLanguage(filepath);

@@ -275,10 +275,14 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           const chunkOverlap = isModernConfig(config)
             ? config.core.chunkOverlap
             : 10;
+          const useAST = isModernConfig(config)
+            ? config.chunking.useAST
+            : true;
           
           const chunks = chunkFile(file, content, {
             chunkSize,
             chunkOverlap,
+            useAST,
           });
           
           if (chunks.length === 0) {

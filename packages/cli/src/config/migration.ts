@@ -10,12 +10,18 @@ export function needsMigration(config: any): boolean {
   // - Has 'indexing' field instead of 'core' and 'frameworks'
   // - Or has no 'frameworks' field at all
   // - Or version is explicitly set to something < 0.3.0
+  // - Or missing 'chunking' field (v0.14.0)
   if (!config) {
     return false;
   }
 
-  // If it has frameworks array, it's already in new format
-  if (config.frameworks !== undefined) {
+  // If missing chunking config, needs migration to v0.14.0
+  if (config.frameworks !== undefined && !config.chunking) {
+    return true;
+  }
+
+  // If it has frameworks array and chunking, it's already in new format
+  if (config.frameworks !== undefined && config.chunking !== undefined) {
     return false;
   }
 
@@ -33,17 +39,21 @@ export function needsMigration(config: any): boolean {
 }
 
 /**
- * Migrates a v0.2.0 config to v0.3.0 format
+ * Migrates a v0.2.0 config to v0.3.0+ format
  */
-export function migrateConfig(oldConfig: Partial<LegacyLienConfig>): LienConfig {
+export function migrateConfig(oldConfig: Partial<LegacyLienConfig | LienConfig>): LienConfig {
   // Start with default config structure
   const newConfig: LienConfig = {
-    version: '0.3.0',
+    version: '0.14.0',
     core: {
-      chunkSize: oldConfig.indexing?.chunkSize ?? defaultConfig.core.chunkSize,
-      chunkOverlap: oldConfig.indexing?.chunkOverlap ?? defaultConfig.core.chunkOverlap,
-      concurrency: oldConfig.indexing?.concurrency ?? defaultConfig.core.concurrency,
-      embeddingBatchSize: oldConfig.indexing?.embeddingBatchSize ?? defaultConfig.core.embeddingBatchSize,
+      chunkSize: (oldConfig as any).indexing?.chunkSize ?? (oldConfig as any).core?.chunkSize ?? defaultConfig.core.chunkSize,
+      chunkOverlap: (oldConfig as any).indexing?.chunkOverlap ?? (oldConfig as any).core?.chunkOverlap ?? defaultConfig.core.chunkOverlap,
+      concurrency: (oldConfig as any).indexing?.concurrency ?? (oldConfig as any).core?.concurrency ?? defaultConfig.core.concurrency,
+      embeddingBatchSize: (oldConfig as any).indexing?.embeddingBatchSize ?? (oldConfig as any).core?.embeddingBatchSize ?? defaultConfig.core.embeddingBatchSize,
+    },
+    chunking: {
+      useAST: (oldConfig as any).chunking?.useAST ?? defaultConfig.chunking.useAST,
+      astFallback: (oldConfig as any).chunking?.astFallback ?? defaultConfig.chunking.astFallback,
     },
     mcp: {
       port: oldConfig.mcp?.port ?? defaultConfig.mcp.port,
@@ -58,18 +68,18 @@ export function migrateConfig(oldConfig: Partial<LegacyLienConfig>): LienConfig 
       enabled: oldConfig.fileWatching?.enabled ?? defaultConfig.fileWatching.enabled,
       debounceMs: oldConfig.fileWatching?.debounceMs ?? defaultConfig.fileWatching.debounceMs,
     },
-    frameworks: [],
+    frameworks: (oldConfig as any).frameworks ?? [],
   };
 
-  // Convert old indexing config to a single "generic" framework
-  if (oldConfig.indexing) {
+  // Convert old indexing config to a single "generic" framework (only for legacy configs)
+  if ((oldConfig as any).indexing && newConfig.frameworks.length === 0) {
     const genericFramework: FrameworkInstance = {
       name: 'generic',
       path: '.',
       enabled: true,
       config: {
-        include: oldConfig.indexing.include ?? ['**/*.{ts,tsx,js,jsx,py,go,rs,java,c,cpp,cs}'],
-        exclude: oldConfig.indexing.exclude ?? [
+        include: (oldConfig as any).indexing.include ?? ['**/*.{ts,tsx,js,jsx,py,go,rs,java,c,cpp,cs}'],
+        exclude: (oldConfig as any).indexing.exclude ?? [
           '**/node_modules/**',
           '**/dist/**',
           '**/build/**',
@@ -83,8 +93,8 @@ export function migrateConfig(oldConfig: Partial<LegacyLienConfig>): LienConfig 
     };
 
     newConfig.frameworks.push(genericFramework);
-  } else {
-    // No indexing config present, use defaults for generic framework
+  } else if (newConfig.frameworks.length === 0) {
+    // No indexing config and no frameworks present, use defaults for generic framework
     const genericFramework: FrameworkInstance = {
       name: 'generic',
       path: '.',

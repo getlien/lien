@@ -1,6 +1,43 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+
+## [0.14.0] - 2025-XX-XX
+
+### Breaking Changes
+- **AST-based chunking**: Full reindex required due to new chunking strategy and metadata fields
+- Index format version bumped to v2 (will trigger automatic reindex on first run)
+- Search results now include enhanced metadata (function names, complexity, signatures, etc.)
+
+### Added
+- **AST-based semantic chunking for TypeScript/JavaScript** using Tree-sitter
+  - Chunks now respect function/class boundaries (never split mid-function)
+  - Enhanced metadata: function names, cyclomatic complexity, method signatures
+  - Parameter lists and return types extracted for functions
+  - Import statements tracked for better context
+  - Graceful fallback to line-based chunking on parse errors
+- **Enhanced `list_functions` MCP tool**
+  - Returns full function signatures with parameters and return types
+  - Includes complexity metrics for functions
+  - Better symbol detection using AST extraction
+  - Filters by AST-derived `symbolName` in addition to legacy symbol arrays
+- **New configuration options** in `.lien.config.json`:
+  - `chunking.useAST`: Enable/disable AST-based chunking (default: `true`)
+  - `chunking.astFallback`: Strategy on parse errors (`'line-based'` or `'error'`)
+- **Config migration** automatically adds new chunking section to existing configs
+
+### Improved
+- **Search result quality**: Chunks are now semantically meaningful code units
+- **Better context for AI assistants**: Metadata provides function names, complexity, and signatures
+- **More accurate symbol extraction**: Uses AST parsing instead of regex patterns
+- **Metadata enrichment**: All search results include `symbolName`, `symbolType`, `complexity`, `parameters`, `signature`, and `imports` when available
+
+### Technical
+- New dependency: `tree-sitter` and `tree-sitter-typescript` for AST parsing
+- Vector DB schema updated to store new AST-derived metadata fields
+- Config version updated to `0.14.0`
+- Index format version updated to `2`
+
 ## [0.12.0] - 2025-11-23
 
 ### Added
