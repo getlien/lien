@@ -135,6 +135,9 @@ function extractSignature(node: Parser.SyntaxNode, content: string): string {
 
 /**
  * Extract parameter list from function node
+ * 
+ * Note: The `_content` parameter is unused in this function, but is kept for API consistency
+ * with other extract functions (e.g., extractSignature).
  */
 function extractParameters(node: Parser.SyntaxNode, _content: string): string[] {
   const parameters: string[] = [];
@@ -156,6 +159,9 @@ function extractParameters(node: Parser.SyntaxNode, _content: string): string[] 
 
 /**
  * Extract return type from function node (TypeScript)
+ * 
+ * Note: The `_content` parameter is unused in this function, but is kept for API consistency
+ * with other extract functions (e.g., extractSignature).
  */
 function extractReturnType(node: Parser.SyntaxNode, _content: string): string | undefined {
   const returnTypeNode = node.childForFieldName('return_type');
