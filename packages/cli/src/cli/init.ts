@@ -9,6 +9,7 @@ import { showCompactBanner } from '../utils/banner.js';
 import { needsMigration, migrateConfig } from '../config/migration.js';
 import { detectAllFrameworks } from '../frameworks/detector-service.js';
 import { getFrameworkDetector } from '../frameworks/registry.js';
+import { CURRENT_CONFIG_VERSION } from '../constants.js';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -337,7 +338,7 @@ async function upgradeConfig(configPath: string) {
     let migrated = false;
     
     if (migrationNeeded) {
-      console.log(chalk.blue('🔄 Migrating config from v0.2.0 to v0.13.0...'));
+      console.log(chalk.blue(`🔄 Migrating config from v0.2.0 to v${CURRENT_CONFIG_VERSION}...`));
       upgradedConfig = migrateConfig(existingConfig);
       migrated = true;
     } else {
