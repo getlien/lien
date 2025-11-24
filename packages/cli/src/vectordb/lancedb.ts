@@ -853,10 +853,10 @@ export class VectorDB implements VectorDBInterface {
           if (!nameMatches) return false;
           
           // If name matches, also check AST symbolType if specified
-          // Semantic filtering: 'function' includes methods and arrow functions
+          // Semantic filtering: 'function' includes methods (arrow functions are typed as 'function')
           if (symbolType && r.symbolType) {
             if (symbolType === 'function') {
-              return r.symbolType === 'function' || r.symbolType === 'method' || r.symbolType === 'arrow_function';
+              return r.symbolType === 'function' || r.symbolType === 'method';
             } else if (symbolType === 'class') {
               return r.symbolType === 'class';
             } else if (symbolType === 'interface') {
@@ -870,7 +870,7 @@ export class VectorDB implements VectorDBInterface {
         // If no pattern, check symbolType only
         if (symbolType && r.symbolType) {
           if (symbolType === 'function') {
-            return r.symbolType === 'function' || r.symbolType === 'method' || r.symbolType === 'arrow_function';
+            return r.symbolType === 'function' || r.symbolType === 'method';
           } else if (symbolType === 'class') {
             return r.symbolType === 'class';
           } else if (symbolType === 'interface') {
