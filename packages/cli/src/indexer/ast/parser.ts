@@ -1,5 +1,6 @@
 import Parser from 'tree-sitter';
 import TypeScript from 'tree-sitter-typescript';
+import JavaScript from 'tree-sitter-javascript';
 import type { ASTParseResult, SupportedLanguage } from './types.js';
 
 /**
@@ -12,7 +13,7 @@ const parserCache = new Map<SupportedLanguage, Parser>();
  */
 const languageConfig: Record<SupportedLanguage, any> = {
   typescript: TypeScript.typescript,
-  javascript: TypeScript.tsx, // Use tsx for JavaScript (supports JSX)
+  javascript: JavaScript, // Use proper JavaScript parser
 };
 
 /**
