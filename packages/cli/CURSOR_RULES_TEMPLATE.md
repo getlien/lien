@@ -114,7 +114,7 @@ list_functions({
 
 ---
 
-## Enhanced Metadata (AST-Based) ⚡ NEW in v0.14.0
+## Enhanced Metadata (AST-Based) ⚡ NEW in v0.13.0
 
 Lien now uses **Abstract Syntax Tree (AST) parsing** for TypeScript/JavaScript files to provide rich code metadata:
 
@@ -132,7 +132,7 @@ All search results (`semantic_search`, `get_file_context`, `find_similar`, `list
     type: "function",  // 'function' | 'class' | 'block'
     language: "typescript",
     
-    // AST-derived metadata (NEW in v0.14.0):
+    // AST-derived metadata (NEW in v0.13.0):
     symbolName: "validateEmail",              // Function/class name
     symbolType: "function",                   // 'function' | 'method' | 'class' | 'interface'
     parentClass: undefined,                   // For methods: parent class name
