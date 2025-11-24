@@ -79,7 +79,7 @@ find_similar({
 - Consistency: ensure new code matches existing patterns
 - Duplication detection
 
-### `list_functions` ⚡ NEW in v0.5.0
+### `list_functions` ⚡
 **Fast symbol-based search for functions, classes, and interfaces by name.**
 
 ```typescript
@@ -104,7 +104,6 @@ list_functions({
 **Best practices:**
 - Use regex patterns that match naming conventions: `.*Controller.*`, `handle.*`, `get.*`
 - Combine with language filter for large codebases: `language: "typescript"`
-- For best results: run `lien reindex` after upgrading to v0.5.0
 
 **When to use `list_functions` vs `semantic_search`:**
 - ✅ Use `list_functions` when you know the naming pattern (e.g., "all Controllers")
@@ -277,7 +276,7 @@ Lien uses structured error codes for programmatic error handling:
 - `INVALID_INPUT` - Parameter validation failed
 - `FILE_NOT_FOUND` - Requested file doesn't exist in index
 - `INDEX_NOT_FOUND` - No index found (run `lien index`)
-- `INDEX_CORRUPTED` - Index is corrupted (run `lien reindex`)
+- `INDEX_CORRUPTED` - Index is corrupted (run `lien index` to rebuild)
 - `EMBEDDING_GENERATION_FAILED` - Embedding model failed (retryable)
 - `INTERNAL_ERROR` - Unexpected internal error
 
@@ -341,7 +340,7 @@ Lien uses structured error codes for programmatic error handling:
 4. Analyze and suggest improvements
 ```
 
-### Pattern 7: Finding All Classes/Functions by Name Pattern ⚡ NEW
+### Pattern 7: Finding All Classes/Functions by Name Pattern ⚡
 ```
 1. list_functions({ pattern: ".*Controller.*", language: "php" })
 2. Review the list of matching classes
@@ -365,7 +364,7 @@ Lien uses structured error codes for programmatic error handling:
 ✅ Exploring unfamiliar parts of codebase
 ✅ Searching by what code **does** (behavior, functionality)
 
-### Use `list_functions` when: ⚡ NEW
+### Use `list_functions` when: ⚡
 ✅ User asks "show me all Controllers" or similar structural queries
 ✅ Looking for classes/functions matching a **naming pattern**
 ✅ Getting architectural overview (all Services, all Handlers, etc.)
@@ -426,7 +425,7 @@ Lien uses structured error codes for programmatic error handling:
 - First query loads embeddings (~1-2s), subsequent queries are fast (<500ms)
 - Increase `limit` to 10-15 for broad exploration
 - Results are ranked by semantic relevance (trust the ranking)
-- User can re-index with `lien reindex` if results seem stale
+- User can re-index with `lien index` if results seem stale
 - **Relevance categories**: All search results include a `relevance` field (`highly_relevant`, `relevant`, `loosely_related`, `not_relevant`) to help interpret search quality at a glance
 - **Test associations**: Lien automatically detects test-source relationships across 12 languages using convention-based patterns and import analysis
 
@@ -450,10 +449,12 @@ Create a `lien.mdc` file in your `.cursor/rules/` directory:
 ```bash
 # From your project directory
 mkdir -p .cursor/rules
-cp /path/to/lien/CURSOR_RULES_TEMPLATE.md .cursor/rules/lien.mdc
+cp node_modules/@liendev/lien/CURSOR_RULES_TEMPLATE.md .cursor/rules/lien.mdc
 ```
 
 The `alwaysApply: true` frontmatter ensures Cursor uses Lien for all files in your project.
 
 This approach allows you to have multiple rule files in `.cursor/rules/` without conflicts.
+
+**Note:** The template is automatically copied during `lien init` to `.cursor/rules/lien.mdc`.
 
