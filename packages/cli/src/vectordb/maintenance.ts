@@ -3,6 +3,9 @@ import { DatabaseError, wrapError } from '../errors/index.js';
 import { writeVersionFile } from './version.js';
 import { insertBatch } from './batch-insert.js';
 
+// TODO: Replace with proper types from lancedb-types.ts
+// Currently using 'any' because tests use incomplete mocks that don't satisfy full LanceDB interface
+// Proper types: Awaited<ReturnType<typeof lancedb.connect>> and Awaited<ReturnType<Connection['openTable']>>
 type LanceDBConnection = any;
 type LanceDBTable = any;
 

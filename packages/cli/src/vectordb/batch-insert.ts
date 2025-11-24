@@ -2,6 +2,9 @@ import { ChunkMetadata } from '../indexer/types.js';
 import { DatabaseError } from '../errors/index.js';
 import { VECTOR_DB_MAX_BATCH_SIZE, VECTOR_DB_MIN_BATCH_SIZE } from '../constants.js';
 
+// TODO: Replace with proper types from lancedb-types.ts
+// Currently using 'any' because tests use incomplete mocks that don't satisfy full LanceDB interface
+// Proper types: Awaited<ReturnType<typeof lancedb.connect>> and Awaited<ReturnType<Connection['openTable']>>
 type LanceDBConnection = any;
 type LanceDBTable = any;
 

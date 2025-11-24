@@ -5,6 +5,9 @@ import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
 import { QueryIntent, classifyQueryIntent } from './intent-classifier.js';
 
+// TODO: Replace with proper type from lancedb-types.ts
+// Currently using 'any' because tests use incomplete mocks that don't satisfy full LanceDB interface
+// See: https://github.com/getlien/lien/issues/XXX
 type LanceDBTable = any;
 
 /**
