@@ -59,6 +59,7 @@ export async function insertBatch(
 
 /**
  * Internal method to insert a single batch with iterative retry logic.
+ * @returns Always returns a valid LanceDBTable or throws DatabaseError
  */
 async function insertBatchInternal(
   db: LanceDBConnection,
@@ -67,7 +68,7 @@ async function insertBatchInternal(
   vectors: Float32Array[],
   metadatas: ChunkMetadata[],
   contents: string[]
-): Promise<LanceDBTable | null> {
+): Promise<LanceDBTable> {
   interface BatchToProcess {
     vectors: Float32Array[];
     metadatas: ChunkMetadata[];
