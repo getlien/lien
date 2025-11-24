@@ -168,7 +168,7 @@ function extractReturnType(node: Parser.SyntaxNode, _content: string): string | 
  * Calculate cyclomatic complexity of a function
  * 
  * Complexity = 1 (base) + number of decision points
- * Decision points: if, while, for, case, catch, &&, ||, ?:
+ * Decision points: if, while, do...while, for, for...in, for...of, case, catch, &&, ||, ?:
  */
 export function calculateComplexity(node: Parser.SyntaxNode): number {
   let complexity = 1; // Base complexity
@@ -176,8 +176,10 @@ export function calculateComplexity(node: Parser.SyntaxNode): number {
   const decisionPoints = [
     'if_statement',
     'while_statement',
+    'do_statement',        // do...while loops
     'for_statement',
     'for_in_statement',
+    'for_of_statement',    // for...of loops
     'switch_case',
     'catch_clause',
     'ternary_expression',
