@@ -71,6 +71,9 @@ export async function updateFile(
     let updatedTable = table;
     if (vectors.length > 0) {
       updatedTable = await insertBatch(db, table, tableName, vectors, metadatas, contents);
+      if (!updatedTable) {
+        throw new DatabaseError('insertBatch unexpectedly returned null');
+      }
     }
     
     // 3. Update version file to trigger MCP reconnection
