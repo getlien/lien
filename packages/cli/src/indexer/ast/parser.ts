@@ -1,6 +1,7 @@
 import Parser from 'tree-sitter';
 import TypeScript from 'tree-sitter-typescript';
 import JavaScript from 'tree-sitter-javascript';
+import { extname } from 'path';
 import type { ASTParseResult, SupportedLanguage } from './types.js';
 
 /**
@@ -37,9 +38,12 @@ function getParser(language: SupportedLanguage): Parser {
 
 /**
  * Detect language from file extension
+ * Uses path.extname() to handle edge cases like multiple dots in filenames
  */
 export function detectLanguage(filePath: string): SupportedLanguage | null {
-  const ext = filePath.split('.').pop()?.toLowerCase();
+  // extname returns extension with leading dot (e.g., '.ts')
+  // Remove the dot and convert to lowercase
+  const ext = extname(filePath).slice(1).toLowerCase();
   
   switch (ext) {
     case 'ts':
