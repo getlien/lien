@@ -16,7 +16,7 @@ export interface ChunkMetadata {
     interfaces: string[];
   };
   
-  // NEW: AST-derived metadata (v0.14.0)
+  // NEW: AST-derived metadata (v0.13.0)
   symbolName?: string;        // Function/class name
   symbolType?: 'function' | 'method' | 'class' | 'interface';
   parentClass?: string;       // For methods

@@ -11,12 +11,12 @@ export function needsMigration(config: any): boolean {
   // - Has 'indexing' field instead of 'core' and 'frameworks'
   // - Or has no 'frameworks' field at all
   // - Or version is explicitly set to something < 0.3.0
-  // - Or missing 'chunking' field (v0.14.0)
+  // - Or missing 'chunking' field (v0.13.0)
   if (!config) {
     return false;
   }
 
-  // If missing chunking config, needs migration to v0.14.0
+  // If missing chunking config, needs migration to v0.13.0
   if (config.frameworks !== undefined && !config.chunking) {
     return true;
   }

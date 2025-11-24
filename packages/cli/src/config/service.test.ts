@@ -108,7 +108,7 @@ describe('ConfigService', () => {
       
       const config = await service.load(testDir);
       
-      // Should be migrated to v0.14.0
+      // Should be migrated to v0.13.0
       expect(config.version).toBe('0.13.0');
       expect(config.frameworks).toBeDefined();
       expect(config.core.chunkSize).toBe(100);

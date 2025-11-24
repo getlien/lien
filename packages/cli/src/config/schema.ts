@@ -39,7 +39,7 @@ export interface LienConfig {
     embeddingBatchSize: number;
   };
   chunking: {
-    useAST: boolean;          // Enable AST-based chunking (v0.14.0)
+    useAST: boolean;          // Enable AST-based chunking (v0.13.0)
     astFallback: 'line-based' | 'error';  // Fallback strategy on AST errors
   };
   mcp: {
@@ -122,7 +122,7 @@ export const defaultConfig: LienConfig = {
     embeddingBatchSize: DEFAULT_EMBEDDING_BATCH_SIZE,
   },
   chunking: {
-    useAST: true,              // AST-based chunking enabled by default (v0.14.0)
+    useAST: true,              // AST-based chunking enabled by default (v0.13.0)
     astFallback: 'line-based', // Fallback to line-based on errors
   },
   mcp: {

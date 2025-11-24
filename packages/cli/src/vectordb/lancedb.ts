@@ -560,7 +560,7 @@ export class VectorDB implements VectorDBInterface {
           functionNames: (batch.metadatas[i].symbols?.functions && batch.metadatas[i].symbols.functions.length > 0) ? batch.metadatas[i].symbols.functions : [''],
           classNames: (batch.metadatas[i].symbols?.classes && batch.metadatas[i].symbols.classes.length > 0) ? batch.metadatas[i].symbols.classes : [''],
           interfaceNames: (batch.metadatas[i].symbols?.interfaces && batch.metadatas[i].symbols.interfaces.length > 0) ? batch.metadatas[i].symbols.interfaces : [''],
-          // AST-derived metadata (v0.14.0)
+          // AST-derived metadata (v0.13.0)
           symbolName: batch.metadatas[i].symbolName || '',
           symbolType: batch.metadatas[i].symbolType || '',
           parentClass: batch.metadatas[i].parentClass || '',
@@ -650,7 +650,7 @@ export class VectorDB implements VectorDBInterface {
               endLine: r.endLine,
               type: r.type as 'function' | 'class' | 'block',
               language: r.language,
-              // AST-derived metadata (v0.14.0)
+              // AST-derived metadata (v0.13.0)
               symbolName: r.symbolName || undefined,
               symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
               parentClass: r.parentClass || undefined,
@@ -774,7 +774,7 @@ export class VectorDB implements VectorDBInterface {
             endLine: r.endLine,
             type: r.type as 'function' | 'class' | 'block',
             language: r.language,
-            // AST-derived metadata (v0.14.0)
+            // AST-derived metadata (v0.13.0)
             symbolName: r.symbolName || undefined,
             symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
             parentClass: r.parentClass || undefined,
@@ -896,7 +896,7 @@ export class VectorDB implements VectorDBInterface {
               classes: r.classNames || [],
               interfaces: r.interfaceNames || [],
             },
-            // AST-derived metadata (v0.14.0)
+            // AST-derived metadata (v0.13.0)
             symbolName: r.symbolName || undefined,
             symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
             parentClass: r.parentClass || undefined,
