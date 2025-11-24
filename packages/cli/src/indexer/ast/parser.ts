@@ -10,9 +10,15 @@ import type { ASTParseResult, SupportedLanguage } from './types.js';
 const parserCache = new Map<SupportedLanguage, Parser>();
 
 /**
+ * Tree-sitter language grammar type
+ * (Tree-sitter doesn't export a specific Language type, so we define one)
+ */
+type TreeSitterLanguage = object;
+
+/**
  * Language configuration mapping
  */
-const languageConfig: Record<SupportedLanguage, any> = {
+const languageConfig: Record<SupportedLanguage, TreeSitterLanguage> = {
   typescript: TypeScript.typescript,
   javascript: JavaScript, // Use proper JavaScript parser
 };
