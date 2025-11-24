@@ -150,7 +150,7 @@ test('calculator addition', () => {
     const migratedConfig = await loadConfig(testDir);
 
     // Step 3: Verify migration
-    expect(migratedConfig.version).toBe('0.12.0');
+    expect(migratedConfig.version).toBe('0.13.0');
     expect(migratedConfig.frameworks).toHaveLength(1);
     expect(migratedConfig.frameworks[0].name).toBe('generic');
     expect(migratedConfig.frameworks[0].path).toBe('.');
@@ -282,7 +282,7 @@ test('calculator addition', () => {
     );
 
     const oldConfig: LienConfig = {
-      version: '0.3.0',
+      version: '0.13.0',
       core: {
         chunkSize: 50, // Custom value
         chunkOverlap: 5,
@@ -326,7 +326,7 @@ test('calculator addition', () => {
     // Step 4: Merge with new default values
     // (In real usage, this would be done by `lien init --upgrade`)
     // Here we just verify the config structure is valid
-    expect(loaded.version).toBe('0.3.0');
+    expect(loaded.version).toBe('0.13.0');
     expect(loaded.core).toBeDefined();
     expect(loaded.frameworks).toBeDefined();
   });
@@ -369,7 +369,7 @@ test('calculator addition', () => {
     const migratedConfig = migrateConfig(customV020Config);
 
     // Verify all customizations are preserved
-    expect(migratedConfig.version).toBe('0.12.0');
+    expect(migratedConfig.version).toBe('0.13.0');
     expect(migratedConfig.core.chunkSize).toBe(100);
     expect(migratedConfig.core.chunkOverlap).toBe(15);
     expect(migratedConfig.core.concurrency).toBe(8);
