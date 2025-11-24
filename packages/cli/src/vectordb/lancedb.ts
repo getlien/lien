@@ -847,7 +847,35 @@ export class VectorDB implements VectorDBInterface {
           const regex = new RegExp(pattern, 'i');
           const matchesOldSymbols = symbols.some((s: string) => regex.test(s));
           const matchesASTSymbol = regex.test(astSymbolName);
-          return matchesOldSymbols || matchesASTSymbol;
+          const nameMatches = matchesOldSymbols || matchesASTSymbol;
+          
+          // If no name match, reject immediately
+          if (!nameMatches) return false;
+          
+          // If name matches, also check AST symbolType if specified
+          // Semantic filtering: 'function' includes methods and arrow functions
+          if (symbolType && r.symbolType) {
+            if (symbolType === 'function') {
+              return r.symbolType === 'function' || r.symbolType === 'method' || r.symbolType === 'arrow_function';
+            } else if (symbolType === 'class') {
+              return r.symbolType === 'class';
+            } else if (symbolType === 'interface') {
+              return r.symbolType === 'interface';
+            }
+          }
+          
+          return nameMatches;
+        }
+        
+        // If no pattern, check symbolType only
+        if (symbolType && r.symbolType) {
+          if (symbolType === 'function') {
+            return r.symbolType === 'function' || r.symbolType === 'method' || r.symbolType === 'arrow_function';
+          } else if (symbolType === 'class') {
+            return r.symbolType === 'class';
+          } else if (symbolType === 'interface') {
+            return r.symbolType === 'interface';
+          }
         }
         
         return true;
