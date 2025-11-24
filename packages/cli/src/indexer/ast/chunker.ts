@@ -250,6 +250,24 @@ function createChunk(
   imports: string[],
   language: string
 ): ASTChunk {
+  // Populate legacy symbols field for backward compatibility
+  const symbols = {
+    functions: [] as string[],
+    classes: [] as string[],
+    interfaces: [] as string[],
+  };
+  
+  if (symbolInfo?.name) {
+    // Populate legacy symbols arrays based on symbol type
+    if (symbolInfo.type === 'function' || symbolInfo.type === 'method') {
+      symbols.functions.push(symbolInfo.name);
+    } else if (symbolInfo.type === 'class') {
+      symbols.classes.push(symbolInfo.name);
+    } else if (symbolInfo.type === 'interface') {
+      symbols.interfaces.push(symbolInfo.name);
+    }
+  }
+  
   return {
     content,
     metadata: {
@@ -258,6 +276,9 @@ function createChunk(
       endLine: node.endPosition.row + 1,
       type: symbolInfo?.type === 'class' ? 'class' : 'function',
       language,
+      // Legacy symbols field for backward compatibility
+      symbols,
+      // New AST-derived metadata
       symbolName: symbolInfo?.name,
       symbolType: symbolInfo?.type,
       parentClass: symbolInfo?.parentClass,
@@ -302,6 +323,8 @@ function extractUncoveredCode(
             endLine: range.start,
             type: 'block',
             language,
+            // Empty symbols for uncovered code (imports, exports, etc.)
+            symbols: { functions: [], classes: [], interfaces: [] },
             imports,
           },
         });
@@ -324,6 +347,8 @@ function extractUncoveredCode(
           endLine: lines.length,
           type: 'block',
           language,
+          // Empty symbols for uncovered code (imports, exports, etc.)
+          symbols: { functions: [], classes: [], interfaces: [] },
           imports,
         },
       });
