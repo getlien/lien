@@ -300,6 +300,85 @@ function createChunk(
 }
 
 /**
+ * Represents a range of lines in a file
+ */
+interface LineRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * Find gaps between covered ranges (uncovered code)
+ */
+function findUncoveredRanges(
+  coveredRanges: LineRange[],
+  totalLines: number
+): LineRange[] {
+  const uncoveredRanges: LineRange[] = [];
+  let currentStart = 0;
+  
+  // Sort covered ranges
+  const sortedRanges = [...coveredRanges].sort((a, b) => a.start - b.start);
+  
+  for (const range of sortedRanges) {
+    if (currentStart < range.start) {
+      // There's a gap before this range
+      uncoveredRanges.push({
+        start: currentStart,
+        end: range.start - 1,
+      });
+    }
+    currentStart = range.end + 1;
+  }
+  
+  // Handle remaining code after last covered range
+  if (currentStart < totalLines) {
+    uncoveredRanges.push({
+      start: currentStart,
+      end: totalLines - 1,
+    });
+  }
+  
+  return uncoveredRanges;
+}
+
+/**
+ * Create a chunk from a line range
+ */
+function createChunkFromRange(
+  range: LineRange,
+  lines: string[],
+  filepath: string,
+  language: string,
+  imports: string[]
+): ASTChunk {
+  const uncoveredLines = lines.slice(range.start, range.end + 1);
+  const content = uncoveredLines.join('\n').trim();
+  
+  return {
+    content,
+    metadata: {
+      file: filepath,
+      startLine: range.start + 1,
+      endLine: range.end + 1,
+      type: 'block',
+      language,
+      // Empty symbols for uncovered code (imports, exports, etc.)
+      symbols: { functions: [], classes: [], interfaces: [] },
+      imports,
+    },
+  };
+}
+
+/**
+ * Validate that a chunk meets the minimum size requirements
+ */
+function isValidChunk(chunk: ASTChunk, minChunkSize: number): boolean {
+  const lineCount = chunk.metadata.endLine - chunk.metadata.startLine + 1;
+  return chunk.content.length > 0 && lineCount >= minChunkSize;
+}
+
+/**
  * Extract code that wasn't covered by function/class chunks
  * (imports, exports, top-level statements)
  */
@@ -311,60 +390,11 @@ function extractUncoveredCode(
   imports: string[],
   language: string
 ): ASTChunk[] {
-  const chunks: ASTChunk[] = [];
-  let currentStart = 0;
+  const uncoveredRanges = findUncoveredRanges(coveredRanges, lines.length);
   
-  // Sort covered ranges
-  coveredRanges.sort((a, b) => a.start - b.start);
-  
-  for (const range of coveredRanges) {
-    if (currentStart < range.start) {
-      // There's uncovered code before this range
-      const uncoveredLines = lines.slice(currentStart, range.start);
-      const content = uncoveredLines.join('\n').trim();
-      
-      if (content.length > 0 && uncoveredLines.length >= minChunkSize) {
-        chunks.push({
-          content,
-          metadata: {
-            file: filepath,
-            startLine: currentStart + 1,
-            endLine: range.start,
-            type: 'block',
-            language,
-            // Empty symbols for uncovered code (imports, exports, etc.)
-            symbols: { functions: [], classes: [], interfaces: [] },
-            imports,
-          },
-        });
-      }
-    }
-    currentStart = range.end + 1;
-  }
-  
-  // Handle remaining code after last covered range
-  if (currentStart < lines.length) {
-    const uncoveredLines = lines.slice(currentStart);
-    const content = uncoveredLines.join('\n').trim();
-    
-    if (content.length > 0 && uncoveredLines.length >= minChunkSize) {
-      chunks.push({
-        content,
-        metadata: {
-          file: filepath,
-          startLine: currentStart + 1,
-          endLine: lines.length,
-          type: 'block',
-          language,
-          // Empty symbols for uncovered code (imports, exports, etc.)
-          symbols: { functions: [], classes: [], interfaces: [] },
-          imports,
-        },
-      });
-    }
-  }
-  
-  return chunks;
+  return uncoveredRanges
+    .map(range => createChunkFromRange(range, lines, filepath, language, imports))
+    .filter(chunk => isValidChunk(chunk, minChunkSize));
 }
 
 /**
