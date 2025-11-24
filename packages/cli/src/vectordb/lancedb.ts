@@ -161,7 +161,7 @@ export class VectorDB implements VectorDBInterface {
     metadatas: ChunkMetadata[],
     contents: string[]
   ): Promise<void> {
-    if (!this.db) {
+    if (!this.db || !this.table) {
       throw new DatabaseError('Vector database not initialized');
     }
     this.table = await maintenanceOps.updateFile(
