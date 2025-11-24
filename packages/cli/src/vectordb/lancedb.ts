@@ -854,7 +854,31 @@ export class VectorDB implements VectorDBInterface {
           
           // If name matches, also check AST symbolType if specified
           // Semantic filtering: 'function' includes methods (arrow functions are typed as 'function')
-          if (symbolType && r.symbolType) {
+          if (symbolType) {
+            // If AST metadata available, use it for precise filtering
+            if (r.symbolType) {
+              if (symbolType === 'function') {
+                return r.symbolType === 'function' || r.symbolType === 'method';
+              } else if (symbolType === 'class') {
+                return r.symbolType === 'class';
+              } else if (symbolType === 'interface') {
+                return r.symbolType === 'interface';
+              }
+              return false; // symbolType doesn't match filter
+            }
+            
+            // Fallback: For line-based chunks, trust that name matched the right symbol type
+            // The 'symbols' array was already filtered by symbolType on line 832-835
+            return nameMatches;
+          }
+          
+          return nameMatches;
+        }
+        
+        // If no pattern, check symbolType only
+        if (symbolType) {
+          // If AST metadata available, use it for precise filtering
+          if (r.symbolType) {
             if (symbolType === 'function') {
               return r.symbolType === 'function' || r.symbolType === 'method';
             } else if (symbolType === 'class') {
@@ -862,20 +886,12 @@ export class VectorDB implements VectorDBInterface {
             } else if (symbolType === 'interface') {
               return r.symbolType === 'interface';
             }
+            return false; // symbolType doesn't match filter
           }
           
-          return nameMatches;
-        }
-        
-        // If no pattern, check symbolType only
-        if (symbolType && r.symbolType) {
-          if (symbolType === 'function') {
-            return r.symbolType === 'function' || r.symbolType === 'method';
-          } else if (symbolType === 'class') {
-            return r.symbolType === 'class';
-          } else if (symbolType === 'interface') {
-            return r.symbolType === 'interface';
-          }
+          // Fallback: For line-based chunks without AST metadata, check legacy symbols
+          // The 'symbols' array was already filtered by symbolType on line 832-835
+          return symbols.length > 0 && symbols.some((s: string) => s.length > 0 && s !== '');
         }
         
         return true;
