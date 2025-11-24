@@ -278,11 +278,15 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<void
           const useAST = isModernConfig(config)
             ? config.chunking.useAST
             : true;
+          const astFallback = isModernConfig(config)
+            ? config.chunking.astFallback
+            : 'line-based';
           
           const chunks = chunkFile(file, content, {
             chunkSize,
             chunkOverlap,
             useAST,
+            astFallback,
           });
           
           if (chunks.length === 0) {

@@ -94,6 +94,24 @@ describe('chunkFile', () => {
     expect(chunks[0].metadata.startLine).toBe(1);
     expect(chunks[0].metadata.endLine).toBe(3);
   });
+
+  it('should accept astFallback option without error', () => {
+    // Test that astFallback option doesn't break normal operation
+    const code = 'function test() { return 42; }';
+    
+    // Test with line-based fallback (default)
+    const chunks1 = chunkFile('test.ts', code, { useAST: true, astFallback: 'line-based' });
+    expect(chunks1.length).toBeGreaterThan(0);
+    
+    // Test with error fallback (should work fine for valid code)
+    const chunks2 = chunkFile('test.ts', code, { useAST: true, astFallback: 'error' });
+    expect(chunks2.length).toBeGreaterThan(0);
+  });
+
+  // Note: Tree-sitter is extremely resilient and rarely throws errors even with invalid syntax.
+  // It's designed to produce a best-effort AST even for malformed code. The astFallback: 'error'
+  // option is mainly useful for catching edge cases like the Tree-sitter "Invalid argument" error
+  // that occurs with very large files (1000+ lines).
 });
 
 describe('chunkText', () => {

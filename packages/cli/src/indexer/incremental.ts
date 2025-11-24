@@ -51,12 +51,16 @@ async function processFileContent(
   const useAST = isModernConfig(config)
     ? config.chunking.useAST
     : true;
+  const astFallback = isModernConfig(config)
+    ? config.chunking.astFallback
+    : 'line-based';
   
   // Chunk the file
   const chunks = chunkFile(filepath, content, {
     chunkSize,
     chunkOverlap,
     useAST,
+    astFallback,
   });
   
   if (chunks.length === 0) {

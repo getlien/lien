@@ -7,6 +7,7 @@ export interface ChunkOptions {
   chunkSize?: number;
   chunkOverlap?: number;
   useAST?: boolean; // Flag to enable AST-based chunking
+  astFallback?: 'line-based' | 'error'; // How to handle AST parsing errors
 }
 
 export function chunkFile(
@@ -14,7 +15,7 @@ export function chunkFile(
   content: string,
   options: ChunkOptions = {}
 ): CodeChunk[] {
-  const { chunkSize = 75, chunkOverlap = 10, useAST = true } = options;
+  const { chunkSize = 75, chunkOverlap = 10, useAST = true, astFallback = 'line-based' } = options;
   
   // Try AST-based chunking for supported languages
   if (useAST && shouldUseAST(filepath)) {
@@ -23,7 +24,12 @@ export function chunkFile(
         minChunkSize: Math.floor(chunkSize / 10),
       });
     } catch (error) {
-      // Fallback to line-based chunking on AST errors
+      // Handle AST errors based on configuration
+      if (astFallback === 'error') {
+        // Throw error if user wants strict AST-only behavior
+        throw new Error(`AST chunking failed for ${filepath}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      // Otherwise fallback to line-based chunking
       console.warn(`AST chunking failed for ${filepath}, falling back to line-based:`, error);
     }
   }
