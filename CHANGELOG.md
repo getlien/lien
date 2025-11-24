@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.13.0] - 2025-11-24
+
+### Added
+- **Add AST-based semantic chunking for TypeScript and JavaScript**
+
+
 
 ## [0.12.0] - 2025-11-23
 
