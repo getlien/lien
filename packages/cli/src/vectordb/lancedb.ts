@@ -72,6 +72,8 @@ export class VectorDB implements VectorDBInterface {
     if (!this.db) {
       throw new DatabaseError('Vector database not initialized');
     }
+    // Note: insertBatch may return null for empty batches when table is null
+    // This is correct behavior - empty batches are no-ops and don't create tables
     this.table = await batchOps.insertBatch(
       this.db,
       this.table,
