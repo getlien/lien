@@ -20,7 +20,7 @@
     "pollIntervalMs": 10000
   },
   "fileWatching": {
-    "enabled": false,
+    "enabled": true,
     "debounceMs": 1000
   },
   "frameworks": [
@@ -30,24 +30,15 @@
       "enabled": true,
       "config": {
         "include": [
-          "src/**/*.ts",
-          "src/**/*.tsx",
-          "src/**/*.js",
-          "src/**/*.jsx",
-          "src/**/*.mjs",
-          "src/**/*.cjs",
-          "lib/**/*.ts",
-          "lib/**/*.js",
-          "*.ts",
-          "*.js",
-          "*.mjs",
-          "*.cjs",
+          "**/*.ts",
+          "**/*.tsx",
+          "**/*.js",
+          "**/*.jsx",
+          "**/*.vue",
+          "**/*.mjs",
+          "**/*.cjs",
           "**/*.md",
-          "**/*.mdx",
-          "docs/**/*.md",
-          "README.md",
-          "CHANGELOG.md",
-          "CONTRIBUTING.md"
+          "**/*.mdx"
         ],
         "exclude": [
           "node_modules/**",
@@ -56,10 +47,19 @@
           "coverage/**",
           ".next/**",
           ".nuxt/**",
+          ".vite/**",
+          ".lien/**",
           "out/**",
           "*.min.js",
           "*.min.css",
-          "*.bundle.js"
+          "*.bundle.js",
+          "playwright-report/**",
+          "test-results/**",
+          "__generated__/**",
+          ".cache/**",
+          ".turbo/**",
+          ".vercel/**",
+          ".netlify/**"
         ]
       }
     },
@@ -69,24 +69,15 @@
       "enabled": true,
       "config": {
         "include": [
-          "src/**/*.ts",
-          "src/**/*.tsx",
-          "src/**/*.js",
-          "src/**/*.jsx",
-          "src/**/*.mjs",
-          "src/**/*.cjs",
-          "lib/**/*.ts",
-          "lib/**/*.js",
-          "*.ts",
-          "*.js",
-          "*.mjs",
-          "*.cjs",
+          "**/*.ts",
+          "**/*.tsx",
+          "**/*.js",
+          "**/*.jsx",
+          "**/*.vue",
+          "**/*.mjs",
+          "**/*.cjs",
           "**/*.md",
-          "**/*.mdx",
-          "docs/**/*.md",
-          "README.md",
-          "CHANGELOG.md",
-          "CONTRIBUTING.md"
+          "**/*.mdx"
         ],
         "exclude": [
           "node_modules/**",
@@ -95,10 +86,58 @@
           "coverage/**",
           ".next/**",
           ".nuxt/**",
+          ".vite/**",
+          ".lien/**",
           "out/**",
           "*.min.js",
           "*.min.css",
-          "*.bundle.js"
+          "*.bundle.js",
+          "playwright-report/**",
+          "test-results/**",
+          "__generated__/**",
+          ".cache/**",
+          ".turbo/**",
+          ".vercel/**",
+          ".netlify/**"
+        ]
+      }
+    },
+    {
+      "name": "nodejs",
+      "path": "packages/site",
+      "enabled": true,
+      "config": {
+        "include": [
+          "**/*.ts",
+          "**/*.tsx",
+          "**/*.js",
+          "**/*.jsx",
+          "**/*.vue",
+          "**/*.mjs",
+          "**/*.cjs",
+          "**/*.md",
+          "**/*.mdx"
+        ],
+        "exclude": [
+          "node_modules/**",
+          "dist/**",
+          "build/**",
+          "coverage/**",
+          ".next/**",
+          ".nuxt/**",
+          ".vite/**",
+          ".lien/**",
+          "out/**",
+          "*.min.js",
+          "*.min.css",
+          "*.bundle.js",
+          "playwright-report/**",
+          "test-results/**",
+          "__generated__/**",
+          ".cache/**",
+          ".turbo/**",
+          ".vercel/**",
+          ".netlify/**"
         ]
       }
     }
