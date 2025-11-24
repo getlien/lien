@@ -57,7 +57,13 @@ export function chunkByAST(
       }
     }
     
-    const symbolInfo = extractSymbolInfo(actualNode, content);
+    // For methods, find the parent class name
+    let parentClassName: string | undefined;
+    if (actualNode.type === 'method_definition') {
+      parentClassName = findParentClassName(actualNode);
+    }
+    
+    const symbolInfo = extractSymbolInfo(actualNode, content, parentClassName);
     
     // Extract the code for this node (use original node for full declaration)
     const nodeContent = getNodeContent(node, lines);
@@ -92,6 +98,21 @@ export function chunkByAST(
 }
 
 /**
+ * Find the parent class name for a method node
+ */
+function findParentClassName(methodNode: Parser.SyntaxNode): string | undefined {
+  let current = methodNode.parent;
+  while (current) {
+    if (current.type === 'class_declaration') {
+      const nameNode = current.childForFieldName('name');
+      return nameNode?.text;
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+/**
  * Find all top-level nodes that should become chunks
  */
 function findTopLevelNodes(rootNode: Parser.SyntaxNode): Parser.SyntaxNode[] {
@@ -100,7 +121,7 @@ function findTopLevelNodes(rootNode: Parser.SyntaxNode): Parser.SyntaxNode[] {
   const targetTypes = [
     'function_declaration',
     'function',
-    'class_declaration',
+    // Note: 'class_declaration' is NOT included here - we extract methods individually
     'interface_declaration',
     'method_definition',
     'lexical_declaration', // For const/let with arrow functions
@@ -133,9 +154,8 @@ function findTopLevelNodes(rootNode: Parser.SyntaxNode): Parser.SyntaxNode[] {
       return;
     }
     
-    // For classes, traverse the body
+    // For classes, traverse the body to extract methods (don't chunk the class itself)
     if (node.type === 'class_declaration') {
-      nodes.push(node); // Add the class itself
       const body = node.childForFieldName('body');
       if (body) {
         traverse(body, depth + 1);

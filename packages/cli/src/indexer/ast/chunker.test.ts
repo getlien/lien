@@ -57,13 +57,20 @@ class Calculator {
 
       const chunks = chunkByAST('test.ts', content);
       
-      // Should have at least the class chunk
-      const classChunk = chunks.find(c => c.metadata.symbolName === 'Calculator');
-      expect(classChunk).toBeDefined();
-      expect(classChunk?.metadata.symbolType).toBe('class');
+      // Should have chunks for each method (not the class itself)
+      const addMethod = chunks.find(c => c.metadata.symbolName === 'add');
+      const subtractMethod = chunks.find(c => c.metadata.symbolName === 'subtract');
       
-      // Methods might be included in the class chunk or as separate chunks
-      expect(chunks.length).toBeGreaterThan(0);
+      expect(addMethod).toBeDefined();
+      expect(addMethod?.metadata.symbolType).toBe('method');
+      expect(addMethod?.metadata.parentClass).toBe('Calculator');
+      
+      expect(subtractMethod).toBeDefined();
+      expect(subtractMethod?.metadata.symbolType).toBe('method');
+      expect(subtractMethod?.metadata.parentClass).toBe('Calculator');
+      
+      // Should have 2 method chunks (no class chunk)
+      expect(chunks.length).toBe(2);
     });
 
     it('should extract function metadata', () => {
