@@ -4,6 +4,8 @@
  * to ensure consistency across the codebase.
  */
 
+import { getPackageVersion } from './utils/version.js';
+
 // Chunking settings
 export const DEFAULT_CHUNK_SIZE = 75;
 export const DEFAULT_CHUNK_OVERLAP = 10;
@@ -37,11 +39,9 @@ export const DEFAULT_GIT_POLL_INTERVAL_MS = 10000; // Check every 10 seconds
 // File watching
 export const DEFAULT_DEBOUNCE_MS = 1000;
 
-// Configuration schema version (bumped when config format changes)
-// Note: This tracks config schema changes, not package version
-// v0.3.0: Added frameworks support
-// v0.14.0: Added chunking configuration
-export const CURRENT_CONFIG_VERSION = '0.14.0';
+// Configuration version - always matches package version
+// Config format is tied to the package release that introduces it
+export const CURRENT_CONFIG_VERSION = getPackageVersion();
 
 // Index format version - bump on ANY breaking change to indexing
 // Examples that require version bump:
