@@ -4,7 +4,7 @@ import { parseAST, detectLanguage, isASTSupported } from './parser.js';
 import { extractSymbolInfo, extractImports } from './symbols.js';
 
 export interface ASTChunkOptions {
-  maxChunkSize?: number;
+  maxChunkSize?: number; // Reserved for future use (smart splitting of large functions)
   minChunkSize?: number;
 }
 
@@ -21,7 +21,7 @@ export function chunkByAST(
   content: string,
   options: ASTChunkOptions = {}
 ): ASTChunk[] {
-  const { maxChunkSize = 100, minChunkSize = 5 } = options;
+  const { minChunkSize = 5 } = options;
   
   // Check if AST is supported for this file
   const language = detectLanguage(filepath);
@@ -61,18 +61,11 @@ export function chunkByAST(
     
     // Extract the code for this node (use original node for full declaration)
     const nodeContent = getNodeContent(node, lines);
-    const nodeLines = nodeContent.split('\n').length;
     
-    // If the node is too large, we might need to split it
-    if (nodeLines > maxChunkSize) {
-      // For very large functions/classes, create one chunk for the whole thing
-      // (better to have a large semantic unit than split mid-function)
-      // Future: could split large functions at logical boundaries
-      chunks.push(createChunk(filepath, node, nodeContent, symbolInfo, fileImports, language));
-    } else {
-      // Normal-sized node, create a chunk
-      chunks.push(createChunk(filepath, node, nodeContent, symbolInfo, fileImports, language));
-    }
+    // Create a chunk for this semantic unit
+    // Note: Large functions are kept as single chunks (may exceed maxChunkSize)
+    // This preserves semantic boundaries - better than splitting mid-function
+    chunks.push(createChunk(filepath, node, nodeContent, symbolInfo, fileImports, language));
   }
   
   // Handle remaining code (imports, exports, top-level statements)

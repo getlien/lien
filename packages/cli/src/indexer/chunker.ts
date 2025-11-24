@@ -20,7 +20,6 @@ export function chunkFile(
   if (useAST && shouldUseAST(filepath)) {
     try {
       return chunkByAST(filepath, content, {
-        maxChunkSize: chunkSize,
         minChunkSize: Math.floor(chunkSize / 10),
       });
     } catch (error) {
