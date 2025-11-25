@@ -247,7 +247,7 @@ Non-essential features (git tracking, file watching) are optional and can be dis
 - **Details**: See [ADR-002](decisions/0002-strategy-pattern-ast-traversal.md)
 
 ### VectorDB Module Split
-- **Split**: Monolithic 1119-line `lancedb.ts` into focused modules
+- **Split**: Monolithic 1,119-line `lancedb.ts` into focused modules
 - **Result**: `query.ts` (571L), `batch-insert.ts` (161L), `maintenance.ts` (89L), `lancedb.ts` (267L orchestrator)
 - **Benefit**: Better testability, single responsibility, no AST parsing errors
 - **Details**: See [ADR-001](decisions/0001-split-vectordb-module.md)
