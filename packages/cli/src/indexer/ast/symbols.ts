@@ -18,22 +18,22 @@ function extractFunctionInfo(
   content: string,
   parentClass?: string
 ): SymbolInfo | null {
-  const nameNode = node.childForFieldName('name');
-  if (!nameNode) return null;
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+    
+    return {
+      name: nameNode.text,
+      type: parentClass ? 'method' : 'function',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractSignature(node, content),
+      parameters: extractParameters(node, content),
+      returnType: extractReturnType(node, content),
+      complexity: calculateComplexity(node),
+    };
+  }
   
-  return {
-    name: nameNode.text,
-    type: parentClass ? 'method' : 'function',
-    startLine: node.startPosition.row + 1,
-    endLine: node.endPosition.row + 1,
-    parentClass,
-    signature: extractSignature(node, content),
-    parameters: extractParameters(node, content),
-    returnType: extractReturnType(node, content),
-    complexity: calculateComplexity(node),
-  };
-}
-
 /**
  * Extract arrow function or function expression info
  */
@@ -42,27 +42,27 @@ function extractArrowFunctionInfo(
   content: string,
   parentClass?: string
 ): SymbolInfo | null {
-  // Try to find variable name for arrow functions
-  const parent = node.parent;
-  let name = 'anonymous';
-  
-  if (parent?.type === 'variable_declarator') {
-    const nameNode = parent.childForFieldName('name');
-    name = nameNode?.text || 'anonymous';
+    // Try to find variable name for arrow functions
+    const parent = node.parent;
+    let name = 'anonymous';
+    
+    if (parent?.type === 'variable_declarator') {
+      const nameNode = parent.childForFieldName('name');
+      name = nameNode?.text || 'anonymous';
+    }
+    
+    return {
+      name,
+      type: parentClass ? 'method' : 'function',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractSignature(node, content),
+      parameters: extractParameters(node, content),
+      complexity: calculateComplexity(node),
+    };
   }
   
-  return {
-    name,
-    type: parentClass ? 'method' : 'function',
-    startLine: node.startPosition.row + 1,
-    endLine: node.endPosition.row + 1,
-    parentClass,
-    signature: extractSignature(node, content),
-    parameters: extractParameters(node, content),
-    complexity: calculateComplexity(node),
-  };
-}
-
 /**
  * Extract method definition info
  */
@@ -71,22 +71,22 @@ function extractMethodInfo(
   content: string,
   parentClass?: string
 ): SymbolInfo | null {
-  const nameNode = node.childForFieldName('name');
-  if (!nameNode) return null;
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+    
+    return {
+      name: nameNode.text,
+      type: 'method',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractSignature(node, content),
+      parameters: extractParameters(node, content),
+      returnType: extractReturnType(node, content),
+      complexity: calculateComplexity(node),
+    };
+  }
   
-  return {
-    name: nameNode.text,
-    type: 'method',
-    startLine: node.startPosition.row + 1,
-    endLine: node.endPosition.row + 1,
-    parentClass,
-    signature: extractSignature(node, content),
-    parameters: extractParameters(node, content),
-    returnType: extractReturnType(node, content),
-    complexity: calculateComplexity(node),
-  };
-}
-
 /**
  * Extract class declaration info
  */
@@ -95,18 +95,18 @@ function extractClassInfo(
   _content: string,
   _parentClass?: string
 ): SymbolInfo | null {
-  const nameNode = node.childForFieldName('name');
-  if (!nameNode) return null;
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+    
+    return {
+      name: nameNode.text,
+      type: 'class',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      signature: `class ${nameNode.text}`,
+    };
+  }
   
-  return {
-    name: nameNode.text,
-    type: 'class',
-    startLine: node.startPosition.row + 1,
-    endLine: node.endPosition.row + 1,
-    signature: `class ${nameNode.text}`,
-  };
-}
-
 /**
  * Extract interface declaration info (TypeScript)
  */
@@ -115,18 +115,18 @@ function extractInterfaceInfo(
   _content: string,
   _parentClass?: string
 ): SymbolInfo | null {
-  const nameNode = node.childForFieldName('name');
-  if (!nameNode) return null;
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+    
+    return {
+      name: nameNode.text,
+      type: 'interface',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      signature: `interface ${nameNode.text}`,
+    };
+  }
   
-  return {
-    name: nameNode.text,
-    type: 'interface',
-    startLine: node.startPosition.row + 1,
-    endLine: node.endPosition.row + 1,
-    signature: `interface ${nameNode.text}`,
-  };
-}
-
 /**
  * Map of AST node types to their specialized extractors
  */

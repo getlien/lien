@@ -38,5 +38,8 @@
   "license": "MIT",
   "engines": {
     "node": ">=22.21.0"
+  },
+  "dependencies": {
+    "apache-arrow": "^14.0.2"
   }
 }
