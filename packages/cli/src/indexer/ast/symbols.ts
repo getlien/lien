@@ -131,6 +131,7 @@ function extractInterfaceInfo(
  * Map of AST node types to their specialized extractors
  */
 const symbolExtractors: Record<string, SymbolExtractor> = {
+  // TypeScript/JavaScript
   'function_declaration': extractFunctionInfo,
   'function': extractFunctionInfo,
   'arrow_function': extractArrowFunctionInfo,
@@ -138,6 +139,10 @@ const symbolExtractors: Record<string, SymbolExtractor> = {
   'method_definition': extractMethodInfo,
   'class_declaration': extractClassInfo,
   'interface_declaration': extractInterfaceInfo,
+  
+  // PHP
+  'function_definition': extractFunctionInfo,   // PHP functions
+  'method_declaration': extractMethodInfo,       // PHP methods
 };
 
 /**
@@ -225,12 +230,13 @@ function extractReturnType(node: Parser.SyntaxNode, _content: string): string | 
  * Calculate cyclomatic complexity of a function
  * 
  * Complexity = 1 (base) + number of decision points
- * Decision points: if, while, do...while, for, for...in, for...of, case, catch, &&, ||, ?:
+ * Decision points: if, while, do...while, for, for...in, for...of, foreach, case, catch, &&, ||, ?:
  */
 export function calculateComplexity(node: Parser.SyntaxNode): number {
   let complexity = 1; // Base complexity
   
   const decisionPoints = [
+    // TypeScript/JavaScript
     'if_statement',
     'while_statement',
     'do_statement',        // do...while loops
@@ -240,7 +246,10 @@ export function calculateComplexity(node: Parser.SyntaxNode): number {
     'switch_case',
     'catch_clause',
     'ternary_expression',
-    'binary_expression', // For && and ||
+    'binary_expression',   // For && and ||
+    
+    // PHP
+    'foreach_statement',   // PHP foreach loops
   ];
   
   function traverse(n: Parser.SyntaxNode) {
