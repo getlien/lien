@@ -2,6 +2,7 @@ import type Parser from 'tree-sitter';
 import type { ASTChunk } from './types.js';
 import { parseAST, detectLanguage, isASTSupported } from './parser.js';
 import { extractSymbolInfo, extractImports } from './symbols.js';
+import { getTraverser } from './traversers/index.js';
 
 export interface ASTChunkOptions {
   maxChunkSize?: number; // Reserved for future use (smart splitting of large functions)
@@ -50,27 +51,27 @@ export function chunkByAST(
   const lines = content.split('\n');
   const rootNode = parseResult.tree.rootNode;
   
+  // Get language-specific traverser
+  const traverser = getTraverser(language);
+  
   // Extract file-level imports once
   const fileImports = extractImports(rootNode);
   
   // Find all top-level function and class declarations
-  const topLevelNodes = findTopLevelNodes(rootNode);
+  const topLevelNodes = findTopLevelNodes(rootNode, traverser);
   
   for (const node of topLevelNodes) {
     // For variable declarations, try to find the function inside
     let actualNode = node;
-    if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
-      const funcNode = findActualFunctionNode(node);
-      if (funcNode) {
-        actualNode = funcNode;
+    if (traverser.isDeclarationWithFunction(node)) {
+      const declInfo = traverser.findFunctionInDeclaration(node);
+      if (declInfo.functionNode) {
+        actualNode = declInfo.functionNode;
       }
     }
     
-    // For methods, find the parent class name
-    let parentClassName: string | undefined;
-    if (actualNode.type === 'method_definition') {
-      parentClassName = findParentClassName(actualNode);
-    }
+    // For methods, find the parent container name (e.g., class name)
+    const parentClassName = traverser.findParentContainerName(actualNode);
     
     const symbolInfo = extractSymbolInfo(actualNode, content, parentClassName);
     
@@ -107,73 +108,49 @@ export function chunkByAST(
 }
 
 /**
- * Find the parent class name for a method node
- */
-function findParentClassName(methodNode: Parser.SyntaxNode): string | undefined {
-  let current = methodNode.parent;
-  while (current) {
-    if (current.type === 'class_declaration') {
-      const nameNode = current.childForFieldName('name');
-      return nameNode?.text;
-    }
-    current = current.parent;
-  }
-  return undefined;
-}
-
-/**
  * Find all top-level nodes that should become chunks
+ * 
+ * Uses a language-specific traverser to handle different AST structures.
+ * This function is now language-agnostic - all language-specific logic
+ * is delegated to the traverser.
+ * 
+ * @param rootNode - Root AST node
+ * @param traverser - Language-specific traverser
+ * @returns Array of nodes to extract as chunks
  */
-function findTopLevelNodes(rootNode: Parser.SyntaxNode): Parser.SyntaxNode[] {
+function findTopLevelNodes(
+  rootNode: Parser.SyntaxNode,
+  traverser: ReturnType<typeof getTraverser>
+): Parser.SyntaxNode[] {
   const nodes: Parser.SyntaxNode[] = [];
   
-  const targetTypes = [
-    'function_declaration',
-    'function',
-    // Note: 'class_declaration' is NOT included here - we extract methods individually
-    'interface_declaration',
-    'method_definition',
-    'lexical_declaration', // For const/let with arrow functions
-    'variable_declaration', // For var with functions
-  ];
-  
   function traverse(node: Parser.SyntaxNode, depth: number) {
-    // For lexical declarations (const/let), check if it contains an arrow function
-    if ((node.type === 'lexical_declaration' || node.type === 'variable_declaration') && depth === 0) {
-      // Check if this declaration contains a function
-      const hasFunction = findFunctionInDeclaration(node);
-      if (hasFunction) {
+    // Check if this is a declaration that might contain a function
+    if (traverser.isDeclarationWithFunction(node) && depth === 0) {
+      const declInfo = traverser.findFunctionInDeclaration(node);
+      if (declInfo.hasFunction) {
         nodes.push(node);
         return;
       }
     }
     
-    // Only consider top-level or direct children of classes
-    if (depth <= 1 && targetTypes.includes(node.type)) {
+    // Check if this is a target node type (function, method, etc.)
+    if (depth <= 1 && traverser.targetNodeTypes.includes(node.type)) {
       nodes.push(node);
       return; // Don't traverse into this node
     }
     
-    // For class bodies, traverse methods
-    if (node.type === 'class_body') {
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child) traverse(child, depth);
-      }
-      return;
-    }
-    
-    // For classes, traverse the body to extract methods (don't chunk the class itself)
-    if (node.type === 'class_declaration') {
-      const body = node.childForFieldName('body');
+    // Check if this is a container whose children should be extracted
+    if (traverser.shouldExtractChildren(node)) {
+      const body = traverser.getContainerBody(node);
       if (body) {
         traverse(body, depth + 1);
       }
       return;
     }
     
-    // Traverse children for program and export statements
-    if (node.type === 'program' || node.type === 'export_statement') {
+    // Check if we should traverse this node's children
+    if (traverser.shouldTraverseChildren(node)) {
       for (let i = 0; i < node.namedChildCount; i++) {
         const child = node.namedChild(i);
         if (child) traverse(child, depth);
@@ -183,59 +160,6 @@ function findTopLevelNodes(rootNode: Parser.SyntaxNode): Parser.SyntaxNode[] {
   
   traverse(rootNode, 0);
   return nodes;
-}
-
-/**
- * Check if a declaration node contains a function (arrow, function expression, etc.)
- */
-function findFunctionInDeclaration(node: Parser.SyntaxNode): boolean {
-  const functionTypes = ['arrow_function', 'function_expression', 'function'];
-  
-  function search(n: Parser.SyntaxNode, depth: number): boolean {
-    if (depth > 3) return false; // Don't search too deep
-    
-    if (functionTypes.includes(n.type)) {
-      return true;
-    }
-    
-    for (let i = 0; i < n.childCount; i++) {
-      const child = n.child(i);
-      if (child && search(child, depth + 1)) {
-        return true;
-      }
-    }
-    
-    return false;
-  }
-  
-  return search(node, 0);
-}
-
-/**
- * Find the actual function node within a declaration
- */
-function findActualFunctionNode(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
-  const functionTypes = ['arrow_function', 'function_expression', 'function'];
-  
-  function search(n: Parser.SyntaxNode, depth: number): Parser.SyntaxNode | null {
-    if (depth > 3) return null;
-    
-    if (functionTypes.includes(n.type)) {
-      return n;
-    }
-    
-    for (let i = 0; i < n.childCount; i++) {
-      const child = n.child(i);
-      if (child) {
-        const result = search(child, depth + 1);
-        if (result) return result;
-      }
-    }
-    
-    return null;
-  }
-  
-  return search(node, 0);
 }
 
 /**
