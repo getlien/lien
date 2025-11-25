@@ -28,6 +28,8 @@ graph TB
         INDEXER[Indexer]
         SCANNER[File Scanner]
         CHUNKER[Code Chunker]
+        AST[AST Parser]
+        TRAVERSER[Language Traversers]
         SYMBOLS[Symbol Extractor]
         TESTASSOC[Test Association Manager]
     end
@@ -35,6 +37,9 @@ graph TB
     subgraph "Data Layer"
         EMBEDDINGS[Embeddings Service]
         VECTORDB[Vector Database]
+        QUERY[Query Operations]
+        BATCHINS[Batch Insert]
+        MAINT[Maintenance Ops]
         CACHE[Embedding Cache]
     end
     
@@ -81,11 +86,18 @@ graph TB
     INDEXER --> EMBEDDINGS
     INDEXER --> VECTORDB
     SCANNER --> FRAMEWORK
+    CHUNKER --> AST
+    AST --> TRAVERSER
     
     %% Data Layer
     EMBEDDINGS --> CACHE
     EMBEDDINGS --> TRANSFORMERS
-    VECTORDB --> LANCEDB
+    VECTORDB --> QUERY
+    VECTORDB --> BATCHINS
+    VECTORDB --> MAINT
+    QUERY --> LANCEDB
+    BATCHINS --> LANCEDB
+    MAINT --> LANCEDB
     
     %% Optional Services
     MCP --> GIT
@@ -103,8 +115,8 @@ graph TB
     
     class CLI,INIT,INDEX,SERVE,STATUS cliClass
     class MCP,TOOLS,SEMANTIC,SIMILAR,CONTEXT,LIST mcpClass
-    class CONFIG,INDEXER,SCANNER,CHUNKER,SYMBOLS,TESTASSOC coreClass
-    class EMBEDDINGS,VECTORDB,CACHE dataClass
+    class CONFIG,INDEXER,SCANNER,CHUNKER,AST,TRAVERSER,SYMBOLS,TESTASSOC coreClass
+    class EMBEDDINGS,VECTORDB,QUERY,BATCHINS,MAINT,CACHE dataClass
     class GIT,WATCHER,FRAMEWORK optionalClass
     class TRANSFORMERS,LANCEDB,GITCMD externalClass
 ```
@@ -130,14 +142,19 @@ graph TB
 - **ConfigService**: Manages configuration loading, saving, validation, and migration
 - **Indexer**: Orchestrates the indexing workflow
 - **File Scanner**: Scans codebase respecting .gitignore and framework boundaries
-- **Code Chunker**: Splits files into overlapping chunks for better context
+- **Code Chunker**: Splits files using AST-based semantic chunking or line-based fallback
+- **AST Parser**: Parses code into Abstract Syntax Trees using Tree-sitter
+- **Language Traversers**: Language-specific logic for traversing AST nodes (Strategy Pattern)
 - **Symbol Extractor**: Extracts functions, classes, and interfaces from code
-- **Test Association Manager**: Links test files to source files via two-pass detection
+- **Test Association Manager**: Links test files to source files via convention and import analysis
 
 ### Data Layer
 - **Embeddings Service**: Generates semantic embeddings from code
 - **Embedding Cache**: LRU cache for frequently searched queries
-- **Vector Database**: Stores and searches code chunks with LanceDB
+- **Vector Database**: Main VectorDB class orchestrating operations
+  - **Query Operations**: Semantic search, filtering, and symbol queries
+  - **Batch Insert**: Batch vector insertion with retry logic
+  - **Maintenance Ops**: CRUD operations (clear, delete, update)
 
 ### Optional Services
 - **Git State Tracker**: Monitors repository changes for incremental indexing
@@ -215,4 +232,37 @@ Non-essential features (git tracking, file watching) are optional and can be dis
 - Cloud sync (optional)
 - Multi-repo support
 - Team collaboration features
+
+## Recent Architectural Improvements (v0.13.0-v0.14.0)
+
+### AST-Based Semantic Chunking
+- **Replaced**: Line-based chunking with fixed overlap
+- **With**: Tree-sitter AST parsing for semantic boundaries
+- **Benefit**: Functions never split, 30-35% better search quality
+- **Details**: See [ADR-003](decisions/0003-ast-based-chunking.md)
+
+### Language-Agnostic Traversal (Strategy Pattern)
+- **Extracted**: Language-specific AST logic into traverser classes
+- **Benefit**: Adding new languages (Python, Go, Rust) now takes 2-3 hours instead of 2 days
+- **Details**: See [ADR-002](decisions/0002-strategy-pattern-ast-traversal.md)
+
+### VectorDB Module Split
+- **Split**: Monolithic 1,119-line `lancedb.ts` into focused modules
+- **Result**: `query.ts` (571L), `batch-insert.ts` (161L), `maintenance.ts` (89L), `lancedb.ts` (267L orchestrator)
+- **Benefit**: Better testability, single responsibility, no AST parsing errors
+- **Details**: See [ADR-001](decisions/0001-split-vectordb-module.md)
+
+### Test Association Detection
+- **Added**: Automatic detection of test-source relationships
+- **Method**: Hybrid convention-based + import analysis
+- **Accuracy**: 95% for 12+ test frameworks across 7+ languages
+- **Details**: See [ADR-004](decisions/0004-test-association-detection.md)
+
+## Architectural Decision Records
+
+All major architectural decisions are documented in [docs/architecture/decisions/](decisions/):
+- [ADR-001: Split VectorDB Module](decisions/0001-split-vectordb-module.md)
+- [ADR-002: Strategy Pattern for AST Traversal](decisions/0002-strategy-pattern-ast-traversal.md)
+- [ADR-003: AST-Based Semantic Chunking](decisions/0003-ast-based-chunking.md)
+- [ADR-004: Test Association Detection](decisions/0004-test-association-detection.md)
 

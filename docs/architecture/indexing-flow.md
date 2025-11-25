@@ -84,15 +84,22 @@ sequenceDiagram
     
     par Process File 1
         CLI->>CLI: Read file content
-        CLI->>CLI: Detect language
-        CLI->>CLI: Chunk file (75 lines, 10 overlap)
+        CLI->>CLI: Detect language (TS/JS/etc.)
+        alt Language supports AST
+            CLI->>CLI: Parse with Tree-sitter
+            CLI->>CLI: Get LanguageTraverser
+            CLI->>CLI: Extract semantic chunks (functions, methods)
+            CLI->>CLI: Calculate complexity metrics
+        else Unsupported or fallback
+            CLI->>CLI: Chunk by lines (75 lines, 10 overlap)
+        end
         CLI->>CLI: Extract symbols
         CLI->>CLI: Add test associations
         CLI->>CLI: Accumulate chunks
     and Process File 2
         CLI->>CLI: Read file content
         CLI->>CLI: Detect language
-        CLI->>CLI: Chunk file
+        CLI->>CLI: Chunk file (AST or line-based)
         CLI->>CLI: Extract symbols
         CLI->>CLI: Add test associations
         CLI->>CLI: Accumulate chunks
@@ -232,55 +239,135 @@ sequenceDiagram
 
 ## Chunking Strategy
 
-Visual representation of how files are chunked with overlap:
+Lien uses **AST-based semantic chunking** for supported languages (TypeScript, JavaScript) and falls back to line-based chunking for others.
+
+### AST-Based Semantic Chunking (v0.13.0+)
 
 ```mermaid
 graph TD
-    subgraph "Original File (200 lines)"
-        L1_75["Lines 1-75<br/>(Imports, Class Definition)"]
-        L76_150["Lines 76-150<br/>(Methods, Business Logic)"]
-        L151_200["Lines 151-200<br/>(Helper Functions)"]
+    subgraph "Source File (calculator.ts)"
+        IMPORTS["import statements<br/>(lines 1-3)"]
+        CLASS["class Calculator {<br/>(lines 5-6)"]
+        ADD["  add(a, b) { ... }<br/>(lines 7-10)"]
+        SUB["  subtract(a, b) { ... }<br/>(lines 12-15)"]
+        MUL["  multiply(a, b) { ... }<br/>(lines 17-25)"]
+        CLOSE["}<br/>(line 26)"]
     end
     
-    subgraph "Chunks (size=75, overlap=10)"
-        C1["Chunk 1<br/>Lines 1-75"]
-        C2["Chunk 2<br/>Lines 66-140<br/>(overlaps 10 lines before)"]
-        C3["Chunk 3<br/>Lines 131-200<br/>(overlaps 10 lines before)"]
+    subgraph "AST Analysis"
+        PARSE["Parse with Tree-sitter"]
+        TRAVERSE["Get LanguageTraverser<br/>(Strategy Pattern)"]
+        EXTRACT["Extract top-level nodes<br/>(methods, functions)"]
     end
     
-    L1_75 --> C1
-    L76_150 --> C2
-    L151_200 --> C3
+    subgraph "Semantic Chunks"
+        CHUNK1["Chunk 1: Import block<br/>Lines 1-3<br/>Type: block"]
+        CHUNK2["Chunk 2: add method<br/>Lines 7-10<br/>Type: function<br/>Parent: Calculator<br/>Complexity: 1"]
+        CHUNK3["Chunk 3: subtract method<br/>Lines 12-15<br/>Type: function<br/>Parent: Calculator<br/>Complexity: 1"]
+        CHUNK4["Chunk 4: multiply method<br/>Lines 17-25<br/>Type: function<br/>Parent: Calculator<br/>Complexity: 3"]
+    end
     
-    C1 -.->|Overlap 10| C2
-    C2 -.->|Overlap 10| C3
+    IMPORTS --> PARSE
+    CLASS --> PARSE
+    ADD --> PARSE
+    SUB --> PARSE
+    MUL --> PARSE
+    CLOSE --> PARSE
     
-    style C1 fill:#e1f5ff
-    style C2 fill:#f3e5f5
-    style C3 fill:#e8f5e9
+    PARSE --> TRAVERSE
+    TRAVERSE --> EXTRACT
+    EXTRACT --> CHUNK1
+    EXTRACT --> CHUNK2
+    EXTRACT --> CHUNK3
+    EXTRACT --> CHUNK4
+    
+    style CHUNK2 fill:#e1f5ff
+    style CHUNK3 fill:#f3e5f5
+    style CHUNK4 fill:#e8f5e9
 ```
 
-### Why Overlap?
+### Key Advantages of AST Chunking
 
-Consider a function at the boundary:
-
+**❌ Old (Line-Based):**
 ```typescript
-// Lines 70-80 (chunk boundary at line 75)
-
-// Chunk 1 ends here (line 75)
-export function calculateTotal(
-  items: Item[]
-): number {
-  return items.reduce(
-    // Chunk 2 starts here (line 66, includes 10-line overlap)
-    (sum, item) => sum + item.price,
-    0
-  );
+// Chunk 1 (lines 1-75) - Function split!
+class Calculator {
+  multiply(a: number, b: number): number {
+    let result = 0;
+    for (let i = 0; i < b; i++) {
+      result += a;
+    }
+    
+// Chunk 2 (lines 66-140) - Missing function start!
+    return result;
+  }
 }
 ```
 
-**Without overlap:** Function split across chunks → poor search results
-**With overlap:** Full function in both chunks → better search results
+**✅ New (AST-Based):**
+```typescript
+// Chunk: multiply method (complete semantic unit)
+multiply(a: number, b: number): number {
+  let result = 0;
+  for (let i = 0; i < b; i++) {
+    result += a;
+  }
+  return result;
+}
+
+// Metadata:
+{
+  "symbolName": "multiply",
+  "symbolType": "method",
+  "parentClass": "Calculator",
+  "complexity": 3,
+  "parameters": ["a: number", "b: number"],
+  "signature": "multiply(a: number, b: number): number"
+}
+```
+
+### Language Traverser (Strategy Pattern)
+
+Each language has a dedicated traverser implementing the `LanguageTraverser` interface:
+
+```mermaid
+graph LR
+    CHUNKER["Chunker<br/>(language-agnostic)"]
+    REGISTRY["Traverser Registry"]
+    TS["TypeScriptTraverser"]
+    JS["JavaScriptTraverser"]
+    PY["PythonTraverser<br/>(future)"]
+    
+    CHUNKER -->|getTraverser(language)| REGISTRY
+    REGISTRY -->|typescript| TS
+    REGISTRY -->|javascript| JS
+    REGISTRY -->|python| PY
+    
+    TS -.->|"Node types:<br/>function_declaration<br/>method_definition<br/>class_declaration"| TS
+    JS -.->|"Same as TS"| JS
+    PY -.->|"Node types:<br/>function_definition<br/>class_definition"| PY
+```
+
+**Traverser responsibilities:**
+- Define target node types (`function_declaration`, `class_definition`, etc.)
+- Identify containers to extract children from (classes)
+- Find parent context (class name for methods)
+- Detect functions in declarations (arrow functions in const/let)
+
+See [ADR-002: Strategy Pattern for AST Traversal](decisions/0002-strategy-pattern-ast-traversal.md) for details.
+
+### Fallback to Line-Based Chunking
+
+AST chunking automatically falls back to line-based for:
+- **Unsupported languages** (Python, Go, Rust - until traversers are added)
+- **Very large files** (>1000 lines trigger Tree-sitter buffer limits)
+- **Parse errors** (malformed syntax)
+
+**Line-based chunking (fallback):**
+- Fixed chunk size (default: 75 lines)
+- Fixed overlap (default: 10 lines)
+- No semantic awareness
+- Still works, just less optimal
 
 ## Performance Characteristics
 

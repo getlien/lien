@@ -53,9 +53,10 @@ flowchart TB
         NORMALIZE[Normalize Vectors]
     end
     
-    subgraph "Vector Storage"
+    subgraph "Vector Storage (VectorDB Module)"
         PREP_INSERT[Prepare Insert]
-        BATCH_INSERT[Batch Insert to LanceDB]
+        BATCH_OPS[batch-insert.ts:<br/>Insert with Retry Logic]
+        LANCE_INSERT[LanceDB Table.add()]
         UPDATE_INDEX[Update Index Version]
         WRITE_VERSION[Write Version File]
     end
@@ -95,8 +96,9 @@ flowchart TB
     GENERATE_EMB --> NORMALIZE
     
     NORMALIZE --> PREP_INSERT
-    PREP_INSERT --> BATCH_INSERT
-    BATCH_INSERT --> UPDATE_INDEX
+    PREP_INSERT --> BATCH_OPS
+    BATCH_OPS --> LANCE_INSERT
+    LANCE_INSERT --> UPDATE_INDEX
     UPDATE_INDEX --> WRITE_VERSION
     WRITE_VERSION --> END
     
@@ -113,7 +115,7 @@ flowchart TB
     class CONVENTION_DETECT,PATTERN_MATCH,DIR_MATCH,ASSOC_MAP1,IMPORT_ANALYSIS,PARSE_IMPORTS,RESOLVE_PATHS,ASSOC_MAP2 testClass
     class READ_FILE,DETECT_LANG,CHUNK_FILE,EXTRACT_SYMBOLS,ADD_METADATA processClass
     class BATCH_CHUNKS,TOKENIZE,GENERATE_EMB,NORMALIZE embedClass
-    class PREP_INSERT,BATCH_INSERT,UPDATE_INDEX,WRITE_VERSION storageClass
+    class PREP_INSERT,BATCH_OPS,LANCE_INSERT,UPDATE_INDEX,WRITE_VERSION storageClass
 ```
 
 ## Search Data Flow
@@ -139,10 +141,12 @@ flowchart TB
         GET_VECTOR[Get Query Vector]
     end
     
-    subgraph "Vector Search"
+    subgraph "Vector Search (query.ts)"
         LOAD_INDEX[Load Vector Index]
-        CALC_SIMILARITY[Calculate Cosine Similarity]
-        RANK_RESULTS[Rank by Similarity]
+        CALC_SIMILARITY[LanceDB Vector Search]
+        BOOST[Apply Query Boosting]
+        CLASSIFY[Classify Query Intent]
+        RANK_RESULTS[Rank by Relevance]
         APPLY_LIMIT[Apply Result Limit]
     end
     
@@ -175,7 +179,9 @@ flowchart TB
     
     GET_VECTOR --> LOAD_INDEX
     LOAD_INDEX --> CALC_SIMILARITY
-    CALC_SIMILARITY --> RANK_RESULTS
+    CALC_SIMILARITY --> CLASSIFY
+    CLASSIFY --> BOOST
+    BOOST --> RANK_RESULTS
     RANK_RESULTS --> APPLY_LIMIT
     
     APPLY_LIMIT --> FETCH_METADATA
@@ -196,7 +202,7 @@ flowchart TB
     
     class RECEIVE,VALIDATE,EXTRACT mcpClass
     class CHECK_CACHE,CACHE_HIT,TOKENIZE,GENERATE,STORE_CACHE,GET_VECTOR embedClass
-    class LOAD_INDEX,CALC_SIMILARITY,RANK_RESULTS,APPLY_LIMIT searchClass
+    class LOAD_INDEX,CALC_SIMILARITY,BOOST,CLASSIFY,RANK_RESULTS,APPLY_LIMIT searchClass
     class FETCH_METADATA,LOAD_TEST_ASSOC,FORMAT_RESULTS,ADD_INDEX_INFO processClass
     class BUILD_RESPONSE,RETURN responseClass
 ```
@@ -693,4 +699,124 @@ Update File:
 
 If any step fails → Rollback → File remains in old state
 ```
+
+## VectorDB Module Architecture (v0.14.0)
+
+The Vector Database module is split into focused sub-modules for better maintainability and single responsibility.
+
+### Module Structure
+
+```mermaid
+graph TB
+    subgraph "VectorDB Class (lancedb.ts - Orchestrator)"
+        INIT[initialize]
+        INSERT[insertBatch]
+        SEARCH[search]
+        SCAN[scanWithFilter]
+        QUERY[querySymbols]
+        CLEAR[clear]
+        DELETE[deleteByFile]
+        UPDATE[updateFile]
+    end
+    
+    subgraph "query.ts - Search Operations"
+        SEARCH_OP[search<br/>Vector similarity search]
+        SCAN_OP[scanWithFilter<br/>Filtered table scans]
+        QUERY_OP[querySymbols<br/>Symbol-based queries]
+        BOOST_OP[Query boosting logic]
+        INTENT_OP[Intent classification]
+    end
+    
+    subgraph "batch-insert.ts - Batch Operations"
+        INSERT_OP[insertBatch<br/>Main batch insert]
+        INTERNAL[insertBatchInternal<br/>Retry queue logic]
+        SPLIT[Batch splitting<br/>(max 1000 records)]
+    end
+    
+    subgraph "maintenance.ts - CRUD Operations"
+        CLEAR_OP[clear<br/>Drop table]
+        DELETE_OP[deleteByFile<br/>Remove file chunks]
+        UPDATE_OP[updateFile<br/>Delete + Insert]
+    end
+    
+    subgraph "LanceDB (External)"
+        LANCE[LanceDB Table<br/>Vector storage]
+    end
+    
+    %% Connections
+    SEARCH --> SEARCH_OP
+    SCAN --> SCAN_OP
+    QUERY --> QUERY_OP
+    INSERT --> INSERT_OP
+    CLEAR --> CLEAR_OP
+    DELETE --> DELETE_OP
+    UPDATE --> UPDATE_OP
+    
+    SEARCH_OP --> LANCE
+    SCAN_OP --> LANCE
+    QUERY_OP --> LANCE
+    INSERT_OP --> INTERNAL
+    INTERNAL --> LANCE
+    CLEAR_OP --> LANCE
+    DELETE_OP --> LANCE
+    UPDATE_OP --> DELETE_OP
+    UPDATE_OP --> INSERT_OP
+    
+    %% Styling
+    classDef orchestrator fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef queryClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef insertClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef maintClass fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef externalClass fill:#f5f5f5,stroke:#424242,stroke-width:2px
+    
+    class INIT,INSERT,SEARCH,SCAN,QUERY,CLEAR,DELETE,UPDATE orchestrator
+    class SEARCH_OP,SCAN_OP,QUERY_OP,BOOST_OP,INTENT_OP queryClass
+    class INSERT_OP,INTERNAL,SPLIT insertClass
+    class CLEAR_OP,DELETE_OP,UPDATE_OP maintClass
+    class LANCE externalClass
+```
+
+### Module Responsibilities
+
+**`lancedb.ts` (267 lines)** - Main orchestrator
+- Initializes database connection
+- Delegates operations to sub-modules
+- Manages table state
+- Provides public API
+
+**`query.ts` (571 lines)** - Search and retrieval
+- `search()` - Vector similarity search with query boosting
+- `scanWithFilter()` - Filtered table scans (by language, pattern)
+- `querySymbols()` - Symbol-based queries (functions, classes, interfaces)
+- Query intent classification
+- Relevance calculation
+
+**`batch-insert.ts` (161 lines)** - Batch operations
+- `insertBatch()` - Main entry point for batch insertion
+- `insertBatchInternal()` - Internal queue-based retry logic
+- Handles batch splitting (max 1000 records per batch)
+- Automatic retry with exponential backoff
+
+**`maintenance.ts` (89 lines)** - CRUD operations
+- `clear()` - Drop table (full reindex)
+- `deleteByFile()` - Remove all chunks for a file
+- `updateFile()` - Atomic file update (delete + insert)
+
+### Benefits of Split Architecture
+
+**Before (v0.13.0):**
+- ❌ Single 1,119-line file
+- ❌ Exceeded AST parsing limits
+- ❌ Mixed concerns (query + insert + maintenance)
+- ❌ Hard to test in isolation
+
+**After (v0.14.0):**
+- ✅ 4 focused files (267 + 571 + 161 + 89 lines)
+- ✅ All files parse successfully with AST
+- ✅ Single responsibility per module
+- ✅ Easy to test independently
+- ✅ +28 new unit tests
+- ✅ Coverage improved: 76.84% → 80.09%
+
+See [ADR-001: Split VectorDB Module](decisions/0001-split-vectordb-module.md) for full details.
 
