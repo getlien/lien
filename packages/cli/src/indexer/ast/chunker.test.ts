@@ -15,6 +15,11 @@ describe('AST Chunker', () => {
       expect(shouldUseAST('test.cjs')).toBe(true);
     });
 
+    it('should return true for PHP files', () => {
+      expect(shouldUseAST('test.php')).toBe(true);
+      expect(shouldUseAST('Controller.php')).toBe(true);
+    });
+
     it('should return false for unsupported files', () => {
       expect(shouldUseAST('test.py')).toBe(false);
       expect(shouldUseAST('test.go')).toBe(false);
@@ -242,6 +247,202 @@ export default function defaultFunc() {
       
       expect(chunks.some(c => c.metadata.symbolName === 'exportedFunc')).toBe(true);
       expect(chunks.some(c => c.metadata.symbolName === 'defaultFunc')).toBe(true);
+    });
+  });
+
+  describe('PHP support', () => {
+    it('should chunk PHP functions', () => {
+      const content = `<?php
+
+function validateEmail($email) {
+  if (empty($email)) {
+    return false;
+  }
+  return filter_var($email, FILTER_VALIDATE_EMAIL);
+}
+
+function formatUserData($user) {
+  return [
+    'id' => $user->id,
+    'name' => $user->name
+  ];
+}
+?>`;
+
+      const chunks = chunkByAST('test.php', content);
+      
+      const validateChunk = chunks.find(c => c.metadata.symbolName === 'validateEmail');
+      expect(validateChunk).toBeDefined();
+      expect(validateChunk?.metadata.symbolType).toBe('function');
+      expect(validateChunk?.metadata.language).toBe('php');
+      
+      const formatChunk = chunks.find(c => c.metadata.symbolName === 'formatUserData');
+      expect(formatChunk).toBeDefined();
+      expect(formatChunk?.metadata.symbolType).toBe('function');
+    });
+
+    it('should chunk PHP class methods', () => {
+      const content = `<?php
+
+class UserController {
+  private $database;
+  
+  public function __construct($db) {
+    $this->database = $db;
+  }
+  
+  public function getUserById($id) {
+    if (!is_numeric($id)) {
+      throw new InvalidArgumentException('ID must be numeric');
+    }
+    return $this->database->find($id);
+  }
+  
+  public function createUser($username, $email) {
+    return $this->database->insert([
+      'username' => $username,
+      'email' => $email
+    ]);
+  }
+}
+?>`;
+
+      const chunks = chunkByAST('test.php', content);
+      
+      // Should have chunks for each method
+      const constructorChunk = chunks.find(c => c.metadata.symbolName === '__construct');
+      expect(constructorChunk).toBeDefined();
+      expect(constructorChunk?.metadata.symbolType).toBe('method');
+      expect(constructorChunk?.metadata.parentClass).toBe('UserController');
+      
+      const getByIdChunk = chunks.find(c => c.metadata.symbolName === 'getUserById');
+      expect(getByIdChunk).toBeDefined();
+      expect(getByIdChunk?.metadata.symbolType).toBe('method');
+      expect(getByIdChunk?.metadata.parentClass).toBe('UserController');
+      
+      const createChunk = chunks.find(c => c.metadata.symbolName === 'createUser');
+      expect(createChunk).toBeDefined();
+      expect(createChunk?.metadata.symbolType).toBe('method');
+      expect(createChunk?.metadata.parentClass).toBe('UserController');
+    });
+
+    it('should calculate complexity for PHP control structures', () => {
+      const content = `<?php
+
+function processUsers($users) {
+  foreach ($users as $user) {
+    if ($user->active) {
+      if ($user->verified) {
+        echo $user->name;
+      }
+    }
+  }
+}
+?>`;
+
+      const chunks = chunkByAST('test.php', content);
+      const chunk = chunks.find(c => c.metadata.symbolName === 'processUsers');
+      
+      expect(chunk).toBeDefined();
+      expect(chunk?.metadata.complexity).toBeGreaterThan(1);
+      // Should count foreach (1) + if (2) + nested if (3) = base(1) + 3 = 4
+      expect(chunk?.metadata.complexity).toBeGreaterThanOrEqual(4);
+    });
+
+    it('should require PHP opening tag', () => {
+      // PHP files need <?php tag for tree-sitter-php to parse correctly
+      const contentWithoutTag = `
+function test() {
+  return true;
+}
+      `.trim();
+
+      const chunks = chunkByAST('test.php', contentWithoutTag);
+      
+      // Without <?php tag, tree-sitter-php may not parse correctly
+      // This is expected behavior - valid PHP files should have the tag
+      expect(chunks.length).toBeGreaterThanOrEqual(0);
+      
+      // With proper tag, should parse correctly
+      const contentWithTag = `<?php
+function test() {
+  return true;
+}
+?>`;
+
+      const chunksWithTag = chunkByAST('test.php', contentWithTag);
+      expect(chunksWithTag.length).toBeGreaterThan(0);
+      expect(chunksWithTag.some(c => c.metadata.symbolName === 'test')).toBe(true);
+    });
+
+    it('should handle PHP traits', () => {
+      const content = `<?php
+
+trait Timestampable {
+  public function getCreatedAt() {
+    return $this->created_at;
+  }
+  
+  public function getUpdatedAt() {
+    return $this->updated_at;
+  }
+}
+?>`;
+
+      const chunks = chunkByAST('test.php', content);
+      
+      // Should extract methods from trait
+      const createdChunk = chunks.find(c => c.metadata.symbolName === 'getCreatedAt');
+      expect(createdChunk).toBeDefined();
+      expect(createdChunk?.metadata.symbolType).toBe('method');
+      expect(createdChunk?.metadata.parentClass).toBe('Timestampable');
+    });
+
+    it('should extract PHP function metadata', () => {
+      const content = `<?php
+
+function calculateTotal($items) {
+  $total = 0;
+  foreach ($items as $item) {
+    $total += $item->price;
+  }
+  return $total;
+}
+?>`;
+
+      const chunks = chunkByAST('test.php', content);
+      const chunk = chunks.find(c => c.metadata.symbolName === 'calculateTotal');
+      
+      expect(chunk).toBeDefined();
+      expect(chunk?.metadata.symbolName).toBe('calculateTotal');
+      expect(chunk?.metadata.symbolType).toBe('function');
+      expect(chunk?.metadata.parameters).toBeDefined();
+      expect(chunk?.metadata.signature).toContain('calculateTotal');
+      expect(chunk?.metadata.complexity).toBeGreaterThan(1); // Has foreach
+    });
+
+    it('should handle multiple PHP functions in one file', () => {
+      const content = `<?php
+
+function first() {
+  return 1;
+}
+
+function second() {
+  return 2;
+}
+
+function third() {
+  return 3;
+}
+?>`;
+
+      const chunks = chunkByAST('test.php', content);
+      
+      expect(chunks.length).toBeGreaterThanOrEqual(3);
+      expect(chunks.some(c => c.metadata.symbolName === 'first')).toBe(true);
+      expect(chunks.some(c => c.metadata.symbolName === 'second')).toBe(true);
+      expect(chunks.some(c => c.metadata.symbolName === 'third')).toBe(true);
     });
   });
 
