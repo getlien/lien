@@ -12,9 +12,9 @@ const parserCache = new Map<SupportedLanguage, Parser>();
 
 /**
  * Tree-sitter language grammar type
- * (Tree-sitter doesn't export a specific Language type, so we define one)
+ * Using any here due to type incompatibility between parser packages and tree-sitter core
  */
-type TreeSitterLanguage = object;
+type TreeSitterLanguage = any;
 
 /**
  * Language configuration mapping
