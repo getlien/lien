@@ -55,5 +55,5 @@ export interface LanguageConfig {
 /**
  * Supported languages for AST parsing
  */
-export type SupportedLanguage = 'typescript' | 'javascript';
+export type SupportedLanguage = 'typescript' | 'javascript' | 'php';
 

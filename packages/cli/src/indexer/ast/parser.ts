@@ -1,6 +1,7 @@
 import Parser from 'tree-sitter';
 import TypeScript from 'tree-sitter-typescript';
 import JavaScript from 'tree-sitter-javascript';
+import PHPParser from 'tree-sitter-php';
 import { extname } from 'path';
 import type { ASTParseResult, SupportedLanguage } from './types.js';
 
@@ -11,16 +12,17 @@ const parserCache = new Map<SupportedLanguage, Parser>();
 
 /**
  * Tree-sitter language grammar type
- * (Tree-sitter doesn't export a specific Language type, so we define one)
+ * Using any here due to type incompatibility between parser packages and tree-sitter core
  */
-type TreeSitterLanguage = object;
+type TreeSitterLanguage = any;
 
 /**
  * Language configuration mapping
  */
 const languageConfig: Record<SupportedLanguage, TreeSitterLanguage> = {
   typescript: TypeScript.typescript,
-  javascript: JavaScript, // Use proper JavaScript parser
+  javascript: JavaScript,
+  php: PHPParser.php, // Note: tree-sitter-php exports both 'php' (mixed HTML/PHP) and 'php_only'
 };
 
 /**
@@ -60,6 +62,8 @@ export function detectLanguage(filePath: string): SupportedLanguage | null {
     case 'mjs':
     case 'cjs':
       return 'javascript';
+    case 'php':
+      return 'php';
     default:
       return null;
   }
