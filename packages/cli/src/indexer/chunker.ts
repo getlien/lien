@@ -25,7 +25,10 @@ export function chunkFile(
   }
   
   // Special handling for Shopify JSON template files (templates/**/*.json)
-  if (filepath.endsWith('.json') && filepath.includes('templates/')) {
+  // Use regex to ensure 'templates/' is a path segment, not part of another name
+  // Matches: templates/product.json OR some-path/templates/customers/account.json
+  // Rejects: my-templates/config.json OR node_modules/pkg/templates/file.json (filtered by scanner)
+  if (filepath.endsWith('.json') && /(?:^|\/)templates\//.test(filepath)) {
     return chunkJSONTemplate(filepath, content);
   }
   

@@ -149,6 +149,36 @@ describe('Shopify JSON Template Chunking', () => {
     expect(chunks[0].metadata.imports).toBeUndefined();
   });
 
+  it('should handle templates directory with framework path prefix', () => {
+    // When framework.path !== '.', files have prefix like 'shopify-theme/templates/...'
+    const content = `{
+  "sections": {
+    "main": { "type": "main-product", "settings": {} }
+  },
+  "order": ["main"]
+}`;
+    
+    const chunks = chunkFile('shopify-theme/templates/product.json', content);
+    
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].metadata.symbolName).toBe('product');
+    expect(chunks[0].metadata.imports).toContain('main-product');
+  });
+
+  it('should NOT match templates substring in other directory names', () => {
+    // Should not match 'my-templates', 'templates-backup', etc.
+    const content = `{
+  "sections": {
+    "main": { "type": "should-not-extract" }
+  }
+}`;
+    
+    const chunks = chunkFile('my-templates/product.json', content);
+    
+    // Should use regular JSON chunking (no section extraction)
+    expect(chunks[0].metadata.imports).toBeUndefined();
+  });
+
   it('should handle nested template paths', () => {
     const content = `{
   "sections": {
