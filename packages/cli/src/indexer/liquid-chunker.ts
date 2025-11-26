@@ -247,7 +247,7 @@ export function chunkLiquidFile(
             metadata: {
               file: filepath,
               startLine: block.startLine + offset + 1, // 1-indexed
-              endLine: block.startLine + endOffset + 1, // 1-indexed
+              endLine: block.startLine + endOffset, // 1-indexed (endOffset already accounts for exclusivity)
               language: 'liquid',
               type: 'block',
               symbolName, // Preserve symbol name for all split chunks
