@@ -3,6 +3,7 @@ import { detectLanguage } from './scanner.js';
 import { extractSymbols } from './symbol-extractor.js';
 import { shouldUseAST, chunkByAST } from './ast/chunker.js';
 import { chunkLiquidFile } from './liquid-chunker.js';
+import { chunkJSONTemplate } from './json-template-chunker.js';
 
 export interface ChunkOptions {
   chunkSize?: number;
@@ -21,6 +22,11 @@ export function chunkFile(
   // Special handling for Liquid files
   if (filepath.endsWith('.liquid')) {
     return chunkLiquidFile(filepath, content, chunkSize, chunkOverlap);
+  }
+  
+  // Special handling for Shopify JSON template files (templates/**/*.json)
+  if (filepath.endsWith('.json') && filepath.includes('templates/')) {
+    return chunkJSONTemplate(filepath, content);
   }
   
   // Try AST-based chunking for supported languages
