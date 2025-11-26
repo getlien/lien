@@ -357,6 +357,21 @@ Feel free to open an issue for:
 - Questions about development
 - Ideas for improvements
 
-## License
+## License and Contributor Agreement
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing to Lien, you agree that:
+
+1. **Your contributions will be licensed under the AGPL-3.0 license**, the same license as the project
+2. **You grant the project maintainers** the right to use your contributions under the AGPL-3.0 license
+3. **You have the right to submit** the contribution under these terms (either you own the copyright or have permission from the copyright holder)
+4. **Your contribution is your original work** or you have obtained all necessary permissions
+
+### Why AGPL?
+
+Lien uses the AGPL-3.0 license to:
+- Protect our innovative AST-based semantic chunking architecture
+- Ensure improvements benefit the entire community
+- Prevent proprietary forks that don't contribute back
+- Enable sustainable long-term development
+
+**Local use of Lien is and always will be free.**

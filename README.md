@@ -72,7 +72,15 @@ Contributions welcome! See **[CONTRIBUTING.md](./CONTRIBUTING.md)** for guidelin
 
 ## License
 
-MIT © [Alf Henderson](https://github.com/alfhen)
+AGPL-3.0 © [Alf Henderson](https://github.com/alfhen)
+
+**Lien is free forever for local use.** The AGPL license ensures that:
+- ✅ You can use Lien locally without restrictions
+- ✅ You can modify and distribute Lien freely
+- ✅ Improvements get contributed back to the community
+- ✅ We can sustain long-term development
+
+For questions about licensing, contact us at alf@lien.dev
 
 ---
 
