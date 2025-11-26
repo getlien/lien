@@ -913,4 +913,43 @@ ${cssRules}
     // Large style is split (252 lines > 225 threshold)
     expect(styleChunks.length).toBeGreaterThan(1);
   });
+
+  it('should have correct 1-indexed line numbers for split blocks', () => {
+    // Create a large schema block that will be split
+    const schemaLines = Array.from({ length: 300 }, (_, i) => 
+      `  "setting_${i}": "value_${i}",`
+    ).join('\n');
+    
+    const content = `<div>Before</div>
+{% schema %}
+{
+  "name": "Large Schema",
+${schemaLines}
+  "last": "value"
+}
+{% endschema %}
+<div>After</div>`.trim();
+    
+    const chunks = chunkFile('sections/line-numbers.liquid', content, { chunkSize: 75, chunkOverlap: 10 });
+    const schemaChunks = chunks.filter(c => c.metadata.symbolType === 'schema');
+    
+    // Verify split occurred
+    expect(schemaChunks.length).toBeGreaterThan(1);
+    
+    // Verify line numbers are 1-indexed and continuous
+    for (let i = 0; i < schemaChunks.length - 1; i++) {
+      const currentChunk = schemaChunks[i];
+      const nextChunk = schemaChunks[i + 1];
+      
+      // Line numbers should be 1-indexed (greater than 0)
+      expect(currentChunk.metadata.startLine).toBeGreaterThan(0);
+      expect(currentChunk.metadata.endLine).toBeGreaterThan(0);
+      
+      // endLine should be >= startLine
+      expect(currentChunk.metadata.endLine).toBeGreaterThanOrEqual(currentChunk.metadata.startLine);
+      
+      // With overlap, next chunk should start within or near current chunk's end
+      expect(nextChunk.metadata.startLine).toBeLessThanOrEqual(currentChunk.metadata.endLine + 1);
+    }
+  });
 });
