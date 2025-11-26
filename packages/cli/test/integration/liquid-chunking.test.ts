@@ -600,9 +600,9 @@ Line 7`;
     expect(chunks[0].metadata.symbolName).toBe('Schema Only Section');
   });
 
-  it('should handle very large schema blocks', () => {
-    // Simulate a large schema with many settings
-    const settings = Array.from({ length: 50 }, (_, i) => ({
+  it('should handle large schema blocks within threshold', () => {
+    // Simulate a large schema with many settings (but within 3x chunkSize threshold)
+    const settings = Array.from({ length: 30 }, (_, i) => ({
       type: 'text',
       id: `setting_${i}`,
       label: `Setting ${i}`,
@@ -620,12 +620,13 @@ Line 7`;
     
     const chunks = chunkFile('sections/large-schema.liquid', content);
     
-    expect(chunks).toHaveLength(1);
-    const schemaChunk = chunks[0];
-    expect(schemaChunk.metadata.symbolType).toBe('schema');
+    // Should be kept as one chunk since it's within threshold
+    const schemaChunks = chunks.filter(c => c.metadata.symbolType === 'schema');
+    expect(schemaChunks).toHaveLength(1);
+    const schemaChunk = schemaChunks[0];
     expect(schemaChunk.metadata.symbolName).toBe('Large Schema Section');
     expect(schemaChunk.content).toContain('setting_0');
-    expect(schemaChunk.content).toContain('setting_49');
+    expect(schemaChunk.content).toContain('setting_29');
   });
 
   it('should handle unclosed schema blocks gracefully', () => {
@@ -780,5 +781,136 @@ console.log("unclosed");
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolType).toBe('schema');
     expect(chunks[0].metadata.symbolName).toBe('Compact');
+  });
+
+  it('should split extremely large schema blocks to prevent token limit issues', () => {
+    // Create a schema with 250 lines (exceeds default chunkSize * 3 = 225)
+    const settings = Array.from({ length: 120 }, (_, i) => ({
+      type: 'text',
+      id: `setting_${i}`,
+      label: `Setting ${i}`,
+      default: `Default ${i}`,
+    }));
+    
+    const largeSchema = `{% schema %}
+{
+  "name": "Extremely Large Schema",
+  "settings": ${JSON.stringify(settings, null, 2)}
+}
+{% endschema %}`;
+    
+    const chunks = chunkFile('sections/huge-schema.liquid', largeSchema, { chunkSize: 75, chunkOverlap: 10 });
+    
+    const schemaChunks = chunks.filter(c => c.metadata.symbolType === 'schema');
+    
+    // Should be split into multiple chunks
+    expect(schemaChunks.length).toBeGreaterThan(1);
+    
+    // All chunks should have same symbolName and symbolType
+    expect(schemaChunks.every(c => c.metadata.symbolName === 'Extremely Large Schema')).toBe(true);
+    expect(schemaChunks.every(c => c.metadata.symbolType === 'schema')).toBe(true);
+    expect(schemaChunks.every(c => c.metadata.type === 'block')).toBe(true);
+    
+    // Chunks should have overlap (verify line numbers overlap)
+    for (let i = 1; i < schemaChunks.length; i++) {
+      const prevChunk = schemaChunks[i - 1];
+      const currentChunk = schemaChunks[i];
+      expect(currentChunk.metadata.startLine).toBeLessThan(prevChunk.metadata.endLine);
+    }
+  });
+
+  it('should keep moderately sized blocks together', () => {
+    // Create a schema with ~100 lines (within chunkSize * 3 = 225 threshold)
+    const settings = Array.from({ length: 40 }, (_, i) => ({
+      type: 'text',
+      id: `setting_${i}`,
+      label: `Setting ${i}`,
+    }));
+    
+    const moderateSchema = `{% schema %}
+{
+  "name": "Moderate Schema",
+  "settings": ${JSON.stringify(settings, null, 2)}
+}
+{% endschema %}`;
+    
+    const chunks = chunkFile('sections/moderate-schema.liquid', moderateSchema, { chunkSize: 75 });
+    
+    const schemaChunks = chunks.filter(c => c.metadata.symbolType === 'schema');
+    
+    // Should stay as single chunk since it's within threshold
+    expect(schemaChunks).toHaveLength(1);
+    expect(schemaChunks[0].metadata.symbolName).toBe('Moderate Schema');
+  });
+
+  it('should split large style blocks', () => {
+    // Create a style block with 300+ lines (well over chunkSize * 3 = 225)
+    const cssRules = Array.from({ length: 250 }, (_, i) => 
+      `.class-${i} { color: #${i.toString(16).padStart(6, '0')}; }`
+    ).join('\n');
+    
+    const largeStyle = `{% style %}
+${cssRules}
+{% endstyle %}`;
+    
+    const chunks = chunkFile('sections/huge-styles.liquid', largeStyle, { chunkSize: 75, chunkOverlap: 10 });
+    
+    const styleChunks = chunks.filter(c => c.metadata.symbolType === 'style');
+    
+    // Should be split into multiple chunks (252 lines > 225 threshold)
+    expect(styleChunks.length).toBeGreaterThan(1);
+    expect(styleChunks.every(c => c.metadata.symbolType === 'style')).toBe(true);
+  });
+
+  it('should split large javascript blocks', () => {
+    // Create a javascript block with 300+ lines (well over chunkSize * 3 = 225)
+    const jsCode = Array.from({ length: 250 }, (_, i) => 
+      `function func${i}() { console.log("Function ${i}"); }`
+    ).join('\n');
+    
+    const largeJs = `{% javascript %}
+${jsCode}
+{% endjavascript %}`;
+    
+    const chunks = chunkFile('sections/huge-js.liquid', largeJs, { chunkSize: 75, chunkOverlap: 10 });
+    
+    const jsChunks = chunks.filter(c => c.metadata.symbolType === 'javascript');
+    
+    // Should be split into multiple chunks (252 lines > 225 threshold)
+    expect(jsChunks.length).toBeGreaterThan(1);
+    expect(jsChunks.every(c => c.metadata.symbolType === 'javascript')).toBe(true);
+  });
+
+  it('should handle mix of large and small blocks', () => {
+    // Small schema + huge style
+    const smallSchema = `{% schema %}
+{
+  "name": "Mixed Size Section",
+  "settings": []
+}
+{% endschema %}`;
+    
+    const cssRules = Array.from({ length: 250 }, (_, i) => 
+      `.rule-${i} { display: block; }`
+    ).join('\n');
+    
+    const content = `
+${smallSchema}
+<div>Template</div>
+{% style %}
+${cssRules}
+{% endstyle %}
+`.trim();
+    
+    const chunks = chunkFile('sections/mixed-sizes.liquid', content, { chunkSize: 75, chunkOverlap: 10 });
+    
+    const schemaChunks = chunks.filter(c => c.metadata.symbolType === 'schema');
+    const styleChunks = chunks.filter(c => c.metadata.symbolType === 'style');
+    
+    // Small schema stays as one chunk
+    expect(schemaChunks).toHaveLength(1);
+    
+    // Large style is split (252 lines > 225 threshold)
+    expect(styleChunks.length).toBeGreaterThan(1);
   });
 });

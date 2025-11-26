@@ -167,19 +167,51 @@ export function chunkLiquidFile(
     // Extract render/include tags
     const imports = extractRenderTags(block.content);
     
-    chunks.push({
-      content: block.content,
-      metadata: {
-        file: filepath,
-        startLine: block.startLine + 1, // 1-indexed
-        endLine: block.endLine + 1,
-        language: 'liquid',
-        type: 'block',
-        symbolName,
-        symbolType: block.type,
-        imports: imports.length > 0 ? imports : undefined,
-      },
-    });
+    const blockLineCount = block.endLine - block.startLine + 1;
+    const maxBlockSize = chunkSize * 3; // Allow blocks up to 3x chunk size before splitting
+    
+    // If block is reasonably sized, keep it as one chunk
+    if (blockLineCount <= maxBlockSize) {
+      chunks.push({
+        content: block.content,
+        metadata: {
+          file: filepath,
+          startLine: block.startLine + 1, // 1-indexed
+          endLine: block.endLine + 1,
+          language: 'liquid',
+          type: 'block',
+          symbolName,
+          symbolType: block.type,
+          imports: imports.length > 0 ? imports : undefined,
+        },
+      });
+    } else {
+      // Block is too large - split it into multiple chunks with overlap
+      const blockLines = block.content.split('\n');
+      
+      for (let offset = 0; offset < blockLines.length; offset += chunkSize - chunkOverlap) {
+        const endOffset = Math.min(offset + chunkSize, blockLines.length);
+        const chunkContent = blockLines.slice(offset, endOffset).join('\n');
+        
+        if (chunkContent.trim().length > 0) {
+          chunks.push({
+            content: chunkContent,
+            metadata: {
+              file: filepath,
+              startLine: block.startLine + offset + 1, // 1-indexed
+              endLine: block.startLine + endOffset,
+              language: 'liquid',
+              type: 'block',
+              symbolName, // Preserve symbol name for all split chunks
+              symbolType: block.type,
+              imports: imports.length > 0 ? imports : undefined,
+            },
+          });
+        }
+        
+        if (endOffset >= blockLines.length) break;
+      }
+    }
   }
   
   // Chunk uncovered template content
