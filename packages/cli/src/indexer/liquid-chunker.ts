@@ -286,7 +286,7 @@ export function chunkLiquidFile(
       
       // Add overlap for next chunk
       currentChunk = currentChunk.slice(-chunkOverlap);
-      chunkStartLine = i + 1 - chunkOverlap;
+      chunkStartLine = Math.max(0, i + 1 - chunkOverlap);
     }
   }
   
