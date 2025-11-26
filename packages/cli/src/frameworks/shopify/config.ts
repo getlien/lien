@@ -14,6 +14,7 @@ export async function generateShopifyConfig(
       'sections/**/*.liquid',
       'snippets/**/*.liquid',
       'templates/**/*.liquid', // Matches any nesting level (e.g., templates/customers/account.liquid)
+      'templates/**/*.json',   // JSON template definitions (Shopify 2.0+)
       
       // Theme editor blocks (Online Store 2.0)
       'blocks/**/*.liquid',

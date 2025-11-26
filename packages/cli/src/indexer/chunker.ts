@@ -2,6 +2,8 @@ import { CodeChunk } from './types.js';
 import { detectLanguage } from './scanner.js';
 import { extractSymbols } from './symbol-extractor.js';
 import { shouldUseAST, chunkByAST } from './ast/chunker.js';
+import { chunkLiquidFile } from './liquid-chunker.js';
+import { chunkJSONTemplate } from './json-template-chunker.js';
 
 export interface ChunkOptions {
   chunkSize?: number;
@@ -16,6 +18,19 @@ export function chunkFile(
   options: ChunkOptions = {}
 ): CodeChunk[] {
   const { chunkSize = 75, chunkOverlap = 10, useAST = true, astFallback = 'line-based' } = options;
+  
+  // Special handling for Liquid files
+  if (filepath.endsWith('.liquid')) {
+    return chunkLiquidFile(filepath, content, chunkSize, chunkOverlap);
+  }
+  
+  // Special handling for Shopify JSON template files (templates/**/*.json)
+  // Use regex to ensure 'templates/' is a path segment, not part of another name
+  // Matches: templates/product.json OR some-path/templates/customers/account.json
+  // Rejects: my-templates/config.json OR node_modules/pkg/templates/file.json (filtered by scanner)
+  if (filepath.endsWith('.json') && /(?:^|\/)templates\//.test(filepath)) {
+    return chunkJSONTemplate(filepath, content);
+  }
   
   // Try AST-based chunking for supported languages
   if (useAST && shouldUseAST(filepath)) {
