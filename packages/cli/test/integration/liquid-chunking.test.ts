@@ -248,4 +248,129 @@ Line 7`;
     expect(schemaChunk?.metadata.startLine).toBe(3);
     expect(schemaChunk?.metadata.endLine).toBe(6);
   });
+
+  it('should track {% render %} tags as imports', () => {
+    const content = `
+<div class="header">
+  {% render 'logo' %}
+  {% render "navigation", menu: main_menu %}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/header.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toBeDefined();
+    expect(templateChunk?.metadata.imports).toContain('logo');
+    expect(templateChunk?.metadata.imports).toContain('navigation');
+  });
+
+  it('should track {% include %} tags as imports', () => {
+    const content = `
+<div class="product">
+  {% include 'product-price' %}
+  {% include "product-availability", product: product %}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/product.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toBeDefined();
+    expect(templateChunk?.metadata.imports).toContain('product-price');
+    expect(templateChunk?.metadata.imports).toContain('product-availability');
+  });
+
+  it('should track both render and include tags together', () => {
+    const content = `
+<div class="cart">
+  {% render 'cart-item', item: item %}
+  {% include 'cart-total' %}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('snippets/cart.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toContain('cart-item');
+    expect(templateChunk?.metadata.imports).toContain('cart-total');
+    expect(templateChunk?.metadata.imports?.length).toBe(2);
+  });
+
+  it('should deduplicate repeated render tags', () => {
+    const content = `
+<div>
+  {% render 'icon', name: 'cart' %}
+  {% render 'icon', name: 'heart' %}
+  {% render 'icon', name: 'search' %}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/header.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toEqual(['icon']);
+  });
+
+  it('should handle render tags with whitespace control', () => {
+    const content = `
+<div>
+  {%- render 'product-card' -%}
+  {%- render "featured-product", product: product -%}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/collection.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toContain('product-card');
+    expect(templateChunk?.metadata.imports).toContain('featured-product');
+  });
+
+  it('should not include imports field when no render tags present', () => {
+    const content = `
+<div>
+  {{ product.title }}
+  {% if product.available %}
+    <span>Available</span>
+  {% endif %}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('snippets/simple.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toBeUndefined();
+  });
+
+  it('should track render tags in schema blocks', () => {
+    const content = `
+{% schema %}
+{
+  "name": "Test",
+  "presets": [
+    {
+      "name": "Default",
+      "blocks": [
+        {
+          "type": "heading"
+        }
+      ]
+    }
+  ]
+}
+{% endschema %}
+
+{% render 'product-card' %}
+`.trim();
+    
+    const chunks = chunkFile('sections/test.liquid', content);
+    
+    const schemaChunk = chunks.find(c => c.metadata.symbolType === 'schema');
+    // Schema should not have render tags (they're JSON)
+    expect(schemaChunk?.metadata.imports).toBeUndefined();
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toContain('product-card');
+  });
 });

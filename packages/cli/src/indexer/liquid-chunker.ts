@@ -23,6 +23,35 @@ function extractSchemaName(schemaContent: string): string | undefined {
 }
 
 /**
+ * Extract snippet/partial names from {% render %} and {% include %} tags
+ * 
+ * Examples:
+ * - {% render 'product-card' %} → 'product-card'
+ * - {% render "cart-item", product: product %} → 'cart-item'
+ * - {% include 'snippets/header' %} → 'snippets/header'
+ */
+function extractRenderTags(content: string): string[] {
+  const snippets = new Set<string>();
+  
+  // Match {% render 'snippet-name' %} or {% render "snippet-name" %}
+  const renderPattern = /\{%-?\s*render\s+['"]([^'"]+)['"]/g;
+  let match;
+  
+  while ((match = renderPattern.exec(content)) !== null) {
+    snippets.add(match[1]);
+  }
+  
+  // Match {% include 'snippet-name' %} or {% include "snippet-name" %}
+  const includePattern = /\{%-?\s*include\s+['"]([^'"]+)['"]/g;
+  
+  while ((match = includePattern.exec(content)) !== null) {
+    snippets.add(match[1]);
+  }
+  
+  return Array.from(snippets);
+}
+
+/**
  * Find all special Liquid blocks in the template
  */
 function findLiquidBlocks(content: string): LiquidBlock[] {
@@ -78,9 +107,10 @@ function findLiquidBlocks(content: string): LiquidBlock[] {
  * Chunk a Liquid template file
  * 
  * Special handling for:
- * - {% schema %} blocks (kept together)
+ * - {% schema %} blocks (kept together, extract section name)
  * - {% style %} blocks (kept together)  
  * - {% javascript %} blocks (kept together)
+ * - {% render %} and {% include %} tags (tracked as imports)
  * - Regular template content (chunked by lines)
  */
 export function chunkLiquidFile(
@@ -109,6 +139,9 @@ export function chunkLiquidFile(
       symbolName = extractSchemaName(block.content);
     }
     
+    // Extract render/include tags
+    const imports = extractRenderTags(block.content);
+    
     chunks.push({
       content: block.content,
       metadata: {
@@ -119,7 +152,7 @@ export function chunkLiquidFile(
         type: 'block',
         symbolName,
         symbolType: block.type,
-        imports: [],
+        imports: imports.length > 0 ? imports : undefined,
       },
     });
   }
@@ -133,15 +166,18 @@ export function chunkLiquidFile(
     if (coveredLines.has(i)) {
       // Flush current chunk if any
       if (currentChunk.length > 0) {
+        const chunkContent = currentChunk.join('\n');
+        const imports = extractRenderTags(chunkContent);
+        
         chunks.push({
-          content: currentChunk.join('\n'),
+          content: chunkContent,
           metadata: {
             file: filepath,
             startLine: chunkStartLine + 1,
             endLine: i,
             language: 'liquid',
             type: 'template',
-            imports: [],
+            imports: imports.length > 0 ? imports : undefined,
           },
         });
         currentChunk = [];
@@ -158,15 +194,18 @@ export function chunkLiquidFile(
     
     // Flush if chunk is full
     if (currentChunk.length >= chunkSize) {
+      const chunkContent = currentChunk.join('\n');
+      const imports = extractRenderTags(chunkContent);
+      
       chunks.push({
-        content: currentChunk.join('\n'),
+        content: chunkContent,
         metadata: {
           file: filepath,
           startLine: chunkStartLine + 1,
           endLine: i + 1,
           language: 'liquid',
           type: 'template',
-          imports: [],
+          imports: imports.length > 0 ? imports : undefined,
         },
       });
       
@@ -178,15 +217,18 @@ export function chunkLiquidFile(
   
   // Flush remaining chunk
   if (currentChunk.length > 0) {
+    const chunkContent = currentChunk.join('\n');
+    const imports = extractRenderTags(chunkContent);
+    
     chunks.push({
-      content: currentChunk.join('\n'),
+      content: chunkContent,
       metadata: {
         file: filepath,
         startLine: chunkStartLine + 1,
         endLine: lines.length,
         language: 'liquid',
         type: 'template',
-        imports: [],
+        imports: imports.length > 0 ? imports : undefined,
       },
     });
   }
