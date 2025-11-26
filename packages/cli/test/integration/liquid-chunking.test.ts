@@ -952,7 +952,6 @@ ${schemaLines}
       expect(nextChunk.metadata.startLine).toBeLessThanOrEqual(currentChunk.metadata.endLine + 1);
     }
   });
-});
 
   it('should handle escaped quotes in schema names', () => {
     const content = `{% schema %}
@@ -968,3 +967,4 @@ ${schemaLines}
     expect(chunks[0].metadata.symbolType).toBe('schema');
     expect(chunks[0].metadata.symbolName).toBe('My "Special" Section');
   });
+});
