@@ -23,32 +23,40 @@ function extractSchemaName(schemaContent: string): string | undefined {
 }
 
 /**
- * Extract snippet/partial names from {% render %} and {% include %} tags
+ * Extract dependencies from {% render %}, {% include %}, and {% section %} tags
  * 
  * Examples:
  * - {% render 'product-card' %} → 'product-card'
  * - {% render "cart-item", product: product %} → 'cart-item'
  * - {% include 'snippets/header' %} → 'snippets/header'
+ * - {% section 'announcement-bar' %} → 'announcement-bar'
  */
 function extractRenderTags(content: string): string[] {
-  const snippets = new Set<string>();
+  const dependencies = new Set<string>();
   
   // Match {% render 'snippet-name' %} or {% render "snippet-name" %}
   const renderPattern = /\{%-?\s*render\s+['"]([^'"]+)['"]/g;
   let match;
   
   while ((match = renderPattern.exec(content)) !== null) {
-    snippets.add(match[1]);
+    dependencies.add(match[1]);
   }
   
   // Match {% include 'snippet-name' %} or {% include "snippet-name" %}
   const includePattern = /\{%-?\s*include\s+['"]([^'"]+)['"]/g;
   
   while ((match = includePattern.exec(content)) !== null) {
-    snippets.add(match[1]);
+    dependencies.add(match[1]);
   }
   
-  return Array.from(snippets);
+  // Match {% section 'section-name' %} or {% section "section-name" %}
+  const sectionPattern = /\{%-?\s*section\s+['"]([^'"]+)['"]/g;
+  
+  while ((match = sectionPattern.exec(content)) !== null) {
+    dependencies.add(match[1]);
+  }
+  
+  return Array.from(dependencies);
 }
 
 /**
@@ -110,7 +118,7 @@ function findLiquidBlocks(content: string): LiquidBlock[] {
  * - {% schema %} blocks (kept together, extract section name)
  * - {% style %} blocks (kept together)  
  * - {% javascript %} blocks (kept together)
- * - {% render %} and {% include %} tags (tracked as imports)
+ * - {% render %}, {% include %}, and {% section %} tags (tracked as imports)
  * - Regular template content (chunked by lines)
  */
 export function chunkLiquidFile(

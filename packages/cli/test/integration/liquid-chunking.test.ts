@@ -373,4 +373,63 @@ Line 7`;
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toContain('product-card');
   });
+
+  it('should track {% section %} tags as imports', () => {
+    const content = `
+<!doctype html>
+<html>
+<body>
+  {% section 'header' %}
+  <main>{{ content_for_layout }}</main>
+  {% section 'footer' %}
+</body>
+</html>
+`.trim();
+    
+    const chunks = chunkFile('layout/theme.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toBeDefined();
+    expect(templateChunk?.metadata.imports).toContain('header');
+    expect(templateChunk?.metadata.imports).toContain('footer');
+  });
+
+  it('should track mixed render, include, and section tags', () => {
+    const content = `
+<div class="layout">
+  {% section 'announcement-bar' %}
+  {% render 'header-logo' %}
+  {% include 'navigation' %}
+  
+  <main>{{ content_for_layout }}</main>
+  
+  {% section 'footer' %}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('layout/theme.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toContain('announcement-bar');
+    expect(templateChunk?.metadata.imports).toContain('header-logo');
+    expect(templateChunk?.metadata.imports).toContain('navigation');
+    expect(templateChunk?.metadata.imports).toContain('footer');
+    expect(templateChunk?.metadata.imports?.length).toBe(4);
+  });
+
+  it('should handle section tags with whitespace control', () => {
+    const content = `
+<body>
+  {%- section 'header' -%}
+  {{ content_for_layout }}
+  {%- section 'footer' -%}
+</body>
+`.trim();
+    
+    const chunks = chunkFile('layout/minimal.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toContain('header');
+    expect(templateChunk?.metadata.imports).toContain('footer');
+  });
 });
