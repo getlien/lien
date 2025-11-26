@@ -35,7 +35,7 @@
     "local-first"
   ],
   "author": "Alf Henderson",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=22.21.0"
   },

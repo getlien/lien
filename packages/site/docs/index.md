@@ -93,6 +93,17 @@ Lien is built with privacy as a core principle:
 - No telemetry or usage tracking
 - Open source and auditable
 
+## Free & Open Source
+
+Lien is licensed under AGPL-3.0 and **free forever for local use**. The license ensures:
+
+- ✅ Use Lien locally without restrictions
+- ✅ Modify and distribute freely
+- ✅ Improvements benefit the community
+- ✅ Sustainable long-term development
+
+Questions about licensing? Contact alf@lien.dev
+
 ---
 
 <div style="text-align: center; margin-top: 2rem; color: var(--vp-c-text-2);">
