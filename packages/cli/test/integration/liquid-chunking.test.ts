@@ -641,6 +641,60 @@ Line 7`;
     // Should treat everything as template since schema is never closed
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.every(c => c.metadata.type === 'template')).toBe(true);
+    // Explicitly verify no schema chunk was created
+    expect(chunks.every(c => c.metadata.symbolType !== 'schema')).toBe(true);
+    expect(chunks.some(c => c.content.includes('{% schema %}'))).toBe(true);
+  });
+
+  it('should handle unclosed style blocks gracefully', () => {
+    const content = `
+<div>Template</div>
+{% style %}
+.unclosed {
+  color: red;
+<div>More content</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/broken-style.liquid', content);
+    
+    // Should treat everything as template since style is never closed
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks.every(c => c.metadata.type === 'template')).toBe(true);
+    expect(chunks.every(c => c.metadata.symbolType !== 'style')).toBe(true);
+  });
+
+  it('should handle unclosed javascript blocks gracefully', () => {
+    const content = `
+<div>Template</div>
+{% javascript %}
+console.log("unclosed");
+<div>More content</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/broken-js.liquid', content);
+    
+    // Should treat everything as template since javascript is never closed
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks.every(c => c.metadata.type === 'template')).toBe(true);
+    expect(chunks.every(c => c.metadata.symbolType !== 'javascript')).toBe(true);
+  });
+
+  it('should handle partial end tags correctly', () => {
+    const content = `
+<div>Template</div>
+{% schema %}
+{
+  "name": "Test"
+}
+{% endstyle %}
+<div>More content</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/wrong-end-tag.liquid', content);
+    
+    // Schema has wrong end tag (endstyle instead of endschema), should be treated as template
+    expect(chunks.every(c => c.metadata.symbolType !== 'schema')).toBe(true);
+    expect(chunks.every(c => c.metadata.type === 'template')).toBe(true);
   });
 
   it('should handle single line liquid file', () => {
