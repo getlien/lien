@@ -432,4 +432,128 @@ Line 7`;
     expect(templateChunk?.metadata.imports).toContain('header');
     expect(templateChunk?.metadata.imports).toContain('footer');
   });
+
+  it('should ignore render tags inside comment blocks', () => {
+    const content = `
+<div>
+  {% comment %}
+    Old code - don't use anymore:
+    {% render 'old-snippet' %}
+    {% render 'deprecated-component' %}
+  {% endcomment %}
+  
+  {% render 'current-snippet' %}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/test.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toBeDefined();
+    expect(templateChunk?.metadata.imports).toContain('current-snippet');
+    expect(templateChunk?.metadata.imports).not.toContain('old-snippet');
+    expect(templateChunk?.metadata.imports).not.toContain('deprecated-component');
+    expect(templateChunk?.metadata.imports?.length).toBe(1);
+  });
+
+  it('should ignore include tags inside comment blocks', () => {
+    const content = `
+<div>
+  {% comment %}Don't use {% include 'legacy-include' %}{% endcomment %}
+  {% include 'current-include' %}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/test.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toEqual(['current-include']);
+  });
+
+  it('should ignore section tags inside comment blocks', () => {
+    const content = `
+<body>
+  {% comment %}
+    Old layout structure:
+    {% section 'old-header' %}
+  {% endcomment %}
+  
+  {% section 'header' %}
+  {{ content_for_layout }}
+  {% section 'footer' %}
+</body>
+`.trim();
+    
+    const chunks = chunkFile('layout/theme.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toContain('header');
+    expect(templateChunk?.metadata.imports).toContain('footer');
+    expect(templateChunk?.metadata.imports).not.toContain('old-header');
+    expect(templateChunk?.metadata.imports?.length).toBe(2);
+  });
+
+  it('should handle comments with whitespace control', () => {
+    const content = `
+<div>
+  {%- comment -%}
+    {% render 'commented-snippet' %}
+  {%- endcomment -%}
+  {% render 'active-snippet' %}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/test.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toEqual(['active-snippet']);
+  });
+
+  it('should handle multiple comment blocks correctly', () => {
+    const content = `
+<div>
+  {% comment %}Block 1: {% render 'old-1' %}{% endcomment %}
+  {% render 'active-1' %}
+  {% comment %}Block 2: {% render 'old-2' %}{% endcomment %}
+  {% render 'active-2' %}
+  {% comment %}
+    Block 3:
+    {% render 'old-3' %}
+    {% include 'old-4' %}
+  {% endcomment %}
+  {% include 'active-3' %}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/test.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toContain('active-1');
+    expect(templateChunk?.metadata.imports).toContain('active-2');
+    expect(templateChunk?.metadata.imports).toContain('active-3');
+    expect(templateChunk?.metadata.imports).not.toContain('old-1');
+    expect(templateChunk?.metadata.imports).not.toContain('old-2');
+    expect(templateChunk?.metadata.imports).not.toContain('old-3');
+    expect(templateChunk?.metadata.imports).not.toContain('old-4');
+    expect(templateChunk?.metadata.imports?.length).toBe(3);
+  });
+
+  it('should handle nested comment syntax edge cases', () => {
+    const content = `
+<div>
+  {% comment %}
+    Documentation about {% render %} syntax:
+    Use {% render 'snippet-name' %} to include snippets.
+    Old: {% include 'legacy' %}
+  {% endcomment %}
+  
+  {% render 'actual-snippet' %}
+</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/test.liquid', content);
+    
+    const templateChunk = chunks.find(c => c.metadata.type === 'template');
+    expect(templateChunk?.metadata.imports).toEqual(['actual-snippet']);
+  });
 });

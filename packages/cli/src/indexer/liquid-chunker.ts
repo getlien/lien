@@ -23,6 +23,18 @@ function extractSchemaName(schemaContent: string): string | undefined {
 }
 
 /**
+ * Remove Liquid comment blocks from content to avoid extracting tags from comments
+ * 
+ * Example:
+ * {% comment %}Don't use {% render 'old-snippet' %}{% endcomment %}
+ * → (removed)
+ */
+function removeComments(content: string): string {
+  // Remove {% comment %}...{% endcomment %} blocks (with optional whitespace control)
+  return content.replace(/\{%-?\s*comment\s*-?%\}[\s\S]*?\{%-?\s*endcomment\s*-?%\}/g, '');
+}
+
+/**
  * Extract dependencies from {% render %}, {% include %}, and {% section %} tags
  * 
  * Examples:
@@ -30,29 +42,34 @@ function extractSchemaName(schemaContent: string): string | undefined {
  * - {% render "cart-item", product: product %} → 'cart-item'
  * - {% include 'snippets/header' %} → 'snippets/header'
  * - {% section 'announcement-bar' %} → 'announcement-bar'
+ * 
+ * Note: Ignores tags inside {% comment %} blocks
  */
 function extractRenderTags(content: string): string[] {
   const dependencies = new Set<string>();
+  
+  // Remove comments first to avoid extracting commented-out tags
+  const contentWithoutComments = removeComments(content);
   
   // Match {% render 'snippet-name' %} or {% render "snippet-name" %}
   const renderPattern = /\{%-?\s*render\s+['"]([^'"]+)['"]/g;
   let match;
   
-  while ((match = renderPattern.exec(content)) !== null) {
+  while ((match = renderPattern.exec(contentWithoutComments)) !== null) {
     dependencies.add(match[1]);
   }
   
   // Match {% include 'snippet-name' %} or {% include "snippet-name" %}
   const includePattern = /\{%-?\s*include\s+['"]([^'"]+)['"]/g;
   
-  while ((match = includePattern.exec(content)) !== null) {
+  while ((match = includePattern.exec(contentWithoutComments)) !== null) {
     dependencies.add(match[1]);
   }
   
   // Match {% section 'section-name' %} or {% section "section-name" %}
   const sectionPattern = /\{%-?\s*section\s+['"]([^'"]+)['"]/g;
   
-  while ((match = sectionPattern.exec(content)) !== null) {
+  while ((match = sectionPattern.exec(contentWithoutComments)) !== null) {
     dependencies.add(match[1]);
   }
   
