@@ -43,13 +43,12 @@ function removeComments(content: string): string {
  * - {% include 'snippets/header' %} → 'snippets/header'
  * - {% section 'announcement-bar' %} → 'announcement-bar'
  * 
- * Note: Ignores tags inside {% comment %} blocks
+ * Note: Expects content with comments already removed for performance
+ * 
+ * @param contentWithoutComments - Content with Liquid comments already removed
  */
-function extractRenderTags(content: string): string[] {
+function extractRenderTags(contentWithoutComments: string): string[] {
   const dependencies = new Set<string>();
-  
-  // Remove comments first to avoid extracting commented-out tags
-  const contentWithoutComments = removeComments(content);
   
   // Match {% render 'snippet-name' %} or {% render "snippet-name" %}
   const renderPattern = /\{%-?\s*render\s+['"]([^'"]+)['"]/g;
@@ -148,6 +147,10 @@ export function chunkLiquidFile(
   const blocks = findLiquidBlocks(content);
   const chunks: CodeChunk[] = [];
   
+  // Remove comments once for performance (avoids repeated regex operations)
+  const contentWithoutComments = removeComments(content);
+  const linesWithoutComments = contentWithoutComments.split('\n');
+  
   // Track which lines are covered by special blocks
   const coveredLines = new Set<number>();
   
@@ -164,8 +167,11 @@ export function chunkLiquidFile(
       symbolName = extractSchemaName(block.content);
     }
     
-    // Extract render/include tags
-    const imports = extractRenderTags(block.content);
+    // Extract render/include tags from cleaned content (comments already removed)
+    const blockContentWithoutComments = linesWithoutComments
+      .slice(block.startLine, block.endLine + 1)
+      .join('\n');
+    const imports = extractRenderTags(blockContentWithoutComments);
     
     const blockLineCount = block.endLine - block.startLine + 1;
     const maxBlockSize = chunkSize * 3; // Allow blocks up to 3x chunk size before splitting
@@ -227,7 +233,9 @@ export function chunkLiquidFile(
         
         // Only push non-empty chunks
         if (chunkContent.trim().length > 0) {
-          const imports = extractRenderTags(chunkContent);
+          // Extract from cleaned content (comments already removed)
+          const cleanedChunk = linesWithoutComments.slice(chunkStartLine, i).join('\n');
+          const imports = extractRenderTags(cleanedChunk);
           
           chunks.push({
             content: chunkContent,
@@ -259,7 +267,9 @@ export function chunkLiquidFile(
       
       // Only push non-empty chunks
       if (chunkContent.trim().length > 0) {
-        const imports = extractRenderTags(chunkContent);
+        // Extract from cleaned content (comments already removed)
+        const cleanedChunk = linesWithoutComments.slice(chunkStartLine, i + 1).join('\n');
+        const imports = extractRenderTags(cleanedChunk);
         
         chunks.push({
           content: chunkContent,
@@ -289,7 +299,9 @@ export function chunkLiquidFile(
       return chunks.sort((a, b) => a.metadata.startLine - b.metadata.startLine);
     }
     
-    const imports = extractRenderTags(chunkContent);
+    // Extract from cleaned content (comments already removed)
+    const cleanedChunk = linesWithoutComments.slice(chunkStartLine, lines.length).join('\n');
+    const imports = extractRenderTags(cleanedChunk);
     
     chunks.push({
       content: chunkContent,
