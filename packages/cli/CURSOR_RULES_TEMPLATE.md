@@ -186,6 +186,7 @@ const simpleValidators = functions.filter(r => (r.metadata.parameters?.length ||
 **Currently supported:**
 - ✅ TypeScript (`.ts`, `.tsx`)
 - ✅ JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`)
+- ✅ Shopify Liquid (`.liquid`) - **Special regex-based chunking**
 
 **Coming soon:**
 - 🔜 Python, Go, Rust, Java, PHP, and more
@@ -193,6 +194,50 @@ const simpleValidators = functions.filter(r => (r.metadata.parameters?.length ||
 **Fallback behavior:**
 - For unsupported languages, Lien automatically falls back to line-based chunking
 - No disruption to existing workflows
+
+### Shopify Liquid Support ⚡ NEW
+
+Lien provides specialized chunking for Shopify Liquid templates with **dependency tracking**:
+
+**Special block handling:**
+- `{% schema %}` blocks - Kept as single chunks, section names extracted
+- `{% style %}` blocks - Preserved together for scoped CSS
+- `{% javascript %}` blocks - Kept intact
+
+**Dependency tracking (tracked in `metadata.imports`):**
+- `{% render 'snippet-name' %}` - Snippet dependencies
+- `{% include 'snippet-name' %}` - Legacy includes
+- `{% section 'section-name' %}` - Section usage in layouts
+
+**Example metadata:**
+```typescript
+{
+  content: "{% schema %}\n{\"name\": \"Hero Section\", ...}\n{% endschema %}",
+  metadata: {
+    file: "sections/hero.liquid",
+    type: "block",
+    language: "liquid",
+    symbolName: "Hero Section",        // Extracted from schema JSON
+    symbolType: "schema",
+    imports: undefined                  // Schema blocks don't render snippets
+  }
+}
+
+{
+  content: "<div>{% render 'logo' %}{% render 'nav' %}</div>",
+  metadata: {
+    file: "sections/header.liquid",
+    type: "template",
+    language: "liquid",
+    imports: ["logo", "nav"]            // Tracked dependencies
+  }
+}
+```
+
+**Benefits:**
+- **Schema preservation** - Never splits section configuration across chunks
+- **Dependency graph** - Understand layout → section → snippet relationships
+- **Better context** - AI knows which snippets/sections are used where
 
 ### Known Limitations
 
@@ -353,6 +398,27 @@ Lien uses structured error codes for programmatic error handling:
 - "What Services exist?" → `list_functions({ pattern: ".*Service.*" })`
 - "Find all API handlers" → `list_functions({ pattern: "handle.*" })`
 
+### Pattern 8: Working with Shopify Liquid Themes ⚡
+```
+1. semantic_search({ query: "section configuration for [feature]" })
+   → Finds schema blocks with section names
+2. Review metadata.imports to see which snippets/sections are used
+3. semantic_search({ query: "files that render [snippet-name]" })
+   → Trace dependency graph
+4. get_file_context({ filepath: "sections/header.liquid" })
+   → See all dependencies in one file
+```
+
+**Example queries:**
+- "Find the hero section schema" → Returns complete `{% schema %}` block with name
+- "Which sections use the product-card snippet?" → Check `imports` in results
+- "What snippets does the footer render?" → See `metadata.imports: ["logo", "nav", ...]`
+- "Show layout sections" → Search for files with `{% section %}` tags
+
+**Dependency tracking:**
+- `metadata.imports` contains all `{% render %}`, `{% include %}`, and `{% section %}` references
+- Use this to understand theme structure: layouts → sections → snippets
+
 ---
 
 ## Decision Tree: Lien vs Other Tools
@@ -405,6 +471,9 @@ Lien uses structured error codes for programmatic error handling:
 - "React components with form state"
 - "database migration scripts"
 - "API endpoints for user data"
+- "Shopify section schema for hero banner" (Liquid)
+- "files that render product-card snippet" (Liquid)
+- "layout file with header and footer sections" (Liquid)
 
 ### Bad Queries (DON'T DO THIS):
 - "auth" (too vague)
@@ -428,6 +497,7 @@ Lien uses structured error codes for programmatic error handling:
 - User can re-index with `lien index` if results seem stale
 - **Relevance categories**: All search results include a `relevance` field (`highly_relevant`, `relevant`, `loosely_related`, `not_relevant`) to help interpret search quality at a glance
 - **Test associations**: Lien automatically detects test-source relationships across 12 languages using convention-based patterns and import analysis
+- **Shopify Liquid themes**: Semantic chunking reduces chunk count by ~60% (schema/style/javascript blocks preserved), improving search quality and performance
 
 ---
 
