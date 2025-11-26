@@ -240,7 +240,7 @@ Lien provides specialized chunking for Shopify themes with **complete dependency
     language: "liquid",
     symbolName: "Hero Section",        // Extracted from schema JSON
     symbolType: "schema",
-    imports: undefined                  // Schema blocks don't render snippets
+    imports: undefined                  // No render/include/section tags found in this block
   }
 }
 
