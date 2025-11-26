@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.14.0] - 2025-11-26
+
+### Added
+- **Add complete Shopify theme support with semantic chunking for Liquid and JSON templates**
+
+
 ## [0.13.0] - 2025-11-24
 
 ### Added
