@@ -652,4 +652,79 @@ Line 7`;
     expect(chunks[0].metadata.type).toBe('template');
     expect(chunks[0].content).toBe(content);
   });
+
+  it('should handle single-line schema blocks', () => {
+    const content = '{% schema %}{"name": "Compact Section", "settings": []}{% endschema %}';
+    
+    const chunks = chunkFile('sections/compact.liquid', content);
+    
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].metadata.symbolType).toBe('schema');
+    expect(chunks[0].metadata.symbolName).toBe('Compact Section');
+    expect(chunks[0].metadata.type).toBe('block');
+    expect(chunks[0].metadata.startLine).toBe(1);
+    expect(chunks[0].metadata.endLine).toBe(1);
+  });
+
+  it('should handle single-line style blocks', () => {
+    const content = '{% style %}.compact { color: red; }{% endstyle %}';
+    
+    const chunks = chunkFile('sections/test.liquid', content);
+    
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].metadata.symbolType).toBe('style');
+    expect(chunks[0].metadata.type).toBe('block');
+    expect(chunks[0].content).toBe(content);
+  });
+
+  it('should handle single-line javascript blocks', () => {
+    const content = '{% javascript %}console.log("compact");{% endjavascript %}';
+    
+    const chunks = chunkFile('sections/test.liquid', content);
+    
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].metadata.symbolType).toBe('javascript');
+    expect(chunks[0].metadata.type).toBe('block');
+    expect(chunks[0].content).toBe(content);
+  });
+
+  it('should handle mix of single-line and multi-line blocks', () => {
+    const content = `
+<div>Template</div>
+{% schema %}{"name": "Mixed"}{% endschema %}
+{% style %}
+.multi-line {
+  color: blue;
+}
+{% endstyle %}
+{% javascript %}console.log("single");{% endjavascript %}
+<div>More template</div>
+`.trim();
+    
+    const chunks = chunkFile('sections/mixed.liquid', content);
+    
+    const schemaChunk = chunks.find(c => c.metadata.symbolType === 'schema');
+    const styleChunk = chunks.find(c => c.metadata.symbolType === 'style');
+    const jsChunk = chunks.find(c => c.metadata.symbolType === 'javascript');
+    
+    expect(schemaChunk).toBeDefined();
+    expect(schemaChunk?.metadata.symbolName).toBe('Mixed');
+    expect(schemaChunk?.metadata.startLine).toBe(schemaChunk?.metadata.endLine); // Single line
+    
+    expect(styleChunk).toBeDefined();
+    expect(styleChunk?.metadata.endLine).toBeGreaterThan(styleChunk!.metadata.startLine); // Multi-line
+    
+    expect(jsChunk).toBeDefined();
+    expect(jsChunk?.metadata.startLine).toBe(jsChunk?.metadata.endLine); // Single line
+  });
+
+  it('should handle single-line blocks with whitespace control', () => {
+    const content = '{%- schema -%}{"name": "Compact"}{%- endschema -%}';
+    
+    const chunks = chunkFile('sections/compact-ws.liquid', content);
+    
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].metadata.symbolType).toBe('schema');
+    expect(chunks[0].metadata.symbolName).toBe('Compact');
+  });
 });

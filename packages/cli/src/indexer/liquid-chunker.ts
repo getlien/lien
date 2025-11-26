@@ -101,9 +101,9 @@ function findLiquidBlocks(content: string): LiquidBlock[] {
       
       if (startIdx === -1) break;
       
-      // Find end tag
+      // Find end tag (allow same line for single-line blocks)
       const endIdx = lines.findIndex((line, idx) => 
-        idx > startIdx && pattern.end.test(line)
+        idx >= startIdx && pattern.end.test(line)
       );
       
       if (endIdx === -1) {
