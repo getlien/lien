@@ -29,8 +29,13 @@ function extractSectionReferences(jsonContent: string): string[] {
     // Extract from sections object
     if (template.sections && typeof template.sections === 'object') {
       for (const section of Object.values(template.sections)) {
-        if (typeof section === 'object' && section !== null && 'type' in section) {
-          sectionTypes.add((section as { type: string }).type);
+        if (
+          typeof section === 'object' && 
+          section !== null && 
+          'type' in section && 
+          typeof section.type === 'string'
+        ) {
+          sectionTypes.add(section.type);
         }
       }
     }

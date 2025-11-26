@@ -227,5 +227,29 @@ describe('Shopify JSON Template Chunking', () => {
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.imports).toEqual(['image-banner']);
   });
+
+  it('should handle malformed type values (non-string)', () => {
+    const content = `{
+  "sections": {
+    "valid": { "type": "main-product", "settings": {} },
+    "invalid_number": { "type": 123, "settings": {} },
+    "invalid_null": { "type": null, "settings": {} },
+    "invalid_array": { "type": ["array"], "settings": {} },
+    "another_valid": { "type": "product-recommendations", "settings": {} }
+  },
+  "order": ["valid", "invalid_number", "invalid_null", "invalid_array", "another_valid"]
+}`;
+    
+    const chunks = chunkFile('templates/malformed.json', content);
+    
+    expect(chunks).toHaveLength(1);
+    // Should only extract valid string types, ignoring malformed ones
+    expect(chunks[0].metadata.imports).toHaveLength(2);
+    expect(chunks[0].metadata.imports).toContain('main-product');
+    expect(chunks[0].metadata.imports).toContain('product-recommendations');
+    // Should NOT contain non-string types
+    expect(chunks[0].metadata.imports).not.toContain(123);
+    expect(chunks[0].metadata.imports).not.toContain(null);
+  });
 });
 
