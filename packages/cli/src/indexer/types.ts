@@ -18,7 +18,7 @@ export interface ChunkMetadata {
   
   // NEW: AST-derived metadata (v0.13.0)
   symbolName?: string;        // Function/class name
-  symbolType?: 'function' | 'method' | 'class' | 'interface' | 'schema' | 'style' | 'javascript' | 'template' | 'block';
+  symbolType?: 'function' | 'method' | 'class' | 'interface' | 'schema' | 'style' | 'javascript' | 'template';
   parentClass?: string;       // For methods
   complexity?: number;        // Cyclomatic complexity
   parameters?: string[];      // Function parameters
