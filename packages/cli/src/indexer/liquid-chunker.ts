@@ -192,19 +192,23 @@ export function chunkLiquidFile(
       // Flush current chunk if any
       if (currentChunk.length > 0) {
         const chunkContent = currentChunk.join('\n');
-        const imports = extractRenderTags(chunkContent);
         
-        chunks.push({
-          content: chunkContent,
-          metadata: {
-            file: filepath,
-            startLine: chunkStartLine + 1,
-            endLine: i,
-            language: 'liquid',
-            type: 'template',
-            imports: imports.length > 0 ? imports : undefined,
-          },
-        });
+        // Only push non-empty chunks
+        if (chunkContent.trim().length > 0) {
+          const imports = extractRenderTags(chunkContent);
+          
+          chunks.push({
+            content: chunkContent,
+            metadata: {
+              file: filepath,
+              startLine: chunkStartLine + 1,
+              endLine: i,
+              language: 'liquid',
+              type: 'template',
+              imports: imports.length > 0 ? imports : undefined,
+            },
+          });
+        }
         currentChunk = [];
       }
       continue;
@@ -220,19 +224,23 @@ export function chunkLiquidFile(
     // Flush if chunk is full
     if (currentChunk.length >= chunkSize) {
       const chunkContent = currentChunk.join('\n');
-      const imports = extractRenderTags(chunkContent);
       
-      chunks.push({
-        content: chunkContent,
-        metadata: {
-          file: filepath,
-          startLine: chunkStartLine + 1,
-          endLine: i + 1,
-          language: 'liquid',
-          type: 'template',
-          imports: imports.length > 0 ? imports : undefined,
-        },
-      });
+      // Only push non-empty chunks
+      if (chunkContent.trim().length > 0) {
+        const imports = extractRenderTags(chunkContent);
+        
+        chunks.push({
+          content: chunkContent,
+          metadata: {
+            file: filepath,
+            startLine: chunkStartLine + 1,
+            endLine: i + 1,
+            language: 'liquid',
+            type: 'template',
+            imports: imports.length > 0 ? imports : undefined,
+          },
+        });
+      }
       
       // Add overlap for next chunk
       currentChunk = currentChunk.slice(-chunkOverlap);
@@ -243,6 +251,12 @@ export function chunkLiquidFile(
   // Flush remaining chunk
   if (currentChunk.length > 0) {
     const chunkContent = currentChunk.join('\n');
+    
+    // Skip empty or whitespace-only chunks
+    if (chunkContent.trim().length === 0) {
+      return chunks.sort((a, b) => a.metadata.startLine - b.metadata.startLine);
+    }
+    
     const imports = extractRenderTags(chunkContent);
     
     chunks.push({

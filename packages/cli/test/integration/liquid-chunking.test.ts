@@ -556,4 +556,100 @@ Line 7`;
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toEqual(['actual-snippet']);
   });
+
+  it('should handle empty liquid files', () => {
+    const chunks = chunkFile('empty.liquid', '');
+    expect(chunks).toHaveLength(0);
+  });
+
+  it('should handle whitespace-only liquid files', () => {
+    const chunks = chunkFile('whitespace.liquid', '   \n\n  \t  \n   ');
+    expect(chunks).toHaveLength(0);
+  });
+
+  it('should handle file with only comments', () => {
+    const content = `
+{% comment %}
+  This file is deprecated.
+  Use the new version instead.
+{% endcomment %}
+`.trim();
+    
+    const chunks = chunkFile('deprecated.liquid', content);
+    
+    // Comments are valid template content and should be preserved in chunks
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].metadata.type).toBe('template');
+    expect(chunks[0].content).toContain('{% comment %}');
+    expect(chunks[0].metadata.imports).toBeUndefined(); // No imports in comments
+  });
+
+  it('should handle schema block only files', () => {
+    const content = `
+{% schema %}
+{
+  "name": "Schema Only Section"
+}
+{% endschema %}
+`.trim();
+    
+    const chunks = chunkFile('sections/schema-only.liquid', content);
+    
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].metadata.symbolType).toBe('schema');
+    expect(chunks[0].metadata.symbolName).toBe('Schema Only Section');
+  });
+
+  it('should handle very large schema blocks', () => {
+    // Simulate a large schema with many settings
+    const settings = Array.from({ length: 50 }, (_, i) => ({
+      type: 'text',
+      id: `setting_${i}`,
+      label: `Setting ${i}`,
+      default: `Default ${i}`,
+    }));
+    
+    const content = `
+{% schema %}
+{
+  "name": "Large Schema Section",
+  "settings": ${JSON.stringify(settings, null, 2)}
+}
+{% endschema %}
+`.trim();
+    
+    const chunks = chunkFile('sections/large-schema.liquid', content);
+    
+    expect(chunks).toHaveLength(1);
+    const schemaChunk = chunks[0];
+    expect(schemaChunk.metadata.symbolType).toBe('schema');
+    expect(schemaChunk.metadata.symbolName).toBe('Large Schema Section');
+    expect(schemaChunk.content).toContain('setting_0');
+    expect(schemaChunk.content).toContain('setting_49');
+  });
+
+  it('should handle unclosed schema blocks gracefully', () => {
+    const content = `
+<div>Template content</div>
+{% schema %}
+{
+  "name": "Unclosed Schema"
+`.trim();
+    
+    const chunks = chunkFile('sections/broken.liquid', content);
+    
+    // Should treat everything as template since schema is never closed
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks.every(c => c.metadata.type === 'template')).toBe(true);
+  });
+
+  it('should handle single line liquid file', () => {
+    const content = '{{ product.title }}';
+    
+    const chunks = chunkFile('snippets/single-line.liquid', content);
+    
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].metadata.type).toBe('template');
+    expect(chunks[0].content).toBe(content);
+  });
 });
