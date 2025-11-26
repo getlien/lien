@@ -43,6 +43,12 @@ function removeComments(content: string): string {
  * - {% include 'snippets/header' %} → 'snippets/header'
  * - {% section 'announcement-bar' %} → 'announcement-bar'
  * 
+ * Limitations:
+ * - Does not handle escaped quotes in snippet names (e.g., {% render 'name\'s' %})
+ * - This is acceptable because Shopify snippet names map to filenames, and
+ *   filesystem restrictions prevent quotes in filenames (snippets/name's.liquid is invalid)
+ * - In practice, Shopify snippet names use only alphanumeric, dash, and underscore
+ * 
  * Note: Expects content with comments already removed for performance
  * 
  * @param contentWithoutComments - Content with Liquid comments already removed
@@ -51,6 +57,7 @@ function extractRenderTags(contentWithoutComments: string): string[] {
   const dependencies = new Set<string>();
   
   // Match {% render 'snippet-name' %} or {% render "snippet-name" %}
+  // Note: Does not handle escaped quotes - see function docs for rationale
   const renderPattern = /\{%-?\s*render\s+['"]([^'"]+)['"]/g;
   let match;
   
