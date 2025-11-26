@@ -197,20 +197,41 @@ const simpleValidators = functions.filter(r => (r.metadata.parameters?.length ||
 
 ### Shopify Liquid Support ⚡ NEW
 
-Lien provides specialized chunking for Shopify Liquid templates with **dependency tracking**:
+Lien provides specialized chunking for Shopify themes with **complete dependency tracking**:
 
-**Special block handling:**
+**Liquid template handling:**
 - `{% schema %}` blocks - Kept as single chunks, section names extracted
 - `{% style %}` blocks - Preserved together for scoped CSS
 - `{% javascript %}` blocks - Kept intact
+- Oversized blocks (>225 lines) - Intelligently split to prevent token limits
 
-**Dependency tracking (tracked in `metadata.imports`):**
+**JSON template handling (Shopify 2.0+):**
+- `templates/**/*.json` - Template definition files
+- Section references extracted from JSON structure
+- Template names extracted from filepath
+
+**Complete dependency tracking (tracked in `metadata.imports`):**
 - `{% render 'snippet-name' %}` - Snippet dependencies
 - `{% include 'snippet-name' %}` - Legacy includes
 - `{% section 'section-name' %}` - Section usage in layouts
+- JSON template sections - Section type references
 
 **Example metadata:**
 ```typescript
+// JSON Template
+{
+  content: "{\"sections\": {\"main\": {\"type\": \"main-product\"}}}",
+  metadata: {
+    file: "templates/product.json",
+    type: "template",
+    language: "json",
+    symbolName: "product",              // Template name
+    symbolType: "template",
+    imports: ["main-product"]           // Sections used by this template
+  }
+}
+
+// Liquid Section Schema
 {
   content: "{% schema %}\n{\"name\": \"Hero Section\", ...}\n{% endschema %}",
   metadata: {
@@ -223,6 +244,7 @@ Lien provides specialized chunking for Shopify Liquid templates with **dependenc
   }
 }
 
+// Liquid Template Content
 {
   content: "<div>{% render 'logo' %}{% render 'nav' %}</div>",
   metadata: {
@@ -235,9 +257,9 @@ Lien provides specialized chunking for Shopify Liquid templates with **dependenc
 ```
 
 **Benefits:**
+- **Complete dependency graph** - JSON templates → sections → snippets
 - **Schema preservation** - Never splits section configuration across chunks
-- **Dependency graph** - Understand layout → section → snippet relationships
-- **Better context** - AI knows which snippets/sections are used where
+- **Better context** - AI knows full theme structure and all dependencies
 
 ### Known Limitations
 
@@ -398,26 +420,38 @@ Lien uses structured error codes for programmatic error handling:
 - "What Services exist?" → `list_functions({ pattern: ".*Service.*" })`
 - "Find all API handlers" → `list_functions({ pattern: "handle.*" })`
 
-### Pattern 8: Working with Shopify Liquid Themes ⚡
+### Pattern 8: Working with Shopify Themes (Liquid + JSON) ⚡
 ```
-1. semantic_search({ query: "section configuration for [feature]" })
-   → Finds schema blocks with section names
-2. Review metadata.imports to see which snippets/sections are used
-3. semantic_search({ query: "files that render [snippet-name]" })
-   → Trace dependency graph
-4. get_file_context({ filepath: "sections/header.liquid" })
-   → See all dependencies in one file
+1. semantic_search({ query: "product template configuration" })
+   → Finds JSON template with section references
+2. Check metadata.imports to see which sections are used
+3. semantic_search({ query: "main-product section schema" })
+   → Find section definition
+4. Review section's metadata.imports to see which snippets it renders
+   → Complete dependency chain visible!
 ```
 
 **Example queries:**
-- "Find the hero section schema" → Returns complete `{% schema %}` block with name
-- "Which sections use the product-card snippet?" → Check `imports` in results
+- "Find the product template sections" → Returns `templates/product.json` with section imports
+- "Which sections are on the collection page?" → Check JSON template imports
+- "What sections use the product-card snippet?" → Reverse lookup via imports
+- "Show the hero section schema" → Returns complete `{% schema %}` block with name
 - "What snippets does the footer render?" → See `metadata.imports: ["logo", "nav", ...]`
-- "Show layout sections" → Search for files with `{% section %}` tags
+
+**Complete dependency graph:**
+```
+templates/product.json
+  → imports: ["main-product", "recommendations"]
+    → sections/main-product.liquid
+      → imports: ["product-card", "price-tag"]
+        → snippets/product-card.liquid
+        → snippets/price-tag.liquid
+```
 
 **Dependency tracking:**
-- `metadata.imports` contains all `{% render %}`, `{% include %}`, and `{% section %}` references
-- Use this to understand theme structure: layouts → sections → snippets
+- **JSON templates** - `metadata.imports` contains section type references
+- **Liquid templates** - `metadata.imports` contains `{% render %}`, `{% include %}`, `{% section %}` references
+- Full theme architecture visible through imports metadata
 
 ---
 
