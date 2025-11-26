@@ -28,7 +28,7 @@ interface LiquidBlock {
  * }
  * {% endschema %}
  * 
- * Returns: "My \"Special\" Section" (with quotes preserved)
+ * Returns: 'My "Special" Section' (with literal quotes, unescaped)
  */
 function extractSchemaName(schemaContent: string): string | undefined {
   try {
