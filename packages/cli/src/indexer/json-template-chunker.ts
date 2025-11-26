@@ -43,7 +43,7 @@ function extractSectionReferences(jsonContent: string): string[] {
     return Array.from(sectionTypes);
   } catch (error) {
     // Invalid JSON - return empty array
-    console.warn(`Failed to parse JSON template: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`[Lien] Failed to parse JSON template: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
 }
