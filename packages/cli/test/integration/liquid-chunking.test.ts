@@ -953,3 +953,18 @@ ${schemaLines}
     }
   });
 });
+
+  it('should handle escaped quotes in schema names', () => {
+    const content = `{% schema %}
+{
+  "name": "My \\"Special\\" Section",
+  "settings": []
+}
+{% endschema %}`;
+    
+    const chunks = chunkFile('sections/escaped-quotes.liquid', content);
+    
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].metadata.symbolType).toBe('schema');
+    expect(chunks[0].metadata.symbolName).toBe('My "Special" Section');
+  });

@@ -16,10 +16,38 @@ interface LiquidBlock {
 
 /**
  * Extract schema name from JSON content
+ * 
+ * Extracts the "name" field from Shopify schema JSON.
+ * Uses JSON.parse to properly handle escaped quotes and other JSON edge cases.
+ * 
+ * Example:
+ * {% schema %}
+ * {
+ *   "name": "My \"Special\" Section",
+ *   "settings": []
+ * }
+ * {% endschema %}
+ * 
+ * Returns: "My \"Special\" Section" (with quotes preserved)
  */
 function extractSchemaName(schemaContent: string): string | undefined {
-  const nameMatch = schemaContent.match(/"name"\s*:\s*"([^"]+)"/);
-  return nameMatch ? nameMatch[1] : undefined;
+  try {
+    // Remove Liquid tags to isolate JSON content
+    // Replace {% schema %} and {% endschema %} (with optional whitespace control)
+    let jsonContent = schemaContent
+      .replace(/\{%-?\s*schema\s*-?%\}/g, '')
+      .replace(/\{%-?\s*endschema\s*-?%\}/g, '')
+      .trim();
+    
+    // Parse the JSON
+    const schema = JSON.parse(jsonContent);
+    // Ensure name is a string before returning
+    return typeof schema.name === 'string' ? schema.name : undefined;
+  } catch (error) {
+    // Invalid JSON - return undefined
+    // This is acceptable: schema blocks with invalid JSON won't have names extracted
+  }
+  return undefined;
 }
 
 /**
