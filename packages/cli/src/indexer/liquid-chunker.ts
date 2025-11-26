@@ -84,12 +84,19 @@ function extractRenderTags(contentWithoutComments: string): string[] {
 
 /**
  * Find all special Liquid blocks in the template
+ * 
+ * Limitation: Does not support nested blocks of the same type.
+ * - Matches first start tag with first end tag
+ * - This is acceptable because Shopify Liquid does not allow nested blocks
+ * - Example invalid: {% schema %}...{% schema %}...{% endschema %} (Shopify rejects this)
+ * - If malformed input contains nested blocks, only outermost block is extracted
  */
 function findLiquidBlocks(content: string): LiquidBlock[] {
   const lines = content.split('\n');
   const blocks: LiquidBlock[] = [];
   
   // Regex patterns for Liquid blocks
+  // Note: Matches first start → first end (no nesting support, which is correct for Shopify)
   const blockPatterns = [
     { type: 'schema' as const, start: /\{%-?\s*schema\s*-?%\}/, end: /\{%-?\s*endschema\s*-?%\}/ },
     { type: 'style' as const, start: /\{%-?\s*style\s*-?%\}/, end: /\{%-?\s*endstyle\s*-?%\}/ },
