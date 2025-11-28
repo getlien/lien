@@ -1,7 +1,10 @@
 """
 Sample Python module for testing AST chunking
+
+Note: Imports are intentionally present to test import extraction,
+even if they're not used in the code. This is a test fixture!
 """
-import os
+import os  # noqa: F401 - intentionally unused (testing import extraction)
 from typing import List, Optional
 
 def calculate_sum(numbers: List[int]) -> int:
