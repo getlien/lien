@@ -52,7 +52,6 @@ interface ProjectConfig {
   expectedMinFiles: number; // Minimum files to index
   expectedMinChunks: number; // Minimum chunks to create
   sampleSearchQuery: string; // Query that should find results
-  expectedSymbolTypes: string[]; // AST symbol types to validate
 }
 
 /**
@@ -67,7 +66,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 10, // Requests has clean structure with requests/*.py
     expectedMinChunks: 50, // Conservative estimate
     sampleSearchQuery: 'make http request',
-    expectedSymbolTypes: ['function', 'method', 'class'],
   },
   {
     name: 'Zod',
@@ -77,7 +75,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 30,
     expectedMinChunks: 100,
     sampleSearchQuery: 'validate schema',
-    expectedSymbolTypes: ['function', 'method', 'class', 'interface'],
   },
   {
     name: 'Express',
@@ -87,7 +84,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 20,
     expectedMinChunks: 80,
     sampleSearchQuery: 'handle http request',
-    expectedSymbolTypes: ['function', 'method'],
   },
   {
     name: 'Monolog',
@@ -97,7 +93,6 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinFiles: 30,
     expectedMinChunks: 100,
     sampleSearchQuery: 'log message handler',
-    expectedSymbolTypes: ['function', 'method', 'class'],
   },
 ];
 
@@ -170,8 +165,7 @@ function getIndexStats(projectDir: string): { files: number; chunks: number } {
  * Helper to validate AST metadata in index
  */
 async function validateASTMetadata(
-  projectDir: string,
-  _expectedSymbolTypes: string[]
+  projectDir: string
 ): Promise<boolean> {
   // Check that manifest exists and has AST metadata
   const indexPath = getIndexPath(projectDir);
@@ -372,10 +366,7 @@ describe('E2E: Real Open Source Projects', () => {
       });
       
       it('should have AST metadata for code chunks', async () => {
-        const hasMetadata = await validateASTMetadata(
-          projectDir,
-          project.expectedSymbolTypes
-        );
+        const hasMetadata = await validateASTMetadata(projectDir);
         
         expect(hasMetadata).toBe(true);
       });
