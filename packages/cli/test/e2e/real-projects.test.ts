@@ -216,16 +216,28 @@ async function cleanup() {
  * Register signal handlers at module scope for proper cleanup
  * This ensures cleanup even if tests are interrupted (Ctrl+C, kill, etc.)
  * Only enabled in local dev (not CI where process management differs)
+ * 
+ * Uses process.on() instead of process.once() to handle multiple signals
+ * (e.g., impatient users pressing Ctrl+C multiple times)
  */
+let cleanupInProgress = false;
+
 if (!process.env.CI) {
   const exitHandler = async (signal: string) => {
+    if (cleanupInProgress) {
+      // Already cleaning up, force exit on second signal
+      console.log(`\nReceived ${signal} again, forcing exit...`);
+      process.exit(1);
+    }
+    
+    cleanupInProgress = true;
     console.log(`\n\nReceived ${signal}, cleaning up test directories...`);
     await cleanup();
     process.exit(0);
   };
   
-  process.once('SIGINT', () => exitHandler('SIGINT'));
-  process.once('SIGTERM', () => exitHandler('SIGTERM'));
+  process.on('SIGINT', () => exitHandler('SIGINT'));
+  process.on('SIGTERM', () => exitHandler('SIGTERM'));
 }
 
 describe('E2E: Real Open Source Projects', () => {
