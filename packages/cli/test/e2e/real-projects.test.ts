@@ -198,41 +198,47 @@ async function validateASTMetadata(
   }
 }
 
-describe('E2E: Real Open Source Projects', () => {
-  const testDirs: string[] = [];
-  
-  /**
-   * Cleanup function that removes all test directories
-   */
-  async function cleanup() {
-    for (const dir of testDirs) {
-      try {
-        await fs.rm(dir, { recursive: true, force: true });
-        console.log(`🧹 Cleaned up: ${dir}`);
-      } catch (error) {
-        console.warn(`Failed to cleanup ${dir}:`, error);
-      }
+/**
+ * Module-level state for test cleanup
+ * Placed at module scope to ensure proper cleanup even with parallel test execution
+ */
+const testDirs: string[] = [];
+
+/**
+ * Cleanup function that removes all test directories
+ */
+async function cleanup() {
+  for (const dir of testDirs) {
+    try {
+      await fs.rm(dir, { recursive: true, force: true });
+      console.log(`🧹 Cleaned up: ${dir}`);
+    } catch (error) {
+      console.warn(`Failed to cleanup ${dir}:`, error);
     }
   }
+}
+
+/**
+ * Register signal handlers at module scope for proper cleanup
+ * This ensures cleanup even if tests are interrupted (Ctrl+C, kill, etc.)
+ * Only enabled in local dev (not CI where process management differs)
+ */
+if (!process.env.CI) {
+  const exitHandler = async (signal: string) => {
+    console.log(`\n\nReceived ${signal}, cleaning up test directories...`);
+    await cleanup();
+    process.exit(0);
+  };
   
+  process.once('SIGINT', () => exitHandler('SIGINT'));
+  process.once('SIGTERM', () => exitHandler('SIGTERM'));
+}
+
+describe('E2E: Real Open Source Projects', () => {
   // Cleanup after all tests complete
   afterAll(async () => {
     await cleanup();
   });
-  
-  // Cleanup on process exit (Ctrl+C, kill, etc.)
-  // This ensures cleanup even if tests are interrupted
-  if (!process.env.CI) {
-    // Only add handlers in local dev (not CI where process management is different)
-    const exitHandler = async (signal: string) => {
-      console.log(`\n\nReceived ${signal}, cleaning up test directories...`);
-      await cleanup();
-      process.exit(0);
-    };
-    
-    process.once('SIGINT', () => exitHandler('SIGINT'));
-    process.once('SIGTERM', () => exitHandler('SIGTERM'));
-  }
   
   // Create a test for each project
   TEST_PROJECTS.forEach((project) => {
