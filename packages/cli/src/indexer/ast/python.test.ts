@@ -89,7 +89,9 @@ def complex_function(x):
     
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.complexity).toBeDefined();
-    expect(chunks[0].metadata.complexity).toBeGreaterThan(1);
+    // Complexity = 1 (base) + 1 (if) + 1 (elif) = 3
+    // Note: else does NOT add complexity (it's the default path)
+    expect(chunks[0].metadata.complexity).toBe(3);
   });
   
   it('should extract function parameters', () => {

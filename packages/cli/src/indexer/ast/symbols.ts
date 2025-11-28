@@ -316,8 +316,8 @@ export function calculateComplexity(node: Parser.SyntaxNode): number {
     'foreach_statement',   // PHP foreach loops
     
     // Python
-    'elif_clause',         // Python elif
-    'else_clause',         // Python else (when part of if)
+    'elif_clause',         // Python elif (adds decision point)
+    // Note: 'else_clause' is NOT a decision point (it's the default path)
     'except_clause',       // Python except (try/except)
     'conditional_expression',  // Python ternary (x if cond else y)
   ];
