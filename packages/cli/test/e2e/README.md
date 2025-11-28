@@ -144,7 +144,7 @@ C:\Users\<username>\AppData\Local\Temp\lien-e2e-tests\
 **Manual cleanup if needed:**
 ```bash
 # Linux/macOS: Remove all E2E test directories
-rm -rf "$(node -p 'require("os").tmpdir()')/lien-e2e-tests/"
+rm -rf "$(node -e 'console.log(require("os").tmpdir())')/lien-e2e-tests/"
 
 # Windows (PowerShell): Remove all E2E test directories
 Remove-Item -Recurse -Force "$env:TEMP\lien-e2e-tests"
