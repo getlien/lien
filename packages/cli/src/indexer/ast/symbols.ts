@@ -353,19 +353,23 @@ export function extractImports(rootNode: Parser.SyntaxNode): string[] {
   const imports: string[] = [];
   
   function traverse(node: Parser.SyntaxNode) {
-    // TypeScript/JavaScript imports
+    // Handle import statements (shared node type between languages)
     if (node.type === 'import_statement') {
-      // Get the source (the string after 'from')
+      // TypeScript/JavaScript: Extract just the module path from 'source' field
       const sourceNode = node.childForFieldName('source');
       if (sourceNode) {
+        // TS/JS import with source field
         const importPath = sourceNode.text.replace(/['"]/g, '');
         imports.push(importPath);
+      } else {
+        // Python import without source field (e.g., "import os")
+        const importText = node.text.split('\n')[0];
+        imports.push(importText);
       }
     }
-    
-    // Python imports
-    if (node.type === 'import_statement' || node.type === 'import_from_statement') {
-      // For Python, get the entire import line (first line only)
+    // Python-specific: from...import statements
+    else if (node.type === 'import_from_statement') {
+      // Python: Get the entire import line (first line only)
       const importText = node.text.split('\n')[0];
       imports.push(importText);
     }
