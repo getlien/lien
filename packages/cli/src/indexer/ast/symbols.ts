@@ -191,12 +191,14 @@ const symbolExtractors: Record<string, SymbolExtractor> = {
   'interface_declaration': extractInterfaceInfo,
   
   // PHP
-  'function_definition': extractFunctionInfo,   // PHP functions (also used by Python - see note above)
+  'function_definition': extractFunctionInfo,   // PHP functions (Python handled via language check in extractSymbolInfo)
   'method_declaration': extractMethodInfo,       // PHP methods
   
   // Python
   'async_function_definition': extractPythonFunctionInfo,  // Python async functions
   'class_definition': extractPythonClassInfo,              // Python classes
+  // Note: Python regular functions use 'function_definition' (same as PHP)
+  // They are dispatched to extractPythonFunctionInfo via language check in extractSymbolInfo()
 };
 
 /**
@@ -205,13 +207,21 @@ const symbolExtractors: Record<string, SymbolExtractor> = {
  * @param node - AST node to extract info from
  * @param content - Source code content
  * @param parentClass - Parent class name if this is a method
+ * @param language - Programming language (for disambiguating shared node types)
  * @returns Symbol information or null
  */
 export function extractSymbolInfo(
   node: Parser.SyntaxNode,
   content: string,
-  parentClass?: string
+  parentClass?: string,
+  language?: string
 ): SymbolInfo | null {
+  // Handle ambiguous node types that are shared between languages
+  // PHP and Python both use 'function_definition', but need different extractors
+  if (node.type === 'function_definition' && language === 'python') {
+    return extractPythonFunctionInfo(node, content, parentClass);
+  }
+  
   const extractor = symbolExtractors[node.type];
   return extractor ? extractor(node, content, parentClass) : null;
 }
