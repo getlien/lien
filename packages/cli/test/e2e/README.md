@@ -105,9 +105,12 @@ git clone --depth 1 --branch main https://github.com/user/project.git /tmp/test
 # Check the temp directory (tests use /tmp for predictability)
 ls -la /tmp/lien-e2e-tests/
 
-# Run Lien manually
+# Run Lien manually (from your lien repo root)
 cd /tmp/lien-e2e-tests/requests-*  # or zod-*, express-*, monolog-*
-node /Users/alfhenderson/Code/lien/packages/cli/dist/index.js index --verbose
+node <path-to-lien-repo>/packages/cli/dist/index.js index --verbose
+
+# Or if you have lien installed globally
+lien index --verbose
 ```
 
 ### Not Enough Files/Chunks
