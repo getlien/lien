@@ -246,9 +246,10 @@ describe('E2E: Real Open Source Projects', () => {
       let projectDir: string;
       
       beforeAll(async () => {
-        // Create temp directory in /tmp for predictability and easy cleanup
-        // (os.tmpdir() returns /var/folders/... on macOS which is harder to find)
-        const tempBase = '/tmp/lien-e2e-tests';
+        // Create temp directory using OS temp dir for cross-platform compatibility
+        // Linux/macOS: /tmp/lien-e2e-tests or /var/folders/.../lien-e2e-tests
+        // Windows: C:\Users\<user>\AppData\Local\Temp\lien-e2e-tests
+        const tempBase = path.join(os.tmpdir(), 'lien-e2e-tests');
         await fs.mkdir(tempBase, { recursive: true });
         projectDir = path.join(tempBase, `${project.name.toLowerCase()}-${Date.now()}`);
         testDirs.push(projectDir);

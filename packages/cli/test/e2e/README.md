@@ -102,11 +102,15 @@ git clone --depth 1 --branch main https://github.com/user/project.git /tmp/test
 
 ### Index Failed
 ```bash
-# Check the temp directory (tests use /tmp for predictability)
-ls -la /tmp/lien-e2e-tests/
+# Find the temp directory (cross-platform)
+TEMP_DIR="$(node -p 'require("path").join(require("os").tmpdir(), "lien-e2e-tests")')"
+echo "Temp directory: $TEMP_DIR"
 
-# Run Lien manually (from your lien repo root)
-cd /tmp/lien-e2e-tests/requests-*  # or zod-*, express-*, monolog-*
+# Check the temp directory contents
+ls -la "$TEMP_DIR"
+
+# Run Lien manually in the failed project directory
+cd "$TEMP_DIR"/requests-*  # or zod-*, express-*, monolog-*
 node <path-to-lien-repo>/packages/cli/dist/index.js index --verbose
 
 # Or if you have lien installed globally
@@ -125,18 +129,28 @@ Tests automatically clean up temp directories:
 - **On interruption**: Signal handlers (SIGINT/SIGTERM) catch Ctrl+C and kill commands
 - **On crash**: Process exit handlers ensure cleanup even if tests fail
 
-**Temp directory location:**
+**Temp directory location (OS-specific):**
 ```bash
+# Linux
 /tmp/lien-e2e-tests/
+
+# macOS
+/var/folders/.../T/lien-e2e-tests/  # or /tmp/lien-e2e-tests/
+
+# Windows
+C:\Users\<username>\AppData\Local\Temp\lien-e2e-tests\
 ```
 
 **Manual cleanup if needed:**
 ```bash
-# Remove all E2E test directories
-rm -rf /tmp/lien-e2e-tests/
+# Linux/macOS: Remove all E2E test directories
+rm -rf "$(node -p 'require("os").tmpdir()')/lien-e2e-tests/"
 
-# Or check what's there
-ls -la /tmp/lien-e2e-tests/
+# Windows (PowerShell): Remove all E2E test directories
+Remove-Item -Recurse -Force "$env:TEMP\lien-e2e-tests"
+
+# Or check what's there (cross-platform Node.js)
+node -e "console.log(require('path').join(require('os').tmpdir(), 'lien-e2e-tests'))"
 ```
 
 **Cleanup guarantees:**
