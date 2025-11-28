@@ -126,9 +126,59 @@ function extractInterfaceInfo(
       signature: `interface ${nameNode.text}`,
     };
   }
+
+/**
+ * Extract Python function info (def and async def)
+ */
+function extractPythonFunctionInfo(
+  node: Parser.SyntaxNode,
+  content: string,
+  parentClass?: string
+): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+    
+    return {
+      name: nameNode.text,
+      type: parentClass ? 'method' : 'function',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractSignature(node, content),
+      parameters: extractParameters(node, content),
+      complexity: calculateComplexity(node),
+    };
+  }
+
+/**
+ * Extract Python class info
+ */
+function extractPythonClassInfo(
+  node: Parser.SyntaxNode,
+  _content: string,
+  _parentClass?: string
+): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+    
+    return {
+      name: nameNode.text,
+      type: 'class',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      signature: `class ${nameNode.text}`,
+    };
+  }
   
 /**
  * Map of AST node types to their specialized extractors
+ * 
+ * Note: There is intentional overlap in node type names across languages:
+ * - 'function_definition': Used by both PHP and Python
+ * - 'class_declaration': Used by TypeScript/JavaScript
+ * - 'class_definition': Used by Python
+ * 
+ * This is handled correctly because each file is parsed with its specific language parser.
  */
 const symbolExtractors: Record<string, SymbolExtractor> = {
   // TypeScript/JavaScript
@@ -141,8 +191,12 @@ const symbolExtractors: Record<string, SymbolExtractor> = {
   'interface_declaration': extractInterfaceInfo,
   
   // PHP
-  'function_definition': extractFunctionInfo,   // PHP functions
+  'function_definition': extractFunctionInfo,   // PHP functions (also used by Python - see note above)
   'method_declaration': extractMethodInfo,       // PHP methods
+  
+  // Python
+  'async_function_definition': extractPythonFunctionInfo,  // Python async functions
+  'class_definition': extractPythonClassInfo,              // Python classes
 };
 
 /**
@@ -250,6 +304,12 @@ export function calculateComplexity(node: Parser.SyntaxNode): number {
     
     // PHP
     'foreach_statement',   // PHP foreach loops
+    
+    // Python
+    'elif_clause',         // Python elif
+    'else_clause',         // Python else (when part of if)
+    'except_clause',       // Python except (try/except)
+    'conditional_expression',  // Python ternary (x if cond else y)
   ];
   
   function traverse(n: Parser.SyntaxNode) {
@@ -283,6 +343,7 @@ export function extractImports(rootNode: Parser.SyntaxNode): string[] {
   const imports: string[] = [];
   
   function traverse(node: Parser.SyntaxNode) {
+    // TypeScript/JavaScript imports
     if (node.type === 'import_statement') {
       // Get the source (the string after 'from')
       const sourceNode = node.childForFieldName('source');
@@ -290,6 +351,13 @@ export function extractImports(rootNode: Parser.SyntaxNode): string[] {
         const importPath = sourceNode.text.replace(/['"]/g, '');
         imports.push(importPath);
       }
+    }
+    
+    // Python imports
+    if (node.type === 'import_statement' || node.type === 'import_from_statement') {
+      // For Python, get the entire import line (first line only)
+      const importText = node.text.split('\n')[0];
+      imports.push(importText);
     }
     
     // Only traverse top-level nodes for imports

@@ -2,6 +2,7 @@ import type { SupportedLanguage } from '../types.js';
 import type { LanguageTraverser } from './types.js';
 import { TypeScriptTraverser, JavaScriptTraverser } from './typescript.js';
 import { PHPTraverser } from './php.js';
+import { PythonTraverser } from './python.js';
 
 export type { LanguageTraverser, DeclarationFunctionInfo } from './types.js';
 
@@ -18,6 +19,7 @@ const traverserRegistry: Record<SupportedLanguage, LanguageTraverser> = {
   typescript: new TypeScriptTraverser(),
   javascript: new JavaScriptTraverser(),
   php: new PHPTraverser(),
+  python: new PythonTraverser(),
 };
 
 /**

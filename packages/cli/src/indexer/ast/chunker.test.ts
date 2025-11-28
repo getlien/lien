@@ -20,9 +20,14 @@ describe('AST Chunker', () => {
       expect(shouldUseAST('Controller.php')).toBe(true);
     });
 
+    it('should return true for Python files', () => {
+      expect(shouldUseAST('test.py')).toBe(true);
+      expect(shouldUseAST('script.py')).toBe(true);
+    });
+
     it('should return false for unsupported files', () => {
-      expect(shouldUseAST('test.py')).toBe(false);
       expect(shouldUseAST('test.go')).toBe(false);
+      expect(shouldUseAST('test.rb')).toBe(false);
       expect(shouldUseAST('test.txt')).toBe(false);
     });
   });
@@ -448,9 +453,10 @@ function third() {
 
   describe('error handling', () => {
     it('should throw error for unsupported language', () => {
-      const content = 'print("Hello")';
+      const content = 'puts "Hello"';
       
-      expect(() => chunkByAST('test.py', content)).toThrow();
+      // Ruby is not yet supported
+      expect(() => chunkByAST('test.rb', content)).toThrow();
     });
 
     it('should handle invalid syntax gracefully', () => {

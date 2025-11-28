@@ -37,6 +37,11 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "vitest run test/e2e/real-projects.test.ts --reporter=verbose",
+    "test:e2e:python": "vitest run test/e2e/real-projects.test.ts -t 'Requests'",
+    "test:e2e:typescript": "vitest run test/e2e/real-projects.test.ts -t 'Zod'",
+    "test:e2e:javascript": "vitest run test/e2e/real-projects.test.ts -t 'Express'",
+    "test:e2e:php": "vitest run test/e2e/real-projects.test.ts -t 'Monolog'",
     "docs": "typedoc"
   },
   "keywords": [
@@ -69,6 +74,7 @@
     "tree-sitter": "^0.25.0",
     "tree-sitter-javascript": "0.23.1",
     "tree-sitter-php": "^0.24.2",
+    "tree-sitter-python": "^0.25.0",
     "tree-sitter-typescript": "0.23.2",
     "vectordb": "0.21.2",
     "zod": "^3.25.76",

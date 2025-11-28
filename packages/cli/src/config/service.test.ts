@@ -108,8 +108,8 @@ describe('ConfigService', () => {
       
       const config = await service.load(testDir);
       
-      // Should be migrated to v0.13.0
-      expect(config.version).toBe('0.13.0');
+      // Should be migrated to v0.14.0
+      expect(config.version).toBe('0.14.0');
       expect(config.frameworks).toBeDefined();
       expect(config.core.chunkSize).toBe(100);
       
@@ -186,7 +186,7 @@ describe('ConfigService', () => {
       
       expect(result.migrated).toBe(true);
       expect(result.backupPath).toBeDefined();
-      expect(result.config.version).toBe('0.13.0');
+      expect(result.config.version).toBe('0.14.0');
       expect(result.config.frameworks).toHaveLength(1);
       expect(result.config.frameworks[0].name).toBe('generic');
     });
@@ -555,7 +555,7 @@ describe('ConfigService', () => {
       // Load should auto-migrate
       const config = await service.load(testDir);
       
-      expect(config.version).toBe('0.13.0');
+      expect(config.version).toBe('0.14.0');
       expect(config.frameworks).toBeDefined();
       expect(config.core.chunkSize).toBe(90);
       expect(config.mcp.port).toBe(7200);

@@ -18,6 +18,7 @@ export async function generateNodeJsConfig(
       '**/*.vue',
       '**/*.mjs',
       '**/*.cjs',
+      '**/*.py',
       '**/*.md',
       '**/*.mdx',
     ],

@@ -93,7 +93,7 @@ async function createNewConfig(rootDir: string, options: InitOptions) {
       path: '.',
       enabled: true,
       config: {
-        include: ['**/*.{ts,tsx,js,jsx,py,go,rs,java,c,cpp,cs}'],
+        include: ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,c,cpp,cs}'],
         exclude: [
           '**/node_modules/**',
           '**/dist/**',

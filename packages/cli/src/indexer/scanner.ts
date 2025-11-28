@@ -123,7 +123,7 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
   // Determine patterns to search for
   const patterns = includePatterns.length > 0 
     ? includePatterns 
-    : ['**/*.{ts,tsx,js,jsx,py,go,rs,java,cpp,c,h,md,mdx}'];
+    : ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,cpp,c,cs,h,md,mdx}'];
   
   // Find all code files
   const allFiles: string[] = [];

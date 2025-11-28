@@ -115,7 +115,7 @@ list_functions({
 
 ## Enhanced Metadata (AST-Based) ⚡ NEW in v0.13.0
 
-Lien now uses **Abstract Syntax Tree (AST) parsing** for TypeScript/JavaScript files to provide rich code metadata:
+Lien now uses **Abstract Syntax Tree (AST) parsing** for TypeScript/JavaScript/PHP/Python files to provide rich code metadata:
 
 ### Metadata Fields in Search Results
 
@@ -186,10 +186,12 @@ const simpleValidators = functions.filter(r => (r.metadata.parameters?.length ||
 **Currently supported:**
 - ✅ TypeScript (`.ts`, `.tsx`)
 - ✅ JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`)
+- ✅ PHP (`.php`)
+- ✅ Python (`.py`)
 - ✅ Shopify Liquid (`.liquid`) - **Special regex-based chunking**
 
 **Coming soon:**
-- 🔜 Python, Go, Rust, Java, PHP, and more
+- 🔜 Go, Rust, Java, and more
 
 **Fallback behavior:**
 - For unsupported languages, Lien automatically falls back to line-based chunking
