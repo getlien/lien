@@ -106,7 +106,7 @@ git clone --depth 1 --branch main https://github.com/user/project.git /tmp/test
 ls -la /tmp/lien-e2e-tests/
 
 # Run Lien manually
-cd /tmp/lien-e2e-tests/flask-*  # or zod-*, express-*, monolog-*
+cd /tmp/lien-e2e-tests/requests-*  # or zod-*, express-*, monolog-*
 node /Users/alfhenderson/Code/lien/packages/cli/dist/index.js index --verbose
 ```
 
