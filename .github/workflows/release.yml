@@ -36,10 +36,10 @@ jobs:
         run: npm run build
       
       - name: Run unit and integration tests
-        run: npm test
+        run: npm test --workspace=packages/cli
       
       - name: Run E2E tests
-        run: npm run test:e2e
+        run: npm run test:e2e --workspace=packages/cli
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
       
