@@ -96,7 +96,8 @@ describe('Python AST Integration', () => {
       const current = sortedChunks[i];
       const next = sortedChunks[i + 1];
       
-      expect(current.metadata.startLine).toBeLessThan(current.metadata.endLine);
+      // Single-line functions/methods are valid (e.g., "def add(a, b): return a + b")
+      expect(current.metadata.startLine).toBeLessThanOrEqual(current.metadata.endLine);
       // Chunks shouldn't overlap (next chunk should start after current)
       expect(next.metadata.startLine).toBeGreaterThanOrEqual(current.metadata.endLine);
     }
