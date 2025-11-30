@@ -278,9 +278,11 @@ async function performFullIndex(
     // The actual processing logic (separated for queue-based synchronization)
     const doProcessChunks = async (): Promise<void> => {
       if (chunkAccumulator.length === 0) {
-        processingQueue = null;
         return;
       }
+      
+      // Capture current promise to detect if new work was queued during processing
+      const currentPromise = processingQueue;
       
       try {
         const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
@@ -322,8 +324,12 @@ async function performFullIndex(
         
         progressTracker.setMessage(getIndexingMessage());
       } finally {
-        // Clear the processing queue
-        processingQueue = null;
+        // Only clear processingQueue if it still points to this operation
+        // If another task chained onto this promise (via .then()), processingQueue
+        // will point to the chained promise and we shouldn't clear it
+        if (processingQueue === currentPromise) {
+          processingQueue = null;
+        }
       }
     };
   
