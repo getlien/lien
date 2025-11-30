@@ -252,9 +252,25 @@ async function performFullIndex(
   const progressTracker = new IndexingProgressTracker(files.length, spinner);
   progressTracker.start();
   
+  // Mutex to prevent concurrent access to chunkAccumulator
+  // While JavaScript's event loop makes operations atomic, explicit synchronization
+  // makes the intent clear and prevents subtle bugs if code is modified.
+  let processingLock: Promise<void> | null = null;
+  
   // Function to process accumulated chunks
   const processAccumulatedChunks = async () => {
+    // Wait for any in-progress processing to complete
+    if (processingLock) {
+      await processingLock;
+    }
+    
     if (chunkAccumulator.length === 0) return;
+    
+    // Acquire lock by creating a promise that will resolve when we're done
+    let releaseLock: () => void;
+    processingLock = new Promise<void>(resolve => {
+      releaseLock = resolve;
+    });
     
     const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
     
@@ -294,6 +310,10 @@ async function performFullIndex(
     }
     
     progressTracker.setMessage(getIndexingMessage());
+    
+    // Release lock
+    releaseLock!();
+    processingLock = null;
   };
   
   // Process files with concurrency limit
