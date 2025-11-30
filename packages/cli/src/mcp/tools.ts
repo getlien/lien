@@ -72,25 +72,14 @@ Examples:
     GetDependentsSchema,
     'get_dependents',
     `Find all code that depends on a file (reverse dependency lookup). Use for impact analysis:
-- "What breaks if I change this file?"
-- "Is this file safe to delete?"
-- "What code imports this module?"
+- "What breaks if I change this?"
+- "Is this safe to delete?"
+- "What imports this module?"
 
-Returns list of files that import the target file, plus risk assessment based on:
-1. **Dependency count** (how many files depend on it)
-2. **Complexity metrics** (how complex the dependent code is)
+Returns:
+- List of files that import the target
+- Risk level (low/medium/high/critical) based on dependent count and complexity
 
-Risk Levels (hybrid: count + complexity):
-- low: Few dependents (≤5) with simple code
-- medium: Moderate dependents (6-15) or some complex code
-- high: Many dependents (16-30) or highly complex code
-- critical: 30+ dependents OR very high complexity (avg>15, max>25)
-
-Complexity Analysis (when available):
-- Average/max cyclomatic complexity of dependents
-- Highlights top 5 most complex dependents
-- Risk boost: High complexity → higher risk level
-
-Example: get_dependents({ filepath: "src/utils/validate.ts", depth: 1 })`
+Example: get_dependents({ filepath: "src/utils/validate.ts" })`
   ),
 ];
