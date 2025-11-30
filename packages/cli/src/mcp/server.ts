@@ -225,7 +225,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
                 );
                 
                 // Map back to original indices
-                relatedChunksMap = new Array(filepaths.length).fill([]);
+                relatedChunksMap = Array.from({ length: filepaths.length }, () => []);
                 filesWithChunks.forEach(({ filepath, index }, i) => {
                   const related = relatedSearches[i];
                   // Filter out chunks from the same file
