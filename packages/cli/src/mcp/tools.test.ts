@@ -192,7 +192,7 @@ describe('MCP Tools Schema', () => {
       const tool = tools.find(t => t.name === 'get_dependents');
       const schema = tool?.inputSchema as any;
       expect(schema.properties.depth?.minimum).toBe(1);
-      expect(schema.properties.depth?.maximum).toBe(3);
+      expect(schema.properties.depth?.maximum).toBe(1);
     });
   });
   
@@ -406,14 +406,14 @@ describe('MCP Tools Schema', () => {
         expect(invalid.success).toBe(false);
       });
       
-      it('should reject depth > 1 with refinement', () => {
+      it('should reject depth > 1', () => {
         const invalid = GetDependentsSchema.safeParse({
           filepath: 'src/test.ts',
           depth: 2
         });
         expect(invalid.success).toBe(false);
         if (!invalid.success) {
-          expect(invalid.error.issues[0].message).toContain('Only depth=1 is currently supported');
+          expect(invalid.error.issues[0].message).toContain('less than or equal to 1');
         }
       });
     });

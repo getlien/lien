@@ -263,36 +263,20 @@ describe('GetDependentsSchema', () => {
       .toThrow();
   });
   
-  it('should reject depth greater than 3', () => {
+  it('should reject depth greater than 1', () => {
     expect(() => GetDependentsSchema.parse({ 
       filepath: 'src/test.ts', 
-      depth: 4 
+      depth: 2 
     }))
       .toThrow();
   });
   
-  it('should accept only depth=1 (others not yet implemented)', () => {
+  it('should accept only depth=1', () => {
     const result = GetDependentsSchema.parse({
       filepath: 'test.ts',
       depth: 1,
     });
     expect(result.depth).toBe(1);
-  });
-  
-  it('should reject depth=2 with clear message', () => {
-    expect(() => GetDependentsSchema.parse({ 
-      filepath: 'test.ts', 
-      depth: 2 
-    }))
-      .toThrow('Only depth=1 is currently supported');
-  });
-  
-  it('should reject depth=3 with clear message', () => {
-    expect(() => GetDependentsSchema.parse({ 
-      filepath: 'test.ts', 
-      depth: 3 
-    }))
-      .toThrow('Only depth=1 is currently supported');
   });
   
   it('should accept various filepath formats', () => {

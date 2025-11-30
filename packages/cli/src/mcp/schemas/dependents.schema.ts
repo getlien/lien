@@ -24,17 +24,12 @@ export const GetDependentsSchema = z.object({
   depth: z.number()
     .int()
     .min(1)
-    .max(3)
+    .max(1)
     .default(1)
     .describe(
-      "Depth of transitive dependencies (1-3). Default: 1\n\n" +
-      "1 = Direct dependents only\n" +
-      "2 = Direct + their dependents\n" +
-      "3 = Three levels deep"
+      "Depth of transitive dependencies. Only depth=1 (direct dependents) is currently supported.\n\n" +
+      "1 = Direct dependents only"
     ),
-}).refine(data => data.depth === 1, {
-  message: "Only depth=1 is currently supported. Transitive dependencies (depth > 1) are not yet implemented.",
-  path: ["depth"],
 });
 
 /**
