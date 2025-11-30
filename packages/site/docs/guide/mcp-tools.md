@@ -91,21 +91,25 @@ Similar format to `semantic_search`, returns semantically similar code chunks.
 - **Consistency**: Ensure new code matches existing patterns
 - **Duplication Detection**: Locate duplicated logic across the codebase
 
-## get_file_context
+## get_files_context
 
-Get all chunks and related context for a specific file.
+Get all chunks and related context for one or more files.
 
 ### Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `filepath` | string | Yes | - | Path to file (relative to project root) |
+| `filepaths` | string \| string[] | Yes | - | Path(s) to file (relative to project root). Single path or array of paths (max 50). |
 | `includeRelated` | boolean | No | true | Include related chunks from other files |
 
 ### Usage
 
 ```
 Show context for src/utils/auth.ts
+```
+
+```
+Get context for multiple files: ["src/auth.ts", "src/user.ts"]
 ```
 
 ```
@@ -146,10 +150,33 @@ Get file context for app/Models/User.php without related files
 
 ### Features
 
-- Returns all chunks from the specified file
+- Returns all chunks from the specified file(s)
 - Includes test associations (which tests cover this file)
 - Optionally includes related chunks from other files
 - Useful before editing a file to understand dependencies
+- Supports batch operations for multiple files (up to 50)
+
+### Response Format
+
+For a single file, returns:
+```json
+{
+  "indexInfo": { ... },
+  "file": "src/utils/auth.ts",
+  "chunks": [ ... ]
+}
+```
+
+For multiple files, returns:
+```json
+{
+  "indexInfo": { ... },
+  "files": {
+    "src/auth.ts": { "chunks": [ ... ] },
+    "src/user.ts": { "chunks": [ ... ] }
+  }
+}
+```
 
 ## list_functions
 
@@ -257,10 +284,11 @@ All search results include test association metadata:
 - Looking for classes/functions matching a naming pattern
 - Getting architectural overview
 
-### Use `get_file_context` when:
+### Use `get_files_context` when:
 - You identified a file via search and need to understand it
 - About to edit a file (check dependencies first)
 - Need to understand test coverage
+- Reviewing multiple files together (e.g., PR review)
 
 ### Use `find_similar` when:
 - Refactoring multiple similar pieces of code

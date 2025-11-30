@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   SemanticSearchSchema,
   FindSimilarSchema,
-  GetFileContextSchema,
+  GetFilesContextSchema,
   ListFunctionsSchema,
 } from './index.js';
 
@@ -110,25 +110,25 @@ describe('FindSimilarSchema', () => {
   });
 });
 
-describe('GetFileContextSchema', () => {
+describe('GetFilesContextSchema', () => {
   it('should validate correct input', () => {
-    const result = GetFileContextSchema.parse({
-      filepath: 'src/index.ts',
+    const result = GetFilesContextSchema.parse({
+      filepaths: 'src/index.ts',
       includeRelated: false,
     });
-    expect(result.filepath).toBe('src/index.ts');
+    expect(result.filepaths).toBe('src/index.ts');
     expect(result.includeRelated).toBe(false);
   });
   
   it('should apply default includeRelated', () => {
-    const result = GetFileContextSchema.parse({
-      filepath: 'src/index.ts',
+    const result = GetFilesContextSchema.parse({
+      filepaths: 'src/index.ts',
     });
     expect(result.includeRelated).toBe(true);
   });
   
   it('should reject empty filepath', () => {
-    expect(() => GetFileContextSchema.parse({ filepath: '' }))
+    expect(() => GetFilesContextSchema.parse({ filepaths: '' }))
       .toThrow('Filepath cannot be empty');
   });
   
@@ -141,23 +141,37 @@ describe('GetFileContextSchema', () => {
     ];
     
     paths.forEach(path => {
-      const result = GetFileContextSchema.parse({ filepath: path });
-      expect(result.filepath).toBe(path);
+      const result = GetFilesContextSchema.parse({ filepaths: path });
+      expect(result.filepaths).toBe(path);
     });
   });
   
   it('should accept explicit includeRelated values', () => {
-    const resultTrue = GetFileContextSchema.parse({
-      filepath: 'test.ts',
+    const resultTrue = GetFilesContextSchema.parse({
+      filepaths: 'test.ts',
       includeRelated: true,
     });
     expect(resultTrue.includeRelated).toBe(true);
     
-    const resultFalse = GetFileContextSchema.parse({
-      filepath: 'test.ts',
+    const resultFalse = GetFilesContextSchema.parse({
+      filepaths: 'test.ts',
       includeRelated: false,
     });
     expect(resultFalse.includeRelated).toBe(false);
+  });
+  
+  it('should reject array with empty strings', () => {
+    const invalid = GetFilesContextSchema.safeParse({ 
+      filepaths: ['', 'src/auth.ts'] 
+    });
+    expect(invalid.success).toBe(false);
+  });
+  
+  it('should reject array with all empty strings', () => {
+    const invalid = GetFilesContextSchema.safeParse({ 
+      filepaths: ['', ''] 
+    });
+    expect(invalid.success).toBe(false);
   });
 });
 

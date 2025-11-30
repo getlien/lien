@@ -21,7 +21,7 @@ import { wrapToolHandler } from './utils/tool-wrapper.js';
 import {
   SemanticSearchSchema,
   FindSimilarSchema,
-  GetFileContextSchema,
+  GetFilesContextSchema,
   ListFunctionsSchema,
 } from './schemas/index.js';
 import { LienError, LienErrorCode } from '../errors/index.js';
@@ -169,47 +169,101 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
           }
         )(args);
       
-      case 'get_file_context':
+      case 'get_files_context':
         return await wrapToolHandler(
-          GetFileContextSchema,
+          GetFilesContextSchema,
           async (validatedArgs) => {
-            log(`Getting context for: ${validatedArgs.filepath}`);
+            // Normalize input: convert single string to array
+            const filepaths = Array.isArray(validatedArgs.filepaths) 
+              ? validatedArgs.filepaths 
+              : [validatedArgs.filepaths];
+            
+            const isSingleFile = !Array.isArray(validatedArgs.filepaths);
+            
+            log(`Getting context for: ${filepaths.join(', ')}`);
             
             // Check if index has been updated and reconnect if needed
             await checkAndReconnect();
             
-            // Search for chunks from this file by embedding the filepath
-            // This is a simple approach; could be improved with metadata filtering
-            const fileEmbedding = await embeddings.embed(validatedArgs.filepath);
-            const allResults = await vectorDB.search(fileEmbedding, 50, validatedArgs.filepath);
+            // Batch embedding calls for all filepaths at once to reduce latency
+            const fileEmbeddings = await Promise.all(filepaths.map(fp => embeddings.embed(fp)));
             
-            // Filter results to only include chunks from the target file
-            const fileChunks = allResults.filter(r => 
-              r.metadata.file.includes(validatedArgs.filepath) || validatedArgs.filepath.includes(r.metadata.file)
+            // Batch all initial file searches in parallel
+            const allFileSearches = await Promise.all(
+              fileEmbeddings.map((embedding, i) => 
+                vectorDB.search(embedding, 50, filepaths[i])
+              )
             );
             
-            let results = fileChunks;
-            
-            if (validatedArgs.includeRelated && fileChunks.length > 0) {
-              // Get related chunks by searching with the first chunk's content
-              const relatedEmbedding = await embeddings.embed(fileChunks[0].content);
-              const related = await vectorDB.search(relatedEmbedding, 5, fileChunks[0].content);
-              
-              // Add related chunks that aren't from the same file
-              const relatedOtherFiles = related.filter(r => 
-                !r.metadata.file.includes(validatedArgs.filepath) && !validatedArgs.filepath.includes(r.metadata.file)
+            // Filter results to only include chunks from each target file
+            const fileChunksMap = filepaths.map((filepath, i) => {
+              const allResults = allFileSearches[i];
+              return allResults.filter(r => 
+                r.metadata.file.includes(filepath) || filepath.includes(r.metadata.file)
               );
+            });
+            
+            // Batch related chunk operations if includeRelated is true
+            let relatedChunksMap: any[][] = [];
+            if (validatedArgs.includeRelated) {
+              // Get files that have chunks (need first chunk for related search)
+              const filesWithChunks = fileChunksMap
+                .map((chunks, i) => ({ chunks, filepath: filepaths[i], index: i }))
+                .filter(({ chunks }) => chunks.length > 0);
               
-              results = [...fileChunks, ...relatedOtherFiles];
+              if (filesWithChunks.length > 0) {
+                // Batch embedding calls for all first chunks
+                const relatedEmbeddings = await Promise.all(
+                  filesWithChunks.map(({ chunks }) => embeddings.embed(chunks[0].content))
+                );
+                
+                // Batch all related chunk searches
+                const relatedSearches = await Promise.all(
+                  relatedEmbeddings.map((embedding, i) => 
+                    vectorDB.search(embedding, 5, filesWithChunks[i].chunks[0].content)
+                  )
+                );
+                
+                // Map back to original indices
+                relatedChunksMap = Array.from({ length: filepaths.length }, () => []);
+                filesWithChunks.forEach(({ filepath, index }, i) => {
+                  const related = relatedSearches[i];
+                  // Filter out chunks from the same file
+                  relatedChunksMap[index] = related.filter(r => 
+                    !r.metadata.file.includes(filepath) && !filepath.includes(r.metadata.file)
+                  );
+                });
+              }
             }
             
-            log(`Found ${results.length} chunks`);
+            // Combine file chunks with related chunks
+            const filesData: Record<string, { chunks: any[] }> = {};
+            filepaths.forEach((filepath, i) => {
+              const fileChunks = fileChunksMap[i];
+              const relatedChunks = relatedChunksMap[i] || [];
+              filesData[filepath] = { 
+                chunks: [...fileChunks, ...relatedChunks]
+              };
+            });
             
-            return {
-              indexInfo: getIndexMetadata(),
-              file: validatedArgs.filepath,
-              chunks: results,
-            };
+            log(`Found ${Object.values(filesData).reduce((sum, f) => sum + f.chunks.length, 0)} total chunks`);
+            
+            // Return format depends on single vs multi file
+            if (isSingleFile) {
+              // Single file: return old format for backward compatibility
+              const filepath = filepaths[0];
+              return {
+                indexInfo: getIndexMetadata(),
+                file: filepath,
+                chunks: filesData[filepath].chunks,
+              };
+            } else {
+              // Multiple files: return new format
+              return {
+                indexInfo: getIndexMetadata(),
+                files: filesData,
+              };
+            }
           }
         )(args);
       

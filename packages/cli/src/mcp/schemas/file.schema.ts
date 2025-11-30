@@ -1,17 +1,21 @@
 import { z } from 'zod';
 
 /**
- * Schema for get_file_context tool input.
+ * Schema for get_files_context tool input.
  * 
  * Validates file paths and context options for retrieving file-specific code chunks.
+ * Supports both single file and batch operations.
  */
-export const GetFileContextSchema = z.object({
-  filepath: z.string()
-    .min(1, "Filepath cannot be empty")
-    .describe(
-      "Relative path to file from workspace root.\n\n" +
-      "Example: 'src/components/Button.tsx'"
-    ),
+export const GetFilesContextSchema = z.object({
+  filepaths: z.union([
+    z.string().min(1, "Filepath cannot be empty"),
+    z.array(z.string().min(1, "Filepath cannot be empty")).min(1, "Array must contain at least one filepath").max(50, "Maximum 50 files per request")
+  ]).describe(
+    "Single filepath or array of filepaths (relative to workspace root).\n\n" +
+    "Single file: 'src/components/Button.tsx'\n" +
+    "Multiple files: ['src/auth.ts', 'src/user.ts']\n\n" +
+    "Maximum 50 files per request for batch operations."
+  ),
     
   includeRelated: z.boolean()
     .default(true)
@@ -26,5 +30,5 @@ export const GetFileContextSchema = z.object({
 /**
  * Inferred TypeScript type for file context input
  */
-export type GetFileContextInput = z.infer<typeof GetFileContextSchema>;
+export type GetFilesContextInput = z.infer<typeof GetFilesContextSchema>;
 

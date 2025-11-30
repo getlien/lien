@@ -18,13 +18,21 @@ export interface SearchResultResponse {
 }
 
 /**
- * Response for get_file_context tool
+ * Response for get_files_context tool (single file)
  */
-export interface FileContextResponse {
+export interface FilesContextResponse {
   indexInfo: IndexMetadata;
   file: string;
   chunks: SearchResult[];
   note?: string;
+}
+
+/**
+ * Response for get_files_context tool (multiple files)
+ */
+export interface FilesContextMultiResponse {
+  indexInfo: IndexMetadata;
+  files: Record<string, { chunks: SearchResult[] }>;
 }
 
 /**
