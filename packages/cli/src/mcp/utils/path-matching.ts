@@ -51,11 +51,12 @@ export function matchesAtBoundary(str: string, pattern: string): boolean {
   const charBefore = index > 0 ? str[index - 1] : '/';
   if (charBefore !== '/' && index !== 0) return false;
   
-  // Check character after match (must be end, path separator, or extension)
+  // Check character after match (must be end or path separator)
+  // Note: We don't check for '.' because extensions are already stripped during normalization
   const endIndex = index + pattern.length;
   if (endIndex === str.length) return true;
   const charAfter = str[endIndex];
-  return charAfter === '/' || charAfter === '.';
+  return charAfter === '/';
 }
 
 /**

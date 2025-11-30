@@ -503,15 +503,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               };
             }
             
-            // Deduplicate by normalized file path for the dependents list
-            // Build a set of unique canonical paths (using Set instead of Map for deduplication)
-            const uniquePaths = new Set<string>();
-            for (const chunk of dependentChunks) {
-              const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
-              uniquePaths.add(canonical);
-            }
-            
-            const uniqueFiles = Array.from(uniquePaths).map(filepath => ({
+            // Use chunksByFile keys for the dependents list (already canonical and deduplicated)
+            const uniqueFiles = Array.from(chunksByFile.keys()).map(filepath => ({
               filepath,
               isTestFile: isTestFile(filepath),
             }));
@@ -525,15 +518,10 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               count <= 30 ? 'high' : 'critical';
             
             // Boost risk level if complexity is high
-            if (complexityMetrics.complexityRiskBoost !== 'low') {
-              const riskLevels = ['low', 'medium', 'high', 'critical'];
-              const currentIndex = riskLevels.indexOf(riskLevel);
-              const boostIndex = riskLevels.indexOf(complexityMetrics.complexityRiskBoost);
-              
-              // Take the higher of the two risks
-              if (boostIndex > currentIndex) {
-                riskLevel = complexityMetrics.complexityRiskBoost;
-              }
+            // Use explicit risk ordering for maintainability
+            const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
+            if (RISK_ORDER[complexityMetrics.complexityRiskBoost] > RISK_ORDER[riskLevel]) {
+              riskLevel = complexityMetrics.complexityRiskBoost;
             }
             
             log(`Found ${count} dependent files (risk: ${riskLevel}${complexityMetrics.filesWithComplexityData > 0 ? ', complexity-boosted' : ''})`);

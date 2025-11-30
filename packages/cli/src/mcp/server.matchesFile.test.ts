@@ -136,5 +136,21 @@ describe('matchesFile - Path Boundary Checking', () => {
       expect(testMatchesFile('auth/handler.js', 'api/handler.js')).toBe(false);
     });
   });
+
+  describe('test file boundary checking', () => {
+    it('should NOT match test files when searching for source file', () => {
+      // After normalization: logger.test.ts → logger.test, logger.ts → logger
+      // "logger" should NOT match "logger.test" 
+      expect(testMatchesFile('logger', 'logger.test')).toBe(false);
+      expect(testMatchesFile('src/logger', 'src/logger.test')).toBe(false);
+      expect(testMatchesFile('utils/validator', 'utils/validator.spec')).toBe(false);
+    });
+
+    it('should NOT match test files with extensions', () => {
+      // These get normalized but should still not match
+      expect(testMatchesFile('logger.ts', 'logger.test.ts')).toBe(false);
+      expect(testMatchesFile('src/auth.ts', 'src/auth.spec.ts')).toBe(false);
+    });
+  });
 });
 
