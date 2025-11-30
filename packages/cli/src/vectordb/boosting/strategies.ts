@@ -208,7 +208,7 @@ export class FileTypeBoostingStrategy implements BoostingStrategy {
     
     // Slight boost for utility files (often contain reusable logic)
     if (isUtilityFile(filepath)) {
-      score *= 1.05;
+      score *= 0.95;
     }
     
     // Boost filename matches

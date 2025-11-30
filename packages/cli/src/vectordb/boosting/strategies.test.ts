@@ -141,12 +141,12 @@ describe('Boosting Strategies', () => {
       });
 
       it('should slightly boost utility files', () => {
-        const query = 'how does logging work';
-        const filepath = 'src/utils/logger.ts';
+        const query = 'how does validation work';
+        const filepath = 'src/utils/validator.ts'; // No token match to isolate utility boost
         
         const boostedScore = strategy.apply(query, filepath, baseScore);
-        // Utility boost is 1.05, making it slightly worse
-        expect(boostedScore).toBeGreaterThan(baseScore * 0.9);
+        // Utility files are boosted (0.95) for conceptual queries
+        expect(boostedScore).toBeCloseTo(baseScore * 0.95);
       });
 
       it('should recognize README files', () => {
