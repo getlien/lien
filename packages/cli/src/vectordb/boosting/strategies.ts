@@ -183,7 +183,7 @@ export class FileTypeBoostingStrategy implements BoostingStrategy {
     // Apply path boosting using cached strategy instance
     score = this.pathStrategy.apply(query, filepath, score);
     
-    // Slightly boost test files (users often look for tests)
+    // Slightly deprioritize test files (users want implementation location, not tests)
     if (isTestFile(filepath)) {
       score *= 1.10;
     }
@@ -245,7 +245,7 @@ export class FileTypeBoostingStrategy implements BoostingStrategy {
     
     // Slightly deprioritize test files (user wants implementation, not tests)
     if (isTestFile(filepath)) {
-      score *= 0.90;
+      score *= 1.10;
     }
     
     return score;

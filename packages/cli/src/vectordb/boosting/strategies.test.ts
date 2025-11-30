@@ -170,13 +170,12 @@ describe('Boosting Strategies', () => {
       });
 
       it('should slightly deprioritize test files', () => {
-        const query = 'how is auth implemented';
-        const filepath = 'src/auth/handler.test.ts';
+        const query = 'how is database implemented';
+        const filepath = 'src/unrelated/foo.test.ts'; // No filename/path match to isolate test penalty
         
         const boostedScore = strategy.apply(query, filepath, baseScore);
-        // Test file penalty (0.90) might be offset by other matches
-        // Just verify it runs without error
-        expect(boostedScore).toBeDefined();
+        // Test files should be deprioritized (score increased by 1.10x)
+        expect(boostedScore).toBeCloseTo(baseScore * 1.10);
       });
     });
   });
