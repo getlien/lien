@@ -185,13 +185,18 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             // Check if index has been updated and reconnect if needed
             await checkAndReconnect();
             
+            // Batch embedding calls for all filepaths at once to reduce latency
+            const fileEmbeddings = await Promise.all(filepaths.map(fp => embeddings.embed(fp)));
+            
             // Process each file
             const filesData: Record<string, { chunks: any[] }> = {};
             
-            for (const filepath of filepaths) {
-              // Search for chunks from this file by embedding the filepath
+            for (let i = 0; i < filepaths.length; i++) {
+              const filepath = filepaths[i];
+              const fileEmbedding = fileEmbeddings[i];
+              
+              // Search for chunks from this file
               // This is a simple approach; could be improved with metadata filtering
-              const fileEmbedding = await embeddings.embed(filepath);
               const allResults = await vectorDB.search(fileEmbedding, 50, filepath);
               
               // Filter results to only include chunks from the target file
