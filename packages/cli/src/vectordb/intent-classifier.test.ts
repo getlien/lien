@@ -209,6 +209,12 @@ describe('Query Intent Classification', () => {
   });
   
   describe('Helper Functions', () => {
+    // Clean up any custom rules added during tests
+    afterEach(async () => {
+      const { resetIntentRules } = await import('./intent-classifier.js');
+      resetIntentRules();
+    });
+    
     describe('getPatternsForIntent', () => {
       it('should return patterns for LOCATION intent', async () => {
         const { getPatternsForIntent } = await import('./intent-classifier.js');
@@ -263,7 +269,7 @@ describe('Query Intent Classification', () => {
     });
     
     describe('addIntentRule', () => {
-      it('should allow adding custom rules', async () => {
+      it('should allow adding custom rules with cleanup', async () => {
         const { addIntentRule, classifyQueryIntent, QueryIntent } = await import('./intent-classifier.js');
         
         // Add a custom high-priority rule
@@ -280,7 +286,8 @@ describe('Query Intent Classification', () => {
         cleanup();
         
         // After cleanup, should not match the custom pattern anymore
-        expect(classifyQueryIntent('this matches custom test pattern')).not.toBe(QueryIntent.LOCATION);
+        // Should fall back to default IMPLEMENTATION
+        expect(classifyQueryIntent('this matches custom test pattern')).toBe(QueryIntent.IMPLEMENTATION);
       });
       
       it('should return cleanup function that removes the rule', async () => {
@@ -297,6 +304,23 @@ describe('Query Intent Classification', () => {
         expect(getIntentRules().length).toBe(initialCount + 1);
         
         cleanup();
+        
+        expect(getIntentRules().length).toBe(initialCount);
+      });
+      
+      it('should handle multiple cleanup calls safely', async () => {
+        const { addIntentRule, getIntentRules } = await import('./intent-classifier.js');
+        
+        const initialCount = getIntentRules().length;
+        
+        const cleanup = addIntentRule({
+          intent: QueryIntent.LOCATION,
+          priority: 10,
+          patterns: [/test/],
+        });
+        
+        cleanup();
+        cleanup(); // Second call should not throw
         
         expect(getIntentRules().length).toBe(initialCount);
       });
