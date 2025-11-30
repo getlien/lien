@@ -374,6 +374,7 @@ async function performFullIndex(
   await manifest.updateFiles(
     indexedFileEntries.map(entry => ({
       filepath: entry.filepath,
+      // Use actual file mtime for accurate change detection
       lastModified: entry.mtime,
       chunkCount: entry.chunkCount,
     }))
