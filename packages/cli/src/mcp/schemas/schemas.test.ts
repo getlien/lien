@@ -159,6 +159,20 @@ describe('GetFilesContextSchema', () => {
     });
     expect(resultFalse.includeRelated).toBe(false);
   });
+  
+  it('should reject array with empty strings', () => {
+    const invalid = GetFilesContextSchema.safeParse({ 
+      filepaths: ['', 'src/auth.ts'] 
+    });
+    expect(invalid.success).toBe(false);
+  });
+  
+  it('should reject array with all empty strings', () => {
+    const invalid = GetFilesContextSchema.safeParse({ 
+      filepaths: ['', ''] 
+    });
+    expect(invalid.success).toBe(false);
+  });
 });
 
 describe('ListFunctionsSchema', () => {

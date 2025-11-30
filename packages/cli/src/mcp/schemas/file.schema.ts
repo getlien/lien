@@ -9,7 +9,7 @@ import { z } from 'zod';
 export const GetFilesContextSchema = z.object({
   filepaths: z.union([
     z.string().min(1, "Filepath cannot be empty"),
-    z.array(z.string()).min(1, "Array must contain at least one filepath").max(50, "Maximum 50 files per request")
+    z.array(z.string().min(1, "Filepath cannot be empty")).min(1, "Array must contain at least one filepath").max(50, "Maximum 50 files per request")
   ]).describe(
     "Single filepath or array of filepaths (relative to workspace root).\n\n" +
     "Single file: 'src/components/Button.tsx'\n" +
