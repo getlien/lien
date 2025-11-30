@@ -500,8 +500,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               }
             }
             
-            // Calculate overall complexity metrics
-            let complexityMetrics: ComplexityMetrics | undefined = undefined;
+            // Calculate overall complexity metrics (always return for consistent response shape)
+            let complexityMetrics: ComplexityMetrics;
             
             if (fileComplexities.length > 0) {
               const allAvgs = fileComplexities.map(f => f.avgComplexity);
@@ -537,6 +537,15 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
                 filesWithComplexityData: fileComplexities.length,
                 highComplexityDependents,
                 complexityRiskBoost,
+              };
+            } else {
+              // No complexity data available - return empty structure for consistent response shape
+              complexityMetrics = {
+                averageComplexity: 0,
+                maxComplexity: 0,
+                filesWithComplexityData: 0,
+                highComplexityDependents: [],
+                complexityRiskBoost: 'low',
               };
             }
             
@@ -579,7 +588,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               count <= 30 ? 'high' : 'critical';
             
             // Boost risk level if complexity is high
-            if (complexityMetrics && complexityMetrics.complexityRiskBoost !== 'low') {
+            if (complexityMetrics.complexityRiskBoost !== 'low') {
               const riskLevels = ['low', 'medium', 'high', 'critical'];
               const currentIndex = riskLevels.indexOf(riskLevel);
               const boostIndex = riskLevels.indexOf(complexityMetrics.complexityRiskBoost);
@@ -590,7 +599,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               }
             }
             
-            log(`Found ${count} dependent files (risk: ${riskLevel}${complexityMetrics ? ', complexity-boosted' : ''})`);
+            log(`Found ${count} dependent files (risk: ${riskLevel}${complexityMetrics.filesWithComplexityData > 0 ? ', complexity-boosted' : ''})`);
             
             // Build warning if scan limit was reached (results may be incomplete)
             let note: string | undefined;
