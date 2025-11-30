@@ -521,18 +521,10 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             
             log(`Found ${count} dependent files (risk: ${riskLevel}${complexityMetrics ? ', complexity-boosted' : ''})`);
             
-            // Build notes array for any warnings/limitations
-            const notes: string[] = [];
-            
-            // Warn if scan limit was reached (results may be incomplete)
+            // Build warning if scan limit was reached (results may be incomplete)
+            let note: string | undefined;
             if (allChunks.length === scanLimit) {
-              notes.push(`Warning: Scanned ${scanLimit} chunks (limit reached). Results may be incomplete for large codebases. Some dependents might not be listed.`);
-            }
-            
-            // Note about transitive dependencies if depth > 1
-            const depth = validatedArgs.depth ?? 1;
-            if (depth > 1) {
-              notes.push('Note: Transitive dependency tracking (depth > 1) is not yet implemented. Showing direct dependents only.');
+              note = `Warning: Scanned ${scanLimit} chunks (limit reached). Results may be incomplete for large codebases. Some dependents might not be listed.`;
             }
             
             return {
@@ -542,7 +534,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               riskLevel,
               dependents: uniqueFiles,
               complexityMetrics,
-              note: notes.length > 0 ? notes.join('\n\n') : undefined,
+              note,
             };
           }
         )(args);

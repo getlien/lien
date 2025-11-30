@@ -26,6 +26,9 @@ export const GetDependentsSchema = z.object({
       "2 = Direct + their dependents\n" +
       "3 = Three levels deep"
     ),
+}).refine(data => data.depth === 1, {
+  message: "Only depth=1 is currently supported. Transitive dependencies (depth > 1) are not yet implemented.",
+  path: ["depth"],
 });
 
 /**

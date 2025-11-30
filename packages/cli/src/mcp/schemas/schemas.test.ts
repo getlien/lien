@@ -234,13 +234,13 @@ describe('ListFunctionsSchema', () => {
 });
 
 describe('GetDependentsSchema', () => {
-  it('should validate correct input', () => {
+  it('should validate correct input with depth=1', () => {
     const result = GetDependentsSchema.parse({
       filepath: 'src/utils/validate.ts',
-      depth: 2,
+      depth: 1,
     });
     expect(result.filepath).toBe('src/utils/validate.ts');
-    expect(result.depth).toBe(2);
+    expect(result.depth).toBe(1);
   });
   
   it('should apply default depth', () => {
@@ -271,14 +271,28 @@ describe('GetDependentsSchema', () => {
       .toThrow();
   });
   
-  it('should accept depth values 1-3', () => {
-    [1, 2, 3].forEach(depth => {
-      const result = GetDependentsSchema.parse({
-        filepath: 'test.ts',
-        depth,
-      });
-      expect(result.depth).toBe(depth);
+  it('should accept only depth=1 (others not yet implemented)', () => {
+    const result = GetDependentsSchema.parse({
+      filepath: 'test.ts',
+      depth: 1,
     });
+    expect(result.depth).toBe(1);
+  });
+  
+  it('should reject depth=2 with clear message', () => {
+    expect(() => GetDependentsSchema.parse({ 
+      filepath: 'test.ts', 
+      depth: 2 
+    }))
+      .toThrow('Only depth=1 is currently supported');
+  });
+  
+  it('should reject depth=3 with clear message', () => {
+    expect(() => GetDependentsSchema.parse({ 
+      filepath: 'test.ts', 
+      depth: 3 
+    }))
+      .toThrow('Only depth=1 is currently supported');
   });
   
   it('should accept various filepath formats', () => {
