@@ -12,4 +12,5 @@ export * from './search.schema.js';
 export * from './similarity.schema.js';
 export * from './file.schema.js';
 export * from './symbols.schema.js';
+export * from './dependents.schema.js';
 

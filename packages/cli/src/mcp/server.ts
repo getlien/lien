@@ -23,6 +23,7 @@ import {
   FindSimilarSchema,
   GetFilesContextSchema,
   ListFunctionsSchema,
+  GetDependentsSchema,
 } from './schemas/index.js';
 import { LienError, LienErrorCode } from '../errors/index.js';
 
@@ -318,6 +319,211 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               note: usedMethod === 'content' 
                 ? 'Using content search. Run "lien reindex" to enable faster symbol-based queries.'
                 : undefined,
+            };
+          }
+        )(args);
+      
+      case 'get_dependents':
+        return await wrapToolHandler(
+          GetDependentsSchema,
+          async (validatedArgs) => {
+            log(`Finding dependents of: ${validatedArgs.filepath}`);
+            
+            // Check if index has been updated and reconnect if needed
+            await checkAndReconnect();
+            
+            // Get all chunks - they include imports metadata
+            const allChunks = await vectorDB.scanWithFilter({ limit: 10000 });
+            
+            log(`Scanning ${allChunks.length} chunks for imports...`);
+            
+            // Helper function to normalize and match file paths
+            const matchesFile = (importPath: string, targetPath: string): boolean => {
+              // Remove quotes and normalize paths
+              const cleanImport = importPath.replace(/['"]/g, '').trim();
+              const cleanTarget = targetPath.trim();
+              
+              // Normalize separators (handle both / and \)
+              const normalizeImport = cleanImport.replace(/\\/g, '/');
+              const normalizeTarget = cleanTarget.replace(/\\/g, '/');
+              
+              // Helper: Check if match occurs at path boundaries
+              const matchesAtBoundary = (str: string, pattern: string): boolean => {
+                const index = str.indexOf(pattern);
+                if (index === -1) return false;
+                
+                // Check character before match (must be start or path separator)
+                const charBefore = index > 0 ? str[index - 1] : '/';
+                if (charBefore !== '/' && index !== 0) return false;
+                
+                // Check character after match (must be end, path separator, or extension)
+                const endIndex = index + pattern.length;
+                if (endIndex === str.length) return true;
+                const charAfter = str[endIndex];
+                return charAfter === '/' || charAfter === '.';
+              };
+              
+              // Strategy 1: Check if target path appears in import at path boundaries
+              if (matchesAtBoundary(normalizeImport, normalizeTarget)) {
+                return true;
+              }
+              
+              // Strategy 2: Check if import path appears in target (for longer target paths)
+              if (matchesAtBoundary(normalizeTarget, normalizeImport)) {
+                return true;
+              }
+              
+              // Strategy 3: Match by filename only (without extension)
+              const importFilename = normalizeImport.split('/').pop()?.replace(/\.[^.]+$/, '');
+              const targetFilename = normalizeTarget.split('/').pop()?.replace(/\.[^.]+$/, '');
+              if (importFilename && targetFilename && importFilename === targetFilename) {
+                return true;
+              }
+              
+              // Strategy 4: Handle relative imports (./logger vs src/utils/logger)
+              // Remove leading ./ and ../ from import
+              const cleanedImport = normalizeImport.replace(/^(\.\.?\/)+/, '');
+              if (matchesAtBoundary(cleanedImport, normalizeTarget) || 
+                  matchesAtBoundary(normalizeTarget, cleanedImport)) {
+                return true;
+              }
+              
+              return false;
+            };
+            
+            // Find all chunks that import the target file
+            const dependentChunks = allChunks.filter(chunk => {
+              const imports = chunk.metadata.imports || [];
+              return imports.some(imp => matchesFile(imp, validatedArgs.filepath));
+            });
+            
+            // Group chunks by file for complexity analysis
+            const chunksByFile = new Map<string, typeof dependentChunks>();
+            for (const chunk of dependentChunks) {
+              const existing = chunksByFile.get(chunk.metadata.file) || [];
+              existing.push(chunk);
+              chunksByFile.set(chunk.metadata.file, existing);
+            }
+            
+            // Calculate complexity metrics per file
+            interface FileComplexity {
+              filepath: string;
+              avgComplexity: number;
+              maxComplexity: number;
+              complexityScore: number; // Sum of all complexities
+              chunksWithComplexity: number;
+            }
+            
+            const fileComplexities: FileComplexity[] = [];
+            
+            for (const [filepath, chunks] of chunksByFile.entries()) {
+              const complexities = chunks
+                .map(c => c.metadata.complexity)
+                .filter((c): c is number => typeof c === 'number' && c > 0);
+              
+              if (complexities.length > 0) {
+                const sum = complexities.reduce((a, b) => a + b, 0);
+                const avg = sum / complexities.length;
+                const max = Math.max(...complexities);
+                
+                fileComplexities.push({
+                  filepath,
+                  avgComplexity: Math.round(avg * 10) / 10, // Round to 1 decimal
+                  maxComplexity: max,
+                  complexityScore: sum,
+                  chunksWithComplexity: complexities.length,
+                });
+              }
+            }
+            
+            // Calculate overall complexity metrics
+            let complexityMetrics: any = undefined;
+            
+            if (fileComplexities.length > 0) {
+              const allAvgs = fileComplexities.map(f => f.avgComplexity);
+              const allMaxes = fileComplexities.map(f => f.maxComplexity);
+              const totalAvg = allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length;
+              const globalMax = Math.max(...allMaxes);
+              
+              // Identify high-complexity dependents (complexity > 10)
+              const highComplexityThreshold = 10;
+              const highComplexityDependents = fileComplexities
+                .filter(f => f.maxComplexity > highComplexityThreshold)
+                .sort((a, b) => b.maxComplexity - a.maxComplexity)
+                .slice(0, 5) // Top 5
+                .map(f => ({
+                  filepath: f.filepath,
+                  maxComplexity: f.maxComplexity,
+                  avgComplexity: f.avgComplexity,
+                }));
+              
+              // Calculate complexity-based risk boost
+              let complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical' = 'low';
+              if (totalAvg > 15 || globalMax > 25) {
+                complexityRiskBoost = 'critical';
+              } else if (totalAvg > 10 || globalMax > 20) {
+                complexityRiskBoost = 'high';
+              } else if (totalAvg > 6 || globalMax > 15) {
+                complexityRiskBoost = 'medium';
+              }
+              
+              complexityMetrics = {
+                averageComplexity: Math.round(totalAvg * 10) / 10,
+                maxComplexity: globalMax,
+                filesWithComplexityData: fileComplexities.length,
+                highComplexityDependents,
+                complexityRiskBoost,
+              };
+            }
+            
+            // Deduplicate by file path for the dependents list
+            const uniqueFiles = Array.from(
+              new Set(dependentChunks.map(d => d.metadata.file))
+            ).map(filepath => ({
+              filepath,
+              isTestFile: filepath.includes('.test.') || 
+                         filepath.includes('.spec.') ||
+                         filepath.includes('/test/') ||
+                         filepath.includes('/tests/'),
+            }));
+            
+            // Calculate risk level based on dependent count
+            const count = uniqueFiles.length;
+            let riskLevel: 'low' | 'medium' | 'high' | 'critical' = 
+              count === 0 ? 'low' :
+              count <= 5 ? 'low' :
+              count <= 15 ? 'medium' :
+              count <= 30 ? 'high' : 'critical';
+            
+            // Boost risk level if complexity is high
+            if (complexityMetrics && complexityMetrics.complexityRiskBoost !== 'low') {
+              const riskLevels = ['low', 'medium', 'high', 'critical'];
+              const currentIndex = riskLevels.indexOf(riskLevel);
+              const boostIndex = riskLevels.indexOf(complexityMetrics.complexityRiskBoost);
+              
+              // Take the higher of the two risks
+              if (boostIndex > currentIndex) {
+                riskLevel = complexityMetrics.complexityRiskBoost;
+              }
+            }
+            
+            log(`Found ${count} dependent files (risk: ${riskLevel}${complexityMetrics ? ', complexity-boosted' : ''})`);
+            
+            // Handle transitive dependencies if depth > 1
+            const depth = validatedArgs.depth ?? 1;
+            let transitiveNote: string | undefined;
+            if (depth > 1) {
+              transitiveNote = 'Note: Transitive dependency tracking (depth > 1) is not yet implemented. Showing direct dependents only.';
+            }
+            
+            return {
+              indexInfo: getIndexMetadata(),
+              filepath: validatedArgs.filepath,
+              dependentCount: count,
+              riskLevel,
+              dependents: uniqueFiles,
+              complexityMetrics,
+              note: transitiveNote,
             };
           }
         )(args);

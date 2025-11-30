@@ -14,9 +14,9 @@ describe('MCP Tools Schema', () => {
       expect(tools.length).toBeGreaterThan(0);
     });
     
-    it('should have exactly 4 tools', () => {
-      expect(tools.length).toBe(4);
-    });
+  it('should have exactly 5 tools', () => {
+    expect(tools.length).toBe(5);
+  });
     
     it('should have all required properties for each tool', () => {
       tools.forEach(tool => {
