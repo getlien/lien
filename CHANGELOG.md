@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.16.0] - 2025-11-30
+
+### Added
+- **Multi-file support for get_files_context**
+
+
 ## [0.15.1] - 2025-11-30
 
 ### Fixed
