@@ -300,26 +300,29 @@ export function calculateComplexity(node: Parser.SyntaxNode): number {
   let complexity = 1; // Base complexity
   
   const decisionPoints = [
-    // TypeScript/JavaScript
-    'if_statement',
-    'while_statement',
-    'do_statement',        // do...while loops
-    'for_statement',
-    'for_in_statement',
-    'for_of_statement',    // for...of loops
-    'switch_case',
-    'catch_clause',
-    'ternary_expression',
-    'binary_expression',   // For && and ||
+    // Common across languages (TypeScript/JavaScript/Python/PHP)
+    'if_statement',          // if conditions
+    'while_statement',       // while loops
+    'for_statement',         // for loops
+    'switch_case',           // switch/case statements
+    'catch_clause',          // try/catch error handling
+    'ternary_expression',    // Ternary operator (a ? b : c)
+    'binary_expression',     // For && and || logical operators
     
-    // PHP
-    'foreach_statement',   // PHP foreach loops
+    // TypeScript/JavaScript specific
+    'do_statement',          // do...while loops
+    'for_in_statement',      // for...in loops
+    'for_of_statement',      // for...of loops
     
-    // Python
-    'elif_clause',         // Python elif (adds decision point)
+    // PHP specific
+    'foreach_statement',     // PHP foreach loops
+    
+    // Python specific
+    'elif_clause',           // Python elif (adds decision point)
     // Note: 'else_clause' is NOT a decision point (it's the default path)
-    'except_clause',       // Python except (try/except)
-    'conditional_expression',  // Python ternary (x if cond else y)
+    'except_clause',         // Python except (try/except)
+    'conditional_expression', // Python ternary (x if cond else y)
+    'with_statement',        // Python with/context managers
   ];
   
   function traverse(n: Parser.SyntaxNode) {
