@@ -2,13 +2,30 @@ import { SearchResult } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
-import { classifyQueryIntent } from './intent-classifier.js';
+import { classifyQueryIntent, QueryIntent } from './intent-classifier.js';
 import { BoostingComposer, PathBoostingStrategy, FilenameBoostingStrategy, FileTypeBoostingStrategy } from './boosting/index.js';
 
 // TODO: Replace with proper type from lancedb-types.ts
 // Currently using 'any' because tests use incomplete mocks that don't satisfy full LanceDB interface
 // See: https://github.com/getlien/lien/issues/XXX
 type LanceDBTable = any;
+
+/**
+ * Cached strategy instances to avoid repeated instantiation overhead.
+ * These strategies are stateless and can be safely reused across queries.
+ */
+const PATH_STRATEGY = new PathBoostingStrategy();
+const FILENAME_STRATEGY = new FilenameBoostingStrategy();
+
+/**
+ * Cached FileTypeBoostingStrategy instances for each intent.
+ * Since there are only three possible intents, we can cache all three.
+ */
+const FILE_TYPE_STRATEGIES = {
+  [QueryIntent.LOCATION]: new FileTypeBoostingStrategy(QueryIntent.LOCATION),
+  [QueryIntent.CONCEPTUAL]: new FileTypeBoostingStrategy(QueryIntent.CONCEPTUAL),
+  [QueryIntent.IMPLEMENTATION]: new FileTypeBoostingStrategy(QueryIntent.IMPLEMENTATION),
+};
 
 /**
  * Database record structure as stored in LanceDB
@@ -54,10 +71,11 @@ function applyRelevanceBoosting(
   
   const intent = classifyQueryIntent(query);
   
+  // Use cached strategy instances to avoid allocation overhead
   const composer = new BoostingComposer()
-    .addStrategy(new PathBoostingStrategy())
-    .addStrategy(new FilenameBoostingStrategy())
-    .addStrategy(new FileTypeBoostingStrategy(intent));
+    .addStrategy(PATH_STRATEGY)
+    .addStrategy(FILENAME_STRATEGY)
+    .addStrategy(FILE_TYPE_STRATEGIES[intent]);
   
   return composer.apply(query, filepath, baseScore);
 }
