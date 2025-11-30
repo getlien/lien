@@ -492,10 +492,11 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               new Set(dependentChunks.map(d => d.metadata.file))
             ).map(filepath => ({
               filepath,
-              isTestFile: filepath.includes('.test.') || 
-                         filepath.includes('.spec.') ||
-                         filepath.includes('/test/') ||
-                         filepath.includes('/tests/'),
+              // More precise test file detection to avoid false positives like:
+              // - contest.ts (contains ".test." but isn't a test)
+              // - latest/config.ts (contains "/test/" but isn't a test)
+              isTestFile: /\.(test|spec)\.[^/]+$/.test(filepath) ||
+                         /(^|[/\\])(test|tests|__tests__)[/\\]/.test(filepath),
             }));
             
             // Calculate risk level based on dependent count
