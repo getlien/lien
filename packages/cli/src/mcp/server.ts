@@ -414,6 +414,18 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               chunksWithComplexity: number;
             }
             
+            interface ComplexityMetrics {
+              averageComplexity: number;
+              maxComplexity: number;
+              filesWithComplexityData: number;
+              highComplexityDependents: Array<{
+                filepath: string;
+                maxComplexity: number;
+                avgComplexity: number;
+              }>;
+              complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical';
+            }
+            
             const fileComplexities: FileComplexity[] = [];
             
             for (const [filepath, chunks] of chunksByFile.entries()) {
@@ -437,7 +449,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             }
             
             // Calculate overall complexity metrics
-            let complexityMetrics: any = undefined;
+            let complexityMetrics: ComplexityMetrics | undefined = undefined;
             
             if (fileComplexities.length > 0) {
               const allAvgs = fileComplexities.map(f => f.avgComplexity);
