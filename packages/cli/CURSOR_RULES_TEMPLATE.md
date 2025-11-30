@@ -17,6 +17,7 @@ You have access to Lien semantic search tools. USE THEM INSTEAD OF grep/ripgrep/
 | "Find all Controllers" | `list_functions` | grep |
 | Edit a file | `get_files_context` FIRST | direct edit |
 | Find similar code | `find_similar` | manual search |
+| "What depends on this file?" | `get_dependents` | manual grep |
 
 ## Before ANY Code Change
 
@@ -48,6 +49,14 @@ REQUIRED sequence:
 - Find similar implementations for consistency
 - Use when refactoring or detecting duplication
 
+**`get_dependents({ filepath: "path/to/file.ts", depth: 1 })`**
+- Find all files that import/depend on a target file
+- Use for impact analysis: "What breaks if I change this?"
+- Returns risk level (low/medium/high/critical) based on:
+  - Dependency count (how many files import it)
+  - Complexity metrics (how complex the dependent code is)
+- Highlights top 5 most complex dependents when complexity data available
+
 ## Test Associations
 
 `get_files_context` returns `testAssociations` showing which tests cover the file.
@@ -71,6 +80,15 @@ After changes, remind the user: "This file is covered by [test files] - run thes
 3. Check testAssociations in response
 4. Make changes
 5. Tell user which tests to run
+```
+
+### Pattern 3: Impact Analysis Before Refactoring
+```
+1. get_dependents({ filepath: "target/file.ts" })
+2. Review risk level and dependent count
+3. Check highComplexityDependents (if any)
+4. Use get_files_context on high-risk dependents
+5. Plan refactoring strategy based on impact
 ```
 
 ## Query Construction
