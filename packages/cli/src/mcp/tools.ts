@@ -41,7 +41,7 @@ Provide at least 10 characters of code to match against. Results include a relev
     'get_files_context',
     `Get context for one or more files including dependencies and test coverage.
 
-MANDATORY before editing files. Accepts single path or array of paths.
+MANDATORY: Call this BEFORE editing any file. Accepts single path or array of paths.
 
 Single file:
   get_files_context({ filepaths: "src/auth.ts" })
