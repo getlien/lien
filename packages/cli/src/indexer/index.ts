@@ -259,69 +259,73 @@ async function performFullIndex(
     // 2. Check accumulator length threshold
     // 3. Trigger processing
     let addChunksLock: Promise<void> | null = null;
-    let processingLock: Promise<void> | null = null;
+    let processingQueue: Promise<void> | null = null;
     
     // Function to process accumulated chunks
-    const processAccumulatedChunks = async () => {
-    // Wait for any in-progress processing to complete
-    if (processingLock) {
-      await processingLock;
-    }
+    // Uses queue-based synchronization to prevent TOCTOU race conditions
+    const processAccumulatedChunks = async (): Promise<void> => {
+      // Chain onto existing processing promise to create a queue
+      // This prevents the race condition where multiple tasks check processingQueue
+      // simultaneously and both proceed to process
+      if (processingQueue) {
+        processingQueue = processingQueue.then(() => doProcessChunks());
+      } else {
+        processingQueue = doProcessChunks();
+      }
+      return processingQueue;
+    };
     
-    if (chunkAccumulator.length === 0) return;
-    
-    // Acquire lock by creating a promise that will resolve when we're done
-    let releaseLock: () => void;
-    processingLock = new Promise<void>(resolve => {
-      releaseLock = resolve;
-    });
-    
-    try {
-      const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
+    // The actual processing logic (separated for queue-based synchronization)
+    const doProcessChunks = async (): Promise<void> => {
+      if (chunkAccumulator.length === 0) {
+        processingQueue = null;
+        return;
+      }
       
-      // Process embeddings in smaller batches AND insert incrementally to keep UI responsive
-      for (let i = 0; i < toProcess.length; i += embeddingBatchSize) {
-        const batch = toProcess.slice(i, Math.min(i + embeddingBatchSize, toProcess.length));
+      try {
+        const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
         
-        // Update progress message
-        progressTracker.setMessage(getEmbeddingMessage());
-        
-        // Process embeddings in micro-batches to prevent event loop blocking
-        const texts = batch.map(item => item.content);
-        const embeddingVectors: Float32Array[] = [];
-        
-        for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
-          const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
-          const microResults = await embeddings.embedBatch(microBatch);
-          embeddingVectors.push(...microResults);
+        // Process embeddings in smaller batches AND insert incrementally to keep UI responsive
+        for (let i = 0; i < toProcess.length; i += embeddingBatchSize) {
+          const batch = toProcess.slice(i, Math.min(i + embeddingBatchSize, toProcess.length));
           
-          // Yield to event loop so spinner can update
+          // Update progress message
+          progressTracker.setMessage(getEmbeddingMessage());
+          
+          // Process embeddings in micro-batches to prevent event loop blocking
+          const texts = batch.map(item => item.content);
+          const embeddingVectors: Float32Array[] = [];
+          
+          for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
+            const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
+            const microResults = await embeddings.embedBatch(microBatch);
+            embeddingVectors.push(...microResults);
+            
+            // Yield to event loop so spinner can update
+            await new Promise(resolve => setImmediate(resolve));
+          }
+          
+          processedChunks += batch.length;
+          
+          // Update progress before DB insertion
+          progressTracker.setMessage(`Inserting ${batch.length} chunks into vector space...`);
+          
+          await vectorDB.insertBatch(
+            embeddingVectors,
+            batch.map(item => item.chunk.metadata),
+            texts
+          );
+          
+          // Yield after DB insertion too
           await new Promise(resolve => setImmediate(resolve));
         }
         
-        processedChunks += batch.length;
-        
-        // Update progress before DB insertion
-        progressTracker.setMessage(`Inserting ${batch.length} chunks into vector space...`);
-        
-        await vectorDB.insertBatch(
-          embeddingVectors,
-          batch.map(item => item.chunk.metadata),
-          texts
-        );
-        
-        // Yield after DB insertion too
-        await new Promise(resolve => setImmediate(resolve));
+        progressTracker.setMessage(getIndexingMessage());
+      } finally {
+        // Clear the processing queue
+        processingQueue = null;
       }
-      
-      progressTracker.setMessage(getIndexingMessage());
-    } finally {
-      // Always release lock, even if an error occurs
-      // This prevents deadlock where processingLock is never cleared
-      releaseLock!();
-      processingLock = null;
-    }
-  };
+    };
   
   // Process files with concurrency limit
   const filePromises = files.map((file) =>
