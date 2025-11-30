@@ -350,8 +350,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               const cleanTarget = targetPath.trim();
               
               // Normalize separators (handle both / and \)
-              const normalizeImport = cleanImport.replace(/\\/g, '/');
-              const normalizeTarget = cleanTarget.replace(/\\/g, '/');
+              const normalizedImport = cleanImport.replace(/\\/g, '/');
+              const normalizedTarget = cleanTarget.replace(/\\/g, '/');
               
               // Helper: Check if match occurs at path boundaries
               const matchesAtBoundary = (str: string, pattern: string): boolean => {
@@ -370,20 +370,20 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               };
               
               // Strategy 1: Check if target path appears in import at path boundaries
-              if (matchesAtBoundary(normalizeImport, normalizeTarget)) {
+              if (matchesAtBoundary(normalizedImport, normalizedTarget)) {
                 return true;
               }
               
               // Strategy 2: Check if import path appears in target (for longer target paths)
-              if (matchesAtBoundary(normalizeTarget, normalizeImport)) {
+              if (matchesAtBoundary(normalizedTarget, normalizedImport)) {
                 return true;
               }
               
               // Strategy 3: Handle relative imports (./logger vs src/utils/logger)
               // Remove leading ./ and ../ from import
-              const cleanedImport = normalizeImport.replace(/^(\.\.?\/)+/, '');
-              if (matchesAtBoundary(cleanedImport, normalizeTarget) || 
-                  matchesAtBoundary(normalizeTarget, cleanedImport)) {
+              const cleanedImport = normalizedImport.replace(/^(\.\.?\/)+/, '');
+              if (matchesAtBoundary(cleanedImport, normalizedTarget) || 
+                  matchesAtBoundary(normalizedTarget, cleanedImport)) {
                 return true;
               }
               

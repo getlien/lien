@@ -16,8 +16,8 @@ describe('matchesFile - Path Boundary Checking', () => {
     const cleanImport = importPath.replace(/['"]/g, '').trim();
     const cleanTarget = targetPath.trim();
     
-    const normalizeImport = cleanImport.replace(/\\/g, '/');
-    const normalizeTarget = cleanTarget.replace(/\\/g, '/');
+    const normalizedImport = cleanImport.replace(/\\/g, '/');
+    const normalizedTarget = cleanTarget.replace(/\\/g, '/');
     
     const matchesAtBoundary = (str: string, pattern: string): boolean => {
       const index = str.indexOf(pattern);
@@ -32,17 +32,17 @@ describe('matchesFile - Path Boundary Checking', () => {
       return charAfter === '/' || charAfter === '.';
     };
     
-    if (matchesAtBoundary(normalizeImport, normalizeTarget)) {
+    if (matchesAtBoundary(normalizedImport, normalizedTarget)) {
       return true;
     }
     
-    if (matchesAtBoundary(normalizeTarget, normalizeImport)) {
+    if (matchesAtBoundary(normalizedTarget, normalizedImport)) {
       return true;
     }
     
-    const cleanedImport = normalizeImport.replace(/^(\.\.?\/)+/, '');
-    if (matchesAtBoundary(cleanedImport, normalizeTarget) || 
-        matchesAtBoundary(normalizeTarget, cleanedImport)) {
+    const cleanedImport = normalizedImport.replace(/^(\.\.?\/)+/, '');
+    if (matchesAtBoundary(cleanedImport, normalizedTarget) || 
+        matchesAtBoundary(normalizedTarget, cleanedImport)) {
       return true;
     }
     
