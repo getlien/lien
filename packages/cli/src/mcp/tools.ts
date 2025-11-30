@@ -39,7 +39,7 @@ Provide at least 10 characters of code to match against. Results include a relev
   toMCPToolSchema(
     GetFileContextSchema,
     'get_file_context',
-    `Get full context for a file including related code and dependencies. 
+    `Get full context for a file including related code and dependencies.
 
 IMPORTANT: Call this BEFORE editing any file to understand:
 - What the file does
