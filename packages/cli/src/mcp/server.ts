@@ -188,39 +188,63 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             // Batch embedding calls for all filepaths at once to reduce latency
             const fileEmbeddings = await Promise.all(filepaths.map(fp => embeddings.embed(fp)));
             
-            // Process each file
-            const filesData: Record<string, { chunks: any[] }> = {};
+            // Batch all initial file searches in parallel
+            const allFileSearches = await Promise.all(
+              fileEmbeddings.map((embedding, i) => 
+                vectorDB.search(embedding, 50, filepaths[i])
+              )
+            );
             
-            for (let i = 0; i < filepaths.length; i++) {
-              const filepath = filepaths[i];
-              const fileEmbedding = fileEmbeddings[i];
-              
-              // Search for chunks from this file
-              // This is a simple approach; could be improved with metadata filtering
-              const allResults = await vectorDB.search(fileEmbedding, 50, filepath);
-              
-              // Filter results to only include chunks from the target file
-              const fileChunks = allResults.filter(r => 
+            // Filter results to only include chunks from each target file
+            const fileChunksMap = filepaths.map((filepath, i) => {
+              const allResults = allFileSearches[i];
+              return allResults.filter(r => 
                 r.metadata.file.includes(filepath) || filepath.includes(r.metadata.file)
               );
+            });
+            
+            // Batch related chunk operations if includeRelated is true
+            let relatedChunksMap: any[][] = [];
+            if (validatedArgs.includeRelated) {
+              // Get files that have chunks (need first chunk for related search)
+              const filesWithChunks = fileChunksMap
+                .map((chunks, i) => ({ chunks, filepath: filepaths[i], index: i }))
+                .filter(({ chunks }) => chunks.length > 0);
               
-              let results = fileChunks;
-              
-              if (validatedArgs.includeRelated && fileChunks.length > 0) {
-                // Get related chunks by searching with the first chunk's content
-                const relatedEmbedding = await embeddings.embed(fileChunks[0].content);
-                const related = await vectorDB.search(relatedEmbedding, 5, fileChunks[0].content);
-                
-                // Add related chunks that aren't from the same file
-                const relatedOtherFiles = related.filter(r => 
-                  !r.metadata.file.includes(filepath) && !filepath.includes(r.metadata.file)
+              if (filesWithChunks.length > 0) {
+                // Batch embedding calls for all first chunks
+                const relatedEmbeddings = await Promise.all(
+                  filesWithChunks.map(({ chunks }) => embeddings.embed(chunks[0].content))
                 );
                 
-                results = [...fileChunks, ...relatedOtherFiles];
+                // Batch all related chunk searches
+                const relatedSearches = await Promise.all(
+                  relatedEmbeddings.map((embedding, i) => 
+                    vectorDB.search(embedding, 5, filesWithChunks[i].chunks[0].content)
+                  )
+                );
+                
+                // Map back to original indices
+                relatedChunksMap = new Array(filepaths.length).fill([]);
+                filesWithChunks.forEach(({ filepath, index }, i) => {
+                  const related = relatedSearches[i];
+                  // Filter out chunks from the same file
+                  relatedChunksMap[index] = related.filter(r => 
+                    !r.metadata.file.includes(filepath) && !filepath.includes(r.metadata.file)
+                  );
+                });
               }
-              
-              filesData[filepath] = { chunks: results };
             }
+            
+            // Combine file chunks with related chunks
+            const filesData: Record<string, { chunks: any[] }> = {};
+            filepaths.forEach((filepath, i) => {
+              const fileChunks = fileChunksMap[i];
+              const relatedChunks = relatedChunksMap[i] || [];
+              filesData[filepath] = { 
+                chunks: [...fileChunks, ...relatedChunks]
+              };
+            });
             
             log(`Found ${Object.values(filesData).reduce((sum, f) => sum + f.chunks.length, 0)} total chunks`);
             
