@@ -6,6 +6,7 @@ import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '..
 import { ManifestManager } from './manifest.js';
 import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
 import { CodeChunk } from './types.js';
+import { Result, Ok, Err, isOk } from '../utils/result.js';
 
 export interface IncrementalIndexOptions {
   verbose?: boolean;
@@ -19,6 +20,15 @@ interface ProcessFileResult {
   vectors: Float32Array[];
   chunks: CodeChunk[];
   texts: string[];
+}
+
+/**
+ * Result of processing a single file for incremental indexing.
+ */
+interface FileProcessResult {
+  filepath: string;
+  result: ProcessFileResult | null; // null for empty files
+  mtime: number;
 }
 
 /**
@@ -177,8 +187,39 @@ export async function indexSingleFile(
 }
 
 /**
+ * Process a single file, returning a Result type.
+ * This helper makes error handling explicit and testable.
+ */
+async function processSingleFileForIndexing(
+  filepath: string,
+  embeddings: EmbeddingService,
+  config: LienConfig | LegacyLienConfig,
+  verbose: boolean
+): Promise<Result<FileProcessResult, string>> {
+  try {
+    // Read file stats and content
+    const stats = await fs.stat(filepath);
+    const content = await fs.readFile(filepath, 'utf-8');
+    
+    // Process content
+    const result = await processFileContent(filepath, content, embeddings, config, verbose);
+    
+    return Ok({
+      filepath,
+      result,
+      mtime: stats.mtimeMs,
+    });
+  } catch (error) {
+    return Err(`Failed to process ${filepath}: ${error}`);
+  }
+}
+
+/**
  * Indexes multiple files incrementally.
  * Processes files sequentially for simplicity and reliability.
+ * 
+ * Uses Result type for explicit error handling, making it easier to test
+ * and reason about failure modes.
  * 
  * Note: This function counts both successfully indexed files AND successfully
  * handled deletions (files that don't exist but were removed from the index).
@@ -205,38 +246,12 @@ export async function indexMultipleFiles(
   
   // Process each file sequentially (simple and reliable)
   for (const filepath of filepaths) {
-    // Try to read the file and get its stats
-    let content: string;
-    let fileMtime: number;
-    try {
-      const stats = await fs.stat(filepath);
-      fileMtime = stats.mtimeMs;
-      content = await fs.readFile(filepath, 'utf-8');
-    } catch (error) {
-      // File doesn't exist or couldn't be read - delete from index
-      if (verbose) {
-        console.error(`[Lien] File not readable: ${filepath}`);
-      }
-      try {
-        await vectorDB.deleteByFile(filepath);
-        const manifest = new ManifestManager(vectorDB.dbPath);
-        await manifest.removeFile(filepath);
-      } catch (error) {
-        // Ignore errors if file wasn't in index
-        if (verbose) {
-          console.error(`[Lien] Note: ${filepath} not in index`);
-        }
-      }
-      // Count as successfully processed (we handled the deletion)
-      processedCount++;
-      continue;
-    }
+    const result = await processSingleFileForIndexing(filepath, embeddings, config, verbose || false);
     
-    try {
-      // Process file content (chunking + embeddings) - shared logic
-      const result = await processFileContent(filepath, content, embeddings, config, verbose || false);
+    if (isOk(result)) {
+      const { result: processResult, mtime } = result.value;
       
-      if (result === null) {
+      if (processResult === null) {
         // Empty file - remove from vector DB but keep in manifest with chunkCount: 0
         try {
           await vectorDB.deleteByFile(filepath);
@@ -248,11 +263,10 @@ export async function indexMultipleFiles(
         const manifest = new ManifestManager(vectorDB.dbPath);
         await manifest.updateFile(filepath, {
           filepath,
-          lastModified: fileMtime,
+          lastModified: mtime,
           chunkCount: 0,
         });
         
-        // Count as successful processing (handled empty file)
         processedCount++;
         continue;
       }
@@ -266,28 +280,44 @@ export async function indexMultipleFiles(
       
       // Insert new chunks
       await vectorDB.insertBatch(
-        result.vectors,
-        result.chunks.map(c => c.metadata),
-        result.texts
+        processResult.vectors,
+        processResult.chunks.map(c => c.metadata),
+        processResult.texts
       );
       
-      // Queue manifest update (batch at end) with actual file mtime
+      // Queue manifest update (batch at end)
       manifestEntries.push({
         filepath,
-        chunkCount: result.chunkCount,
-        mtime: fileMtime,
+        chunkCount: processResult.chunkCount,
+        mtime,
       });
       
       if (verbose) {
-        console.error(`[Lien] ✓ Updated ${filepath} (${result.chunkCount} chunks)`);
+        console.error(`[Lien] ✓ Updated ${filepath} (${processResult.chunkCount} chunks)`);
       }
       
       processedCount++;
-    } catch (error) {
-      // Log error but don't throw - we want to continue with other files
-      console.error(`[Lien] ⚠️  Failed to index ${filepath}: ${error}`);
+    } else {
+      // File doesn't exist or couldn't be read - handle deletion
+      if (verbose) {
+        console.error(`[Lien] ${result.error}`);
       }
+      
+      try {
+        await vectorDB.deleteByFile(filepath);
+        const manifest = new ManifestManager(vectorDB.dbPath);
+        await manifest.removeFile(filepath);
+      } catch (error) {
+        // Ignore errors if file wasn't in index
+        if (verbose) {
+          console.error(`[Lien] Note: ${filepath} not in index`);
+        }
+      }
+      
+      // Count as processed regardless of deletion success/failure
+      processedCount++;
     }
+  }
   
   // Batch update manifest at the end (much faster than updating after each file)
   if (manifestEntries.length > 0) {

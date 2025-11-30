@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { QueryIntent, classifyQueryIntent } from './intent-classifier.js';
 
 describe('Query Intent Classification', () => {
@@ -205,6 +205,152 @@ describe('Query Intent Classification', () => {
       expect(classifyQueryIntent('Where are the MCP tools defined?')).toBe(QueryIntent.LOCATION);
       expect(classifyQueryIntent('How does the chunker work?')).toBe(QueryIntent.CONCEPTUAL);
       expect(classifyQueryIntent('Configuration migration system implementation')).toBe(QueryIntent.IMPLEMENTATION);
+    });
+  });
+  
+  describe('Helper Functions', () => {
+    // Clean up any custom rules added during tests
+    afterEach(async () => {
+      const { resetIntentRules } = await import('./intent-classifier.js');
+      resetIntentRules();
+    });
+    
+    describe('getPatternsForIntent', () => {
+      it('should return patterns for LOCATION intent', async () => {
+        const { getPatternsForIntent } = await import('./intent-classifier.js');
+        const patterns = getPatternsForIntent(QueryIntent.LOCATION);
+        
+        expect(patterns.length).toBeGreaterThan(0);
+        expect(patterns.every(p => p instanceof RegExp)).toBe(true);
+      });
+      
+      it('should return patterns for CONCEPTUAL intent', async () => {
+        const { getPatternsForIntent } = await import('./intent-classifier.js');
+        const patterns = getPatternsForIntent(QueryIntent.CONCEPTUAL);
+        
+        expect(patterns.length).toBeGreaterThan(0);
+        expect(patterns.every(p => p instanceof RegExp)).toBe(true);
+      });
+      
+      it('should return patterns for IMPLEMENTATION intent', async () => {
+        const { getPatternsForIntent } = await import('./intent-classifier.js');
+        const patterns = getPatternsForIntent(QueryIntent.IMPLEMENTATION);
+        
+        expect(patterns.length).toBeGreaterThan(0);
+        expect(patterns.every(p => p instanceof RegExp)).toBe(true);
+      });
+      
+      it('should return empty array for intent with no patterns', async () => {
+        const { getPatternsForIntent } = await import('./intent-classifier.js');
+        // Create a custom intent that doesn't exist in rules
+        const patterns = getPatternsForIntent('nonexistent' as QueryIntent);
+        
+        expect(patterns).toEqual([]);
+      });
+    });
+    
+    describe('getIntentRules', () => {
+      it('should return all intent rules', async () => {
+        const { getIntentRules } = await import('./intent-classifier.js');
+        const rules = getIntentRules();
+        
+        expect(rules.length).toBeGreaterThan(0);
+        expect(rules.every(r => r.intent && r.patterns && r.priority !== undefined)).toBe(true);
+      });
+      
+      it('should return a copy (not reference)', async () => {
+        const { getIntentRules } = await import('./intent-classifier.js');
+        const rules1 = getIntentRules();
+        const rules2 = getIntentRules();
+        
+        expect(rules1).not.toBe(rules2); // Different references
+        expect(rules1).toEqual(rules2); // Same content
+      });
+    });
+    
+    describe('addIntentRule', () => {
+      it('should allow adding custom rules with cleanup', async () => {
+        const { addIntentRule, classifyQueryIntent, QueryIntent } = await import('./intent-classifier.js');
+        
+        // Add a custom high-priority rule
+        const cleanup = addIntentRule({
+          intent: QueryIntent.LOCATION,
+          priority: 10,
+          patterns: [/custom test pattern/],
+        });
+        
+        // Should match our custom pattern
+        expect(classifyQueryIntent('this matches custom test pattern')).toBe(QueryIntent.LOCATION);
+        
+        // Clean up the custom rule
+        cleanup();
+        
+        // After cleanup, should not match the custom pattern anymore
+        // Should fall back to default IMPLEMENTATION
+        expect(classifyQueryIntent('this matches custom test pattern')).toBe(QueryIntent.IMPLEMENTATION);
+      });
+      
+      it('should return cleanup function that removes the rule', async () => {
+        const { addIntentRule, getIntentRules } = await import('./intent-classifier.js');
+        
+        const initialCount = getIntentRules().length;
+        
+        const cleanup = addIntentRule({
+          intent: QueryIntent.LOCATION,
+          priority: 10,
+          patterns: [/test/],
+        });
+        
+        expect(getIntentRules().length).toBe(initialCount + 1);
+        
+        cleanup();
+        
+        expect(getIntentRules().length).toBe(initialCount);
+      });
+      
+      it('should handle multiple cleanup calls safely', async () => {
+        const { addIntentRule, getIntentRules } = await import('./intent-classifier.js');
+        
+        const initialCount = getIntentRules().length;
+        
+        const cleanup = addIntentRule({
+          intent: QueryIntent.LOCATION,
+          priority: 10,
+          patterns: [/test/],
+        });
+        
+        cleanup();
+        cleanup(); // Second call should not throw
+        
+        expect(getIntentRules().length).toBe(initialCount);
+      });
+    });
+    
+    describe('resetIntentRules', () => {
+      it('should reset to original rules', async () => {
+        const { addIntentRule, resetIntentRules, getIntentRules, QueryIntent } = await import('./intent-classifier.js');
+        
+        const initialCount = getIntentRules().length;
+        
+        // Add some custom rules
+        addIntentRule({
+          intent: QueryIntent.LOCATION,
+          priority: 10,
+          patterns: [/custom1/],
+        });
+        addIntentRule({
+          intent: QueryIntent.LOCATION,
+          priority: 11,
+          patterns: [/custom2/],
+        });
+        
+        expect(getIntentRules().length).toBe(initialCount + 2);
+        
+        // Reset should remove custom rules
+        resetIntentRules();
+        
+        expect(getIntentRules().length).toBe(initialCount);
+      });
     });
   });
 });
