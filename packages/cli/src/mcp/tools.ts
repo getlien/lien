@@ -16,22 +16,47 @@ export const tools = [
   toMCPToolSchema(
     SemanticSearchSchema,
     'semantic_search',
-    'Search the codebase semantically for relevant code using natural language. Results include a relevance category (highly_relevant, relevant, loosely_related, not_relevant) based on semantic similarity.'
+    `Search codebase by MEANING, not text. USE THIS INSTEAD OF grep/ripgrep for finding implementations, features, or understanding how code works.
+
+Examples:
+- "Where is authentication handled?" → semantic_search({ query: "handles user authentication" })
+- "How does payment work?" → semantic_search({ query: "processes payment transactions" })
+
+Use natural language describing what the code DOES, not function names. For exact string matching, use grep instead.
+
+Results include relevance scores: highly_relevant, relevant, loosely_related, not_relevant.`
   ),
   toMCPToolSchema(
     FindSimilarSchema,
     'find_similar',
-    'Find code similar to a given code snippet. Results include a relevance category (highly_relevant, relevant, loosely_related, not_relevant) based on semantic similarity.'
+    `Find code structurally similar to a given snippet. Use for:
+- Ensuring consistency when adding new code
+- Finding duplicate implementations
+- Refactoring similar patterns together
+
+Provide at least 10 characters of code to match against.`
   ),
   toMCPToolSchema(
     GetFileContextSchema,
     'get_file_context',
-    'Get all chunks and related context for a specific file. Results include a relevance category (highly_relevant, relevant, loosely_related, not_relevant) based on semantic similarity.'
+    `Get full context for a file including related code and dependencies. 
+
+IMPORTANT: Call this BEFORE editing any file to understand:
+- What the file does
+- What depends on it
+- Related test files (via testAssociations)
+
+Typical flow: semantic_search → find file → get_file_context → make changes.`
   ),
   toMCPToolSchema(
     ListFunctionsSchema,
     'list_functions',
-    'List functions, classes, and interfaces by name pattern and language'
+    `Fast symbol lookup by naming pattern. Use when searching by NAME, not behavior.
+
+Examples:
+- "Show all controllers" → list_functions({ pattern: ".*Controller.*" })
+- "Find service classes" → list_functions({ pattern: ".*Service$" })
+
+10x faster than semantic_search for structural/architectural queries. Use semantic_search instead when searching by what code DOES.`
   ),
 ];
-
