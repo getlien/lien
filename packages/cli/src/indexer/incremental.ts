@@ -307,14 +307,15 @@ export async function indexMultipleFiles(
         await vectorDB.deleteByFile(filepath);
         const manifest = new ManifestManager(vectorDB.dbPath);
         await manifest.removeFile(filepath);
-        processedCount++; // Count as successfully processed (handled deletion)
       } catch (error) {
         // Ignore errors if file wasn't in index
         if (verbose) {
           console.error(`[Lien] Note: ${filepath} not in index`);
         }
-        processedCount++; // Still count as processed
       }
+      
+      // Count as processed regardless of deletion success/failure
+      processedCount++;
     }
   }
   
