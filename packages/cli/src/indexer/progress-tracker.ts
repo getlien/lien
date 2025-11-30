@@ -64,7 +64,9 @@ export class IndexingProgressTracker {
   
   /**
    * Increment the count of processed files.
-   * Safe to call from concurrent operations.
+   * 
+   * Safe for async operations in Node.js's single-threaded event loop.
+   * Note: Not thread-safe for true concurrent operations (e.g., worker threads).
    */
   incrementFiles(): void {
     this.processedFiles++;
