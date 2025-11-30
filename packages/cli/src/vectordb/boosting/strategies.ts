@@ -139,13 +139,14 @@ export class FilenameBoostingStrategy implements BoostingStrategy {
 /**
  * Boosts relevance based on file type and query intent.
  * Different file types are boosted for different query intents.
+ * 
+ * Note: This strategy focuses on file-type-specific boosting (test files,
+ * documentation files, utility files, etc.). Path and filename boosting
+ * are handled separately by PathBoostingStrategy and FilenameBoostingStrategy
+ * in the BoostingComposer to avoid double-boosting.
  */
 export class FileTypeBoostingStrategy implements BoostingStrategy {
   name = 'file-type';
-  
-  // Cache strategy instances to avoid recreating on every call
-  private pathStrategy = new PathBoostingStrategy();
-  private filenameStrategy = new FilenameBoostingStrategy();
   
   constructor(private intent: QueryIntent) {}
   
@@ -165,23 +166,10 @@ export class FileTypeBoostingStrategy implements BoostingStrategy {
     }
   }
   
-  private applyLocationBoosting(query: string, filepath: string, score: number): number {
-    const filename = path.basename(filepath, path.extname(filepath)).toLowerCase();
-    const queryTokens = query.toLowerCase().split(/\s+/);
-    
-    // Boost exact filename matches strongly
-    for (const token of queryTokens) {
-      if (token.length <= 2) continue;
-      
-      if (filename === token) {
-        score *= 0.60;
-      } else if (filename.includes(token)) {
-        score *= 0.70;
-      }
-    }
-    
-    // Apply path boosting using cached strategy instance
-    score = this.pathStrategy.apply(query, filepath, score);
+  private applyLocationBoosting(_query: string, filepath: string, score: number): number {
+    // Note: Path and filename boosting are handled by PathBoostingStrategy and
+    // FilenameBoostingStrategy in the composer. This method only handles
+    // file-type-specific boosting for location queries.
     
     // Slightly deprioritize test files (users want implementation location, not tests)
     if (isTestFile(filepath)) {
@@ -191,7 +179,11 @@ export class FileTypeBoostingStrategy implements BoostingStrategy {
     return score;
   }
   
-  private applyConceptualBoosting(query: string, filepath: string, score: number): number {
+  private applyConceptualBoosting(_query: string, filepath: string, score: number): number {
+    // Note: Path and filename boosting are handled by PathBoostingStrategy and
+    // FilenameBoostingStrategy in the composer. This method only handles
+    // file-type-specific boosting for conceptual queries.
+    
     // Strong boost for documentation files
     if (isDocumentationFile(filepath)) {
       score *= 0.65;
@@ -211,37 +203,13 @@ export class FileTypeBoostingStrategy implements BoostingStrategy {
       score *= 0.95;
     }
     
-    // Boost filename matches
-    const filename = path.basename(filepath, path.extname(filepath)).toLowerCase();
-    const queryTokens = query.toLowerCase().split(/\s+/);
-    
-    for (const token of queryTokens) {
-      if (token.length <= 2) continue;
-      if (filename.includes(token)) {
-        score *= 0.90;
-      }
-    }
-    
-    // Boost path matches
-    const pathSegments = filepath.toLowerCase().split(path.sep);
-    for (const token of queryTokens) {
-      if (token.length <= 2) continue;
-      
-      for (const segment of pathSegments) {
-        if (segment.includes(token)) {
-          score *= 0.95;
-          break;
-        }
-      }
-    }
-    
     return score;
   }
   
-  private applyImplementationBoosting(query: string, filepath: string, score: number): number {
-    // Apply filename and path boosting using cached strategy instances
-    score = this.filenameStrategy.apply(query, filepath, score);
-    score = this.pathStrategy.apply(query, filepath, score);
+  private applyImplementationBoosting(_query: string, filepath: string, score: number): number {
+    // Note: Path and filename boosting are handled by PathBoostingStrategy and
+    // FilenameBoostingStrategy in the composer. This method only handles
+    // file-type-specific boosting for implementation queries.
     
     // Slightly deprioritize test files (user wants implementation, not tests)
     if (isTestFile(filepath)) {

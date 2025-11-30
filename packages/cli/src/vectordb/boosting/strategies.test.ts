@@ -102,22 +102,23 @@ describe('Boosting Strategies', () => {
         expect(strategy.name).toBe('file-type');
       });
 
-      it('should strongly boost exact filename matches', () => {
+      it('should not boost non-test files (no file-type-specific logic)', () => {
         const query = 'where is controller';
         const filepath = 'src/controller.ts';
         
         const boostedScore = strategy.apply(query, filepath, baseScore);
-        expect(boostedScore).toBeLessThan(baseScore);
+        // FileTypeBoostingStrategy only handles file-type-specific boosting
+        // For non-test files, no boosting is applied
+        expect(boostedScore).toBe(baseScore);
       });
 
-      it('should boost files with location intent', () => {
+      it('should deprioritize test files', () => {
         const query = 'where is the handler test';
         const filepath = 'src/auth/handler.test.ts';
         
         const boostedScore = strategy.apply(query, filepath, baseScore);
-        // With LOCATION intent, filename and path matches provide strong boosting
-        // The test file penalty (1.10x) is offset by filename/path matches
-        expect(boostedScore).toBeLessThan(baseScore); // Overall boost from filename matching
+        // Test files are deprioritized for LOCATION intent (1.10x penalty)
+        expect(boostedScore).toBeCloseTo(baseScore * 1.10);
       });
     });
 
@@ -161,12 +162,14 @@ describe('Boosting Strategies', () => {
     describe('IMPLEMENTATION intent', () => {
       const strategy = new FileTypeBoostingStrategy(QueryIntent.IMPLEMENTATION);
 
-      it('should boost filename matches', () => {
+      it('should not boost non-test files (no file-type-specific logic)', () => {
         const query = 'how is handler implemented';
         const filepath = 'src/handler.ts';
         
         const boostedScore = strategy.apply(query, filepath, baseScore);
-        expect(boostedScore).toBeLessThan(baseScore);
+        // FileTypeBoostingStrategy only handles file-type-specific boosting
+        // For non-test files, no boosting is applied
+        expect(boostedScore).toBe(baseScore);
       });
 
       it('should slightly deprioritize test files', () => {
