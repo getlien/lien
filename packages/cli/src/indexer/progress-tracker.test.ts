@@ -78,6 +78,22 @@ describe('IndexingProgressTracker', () => {
       tracker.start(); // Second call should be safe
       tracker.stop();
     });
+    
+    it('should not create duplicate intervals when called multiple times', () => {
+      vi.useFakeTimers();
+      
+      tracker.start();
+      const firstInterval = (tracker as any).updateInterval;
+      
+      tracker.start(); // Second call
+      const secondInterval = (tracker as any).updateInterval;
+      
+      // Should be the same interval (not a new one)
+      expect(secondInterval).toBe(firstInterval);
+      
+      tracker.stop();
+      vi.useRealTimers();
+    });
   });
 
   describe('incrementFiles()', () => {

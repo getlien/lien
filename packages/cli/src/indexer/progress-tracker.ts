@@ -41,8 +41,15 @@ export class IndexingProgressTracker {
   /**
    * Start the progress tracker.
    * Sets up periodic updates for spinner and message rotation.
+   * 
+   * Safe to call multiple times - will not create duplicate intervals.
    */
   start(): void {
+    // Prevent creating multiple intervals (resource leak)
+    if (this.updateInterval) {
+      return;
+    }
+    
     const MESSAGE_ROTATION_TICKS = Math.floor(
       IndexingProgressTracker.MESSAGE_ROTATION_INTERVAL_MS / 
       IndexingProgressTracker.SPINNER_UPDATE_INTERVAL_MS
