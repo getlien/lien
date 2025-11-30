@@ -7,7 +7,7 @@ import { isTestFile } from './utils/path-matching.js';
  * Bug: Simple string matching produced false positives:
  * - "contest.ts" matched ".test." ❌
  * - "latest/config.ts" matched "/test/" ❌
- * - "manifest.json" matched ".test." ❌
+ * - "protest.ts" matched ".test." ❌
  * 
  * Fix: Use precise regex patterns
  */
