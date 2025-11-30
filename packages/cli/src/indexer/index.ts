@@ -253,9 +253,12 @@ async function performFullIndex(
   progressTracker.start();
   
   try {
-    // Mutex to prevent concurrent access to chunkAccumulator
-    // While JavaScript's event loop makes operations atomic, explicit synchronization
-    // makes the intent clear and prevents subtle bugs if code is modified.
+    // Mutex to prevent concurrent access to shared state (chunkAccumulator, indexedFileEntries)
+    // This prevents race conditions when multiple concurrent tasks try to:
+    // 1. Push to shared arrays
+    // 2. Check accumulator length threshold
+    // 3. Trigger processing
+    let addChunksLock: Promise<void> | null = null;
     let processingLock: Promise<void> | null = null;
     
     // Function to process accumulated chunks
@@ -349,26 +352,48 @@ async function performFullIndex(
           return;
         }
         
-        // Add chunks to accumulator
-        for (const chunk of chunks) {
-          chunkAccumulator.push({
-            chunk,
-            content: chunk.content,
+        // Critical section: add chunks to shared state and check threshold
+        // Must be protected with mutex to prevent race conditions
+        {
+          // Wait for any in-progress add operation
+          if (addChunksLock) {
+            await addChunksLock;
+          }
+          
+          // Acquire lock
+          let releaseAddLock: () => void;
+          addChunksLock = new Promise<void>(resolve => {
+            releaseAddLock = resolve;
           });
-        }
-        
-        // Track this file for manifest with actual file mtime
-        indexedFileEntries.push({
-          filepath: file,
-          chunkCount: chunks.length,
-          mtime: stats.mtimeMs,
-        });
-        
-        progressTracker.incrementFiles();
-        
-        // Process when batch is large enough (use smaller batch for responsiveness)
-        if (chunkAccumulator.length >= vectorDBBatchSize) {
-          await processAccumulatedChunks();
+          
+          try {
+            // Add chunks to accumulator
+            for (const chunk of chunks) {
+              chunkAccumulator.push({
+                chunk,
+                content: chunk.content,
+              });
+            }
+            
+            // Track this file for manifest with actual file mtime
+            indexedFileEntries.push({
+              filepath: file,
+              chunkCount: chunks.length,
+              mtime: stats.mtimeMs,
+            });
+            
+            progressTracker.incrementFiles();
+            
+            // Process when batch is large enough (use smaller batch for responsiveness)
+            // Check is done inside the mutex to prevent multiple tasks from triggering processing
+            if (chunkAccumulator.length >= vectorDBBatchSize) {
+              await processAccumulatedChunks();
+            }
+          } finally {
+            // Release lock
+            releaseAddLock!();
+            addChunksLock = null;
+          }
         }
       } catch (error) {
         if (options.verbose) {
