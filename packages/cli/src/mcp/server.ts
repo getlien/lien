@@ -333,7 +333,13 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             await checkAndReconnect();
             
             // Get all chunks - they include imports metadata
-            const allChunks = await vectorDB.scanWithFilter({ limit: 10000 });
+            const scanLimit = 10000;
+            const allChunks = await vectorDB.scanWithFilter({ limit: scanLimit });
+            
+            // Warn if we hit the limit (results may be truncated)
+            if (allChunks.length === scanLimit) {
+              log(`WARNING: Scanned ${scanLimit} chunks (limit reached). Results may be incomplete for large codebases.`);
+            }
             
             log(`Scanning ${allChunks.length} chunks for imports...`);
             
@@ -514,11 +520,18 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             
             log(`Found ${count} dependent files (risk: ${riskLevel}${complexityMetrics ? ', complexity-boosted' : ''})`);
             
-            // Handle transitive dependencies if depth > 1
+            // Build notes array for any warnings/limitations
+            const notes: string[] = [];
+            
+            // Warn if scan limit was reached (results may be incomplete)
+            if (allChunks.length === scanLimit) {
+              notes.push(`Warning: Scanned ${scanLimit} chunks (limit reached). Results may be incomplete for large codebases. Some dependents might not be listed.`);
+            }
+            
+            // Note about transitive dependencies if depth > 1
             const depth = validatedArgs.depth ?? 1;
-            let transitiveNote: string | undefined;
             if (depth > 1) {
-              transitiveNote = 'Note: Transitive dependency tracking (depth > 1) is not yet implemented. Showing direct dependents only.';
+              notes.push('Note: Transitive dependency tracking (depth > 1) is not yet implemented. Showing direct dependents only.');
             }
             
             return {
@@ -528,7 +541,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               riskLevel,
               dependents: uniqueFiles,
               complexityMetrics,
-              note: transitiveNote,
+              note: notes.length > 0 ? notes.join('\n\n') : undefined,
             };
           }
         )(args);
