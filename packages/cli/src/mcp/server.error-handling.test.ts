@@ -5,7 +5,7 @@ describe('MCP Server Error Handling', () => {
   describe('Unknown tool error', () => {
     it('should create structured error for unknown tool', () => {
       const toolName = 'non_existent_tool';
-      const availableTools = ['semantic_search', 'find_similar', 'get_file_context', 'list_functions'];
+      const availableTools = ['semantic_search', 'find_similar', 'get_files_context', 'list_functions'];
       
       const error = new LienError(
         `Unknown tool: ${toolName}`,
@@ -45,7 +45,7 @@ describe('MCP Server Error Handling', () => {
         LienErrorCode.INVALID_INPUT,
         { 
           requestedTool: 'typo_search',
-          availableTools: ['semantic_search', 'find_similar', 'get_file_context', 'list_functions']
+          availableTools: ['semantic_search', 'find_similar', 'get_files_context', 'list_functions']
         }
       );
       

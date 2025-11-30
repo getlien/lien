@@ -3,7 +3,7 @@ import { tools } from './tools.js';
 import { 
   SemanticSearchSchema, 
   FindSimilarSchema, 
-  GetFileContextSchema, 
+  GetFilesContextSchema, 
   ListFunctionsSchema 
 } from './schemas/index.js';
 
@@ -96,33 +96,33 @@ describe('MCP Tools Schema', () => {
     });
   });
   
-  describe('get_file_context tool', () => {
+  describe('get_files_context tool', () => {
     it('should have correct schema', () => {
-      const tool = tools.find(t => t.name === 'get_file_context');
+      const tool = tools.find(t => t.name === 'get_files_context');
       
       expect(tool).toBeDefined();
-      expect(tool!.name).toBe('get_file_context');
+      expect(tool!.name).toBe('get_files_context');
       expect(tool!.description).toContain('file');
       const schema = tool!.inputSchema as any;
       expect(schema.type).toBe('object');
-      expect(schema.properties).toHaveProperty('filepath');
+      expect(schema.properties).toHaveProperty('filepaths');
       expect(schema.properties).toHaveProperty('includeRelated');
-      expect(schema.required).toEqual(['filepath']);
+      expect(schema.required).toEqual(['filepaths']);
     });
     
     it('should mention relevance categories in description', () => {
-      const tool = tools.find(t => t.name === 'get_file_context');
-      expect(tool!.description).toContain('relevance category');
+      const tool = tools.find(t => t.name === 'get_files_context');
+      expect(tool!.description.toLowerCase()).toContain('relevance');
     });
     
-    it('should have filepath as required field', () => {
-      const tool = tools.find(t => t.name === 'get_file_context');
+    it('should have filepaths as required field', () => {
+      const tool = tools.find(t => t.name === 'get_files_context');
       const schema = tool?.inputSchema as any;
-      expect(schema.required).toContain('filepath');
+      expect(schema.required).toContain('filepaths');
     });
     
     it('should have includeRelated with default value', () => {
-      const tool = tools.find(t => t.name === 'get_file_context');
+      const tool = tools.find(t => t.name === 'get_files_context');
       const schema = tool?.inputSchema as any;
       expect(schema.properties.includeRelated?.default).toBe(true);
     });
@@ -184,8 +184,18 @@ describe('MCP Tools Schema', () => {
       tools.forEach(tool => {
         const schema = tool.inputSchema as any;
         Object.values(schema.properties).forEach((prop: any) => {
-          expect(prop).toHaveProperty('type');
-          expect(validTypes).toContain(prop.type);
+          // Handle both simple types and union types (anyOf)
+          if (prop.type) {
+            expect(validTypes).toContain(prop.type);
+          } else if (prop.anyOf) {
+            // Union type - check that at least one option has a valid type
+            const hasValidType = prop.anyOf.some((option: any) => 
+              option.type && validTypes.includes(option.type)
+            );
+            expect(hasValidType).toBe(true);
+          } else {
+            throw new Error(`Property has neither type nor anyOf: ${JSON.stringify(prop)}`);
+          }
         });
       });
     });
@@ -237,24 +247,47 @@ describe('MCP Tools Schema', () => {
       });
     });
     
-    describe('get_file_context validation', () => {
-      it('should accept valid input', () => {
-        const valid = GetFileContextSchema.safeParse({
-          filepath: 'src/index.ts',
+    describe('get_files_context validation', () => {
+      it('should accept valid input with single filepath', () => {
+        const valid = GetFilesContextSchema.safeParse({
+          filepaths: 'src/index.ts',
           includeRelated: false
         });
         expect(valid.success).toBe(true);
       });
       
+      it('should accept single string', () => {
+        const valid = GetFilesContextSchema.safeParse({ filepaths: 'src/index.ts' });
+        expect(valid.success).toBe(true);
+      });
+      
+      it('should accept array of strings', () => {
+        const valid = GetFilesContextSchema.safeParse({ 
+          filepaths: ['src/a.ts', 'src/b.ts'] 
+        });
+        expect(valid.success).toBe(true);
+      });
+      
+      it('should reject empty array', () => {
+        const invalid = GetFilesContextSchema.safeParse({ filepaths: [] });
+        expect(invalid.success).toBe(false);
+      });
+      
+      it('should reject array with >50 files', () => {
+        const tooMany = Array(51).fill('file.ts');
+        const invalid = GetFilesContextSchema.safeParse({ filepaths: tooMany });
+        expect(invalid.success).toBe(false);
+      });
+      
       it('should reject empty filepath', () => {
-        const invalid = GetFileContextSchema.safeParse({
-          filepath: ''
+        const invalid = GetFilesContextSchema.safeParse({
+          filepaths: ''
         });
         expect(invalid.success).toBe(false);
       });
       
       it('should apply defaults', () => {
-        const result = GetFileContextSchema.parse({ filepath: 'test.ts' });
+        const result = GetFilesContextSchema.parse({ filepaths: 'test.ts' });
         expect(result.includeRelated).toBe(true);
       });
     });

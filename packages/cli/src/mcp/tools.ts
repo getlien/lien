@@ -2,7 +2,7 @@ import { toMCPToolSchema } from './utils/zod-to-json-schema.js';
 import {
   SemanticSearchSchema,
   FindSimilarSchema,
-  GetFileContextSchema,
+  GetFilesContextSchema,
   ListFunctionsSchema,
 } from './schemas/index.js';
 
@@ -37,16 +37,24 @@ Results include a relevance category (highly_relevant, relevant, loosely_related
 Provide at least 10 characters of code to match against. Results include a relevance category for each match.`
   ),
   toMCPToolSchema(
-    GetFileContextSchema,
-    'get_file_context',
-    `Get full context for a file including related code and dependencies.
+    GetFilesContextSchema,
+    'get_files_context',
+    `Get context for one or more files including dependencies and test coverage.
 
-IMPORTANT: Call this BEFORE editing any file to understand:
-- What the file does
-- What depends on it
-- Related test files (via testAssociations)
+MANDATORY before editing files. Accepts single path or array of paths.
 
-Results include a relevance category for each related chunk. Typical flow: semantic_search → find file → get_file_context → make changes.`
+Single file:
+  get_files_context({ filepaths: "src/auth.ts" })
+
+Multiple files (batch):
+  get_files_context({ filepaths: ["src/auth.ts", "src/user.ts"] })
+
+Returns for each file:
+- All chunks and related code
+- testAssociations (which tests cover this file)
+- Relevance scoring
+
+Batch calls are more efficient than multiple single-file calls.`
   ),
   toMCPToolSchema(
     ListFunctionsSchema,
