@@ -427,9 +427,10 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             // First: Try direct index lookup (fastest path)
             if (importIndex.has(normalizedTarget)) {
               for (const chunk of importIndex.get(normalizedTarget)!) {
-                if (!seenFiles.has(chunk.metadata.file)) {
+                const normalizedFilePath = normalizePath(chunk.metadata.file);
+                if (!seenFiles.has(normalizedFilePath)) {
                   dependentChunks.push(chunk);
-                  seenFiles.add(chunk.metadata.file);
+                  seenFiles.add(normalizedFilePath);
                 }
               }
             }
@@ -439,9 +440,10 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             for (const [normalizedImport, chunks] of importIndex.entries()) {
               if (matchesFile(normalizedImport, normalizedTarget)) {
                 for (const chunk of chunks) {
-                  if (!seenFiles.has(chunk.metadata.file)) {
+                  const normalizedFilePath = normalizePath(chunk.metadata.file);
+                  if (!seenFiles.has(normalizedFilePath)) {
                     dependentChunks.push(chunk);
-                    seenFiles.add(chunk.metadata.file);
+                    seenFiles.add(normalizedFilePath);
                   }
                 }
               }
@@ -538,10 +540,28 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               };
             }
             
-            // Deduplicate by file path for the dependents list
-            const uniqueFiles = Array.from(
-              new Set(dependentChunks.map(d => d.metadata.file))
-            ).map(filepath => ({
+            // Deduplicate by normalized file path for the dependents list
+            // Helper to get canonical path (relative to workspace, with extension)
+            const workspaceRoot = process.cwd().replace(/\\/g, '/');
+            const getCanonicalPath = (filepath: string): string => {
+              let canonical = filepath.replace(/\\/g, '/');
+              if (canonical.startsWith(workspaceRoot + '/')) {
+                canonical = canonical.substring(workspaceRoot.length + 1);
+              }
+              return canonical;
+            };
+            
+            // Build a map from canonical path to first occurrence
+            const pathMap = new Map<string, string>();
+            for (const chunk of dependentChunks) {
+              const canonical = getCanonicalPath(chunk.metadata.file);
+              if (!pathMap.has(canonical)) {
+                // Use canonical path (relative, with extension) for output
+                pathMap.set(canonical, canonical);
+              }
+            }
+            
+            const uniqueFiles = Array.from(pathMap.values()).map(filepath => ({
               filepath,
               // More precise test file detection to avoid false positives like:
               // - contest.ts (contains ".test." but isn't a test)
