@@ -85,6 +85,31 @@ const INTENT_RULES: IntentRule[] = [
 const INITIAL_RULE_COUNT = INTENT_RULES.length;
 
 /**
+ * Cached sorted rules to avoid re-sorting on every query.
+ * Invalidated when rules are modified via addIntentRule() or resetIntentRules().
+ */
+let cachedSortedRules: IntentRule[] | null = null;
+
+/**
+ * Get sorted rules (cached).
+ * Lazy-computes and caches the sorted array on first access.
+ */
+function getSortedRules(): IntentRule[] {
+  if (cachedSortedRules === null) {
+    cachedSortedRules = [...INTENT_RULES].sort((a, b) => b.priority - a.priority);
+  }
+  return cachedSortedRules;
+}
+
+/**
+ * Invalidate the sorted rules cache.
+ * Called when rules are modified.
+ */
+function invalidateSortedRulesCache(): void {
+  cachedSortedRules = null;
+}
+
+/**
  * Classifies a search query into one of three intent categories.
  * 
  * Uses data-driven pattern matching to detect query intent.
@@ -101,8 +126,8 @@ const INITIAL_RULE_COUNT = INTENT_RULES.length;
 export function classifyQueryIntent(query: string): QueryIntent {
   const lower = query.toLowerCase().trim();
   
-  // Sort by priority (higher first) and find first matching intent
-  const sortedRules = [...INTENT_RULES].sort((a, b) => b.priority - a.priority);
+  // Use cached sorted rules to avoid re-sorting on every query
+  const sortedRules = getSortedRules();
   
   for (const rule of sortedRules) {
     if (rule.patterns.some(pattern => pattern.test(lower))) {
@@ -136,11 +161,16 @@ export function classifyQueryIntent(query: string): QueryIntent {
 export function addIntentRule(rule: IntentRule): () => void {
   INTENT_RULES.push(rule);
   
+  // Invalidate cache since rules have changed
+  invalidateSortedRulesCache();
+  
   // Return cleanup function to remove the rule
   return () => {
     const idx = INTENT_RULES.indexOf(rule);
     if (idx !== -1) {
       INTENT_RULES.splice(idx, 1);
+      // Invalidate cache since rules have changed
+      invalidateSortedRulesCache();
     }
   };
 }
@@ -185,5 +215,8 @@ export function getIntentRules(): IntentRule[] {
 export function resetIntentRules(): void {
   // Remove all custom rules, preserving only the original built-in rules
   INTENT_RULES.splice(INITIAL_RULE_COUNT);
+  
+  // Invalidate cache since rules have changed
+  invalidateSortedRulesCache();
 }
 
