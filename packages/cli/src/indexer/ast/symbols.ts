@@ -322,7 +322,6 @@ export function calculateComplexity(node: Parser.SyntaxNode): number {
     // Note: 'else_clause' is NOT a decision point (it's the default path)
     'except_clause',         // Python except (try/except)
     'conditional_expression', // Python ternary (x if cond else y)
-    'with_statement',        // Python with/context managers
   ];
   
   function traverse(n: Parser.SyntaxNode) {
