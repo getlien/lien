@@ -46,6 +46,62 @@ export interface MCPServerOptions {
   watch?: boolean;
 }
 
+/**
+ * Complexity metrics for a single dependent file.
+ */
+interface FileComplexity {
+  filepath: string;
+  avgComplexity: number;
+  maxComplexity: number;
+  complexityScore: number; // Sum of all complexities
+  chunksWithComplexity: number;
+}
+
+/**
+ * Aggregate complexity metrics for all dependents.
+ */
+interface ComplexityMetrics {
+  averageComplexity: number;
+  maxComplexity: number;
+  filesWithComplexityData: number;
+  highComplexityDependents: Array<{
+    filepath: string;
+    maxComplexity: number;
+    avgComplexity: number;
+  }>;
+  complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical';
+}
+
+/**
+ * Risk level thresholds for dependent count.
+ * Based on impact analysis: more dependents = higher risk of breaking changes.
+ */
+const DEPENDENT_COUNT_THRESHOLDS = {
+  LOW: 5,       // Few dependents, safe to change
+  MEDIUM: 15,   // Moderate impact, review dependents
+  HIGH: 30,     // High impact, careful planning needed
+} as const;
+
+/**
+ * Complexity thresholds for risk assessment.
+ * Based on cyclomatic complexity: higher complexity = harder to change safely.
+ */
+const COMPLEXITY_THRESHOLDS = {
+  HIGH_COMPLEXITY_DEPENDENT: 10,  // Individual file is complex
+  CRITICAL_AVG: 15,              // Average complexity indicates systemic complexity
+  CRITICAL_MAX: 25,              // Peak complexity indicates hotspot
+  HIGH_AVG: 10,                  // Moderately complex on average
+  HIGH_MAX: 20,                  // Some complex functions exist
+  MEDIUM_AVG: 6,                 // Slightly above simple code
+  MEDIUM_MAX: 15,                // Occasional branching
+} as const;
+
+/**
+ * Maximum number of chunks to scan for dependency analysis.
+ * Larger codebases may have incomplete results if they exceed this limit.
+ */
+const SCAN_LIMIT = 10000;
+
 export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   const { rootDir, verbose, watch } = options;
   
@@ -334,12 +390,11 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             await checkAndReconnect();
             
             // Get all chunks - they include imports metadata
-            const scanLimit = 10000;
-            const allChunks = await vectorDB.scanWithFilter({ limit: scanLimit });
+            const allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
             
             // Warn if we hit the limit (results may be truncated)
-            if (allChunks.length === scanLimit) {
-              log(`WARNING: Scanned ${scanLimit} chunks (limit reached). Results may be incomplete for large codebases.`);
+            if (allChunks.length === SCAN_LIMIT) {
+              log(`WARNING: Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete for large codebases.`);
             }
             
             log(`Scanning ${allChunks.length} chunks for imports...`);
@@ -411,27 +466,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               chunksByFile.set(canonical, existing);
             }
             
-            // Calculate complexity metrics per file
-            interface FileComplexity {
-              filepath: string;
-              avgComplexity: number;
-              maxComplexity: number;
-              complexityScore: number; // Sum of all complexities
-              chunksWithComplexity: number;
-            }
-            
-            interface ComplexityMetrics {
-              averageComplexity: number;
-              maxComplexity: number;
-              filesWithComplexityData: number;
-              highComplexityDependents: Array<{
-                filepath: string;
-                maxComplexity: number;
-                avgComplexity: number;
-              }>;
-              complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical';
-            }
-            
+            // Calculate complexity metrics per file (using module-level interfaces)
             const fileComplexities: FileComplexity[] = [];
             
             for (const [filepath, chunks] of chunksByFile.entries()) {
@@ -442,6 +477,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               if (complexities.length > 0) {
                 const sum = complexities.reduce((a, b) => a + b, 0);
                 const avg = sum / complexities.length;
+                // Math.max is safe here because complexities.length > 0 is guaranteed by the if condition
                 const max = Math.max(...complexities);
                 
                 fileComplexities.push({
@@ -461,12 +497,12 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               const allAvgs = fileComplexities.map(f => f.avgComplexity);
               const allMaxes = fileComplexities.map(f => f.maxComplexity);
               const totalAvg = allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length;
+              // Math.max is safe here: allMaxes is non-empty because fileComplexities has entries
               const globalMax = Math.max(...allMaxes);
               
-              // Identify high-complexity dependents (complexity > 10)
-              const highComplexityThreshold = 10;
+              // Identify high-complexity dependents
               const highComplexityDependents = fileComplexities
-                .filter(f => f.maxComplexity > highComplexityThreshold)
+                .filter(f => f.maxComplexity > COMPLEXITY_THRESHOLDS.HIGH_COMPLEXITY_DEPENDENT)
                 .sort((a, b) => b.maxComplexity - a.maxComplexity)
                 .slice(0, 5) // Top 5
                 .map(f => ({
@@ -477,11 +513,11 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               
               // Calculate complexity-based risk boost
               let complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical' = 'low';
-              if (totalAvg > 15 || globalMax > 25) {
+              if (totalAvg > COMPLEXITY_THRESHOLDS.CRITICAL_AVG || globalMax > COMPLEXITY_THRESHOLDS.CRITICAL_MAX) {
                 complexityRiskBoost = 'critical';
-              } else if (totalAvg > 10 || globalMax > 20) {
+              } else if (totalAvg > COMPLEXITY_THRESHOLDS.HIGH_AVG || globalMax > COMPLEXITY_THRESHOLDS.HIGH_MAX) {
                 complexityRiskBoost = 'high';
-              } else if (totalAvg > 6 || globalMax > 15) {
+              } else if (totalAvg > COMPLEXITY_THRESHOLDS.MEDIUM_AVG || globalMax > COMPLEXITY_THRESHOLDS.MEDIUM_MAX) {
                 complexityRiskBoost = 'medium';
               }
               
@@ -509,13 +545,13 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               isTestFile: isTestFile(filepath),
             }));
             
-            // Calculate risk level based on dependent count
+            // Calculate risk level based on dependent count (using module-level thresholds)
             const count = uniqueFiles.length;
             let riskLevel: 'low' | 'medium' | 'high' | 'critical' = 
               count === 0 ? 'low' :
-              count <= 5 ? 'low' :
-              count <= 15 ? 'medium' :
-              count <= 30 ? 'high' : 'critical';
+              count <= DEPENDENT_COUNT_THRESHOLDS.LOW ? 'low' :
+              count <= DEPENDENT_COUNT_THRESHOLDS.MEDIUM ? 'medium' :
+              count <= DEPENDENT_COUNT_THRESHOLDS.HIGH ? 'high' : 'critical';
             
             // Boost risk level if complexity is high
             // Use explicit risk ordering for maintainability
@@ -528,8 +564,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             
             // Build warning if scan limit was reached (results may be incomplete)
             let note: string | undefined;
-            if (allChunks.length === scanLimit) {
-              note = `Warning: Scanned ${scanLimit} chunks (limit reached). Results may be incomplete for large codebases. Some dependents might not be listed.`;
+            if (allChunks.length === SCAN_LIMIT) {
+              note = `Warning: Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete for large codebases. Some dependents might not be listed.`;
             }
             
             return {
