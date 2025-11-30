@@ -98,8 +98,10 @@ describe('Python AST Integration', () => {
       
       // Single-line functions/methods are valid (e.g., "def add(a, b): return a + b")
       expect(current.metadata.startLine).toBeLessThanOrEqual(current.metadata.endLine);
-      // Chunks shouldn't overlap (next chunk should start after current)
-      expect(next.metadata.startLine).toBeGreaterThanOrEqual(current.metadata.endLine);
+      
+      // Chunks must not overlap - next chunk must start AFTER current ends
+      // Using strict > ensures no two chunks share the same line
+      expect(next.metadata.startLine).toBeGreaterThan(current.metadata.endLine);
     }
   });
   
