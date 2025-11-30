@@ -5,10 +5,6 @@ on:
   push:
     branches: [main]
   
-  # Optionally run on PRs (can be skipped with [skip e2e] in commit message)
-  pull_request:
-    branches: [main]
-  
   # Allow manual trigger
   workflow_dispatch:
 
