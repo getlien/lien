@@ -276,48 +276,51 @@ async function performFullIndex(
       releaseLock = resolve;
     });
     
-    const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
-    
-    // Process embeddings in smaller batches AND insert incrementally to keep UI responsive
-    for (let i = 0; i < toProcess.length; i += embeddingBatchSize) {
-      const batch = toProcess.slice(i, Math.min(i + embeddingBatchSize, toProcess.length));
+    try {
+      const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
       
-      // Update progress message
-      progressTracker.setMessage(getEmbeddingMessage());
-      
-      // Process embeddings in micro-batches to prevent event loop blocking
-      const texts = batch.map(item => item.content);
-      const embeddingVectors: Float32Array[] = [];
-      
-      for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
-        const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
-        const microResults = await embeddings.embedBatch(microBatch);
-        embeddingVectors.push(...microResults);
+      // Process embeddings in smaller batches AND insert incrementally to keep UI responsive
+      for (let i = 0; i < toProcess.length; i += embeddingBatchSize) {
+        const batch = toProcess.slice(i, Math.min(i + embeddingBatchSize, toProcess.length));
         
-        // Yield to event loop so spinner can update
+        // Update progress message
+        progressTracker.setMessage(getEmbeddingMessage());
+        
+        // Process embeddings in micro-batches to prevent event loop blocking
+        const texts = batch.map(item => item.content);
+        const embeddingVectors: Float32Array[] = [];
+        
+        for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
+          const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
+          const microResults = await embeddings.embedBatch(microBatch);
+          embeddingVectors.push(...microResults);
+          
+          // Yield to event loop so spinner can update
+          await new Promise(resolve => setImmediate(resolve));
+        }
+        
+        processedChunks += batch.length;
+        
+        // Update progress before DB insertion
+        progressTracker.setMessage(`Inserting ${batch.length} chunks into vector space...`);
+        
+        await vectorDB.insertBatch(
+          embeddingVectors,
+          batch.map(item => item.chunk.metadata),
+          texts
+        );
+        
+        // Yield after DB insertion too
         await new Promise(resolve => setImmediate(resolve));
       }
       
-      processedChunks += batch.length;
-      
-      // Update progress before DB insertion
-      progressTracker.setMessage(`Inserting ${batch.length} chunks into vector space...`);
-      
-      await vectorDB.insertBatch(
-        embeddingVectors,
-        batch.map(item => item.chunk.metadata),
-        texts
-      );
-      
-      // Yield after DB insertion too
-      await new Promise(resolve => setImmediate(resolve));
+      progressTracker.setMessage(getIndexingMessage());
+    } finally {
+      // Always release lock, even if an error occurs
+      // This prevents deadlock where processingLock is never cleared
+      releaseLock!();
+      processingLock = null;
     }
-    
-    progressTracker.setMessage(getIndexingMessage());
-    
-    // Release lock
-    releaseLock!();
-    processingLock = null;
   };
   
   // Process files with concurrency limit
