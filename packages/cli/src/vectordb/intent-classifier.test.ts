@@ -267,7 +267,7 @@ describe('Query Intent Classification', () => {
         const { addIntentRule, classifyQueryIntent, QueryIntent } = await import('./intent-classifier.js');
         
         // Add a custom high-priority rule
-        addIntentRule({
+        const cleanup = addIntentRule({
           intent: QueryIntent.LOCATION,
           priority: 10,
           patterns: [/custom test pattern/],
@@ -275,6 +275,57 @@ describe('Query Intent Classification', () => {
         
         // Should match our custom pattern
         expect(classifyQueryIntent('this matches custom test pattern')).toBe(QueryIntent.LOCATION);
+        
+        // Clean up the custom rule
+        cleanup();
+        
+        // After cleanup, should not match the custom pattern anymore
+        expect(classifyQueryIntent('this matches custom test pattern')).not.toBe(QueryIntent.LOCATION);
+      });
+      
+      it('should return cleanup function that removes the rule', async () => {
+        const { addIntentRule, getIntentRules } = await import('./intent-classifier.js');
+        
+        const initialCount = getIntentRules().length;
+        
+        const cleanup = addIntentRule({
+          intent: QueryIntent.LOCATION,
+          priority: 10,
+          patterns: [/test/],
+        });
+        
+        expect(getIntentRules().length).toBe(initialCount + 1);
+        
+        cleanup();
+        
+        expect(getIntentRules().length).toBe(initialCount);
+      });
+    });
+    
+    describe('resetIntentRules', () => {
+      it('should reset to original rules', async () => {
+        const { addIntentRule, resetIntentRules, getIntentRules, QueryIntent } = await import('./intent-classifier.js');
+        
+        const initialCount = getIntentRules().length;
+        
+        // Add some custom rules
+        addIntentRule({
+          intent: QueryIntent.LOCATION,
+          priority: 10,
+          patterns: [/custom1/],
+        });
+        addIntentRule({
+          intent: QueryIntent.LOCATION,
+          priority: 11,
+          patterns: [/custom2/],
+        });
+        
+        expect(getIntentRules().length).toBe(initialCount + 2);
+        
+        // Reset should remove custom rules
+        resetIntentRules();
+        
+        expect(getIntentRules().length).toBe(initialCount);
       });
     });
   });

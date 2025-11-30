@@ -112,17 +112,31 @@ export function classifyQueryIntent(query: string): QueryIntent {
 /**
  * Add a custom intent rule (useful for testing or extensions).
  * 
+ * Returns a cleanup function that removes the added rule.
+ * This prevents test pollution and allows proper cleanup.
+ * 
  * @param rule - The intent rule to add
+ * @returns A cleanup function that removes the added rule
  * 
  * @example
- * addIntentRule({
+ * const cleanup = addIntentRule({
  *   intent: QueryIntent.LOCATION,
  *   priority: 4,
  *   patterns: [/custom pattern/]
  * });
+ * // ... use the rule ...
+ * cleanup(); // removes the rule
  */
-export function addIntentRule(rule: IntentRule): void {
+export function addIntentRule(rule: IntentRule): () => void {
   INTENT_RULES.push(rule);
+  
+  // Return cleanup function to remove the rule
+  return () => {
+    const idx = INTENT_RULES.indexOf(rule);
+    if (idx !== -1) {
+      INTENT_RULES.splice(idx, 1);
+    }
+  };
 }
 
 /**
@@ -147,5 +161,24 @@ export function getPatternsForIntent(intent: QueryIntent): RegExp[] {
  */
 export function getIntentRules(): IntentRule[] {
   return [...INTENT_RULES];
+}
+
+/**
+ * Reset intent rules to initial state.
+ * 
+ * WARNING: This function is intended for testing only.
+ * It removes all custom rules added via addIntentRule().
+ * The original built-in rules are preserved.
+ * 
+ * @example
+ * // In test cleanup
+ * afterEach(() => {
+ *   resetIntentRules();
+ * });
+ */
+export function resetIntentRules(): void {
+  // Remove all rules beyond the original 3 built-in rules
+  // (LOCATION, CONCEPTUAL, IMPLEMENTATION)
+  INTENT_RULES.splice(3);
 }
 
