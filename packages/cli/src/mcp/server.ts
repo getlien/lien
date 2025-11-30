@@ -428,18 +428,18 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             // Find all chunks that import the target file using index + fuzzy matching
             const normalizedTarget = normalizePathCached(validatedArgs.filepath);
             const dependentChunks: typeof allChunks = [];
-            // Track seen files using normalized paths (extensions stripped) to handle TypeScript's
-            // ESM requirement where .ts files are imported as .js. This intentionally treats
-            // file.ts and file.js as the same file for dependency tracking.
-            const seenFiles = new Set<string>();
+            // Track chunks we've already added to avoid duplicates when the same chunk
+            // matches via multiple strategies (e.g., both direct lookup and fuzzy match)
+            const seenChunkIds = new Set<string>();
             
             // First: Try direct index lookup (fastest path)
             if (importIndex.has(normalizedTarget)) {
               for (const chunk of importIndex.get(normalizedTarget)!) {
-                const normalizedFilePath = normalizePathCached(chunk.metadata.file);
-                if (!seenFiles.has(normalizedFilePath)) {
+                // Use file + line range as unique chunk identifier
+                const chunkId = `${chunk.metadata.file}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
+                if (!seenChunkIds.has(chunkId)) {
                   dependentChunks.push(chunk);
-                  seenFiles.add(normalizedFilePath);
+                  seenChunkIds.add(chunkId);
                 }
               }
             }
@@ -450,10 +450,11 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               // Skip exact match (already processed in direct lookup above)
               if (normalizedImport !== normalizedTarget && matchesFile(normalizedImport, normalizedTarget)) {
                 for (const chunk of chunks) {
-                  const normalizedFilePath = normalizePathCached(chunk.metadata.file);
-                  if (!seenFiles.has(normalizedFilePath)) {
+                  // Use file + line range as unique chunk identifier
+                  const chunkId = `${chunk.metadata.file}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
+                  if (!seenChunkIds.has(chunkId)) {
                     dependentChunks.push(chunk);
-                    seenFiles.add(normalizedFilePath);
+                    seenChunkIds.add(chunkId);
                   }
                 }
               }
@@ -461,7 +462,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             
             // Group chunks by file for complexity analysis
             // Use canonical paths (with extensions) for the final output to show users actual file names.
-            // This is safe because seenFiles already deduplicated using normalized paths above.
+            // Multiple chunks from the same file are grouped together for accurate complexity metrics.
             const chunksByFile = new Map<string, typeof dependentChunks>();
             for (const chunk of dependentChunks) {
               const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
