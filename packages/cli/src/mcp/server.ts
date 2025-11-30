@@ -343,31 +343,35 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             
             log(`Scanning ${allChunks.length} chunks for imports...`);
             
-            // Helper function to normalize and match file paths
-            const matchesFile = (importPath: string, targetPath: string): boolean => {
-              // Remove quotes and normalize paths
-              const cleanImport = importPath.replace(/['"]/g, '').trim();
-              const cleanTarget = targetPath.trim();
+            // Path normalization cache to avoid repeated string operations
+            const pathCache = new Map<string, string>();
+            const normalizePath = (path: string): string => {
+              if (pathCache.has(path)) return pathCache.get(path)!;
+              const normalized = path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
+              pathCache.set(path, normalized);
+              return normalized;
+            };
+            
+            // Helper: Check if match occurs at path boundaries
+            const matchesAtBoundary = (str: string, pattern: string): boolean => {
+              const index = str.indexOf(pattern);
+              if (index === -1) return false;
               
-              // Normalize separators (handle both / and \)
-              const normalizedImport = cleanImport.replace(/\\/g, '/');
-              const normalizedTarget = cleanTarget.replace(/\\/g, '/');
+              // Check character before match (must be start or path separator)
+              const charBefore = index > 0 ? str[index - 1] : '/';
+              if (charBefore !== '/' && index !== 0) return false;
               
-              // Helper: Check if match occurs at path boundaries
-              const matchesAtBoundary = (str: string, pattern: string): boolean => {
-                const index = str.indexOf(pattern);
-                if (index === -1) return false;
-                
-                // Check character before match (must be start or path separator)
-                const charBefore = index > 0 ? str[index - 1] : '/';
-                if (charBefore !== '/' && index !== 0) return false;
-                
-                // Check character after match (must be end, path separator, or extension)
-                const endIndex = index + pattern.length;
-                if (endIndex === str.length) return true;
-                const charAfter = str[endIndex];
-                return charAfter === '/' || charAfter === '.';
-              };
+              // Check character after match (must be end, path separator, or extension)
+              const endIndex = index + pattern.length;
+              if (endIndex === str.length) return true;
+              const charAfter = str[endIndex];
+              return charAfter === '/' || charAfter === '.';
+            };
+            
+            // Helper function to check if two paths match
+            const matchesFile = (normalizedImport: string, normalizedTarget: string): boolean => {
+              // Exact match
+              if (normalizedImport === normalizedTarget) return true;
               
               // Strategy 1: Check if target path appears in import at path boundaries
               if (matchesAtBoundary(normalizedImport, normalizedTarget)) {
@@ -390,11 +394,47 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               return false;
             };
             
-            // Find all chunks that import the target file
-            const dependentChunks = allChunks.filter(chunk => {
+            // Build import-to-chunk index for O(n) instead of O(n*m) lookup
+            // Key: normalized import path, Value: array of chunks that import it
+            const importIndex = new Map<string, typeof allChunks>();
+            for (const chunk of allChunks) {
               const imports = chunk.metadata.imports || [];
-              return imports.some(imp => matchesFile(imp, validatedArgs.filepath));
-            });
+              for (const imp of imports) {
+                const normalizedImport = normalizePath(imp);
+                if (!importIndex.has(normalizedImport)) {
+                  importIndex.set(normalizedImport, []);
+                }
+                importIndex.get(normalizedImport)!.push(chunk);
+              }
+            }
+            
+            // Find all chunks that import the target file using index + fuzzy matching
+            const normalizedTarget = normalizePath(validatedArgs.filepath);
+            const dependentChunks: typeof allChunks = [];
+            const seenFiles = new Set<string>(); // Avoid duplicates
+            
+            // First: Try direct index lookup (fastest path)
+            if (importIndex.has(normalizedTarget)) {
+              for (const chunk of importIndex.get(normalizedTarget)!) {
+                if (!seenFiles.has(chunk.metadata.file)) {
+                  dependentChunks.push(chunk);
+                  seenFiles.add(chunk.metadata.file);
+                }
+              }
+            }
+            
+            // Second: Fuzzy match against all unique import paths in the index
+            // This handles relative imports and path variations
+            for (const [normalizedImport, chunks] of importIndex.entries()) {
+              if (matchesFile(normalizedImport, normalizedTarget)) {
+                for (const chunk of chunks) {
+                  if (!seenFiles.has(chunk.metadata.file)) {
+                    dependentChunks.push(chunk);
+                    seenFiles.add(chunk.metadata.file);
+                  }
+                }
+              }
+            }
             
             // Group chunks by file for complexity analysis
             const chunksByFile = new Map<string, typeof dependentChunks>();

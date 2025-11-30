@@ -11,26 +11,30 @@ import { describe, it, expect } from 'vitest';
  * Fix: Now checks for path boundaries (/ or . separators)
  */
 describe('matchesFile - Path Boundary Checking', () => {
-  // Extracted matching logic for testing
+  // Extracted matching logic for testing (mirrors optimized server.ts implementation)
+  const normalizePath = (path: string): string => {
+    return path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
+  };
+  
+  const matchesAtBoundary = (str: string, pattern: string): boolean => {
+    const index = str.indexOf(pattern);
+    if (index === -1) return false;
+    
+    const charBefore = index > 0 ? str[index - 1] : '/';
+    if (charBefore !== '/' && index !== 0) return false;
+    
+    const endIndex = index + pattern.length;
+    if (endIndex === str.length) return true;
+    const charAfter = str[endIndex];
+    return charAfter === '/' || charAfter === '.';
+  };
+  
   const matchesFile = (importPath: string, targetPath: string): boolean => {
-    const cleanImport = importPath.replace(/['"]/g, '').trim();
-    const cleanTarget = targetPath.trim();
+    const normalizedImport = normalizePath(importPath);
+    const normalizedTarget = normalizePath(targetPath);
     
-    const normalizedImport = cleanImport.replace(/\\/g, '/');
-    const normalizedTarget = cleanTarget.replace(/\\/g, '/');
-    
-    const matchesAtBoundary = (str: string, pattern: string): boolean => {
-      const index = str.indexOf(pattern);
-      if (index === -1) return false;
-      
-      const charBefore = index > 0 ? str[index - 1] : '/';
-      if (charBefore !== '/' && index !== 0) return false;
-      
-      const endIndex = index + pattern.length;
-      if (endIndex === str.length) return true;
-      const charAfter = str[endIndex];
-      return charAfter === '/' || charAfter === '.';
-    };
+    // Exact match
+    if (normalizedImport === normalizedTarget) return true;
     
     if (matchesAtBoundary(normalizedImport, normalizedTarget)) {
       return true;
