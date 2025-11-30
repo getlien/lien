@@ -31,7 +31,7 @@ REQUIRED sequence:
 **`semantic_search({ query: "what the code does", limit: 5 })`**
 - Use natural language: "handles authentication", "validates email"
 - NOT function names (use grep for exact names)
-- Returns relevance scores: `highly_relevant`, `relevant`, `loosely_related`, `not_relevant`
+- Returns relevance category: `highly_relevant`, `relevant`, `loosely_related`, `not_relevant`
 
 **`get_file_context({ filepath: "path/to/file.ts" })`**
 - MANDATORY before editing any file

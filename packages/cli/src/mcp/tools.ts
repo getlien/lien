@@ -24,7 +24,7 @@ Examples:
 
 Use natural language describing what the code DOES, not function names. For exact string matching, use grep instead.
 
-Results include relevance scores: highly_relevant, relevant, loosely_related, not_relevant.`
+Results include a relevance category (highly_relevant, relevant, loosely_related, not_relevant) for each match.`
   ),
   toMCPToolSchema(
     FindSimilarSchema,
@@ -34,7 +34,7 @@ Results include relevance scores: highly_relevant, relevant, loosely_related, no
 - Finding duplicate implementations
 - Refactoring similar patterns together
 
-Provide at least 10 characters of code to match against.`
+Provide at least 10 characters of code to match against. Results include a relevance category for each match.`
   ),
   toMCPToolSchema(
     GetFileContextSchema,
@@ -46,7 +46,7 @@ IMPORTANT: Call this BEFORE editing any file to understand:
 - What depends on it
 - Related test files (via testAssociations)
 
-Typical flow: semantic_search → find file → get_file_context → make changes.`
+Results include a relevance category for each related chunk. Typical flow: semantic_search → find file → get_file_context → make changes.`
   ),
   toMCPToolSchema(
     ListFunctionsSchema,
