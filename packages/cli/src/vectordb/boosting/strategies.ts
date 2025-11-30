@@ -143,6 +143,10 @@ export class FilenameBoostingStrategy implements BoostingStrategy {
 export class FileTypeBoostingStrategy implements BoostingStrategy {
   name = 'file-type';
   
+  // Cache strategy instances to avoid recreating on every call
+  private pathStrategy = new PathBoostingStrategy();
+  private filenameStrategy = new FilenameBoostingStrategy();
+  
   constructor(private intent: QueryIntent) {}
   
   apply(query: string, filepath: string, baseScore: number): number {
@@ -176,8 +180,8 @@ export class FileTypeBoostingStrategy implements BoostingStrategy {
       }
     }
     
-    // Apply path boosting
-    score = new PathBoostingStrategy().apply(query, filepath, score);
+    // Apply path boosting using cached strategy instance
+    score = this.pathStrategy.apply(query, filepath, score);
     
     // Slightly boost test files (users often look for tests)
     if (isTestFile(filepath)) {
@@ -235,9 +239,9 @@ export class FileTypeBoostingStrategy implements BoostingStrategy {
   }
   
   private applyImplementationBoosting(query: string, filepath: string, score: number): number {
-    // Apply filename and path boosting
-    score = new FilenameBoostingStrategy().apply(query, filepath, score);
-    score = new PathBoostingStrategy().apply(query, filepath, score);
+    // Apply filename and path boosting using cached strategy instances
+    score = this.filenameStrategy.apply(query, filepath, score);
+    score = this.pathStrategy.apply(query, filepath, score);
     
     // Slightly deprioritize test files (user wants implementation, not tests)
     if (isTestFile(filepath)) {

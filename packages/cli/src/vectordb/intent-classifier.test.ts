@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { QueryIntent, classifyQueryIntent } from './intent-classifier.js';
 
 describe('Query Intent Classification', () => {
