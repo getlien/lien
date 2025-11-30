@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { isTestFile } from './utils/path-matching.js';
 
 /**
  * Test cases for test file detection in get_dependents tool.
@@ -11,10 +12,6 @@ import { describe, it, expect } from 'vitest';
  * Fix: Use precise regex patterns
  */
 describe('isTestFile - Precise Test Detection', () => {
-  const isTestFile = (filepath: string): boolean => {
-    return /\.(test|spec)\.[^/]+$/.test(filepath) ||
-           /(^|[/\\])(test|tests|__tests__)[/\\]/.test(filepath);
-  };
 
   describe('should correctly identify test files', () => {
     it('should match .test. files', () => {

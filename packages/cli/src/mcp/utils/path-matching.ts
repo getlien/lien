@@ -111,3 +111,22 @@ export function getCanonicalPath(filepath: string, workspaceRoot: string): strin
   return canonical;
 }
 
+/**
+ * Determines if a file is a test file based on naming conventions.
+ * 
+ * Uses precise regex patterns to avoid false positives:
+ * - Files with .test. or .spec. extensions (e.g., foo.test.ts, bar.spec.js)
+ * - Files in test/, tests/, or __tests__/ directories
+ * 
+ * Avoids false positives like:
+ * - contest.ts (contains ".test." but isn't a test)
+ * - latest/config.ts (contains "/test/" but isn't a test)
+ * 
+ * @param filepath - The file path to check
+ * @returns True if the file is a test file
+ */
+export function isTestFile(filepath: string): boolean {
+  return /\.(test|spec)\.[^/]+$/.test(filepath) ||
+         /(^|[/\\])(test|tests|__tests__)[/\\]/.test(filepath);
+}
+

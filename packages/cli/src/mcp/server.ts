@@ -18,7 +18,7 @@ import { isGitAvailable, isGitRepo } from '../git/utils.js';
 import { FileWatcher } from '../watcher/index.js';
 import { VERSION_CHECK_INTERVAL_MS } from '../constants.js';
 import { wrapToolHandler } from './utils/tool-wrapper.js';
-import { normalizePath, matchesFile, getCanonicalPath } from './utils/path-matching.js';
+import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from './utils/path-matching.js';
 import {
   SemanticSearchSchema,
   FindSimilarSchema,
@@ -389,7 +389,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             // Second: Fuzzy match against all unique import paths in the index
             // This handles relative imports and path variations
             for (const [normalizedImport, chunks] of importIndex.entries()) {
-              if (matchesFile(normalizedImport, normalizedTarget)) {
+              // Skip exact match (already processed in direct lookup above)
+              if (normalizedImport !== normalizedTarget && matchesFile(normalizedImport, normalizedTarget)) {
                 for (const chunk of chunks) {
                   const normalizedFilePath = normalizePathCached(chunk.metadata.file);
                   if (!seenFiles.has(normalizedFilePath)) {
@@ -401,11 +402,13 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             }
             
             // Group chunks by file for complexity analysis
+            // Use canonical paths to ensure consistency with dependents array
             const chunksByFile = new Map<string, typeof dependentChunks>();
             for (const chunk of dependentChunks) {
-              const existing = chunksByFile.get(chunk.metadata.file) || [];
+              const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+              const existing = chunksByFile.get(canonical) || [];
               existing.push(chunk);
-              chunksByFile.set(chunk.metadata.file, existing);
+              chunksByFile.set(canonical, existing);
             }
             
             // Calculate complexity metrics per file
@@ -510,11 +513,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             
             const uniqueFiles = Array.from(uniquePaths).map(filepath => ({
               filepath,
-              // More precise test file detection to avoid false positives like:
-              // - contest.ts (contains ".test." but isn't a test)
-              // - latest/config.ts (contains "/test/" but isn't a test)
-              isTestFile: /\.(test|spec)\.[^/]+$/.test(filepath) ||
-                         /(^|[/\\])(test|tests|__tests__)[/\\]/.test(filepath),
+              isTestFile: isTestFile(filepath),
             }));
             
             // Calculate risk level based on dependent count
