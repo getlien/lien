@@ -28,6 +28,26 @@ const FILE_TYPE_STRATEGIES = {
 };
 
 /**
+ * Cached BoostingComposer instances for each intent.
+ * Pre-configured with the appropriate strategy pipeline for each intent type.
+ * This avoids creating a new composer instance on every search result.
+ */
+const BOOSTING_COMPOSERS = {
+  [QueryIntent.LOCATION]: new BoostingComposer()
+    .addStrategy(PATH_STRATEGY)
+    .addStrategy(FILENAME_STRATEGY)
+    .addStrategy(FILE_TYPE_STRATEGIES[QueryIntent.LOCATION]),
+  [QueryIntent.CONCEPTUAL]: new BoostingComposer()
+    .addStrategy(PATH_STRATEGY)
+    .addStrategy(FILENAME_STRATEGY)
+    .addStrategy(FILE_TYPE_STRATEGIES[QueryIntent.CONCEPTUAL]),
+  [QueryIntent.IMPLEMENTATION]: new BoostingComposer()
+    .addStrategy(PATH_STRATEGY)
+    .addStrategy(FILENAME_STRATEGY)
+    .addStrategy(FILE_TYPE_STRATEGIES[QueryIntent.IMPLEMENTATION]),
+};
+
+/**
  * Database record structure as stored in LanceDB
  */
 interface DBRecord {
@@ -71,13 +91,8 @@ function applyRelevanceBoosting(
   
   const intent = classifyQueryIntent(query);
   
-  // Use cached strategy instances to avoid allocation overhead
-  const composer = new BoostingComposer()
-    .addStrategy(PATH_STRATEGY)
-    .addStrategy(FILENAME_STRATEGY)
-    .addStrategy(FILE_TYPE_STRATEGIES[intent]);
-  
-  return composer.apply(query, filepath, baseScore);
+  // Use cached composer instance configured for this intent
+  return BOOSTING_COMPOSERS[intent].apply(query, filepath, baseScore);
 }
 
 /**
