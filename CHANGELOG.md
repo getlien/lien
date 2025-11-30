@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.15.0] - 2025-11-30
+
+### Added
+- **Add Python AST support with enhanced documentation**
+
+
 ## [0.14.0] - 2025-11-26
 
 ### Added
