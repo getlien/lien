@@ -347,7 +347,18 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             const pathCache = new Map<string, string>();
             const normalizePath = (path: string): string => {
               if (pathCache.has(path)) return pathCache.get(path)!;
-              const normalized = path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
+              let normalized = path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
+              
+              // Normalize extensions: .ts/.tsx/.js/.jsx → all treated as equivalent
+              // This handles TypeScript's ESM requirement of .js imports for .ts files
+              normalized = normalized.replace(/\.(ts|tsx|js|jsx)$/, '');
+              
+              // Normalize to relative path if it starts with workspace root
+              const workspaceRoot = process.cwd().replace(/\\/g, '/');
+              if (normalized.startsWith(workspaceRoot + '/')) {
+                normalized = normalized.substring(workspaceRoot.length + 1);
+              }
+              
               pathCache.set(path, normalized);
               return normalized;
             };

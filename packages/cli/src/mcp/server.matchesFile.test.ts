@@ -13,7 +13,11 @@ import { describe, it, expect } from 'vitest';
 describe('matchesFile - Path Boundary Checking', () => {
   // Extracted matching logic for testing (mirrors optimized server.ts implementation)
   const normalizePath = (path: string): string => {
-    return path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
+    let normalized = path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
+    // Normalize extensions: .ts/.tsx/.js/.jsx → all treated as equivalent
+    normalized = normalized.replace(/\.(ts|tsx|js|jsx)$/, '');
+    // Note: workspace root normalization not needed for unit tests
+    return normalized;
   };
   
   const matchesAtBoundary = (str: string, pattern: string): boolean => {
@@ -71,6 +75,21 @@ describe('matchesFile - Path Boundary Checking', () => {
       expect(matchesFile('./utils/logger', 'utils/logger')).toBe(true);
     });
 
+    it('should match relative imports to full paths', () => {
+      expect(matchesFile('./schemas/index.js', 'packages/cli/src/mcp/schemas/index.ts')).toBe(true);
+      expect(matchesFile('../schemas/index', 'src/mcp/schemas/index')).toBe(true);
+    });
+    
+    it('should match the exact dogfooding scenario', () => {
+      // After normalization (extension stripped):
+      // import: ./schemas/index.js → ./schemas/index
+      // target: packages/cli/src/mcp/schemas/index.ts → packages/cli/src/mcp/schemas/index
+      const normalizeExt = (p: string) => p.replace(/\.(ts|tsx|js|jsx)$/, '');
+      const imp = normalizeExt('./schemas/index.js');
+      const target = normalizeExt('packages/cli/src/mcp/schemas/index.ts');
+      expect(matchesFile(imp, target)).toBe(true);
+    });
+
     it('should match nested paths', () => {
       expect(matchesFile('src/utils/logger', 'utils/logger')).toBe(true);
       expect(matchesFile('packages/cli/src/logger', 'src/logger')).toBe(true);
@@ -123,6 +142,33 @@ describe('matchesFile - Path Boundary Checking', () => {
 
     it('should handle whitespace', () => {
       expect(matchesFile(' src/logger ', 'src/logger')).toBe(true);
+    });
+  });
+
+  describe('extension normalization (.ts vs .js)', () => {
+    it('should match .ts files with .js imports (TypeScript ESM)', () => {
+      expect(matchesFile('src/logger.js', 'src/logger.ts')).toBe(true);
+      expect(matchesFile('./utils.js', './utils.ts')).toBe(true);
+    });
+
+    it('should match .tsx files with .js imports', () => {
+      expect(matchesFile('components/Button.js', 'components/Button.tsx')).toBe(true);
+    });
+
+    it('should match files with any JS/TS extension combination', () => {
+      expect(matchesFile('src/helper.js', 'src/helper.ts')).toBe(true);
+      expect(matchesFile('src/helper.ts', 'src/helper.js')).toBe(true);
+      expect(matchesFile('src/helper.jsx', 'src/helper.tsx')).toBe(true);
+    });
+
+    it('should match files without extensions to files with extensions', () => {
+      expect(matchesFile('src/logger', 'src/logger.ts')).toBe(true);
+      expect(matchesFile('src/logger.ts', 'src/logger')).toBe(true);
+    });
+
+    it('should NOT match different files despite same extension', () => {
+      expect(matchesFile('src/logger.ts', 'src/utils.ts')).toBe(false);
+      expect(matchesFile('auth/handler.js', 'api/handler.js')).toBe(false);
     });
   });
 });
