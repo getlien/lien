@@ -373,14 +373,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
                 return true;
               }
               
-              // Strategy 3: Match by filename only (without extension)
-              const importFilename = normalizeImport.split('/').pop()?.replace(/\.[^.]+$/, '');
-              const targetFilename = normalizeTarget.split('/').pop()?.replace(/\.[^.]+$/, '');
-              if (importFilename && targetFilename && importFilename === targetFilename) {
-                return true;
-              }
-              
-              // Strategy 4: Handle relative imports (./logger vs src/utils/logger)
+              // Strategy 3: Handle relative imports (./logger vs src/utils/logger)
               // Remove leading ./ and ../ from import
               const cleanedImport = normalizeImport.replace(/^(\.\.?\/)+/, '');
               if (matchesAtBoundary(cleanedImport, normalizeTarget) || 

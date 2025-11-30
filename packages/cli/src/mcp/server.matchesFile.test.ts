@@ -40,12 +40,6 @@ describe('matchesFile - Path Boundary Checking', () => {
       return true;
     }
     
-    const importFilename = normalizeImport.split('/').pop()?.replace(/\.[^.]+$/, '');
-    const targetFilename = normalizeTarget.split('/').pop()?.replace(/\.[^.]+$/, '');
-    if (importFilename && targetFilename && importFilename === targetFilename) {
-      return true;
-    }
-    
     const cleanedImport = normalizeImport.replace(/^(\.\.?\/)+/, '');
     if (matchesAtBoundary(cleanedImport, normalizeTarget) || 
         matchesAtBoundary(normalizeTarget, cleanedImport)) {
@@ -77,10 +71,6 @@ describe('matchesFile - Path Boundary Checking', () => {
       expect(matchesFile('src/utils/logger', 'utils/logger')).toBe(true);
       expect(matchesFile('packages/cli/src/logger', 'src/logger')).toBe(true);
     });
-    
-    it('should match by filename only', () => {
-      expect(matchesFile('src/utils/validator.ts', 'lib/validator.ts')).toBe(true);
-    });
   });
 
   describe('should NOT match false positives (the bug)', () => {
@@ -107,6 +97,12 @@ describe('matchesFile - Path Boundary Checking', () => {
     it('should NOT match completely different files', () => {
       expect(matchesFile('src/database.ts', 'src/logger.ts')).toBe(false);
       expect(matchesFile('auth/handler', 'logger')).toBe(false);
+    });
+
+    it('should NOT match same filename in different directories', () => {
+      expect(matchesFile('src/utils/validator.ts', 'lib/validator.ts')).toBe(false);
+      expect(matchesFile('components/Button.tsx', 'ui/Button.tsx')).toBe(false);
+      expect(matchesFile('auth/handler.ts', 'api/handler.ts')).toBe(false);
     });
   });
 
