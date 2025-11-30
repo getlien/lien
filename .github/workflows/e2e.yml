@@ -1,0 +1,121 @@
+name: E2E Tests (Real Projects)
+
+on:
+  # Run on push to main (post-merge validation)
+  push:
+    branches: [main]
+  
+  # Optionally run on PRs (can be skipped with [skip e2e] in commit message)
+  pull_request:
+    branches: [main]
+  
+  # Allow manual trigger
+  workflow_dispatch:
+
+# Cancel in-progress runs when a new run is triggered
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-tests:
+    name: E2E Tests with Real Projects
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    # Skip if commit message contains [skip e2e]
+    if: "!contains(github.event.head_commit.message, '[skip e2e]')"
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22.x]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build Lien
+        run: npm run build --workspace=packages/cli
+      
+      - name: Run E2E tests
+        run: npm run test:e2e --workspace=packages/cli
+        env:
+          # Increase Node.js memory for large projects
+          NODE_OPTIONS: '--max-old-space-size=4096'
+      
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-artifacts
+          path: |
+            /tmp/lien-e2e-tests/
+            packages/cli/test/e2e/
+          retention-days: 7
+  
+  # Optional: Run individual language tests in parallel
+  e2e-tests-parallel:
+    name: E2E - ${{ matrix.project }} (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    # Only run on main branch (not PRs) to save CI time
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: Requests
+            language: Python
+            script: test:e2e:python
+          - project: Zod
+            language: TypeScript
+            script: test:e2e:typescript
+          - project: Express
+            language: JavaScript
+            script: test:e2e:javascript
+          - project: Monolog
+            language: PHP
+            script: test:e2e:php
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build Lien
+        run: npm run build --workspace=packages/cli
+      
+      - name: Run E2E test for ${{ matrix.project }}
+        run: npm run ${{ matrix.script }} --workspace=packages/cli
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+      
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.language }}-artifacts
+          path: |
+            /tmp/lien-e2e-tests/
+          retention-days: 7
+

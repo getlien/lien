@@ -66,10 +66,13 @@ describe('chunkFile', () => {
   });
 
   it('should detect language from file extension', () => {
-    const code = 'const x = 1;';
-    const tsChunks = chunkFile('test.ts', code);
-    const jsChunks = chunkFile('test.js', code);
-    const pyChunks = chunkFile('test.py', code);
+    const tsCode = 'const x = 1;';
+    const jsCode = 'const x = 1;';
+    const pyCode = 'def test(): pass';
+    
+    const tsChunks = chunkFile('test.ts', tsCode);
+    const jsChunks = chunkFile('test.js', jsCode);
+    const pyChunks = chunkFile('test.py', pyCode);
 
     expect(tsChunks[0].metadata.language).toBe('typescript');
     expect(jsChunks[0].metadata.language).toBe('javascript');

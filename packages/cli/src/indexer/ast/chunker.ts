@@ -73,7 +73,7 @@ export function chunkByAST(
     // For methods, find the parent container name (e.g., class name)
     const parentClassName = traverser.findParentContainerName(actualNode);
     
-    const symbolInfo = extractSymbolInfo(actualNode, content, parentClassName);
+    const symbolInfo = extractSymbolInfo(actualNode, content, parentClassName, language);
     
     // Extract the code for this node (use original node for full declaration)
     const nodeContent = getNodeContent(node, lines);

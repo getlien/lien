@@ -79,7 +79,7 @@ export function migrateConfig(oldConfig: Partial<LegacyLienConfig | LienConfig>)
       path: '.',
       enabled: true,
       config: {
-        include: (oldConfig as any).indexing.include ?? ['**/*.{ts,tsx,js,jsx,py,go,rs,java,c,cpp,cs}'],
+        include: (oldConfig as any).indexing.include ?? ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,c,cpp,cs}'],
         exclude: (oldConfig as any).indexing.exclude ?? [
           '**/node_modules/**',
           '**/dist/**',
@@ -101,7 +101,7 @@ export function migrateConfig(oldConfig: Partial<LegacyLienConfig | LienConfig>)
       path: '.',
       enabled: true,
       config: {
-        include: ['**/*.{ts,tsx,js,jsx,py,go,rs,java,c,cpp,cs}'],
+        include: ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,c,cpp,cs}'],
         exclude: [
           '**/node_modules/**',
           '**/dist/**',
