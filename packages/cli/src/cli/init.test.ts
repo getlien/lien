@@ -2,7 +2,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import { initCommand } from './init.js';
+import { fileURLToPath } from 'url';
 // import { defaultConfig } from '../config/schema.js'; // Unused
+
+// Get current version from package.json dynamically
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageJson = JSON.parse(
+  await fs.readFile(path.join(__dirname, '../../package.json'), 'utf-8')
+);
+const CURRENT_VERSION = packageJson.version;
 
 describe('initCommand', () => {
   let testDir: string;
@@ -54,7 +62,7 @@ describe('initCommand', () => {
       const content = await fs.readFile(configPath, 'utf-8');
       const config = JSON.parse(content);
       
-      expect(config.version).toBe('0.14.0');
+      expect(config.version).toBe(CURRENT_VERSION);
       expect(config.frameworks).toBeDefined();
       expect(Array.isArray(config.frameworks)).toBe(true);
     });
@@ -150,7 +158,7 @@ describe('initCommand', () => {
       const content = await fs.readFile(configPath, 'utf-8');
       const config = JSON.parse(content);
       
-      expect(config.version).toBe('0.14.0');
+      expect(config.version).toBe(CURRENT_VERSION);
       expect(config.core.chunkSize).toBe(800); // Preserved
       expect(config.core.chunkOverlap).toBe(10); // Preserved
       expect(config.frameworks).toHaveLength(1); // Migrated to generic framework
@@ -221,7 +229,7 @@ describe('initCommand', () => {
       const config = JSON.parse(content);
       
       // User values should be preserved in new structure
-      expect(config.version).toBe('0.14.0');
+      expect(config.version).toBe(CURRENT_VERSION);
       expect(config.core.chunkSize).toBe(2000);
       expect(config.core.chunkOverlap).toBe(400);
       expect(config.frameworks).toHaveLength(1);

@@ -1,8 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { loadConfig, configExists } from './loader.js';
 import { defaultConfig } from './schema.js';
+
+// Get current version from package.json dynamically
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageJson = JSON.parse(
+  await fs.readFile(path.join(__dirname, '../../package.json'), 'utf-8')
+);
+const CURRENT_VERSION = packageJson.version;
 
 describe('Config Loader', () => {
   let testDir: string;
@@ -30,7 +38,7 @@ describe('Config Loader', () => {
     
     it('should load and merge user config with defaults', async () => {
       const userConfig = {
-        version: '0.14.0',
+        version: CURRENT_VERSION,
         core: {
           chunkSize: 2000,
         },
@@ -98,7 +106,7 @@ describe('Config Loader', () => {
       
       const config = await loadConfig(testDir);
       // Empty config just merges with defaults - no migration needed
-      expect(config.version).toBe('0.14.0');
+      expect(config.version).toBe(CURRENT_VERSION);
       expect(config.frameworks).toEqual(defaultConfig.frameworks);
       expect(config.core).toEqual(defaultConfig.core);
     });
@@ -151,8 +159,8 @@ describe('Config Loader', () => {
       
       const config = await loadConfig(testDir);
       
-      // Should be migrated to v0.3.0
-      expect(config.version).toBe('0.14.0');
+      // Should be migrated to current version
+      expect(config.version).toBe(CURRENT_VERSION);
       expect(config.core.chunkSize).toBe(100);
       expect(config.core.chunkOverlap).toBe(20);
       expect(config.mcp.port).toBe(8080);

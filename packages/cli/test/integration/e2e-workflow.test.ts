@@ -3,11 +3,19 @@ import { mkdtemp } from 'fs/promises';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
 import { detectAllFrameworks } from '../../src/frameworks/detector-service.js';
 import { getFrameworkDetector } from '../../src/frameworks/registry.js';
 import { LienConfig, FrameworkInstance, defaultConfig } from '../../src/config/schema.js';
 import { loadConfig } from '../../src/config/loader.js';
 import { migrateConfig } from '../../src/config/migration.js';
+
+// Get current version from package.json dynamically
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageJson = JSON.parse(
+  await fs.readFile(path.join(__dirname, '../../package.json'), 'utf-8')
+);
+const CURRENT_VERSION = packageJson.version;
 
 describe('E2E Workflow', () => {
   let testDir: string;
@@ -150,7 +158,7 @@ test('calculator addition', () => {
     const migratedConfig = await loadConfig(testDir);
 
     // Step 3: Verify migration
-    expect(migratedConfig.version).toBe('0.14.0');
+    expect(migratedConfig.version).toBe(CURRENT_VERSION);
     expect(migratedConfig.frameworks).toHaveLength(1);
     expect(migratedConfig.frameworks[0].name).toBe('generic');
     expect(migratedConfig.frameworks[0].path).toBe('.');
@@ -369,7 +377,7 @@ test('calculator addition', () => {
     const migratedConfig = migrateConfig(customV020Config);
 
     // Verify all customizations are preserved
-    expect(migratedConfig.version).toBe('0.14.0');
+    expect(migratedConfig.version).toBe(CURRENT_VERSION);
     expect(migratedConfig.core.chunkSize).toBe(100);
     expect(migratedConfig.core.chunkOverlap).toBe(15);
     expect(migratedConfig.core.concurrency).toBe(8);

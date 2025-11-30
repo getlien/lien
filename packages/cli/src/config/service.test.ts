@@ -2,9 +2,17 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
 import { ConfigService } from './service.js';
 import { LienConfig, LegacyLienConfig, defaultConfig } from './schema.js';
 import { ConfigError } from '../errors/index.js';
+
+// Get current version from package.json dynamically
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageJson = JSON.parse(
+  await fs.readFile(path.join(__dirname, '../../package.json'), 'utf-8')
+);
+const CURRENT_VERSION = packageJson.version;
 
 describe('ConfigService', () => {
   let service: ConfigService;
@@ -108,8 +116,8 @@ describe('ConfigService', () => {
       
       const config = await service.load(testDir);
       
-      // Should be migrated to v0.14.0
-      expect(config.version).toBe('0.14.0');
+      // Should be migrated to current version
+      expect(config.version).toBe(CURRENT_VERSION);
       expect(config.frameworks).toBeDefined();
       expect(config.core.chunkSize).toBe(100);
       
@@ -186,7 +194,7 @@ describe('ConfigService', () => {
       
       expect(result.migrated).toBe(true);
       expect(result.backupPath).toBeDefined();
-      expect(result.config.version).toBe('0.14.0');
+      expect(result.config.version).toBe(CURRENT_VERSION);
       expect(result.config.frameworks).toHaveLength(1);
       expect(result.config.frameworks[0].name).toBe('generic');
     });
@@ -555,7 +563,7 @@ describe('ConfigService', () => {
       // Load should auto-migrate
       const config = await service.load(testDir);
       
-      expect(config.version).toBe('0.14.0');
+      expect(config.version).toBe(CURRENT_VERSION);
       expect(config.frameworks).toBeDefined();
       expect(config.core.chunkSize).toBe(90);
       expect(config.mcp.port).toBe(7200);

@@ -2,8 +2,16 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
 import { needsMigration, migrateConfig, migrateConfigFile } from './migration.js';
 import { LegacyLienConfig, LienConfig } from './schema.js';
+
+// Get current version from package.json dynamically
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageJson = JSON.parse(
+  await fs.readFile(path.join(__dirname, '../../package.json'), 'utf-8')
+);
+const CURRENT_VERSION = packageJson.version;
 
 describe('Config Migration', () => {
   let tempDir: string;
@@ -45,9 +53,9 @@ describe('Config Migration', () => {
       expect(needsMigration(oldConfig)).toBe(true);
     });
 
-    it('should return false for v0.14.0 config with frameworks and chunking', () => {
+    it('should return false for current version config with frameworks and chunking', () => {
       const newConfig = {
-        version: '0.14.0',
+        version: CURRENT_VERSION,
         frameworks: [],
         chunking: {
           useAST: true,
@@ -115,7 +123,7 @@ describe('Config Migration', () => {
       const newConfig = migrateConfig(oldConfig);
 
       // Check version updated
-      expect(newConfig.version).toBe('0.14.0');
+      expect(newConfig.version).toBe(CURRENT_VERSION);
 
       // Check core settings migrated
       expect(newConfig.core.chunkSize).toBe(100);
@@ -164,7 +172,7 @@ describe('Config Migration', () => {
 
       const newConfig = migrateConfig(oldConfig);
 
-      expect(newConfig.version).toBe('0.14.0');
+      expect(newConfig.version).toBe(CURRENT_VERSION);
       expect(newConfig.core.chunkSize).toBe(50);
       expect(newConfig.frameworks).toHaveLength(1);
       expect(newConfig.frameworks[0].config.include).toEqual(['**/*.py']);
@@ -175,7 +183,7 @@ describe('Config Migration', () => {
 
       const newConfig = migrateConfig(oldConfig);
 
-      expect(newConfig.version).toBe('0.14.0');
+      expect(newConfig.version).toBe(CURRENT_VERSION);
       expect(newConfig.frameworks).toHaveLength(1);
       expect(newConfig.frameworks[0].name).toBe('generic');
       
@@ -269,14 +277,14 @@ describe('Config Migration', () => {
       // Verify new config is migrated
       const newConfigContent = await fs.readFile(configPath, 'utf-8');
       const newConfig = JSON.parse(newConfigContent);
-      expect(newConfig.version).toBe('0.14.0');
+      expect(newConfig.version).toBe(CURRENT_VERSION);
       expect(newConfig.frameworks).toHaveLength(1);
     });
 
     it('should not migrate already migrated config', async () => {
       const configPath = path.join(tempDir, '.lien.config.json');
       const newConfig: LienConfig = {
-        version: '0.14.0',
+        version: CURRENT_VERSION,
         core: {
           chunkSize: 75,
           chunkOverlap: 10,
@@ -322,7 +330,7 @@ describe('Config Migration', () => {
       const result = await migrateConfigFile(tempDir);
 
       expect(result.migrated).toBe(false);
-      expect(result.config.version).toBe('0.14.0');
+      expect(result.config.version).toBe(CURRENT_VERSION);
       expect(result.config.frameworks).toEqual([]);
     });
 
