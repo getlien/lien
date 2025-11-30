@@ -18,6 +18,7 @@ import { isGitAvailable, isGitRepo } from '../git/utils.js';
 import { FileWatcher } from '../watcher/index.js';
 import { VERSION_CHECK_INTERVAL_MS } from '../constants.js';
 import { wrapToolHandler } from './utils/tool-wrapper.js';
+import { normalizePath, matchesFile, getCanonicalPath } from './utils/path-matching.js';
 import {
   SemanticSearchSchema,
   FindSimilarSchema,
@@ -343,66 +344,16 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             
             log(`Scanning ${allChunks.length} chunks for imports...`);
             
+            // Compute workspace root once (used by normalizePath and getCanonicalPath)
+            const workspaceRoot = process.cwd().replace(/\\/g, '/');
+            
             // Path normalization cache to avoid repeated string operations
             const pathCache = new Map<string, string>();
-            const normalizePath = (path: string): string => {
+            const normalizePathCached = (path: string): string => {
               if (pathCache.has(path)) return pathCache.get(path)!;
-              let normalized = path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
-              
-              // Normalize extensions: .ts/.tsx/.js/.jsx → all treated as equivalent
-              // This handles TypeScript's ESM requirement of .js imports for .ts files
-              normalized = normalized.replace(/\.(ts|tsx|js|jsx)$/, '');
-              
-              // Normalize to relative path if it starts with workspace root
-              const workspaceRoot = process.cwd().replace(/\\/g, '/');
-              if (normalized.startsWith(workspaceRoot + '/')) {
-                normalized = normalized.substring(workspaceRoot.length + 1);
-              }
-              
+              const normalized = normalizePath(path, workspaceRoot);
               pathCache.set(path, normalized);
               return normalized;
-            };
-            
-            // Helper: Check if match occurs at path boundaries
-            const matchesAtBoundary = (str: string, pattern: string): boolean => {
-              const index = str.indexOf(pattern);
-              if (index === -1) return false;
-              
-              // Check character before match (must be start or path separator)
-              const charBefore = index > 0 ? str[index - 1] : '/';
-              if (charBefore !== '/' && index !== 0) return false;
-              
-              // Check character after match (must be end, path separator, or extension)
-              const endIndex = index + pattern.length;
-              if (endIndex === str.length) return true;
-              const charAfter = str[endIndex];
-              return charAfter === '/' || charAfter === '.';
-            };
-            
-            // Helper function to check if two paths match
-            const matchesFile = (normalizedImport: string, normalizedTarget: string): boolean => {
-              // Exact match
-              if (normalizedImport === normalizedTarget) return true;
-              
-              // Strategy 1: Check if target path appears in import at path boundaries
-              if (matchesAtBoundary(normalizedImport, normalizedTarget)) {
-                return true;
-              }
-              
-              // Strategy 2: Check if import path appears in target (for longer target paths)
-              if (matchesAtBoundary(normalizedTarget, normalizedImport)) {
-                return true;
-              }
-              
-              // Strategy 3: Handle relative imports (./logger vs src/utils/logger)
-              // Remove leading ./ and ../ from import
-              const cleanedImport = normalizedImport.replace(/^(\.\.?\/)+/, '');
-              if (matchesAtBoundary(cleanedImport, normalizedTarget) || 
-                  matchesAtBoundary(normalizedTarget, cleanedImport)) {
-                return true;
-              }
-              
-              return false;
             };
             
             // Build import-to-chunk index for O(n) instead of O(n*m) lookup
@@ -411,7 +362,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             for (const chunk of allChunks) {
               const imports = chunk.metadata.imports || [];
               for (const imp of imports) {
-                const normalizedImport = normalizePath(imp);
+                const normalizedImport = normalizePathCached(imp);
                 if (!importIndex.has(normalizedImport)) {
                   importIndex.set(normalizedImport, []);
                 }
@@ -420,14 +371,14 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             }
             
             // Find all chunks that import the target file using index + fuzzy matching
-            const normalizedTarget = normalizePath(validatedArgs.filepath);
+            const normalizedTarget = normalizePathCached(validatedArgs.filepath);
             const dependentChunks: typeof allChunks = [];
             const seenFiles = new Set<string>(); // Avoid duplicates
             
             // First: Try direct index lookup (fastest path)
             if (importIndex.has(normalizedTarget)) {
               for (const chunk of importIndex.get(normalizedTarget)!) {
-                const normalizedFilePath = normalizePath(chunk.metadata.file);
+                const normalizedFilePath = normalizePathCached(chunk.metadata.file);
                 if (!seenFiles.has(normalizedFilePath)) {
                   dependentChunks.push(chunk);
                   seenFiles.add(normalizedFilePath);
@@ -440,7 +391,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             for (const [normalizedImport, chunks] of importIndex.entries()) {
               if (matchesFile(normalizedImport, normalizedTarget)) {
                 for (const chunk of chunks) {
-                  const normalizedFilePath = normalizePath(chunk.metadata.file);
+                  const normalizedFilePath = normalizePathCached(chunk.metadata.file);
                   if (!seenFiles.has(normalizedFilePath)) {
                     dependentChunks.push(chunk);
                     seenFiles.add(normalizedFilePath);
@@ -550,27 +501,14 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             }
             
             // Deduplicate by normalized file path for the dependents list
-            // Helper to get canonical path (relative to workspace, with extension)
-            const workspaceRoot = process.cwd().replace(/\\/g, '/');
-            const getCanonicalPath = (filepath: string): string => {
-              let canonical = filepath.replace(/\\/g, '/');
-              if (canonical.startsWith(workspaceRoot + '/')) {
-                canonical = canonical.substring(workspaceRoot.length + 1);
-              }
-              return canonical;
-            };
-            
-            // Build a map from canonical path to first occurrence
-            const pathMap = new Map<string, string>();
+            // Build a set of unique canonical paths (using Set instead of Map for deduplication)
+            const uniquePaths = new Set<string>();
             for (const chunk of dependentChunks) {
-              const canonical = getCanonicalPath(chunk.metadata.file);
-              if (!pathMap.has(canonical)) {
-                // Use canonical path (relative, with extension) for output
-                pathMap.set(canonical, canonical);
-              }
+              const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+              uniquePaths.add(canonical);
             }
             
-            const uniqueFiles = Array.from(pathMap.values()).map(filepath => ({
+            const uniqueFiles = Array.from(uniquePaths).map(filepath => ({
               filepath,
               // More precise test file detection to avoid false positives like:
               // - contest.ts (contains ".test." but isn't a test)
