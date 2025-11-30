@@ -416,18 +416,5 @@ describe('E2E: Real Open Source Projects', () => {
       }, E2E_TIMEOUT);
     });
   });
-  
-  describe('Cross-language validation', () => {
-    it('should handle projects with multiple languages', () => {
-      // This test validates that Lien correctly handles projects
-      // that mix multiple languages (e.g., JS + Python, PHP + JS)
-      // 
-      // Currently just a placeholder - real implementation would:
-      // 1. Clone a multi-language project (e.g., a web app with Python backend + JS frontend)
-      // 2. Verify both languages are indexed
-      // 3. Verify AST metadata is correct for each language
-      expect(true).toBe(true);
-    });
-  });
 });
 
