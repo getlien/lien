@@ -207,5 +207,76 @@ describe('Query Intent Classification', () => {
       expect(classifyQueryIntent('Configuration migration system implementation')).toBe(QueryIntent.IMPLEMENTATION);
     });
   });
+  
+  describe('Helper Functions', () => {
+    describe('getPatternsForIntent', () => {
+      it('should return patterns for LOCATION intent', async () => {
+        const { getPatternsForIntent } = await import('./intent-classifier.js');
+        const patterns = getPatternsForIntent(QueryIntent.LOCATION);
+        
+        expect(patterns.length).toBeGreaterThan(0);
+        expect(patterns.every(p => p instanceof RegExp)).toBe(true);
+      });
+      
+      it('should return patterns for CONCEPTUAL intent', async () => {
+        const { getPatternsForIntent } = await import('./intent-classifier.js');
+        const patterns = getPatternsForIntent(QueryIntent.CONCEPTUAL);
+        
+        expect(patterns.length).toBeGreaterThan(0);
+        expect(patterns.every(p => p instanceof RegExp)).toBe(true);
+      });
+      
+      it('should return patterns for IMPLEMENTATION intent', async () => {
+        const { getPatternsForIntent } = await import('./intent-classifier.js');
+        const patterns = getPatternsForIntent(QueryIntent.IMPLEMENTATION);
+        
+        expect(patterns.length).toBeGreaterThan(0);
+        expect(patterns.every(p => p instanceof RegExp)).toBe(true);
+      });
+      
+      it('should return empty array for intent with no patterns', async () => {
+        const { getPatternsForIntent } = await import('./intent-classifier.js');
+        // Create a custom intent that doesn't exist in rules
+        const patterns = getPatternsForIntent('nonexistent' as QueryIntent);
+        
+        expect(patterns).toEqual([]);
+      });
+    });
+    
+    describe('getIntentRules', () => {
+      it('should return all intent rules', async () => {
+        const { getIntentRules } = await import('./intent-classifier.js');
+        const rules = getIntentRules();
+        
+        expect(rules.length).toBeGreaterThan(0);
+        expect(rules.every(r => r.intent && r.patterns && r.priority !== undefined)).toBe(true);
+      });
+      
+      it('should return a copy (not reference)', async () => {
+        const { getIntentRules } = await import('./intent-classifier.js');
+        const rules1 = getIntentRules();
+        const rules2 = getIntentRules();
+        
+        expect(rules1).not.toBe(rules2); // Different references
+        expect(rules1).toEqual(rules2); // Same content
+      });
+    });
+    
+    describe('addIntentRule', () => {
+      it('should allow adding custom rules', async () => {
+        const { addIntentRule, classifyQueryIntent, QueryIntent } = await import('./intent-classifier.js');
+        
+        // Add a custom high-priority rule
+        addIntentRule({
+          intent: QueryIntent.LOCATION,
+          priority: 10,
+          patterns: [/custom test pattern/],
+        });
+        
+        // Should match our custom pattern
+        expect(classifyQueryIntent('this matches custom test pattern')).toBe(QueryIntent.LOCATION);
+      });
+    });
+  });
 });
 

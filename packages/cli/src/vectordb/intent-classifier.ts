@@ -29,12 +29,60 @@ export enum QueryIntent {
 }
 
 /**
+ * Intent classification rule with patterns and priority
+ */
+export interface IntentRule {
+  intent: QueryIntent;
+  patterns: RegExp[];
+  priority: number;
+}
+
+/**
+ * Intent classification rules.
+ * Rules are checked in priority order (higher priority first).
+ */
+const INTENT_RULES: IntentRule[] = [
+  // LOCATION intent (highest priority - most specific)
+  {
+    intent: QueryIntent.LOCATION,
+    priority: 3,
+    patterns: [
+      /where\s+(is|are|does|can\s+i\s+find)/,
+      /find\s+the\s+/,
+      /locate\s+/,
+    ],
+  },
+  
+  // CONCEPTUAL intent (medium priority)
+  {
+    intent: QueryIntent.CONCEPTUAL,
+    priority: 2,
+    patterns: [
+      /how\s+does\s+.*\s+work/,
+      /what\s+(is|are|does)/,
+      /explain\s+/,
+      /understand\s+/,
+      /\b(process|workflow|architecture)\b/,
+    ],
+  },
+  
+  // IMPLEMENTATION intent (low priority - catches "how is X implemented")
+  {
+    intent: QueryIntent.IMPLEMENTATION,
+    priority: 1,
+    patterns: [
+      /how\s+(is|are)\s+.*\s+(implemented|built|coded)/,
+      /implementation\s+of/,
+      /source\s+code\s+for/,
+    ],
+  },
+];
+
+/**
  * Classifies a search query into one of three intent categories.
  * 
- * Uses pattern matching to detect query intent:
- * - LOCATION: Queries about finding/locating code
- * - CONCEPTUAL: Queries about understanding processes/concepts
- * - IMPLEMENTATION: Queries about code implementation details
+ * Uses data-driven pattern matching to detect query intent.
+ * Rules are checked in priority order, with the first match winning.
  * 
  * @param query - The search query string
  * @returns The detected query intent (defaults to IMPLEMENTATION)
@@ -47,40 +95,57 @@ export enum QueryIntent {
 export function classifyQueryIntent(query: string): QueryIntent {
   const lower = query.toLowerCase().trim();
   
-  // LOCATION queries - user wants to find specific files
-  // Patterns: "where is/are", "find the", "locate"
-  if (
-    lower.match(/where\s+(is|are|does|can\s+i\s+find)/) ||
-    lower.match(/find\s+the\s+/) ||
-    lower.match(/locate\s+/)
-  ) {
-    return QueryIntent.LOCATION;
-  }
+  // Sort by priority (higher first) and find first matching intent
+  const sortedRules = [...INTENT_RULES].sort((a, b) => b.priority - a.priority);
   
-  // CONCEPTUAL queries - user wants to understand how things work
-  // Patterns: "how does X work", "what is/are", "explain", "understand", etc.
-  if (
-    lower.match(/how\s+does\s+.*\s+work/) ||
-    lower.match(/what\s+(is|are|does)/) ||
-    lower.match(/explain\s+/) ||
-    lower.match(/understand\s+/) ||
-    lower.match(/\b(process|workflow|architecture)\b/)
-  ) {
-    return QueryIntent.CONCEPTUAL;
-  }
-  
-  // IMPLEMENTATION queries - user wants code implementation details
-  // Patterns: "how is/are X implemented/built/coded", "implementation of", "source code for"
-  if (
-    lower.match(/how\s+(is|are)\s+.*\s+(implemented|built|coded)/) ||
-    lower.match(/implementation\s+of/) ||
-    lower.match(/source\s+code\s+for/)
-  ) {
-    return QueryIntent.IMPLEMENTATION;
+  for (const rule of sortedRules) {
+    if (rule.patterns.some(pattern => pattern.test(lower))) {
+      return rule.intent;
+    }
   }
   
   // Default to IMPLEMENTATION for ambiguous queries
   // This is the most common use case for code search
   return QueryIntent.IMPLEMENTATION;
+}
+
+/**
+ * Add a custom intent rule (useful for testing or extensions).
+ * 
+ * @param rule - The intent rule to add
+ * 
+ * @example
+ * addIntentRule({
+ *   intent: QueryIntent.LOCATION,
+ *   priority: 4,
+ *   patterns: [/custom pattern/]
+ * });
+ */
+export function addIntentRule(rule: IntentRule): void {
+  INTENT_RULES.push(rule);
+}
+
+/**
+ * Get all patterns for a specific intent (useful for debugging).
+ * 
+ * @param intent - The intent to get patterns for
+ * @returns Array of regex patterns for the intent
+ * 
+ * @example
+ * const locationPatterns = getPatternsForIntent(QueryIntent.LOCATION);
+ */
+export function getPatternsForIntent(intent: QueryIntent): RegExp[] {
+  return INTENT_RULES
+    .filter(rule => rule.intent === intent)
+    .flatMap(rule => rule.patterns);
+}
+
+/**
+ * Get all intent rules (useful for testing/debugging).
+ * 
+ * @returns A copy of the current intent rules
+ */
+export function getIntentRules(): IntentRule[] {
+  return [...INTENT_RULES];
 }
 

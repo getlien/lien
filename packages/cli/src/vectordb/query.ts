@@ -1,9 +1,9 @@
-import path from 'path';
 import { SearchResult } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
-import { QueryIntent, classifyQueryIntent } from './intent-classifier.js';
+import { classifyQueryIntent } from './intent-classifier.js';
+import { BoostingComposer, PathBoostingStrategy, FilenameBoostingStrategy, FileTypeBoostingStrategy } from './boosting/index.js';
 
 // TODO: Replace with proper type from lancedb-types.ts
 // Currently using 'any' because tests use incomplete mocks that don't satisfy full LanceDB interface
@@ -36,248 +36,12 @@ interface DBRecord {
 }
 
 /**
- * Helper Functions for File Type Detection
- */
-
-/**
- * Check if a file is a documentation file.
- */
-function isDocumentationFile(filepath: string): boolean {
-  const lower = filepath.toLowerCase();
-  const filename = path.basename(filepath).toLowerCase();
-  
-  if (filename.startsWith('readme')) return true;
-  if (filename.startsWith('changelog')) return true;
-  if (filename.endsWith('.md') || filename.endsWith('.mdx') || filename.endsWith('.markdown')) {
-    return true;
-  }
-  if (
-    lower.includes('/docs/') ||
-    lower.includes('/documentation/') ||
-    lower.includes('/wiki/') ||
-    lower.includes('/.github/')
-  ) {
-    return true;
-  }
-  if (
-    lower.includes('architecture') ||
-    lower.includes('workflow') ||
-    lower.includes('/flow/')
-  ) {
-    return true;
-  }
-  
-  return false;
-}
-
-/**
- * Check if a file is a test file.
- */
-function isTestFile(filepath: string): boolean {
-  const lower = filepath.toLowerCase();
-  
-  if (
-    lower.includes('/test/') ||
-    lower.includes('/tests/') ||
-    lower.includes('/__tests__/')
-  ) {
-    return true;
-  }
-  
-  if (
-    lower.includes('.test.') ||
-    lower.includes('.spec.') ||
-    lower.includes('_test.') ||
-    lower.includes('_spec.')
-  ) {
-    return true;
-  }
-  
-  return false;
-}
-
-/**
- * Check if a file is a utility/helper file.
- */
-function isUtilityFile(filepath: string): boolean {
-  const lower = filepath.toLowerCase();
-  
-  if (
-    lower.includes('/utils/') ||
-    lower.includes('/utilities/') ||
-    lower.includes('/helpers/') ||
-    lower.includes('/lib/')
-  ) {
-    return true;
-  }
-  
-  if (
-    lower.includes('.util.') ||
-    lower.includes('.helper.') ||
-    lower.includes('-util.') ||
-    lower.includes('-helper.')
-  ) {
-    return true;
-  }
-  
-  return false;
-}
-
-/**
- * Boost relevance score based on path matching.
- */
-function boostPathRelevance(
-  query: string,
-  filepath: string,
-  baseScore: number
-): number {
-  const queryTokens = query.toLowerCase().split(/\s+/);
-  const pathSegments = filepath.toLowerCase().split('/');
-  
-  let boostFactor = 1.0;
-  
-  for (const token of queryTokens) {
-    if (token.length <= 2) continue;
-    if (pathSegments.some(seg => seg.includes(token))) {
-      boostFactor *= 0.9;
-    }
-  }
-  
-  return baseScore * boostFactor;
-}
-
-/**
- * Boost relevance score based on filename matching.
- */
-function boostFilenameRelevance(
-  query: string,
-  filepath: string,
-  baseScore: number
-): number {
-  const filename = path.basename(filepath, path.extname(filepath)).toLowerCase();
-  const queryTokens = query.toLowerCase().split(/\s+/);
-  
-  let boostFactor = 1.0;
-  
-  for (const token of queryTokens) {
-    if (token.length <= 2) continue;
-    
-    if (filename === token) {
-      boostFactor *= 0.70;
-    } else if (filename.includes(token)) {
-      boostFactor *= 0.80;
-    }
-  }
-  
-  return baseScore * boostFactor;
-}
-
-/**
- * Boost relevance for LOCATION intent queries.
- */
-function boostForLocationIntent(
-  query: string,
-  filepath: string,
-  baseScore: number
-): number {
-  let score = baseScore;
-  
-  const filename = path.basename(filepath, path.extname(filepath)).toLowerCase();
-  const queryTokens = query.toLowerCase().split(/\s+/);
-  
-  for (const token of queryTokens) {
-    if (token.length <= 2) continue;
-    
-    if (filename === token) {
-      score *= 0.60;
-    } else if (filename.includes(token)) {
-      score *= 0.70;
-    }
-  }
-  
-  score = boostPathRelevance(query, filepath, score);
-  
-  if (isTestFile(filepath)) {
-    score *= 1.10;
-  }
-  
-  return score;
-}
-
-/**
- * Boost relevance for CONCEPTUAL intent queries.
- */
-function boostForConceptualIntent(
-  query: string,
-  filepath: string,
-  baseScore: number
-): number {
-  let score = baseScore;
-  
-  if (isDocumentationFile(filepath)) {
-    score *= 0.65;
-    
-    const lower = filepath.toLowerCase();
-    if (
-      lower.includes('architecture') ||
-      lower.includes('workflow') ||
-      lower.includes('flow')
-    ) {
-      score *= 0.90;
-    }
-  }
-  
-  if (isUtilityFile(filepath)) {
-    score *= 1.05;
-  }
-  
-  const filename = path.basename(filepath, path.extname(filepath)).toLowerCase();
-  const queryTokens = query.toLowerCase().split(/\s+/);
-  
-  for (const token of queryTokens) {
-    if (token.length <= 2) continue;
-    if (filename.includes(token)) {
-      score *= 0.90;
-    }
-  }
-  
-  const pathSegments = filepath.toLowerCase().split(path.sep);
-  for (const token of queryTokens) {
-    if (token.length <= 2) continue;
-    
-    for (const segment of pathSegments) {
-      if (segment.includes(token)) {
-        score *= 0.95;
-        break;
-      }
-    }
-  }
-  
-  return score;
-}
-
-/**
- * Boost relevance for IMPLEMENTATION intent queries.
- */
-function boostForImplementationIntent(
-  query: string,
-  filepath: string,
-  baseScore: number
-): number {
-  let score = baseScore;
-  
-  score = boostFilenameRelevance(query, filepath, score);
-  score = boostPathRelevance(query, filepath, score);
-  
-  if (isTestFile(filepath)) {
-    score *= 0.90;
-  }
-  
-  return score;
-}
-
-/**
- * Apply all relevance boosting strategies to a search score.
+ * Apply relevance boosting strategies to a search score.
+ * 
+ * Uses composable boosting strategies based on query intent:
+ * - Path matching: Boost files with query tokens in path
+ * - Filename matching: Boost files with query tokens in filename
+ * - File type boosting: Intent-specific boosting (docs for conceptual, etc.)
  */
 function applyRelevanceBoosting(
   query: string | undefined,
@@ -290,19 +54,12 @@ function applyRelevanceBoosting(
   
   const intent = classifyQueryIntent(query);
   
-  switch (intent) {
-    case QueryIntent.LOCATION:
-      return boostForLocationIntent(query, filepath, baseScore);
-    
-    case QueryIntent.CONCEPTUAL:
-      return boostForConceptualIntent(query, filepath, baseScore);
-    
-    case QueryIntent.IMPLEMENTATION:
-      return boostForImplementationIntent(query, filepath, baseScore);
-    
-    default:
-      return boostForImplementationIntent(query, filepath, baseScore);
-  }
+  const composer = new BoostingComposer()
+    .addStrategy(new PathBoostingStrategy())
+    .addStrategy(new FilenameBoostingStrategy())
+    .addStrategy(new FileTypeBoostingStrategy(intent));
+  
+  return composer.apply(query, filepath, baseScore);
 }
 
 /**
