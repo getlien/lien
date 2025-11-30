@@ -390,22 +390,6 @@ describe('MCP Tools Schema', () => {
         expect(invalid.success).toBe(false);
       });
       
-      it('should reject depth > 3', () => {
-        const invalid = GetDependentsSchema.safeParse({
-          filepath: 'src/test.ts',
-          depth: 4
-        });
-        expect(invalid.success).toBe(false);
-      });
-      
-      it('should reject non-integer depth', () => {
-        const invalid = GetDependentsSchema.safeParse({
-          filepath: 'src/test.ts',
-          depth: 1.5
-        });
-        expect(invalid.success).toBe(false);
-      });
-      
       it('should reject depth > 1', () => {
         const invalid = GetDependentsSchema.safeParse({
           filepath: 'src/test.ts',
@@ -415,6 +399,14 @@ describe('MCP Tools Schema', () => {
         if (!invalid.success) {
           expect(invalid.error.issues[0].message).toContain('less than or equal to 1');
         }
+      });
+      
+      it('should reject non-integer depth', () => {
+        const invalid = GetDependentsSchema.safeParse({
+          filepath: 'src/test.ts',
+          depth: 1.5
+        });
+        expect(invalid.success).toBe(false);
       });
     });
   });
