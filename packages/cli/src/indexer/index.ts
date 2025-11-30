@@ -368,7 +368,7 @@ async function performFullIndex(
           }
           
           // Acquire lock
-          let releaseAddLock: () => void;
+          let releaseAddLock!: () => void;
           addChunksLock = new Promise<void>(resolve => {
             releaseAddLock = resolve;
           });
@@ -397,8 +397,8 @@ async function performFullIndex(
               await processAccumulatedChunks();
             }
           } finally {
-            // Release lock
-            releaseAddLock!();
+            // Release lock (always defined by Promise constructor)
+            releaseAddLock();
             addChunksLock = null;
           }
         }
