@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.15.1] - 2025-11-30
+
+### Fixed
+- **Make version checks dynamic to prevent test failures on release**
+
+
 ## [0.15.0] - 2025-11-30
 
 ### Added
