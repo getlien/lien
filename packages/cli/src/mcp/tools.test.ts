@@ -4,7 +4,8 @@ import {
   SemanticSearchSchema, 
   FindSimilarSchema, 
   GetFilesContextSchema, 
-  ListFunctionsSchema 
+  ListFunctionsSchema,
+  GetDependentsSchema
 } from './schemas/index.js';
 
 describe('MCP Tools Schema', () => {
@@ -14,9 +15,9 @@ describe('MCP Tools Schema', () => {
       expect(tools.length).toBeGreaterThan(0);
     });
     
-    it('should have exactly 4 tools', () => {
-      expect(tools.length).toBe(4);
-    });
+  it('should have exactly 5 tools', () => {
+    expect(tools.length).toBe(5);
+  });
     
     it('should have all required properties for each tool', () => {
       tools.forEach(tool => {
@@ -153,6 +154,45 @@ describe('MCP Tools Schema', () => {
       const schema = tool?.inputSchema as any;
       expect(schema.properties.pattern?.type).toBe('string');
       expect(schema.properties.language?.type).toBe('string');
+    });
+  });
+  
+  describe('get_dependents tool', () => {
+    it('should have correct schema', () => {
+      const tool = tools.find(t => t.name === 'get_dependents');
+      
+      expect(tool).toBeDefined();
+      expect(tool!.name).toBe('get_dependents');
+      expect(tool!.description.toLowerCase()).toMatch(/depend|impact/);
+      const schema = tool!.inputSchema as any;
+      expect(schema.type).toBe('object');
+      expect(schema.properties).toHaveProperty('filepath');
+      expect(schema.properties).toHaveProperty('depth');
+      expect(schema.required).toEqual(['filepath']);
+    });
+    
+    it('should mention risk levels in description', () => {
+      const tool = tools.find(t => t.name === 'get_dependents');
+      expect(tool!.description.toLowerCase()).toMatch(/risk|impact/);
+    });
+    
+    it('should have filepath as required field', () => {
+      const tool = tools.find(t => t.name === 'get_dependents');
+      const schema = tool?.inputSchema as any;
+      expect(schema.required).toContain('filepath');
+    });
+    
+    it('should have depth with default value', () => {
+      const tool = tools.find(t => t.name === 'get_dependents');
+      const schema = tool?.inputSchema as any;
+      expect(schema.properties.depth?.default).toBe(1);
+    });
+    
+    it('should have depth constraints', () => {
+      const tool = tools.find(t => t.name === 'get_dependents');
+      const schema = tool?.inputSchema as any;
+      expect(schema.properties.depth?.minimum).toBe(1);
+      expect(schema.properties.depth?.maximum).toBe(1);
     });
   });
   
@@ -318,6 +358,55 @@ describe('MCP Tools Schema', () => {
           language: 'python'
         });
         expect(valid.success).toBe(true);
+      });
+    });
+    
+    describe('get_dependents validation', () => {
+      it('should accept valid input', () => {
+        const valid = GetDependentsSchema.safeParse({
+          filepath: 'src/utils/validate.ts',
+          depth: 1
+        });
+        expect(valid.success).toBe(true);
+      });
+      
+      it('should apply defaults', () => {
+        const result = GetDependentsSchema.parse({ filepath: 'src/index.ts' });
+        expect(result.depth).toBe(1);
+      });
+      
+      it('should reject empty filepath', () => {
+        const invalid = GetDependentsSchema.safeParse({
+          filepath: ''
+        });
+        expect(invalid.success).toBe(false);
+      });
+      
+      it('should reject depth < 1', () => {
+        const invalid = GetDependentsSchema.safeParse({
+          filepath: 'src/test.ts',
+          depth: 0
+        });
+        expect(invalid.success).toBe(false);
+      });
+      
+      it('should reject depth > 1', () => {
+        const invalid = GetDependentsSchema.safeParse({
+          filepath: 'src/test.ts',
+          depth: 2
+        });
+        expect(invalid.success).toBe(false);
+        if (!invalid.success) {
+          expect(invalid.error.issues[0].message).toContain('less than or equal to 1');
+        }
+      });
+      
+      it('should reject non-integer depth', () => {
+        const invalid = GetDependentsSchema.safeParse({
+          filepath: 'src/test.ts',
+          depth: 1.5
+        });
+        expect(invalid.success).toBe(false);
       });
     });
   });

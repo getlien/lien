@@ -4,6 +4,7 @@ import {
   FindSimilarSchema,
   GetFilesContextSchema,
   ListFunctionsSchema,
+  GetDependentsSchema,
 } from './schemas/index.js';
 
 /**
@@ -66,5 +67,19 @@ Examples:
 - "Find service classes" → list_functions({ pattern: ".*Service$" })
 
 10x faster than semantic_search for structural/architectural queries. Use semantic_search instead when searching by what code DOES.`
+  ),
+  toMCPToolSchema(
+    GetDependentsSchema,
+    'get_dependents',
+    `Find all code that depends on a file (reverse dependency lookup). Use for impact analysis:
+- "What breaks if I change this?"
+- "Is this safe to delete?"
+- "What imports this module?"
+
+Returns:
+- List of files that import the target
+- Risk level (low/medium/high/critical) based on dependent count and complexity
+
+Example: get_dependents({ filepath: "src/utils/validate.ts" })`
   ),
 ];

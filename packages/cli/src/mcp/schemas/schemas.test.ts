@@ -4,6 +4,7 @@ import {
   FindSimilarSchema,
   GetFilesContextSchema,
   ListFunctionsSchema,
+  GetDependentsSchema,
 } from './index.js';
 
 describe('SemanticSearchSchema', () => {
@@ -229,6 +230,76 @@ describe('ListFunctionsSchema', () => {
       const result = ListFunctionsSchema.parse({ language });
       expect(result.language).toBe(language);
     });
+  });
+});
+
+describe('GetDependentsSchema', () => {
+  it('should validate correct input with depth=1', () => {
+    const result = GetDependentsSchema.parse({
+      filepath: 'src/utils/validate.ts',
+      depth: 1,
+    });
+    expect(result.filepath).toBe('src/utils/validate.ts');
+    expect(result.depth).toBe(1);
+  });
+  
+  it('should apply default depth', () => {
+    const result = GetDependentsSchema.parse({
+      filepath: 'src/index.ts',
+    });
+    expect(result.depth).toBe(1);
+  });
+  
+  it('should reject empty filepath', () => {
+    expect(() => GetDependentsSchema.parse({ filepath: '' }))
+      .toThrow('Filepath cannot be empty');
+  });
+  
+  it('should reject depth less than 1', () => {
+    expect(() => GetDependentsSchema.parse({ 
+      filepath: 'src/test.ts', 
+      depth: 0 
+    }))
+      .toThrow();
+  });
+  
+  it('should reject depth greater than 1', () => {
+    expect(() => GetDependentsSchema.parse({ 
+      filepath: 'src/test.ts', 
+      depth: 2 
+    }))
+      .toThrow();
+  });
+  
+  it('should accept only depth=1', () => {
+    const result = GetDependentsSchema.parse({
+      filepath: 'test.ts',
+      depth: 1,
+    });
+    expect(result.depth).toBe(1);
+  });
+  
+  it('should accept various filepath formats', () => {
+    const paths = [
+      'src/index.ts',
+      './src/index.ts',
+      'packages/cli/src/index.ts',
+      'index.ts',
+      'utils/validate.js',
+    ];
+    
+    paths.forEach(path => {
+      const result = GetDependentsSchema.parse({ filepath: path });
+      expect(result.filepath).toBe(path);
+    });
+  });
+  
+  it('should reject non-integer depth', () => {
+    expect(() => GetDependentsSchema.parse({ 
+      filepath: 'test.ts', 
+      depth: 1.5 
+    }))
+      .toThrow();
   });
 });
 
