@@ -79,6 +79,12 @@ const INTENT_RULES: IntentRule[] = [
 ];
 
 /**
+ * Capture the initial number of built-in rules.
+ * This is used by resetIntentRules() to distinguish built-in rules from custom rules.
+ */
+const INITIAL_RULE_COUNT = INTENT_RULES.length;
+
+/**
  * Classifies a search query into one of three intent categories.
  * 
  * Uses data-driven pattern matching to detect query intent.
@@ -177,8 +183,7 @@ export function getIntentRules(): IntentRule[] {
  * });
  */
 export function resetIntentRules(): void {
-  // Remove all rules beyond the original 3 built-in rules
-  // (LOCATION, CONCEPTUAL, IMPLEMENTATION)
-  INTENT_RULES.splice(3);
+  // Remove all custom rules, preserving only the original built-in rules
+  INTENT_RULES.splice(INITIAL_RULE_COUNT);
 }
 
