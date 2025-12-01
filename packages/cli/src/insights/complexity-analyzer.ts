@@ -36,13 +36,16 @@ export class ComplexityAnalyzer {
 
   /**
    * Check if a chunk's file matches any of the target files
+   * Uses exact match or suffix matching to avoid unintended matches
    */
   private matchesAnyFile(chunkFile: string, targetFiles: string[]): boolean {
     const normalizedChunkFile = path.normalize(chunkFile);
     return targetFiles.some(target => {
       const normalizedTarget = path.normalize(target);
-      return normalizedChunkFile.includes(normalizedTarget) || 
-             normalizedTarget.includes(normalizedChunkFile);
+      // Exact match or target is a suffix of the chunk file
+      return normalizedChunkFile === normalizedTarget || 
+             normalizedChunkFile.endsWith(path.sep + normalizedTarget) ||
+             normalizedChunkFile.endsWith('/' + normalizedTarget);
     });
   }
 

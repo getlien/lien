@@ -62,7 +62,7 @@ program
   .description('Analyze code complexity')
   .option('--files <paths...>', 'Specific files to analyze')
   .option('--format <type>', 'Output format: text, json, sarif', 'text')
-  .option('--threshold <n>', 'Complexity threshold (default: 10)')
+  .option('--threshold <n>', 'Complexity threshold (overrides config, default: 10)')
   .option('--fail-on <severity>', 'Exit 1 if violations: error, warning')
   .action(complexityCommand);
 

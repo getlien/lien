@@ -18,6 +18,12 @@ export async function complexityCommand(options: ComplexityOptions) {
   const rootDir = process.cwd();
   
   try {
+    // Validate --fail-on option
+    if (options.failOn && !['error', 'warning'].includes(options.failOn)) {
+      console.error(chalk.red(`Error: Invalid --fail-on value "${options.failOn}". Must be either 'error' or 'warning'`));
+      process.exit(1);
+    }
+    
     // Load config and database
     const config = await configService.load(rootDir);
     const vectorDB = new VectorDB(rootDir);

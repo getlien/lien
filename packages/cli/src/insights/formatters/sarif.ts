@@ -74,9 +74,7 @@ export function formatSarifReport(report: ComplexityReport): string {
       help: {
         text: 'Consider refactoring by extracting methods, using early returns, or simplifying conditional logic.',
       },
-      defaultConfiguration: {
-        level: 'warning',
-      },
+      // No defaultConfiguration - level is determined by actual violation severity
     },
   ];
 
