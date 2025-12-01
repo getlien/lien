@@ -44,7 +44,7 @@ describe('get_files_context - Response Structure', () => {
       expect(testMatch('src/auth.ts', 'src/auth.js')).toBe(true);
       expect(testMatch('./auth', 'src/auth.ts')).toBe(true);
       
-      // Should NOT match (substring matching)
+      // Should NOT match (avoiding false positives from substring matching)
       expect(testMatch('src/auth-service.ts', 'src/auth.ts')).toBe(false);
       expect(testMatch('src/auth.ts', 'src/auth-service.ts')).toBe(false);
     });

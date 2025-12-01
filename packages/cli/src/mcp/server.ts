@@ -304,38 +304,50 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
             }
             
             // Compute test associations for each file
-            // For now, use simple reverse dependency lookup (test files that import this file)
-            const testAssociationsMap = await Promise.all(
-              filepaths.map(async (filepath) => {
-                // Scan for test files that import this source file
-                const allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
+            // Scan once for all files to avoid repeated database queries (performance optimization)
+            const allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
+            
+            // Warn if we hit the limit (similar to get_dependents tool)
+            if (allChunks.length === SCAN_LIMIT) {
+              log(`WARNING: Scanned ${SCAN_LIMIT} chunks (limit reached). Test associations may be incomplete for large codebases.`);
+            }
+            
+            // Path normalization cache to avoid repeated string operations
+            const pathCache = new Map<string, string>();
+            const normalizePathCached = (path: string): string => {
+              if (pathCache.has(path)) return pathCache.get(path)!;
+              const normalized = normalizePath(path, workspaceRoot);
+              pathCache.set(path, normalized);
+              return normalized;
+            };
+            
+            // Compute test associations for each file using the same scan result
+            const testAssociationsMap = filepaths.map((filepath) => {
+              const normalizedTarget = normalizePathCached(filepath);
+              
+              // Find chunks that:
+              // 1. Are from test files
+              // 2. Import the target file
+              const testFiles = new Set<string>();
+              for (const chunk of allChunks) {
+                const chunkFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
                 
-                const normalizedTarget = normalizePath(filepath, workspaceRoot);
+                // Skip if not a test file
+                if (!isTestFile(chunkFile)) continue;
                 
-                // Find chunks that:
-                // 1. Are from test files
-                // 2. Import the target file
-                const testFiles = new Set<string>();
-                for (const chunk of allChunks) {
-                  const chunkFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
-                  
-                  // Skip if not a test file
-                  if (!isTestFile(chunkFile)) continue;
-                  
-                  // Check if this test file imports the target
-                  const imports = chunk.metadata.imports || [];
-                  for (const imp of imports) {
-                    const normalizedImport = normalizePath(imp, workspaceRoot);
-                    if (matchesFile(normalizedImport, normalizedTarget)) {
-                      testFiles.add(chunkFile);
-                      break;
-                    }
+                // Check if this test file imports the target
+                const imports = chunk.metadata.imports || [];
+                for (const imp of imports) {
+                  const normalizedImport = normalizePathCached(imp);
+                  if (matchesFile(normalizedImport, normalizedTarget)) {
+                    testFiles.add(chunkFile);
+                    break;
                   }
                 }
-                
-                return Array.from(testFiles);
-              })
-            );
+              }
+              
+              return Array.from(testFiles);
+            });
             
             // Combine file chunks with related chunks and test associations
             const filesData: Record<string, { chunks: any[]; testAssociations: string[] }> = {};
