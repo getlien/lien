@@ -208,5 +208,31 @@ describe('Framework Priority/Conflict Resolution', () => {
     const phpDetection = results.find(r => r.name === 'php');
     expect(phpDetection).toBeUndefined();
   });
+
+  it('should detect Symfony projects as generic PHP', async () => {
+    // Symfony projects should be detected as generic PHP
+    // (unless we add a specific Symfony detector in the future)
+    await fs.mkdir(path.join(testDir, 'src'), { recursive: true });
+    await fs.mkdir(path.join(testDir, 'config'), { recursive: true });
+    
+    await fs.writeFile(
+      path.join(testDir, 'composer.json'),
+      JSON.stringify({ 
+        require: { 
+          php: '^8.1',
+          'symfony/framework-bundle': '^6.0',
+          'symfony/http-kernel': '^6.0'
+        }
+      })
+    );
+
+    const results = await detectAllFrameworks(testDir);
+
+    // Should detect as PHP (no specific Symfony detector yet)
+    expect(results.length).toBe(1);
+    expect(results[0].name).toBe('php');
+    expect(results[0].confidence).toBe('high');
+    expect(results[0].evidence.some(e => e.includes('Symfony'))).toBe(true);
+  });
 });
 

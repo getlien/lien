@@ -72,6 +72,7 @@ describe('PHP Detector', () => {
 
     expect(result.detected).toBe(true);
     expect(result.evidence.some(e => e.includes('PHPUnit'))).toBe(true);
+    expect(result.evidence.some(e => e.includes('PHP project structure'))).toBe(true);
   });
 
   it('should detect PHP project with Pest', async () => {
@@ -90,6 +91,7 @@ describe('PHP Detector', () => {
 
     expect(result.detected).toBe(true);
     expect(result.evidence.some(e => e.includes('Pest'))).toBe(true);
+    expect(result.evidence.some(e => e.includes('PHP project structure'))).toBe(true);
   });
 
   it('should NOT detect project without composer.json', async () => {
@@ -125,7 +127,7 @@ describe('PHP Detector', () => {
       JSON.stringify({ 
         require: { 
           php: '^8.1',
-          'symfony/symfony': '^6.0'
+          'symfony/framework-bundle': '^6.0'
         }
       })
     );

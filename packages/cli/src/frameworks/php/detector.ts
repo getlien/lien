@@ -95,7 +95,9 @@ export const phpDetector: FrameworkDetector = {
     
     // Check for common PHP tools/frameworks
     const tools = [
-      { name: 'symfony/symfony', display: 'Symfony' },
+      { name: 'symfony/framework-bundle', display: 'Symfony' },
+      { name: 'symfony/http-kernel', display: 'Symfony' },
+      { name: 'symfony/symfony', display: 'Symfony (legacy)' },
       { name: 'doctrine/orm', display: 'Doctrine ORM' },
       { name: 'guzzlehttp/guzzle', display: 'Guzzle HTTP' },
       { name: 'monolog/monolog', display: 'Monolog' },
