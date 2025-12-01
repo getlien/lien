@@ -1,6 +1,30 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.17.0] - 2025-12-01
+
+### Added
+- **New `get_dependents` tool for impact analysis**
+  - Find all files that depend on a target file (reverse dependency lookup)
+  - Risk assessment based on dependent count (low/medium/high/critical)
+  - Complexity-aware risk boosting using cyclomatic complexity metrics
+  - Top 5 high-complexity dependents highlighted for focused review
+  - Performance optimized with import index and path caching
+
+### Improved
+- **Enhanced `get_files_context` for multi-file requests**
+  - Added `testAssociations` field showing which test files import each source file
+  - Fixed exact canonical path matching (no more substring false positives)
+  - Implemented chunk deduplication using canonical paths
+  - Performance optimization: single database scan for N files (10x faster for 10 files)
+  - Backward compatible single-file response format maintained
+  - New keyed structure for multi-file responses with per-file test associations
+
+### Documentation
+- Updated tool descriptions with response format examples
+- Enhanced CURSOR_RULES_TEMPLATE.md with test association guidance
+
+
 ## [0.16.0] - 2025-11-30
 
 ### Added
