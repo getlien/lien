@@ -9,7 +9,7 @@ import { shopifyDetector } from './shopify/detector.js';
  * Frameworks will be added as they are implemented
  * 
  * Order doesn't matter for detection as priority system handles conflicts,
- * but listed here in order of specificity for clarity:
+ * but listed here in order from generic to specific for clarity:
  * - Generic language detectors (Node.js, PHP)
  * - Specific framework detectors (Laravel, Shopify)
  */
