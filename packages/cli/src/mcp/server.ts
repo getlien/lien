@@ -358,7 +358,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               // Deduplicate chunks (by canonical file path + line range)
               // Use canonical paths to avoid duplicates from absolute vs relative paths
               const seenChunks = new Set<string>();
-              const allChunks = [...fileChunks, ...relatedChunks].filter(chunk => {
+              const dedupedChunks = [...fileChunks, ...relatedChunks].filter(chunk => {
                 const canonicalFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
                 const chunkId = `${canonicalFile}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
                 if (seenChunks.has(chunkId)) return false;
@@ -367,7 +367,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               });
               
               filesData[filepath] = { 
-                chunks: allChunks,
+                chunks: dedupedChunks,
                 testAssociations: testAssociationsMap[i],
               };
             });
