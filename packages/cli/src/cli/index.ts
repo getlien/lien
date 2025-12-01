@@ -6,6 +6,7 @@ import { initCommand } from './init.js';
 import { statusCommand } from './status.js';
 import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
+import { complexityCommand } from './complexity.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -55,4 +56,13 @@ program
   .command('status')
   .description('Show indexing status and statistics')
   .action(statusCommand);
+
+program
+  .command('complexity')
+  .description('Analyze code complexity')
+  .option('--files <paths...>', 'Specific files to analyze')
+  .option('--format <type>', 'Output format: text, json, sarif', 'text')
+  .option('--threshold <n>', 'Complexity threshold (default: 10)')
+  .option('--fail-on <severity>', 'Exit 1 if violations: error, warning')
+  .action(complexityCommand);
 

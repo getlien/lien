@@ -55,6 +55,18 @@ export interface LienConfig {
     enabled: boolean;
     debounceMs: number;
   };
+  complexity?: {
+    enabled: boolean;
+    thresholds: {
+      method: number;      // Default: 10
+      file: number;        // Default: 50
+      average: number;     // Default: 6
+    };
+    severity: {
+      warning: number;     // Multiplier for warning threshold (default: 1.0)
+      error: number;       // Multiplier for error threshold (default: 2.0)
+    };
+  };
   frameworks: FrameworkInstance[];
 }
 
@@ -137,6 +149,18 @@ export const defaultConfig: LienConfig = {
   fileWatching: {
     enabled: true, // Enabled by default (fast with incremental indexing!)
     debounceMs: DEFAULT_DEBOUNCE_MS,
+  },
+  complexity: {
+    enabled: true,
+    thresholds: {
+      method: 10,
+      file: 50,
+      average: 6,
+    },
+    severity: {
+      warning: 1.0,
+      error: 2.0,
+    },
   },
   frameworks: [], // Will be populated by lien init via framework detection
 };
