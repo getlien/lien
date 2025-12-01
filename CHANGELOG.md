@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.18.0] - 2025-12-01
+
+### Added
+- **Add generic PHP framework detector**
+
+
 ## [0.17.0] - 2025-12-01
 
 ### Added
