@@ -24,6 +24,12 @@ export async function complexityCommand(options: ComplexityOptions) {
       process.exit(1);
     }
     
+    // Validate --format option
+    if (options.format && !['text', 'json', 'sarif'].includes(options.format)) {
+      console.error(chalk.red(`Error: Invalid --format value "${options.format}". Must be one of: text, json, sarif`));
+      process.exit(1);
+    }
+    
     // Load config and database
     const config = await configService.load(rootDir);
     const vectorDB = new VectorDB(rootDir);
@@ -43,6 +49,10 @@ export async function complexityCommand(options: ComplexityOptions) {
       const thresholdValue = parseInt(options.threshold, 10);
       if (isNaN(thresholdValue)) {
         console.error(chalk.red(`Error: Invalid threshold value: ${options.threshold}`));
+        process.exit(1);
+      }
+      if (thresholdValue <= 0) {
+        console.error(chalk.red(`Error: Threshold value must be a positive number. Received: ${options.threshold}`));
         process.exit(1);
       }
       // Update config with CLI override

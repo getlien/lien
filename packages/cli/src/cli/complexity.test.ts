@@ -364,6 +364,53 @@ describe('complexityCommand', () => {
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
 
+  it('should handle invalid --fail-on value', async () => {
+    await complexityCommand({
+      format: 'text',
+      failOn: 'critical' as any, // Invalid value
+    });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid --fail-on value "critical"')
+    );
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('should handle invalid --format value', async () => {
+    await complexityCommand({
+      format: 'xml' as any, // Invalid format
+    });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid --format value "xml"')
+    );
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('should reject negative threshold values', async () => {
+    await complexityCommand({
+      format: 'text',
+      threshold: '-5',
+    });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Threshold value must be a positive number')
+    );
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('should reject zero threshold value', async () => {
+    await complexityCommand({
+      format: 'text',
+      threshold: '0',
+    });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Threshold value must be a positive number')
+    );
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+  });
+
   it('should handle missing index gracefully', async () => {
     mockVectorDB.scanWithFilter.mockRejectedValue(new Error('Index not found'));
 
