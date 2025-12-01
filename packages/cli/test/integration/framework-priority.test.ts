@@ -153,5 +153,60 @@ describe('Framework Priority/Conflict Resolution', () => {
     const rootFramework = results.find(r => r.path === '.');
     expect(rootFramework?.name).toBe('nodejs');
   });
+
+  it('should detect generic PHP project without Laravel', async () => {
+    // Create a generic PHP project (e.g., PHPInsights, PHPUnit, Symfony, etc.)
+    await fs.mkdir(path.join(testDir, 'src'), { recursive: true });
+    await fs.mkdir(path.join(testDir, 'tests'), { recursive: true });
+    
+    await fs.writeFile(
+      path.join(testDir, 'composer.json'),
+      JSON.stringify({ 
+        require: { 
+          php: '^8.1',
+          'symfony/console': '^6.0'
+        },
+        'require-dev': {
+          'phpunit/phpunit': '^10.0'
+        }
+      })
+    );
+
+    const results = await detectAllFrameworks(testDir);
+
+    // Should detect PHP (not Laravel)
+    expect(results.length).toBe(1);
+    expect(results[0].name).toBe('php');
+    expect(results[0].confidence).toBe('high');
+  });
+
+  it('should detect ONLY Laravel (not PHP) when Laravel framework is present', async () => {
+    // This ensures we don't show redundant "php" + "laravel" 
+    // (Laravel detector is more specific and should take precedence)
+    await fs.mkdir(path.join(testDir, 'app'), { recursive: true });
+    await fs.mkdir(path.join(testDir, 'routes'), { recursive: true });
+    
+    await fs.writeFile(
+      path.join(testDir, 'composer.json'),
+      JSON.stringify({ 
+        require: { 
+          php: '^8.1',
+          'laravel/framework': '^11.0'
+        }
+      })
+    );
+    await fs.writeFile(path.join(testDir, 'artisan'), '#!/usr/bin/env php\n');
+
+    const results = await detectAllFrameworks(testDir);
+
+    // Should detect ONLY Laravel (PHP detector should skip)
+    expect(results.length).toBe(1);
+    expect(results[0].name).toBe('laravel');
+    expect(results[0].confidence).toBe('high');
+    
+    // Ensure PHP is NOT detected
+    const phpDetection = results.find(r => r.name === 'php');
+    expect(phpDetection).toBeUndefined();
+  });
 });
 

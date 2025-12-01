@@ -1,14 +1,21 @@
 import { FrameworkDetector } from './types.js';
 import { nodejsDetector } from './nodejs/detector.js';
+import { phpDetector } from './php/detector.js';
 import { laravelDetector } from './laravel/detector.js';
 import { shopifyDetector } from './shopify/detector.js';
 
 /**
  * Registry of all available framework detectors
  * Frameworks will be added as they are implemented
+ * 
+ * Order doesn't matter for detection as priority system handles conflicts,
+ * but listed here in order of specificity for clarity:
+ * - Generic language detectors (Node.js, PHP)
+ * - Specific framework detectors (Laravel, Shopify)
  */
 export const frameworkDetectors: FrameworkDetector[] = [
   nodejsDetector,
+  phpDetector,
   laravelDetector,
   shopifyDetector,
 ];
