@@ -24,6 +24,7 @@ export interface FilesContextResponse {
   indexInfo: IndexMetadata;
   file: string;
   chunks: SearchResult[];
+  testAssociations: string[];
   note?: string;
 }
 
@@ -32,7 +33,10 @@ export interface FilesContextResponse {
  */
 export interface FilesContextMultiResponse {
   indexInfo: IndexMetadata;
-  files: Record<string, { chunks: SearchResult[] }>;
+  files: Record<string, { 
+    chunks: SearchResult[];
+    testAssociations: string[];
+  }>;
 }
 
 /**

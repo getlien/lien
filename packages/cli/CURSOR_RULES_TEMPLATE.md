@@ -36,9 +36,11 @@ REQUIRED sequence:
 
 **`get_files_context({ filepaths: "path/to/file.ts" })`** or **`get_files_context({ filepaths: ["file1.ts", "file2.ts"] })`**
 - MANDATORY before editing any file
-- Returns `testAssociations`: which tests cover this file
+- Returns `testAssociations`: which tests import/cover this file (reverse dependency lookup)
 - Shows file dependencies and relationships
 - Accepts single filepath or array of filepaths for batch operations
+- Single file returns: `{ file: string, chunks: [], testAssociations: [] }`
+- Multiple files returns: `{ files: { [path]: { chunks: [], testAssociations: [] } } }`
 
 **`list_functions({ pattern: ".*Controller.*" })`**
 - Fast symbol lookup by naming pattern
@@ -59,9 +61,20 @@ REQUIRED sequence:
 
 ## Test Associations
 
-`get_files_context` returns `testAssociations` showing which tests cover the file.
-ALWAYS check this before modifying source code.
-After changes, remind the user: "This file is covered by [test files] - run these to verify."
+`get_files_context` returns `testAssociations` showing which tests import/cover the file.
+- Uses reverse dependency lookup to find test files that import the source file
+- Returns array of test file paths for each requested file
+- ALWAYS check this before modifying source code
+- After changes, remind the user: "This file is covered by [test files] - run these to verify."
+
+Example:
+```typescript
+get_files_context({ filepaths: "src/auth.ts" })
+// Returns: { file: "src/auth.ts", chunks: [...], testAssociations: ["src/__tests__/auth.test.ts"] }
+
+get_files_context({ filepaths: ["src/auth.ts", "src/user.ts"] })
+// Returns: { files: { "src/auth.ts": { chunks: [...], testAssociations: [...] }, ... } }
+```
 
 ## Workflow Patterns
 

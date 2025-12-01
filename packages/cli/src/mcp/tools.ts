@@ -46,14 +46,38 @@ MANDATORY: Call this BEFORE editing any file. Accepts single path or array of pa
 
 Single file:
   get_files_context({ filepaths: "src/auth.ts" })
+  
+  Returns:
+  {
+    file: "src/auth.ts",
+    chunks: [...],
+    testAssociations: ["src/__tests__/auth.test.ts"]
+  }
 
 Multiple files (batch):
   get_files_context({ filepaths: ["src/auth.ts", "src/user.ts"] })
+  
+  Returns:
+  {
+    files: {
+      "src/auth.ts": {
+        chunks: [...],
+        testAssociations: ["src/__tests__/auth.test.ts"]
+      },
+      "src/user.ts": {
+        chunks: [...],
+        testAssociations: ["src/__tests__/user.test.ts"]
+      }
+    }
+  }
 
 Returns for each file:
 - All chunks and related code
-- testAssociations (which tests cover this file)
+- testAssociations: Array of test files that import this file (reverse dependency lookup)
 - Relevance scoring
+
+ALWAYS check testAssociations before modifying source code.
+After changes, remind the user to run the associated tests.
 
 Batch calls are more efficient than multiple single-file calls.`
   ),
