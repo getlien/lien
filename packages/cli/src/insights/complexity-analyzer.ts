@@ -46,12 +46,12 @@ export class ComplexityAnalyzer {
    * Uses exact match or suffix matching to avoid unintended matches
    */
   private matchesAnyFile(chunkFile: string, targetFiles: string[]): boolean {
-    const normalizedChunkFile = path.normalize(chunkFile);
+    // Normalize to forward slashes for cross-platform consistency
+    const normalizedChunkFile = path.normalize(chunkFile).replace(/\\/g, '/');
     return targetFiles.some(target => {
-      const normalizedTarget = path.normalize(target);
+      const normalizedTarget = path.normalize(target).replace(/\\/g, '/');
       // Exact match or target is a suffix of the chunk file
       return normalizedChunkFile === normalizedTarget || 
-             normalizedChunkFile.endsWith(path.sep + normalizedTarget) ||
              normalizedChunkFile.endsWith('/' + normalizedTarget);
     });
   }

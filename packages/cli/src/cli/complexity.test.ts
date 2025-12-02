@@ -394,7 +394,7 @@ describe('complexityCommand', () => {
     });
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Threshold value must be a positive number')
+      expect.stringContaining('Invalid --threshold value "-5"')
     );
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
@@ -406,7 +406,7 @@ describe('complexityCommand', () => {
     });
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Threshold value must be a positive number')
+      expect.stringContaining('Invalid --threshold value "0"')
     );
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });

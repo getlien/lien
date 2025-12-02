@@ -24,8 +24,8 @@ export async function complexityCommand(options: ComplexityOptions) {
       process.exit(1);
     }
     
-    // Validate --format option
-    if (options.format && !['text', 'json', 'sarif'].includes(options.format)) {
+    // Validate --format option (always has a default, but validate in case of programmatic use)
+    if (!['text', 'json', 'sarif'].includes(options.format)) {
       console.error(chalk.red(`Error: Invalid --format value "${options.format}". Must be one of: text, json, sarif`));
       process.exit(1);
     }
@@ -48,11 +48,11 @@ export async function complexityCommand(options: ComplexityOptions) {
     if (options.threshold) {
       const thresholdValue = parseInt(options.threshold, 10);
       if (isNaN(thresholdValue)) {
-        console.error(chalk.red(`Error: Invalid threshold value: ${options.threshold}`));
+        console.error(chalk.red(`Error: Invalid --threshold value "${options.threshold}". Must be a number`));
         process.exit(1);
       }
       if (thresholdValue <= 0) {
-        console.error(chalk.red(`Error: Threshold value must be a positive number. Received: ${options.threshold}`));
+        console.error(chalk.red(`Error: Invalid --threshold value "${options.threshold}". Must be a positive number`));
         process.exit(1);
       }
       // Update config with CLI override
