@@ -40,6 +40,9 @@ jobs:
       - name: Install Lien globally
         run: npm install -g ./packages/cli
       
+      - name: Initialize Lien (auto-detect frameworks)
+        run: lien init --yes
+      
       - name: Index codebase
         run: lien index
       
