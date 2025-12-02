@@ -1,6 +1,6 @@
 import { VectorDB } from '../vectordb/lancedb.js';
 import { LienConfig } from '../config/schema.js';
-import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER } from './types.js';
+import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER, RiskLevel } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
 import { SearchResult } from '../vectordb/types.js';
@@ -170,7 +170,7 @@ export class ComplexityAnalyzer {
   /**
    * Calculate risk level based on violations
    */
-  private calculateRiskLevel(violations: ComplexityViolation[]): 'low' | 'medium' | 'high' | 'critical' {
+  private calculateRiskLevel(violations: ComplexityViolation[]): RiskLevel {
     if (violations.length === 0) return 'low';
 
     const hasErrors = violations.some(v => v.severity === 'error');

@@ -31,7 +31,7 @@ export interface FileComplexityData {
   dependents: string[];
   dependentCount?: number;
   testAssociations: string[];
-  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  riskLevel: RiskLevel;
   dependentComplexityMetrics?: {
     averageComplexity: number;
     maxComplexity: number;

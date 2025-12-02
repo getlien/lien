@@ -1,6 +1,6 @@
 import { SearchResult } from '../vectordb/types.js';
 import { normalizePath, getCanonicalPath, matchesFile, isTestFile } from '../mcp/utils/path-matching.js';
-import { RISK_ORDER } from '../insights/types.js';
+import { RISK_ORDER, RiskLevel } from '../insights/types.js';
 
 /**
  * Risk level thresholds for dependent count.
@@ -40,7 +40,7 @@ export interface DependencyAnalysisResult {
     isTestFile: boolean;
   }>;
   dependentCount: number;
-  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  riskLevel: RiskLevel;
   complexityMetrics?: {
     averageComplexity: number;
     maxComplexity: number;
@@ -50,7 +50,7 @@ export interface DependencyAnalysisResult {
       maxComplexity: number;
       avgComplexity: number;
     }>;
-    complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical';
+    complexityRiskBoost: RiskLevel;
   };
 }
 
@@ -175,7 +175,7 @@ export function analyzeDependencies(
       }));
 
     // Calculate complexity-based risk boost
-    let complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical' = 'low';
+    let complexityRiskBoost: RiskLevel = 'low';
     if (totalAvg > COMPLEXITY_THRESHOLDS.CRITICAL_AVG || globalMax > COMPLEXITY_THRESHOLDS.CRITICAL_MAX) {
       complexityRiskBoost = 'critical';
     } else if (totalAvg > COMPLEXITY_THRESHOLDS.HIGH_AVG || globalMax > COMPLEXITY_THRESHOLDS.HIGH_MAX) {
@@ -201,7 +201,7 @@ export function analyzeDependencies(
 
   // Calculate risk level based on dependent count
   const count = uniqueFiles.length;
-  let riskLevel: 'low' | 'medium' | 'high' | 'critical' =
+  let riskLevel: RiskLevel =
     count === 0 ? 'low' :
     count <= DEPENDENT_COUNT_THRESHOLDS.LOW ? 'low' :
     count <= DEPENDENT_COUNT_THRESHOLDS.MEDIUM ? 'medium' :
