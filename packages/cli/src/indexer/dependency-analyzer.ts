@@ -109,6 +109,9 @@ export function analyzeDependencies(
 
   // Second: Fuzzy match against all unique import paths in the index
   // This handles relative imports and path variations
+  // Note: This is O(M) where M = unique import paths. For large codebases with many
+  // violations, consider caching fuzzy match results at a higher level (e.g., in
+  // ComplexityAnalyzer) to avoid repeated iterations.
   for (const [normalizedImport, chunks] of importIndex.entries()) {
     // Skip exact match (already processed in direct lookup above)
     if (normalizedImport !== normalizedTarget && matchesFile(normalizedImport, normalizedTarget)) {
