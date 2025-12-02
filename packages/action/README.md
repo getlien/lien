@@ -60,7 +60,7 @@ jobs:
 | `model` | LLM model to use | No | `anthropic/claude-sonnet-4` |
 | `threshold` | Complexity threshold for violations | No | `10` |
 | `github_token` | GitHub token for posting comments | No | `${{ github.token }}` |
-| `review_style` | `line` for inline comments, `summary` for single comment | No | `line` |
+| `review_style` | Review comment style: `hybrid` (default) posts inline comments for errors + summary for warnings, `line` posts all as inline comments, `summary` posts a single summary comment | No | `hybrid` |
 
 ## Outputs
 
@@ -158,7 +158,3 @@ The `dist/` folder must be committed for GitHub Actions to work.
 ## License
 
 MIT - See [LICENSE](../../LICENSE)
-
-
-# Cache test
-
