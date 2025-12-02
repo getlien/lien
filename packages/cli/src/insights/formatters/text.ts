@@ -25,8 +25,14 @@ function formatViolation(
   lines.push(colorFn(`  ${violation.file}:${violation.startLine}`) + chalk.dim(' - ') + symbolText);
   lines.push(chalk.dim(`    Complexity: ${violation.complexity} (threshold: ${violation.threshold})`));
   
-  const percentage = Math.round(((violation.complexity - violation.threshold) / violation.threshold) * 100);
-  lines.push(chalk.dim(`    ⬆️  ${percentage}% over threshold`));
+  let percentageText: string;
+  if (violation.threshold > 0) {
+    const percentage = Math.round(((violation.complexity - violation.threshold) / violation.threshold) * 100);
+    percentageText = `${percentage}% over threshold`;
+  } else {
+    percentageText = 'N/A (invalid threshold)';
+  }
+  lines.push(chalk.dim(`    ⬆️  ${percentageText}`));
   
   // Show dependency impact
   const depCount = fileData.dependentCount ?? fileData.dependents.length;
