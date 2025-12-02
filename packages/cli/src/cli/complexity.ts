@@ -1,4 +1,6 @@
 import chalk from 'chalk';
+import fs from 'fs';
+import path from 'path';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { configService } from '../config/service.js';
 import { ComplexityAnalyzer } from '../insights/complexity-analyzer.js';
@@ -28,6 +30,24 @@ export async function complexityCommand(options: ComplexityOptions) {
     if (!['text', 'json', 'sarif'].includes(options.format)) {
       console.error(chalk.red(`Error: Invalid --format value "${options.format}". Must be one of: text, json, sarif`));
       process.exit(1);
+    }
+    
+    // Validate --files option: check if files exist
+    if (options.files && options.files.length > 0) {
+      const missingFiles: string[] = [];
+      for (const file of options.files) {
+        const fullPath = path.isAbsolute(file) ? file : path.join(rootDir, file);
+        if (!fs.existsSync(fullPath)) {
+          missingFiles.push(file);
+        }
+      }
+      if (missingFiles.length > 0) {
+        console.error(chalk.red(`Error: File${missingFiles.length > 1 ? 's' : ''} not found:`));
+        for (const file of missingFiles) {
+          console.error(chalk.red(`  - ${file}`));
+        }
+        process.exit(1);
+      }
     }
     
     // Load config and database
