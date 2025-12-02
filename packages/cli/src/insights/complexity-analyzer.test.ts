@@ -131,6 +131,7 @@ describe('ComplexityAnalyzer', () => {
           enabled: true,
           thresholds: { method: 10, file: 50, average: 6 },
           severity: { warning: 1.5, error: 2.5 }, // warning at > 15, error at >= 25
+          maxChunks: 50000,
         },
       };
 

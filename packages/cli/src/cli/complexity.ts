@@ -61,6 +61,7 @@ export async function complexityCommand(options: ComplexityOptions) {
           enabled: true,
           thresholds: { method: thresholdValue, file: 50, average: 6 },
           severity: { warning: 1.0, error: 2.0 },
+          maxChunks: 50000,
         };
       } else {
         config.complexity.thresholds.method = thresholdValue;
