@@ -134,23 +134,27 @@ export function buildLineCommentPrompt(
   codeSnippet: string | null
 ): string {
   const snippetSection = codeSnippet
-    ? `\n\nCode:\n\`\`\`\n${codeSnippet}\n\`\`\``
+    ? `\n\n**Code:**\n\`\`\`\n${codeSnippet}\n\`\`\``
     : '';
 
-  return `Generate a brief, actionable code review comment for this complexity violation.
+  return `You are reviewing code for complexity. Generate an actionable review comment.
 
 **Function**: \`${violation.symbolName}\` (${violation.symbolType})
-**File**: ${violation.filepath}
 **Complexity**: ${violation.complexity} (threshold: ${violation.threshold})
-**Severity**: ${violation.severity}
 ${snippetSection}
 
-Write a 2-4 sentence comment that:
-1. Briefly explains what makes this function complex
-2. Suggests ONE specific refactoring approach
+Write a code review comment that includes:
 
-Be direct and actionable. No preamble. Start with the issue.
-Example format: "This function has X nested conditions making it hard to test. Consider extracting Y into a separate function."`;
+1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains")
+
+2. **Refactoring** (2-3 sentences): Concrete steps to reduce complexity. Be SPECIFIC:
+   - Name the exact functions to extract (e.g., "Extract \`handleAdminDelete()\` and \`handleModeratorDelete()\`")
+   - Suggest specific patterns (strategy, lookup table, early returns)
+   - If applicable, show a brief code sketch
+
+3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
+
+Format as a single cohesive comment without headers. Be direct and specific to THIS code.`;
 }
 
 /**

@@ -93,14 +93,14 @@ export async function generateLineComment(
         {
           role: 'system',
           content:
-            'You are a code reviewer. Write brief, actionable comments about code complexity. Be direct and specific.',
+            'You are an expert code reviewer. Write detailed, actionable comments with specific refactoring suggestions. Include concrete function names and patterns.',
         },
         {
           role: 'user',
           content: prompt,
         },
       ],
-      max_tokens: 300, // Short comments
+      max_tokens: 500, // Allow more detailed comments
       temperature: 0.3,
     }),
   });
