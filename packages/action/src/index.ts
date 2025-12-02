@@ -20,7 +20,7 @@ import {
   type LineComment,
 } from './github.js';
 import { runComplexityAnalysis, filterAnalyzableFiles } from './complexity.js';
-import { generateReview, generateLineComments } from './openrouter.js';
+import { generateReview, generateLineComments, resetTokenUsage, getTokenUsage } from './openrouter.js';
 import {
   buildReviewPrompt,
   buildNoViolationsMessage,
@@ -140,7 +140,9 @@ async function run(): Promise<void> {
     }
     core.info(`Collected ${codeSnippets.size} code snippets for review`);
 
-    // 9. Generate and post review based on style
+    // 9. Reset token tracking and generate review
+    resetTokenUsage();
+    
     if (config.reviewStyle === 'summary') {
       await postSummaryReview(
         octokit,
@@ -303,6 +305,12 @@ async function postHybridReview(
     ? warnings.map(w => `- \`${w.symbolName}\` in \`${w.filepath}\` (complexity: ${w.complexity})`).join('\n')
     : '';
 
+  // Get token usage for cost display
+  const usage = getTokenUsage();
+  const costDisplay = usage.totalTokens > 0
+    ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} (~$${usage.estimatedCost.toFixed(4)})`
+    : '';
+
   const summaryBody = `<!-- lien-ai-review -->
 ## 🔍 Lien Complexity Review
 
@@ -318,7 +326,7 @@ ${warningsList}` : ''}
 
 - Files analyzed: ${summary.filesAnalyzed}
 - Average complexity: ${summary.avgComplexity.toFixed(1)}
-- Max complexity: ${summary.maxComplexity}
+- Max complexity: ${summary.maxComplexity}${costDisplay}
 
 </details>
 

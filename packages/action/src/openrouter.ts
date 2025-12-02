@@ -9,6 +9,78 @@ import { buildLineCommentPrompt } from './prompt.js';
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 /**
+ * Token usage tracking
+ */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimatedCost: number;
+}
+
+// Approximate pricing per 1M tokens (as of late 2024)
+// These are estimates - actual prices may vary
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'anthropic/claude-sonnet-4': { input: 3.0, output: 15.0 },
+  'anthropic/claude-opus-4': { input: 15.0, output: 75.0 },
+  'anthropic/claude-3.5-sonnet': { input: 3.0, output: 15.0 },
+  'openai/gpt-4o': { input: 2.5, output: 10.0 },
+  'openai/gpt-4-turbo': { input: 10.0, output: 30.0 },
+  'openai/gpt-3.5-turbo': { input: 0.5, output: 1.5 },
+};
+
+const DEFAULT_PRICING = { input: 5.0, output: 15.0 }; // Conservative estimate
+
+/**
+ * Global token usage accumulator
+ */
+let totalUsage: TokenUsage = {
+  promptTokens: 0,
+  completionTokens: 0,
+  totalTokens: 0,
+  estimatedCost: 0,
+};
+
+/**
+ * Reset token usage (call at start of review)
+ */
+export function resetTokenUsage(): void {
+  totalUsage = {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    estimatedCost: 0,
+  };
+}
+
+/**
+ * Get current token usage
+ */
+export function getTokenUsage(): TokenUsage {
+  return { ...totalUsage };
+}
+
+/**
+ * Calculate and accumulate token usage
+ */
+function trackUsage(
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined,
+  model: string
+): void {
+  if (!usage) return;
+
+  const pricing = MODEL_PRICING[model] || DEFAULT_PRICING;
+  const cost =
+    (usage.prompt_tokens / 1_000_000) * pricing.input +
+    (usage.completion_tokens / 1_000_000) * pricing.output;
+
+  totalUsage.promptTokens += usage.prompt_tokens;
+  totalUsage.completionTokens += usage.completion_tokens;
+  totalUsage.totalTokens += usage.total_tokens;
+  totalUsage.estimatedCost += cost;
+}
+
+/**
  * Generate an AI review using OpenRouter
  */
 export async function generateReview(
@@ -60,6 +132,7 @@ export async function generateReview(
   const review = data.choices[0].message.content;
 
   if (data.usage) {
+    trackUsage(data.usage, model);
     core.info(
       `Tokens used: ${data.usage.prompt_tokens} prompt, ${data.usage.completion_tokens} completion`
     );
@@ -113,6 +186,10 @@ export async function generateLineComment(
 
   if (!data.choices || data.choices.length === 0) {
     throw new Error('No response from OpenRouter');
+  }
+
+  if (data.usage) {
+    trackUsage(data.usage, model);
   }
 
   return data.choices[0].message.content;
