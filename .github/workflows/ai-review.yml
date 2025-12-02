@@ -58,6 +58,15 @@ jobs:
       - name: Initialize Lien (auto-detect frameworks)
         run: lien init --yes
       
+      # Cache the Lien index for incremental updates
+      - name: Cache Lien index
+        uses: actions/cache@v4
+        with:
+          path: .lien
+          key: lien-index-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+          restore-keys: |
+            lien-index-${{ runner.os }}-
+      
       - name: Index codebase
         run: lien index
       
