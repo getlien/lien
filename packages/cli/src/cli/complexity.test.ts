@@ -19,7 +19,8 @@ describe('complexityCommand', () => {
     // Mock VectorDB instance methods
     mockVectorDB = {
       initialize: vi.fn().mockResolvedValue(undefined),
-      scanWithFilter: vi.fn(),
+      scanWithFilter: vi.fn(),  // Used for index existence check
+      scanAll: vi.fn(),         // Used for actual analysis
     };
     
     // Mock the VectorDB constructor to return our mock instance
@@ -78,10 +79,9 @@ describe('complexityCommand', () => {
       },
     ];
 
-    // Mock both the check and the actual scan
-    mockVectorDB.scanWithFilter
-      .mockResolvedValueOnce([]) // First call to check if index exists
-      .mockResolvedValueOnce(chunks); // Second call for analysis
+    // Mock index check and actual scan
+    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
       format: 'text',
@@ -111,10 +111,9 @@ describe('complexityCommand', () => {
       },
     ];
 
-    // Mock both the check and the actual scan
-    mockVectorDB.scanWithFilter
-      .mockResolvedValueOnce([]) // First call to check if index exists
-      .mockResolvedValueOnce(chunks); // Second call for analysis
+    // Mock index check and actual scan
+    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
       format: 'json',
@@ -149,10 +148,9 @@ describe('complexityCommand', () => {
       },
     ];
 
-    // Mock both the check and the actual scan
-    mockVectorDB.scanWithFilter
-      .mockResolvedValueOnce([]) // First call to check if index exists
-      .mockResolvedValueOnce(chunks); // Second call for analysis
+    // Mock index check and actual scan
+    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
       format: 'sarif',
@@ -202,10 +200,9 @@ describe('complexityCommand', () => {
       },
     ];
 
-    // Mock both the check and the actual scan
-    mockVectorDB.scanWithFilter
-      .mockResolvedValueOnce([]) // First call to check if index exists
-      .mockResolvedValueOnce(chunks); // Second call for analysis
+    // Mock index check and actual scan
+    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
       files: ['src/file1.ts'],
@@ -239,10 +236,9 @@ describe('complexityCommand', () => {
       },
     ];
 
-    // Mock both the check and the actual scan
-    mockVectorDB.scanWithFilter
-      .mockResolvedValueOnce([]) // First call to check if index exists
-      .mockResolvedValueOnce(chunks); // Second call for analysis
+    // Mock index check and actual scan
+    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
       format: 'text',
@@ -271,10 +267,9 @@ describe('complexityCommand', () => {
       },
     ];
 
-    // Mock both the check and the actual scan
-    mockVectorDB.scanWithFilter
-      .mockResolvedValueOnce([]) // First call to check if index exists
-      .mockResolvedValueOnce(chunks); // Second call for analysis
+    // Mock index check and actual scan
+    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
       format: 'text',
@@ -303,10 +298,9 @@ describe('complexityCommand', () => {
       },
     ];
 
-    // Mock both the check and the actual scan
-    mockVectorDB.scanWithFilter
-      .mockResolvedValueOnce([]) // First call to check if index exists
-      .mockResolvedValueOnce(chunks); // Second call for analysis
+    // Mock index check and actual scan
+    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
       format: 'text',
@@ -335,10 +329,9 @@ describe('complexityCommand', () => {
       },
     ];
 
-    // Mock both the check and the actual scan
-    mockVectorDB.scanWithFilter
-      .mockResolvedValueOnce([]) // First call to check if index exists
-      .mockResolvedValueOnce(chunks); // Second call for analysis
+    // Mock index check and actual scan
+    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     // With default threshold of 10, this would be a violation
     // But with threshold of 15, it should not be

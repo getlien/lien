@@ -41,7 +41,6 @@ export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>)
         ...defaults.complexity?.severity,
         ...(user.complexity.severity || {}),
       },
-      maxChunks: user.complexity.maxChunks ?? defaults.complexity?.maxChunks ?? 50000,
     } : defaults.complexity,
     frameworks: user.frameworks ?? defaults.frameworks,
   };

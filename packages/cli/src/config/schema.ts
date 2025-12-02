@@ -66,7 +66,6 @@ export interface LienConfig {
       warning: number;     // Multiplier for warning threshold (default: 1.0)
       error: number;       // Multiplier for error threshold (default: 2.0)
     };
-    maxChunks: number;     // Max chunks to analyze (default: 50000)
   };
   frameworks: FrameworkInstance[];
 }
@@ -162,7 +161,6 @@ export const defaultConfig: LienConfig = {
       warning: 1.0,
       error: 2.0,
     },
-    maxChunks: 50000, // Increase for very large codebases
   },
   frameworks: [], // Will be populated by lien init via framework detection
 };

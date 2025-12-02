@@ -12,7 +12,7 @@ describe('ComplexityAnalyzer', () => {
   beforeEach(() => {
     // Create mock VectorDB
     mockVectorDB = {
-      scanWithFilter: vi.fn(),
+      scanAll: vi.fn(),
     } as any;
 
     // Default config
@@ -68,7 +68,7 @@ describe('ComplexityAnalyzer', () => {
         },
       ];
 
-      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
       const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
       const report = await analyzer.analyze();
@@ -114,7 +114,7 @@ describe('ComplexityAnalyzer', () => {
         },
       ];
 
-      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
       const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
       const report = await analyzer.analyze();
@@ -131,7 +131,6 @@ describe('ComplexityAnalyzer', () => {
           enabled: true,
           thresholds: { method: 10, file: 50, average: 6 },
           severity: { warning: 1.5, error: 2.5 }, // warning at > 15, error at >= 25
-          maxChunks: 50000,
         },
       };
 
@@ -183,7 +182,7 @@ describe('ComplexityAnalyzer', () => {
         },
       ];
 
-      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
       const analyzer = new ComplexityAnalyzer(mockVectorDB, customConfig);
       const report = await analyzer.analyze();
@@ -235,7 +234,7 @@ describe('ComplexityAnalyzer', () => {
         },
       ];
 
-      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
       const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
       const report = await analyzer.analyze(['src/file1.ts']);
@@ -246,7 +245,7 @@ describe('ComplexityAnalyzer', () => {
     });
 
     it('should handle empty results', async () => {
-      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue([]);
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue([]);
 
       const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
       const report = await analyzer.analyze();
@@ -306,7 +305,7 @@ describe('ComplexityAnalyzer', () => {
         },
       ];
 
-      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
       const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
       const report = await analyzer.analyze();
@@ -334,7 +333,7 @@ describe('ComplexityAnalyzer', () => {
         },
       ];
 
-      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
       const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
       const report = await analyzer.analyze();
@@ -394,7 +393,7 @@ describe('ComplexityAnalyzer', () => {
         },
       ];
 
-      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
       const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
       const report = await analyzer.analyze();
@@ -457,7 +456,7 @@ describe('ComplexityAnalyzer', () => {
         },
       ];
 
-      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
       const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
       const report = await analyzer.analyze();
@@ -508,7 +507,7 @@ describe('ComplexityAnalyzer', () => {
         })),
       ];
 
-      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
       const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
       const report = await analyzer.analyze();
@@ -555,7 +554,7 @@ describe('ComplexityAnalyzer', () => {
         },
       ];
 
-      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
       const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
       const report = await analyzer.analyze();

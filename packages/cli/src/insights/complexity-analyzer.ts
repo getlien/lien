@@ -21,17 +21,8 @@ export class ComplexityAnalyzer {
    * @returns Complexity report with violations and summary
    */
   async analyze(files?: string[]): Promise<ComplexityReport> {
-    // 1. Get all chunks from index using configurable limit
-    const maxChunks = this.config.complexity?.maxChunks ?? 50000;
-    const allChunks = await this.vectorDB.scanWithFilter({ limit: maxChunks });
-    
-    // Warn if we hit the limit (some violations may be missed)
-    if (allChunks.length === maxChunks) {
-      console.warn(
-        `⚠️  Warning: Chunk limit (${maxChunks}) reached. Some violations may be missed.\n` +
-        `   Increase complexity.maxChunks in lien.config.json for larger codebases.`
-      );
-    }
+    // 1. Get all chunks from index (uses pagination internally for large codebases)
+    const allChunks = await this.vectorDB.scanAll();
     
     // 2. Filter to specified files if provided
     const chunks = files 
