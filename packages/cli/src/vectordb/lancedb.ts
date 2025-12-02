@@ -134,17 +134,16 @@ export class VectorDB implements VectorDBInterface {
    * Scan all chunks in the database
    * Fetches total count first, then retrieves all chunks in a single optimized query
    * @param options - Filter options (language, pattern)
-   * @param batchSize - Unused, kept for API compatibility
    * @returns All matching chunks
    */
   async scanAll(options: {
     language?: string;
     pattern?: string;
-  } = {}, batchSize = 10000): Promise<SearchResult[]> {
+  } = {}): Promise<SearchResult[]> {
     if (!this.table) {
       throw new DatabaseError('Vector database not initialized');
     }
-    return queryOps.scanAll(this.table, options, batchSize);
+    return queryOps.scanAll(this.table, options);
   }
   
   async querySymbols(options: {

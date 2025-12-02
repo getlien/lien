@@ -384,10 +384,7 @@ export async function scanAll(
   options: {
     language?: string;
     pattern?: string;
-  },
-  // batchSize parameter kept for API compatibility but not used
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _batchSize = 10000
+  } = {}
 ): Promise<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
