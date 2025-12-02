@@ -130,6 +130,22 @@ export class VectorDB implements VectorDBInterface {
     return queryOps.scanWithFilter(this.table, options);
   }
   
+  /**
+   * Scan all chunks in the database
+   * Fetches total count first, then retrieves all chunks in a single optimized query
+   * @param options - Filter options (language, pattern)
+   * @returns All matching chunks
+   */
+  async scanAll(options: {
+    language?: string;
+    pattern?: string;
+  } = {}): Promise<SearchResult[]> {
+    if (!this.table) {
+      throw new DatabaseError('Vector database not initialized');
+    }
+    return queryOps.scanAll(this.table, options);
+  }
+  
   async querySymbols(options: {
     language?: string;
     pattern?: string;

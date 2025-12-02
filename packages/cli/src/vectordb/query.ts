@@ -374,3 +374,38 @@ export async function querySymbols(
   }
 }
 
+/**
+ * Scan all chunks in the database
+ * First gets the total count, then fetches all with a single query
+ * This is more efficient than pagination for local/embedded databases like LanceDB
+ */
+export async function scanAll(
+  table: LanceDBTable,
+  options: {
+    language?: string;
+    pattern?: string;
+  } = {}
+): Promise<SearchResult[]> {
+  if (!table) {
+    throw new DatabaseError('Vector database not initialized');
+  }
+  
+  try {
+    // Get total row count to determine limit
+    const totalRows = await table.countRows();
+    
+    // Fetch all rows in one query (LanceDB is local, this is efficient)
+    // Note: scanWithFilter internally fetches 5x the limit to handle filtering overhead,
+    // then caps output to 'limit'. We pass totalRows so we get all rows back after
+    // filtering. The 5x overfetch is acceptable overhead for local DBs.
+    const MIN_SCAN_LIMIT = 1000;
+    const results = await scanWithFilter(table, {
+      ...options,
+      limit: Math.max(totalRows, MIN_SCAN_LIMIT),
+    });
+    
+    return results;
+  } catch (error) {
+    throw wrapError(error, 'Failed to scan all chunks');
+  }
+}
