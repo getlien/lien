@@ -122,6 +122,83 @@ describe('ComplexityAnalyzer', () => {
       expect(report.summary.bySeverity.error).toBe(1);
     });
 
+    it('should respect custom severity.warning multiplier', async () => {
+      // Custom config with severity.warning = 1.5 means violations only when > 15 (10 * 1.5)
+      const customConfig = {
+        ...config,
+        complexity: {
+          enabled: true,
+          thresholds: { method: 10, file: 50, average: 6 },
+          severity: { warning: 1.5, error: 2.5 }, // warning at > 15, error at >= 25
+        },
+      };
+
+      const chunks = [
+        {
+          content: 'function belowWarning() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'belowWarning',
+            symbolType: 'function',
+            complexity: 12, // Below warning threshold of 15 (10 * 1.5)
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+        {
+          content: 'function atWarning() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 12,
+            endLine: 20,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'atWarning',
+            symbolType: 'function',
+            complexity: 18, // Above warning (15), below error (25) = warning
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+        {
+          content: 'function atError() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 22,
+            endLine: 30,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'atError',
+            symbolType: 'function',
+            complexity: 30, // Above error threshold of 25 (10 * 2.5) = error
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, customConfig);
+      const report = await analyzer.analyze();
+
+      // Only 2 violations: atWarning (warning) and atError (error)
+      // belowWarning (complexity 12) should NOT be a violation with severity.warning = 1.5
+      expect(report.summary.totalViolations).toBe(2);
+      expect(report.summary.bySeverity.warning).toBe(1);
+      expect(report.summary.bySeverity.error).toBe(1);
+      
+      const violations = report.files['src/test.ts'].violations;
+      expect(violations).toHaveLength(2);
+      expect(violations.find(v => v.symbolName === 'belowWarning')).toBeUndefined();
+      expect(violations.find(v => v.symbolName === 'atWarning')?.severity).toBe('warning');
+      expect(violations.find(v => v.symbolName === 'atError')?.severity).toBe('error');
+    });
+
     it('should filter by specific files when provided', async () => {
       const chunks = [
         {

@@ -77,14 +77,18 @@ export class ComplexityAnalyzer {
         continue;
       }
 
-      const threshold = thresholds.method;
+      const baseThreshold = thresholds.method;
       const complexity = metadata.complexity;
+      
+      // Apply severity multipliers to threshold
+      const warningThreshold = baseThreshold * severity.warning;
+      const errorThreshold = baseThreshold * severity.error;
 
-      // Check if complexity exceeds threshold
-      if (complexity > threshold) {
-        // Determine severity based on multiplier
-        const exceedsError = complexity >= threshold * severity.error;
-        const violationSeverity = exceedsError ? 'error' : 'warning';
+      // Check if complexity exceeds warning threshold
+      if (complexity > warningThreshold) {
+        // Determine severity: error if exceeds error threshold, otherwise warning
+        const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
+        const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
 
         violations.push({
           filepath: metadata.file,
@@ -94,9 +98,9 @@ export class ComplexityAnalyzer {
           symbolType: metadata.symbolType as 'function' | 'method',
           language: metadata.language,
           complexity,
-          threshold,
+          threshold: Math.round(effectiveThreshold), // Show the effective threshold that was exceeded
           severity: violationSeverity,
-          message: `${metadata.symbolType} complexity ${complexity} exceeds threshold ${threshold}`,
+          message: `${metadata.symbolType} complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`,
         });
       }
     }
