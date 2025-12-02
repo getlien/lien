@@ -84,8 +84,8 @@ export class ComplexityAnalyzer {
       const warningThreshold = baseThreshold * severity.warning;
       const errorThreshold = baseThreshold * severity.error;
 
-      // Check if complexity exceeds warning threshold
-      if (complexity > warningThreshold) {
+      // Check if complexity meets or exceeds warning threshold
+      if (complexity >= warningThreshold) {
         // Determine severity: error if exceeds error threshold, otherwise warning
         const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
         const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;

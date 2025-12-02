@@ -31,10 +31,10 @@ function formatViolation(
   // Show dependency impact
   const depCount = fileData.dependentCount ?? fileData.dependents.length;
   if (depCount > 0) {
-    lines.push(chalk.dim(`    📦 Imported by ${depCount} file${depCount !== 1 ? 's' : ''}`));
+    lines.push(chalk.dim(`    📦  Imported by ${depCount} file${depCount !== 1 ? 's' : ''}`));
     if (fileData.dependentComplexityMetrics) {
       const metrics = fileData.dependentComplexityMetrics;
-      lines.push(chalk.dim(`       Dependent avg complexity: ${metrics.averageComplexity}, max: ${metrics.maxComplexity}`));
+      lines.push(chalk.dim(`    - Dependent avg complexity: ${metrics.averageComplexity}, max: ${metrics.maxComplexity}`));
     }
   }
   
