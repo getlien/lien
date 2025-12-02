@@ -43,6 +43,26 @@ export class ComplexityAnalyzer {
   }
 
   /**
+   * Normalize a file path to a consistent relative format
+   * Converts absolute paths to relative paths from workspace root
+   */
+  private normalizeFilePath(filepath: string): string {
+    const workspaceRoot = process.cwd();
+    // Convert to forward slashes first
+    const normalized = filepath.replace(/\\/g, '/');
+    const normalizedRoot = workspaceRoot.replace(/\\/g, '/');
+    
+    // Convert absolute paths to relative
+    if (normalized.startsWith(normalizedRoot + '/')) {
+      return normalized.slice(normalizedRoot.length + 1);
+    }
+    if (normalized.startsWith(normalizedRoot)) {
+      return normalized.slice(normalizedRoot.length);
+    }
+    return normalized;
+  }
+
+  /**
    * Check if a chunk's file matches any of the target files
    * Uses exact match or suffix matching to avoid unintended matches
    */
@@ -117,16 +137,19 @@ export class ComplexityAnalyzer {
     violations: ComplexityViolation[],
     allChunks: Array<{ content: string; metadata: ChunkMetadata }>
   ): ComplexityReport {
-    // Group violations by file
+    // Normalize violation filepaths and group by normalized path
     const fileViolationsMap = new Map<string, ComplexityViolation[]>();
     for (const violation of violations) {
-      const existing = fileViolationsMap.get(violation.filepath) || [];
+      const normalizedPath = this.normalizeFilePath(violation.filepath);
+      // Update violation's filepath to normalized form
+      violation.filepath = normalizedPath;
+      const existing = fileViolationsMap.get(normalizedPath) || [];
       existing.push(violation);
-      fileViolationsMap.set(violation.filepath, existing);
+      fileViolationsMap.set(normalizedPath, existing);
     }
 
-    // Get unique files from all analyzed chunks
-    const analyzedFiles = new Set(allChunks.map(c => c.metadata.file));
+    // Get unique files from all analyzed chunks, normalized to relative paths
+    const analyzedFiles = new Set(allChunks.map(c => this.normalizeFilePath(c.metadata.file)));
 
     // Build file data
     const files: Record<string, FileComplexityData> = {};
