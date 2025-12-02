@@ -59,12 +59,11 @@ jobs:
         run: lien init --yes
       
       # Cache the Lien index for incremental updates
-      # Key uses run_id so each run saves a fresh cache
-      # restore-keys always finds the most recent previous cache
+      # Index is stored in ~/.lien/indices/{project-hash}
       - name: Cache Lien index
         uses: actions/cache@v4
         with:
-          path: .lien
+          path: ~/.lien
           key: lien-index-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             lien-index-${{ runner.os }}-
