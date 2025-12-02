@@ -36,7 +36,7 @@ export class ComplexityAnalyzer {
     const report = this.buildReport(violations, chunks);
     
     // 5. Enrich files with violations with dependency data
-    await this.enrichWithDependencies(report, allChunks as SearchResult[]);
+    this.enrichWithDependencies(report, allChunks as SearchResult[]);
     
     return report;
   }
@@ -188,10 +188,10 @@ export class ComplexityAnalyzer {
    * - List of dependent files (who imports this?)
    * - Boosted risk level based on dependents + complexity
    */
-  private async enrichWithDependencies(
+  private enrichWithDependencies(
     report: ComplexityReport,
     allChunks: SearchResult[]
-  ): Promise<void> {
+  ): void {
     const workspaceRoot = process.cwd();
 
     // Only enrich files that have violations (to save computation)
