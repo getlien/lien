@@ -29,10 +29,10 @@ export class ComplexityAnalyzer {
       ? allChunks.filter(c => this.matchesAnyFile(c.metadata.file, files))
       : allChunks;
     
-    // 3. Find violations
+    // 3. Find violations from filtered chunks
     const violations = this.findViolations(chunks);
     
-    // 4. Build report grouped by file
+    // 4. Build report - pass filtered chunks for file list, but keep violations from those files
     const report = this.buildReport(violations, chunks);
     
     // 5. Enrich files with violations with dependency data

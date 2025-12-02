@@ -55,12 +55,12 @@ export function formatTextReport(report: ComplexityReport): string {
 
   // Summary
   lines.push(chalk.bold('Summary:'));
-  lines.push(chalk.dim('  Files analyzed:'), report.summary.filesAnalyzed.toString());
+  lines.push(chalk.dim('  Files analyzed: ') + report.summary.filesAnalyzed.toString());
   const errorText = `${report.summary.bySeverity.error} error${report.summary.bySeverity.error !== 1 ? 's' : ''}`;
   const warningText = `${report.summary.bySeverity.warning} warning${report.summary.bySeverity.warning !== 1 ? 's' : ''}`;
-  lines.push(chalk.dim('  Violations:'), `${report.summary.totalViolations} (${errorText}, ${warningText})`);
-  lines.push(chalk.dim('  Average complexity:'), report.summary.avgComplexity.toString());
-  lines.push(chalk.dim('  Max complexity:'), report.summary.maxComplexity.toString());
+  lines.push(chalk.dim('  Violations: ') + `${report.summary.totalViolations} (${errorText}, ${warningText})`);
+  lines.push(chalk.dim('  Average complexity: ') + report.summary.avgComplexity.toString());
+  lines.push(chalk.dim('  Max complexity: ') + report.summary.maxComplexity.toString());
   lines.push('');
 
   // Group violations by file
