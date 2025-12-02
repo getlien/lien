@@ -1,0 +1,25 @@
+name: 'Lien AI Code Review'
+description: 'Analyze code complexity and post AI-assisted review comments'
+author: 'Lien'
+branding:
+  icon: 'code'
+  color: 'purple'
+
+inputs:
+  openrouter_api_key:
+    description: 'OpenRouter API key for LLM access'
+    required: true
+  model:
+    description: 'LLM model to use (e.g., anthropic/claude-sonnet-4, openai/gpt-4o)'
+    default: 'anthropic/claude-sonnet-4'
+  threshold:
+    description: 'Complexity threshold for violations (default: 10)'
+    default: '10'
+  github_token:
+    description: 'GitHub token for posting comments (defaults to github.token)'
+    default: ${{ github.token }}
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+

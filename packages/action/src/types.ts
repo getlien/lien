@@ -1,0 +1,91 @@
+/**
+ * Types for the Lien AI Code Review GitHub Action
+ */
+
+/**
+ * Risk level for complexity violations
+ */
+export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
+
+/**
+ * A single complexity violation
+ */
+export interface ComplexityViolation {
+  filepath: string;
+  startLine: number;
+  endLine: number;
+  symbolName: string;
+  symbolType: 'function' | 'method' | 'class' | 'file';
+  language: string;
+  complexity: number;
+  threshold: number;
+  severity: 'warning' | 'error';
+  message: string;
+}
+
+/**
+ * Complexity data for a single file
+ */
+export interface FileComplexityData {
+  violations: ComplexityViolation[];
+  dependents: string[];
+  dependentCount?: number;
+  testAssociations: string[];
+  riskLevel: RiskLevel;
+}
+
+/**
+ * Full complexity report from lien complexity command
+ */
+export interface ComplexityReport {
+  summary: {
+    filesAnalyzed: number;
+    totalViolations: number;
+    bySeverity: { error: number; warning: number };
+    avgComplexity: number;
+    maxComplexity: number;
+  };
+  files: Record<string, FileComplexityData>;
+}
+
+/**
+ * OpenRouter API response structure
+ */
+export interface OpenRouterResponse {
+  id: string;
+  choices: Array<{
+    message: {
+      role: string;
+      content: string;
+    };
+    finish_reason: string;
+  }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+}
+
+/**
+ * Action configuration from inputs
+ */
+export interface ActionConfig {
+  openrouterApiKey: string;
+  model: string;
+  threshold: string;
+  githubToken: string;
+}
+
+/**
+ * PR context for review
+ */
+export interface PRContext {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  title: string;
+  baseSha: string;
+  headSha: string;
+}
+

@@ -1,0 +1,53 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+# Prevent concurrent reviews on the same PR
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    # Only run if PR is not from a fork (secrets not available in forks)
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    
+    permissions:
+      contents: read
+      pull-requests: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build Lien CLI
+        run: npm run build
+      
+      - name: Install Lien globally
+        run: npm install -g ./packages/cli
+      
+      - name: Index codebase
+        run: lien index
+      
+      - name: Run AI Code Review
+        uses: ./packages/action
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          model: 'anthropic/claude-sonnet-4'
+          threshold: '15'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+

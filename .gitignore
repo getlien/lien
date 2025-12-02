@@ -13,6 +13,9 @@ docs/
 !packages/site/docs/
 !docs/architecture/
 
+# Exception: GitHub Action dist (must be committed for Actions to work)
+!packages/action/dist/
+
 # VitePress build artifacts
 packages/site/docs/.vitepress/cache/
 packages/site/docs/.vitepress/dist/
