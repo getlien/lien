@@ -4,7 +4,6 @@ import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER, 
 import { ChunkMetadata } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
 import { SearchResult } from '../vectordb/types.js';
-import path from 'path';
 
 /**
  * Analyzer for code complexity based on indexed codebase
@@ -47,9 +46,10 @@ export class ComplexityAnalyzer {
    */
   private matchesAnyFile(chunkFile: string, targetFiles: string[]): boolean {
     // Normalize to forward slashes for cross-platform consistency
-    const normalizedChunkFile = path.normalize(chunkFile).replace(/\\/g, '/');
+    // Don't use path.normalize() as its behavior is platform-dependent
+    const normalizedChunkFile = chunkFile.replace(/\\/g, '/');
     return targetFiles.some(target => {
-      const normalizedTarget = path.normalize(target).replace(/\\/g, '/');
+      const normalizedTarget = target.replace(/\\/g, '/');
       // Exact match or target is a suffix of the chunk file
       return normalizedChunkFile === normalizedTarget || 
              normalizedChunkFile.endsWith('/' + normalizedTarget);
