@@ -66,6 +66,6 @@ jobs:
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
           model: 'anthropic/claude-sonnet-4'
-          threshold: '15'
+          threshold: '10'  # Error threshold = 20, so complexity 26 will be an error
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
