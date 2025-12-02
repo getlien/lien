@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeDependencies, DEPENDENT_COUNT_THRESHOLDS, COMPLEXITY_THRESHOLDS } from './dependency-analyzer.js';
+import { analyzeDependencies, COMPLEXITY_THRESHOLDS } from './dependency-analyzer.js';
 import { SearchResult } from '../vectordb/types.js';
 import { ChunkMetadata } from './types.js';
 

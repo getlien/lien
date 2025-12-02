@@ -1,5 +1,6 @@
 import { SearchResult } from '../vectordb/types.js';
 import { normalizePath, getCanonicalPath, matchesFile, isTestFile } from '../mcp/utils/path-matching.js';
+import { RISK_ORDER } from '../insights/types.js';
 
 /**
  * Risk level thresholds for dependent count.
@@ -208,7 +209,6 @@ export function analyzeDependencies(
 
   // Boost risk level if complexity is high
   if (complexityMetrics?.complexityRiskBoost) {
-    const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
     if (RISK_ORDER[complexityMetrics.complexityRiskBoost] > RISK_ORDER[riskLevel]) {
       riskLevel = complexityMetrics.complexityRiskBoost;
     }

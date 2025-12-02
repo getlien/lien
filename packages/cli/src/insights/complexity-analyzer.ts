@@ -1,6 +1,6 @@
 import { VectorDB } from '../vectordb/lancedb.js';
 import { LienConfig } from '../config/schema.js';
-import { ComplexityViolation, ComplexityReport, FileComplexityData } from './types.js';
+import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
 import { SearchResult } from '../vectordb/types.js';
@@ -211,7 +211,6 @@ export class ComplexityAnalyzer {
       
       // Boost risk level based on dependency analysis
       // Take the higher of the two risk levels
-      const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
       if (RISK_ORDER[depAnalysis.riskLevel] > RISK_ORDER[fileData.riskLevel]) {
         fileData.riskLevel = depAnalysis.riskLevel;
       }
