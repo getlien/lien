@@ -162,3 +162,106 @@ export function createOctokit(token: string): Octokit {
   return github.getOctokit(token);
 }
 
+/**
+ * Line comment for PR review
+ */
+export interface LineComment {
+  path: string;
+  line: number;
+  body: string;
+}
+
+/**
+ * Post a review with line-specific comments
+ */
+export async function postPRReview(
+  octokit: Octokit,
+  prContext: PRContext,
+  comments: LineComment[],
+  summaryBody: string
+): Promise<void> {
+  if (comments.length === 0) {
+    // No line comments, just post summary as regular comment
+    await postPRComment(octokit, prContext, summaryBody);
+    return;
+  }
+
+  core.info(`Creating review with ${comments.length} line comments`);
+
+  try {
+    // Create a review with line comments
+    await octokit.rest.pulls.createReview({
+      owner: prContext.owner,
+      repo: prContext.repo,
+      pull_number: prContext.pullNumber,
+      commit_id: prContext.headSha,
+      event: 'COMMENT', // Don't approve or request changes, just comment
+      body: summaryBody,
+      comments: comments.map((c) => ({
+        path: c.path,
+        line: c.line,
+        body: c.body,
+      })),
+    });
+
+    core.info('Review posted successfully');
+  } catch (error) {
+    // If line comments fail (e.g., lines not in diff), fall back to regular comment
+    core.warning(`Failed to post line comments: ${error}`);
+    core.info('Falling back to regular PR comment');
+    await postPRComment(octokit, prContext, summaryBody);
+  }
+}
+
+/**
+ * Get lines that are in the PR diff (only these can have line comments)
+ */
+export async function getPRDiffLines(
+  octokit: Octokit,
+  prContext: PRContext
+): Promise<Map<string, Set<number>>> {
+  const diffLines = new Map<string, Set<number>>();
+
+  const files = await octokit.rest.pulls.listFiles({
+    owner: prContext.owner,
+    repo: prContext.repo,
+    pull_number: prContext.pullNumber,
+    per_page: 100,
+  });
+
+  for (const file of files.data) {
+    if (!file.patch) continue;
+
+    const lines = new Set<number>();
+    let currentLine = 0;
+
+    // Parse the unified diff to find added/modified line numbers
+    const patchLines = file.patch.split('\n');
+    for (const patchLine of patchLines) {
+      // Hunk header: @@ -start,count +start,count @@
+      const hunkMatch = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (hunkMatch) {
+        currentLine = parseInt(hunkMatch[1], 10);
+        continue;
+      }
+
+      // Added or context line (can have comments)
+      if (patchLine.startsWith('+') || patchLine.startsWith(' ')) {
+        if (!patchLine.startsWith('+++')) {
+          lines.add(currentLine);
+        }
+        currentLine++;
+      } else if (patchLine.startsWith('-')) {
+        // Deleted line, don't increment (not in new file)
+        // But don't add to lines set either
+      }
+    }
+
+    if (lines.size > 0) {
+      diffLines.set(file.filename, lines);
+    }
+  }
+
+  return diffLines;
+}
+

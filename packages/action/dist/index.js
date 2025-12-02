@@ -31819,6 +31819,83 @@ async function getFileContent(octokit, prContext, filepath, startLine, endLine) 
 function createOctokit(token) {
     return github.getOctokit(token);
 }
+/**
+ * Post a review with line-specific comments
+ */
+async function postPRReview(octokit, prContext, comments, summaryBody) {
+    if (comments.length === 0) {
+        // No line comments, just post summary as regular comment
+        await postPRComment(octokit, prContext, summaryBody);
+        return;
+    }
+    core.info(`Creating review with ${comments.length} line comments`);
+    try {
+        // Create a review with line comments
+        await octokit.rest.pulls.createReview({
+            owner: prContext.owner,
+            repo: prContext.repo,
+            pull_number: prContext.pullNumber,
+            commit_id: prContext.headSha,
+            event: 'COMMENT', // Don't approve or request changes, just comment
+            body: summaryBody,
+            comments: comments.map((c) => ({
+                path: c.path,
+                line: c.line,
+                body: c.body,
+            })),
+        });
+        core.info('Review posted successfully');
+    }
+    catch (error) {
+        // If line comments fail (e.g., lines not in diff), fall back to regular comment
+        core.warning(`Failed to post line comments: ${error}`);
+        core.info('Falling back to regular PR comment');
+        await postPRComment(octokit, prContext, summaryBody);
+    }
+}
+/**
+ * Get lines that are in the PR diff (only these can have line comments)
+ */
+async function getPRDiffLines(octokit, prContext) {
+    const diffLines = new Map();
+    const files = await octokit.rest.pulls.listFiles({
+        owner: prContext.owner,
+        repo: prContext.repo,
+        pull_number: prContext.pullNumber,
+        per_page: 100,
+    });
+    for (const file of files.data) {
+        if (!file.patch)
+            continue;
+        const lines = new Set();
+        let currentLine = 0;
+        // Parse the unified diff to find added/modified line numbers
+        const patchLines = file.patch.split('\n');
+        for (const patchLine of patchLines) {
+            // Hunk header: @@ -start,count +start,count @@
+            const hunkMatch = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+            if (hunkMatch) {
+                currentLine = parseInt(hunkMatch[1], 10);
+                continue;
+            }
+            // Added or context line (can have comments)
+            if (patchLine.startsWith('+') || patchLine.startsWith(' ')) {
+                if (!patchLine.startsWith('+++')) {
+                    lines.add(currentLine);
+                }
+                currentLine++;
+            }
+            else if (patchLine.startsWith('-')) {
+                // Deleted line, don't increment (not in new file)
+                // But don't add to lines set either
+            }
+        }
+        if (lines.size > 0) {
+            diffLines.set(file.filename, lines);
+        }
+    }
+    return diffLines;
+}
 
 // EXTERNAL MODULE: ../../node_modules/@actions/exec/lib/exec.js
 var exec = __nccwpck_require__(9192);
@@ -31918,56 +31995,6 @@ function filterAnalyzableFiles(files) {
         }
         return true;
     });
-}
-
-;// CONCATENATED MODULE: ./src/openrouter.ts
-/**
- * OpenRouter API client for LLM access
- */
-
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-/**
- * Generate an AI review using OpenRouter
- */
-async function generateReview(prompt, apiKey, model) {
-    core.info(`Calling OpenRouter with model: ${model}`);
-    const response = await fetch(OPENROUTER_API_URL, {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://github.com/getlien/lien',
-            'X-Title': 'Lien AI Code Review',
-        },
-        body: JSON.stringify({
-            model,
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are an expert code reviewer. Provide actionable, specific feedback on code complexity issues. Be concise but thorough.',
-                },
-                {
-                    role: 'user',
-                    content: prompt,
-                },
-            ],
-            max_tokens: 2000,
-            temperature: 0.3, // Lower temperature for more consistent reviews
-        }),
-    });
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
-    }
-    const data = (await response.json());
-    if (!data.choices || data.choices.length === 0) {
-        throw new Error('No response from OpenRouter');
-    }
-    const review = data.choices[0].message.content;
-    if (data.usage) {
-        core.info(`Tokens used: ${data.usage.prompt_tokens} prompt, ${data.usage.completion_tokens} completion`);
-    }
-    return review;
 }
 
 ;// CONCATENATED MODULE: ./src/prompt.ts
@@ -32077,6 +32104,175 @@ ${aiReview}
 function getViolationKey(violation) {
     return `${violation.filepath}::${violation.symbolName}`;
 }
+/**
+ * Build a prompt for generating a single line comment for a violation
+ */
+function buildLineCommentPrompt(violation, codeSnippet) {
+    const snippetSection = codeSnippet
+        ? `\n\nCode:\n\`\`\`\n${codeSnippet}\n\`\`\``
+        : '';
+    return `Generate a brief, actionable code review comment for this complexity violation.
+
+**Function**: \`${violation.symbolName}\` (${violation.symbolType})
+**File**: ${violation.filepath}
+**Complexity**: ${violation.complexity} (threshold: ${violation.threshold})
+**Severity**: ${violation.severity}
+${snippetSection}
+
+Write a 2-4 sentence comment that:
+1. Briefly explains what makes this function complex
+2. Suggests ONE specific refactoring approach
+
+Be direct and actionable. No preamble. Start with the issue.
+Example format: "This function has X nested conditions making it hard to test. Consider extracting Y into a separate function."`;
+}
+/**
+ * Build a summary comment when using line-specific reviews
+ */
+function buildLineSummaryComment(report, prContext) {
+    const { summary } = report;
+    const emoji = summary.bySeverity.error > 0 ? '🔴' : '🟡';
+    return `<!-- lien-ai-review -->
+## ${emoji} Lien Complexity Review
+
+Found **${summary.totalViolations}** complexity violation${summary.totalViolations === 1 ? '' : 's'} in this PR:
+- ${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'} (complexity > 2x threshold)
+- ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'} (complexity > threshold)
+
+See inline comments below for specific suggestions.
+
+<details>
+<summary>📊 Details</summary>
+
+- Files analyzed: ${summary.filesAnalyzed}
+- Average complexity: ${summary.avgComplexity.toFixed(1)}
+- Max complexity: ${summary.maxComplexity}
+
+</details>
+
+*[Lien](https://lien.dev) AI Code Review*`;
+}
+
+;// CONCATENATED MODULE: ./src/openrouter.ts
+/**
+ * OpenRouter API client for LLM access
+ */
+
+
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+/**
+ * Generate an AI review using OpenRouter
+ */
+async function generateReview(prompt, apiKey, model) {
+    core.info(`Calling OpenRouter with model: ${model}`);
+    const response = await fetch(OPENROUTER_API_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/getlien/lien',
+            'X-Title': 'Lien AI Code Review',
+        },
+        body: JSON.stringify({
+            model,
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are an expert code reviewer. Provide actionable, specific feedback on code complexity issues. Be concise but thorough.',
+                },
+                {
+                    role: 'user',
+                    content: prompt,
+                },
+            ],
+            max_tokens: 2000,
+            temperature: 0.3, // Lower temperature for more consistent reviews
+        }),
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
+    }
+    const data = (await response.json());
+    if (!data.choices || data.choices.length === 0) {
+        throw new Error('No response from OpenRouter');
+    }
+    const review = data.choices[0].message.content;
+    if (data.usage) {
+        core.info(`Tokens used: ${data.usage.prompt_tokens} prompt, ${data.usage.completion_tokens} completion`);
+    }
+    return review;
+}
+/**
+ * Generate a brief comment for a single violation
+ */
+async function generateLineComment(violation, codeSnippet, apiKey, model) {
+    const prompt = buildLineCommentPrompt(violation, codeSnippet);
+    const response = await fetch(OPENROUTER_API_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/getlien/lien',
+            'X-Title': 'Lien AI Code Review',
+        },
+        body: JSON.stringify({
+            model,
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are a code reviewer. Write brief, actionable comments about code complexity. Be direct and specific.',
+                },
+                {
+                    role: 'user',
+                    content: prompt,
+                },
+            ],
+            max_tokens: 300, // Short comments
+            temperature: 0.3,
+        }),
+    });
+    if (!response.ok) {
+        throw new Error(`OpenRouter API error: ${response.status}`);
+    }
+    const data = (await response.json());
+    if (!data.choices || data.choices.length === 0) {
+        throw new Error('No response from OpenRouter');
+    }
+    return data.choices[0].message.content;
+}
+/**
+ * Generate line comments for multiple violations in parallel
+ */
+async function generateLineComments(violations, codeSnippets, apiKey, model) {
+    const results = new Map();
+    // Process in parallel with concurrency limit
+    const CONCURRENCY = 3;
+    for (let i = 0; i < violations.length; i += CONCURRENCY) {
+        const batch = violations.slice(i, i + CONCURRENCY);
+        const promises = batch.map(async (violation) => {
+            const key = `${violation.filepath}::${violation.symbolName}`;
+            const snippet = codeSnippets.get(key) || null;
+            try {
+                const comment = await generateLineComment(violation, snippet, apiKey, model);
+                return { violation, comment };
+            }
+            catch (error) {
+                core.warning(`Failed to generate comment for ${violation.symbolName}: ${error}`);
+                // Fallback comment
+                return {
+                    violation,
+                    comment: `⚠️ **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\nThis ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`,
+                };
+            }
+        });
+        const batchResults = await Promise.all(promises);
+        for (const { violation, comment } of batchResults) {
+            results.set(violation, comment);
+        }
+    }
+    return results;
+}
 
 ;// CONCATENATED MODULE: ./src/index.ts
 /**
@@ -32086,7 +32282,7 @@ function getViolationKey(violation) {
  * 1. Getting PR changed files
  * 2. Running complexity analysis
  * 3. Generating AI review
- * 4. Posting comment to PR
+ * 4. Posting comment to PR (line-specific or summary)
  */
 
 
@@ -32097,11 +32293,13 @@ function getViolationKey(violation) {
  * Get action configuration from inputs
  */
 function getConfig() {
+    const reviewStyle = core.getInput('review_style') || 'line';
     return {
         openrouterApiKey: core.getInput('openrouter_api_key', { required: true }),
         model: core.getInput('model') || 'anthropic/claude-sonnet-4',
         threshold: core.getInput('threshold') || '10',
         githubToken: core.getInput('github_token') || process.env.GITHUB_TOKEN || '',
+        reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
     };
 }
 /**
@@ -32113,6 +32311,7 @@ async function run() {
         const config = getConfig();
         core.info(`Using model: ${config.model}`);
         core.info(`Complexity threshold: ${config.threshold}`);
+        core.info(`Review style: ${config.reviewStyle}`);
         if (!config.githubToken) {
             throw new Error('GitHub token is required');
         }
@@ -32148,37 +32347,35 @@ async function run() {
             await postPRComment(octokit, prContext, message);
             return;
         }
-        // 7. Collect code snippets for violations
-        const codeSnippets = new Map();
+        // 7. Collect all violations and sort by severity
         const allViolations = [];
         for (const [, fileData] of Object.entries(report.files)) {
             allViolations.push(...fileData.violations);
         }
-        // Limit snippets to top 10 most severe violations to avoid token limits
-        const topViolations = allViolations
+        const sortedViolations = allViolations
             .sort((a, b) => {
-            // Sort by severity (error > warning), then by complexity
             if (a.severity !== b.severity) {
                 return a.severity === 'error' ? -1 : 1;
             }
             return b.complexity - a.complexity;
         })
-            .slice(0, 10);
-        for (const violation of topViolations) {
+            .slice(0, 10); // Limit to top 10
+        // 8. Collect code snippets
+        const codeSnippets = new Map();
+        for (const violation of sortedViolations) {
             const snippet = await getFileContent(octokit, prContext, violation.filepath, violation.startLine, violation.endLine);
             if (snippet) {
                 codeSnippets.set(getViolationKey(violation), snippet);
             }
         }
         core.info(`Collected ${codeSnippets.size} code snippets for review`);
-        // 8. Build prompt and generate AI review
-        const prompt = buildReviewPrompt(report, prContext, codeSnippets);
-        core.debug(`Prompt length: ${prompt.length} characters`);
-        const aiReview = await generateReview(prompt, config.openrouterApiKey, config.model);
-        // 9. Format and post review
-        const comment = formatReviewComment(aiReview, report);
-        await postPRComment(octokit, prContext, comment);
-        core.info('Successfully posted AI review comment');
+        // 9. Generate and post review based on style
+        if (config.reviewStyle === 'line') {
+            await postLineReview(octokit, prContext, report, sortedViolations, codeSnippets, config);
+        }
+        else {
+            await postSummaryReview(octokit, prContext, report, codeSnippets, config);
+        }
         // 10. Set outputs
         core.setOutput('violations', report.summary.totalViolations);
         core.setOutput('errors', report.summary.bySeverity.error);
@@ -32192,6 +32389,58 @@ async function run() {
             core.setFailed('An unexpected error occurred');
         }
     }
+}
+/**
+ * Post review with line-specific comments
+ */
+async function postLineReview(octokit, prContext, report, violations, codeSnippets, config) {
+    // Get lines that are in the diff (only these can have line comments)
+    const diffLines = await getPRDiffLines(octokit, prContext);
+    core.info(`Diff covers ${diffLines.size} files`);
+    // Filter violations to only those on lines in the diff
+    const commentableViolations = violations.filter((v) => {
+        const fileLines = diffLines.get(v.filepath);
+        if (!fileLines)
+            return false;
+        // Check if start line is in diff
+        return fileLines.has(v.startLine);
+    });
+    core.info(`${commentableViolations.length}/${violations.length} violations are on diff lines`);
+    if (commentableViolations.length === 0) {
+        // No violations on diff lines, fall back to summary
+        core.info('No violations on diff lines, posting summary comment');
+        await postSummaryReview(octokit, prContext, report, codeSnippets, config);
+        return;
+    }
+    // Generate AI comments for each violation
+    core.info('Generating AI comments for violations...');
+    const aiComments = await generateLineComments(commentableViolations, codeSnippets, config.openrouterApiKey, config.model);
+    // Build line comments
+    const lineComments = [];
+    for (const [violation, comment] of aiComments) {
+        const severityEmoji = violation.severity === 'error' ? '🔴' : '🟡';
+        lineComments.push({
+            path: violation.filepath,
+            line: violation.startLine,
+            body: `${severityEmoji} **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\n${comment}`,
+        });
+    }
+    // Build summary comment
+    const summary = buildLineSummaryComment(report, prContext);
+    // Post the review
+    await postPRReview(octokit, prContext, lineComments, summary);
+    core.info(`Posted review with ${lineComments.length} line comments`);
+}
+/**
+ * Post review as a single summary comment (original behavior)
+ */
+async function postSummaryReview(octokit, prContext, report, codeSnippets, config) {
+    const prompt = buildReviewPrompt(report, prContext, codeSnippets);
+    core.debug(`Prompt length: ${prompt.length} characters`);
+    const aiReview = await generateReview(prompt, config.openrouterApiKey, config.model);
+    const comment = formatReviewComment(aiReview, report);
+    await postPRComment(octokit, prContext, comment);
+    core.info('Successfully posted AI review summary comment');
 }
 // Run the action
 run();

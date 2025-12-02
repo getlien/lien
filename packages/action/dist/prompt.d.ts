@@ -18,3 +18,11 @@ export declare function formatReviewComment(aiReview: string, report: Complexity
  * Get the key for a violation (for code snippet mapping)
  */
 export declare function getViolationKey(violation: ComplexityViolation): string;
+/**
+ * Build a prompt for generating a single line comment for a violation
+ */
+export declare function buildLineCommentPrompt(violation: ComplexityViolation, codeSnippet: string | null): string;
+/**
+ * Build a summary comment when using line-specific reviews
+ */
+export declare function buildLineSummaryComment(report: ComplexityReport, prContext: PRContext): string;

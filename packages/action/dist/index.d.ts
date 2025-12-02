@@ -5,6 +5,6 @@
  * 1. Getting PR changed files
  * 2. Running complexity analysis
  * 3. Generating AI review
- * 4. Posting comment to PR
+ * 4. Posting comment to PR (line-specific or summary)
  */
 export {};

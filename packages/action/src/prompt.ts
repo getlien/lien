@@ -126,3 +126,61 @@ export function getViolationKey(violation: ComplexityViolation): string {
   return `${violation.filepath}::${violation.symbolName}`;
 }
 
+/**
+ * Build a prompt for generating a single line comment for a violation
+ */
+export function buildLineCommentPrompt(
+  violation: ComplexityViolation,
+  codeSnippet: string | null
+): string {
+  const snippetSection = codeSnippet
+    ? `\n\nCode:\n\`\`\`\n${codeSnippet}\n\`\`\``
+    : '';
+
+  return `Generate a brief, actionable code review comment for this complexity violation.
+
+**Function**: \`${violation.symbolName}\` (${violation.symbolType})
+**File**: ${violation.filepath}
+**Complexity**: ${violation.complexity} (threshold: ${violation.threshold})
+**Severity**: ${violation.severity}
+${snippetSection}
+
+Write a 2-4 sentence comment that:
+1. Briefly explains what makes this function complex
+2. Suggests ONE specific refactoring approach
+
+Be direct and actionable. No preamble. Start with the issue.
+Example format: "This function has X nested conditions making it hard to test. Consider extracting Y into a separate function."`;
+}
+
+/**
+ * Build a summary comment when using line-specific reviews
+ */
+export function buildLineSummaryComment(
+  report: ComplexityReport,
+  prContext: PRContext
+): string {
+  const { summary } = report;
+  const emoji = summary.bySeverity.error > 0 ? '🔴' : '🟡';
+
+  return `<!-- lien-ai-review -->
+## ${emoji} Lien Complexity Review
+
+Found **${summary.totalViolations}** complexity violation${summary.totalViolations === 1 ? '' : 's'} in this PR:
+- ${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'} (complexity > 2x threshold)
+- ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'} (complexity > threshold)
+
+See inline comments below for specific suggestions.
+
+<details>
+<summary>📊 Details</summary>
+
+- Files analyzed: ${summary.filesAnalyzed}
+- Average complexity: ${summary.avgComplexity.toFixed(1)}
+- Max complexity: ${summary.maxComplexity}
+
+</details>
+
+*[Lien](https://lien.dev) AI Code Review*`;
+}
+

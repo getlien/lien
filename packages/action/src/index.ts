@@ -5,7 +5,7 @@
  * 1. Getting PR changed files
  * 2. Running complexity analysis
  * 3. Generating AI review
- * 4. Posting comment to PR
+ * 4. Posting comment to PR (line-specific or summary)
  */
 
 import * as core from '@actions/core';
@@ -14,27 +14,36 @@ import {
   getPRChangedFiles,
   getFileContent,
   postPRComment,
+  postPRReview,
+  getPRDiffLines,
   createOctokit,
+  type LineComment,
 } from './github.js';
 import { runComplexityAnalysis, filterAnalyzableFiles } from './complexity.js';
-import { generateReview } from './openrouter.js';
+import { generateReview, generateLineComments } from './openrouter.js';
 import {
   buildReviewPrompt,
   buildNoViolationsMessage,
   formatReviewComment,
+  buildLineSummaryComment,
   getViolationKey,
 } from './prompt.js';
 import type { ActionConfig, ComplexityViolation } from './types.js';
 
+type ReviewStyle = 'line' | 'summary';
+
 /**
  * Get action configuration from inputs
  */
-function getConfig(): ActionConfig {
+function getConfig(): ActionConfig & { reviewStyle: ReviewStyle } {
+  const reviewStyle = core.getInput('review_style') || 'line';
+  
   return {
     openrouterApiKey: core.getInput('openrouter_api_key', { required: true }),
     model: core.getInput('model') || 'anthropic/claude-sonnet-4',
     threshold: core.getInput('threshold') || '10',
     githubToken: core.getInput('github_token') || process.env.GITHUB_TOKEN || '',
+    reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
   };
 }
 
@@ -47,6 +56,7 @@ async function run(): Promise<void> {
     const config = getConfig();
     core.info(`Using model: ${config.model}`);
     core.info(`Complexity threshold: ${config.threshold}`);
+    core.info(`Review style: ${config.reviewStyle}`);
 
     if (!config.githubToken) {
       throw new Error('GitHub token is required');
@@ -94,26 +104,24 @@ async function run(): Promise<void> {
       return;
     }
 
-    // 7. Collect code snippets for violations
-    const codeSnippets = new Map<string, string>();
+    // 7. Collect all violations and sort by severity
     const allViolations: ComplexityViolation[] = [];
-
     for (const [, fileData] of Object.entries(report.files)) {
       allViolations.push(...fileData.violations);
     }
 
-    // Limit snippets to top 10 most severe violations to avoid token limits
-    const topViolations = allViolations
+    const sortedViolations = allViolations
       .sort((a, b) => {
-        // Sort by severity (error > warning), then by complexity
         if (a.severity !== b.severity) {
           return a.severity === 'error' ? -1 : 1;
         }
         return b.complexity - a.complexity;
       })
-      .slice(0, 10);
+      .slice(0, 10); // Limit to top 10
 
-    for (const violation of topViolations) {
+    // 8. Collect code snippets
+    const codeSnippets = new Map<string, string>();
+    for (const violation of sortedViolations) {
       const snippet = await getFileContent(
         octokit,
         prContext,
@@ -125,24 +133,27 @@ async function run(): Promise<void> {
         codeSnippets.set(getViolationKey(violation), snippet);
       }
     }
-
     core.info(`Collected ${codeSnippets.size} code snippets for review`);
 
-    // 8. Build prompt and generate AI review
-    const prompt = buildReviewPrompt(report, prContext, codeSnippets);
-    core.debug(`Prompt length: ${prompt.length} characters`);
-
-    const aiReview = await generateReview(
-      prompt,
-      config.openrouterApiKey,
-      config.model
-    );
-
-    // 9. Format and post review
-    const comment = formatReviewComment(aiReview, report);
-    await postPRComment(octokit, prContext, comment);
-
-    core.info('Successfully posted AI review comment');
+    // 9. Generate and post review based on style
+    if (config.reviewStyle === 'line') {
+      await postLineReview(
+        octokit,
+        prContext,
+        report,
+        sortedViolations,
+        codeSnippets,
+        config
+      );
+    } else {
+      await postSummaryReview(
+        octokit,
+        prContext,
+        report,
+        codeSnippets,
+        config
+      );
+    }
 
     // 10. Set outputs
     core.setOutput('violations', report.summary.totalViolations);
@@ -157,6 +168,91 @@ async function run(): Promise<void> {
   }
 }
 
+/**
+ * Post review with line-specific comments
+ */
+async function postLineReview(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: ReturnType<typeof getPRContext> & object,
+  report: Awaited<ReturnType<typeof runComplexityAnalysis>> & object,
+  violations: ComplexityViolation[],
+  codeSnippets: Map<string, string>,
+  config: ReturnType<typeof getConfig>
+): Promise<void> {
+  // Get lines that are in the diff (only these can have line comments)
+  const diffLines = await getPRDiffLines(octokit, prContext);
+  core.info(`Diff covers ${diffLines.size} files`);
+
+  // Filter violations to only those on lines in the diff
+  const commentableViolations = violations.filter((v) => {
+    const fileLines = diffLines.get(v.filepath);
+    if (!fileLines) return false;
+    // Check if start line is in diff
+    return fileLines.has(v.startLine);
+  });
+
+  core.info(
+    `${commentableViolations.length}/${violations.length} violations are on diff lines`
+  );
+
+  if (commentableViolations.length === 0) {
+    // No violations on diff lines, fall back to summary
+    core.info('No violations on diff lines, posting summary comment');
+    await postSummaryReview(octokit, prContext, report, codeSnippets, config);
+    return;
+  }
+
+  // Generate AI comments for each violation
+  core.info('Generating AI comments for violations...');
+  const aiComments = await generateLineComments(
+    commentableViolations,
+    codeSnippets,
+    config.openrouterApiKey,
+    config.model
+  );
+
+  // Build line comments
+  const lineComments: LineComment[] = [];
+  for (const [violation, comment] of aiComments) {
+    const severityEmoji = violation.severity === 'error' ? '🔴' : '🟡';
+    lineComments.push({
+      path: violation.filepath,
+      line: violation.startLine,
+      body: `${severityEmoji} **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\n${comment}`,
+    });
+  }
+
+  // Build summary comment
+  const summary = buildLineSummaryComment(report, prContext);
+
+  // Post the review
+  await postPRReview(octokit, prContext, lineComments, summary);
+  core.info(`Posted review with ${lineComments.length} line comments`);
+}
+
+/**
+ * Post review as a single summary comment (original behavior)
+ */
+async function postSummaryReview(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: ReturnType<typeof getPRContext> & object,
+  report: Awaited<ReturnType<typeof runComplexityAnalysis>> & object,
+  codeSnippets: Map<string, string>,
+  config: ReturnType<typeof getConfig>
+): Promise<void> {
+  const prompt = buildReviewPrompt(report, prContext, codeSnippets);
+  core.debug(`Prompt length: ${prompt.length} characters`);
+
+  const aiReview = await generateReview(
+    prompt,
+    config.openrouterApiKey,
+    config.model
+  );
+
+  const comment = formatReviewComment(aiReview, report);
+  await postPRComment(octokit, prContext, comment);
+  core.info('Successfully posted AI review summary comment');
+}
+
 // Run the action
 run();
-

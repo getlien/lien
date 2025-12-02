@@ -6,7 +6,8 @@ A GitHub Action that analyzes code complexity in pull requests and posts AI-gene
 
 - 🔍 **Complexity Analysis** - Detects functions exceeding complexity thresholds
 - 🤖 **AI-Powered Reviews** - Generates actionable refactoring suggestions via OpenRouter (Claude, GPT-4, etc.)
-- 💬 **PR Comments** - Posts detailed review comments directly on your pull requests
+- 📍 **Line-Specific Comments** - Posts inline comments directly on the problematic code lines
+- 💬 **Smart Fallback** - Falls back to summary comment if lines aren't in the diff
 - ⚡ **Incremental** - Only analyzes changed files in the PR
 
 ## Quick Start
@@ -59,6 +60,7 @@ jobs:
 | `model` | LLM model to use | No | `anthropic/claude-sonnet-4` |
 | `threshold` | Complexity threshold for violations | No | `10` |
 | `github_token` | GitHub token for posting comments | No | `${{ github.token }}` |
+| `review_style` | `line` for inline comments, `summary` for single comment | No | `line` |
 
 ## Outputs
 
@@ -132,7 +134,7 @@ The action posts a comment like this:
 
 - Only runs on PRs from the same repository (not forks) due to secrets access
 - Analyzes up to 10 violations per review to stay within token limits
-- Single PR comment (line-specific comments coming soon)
+- Line comments only work for lines that are part of the PR diff
 
 ## Development
 
