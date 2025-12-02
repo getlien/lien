@@ -64,6 +64,7 @@ export interface OpenRouterResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    cost?: number; // OpenRouter returns actual cost in USD
   };
 }
 

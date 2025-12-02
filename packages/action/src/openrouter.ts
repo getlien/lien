@@ -15,21 +15,8 @@ export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
-  estimatedCost: number;
+  cost: number; // Actual cost from OpenRouter API
 }
-
-// Approximate pricing per 1M tokens (as of late 2024)
-// These are estimates - actual prices may vary
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'anthropic/claude-sonnet-4': { input: 3.0, output: 15.0 },
-  'anthropic/claude-opus-4': { input: 15.0, output: 75.0 },
-  'anthropic/claude-3.5-sonnet': { input: 3.0, output: 15.0 },
-  'openai/gpt-4o': { input: 2.5, output: 10.0 },
-  'openai/gpt-4-turbo': { input: 10.0, output: 30.0 },
-  'openai/gpt-3.5-turbo': { input: 0.5, output: 1.5 },
-};
-
-const DEFAULT_PRICING = { input: 5.0, output: 15.0 }; // Conservative estimate
 
 /**
  * Global token usage accumulator
@@ -38,7 +25,7 @@ let totalUsage: TokenUsage = {
   promptTokens: 0,
   completionTokens: 0,
   totalTokens: 0,
-  estimatedCost: 0,
+  cost: 0,
 };
 
 /**
@@ -49,7 +36,7 @@ export function resetTokenUsage(): void {
     promptTokens: 0,
     completionTokens: 0,
     totalTokens: 0,
-    estimatedCost: 0,
+    cost: 0,
   };
 }
 
@@ -61,23 +48,17 @@ export function getTokenUsage(): TokenUsage {
 }
 
 /**
- * Calculate and accumulate token usage
+ * Accumulate token usage from API response
  */
 function trackUsage(
-  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined,
-  model: string
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number; cost?: number } | undefined
 ): void {
   if (!usage) return;
-
-  const pricing = MODEL_PRICING[model] || DEFAULT_PRICING;
-  const cost =
-    (usage.prompt_tokens / 1_000_000) * pricing.input +
-    (usage.completion_tokens / 1_000_000) * pricing.output;
 
   totalUsage.promptTokens += usage.prompt_tokens;
   totalUsage.completionTokens += usage.completion_tokens;
   totalUsage.totalTokens += usage.total_tokens;
-  totalUsage.estimatedCost += cost;
+  totalUsage.cost += usage.cost || 0; // Use actual cost from OpenRouter
 }
 
 /**
@@ -132,9 +113,9 @@ export async function generateReview(
   const review = data.choices[0].message.content;
 
   if (data.usage) {
-    trackUsage(data.usage, model);
+    trackUsage(data.usage);
     core.info(
-      `Tokens used: ${data.usage.prompt_tokens} prompt, ${data.usage.completion_tokens} completion`
+      `Tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : ''}`
     );
   }
 
@@ -189,7 +170,7 @@ export async function generateLineComment(
   }
 
   if (data.usage) {
-    trackUsage(data.usage, model);
+    trackUsage(data.usage);
   }
 
   return data.choices[0].message.content;

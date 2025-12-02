@@ -308,7 +308,7 @@ async function postHybridReview(
   // Get token usage for cost display
   const usage = getTokenUsage();
   const costDisplay = usage.totalTokens > 0
-    ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} (~$${usage.estimatedCost.toFixed(4)})`
+    ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})`
     : '';
 
   const summaryBody = `<!-- lien-ai-review -->

@@ -9,7 +9,7 @@ export interface TokenUsage {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
-    estimatedCost: number;
+    cost: number;
 }
 /**
  * Reset token usage (call at start of review)

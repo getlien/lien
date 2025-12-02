@@ -32164,17 +32164,6 @@ See inline comments below for specific suggestions.
 
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-// Approximate pricing per 1M tokens (as of late 2024)
-// These are estimates - actual prices may vary
-const MODEL_PRICING = {
-    'anthropic/claude-sonnet-4': { input: 3.0, output: 15.0 },
-    'anthropic/claude-opus-4': { input: 15.0, output: 75.0 },
-    'anthropic/claude-3.5-sonnet': { input: 3.0, output: 15.0 },
-    'openai/gpt-4o': { input: 2.5, output: 10.0 },
-    'openai/gpt-4-turbo': { input: 10.0, output: 30.0 },
-    'openai/gpt-3.5-turbo': { input: 0.5, output: 1.5 },
-};
-const DEFAULT_PRICING = { input: 5.0, output: 15.0 }; // Conservative estimate
 /**
  * Global token usage accumulator
  */
@@ -32182,7 +32171,7 @@ let totalUsage = {
     promptTokens: 0,
     completionTokens: 0,
     totalTokens: 0,
-    estimatedCost: 0,
+    cost: 0,
 };
 /**
  * Reset token usage (call at start of review)
@@ -32192,7 +32181,7 @@ function resetTokenUsage() {
         promptTokens: 0,
         completionTokens: 0,
         totalTokens: 0,
-        estimatedCost: 0,
+        cost: 0,
     };
 }
 /**
@@ -32202,18 +32191,15 @@ function getTokenUsage() {
     return { ...totalUsage };
 }
 /**
- * Calculate and accumulate token usage
+ * Accumulate token usage from API response
  */
-function trackUsage(usage, model) {
+function trackUsage(usage) {
     if (!usage)
         return;
-    const pricing = MODEL_PRICING[model] || DEFAULT_PRICING;
-    const cost = (usage.prompt_tokens / 1_000_000) * pricing.input +
-        (usage.completion_tokens / 1_000_000) * pricing.output;
     totalUsage.promptTokens += usage.prompt_tokens;
     totalUsage.completionTokens += usage.completion_tokens;
     totalUsage.totalTokens += usage.total_tokens;
-    totalUsage.estimatedCost += cost;
+    totalUsage.cost += usage.cost || 0; // Use actual cost from OpenRouter
 }
 /**
  * Generate an AI review using OpenRouter
@@ -32254,8 +32240,8 @@ async function generateReview(prompt, apiKey, model) {
     }
     const review = data.choices[0].message.content;
     if (data.usage) {
-        trackUsage(data.usage, model);
-        core.info(`Tokens used: ${data.usage.prompt_tokens} prompt, ${data.usage.completion_tokens} completion`);
+        trackUsage(data.usage);
+        core.info(`Tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : ''}`);
     }
     return review;
 }
@@ -32296,7 +32282,7 @@ async function generateLineComment(violation, codeSnippet, apiKey, model) {
         throw new Error('No response from OpenRouter');
     }
     if (data.usage) {
-        trackUsage(data.usage, model);
+        trackUsage(data.usage);
     }
     return data.choices[0].message.content;
 }
@@ -32539,7 +32525,7 @@ async function postHybridReview(octokit, prContext, report, violations, codeSnip
     // Get token usage for cost display
     const usage = getTokenUsage();
     const costDisplay = usage.totalTokens > 0
-        ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} (~$${usage.estimatedCost.toFixed(4)})`
+        ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})`
         : '';
     const summaryBody = `<!-- lien-ai-review -->
 ## 🔍 Lien Complexity Review
