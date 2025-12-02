@@ -45,19 +45,25 @@ describe('Laravel Frontend Integration', () => {
     expect(config.include).toContain('app/**/*.php');
     expect(config.include).toContain('resources/**/*.php');
 
-    // Verify frontend files are included (broadened patterns for flexibility)
-    expect(config.include).toContain('**/*.js');
-    expect(config.include).toContain('**/*.ts');
-    expect(config.include).toContain('**/*.jsx');
-    expect(config.include).toContain('**/*.tsx');
-    expect(config.include).toContain('**/*.vue');
+    // Verify frontend files are included (scoped to resources/ to avoid build outputs)
+    expect(config.include).toContain('resources/**/*.js');
+    expect(config.include).toContain('resources/**/*.ts');
+    expect(config.include).toContain('resources/**/*.jsx');
+    expect(config.include).toContain('resources/**/*.tsx');
+    expect(config.include).toContain('resources/**/*.vue');
 
     // Verify Blade templates are included
     expect(config.include).toContain('resources/views/**/*.blade.php');
 
-    // Verify vendor is excluded
+    // Verify vendor is excluded (with ** prefix for nested projects)
+    expect(config.exclude).toContain('**/vendor/**');
     expect(config.exclude).toContain('vendor/**');
+    expect(config.exclude).toContain('**/node_modules/**');
     expect(config.exclude).toContain('node_modules/**');
+    
+    // Verify build outputs are excluded
+    expect(config.exclude).toContain('**/public/build/**');
+    expect(config.exclude).toContain('public/build/**');
   });
 
   it('should scan and index both PHP and Vue files', async () => {

@@ -22,20 +22,31 @@ export async function generateNodeJsConfig(
       '**/*.mdx',
     ],
     exclude: [
+      // Node.js dependencies (with ** prefix for nested projects)
+      '**/node_modules/**',
       'node_modules/**',
+      
+      // PHP/Composer dependencies (for monorepos with PHP)
+      '**/vendor/**',
+      'vendor/**',
+      
+      // Build outputs
+      '**/dist/**',
       'dist/**',
+      '**/build/**',
       'build/**',
-      'coverage/**',
+      '**/public/build/**',
+      'public/build/**',
+      'out/**',
+      
+      // Framework build caches
       '.next/**',
       '.nuxt/**',
       '.vite/**',
       '.lien/**',
-      'out/**',
-      '*.min.js',
-      '*.min.css',
-      '*.bundle.js',
       
-      // Test artifacts (source files are indexed, but not output)
+      // Test artifacts
+      'coverage/**',
       'playwright-report/**',
       'test-results/**',
       
@@ -47,6 +58,11 @@ export async function generateNodeJsConfig(
       '.turbo/**',
       '.vercel/**',
       '.netlify/**',
+      
+      // Minified/bundled files
+      '**/*.min.js',
+      '**/*.min.css',
+      '**/*.bundle.js',
     ],
   };
 }

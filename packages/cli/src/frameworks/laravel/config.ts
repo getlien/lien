@@ -17,31 +17,44 @@ export async function generateLaravelConfig(
       'resources/**/*.php',
       'tests/**/*.php',
       '*.php',
-      // Frontend assets (Vue/React/Inertia) - Broadened for flexibility
-      '**/*.js',
-      '**/*.ts',
-      '**/*.jsx',
-      '**/*.tsx',
-      '**/*.vue',
+      // Frontend assets (Vue/React/Inertia) - Scoped to resources/ to avoid build output
+      'resources/**/*.js',
+      'resources/**/*.ts',
+      'resources/**/*.jsx',
+      'resources/**/*.tsx',
+      'resources/**/*.vue',
       // Blade templates
       'resources/views/**/*.blade.php',
       // Documentation
-      '**/*.md',
-      '**/*.mdx',
       'docs/**/*.md',
       'README.md',
       'CHANGELOG.md',
     ],
     exclude: [
+      // Composer dependencies (CRITICAL: exclude before any include patterns)
+      '**/vendor/**',
       'vendor/**',
-      'storage/**',
-      'bootstrap/cache/**',
-      'public/**',
-      'node_modules/**',
+      
+      // Build outputs (Vite/Mix compiled assets)
+      '**/public/build/**',
+      'public/build/**',
+      'public/hot',
+      '**/dist/**',
       'dist/**',
+      '**/build/**',
       'build/**',
       
-      // Test artifacts (source files are indexed, but not output)
+      // Laravel system directories
+      'storage/**',
+      'bootstrap/cache/**',
+      'public/**/*.js',  // Compiled JS in public
+      'public/**/*.css', // Compiled CSS in public
+      
+      // Node.js dependencies
+      '**/node_modules/**',
+      'node_modules/**',
+      
+      // Test artifacts
       'playwright-report/**',
       'test-results/**',
       'coverage/**',
@@ -53,6 +66,10 @@ export async function generateLaravelConfig(
       '.vite/**',
       '.nuxt/**',
       '.next/**',
+      
+      // Minified files
+      '**/*.min.js',
+      '**/*.min.css',
     ],
   };
 }

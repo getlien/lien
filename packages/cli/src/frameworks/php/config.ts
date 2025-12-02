@@ -28,12 +28,26 @@ export async function generatePhpConfig(
       'CHANGELOG.md',
     ],
     exclude: [
+      // Composer dependencies (CRITICAL)
+      '**/vendor/**',
       'vendor/**',
+      
+      // Node.js dependencies
+      '**/node_modules/**',
       'node_modules/**',
+      
+      // Build outputs
+      '**/dist/**',
       'dist/**',
+      '**/build/**',
       'build/**',
+      '**/public/build/**',
+      'public/build/**',
+      
+      // Laravel/PHP system directories
       'storage/**',
       'cache/**',
+      'bootstrap/cache/**',
       
       // Test artifacts
       'coverage/**',
@@ -42,6 +56,10 @@ export async function generatePhpConfig(
       
       // Build outputs
       '__generated__/**',
+      
+      // Minified files
+      '**/*.min.js',
+      '**/*.min.css',
     ],
   };
 }
