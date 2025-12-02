@@ -50,6 +50,7 @@ export interface ComplexityReport {
 
 /**
  * OpenRouter API response structure
+ * Cost can be in usage.cost or at root level as total_cost
  */
 export interface OpenRouterResponse {
   id: string;
@@ -64,8 +65,11 @@ export interface OpenRouterResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
-    cost?: number; // OpenRouter returns actual cost in USD
+    cost?: number;
   };
+  // OpenRouter may return cost at different levels
+  total_cost?: number;
+  cost?: number;
 }
 
 /**

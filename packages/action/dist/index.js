@@ -32192,14 +32192,17 @@ function getTokenUsage() {
 }
 /**
  * Accumulate token usage from API response
+ * OpenRouter can return cost in multiple places
  */
-function trackUsage(usage) {
+function trackUsage(usage, responseCost) {
     if (!usage)
         return;
     totalUsage.promptTokens += usage.prompt_tokens;
     totalUsage.completionTokens += usage.completion_tokens;
     totalUsage.totalTokens += usage.total_tokens;
-    totalUsage.cost += usage.cost || 0; // Use actual cost from OpenRouter
+    // Try to get cost from multiple locations
+    const cost = usage.cost || responseCost || 0;
+    totalUsage.cost += cost;
 }
 /**
  * Generate an AI review using OpenRouter
@@ -32239,9 +32242,16 @@ async function generateReview(prompt, apiKey, model) {
         throw new Error('No response from OpenRouter');
     }
     const review = data.choices[0].message.content;
+    // Get cost from any available location
+    const cost = data.usage?.cost || data.total_cost || data.cost || 0;
     if (data.usage) {
-        trackUsage(data.usage);
-        core.info(`Tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : ''}`);
+        trackUsage(data.usage, cost);
+        core.info(`Tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${cost ? ` ($${cost.toFixed(6)})` : ''}`);
+    }
+    // Debug: log full response structure to find cost field
+    core.debug(`OpenRouter response keys: ${Object.keys(data).join(', ')}`);
+    if (cost === 0) {
+        core.warning(`No cost data found in response. Response: ${JSON.stringify(data).slice(0, 500)}`);
     }
     return review;
 }
@@ -32281,8 +32291,9 @@ async function generateLineComment(violation, codeSnippet, apiKey, model) {
     if (!data.choices || data.choices.length === 0) {
         throw new Error('No response from OpenRouter');
     }
+    const cost = data.usage?.cost || data.total_cost || data.cost || 0;
     if (data.usage) {
-        trackUsage(data.usage);
+        trackUsage(data.usage, cost);
     }
     return data.choices[0].message.content;
 }
