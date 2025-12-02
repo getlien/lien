@@ -20,7 +20,9 @@ export class ComplexityAnalyzer {
    * @returns Complexity report with violations and summary
    */
   async analyze(files?: string[]): Promise<ComplexityReport> {
-    // 1. Get all chunks from index (uses pagination internally for large codebases)
+    // 1. Get all chunks from index (uses full scan internally for LanceDB)
+    // Note: We fetch all chunks even with --files filter because dependency analysis
+    // needs the complete dataset to find dependents accurately
     const allChunks = await this.vectorDB.scanAll();
     
     // 2. Filter to specified files if provided

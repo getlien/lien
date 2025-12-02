@@ -395,14 +395,12 @@ export async function scanAll(
     const totalRows = await table.countRows();
     
     // Fetch all rows in one query (LanceDB is local, this is efficient)
-    // The 2x multiplier accounts for LanceDB internal filtering overhead -
-    // scanWithFilter may need to scan more records than it returns due to
-    // post-query filtering. 10000 is the minimum to handle small databases.
-    const FILTERING_OVERHEAD_MULTIPLIER = 2;
-    const MIN_SCAN_LIMIT = 10000;
+    // Note: scanWithFilter internally applies a 5x multiplier to the limit,
+    // so we pass totalRows directly. MIN_SCAN_LIMIT ensures small DBs work.
+    const MIN_SCAN_LIMIT = 1000;
     const results = await scanWithFilter(table, {
       ...options,
-      limit: Math.max(totalRows * FILTERING_OVERHEAD_MULTIPLIER, MIN_SCAN_LIMIT),
+      limit: Math.max(totalRows, MIN_SCAN_LIMIT),
     });
     
     return results;

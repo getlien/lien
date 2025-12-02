@@ -82,6 +82,8 @@ export async function complexityCommand(options: ComplexityOptions) {
           thresholds: { method: thresholdValue, file: 50, average: 6 },
           severity: { warning: 1.0, error: 2.0 },
         };
+      } else if (!config.complexity.thresholds) {
+        config.complexity.thresholds = { method: thresholdValue, file: 50, average: 6 };
       } else {
         config.complexity.thresholds.method = thresholdValue;
       }
