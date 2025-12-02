@@ -58,10 +58,6 @@ jobs:
       - name: Initialize Lien (auto-detect frameworks)
         run: lien init --yes
       
-      # Note: We don't cache ~/.lien because the git SHAs stored in the index
-      # manifest don't match across workflow runs, causing full reindex anyway.
-      # The embedding model is loaded fresh each time (~2s with warm node_modules).
-      
       - name: Index codebase
         run: lien index
       

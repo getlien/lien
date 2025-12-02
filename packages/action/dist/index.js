@@ -32293,17 +32293,21 @@ async function generateLineComments(violations, codeSnippets, apiKey, model) {
 
 
 
+// Max inline comments to generate (controls token costs)
+const MAX_INLINE_COMMENTS = 5;
 /**
  * Get action configuration from inputs
  */
 function getConfig() {
-    const reviewStyle = core.getInput('review_style') || 'line';
+    const reviewStyle = core.getInput('review_style') || 'hybrid';
     return {
         openrouterApiKey: core.getInput('openrouter_api_key', { required: true }),
         model: core.getInput('model') || 'anthropic/claude-sonnet-4',
         threshold: core.getInput('threshold') || '10',
         githubToken: core.getInput('github_token') || process.env.GITHUB_TOKEN || '',
-        reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
+        reviewStyle: ['summary', 'line', 'hybrid'].includes(reviewStyle)
+            ? reviewStyle
+            : 'hybrid',
     };
 }
 /**
@@ -32374,11 +32378,16 @@ async function run() {
         }
         core.info(`Collected ${codeSnippets.size} code snippets for review`);
         // 9. Generate and post review based on style
-        if (config.reviewStyle === 'line') {
-            await postLineReview(octokit, prContext, report, sortedViolations, codeSnippets, config);
+        if (config.reviewStyle === 'summary') {
+            await postSummaryReview(octokit, prContext, report, codeSnippets, config);
+        }
+        else if (config.reviewStyle === 'line') {
+            await postLineReview(octokit, prContext, report, sortedViolations, codeSnippets, config, false // don't limit to errors only
+            );
         }
         else {
-            await postSummaryReview(octokit, prContext, report, codeSnippets, config);
+            // hybrid mode: inline for errors, summary for warnings
+            await postHybridReview(octokit, prContext, report, sortedViolations, codeSnippets, config);
         }
         // 10. Set outputs
         core.setOutput('violations', report.summary.totalViolations);
@@ -32397,7 +32406,7 @@ async function run() {
 /**
  * Post review with line-specific comments
  */
-async function postLineReview(octokit, prContext, report, violations, codeSnippets, config) {
+async function postLineReview(octokit, prContext, report, violations, codeSnippets, config, _errorsOnly = false) {
     // Get lines that are in the diff (only these can have line comments)
     const diffLines = await getPRDiffLines(octokit, prContext);
     core.info(`Diff covers ${diffLines.size} files`);
@@ -32434,6 +32443,66 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     // Post the review
     await postPRReview(octokit, prContext, lineComments, summary);
     core.info(`Posted review with ${lineComments.length} line comments`);
+}
+/**
+ * Hybrid mode: inline comments for errors, summary for warnings
+ * Best balance of UX and token costs
+ */
+async function postHybridReview(octokit, prContext, report, violations, codeSnippets, config) {
+    // Split into errors (inline) and warnings (summary)
+    const errors = violations.filter(v => v.severity === 'error');
+    const warnings = violations.filter(v => v.severity === 'warning');
+    core.info(`Hybrid mode: ${errors.length} errors (inline), ${warnings.length} warnings (summary)`);
+    // Get lines in diff for inline comments
+    const diffLines = await getPRDiffLines(octokit, prContext);
+    // Filter errors to those on diff lines, limit to MAX_INLINE_COMMENTS
+    const inlineErrors = errors
+        .filter(v => {
+        const fileLines = diffLines.get(v.filepath);
+        return fileLines?.has(v.startLine);
+    })
+        .slice(0, MAX_INLINE_COMMENTS);
+    const lineComments = [];
+    if (inlineErrors.length > 0) {
+        // Generate AI comments only for errors
+        core.info(`Generating ${inlineErrors.length} inline comments for errors...`);
+        const aiComments = await generateLineComments(inlineErrors, codeSnippets, config.openrouterApiKey, config.model);
+        for (const [violation, comment] of aiComments) {
+            lineComments.push({
+                path: violation.filepath,
+                line: violation.startLine,
+                body: `🔴 **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\n${comment}`,
+            });
+        }
+    }
+    // Build summary that includes warnings
+    const { summary } = report;
+    const warningsList = warnings.length > 0
+        ? warnings.map(w => `- \`${w.symbolName}\` in \`${w.filepath}\` (complexity: ${w.complexity})`).join('\n')
+        : '';
+    const summaryBody = `<!-- lien-ai-review -->
+## 🔍 Lien Complexity Review
+
+**Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}:**
+- 🔴 ${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'} (inline comments ${inlineErrors.length > 0 ? 'above' : 'n/a - not in diff'})
+- 🟡 ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'}${warnings.length > 0 ? `
+
+### Warnings (consider refactoring)
+${warningsList}` : ''}
+
+<details>
+<summary>📊 Analysis Details</summary>
+
+- Files analyzed: ${summary.filesAnalyzed}
+- Average complexity: ${summary.avgComplexity.toFixed(1)}
+- Max complexity: ${summary.maxComplexity}
+
+</details>
+
+*[Lien](https://lien.dev) AI Code Review*`;
+    // Post the review
+    await postPRReview(octokit, prContext, lineComments, summaryBody);
+    core.info(`Posted hybrid review: ${lineComments.length} inline + summary`);
 }
 /**
  * Post review as a single summary comment (original behavior)

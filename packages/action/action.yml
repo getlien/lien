@@ -19,8 +19,8 @@ inputs:
     description: 'GitHub token for posting comments (defaults to github.token)'
     default: ${{ github.token }}
   review_style:
-    description: 'Review style: "line" for inline comments on specific lines, "summary" for single PR comment'
-    default: 'line'
+    description: 'Review style: "hybrid" (default) for inline on errors + summary for warnings, "line" for all inline, "summary" for single comment'
+    default: 'hybrid'
 
 runs:
   using: 'node20'
