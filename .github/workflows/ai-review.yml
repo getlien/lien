@@ -4,10 +4,10 @@ on:
   pull_request:
     types: [opened, synchronize]
 
-# Prevent concurrent reviews on the same PR
+# Queue reviews on the same PR (don't cancel - we need cache to save!)
 concurrency:
   group: ai-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   review:
