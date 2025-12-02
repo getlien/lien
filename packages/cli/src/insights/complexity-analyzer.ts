@@ -67,7 +67,7 @@ export class ComplexityAnalyzer {
     for (const chunk of chunks) {
       const metadata = chunk.metadata;
       
-      // Skip chunks without complexity data
+      // Skip chunks without complexity data or with 0 complexity
       if (!metadata.complexity) {
         continue;
       }

@@ -131,9 +131,10 @@ export class VectorDB implements VectorDBInterface {
   }
   
   /**
-   * Scan all chunks in the database with pagination
+   * Scan all chunks in the database
+   * Fetches total count first, then retrieves all chunks in a single optimized query
    * @param options - Filter options (language, pattern)
-   * @param batchSize - Number of chunks to fetch per batch (default: 10000)
+   * @param batchSize - Unused, kept for API compatibility
    * @returns All matching chunks
    */
   async scanAll(options: {

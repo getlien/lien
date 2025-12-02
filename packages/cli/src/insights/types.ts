@@ -30,6 +30,7 @@ export interface FileComplexityData {
   violations: ComplexityViolation[];
   dependents: string[];
   dependentCount?: number;
+  /** Test files associated with this source file. TODO: Populate when test-to-code mapping is implemented */
   testAssociations: string[];
   riskLevel: RiskLevel;
   dependentComplexityMetrics?: {
