@@ -4,10 +4,10 @@ on:
   pull_request:
     types: [opened, synchronize]
 
-# Queue reviews on the same PR (don't cancel - we need cache to save!)
+# Cancel previous runs on same PR to save resources
 concurrency:
   group: ai-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   review:
@@ -58,15 +58,9 @@ jobs:
       - name: Initialize Lien (auto-detect frameworks)
         run: lien init --yes
       
-      # Cache the Lien index for incremental updates
-      # Index is stored in ~/.lien/indices/{project-hash}
-      - name: Cache Lien index
-        uses: actions/cache@v4
-        with:
-          path: ~/.lien
-          key: lien-index-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            lien-index-${{ runner.os }}-
+      # Note: We don't cache ~/.lien because the git SHAs stored in the index
+      # manifest don't match across workflow runs, causing full reindex anyway.
+      # The embedding model is loaded fresh each time (~2s with warm node_modules).
       
       - name: Index codebase
         run: lien index
