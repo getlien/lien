@@ -3,6 +3,7 @@ import { ComplexityAnalyzer } from './complexity-analyzer.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { LienConfig } from '../config/schema.js';
 import { ChunkMetadata } from '../indexer/types.js';
+import { SearchResult } from '../vectordb/types.js';
 
 describe('ComplexityAnalyzer', () => {
   let mockVectorDB: VectorDB;
