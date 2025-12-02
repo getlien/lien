@@ -2,6 +2,8 @@ import { VectorDB } from '../vectordb/lancedb.js';
 import { LienConfig } from '../config/schema.js';
 import { ComplexityViolation, ComplexityReport, FileComplexityData } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
+import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
+import { SearchResult } from '../vectordb/types.js';
 import path from 'path';
 
 /**
@@ -31,7 +33,12 @@ export class ComplexityAnalyzer {
     const violations = this.findViolations(chunks);
     
     // 4. Build report grouped by file
-    return this.buildReport(violations, chunks);
+    const report = this.buildReport(violations, chunks);
+    
+    // 5. Enrich files with violations with dependency data
+    await this.enrichWithDependencies(report, allChunks as SearchResult[]);
+    
+    return report;
   }
 
   /**
@@ -169,6 +176,51 @@ export class ComplexityAnalyzer {
     if (hasErrors) return 'high';
     if (violations.length >= 3) return 'medium';
     return 'low';
+  }
+
+  /**
+   * Enrich files with violations with dependency data
+   * This adds:
+   * - List of dependent files (who imports this?)
+   * - Boosted risk level based on dependents + complexity
+   */
+  private async enrichWithDependencies(
+    report: ComplexityReport,
+    allChunks: SearchResult[]
+  ): Promise<void> {
+    const workspaceRoot = process.cwd();
+
+    // Only enrich files that have violations (to save computation)
+    const filesWithViolations = Object.entries(report.files)
+      .filter(([_, data]) => data.violations.length > 0)
+      .map(([filepath, _]) => filepath);
+
+    for (const filepath of filesWithViolations) {
+      const fileData = report.files[filepath];
+      
+      // Analyze dependencies for this file
+      const depAnalysis = analyzeDependencies(filepath, allChunks, workspaceRoot);
+      
+      // Update file data with dependency information
+      fileData.dependents = depAnalysis.dependents.map(d => d.filepath);
+      fileData.dependentCount = depAnalysis.dependentCount;
+      
+      // Boost risk level based on dependency analysis
+      // Take the higher of the two risk levels
+      const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
+      if (RISK_ORDER[depAnalysis.riskLevel] > RISK_ORDER[fileData.riskLevel]) {
+        fileData.riskLevel = depAnalysis.riskLevel;
+      }
+      
+      // Add complexity metrics if available
+      if (depAnalysis.complexityMetrics) {
+        fileData.dependentComplexityMetrics = {
+          averageComplexity: depAnalysis.complexityMetrics.averageComplexity,
+          maxComplexity: depAnalysis.complexityMetrics.maxComplexity,
+          filesWithComplexityData: depAnalysis.complexityMetrics.filesWithComplexityData,
+        };
+      }
+    }
   }
 }
 

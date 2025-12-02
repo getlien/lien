@@ -18,8 +18,14 @@ export interface ComplexityViolation {
 export interface FileComplexityData {
   violations: ComplexityViolation[];
   dependents: string[];
+  dependentCount?: number;
   testAssociations: string[];
   riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  dependentComplexityMetrics?: {
+    averageComplexity: number;
+    maxComplexity: number;
+    filesWithComplexityData: number;
+  };
 }
 
 export interface ComplexityReport {

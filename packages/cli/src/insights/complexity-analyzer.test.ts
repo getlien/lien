@@ -325,5 +325,167 @@ describe('ComplexityAnalyzer', () => {
       expect(report.files['src/high.ts'].riskLevel).toBe('high'); // Has error
     });
   });
+
+  describe('dependency enrichment', () => {
+    it('should enrich violations with dependency data', async () => {
+      const chunks: SearchResult[] = [
+        // File with violation
+        {
+          content: 'function complex() { }',
+          metadata: {
+            file: 'src/utils.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'complex',
+            symbolType: 'function',
+            complexity: 20, // Above threshold
+            imports: [],
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+        // Dependent file 1
+        {
+          content: 'import { complex } from "./utils";',
+          metadata: {
+            file: 'src/app.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            imports: ['src/utils.ts'],
+            complexity: 15,
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+        // Dependent file 2
+        {
+          content: 'import { complex } from "./utils";',
+          metadata: {
+            file: 'src/config.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            imports: ['src/utils.ts'],
+            complexity: 8,
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const report = await analyzer.analyze();
+
+      const fileData = report.files['src/utils.ts'];
+      expect(fileData.violations).toHaveLength(1);
+      expect(fileData.dependentCount).toBe(2);
+      expect(fileData.dependents).toHaveLength(2);
+      expect(fileData.dependents).toEqual(expect.arrayContaining(['src/app.ts', 'src/config.ts']));
+      expect(fileData.dependentComplexityMetrics).toBeDefined();
+      expect(fileData.dependentComplexityMetrics!.maxComplexity).toBe(15);
+      expect(fileData.dependentComplexityMetrics!.averageComplexity).toBeCloseTo(11.5, 1); // (15 + 8) / 2
+    });
+
+    it('should boost risk level based on many dependents', async () => {
+      const chunks: SearchResult[] = [
+        // File with minor violation
+        {
+          content: 'function complex() { }',
+          metadata: {
+            file: 'src/utils.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'complex',
+            symbolType: 'function',
+            complexity: 12, // Just slightly above threshold (10)
+            imports: [],
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+        // Many dependents
+        ...Array.from({ length: 35 }, (_, i) => ({
+          content: `import { complex } from "./utils";`,
+          metadata: {
+            file: `src/dep${i}.ts`,
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            imports: ['src/utils.ts'],
+            complexity: 5,
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        })),
+      ];
+
+      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const report = await analyzer.analyze();
+
+      const fileData = report.files['src/utils.ts'];
+      
+      // Should be boosted to critical due to high dependent count (35 > 30)
+      expect(fileData.dependentCount).toBe(35);
+      expect(fileData.riskLevel).toBe('critical');
+    });
+
+    it('should not enrich files without violations', async () => {
+      const chunks: SearchResult[] = [
+        // File without violation
+        {
+          content: 'function simple() { }',
+          metadata: {
+            file: 'src/simple.ts',
+            startLine: 1,
+            endLine: 5,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'simple',
+            symbolType: 'function',
+            complexity: 5, // Below threshold
+            imports: [],
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+        // Dependent file
+        {
+          content: 'import { simple } from "./simple";',
+          metadata: {
+            file: 'src/app.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            imports: ['src/simple.ts'],
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanWithFilter).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const report = await analyzer.analyze();
+
+      const fileData = report.files['src/simple.ts'];
+      expect(fileData.violations).toHaveLength(0);
+      expect(fileData.dependentCount).toBeUndefined(); // Should not be enriched
+      expect(fileData.dependents).toHaveLength(0); // Empty array by default
+    });
+  });
 });
 

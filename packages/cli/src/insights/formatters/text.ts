@@ -38,15 +38,26 @@ export function formatTextReport(report: ComplexityReport): string {
   if (errors.length > 0) {
     lines.push(chalk.red.bold('❌ Errors:\n'));
     for (const error of errors) {
-      lines.push(chalk.red(`  ${error.file}:${error.startLine}`) + chalk.dim(' - ') + chalk.bold(error.symbolName + '()'));
+      const symbolDisplay = (error.symbolType === 'function' || error.symbolType === 'method') 
+        ? error.symbolName + '()' 
+        : error.symbolName;
+      lines.push(chalk.red(`  ${error.file}:${error.startLine}`) + chalk.dim(' - ') + chalk.bold(symbolDisplay));
       lines.push(chalk.dim(`    Complexity: ${error.complexity} (threshold: ${error.threshold})`));
       const percentage = Math.round(((error.complexity - error.threshold) / error.threshold) * 100);
       lines.push(chalk.dim(`    ⬆️  ${percentage}% over threshold`));
       const fileData = report.files[error.file];
-      if (fileData.dependents && fileData.dependents.length > 0) {
-        lines.push(chalk.dim(`    Dependents: ${fileData.dependents.length} files`));
+      
+      // Show dependency impact
+      const depCount = fileData.dependentCount ?? fileData.dependents.length;
+      if (depCount > 0) {
+        lines.push(chalk.dim(`    📦 Imported by ${depCount} file${depCount !== 1 ? 's' : ''}`));
+        if (fileData.dependentComplexityMetrics) {
+          const metrics = fileData.dependentComplexityMetrics;
+          lines.push(chalk.dim(`       Dependent avg complexity: ${metrics.averageComplexity}, max: ${metrics.maxComplexity}`));
+        }
       }
-      lines.push(chalk.dim(`    Risk: ${fileData.riskLevel.toUpperCase()}`));
+      
+      lines.push(chalk.dim(`    ⚠️  Risk: ${fileData.riskLevel.toUpperCase()}`));
       lines.push('');
     }
   }
@@ -59,13 +70,26 @@ export function formatTextReport(report: ComplexityReport): string {
   if (warnings.length > 0) {
     lines.push(chalk.yellow.bold('⚠️  Warnings:\n'));
     for (const warning of warnings) {
-      lines.push(chalk.yellow(`  ${warning.file}:${warning.startLine}`) + chalk.dim(' - ') + warning.symbolName + '()');
+      const symbolDisplay = (warning.symbolType === 'function' || warning.symbolType === 'method') 
+        ? warning.symbolName + '()' 
+        : warning.symbolName;
+      lines.push(chalk.yellow(`  ${warning.file}:${warning.startLine}`) + chalk.dim(' - ') + symbolDisplay);
       lines.push(chalk.dim(`    Complexity: ${warning.complexity} (threshold: ${warning.threshold})`));
+      const percentage = Math.round(((warning.complexity - warning.threshold) / warning.threshold) * 100);
+      lines.push(chalk.dim(`    ⬆️  ${percentage}% over threshold`));
       const fileData = report.files[warning.file];
-      if (fileData.dependents && fileData.dependents.length > 0) {
-        lines.push(chalk.dim(`    Dependents: ${fileData.dependents.length} files`));
+      
+      // Show dependency impact
+      const depCount = fileData.dependentCount ?? fileData.dependents.length;
+      if (depCount > 0) {
+        lines.push(chalk.dim(`    📦 Imported by ${depCount} file${depCount !== 1 ? 's' : ''}`));
+        if (fileData.dependentComplexityMetrics) {
+          const metrics = fileData.dependentComplexityMetrics;
+          lines.push(chalk.dim(`       Dependent avg complexity: ${metrics.averageComplexity}, max: ${metrics.maxComplexity}`));
+        }
       }
-      lines.push(chalk.dim(`    Risk: ${fileData.riskLevel.toUpperCase()}`));
+      
+      lines.push(chalk.dim(`    ⚠️  Risk: ${fileData.riskLevel.toUpperCase()}`));
       lines.push('');
     }
   }
