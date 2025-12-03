@@ -239,7 +239,7 @@ export function buildBatchedCommentsPrompt(
     .map((v) => `  "${v.filepath}::${v.symbolName}": "your comment here"`)
     .join(',\n');
 
-  return `You are reviewing code for complexity violations. Generate actionable review comments for each violation.
+  return `You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.
 
 ## Violations to Review
 
@@ -247,12 +247,23 @@ ${violationsText}
 
 ## Instructions
 
-For each violation, write a code review comment with:
-1. **Problem:** What pattern causes complexity (1 sentence)
-2. **Suggestion:** Concrete fix with a short code example showing the refactored approach (3-5 lines of code max)
-3. **Benefit:** What improves (1 sentence)
+For each violation, write a code review comment that:
 
-Always include a brief code snippet demonstrating the suggested fix.
+1. **Identifies the specific pattern** causing complexity (not just "too complex")
+   - Is it nested conditionals? Long parameter lists? Multiple responsibilities?
+   - Be specific: "5 levels of nesting" not "deeply nested"
+
+2. **Suggests a concrete fix** with a short code example (3-5 lines)
+   - Consider: early returns, guard clauses, lookup tables, extracting helpers, strategy pattern
+   - Name specific functions: "Extract \`handleAdminCase()\`" not "extract a function"
+   - Choose the SIMPLEST fix that addresses the issue (KISS principle)
+
+3. **Acknowledges context** when relevant
+   - If this is an orchestration function, complexity may be acceptable
+   - If the logic is inherently complex (state machines, parsers), say so
+   - Don't suggest over-engineering for marginal gains
+
+Be direct and specific to THIS code. Avoid generic advice like "break into smaller functions."
 
 IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
 
