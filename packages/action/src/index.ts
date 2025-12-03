@@ -46,127 +46,124 @@ function getConfig(): ActionConfig & { reviewStyle: ReviewStyle } {
   };
 }
 
+type PRContext = NonNullable<ReturnType<typeof getPRContext>>;
+type Octokit = ReturnType<typeof createOctokit>;
+type Config = ReturnType<typeof getConfig>;
+
 /**
- * Main action logic
+ * Setup and validate PR analysis prerequisites
+ */
+function setupPRAnalysis(): { config: Config; prContext: PRContext; octokit: Octokit } | null {
+  const config = getConfig();
+  core.info(`Using model: ${config.model}`);
+  core.info(`Complexity threshold: ${config.threshold}`);
+  core.info(`Review style: ${config.reviewStyle}`);
+
+  if (!config.githubToken) {
+    throw new Error('GitHub token is required');
+  }
+
+  const prContext = getPRContext();
+  if (!prContext) {
+    core.warning('Not running in PR context, skipping');
+    return null;
+  }
+
+  core.info(`Reviewing PR #${prContext.pullNumber}: ${prContext.title}`);
+  return { config, prContext, octokit: createOctokit(config.githubToken) };
+}
+
+/**
+ * Get and filter files eligible for complexity analysis
+ */
+async function getFilesToAnalyze(octokit: Octokit, prContext: PRContext): Promise<string[]> {
+  const allChangedFiles = await getPRChangedFiles(octokit, prContext);
+  core.info(`Found ${allChangedFiles.length} changed files in PR`);
+
+  const filesToAnalyze = filterAnalyzableFiles(allChangedFiles);
+  core.info(`${filesToAnalyze.length} files eligible for complexity analysis`);
+
+  return filesToAnalyze;
+}
+
+/**
+ * Sort violations by severity and collect code snippets
+ */
+async function prepareViolationsForReview(
+  report: NonNullable<Awaited<ReturnType<typeof runComplexityAnalysis>>>,
+  octokit: Octokit,
+  prContext: PRContext
+): Promise<{ violations: ComplexityViolation[]; codeSnippets: Map<string, string> }> {
+  // Collect and sort violations
+  const violations = Object.values(report.files)
+    .flatMap((fileData) => fileData.violations)
+    .sort((a, b) => {
+      if (a.severity !== b.severity) return a.severity === 'error' ? -1 : 1;
+      return b.complexity - a.complexity;
+    })
+    .slice(0, 10);
+
+  // Collect code snippets
+  const codeSnippets = new Map<string, string>();
+  for (const violation of violations) {
+    const snippet = await getFileContent(
+      octokit,
+      prContext,
+      violation.filepath,
+      violation.startLine,
+      violation.endLine
+    );
+    if (snippet) {
+      codeSnippets.set(getViolationKey(violation), snippet);
+    }
+  }
+  core.info(`Collected ${codeSnippets.size} code snippets for review`);
+
+  return { violations, codeSnippets };
+}
+
+/**
+ * Main action logic - orchestrates the review flow
  */
 async function run(): Promise<void> {
   try {
-    // 1. Get configuration
-    const config = getConfig();
-    core.info(`Using model: ${config.model}`);
-    core.info(`Complexity threshold: ${config.threshold}`);
-    core.info(`Review style: ${config.reviewStyle}`);
+    const setup = setupPRAnalysis();
+    if (!setup) return;
+    const { config, prContext, octokit } = setup;
 
-    if (!config.githubToken) {
-      throw new Error('GitHub token is required');
-    }
-
-    // 2. Get PR context
-    const prContext = getPRContext();
-    if (!prContext) {
-      core.warning('Not running in PR context, skipping');
-      return;
-    }
-    core.info(`Reviewing PR #${prContext.pullNumber}: ${prContext.title}`);
-
-    // 3. Get changed files
-    const octokit = createOctokit(config.githubToken);
-    const allChangedFiles = await getPRChangedFiles(octokit, prContext);
-    core.info(`Found ${allChangedFiles.length} changed files in PR`);
-
-    // 4. Filter to analyzable files
-    const filesToAnalyze = filterAnalyzableFiles(allChangedFiles);
-    core.info(`${filesToAnalyze.length} files eligible for complexity analysis`);
-
+    const filesToAnalyze = await getFilesToAnalyze(octokit, prContext);
     if (filesToAnalyze.length === 0) {
       core.info('No analyzable files found, skipping review');
       return;
     }
 
-    // 5. Run complexity analysis
     const report = await runComplexityAnalysis(filesToAnalyze, config.threshold);
-
     if (!report) {
       core.warning('Failed to get complexity report');
       return;
     }
+    core.info(`Analysis complete: ${report.summary.totalViolations} violations found`);
 
-    core.info(
-      `Analysis complete: ${report.summary.totalViolations} violations found`
-    );
-
-    // 6. Handle no violations case
     if (report.summary.totalViolations === 0) {
       core.info('No complexity violations found');
-      const message = buildNoViolationsMessage(prContext);
-      await postPRComment(octokit, prContext, message);
+      await postPRComment(octokit, prContext, buildNoViolationsMessage(prContext));
       return;
     }
 
-    // 7. Collect all violations and sort by severity
-    const allViolations: ComplexityViolation[] = [];
-    for (const [, fileData] of Object.entries(report.files)) {
-      allViolations.push(...fileData.violations);
-    }
+    const { violations, codeSnippets } = await prepareViolationsForReview(report, octokit, prContext);
 
-    const sortedViolations = allViolations
-      .sort((a, b) => {
-        if (a.severity !== b.severity) {
-          return a.severity === 'error' ? -1 : 1;
-        }
-        return b.complexity - a.complexity;
-      })
-      .slice(0, 10); // Limit to top 10
-
-    // 8. Collect code snippets
-    const codeSnippets = new Map<string, string>();
-    for (const violation of sortedViolations) {
-      const snippet = await getFileContent(
-        octokit,
-        prContext,
-        violation.filepath,
-        violation.startLine,
-        violation.endLine
-      );
-      if (snippet) {
-        codeSnippets.set(getViolationKey(violation), snippet);
-      }
-    }
-    core.info(`Collected ${codeSnippets.size} code snippets for review`);
-
-    // 9. Reset token tracking and generate review
     resetTokenUsage();
-    
     if (config.reviewStyle === 'summary') {
-      await postSummaryReview(
-        octokit,
-        prContext,
-        report,
-        codeSnippets,
-        config
-      );
+      await postSummaryReview(octokit, prContext, report, codeSnippets, config);
     } else {
-      // line mode (default): inline comments for all violations
-      await postLineReview(
-        octokit,
-        prContext,
-        report,
-        sortedViolations,
-        codeSnippets,
-        config
-      );
+      await postLineReview(octokit, prContext, report, violations, codeSnippets, config);
     }
 
-    // 10. Set outputs
     core.setOutput('violations', report.summary.totalViolations);
     core.setOutput('errors', report.summary.bySeverity.error);
     core.setOutput('warnings', report.summary.bySeverity.warning);
   } catch (error) {
-    if (error instanceof Error) {
-      core.setFailed(error.message);
-    } else {
-      core.setFailed('An unexpected error occurred');
-    }
+    core.setFailed(error instanceof Error ? error.message : 'An unexpected error occurred');
   }
 }
 
