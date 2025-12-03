@@ -24,10 +24,11 @@ export declare function getTokenUsage(): TokenUsage;
  */
 export declare function generateReview(prompt: string, apiKey: string, model: string): Promise<string>;
 /**
- * Generate a brief comment for a single violation
- */
-export declare function generateLineComment(violation: ComplexityViolation, codeSnippet: string | null, apiKey: string, model: string): Promise<string>;
-/**
- * Generate line comments for multiple violations in parallel
+ * Generate line comments for multiple violations in a single API call
+ *
+ * This is more efficient than individual calls:
+ * - System prompt only sent once (saves ~100 tokens per violation)
+ * - AI has full context of all violations (can identify patterns)
+ * - Single API call = faster execution
  */
 export declare function generateLineComments(violations: ComplexityViolation[], codeSnippets: Map<string, string>, apiKey: string, model: string): Promise<Map<ComplexityViolation, string>>;

@@ -26,3 +26,11 @@ export declare function buildLineCommentPrompt(violation: ComplexityViolation, c
  * Build a summary comment when using line-specific reviews
  */
 export declare function buildLineSummaryComment(report: ComplexityReport, prContext: PRContext): string;
+/**
+ * Build a batched prompt for generating multiple line comments at once
+ * This is more efficient than individual prompts as:
+ * - System prompt only sent once
+ * - AI has full context of all violations
+ * - Fewer API calls = faster + cheaper
+ */
+export declare function buildBatchedCommentsPrompt(violations: ComplexityViolation[], codeSnippets: Map<string, string>): string;

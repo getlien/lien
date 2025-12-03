@@ -4,6 +4,7 @@ import {
   buildNoViolationsMessage,
   formatReviewComment,
   getViolationKey,
+  buildBatchedCommentsPrompt,
 } from '../src/prompt.js';
 import type { ComplexityReport, PRContext } from '../src/types.js';
 
@@ -177,6 +178,46 @@ describe('prompt', () => {
       const key = getViolationKey(violation);
 
       expect(key).toBe('src/utils.ts::processData');
+    });
+  });
+
+  describe('buildBatchedCommentsPrompt', () => {
+    it('should include all violations in the prompt', () => {
+      const violations = [
+        mockReport.files['src/utils.ts'].violations[0],
+        mockReport.files['src/handler.ts'].violations[0],
+      ];
+      const codeSnippets = new Map<string, string>();
+
+      const prompt = buildBatchedCommentsPrompt(violations, codeSnippets);
+
+      expect(prompt).toContain('processData');
+      expect(prompt).toContain('handleRequest');
+      expect(prompt).toContain('Complexity**: 23');
+      expect(prompt).toContain('Complexity**: 11');
+    });
+
+    it('should include code snippets when provided', () => {
+      const violations = [mockReport.files['src/utils.ts'].violations[0]];
+      const codeSnippets = new Map<string, string>();
+      codeSnippets.set('src/utils.ts::processData', 'function processData() {}');
+
+      const prompt = buildBatchedCommentsPrompt(violations, codeSnippets);
+
+      expect(prompt).toContain('function processData() {}');
+    });
+
+    it('should include JSON response format with correct keys', () => {
+      const violations = [
+        mockReport.files['src/utils.ts'].violations[0],
+        mockReport.files['src/handler.ts'].violations[0],
+      ];
+
+      const prompt = buildBatchedCommentsPrompt(violations, new Map());
+
+      expect(prompt).toContain('"src/utils.ts::processData"');
+      expect(prompt).toContain('"src/handler.ts::handleRequest"');
+      expect(prompt).toContain('Respond with ONLY valid JSON');
     });
   });
 });

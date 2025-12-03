@@ -188,3 +188,59 @@ See inline comments below for specific suggestions.
 *[Lien](https://lien.dev) AI Code Review*`;
 }
 
+/**
+ * Build a batched prompt for generating multiple line comments at once
+ * This is more efficient than individual prompts as:
+ * - System prompt only sent once
+ * - AI has full context of all violations
+ * - Fewer API calls = faster + cheaper
+ */
+export function buildBatchedCommentsPrompt(
+  violations: ComplexityViolation[],
+  codeSnippets: Map<string, string>
+): string {
+  const violationsText = violations
+    .map((v, i) => {
+      const key = `${v.filepath}::${v.symbolName}`;
+      const snippet = codeSnippets.get(key);
+      const snippetSection = snippet
+        ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\``
+        : '';
+
+      return `### ${i + 1}. ${v.filepath}::${v.symbolName}
+- **Function**: \`${v.symbolName}\` (${v.symbolType})
+- **Complexity**: ${v.complexity} (threshold: ${v.threshold})
+- **Severity**: ${v.severity}${snippetSection}`;
+    })
+    .join('\n\n');
+
+  // Build JSON keys for the response format
+  const jsonKeys = violations
+    .map((v) => `  "${v.filepath}::${v.symbolName}": "your comment here"`)
+    .join(',\n');
+
+  return `You are reviewing code for complexity violations. Generate actionable review comments for each violation.
+
+## Violations to Review
+
+${violationsText}
+
+## Instructions
+
+For each violation, write a concise code review comment that includes:
+1. **Problem** (1 sentence): What specific pattern makes this complex
+2. **Refactoring** (2-3 sentences): Concrete steps with specific function names to extract
+3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
+
+## Response Format
+
+Respond with ONLY valid JSON. Each key is "filepath::symbolName", value is the comment text.
+Use \\n for newlines within comments.
+
+\`\`\`json
+{
+${jsonKeys}
+}
+\`\`\``;
+}
+

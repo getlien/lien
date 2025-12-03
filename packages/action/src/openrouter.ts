@@ -4,7 +4,7 @@
 
 import * as core from '@actions/core';
 import type { OpenRouterResponse, ComplexityViolation } from './types.js';
-import { buildLineCommentPrompt } from './prompt.js';
+import { buildBatchedCommentsPrompt } from './prompt.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -131,15 +131,28 @@ export async function generateReview(
 }
 
 /**
- * Generate a brief comment for a single violation
+ * Generate line comments for multiple violations in a single API call
+ * 
+ * This is more efficient than individual calls:
+ * - System prompt only sent once (saves ~100 tokens per violation)
+ * - AI has full context of all violations (can identify patterns)
+ * - Single API call = faster execution
  */
-export async function generateLineComment(
-  violation: ComplexityViolation,
-  codeSnippet: string | null,
+export async function generateLineComments(
+  violations: ComplexityViolation[],
+  codeSnippets: Map<string, string>,
   apiKey: string,
   model: string
-): Promise<string> {
-  const prompt = buildLineCommentPrompt(violation, codeSnippet);
+): Promise<Map<ComplexityViolation, string>> {
+  const results = new Map<ComplexityViolation, string>();
+
+  if (violations.length === 0) {
+    return results;
+  }
+
+  core.info(`Generating comments for ${violations.length} violations in single batch`);
+
+  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets);
 
   const response = await fetch(OPENROUTER_API_URL, {
     method: 'POST',
@@ -155,16 +168,16 @@ export async function generateLineComment(
         {
           role: 'system',
           content:
-            'You are an expert code reviewer. Write detailed, actionable comments with specific refactoring suggestions. Include concrete function names and patterns.',
+            'You are an expert code reviewer. Write detailed, actionable comments with specific refactoring suggestions. Respond ONLY with valid JSON.',
         },
         {
           role: 'user',
           content: prompt,
         },
       ],
-      max_tokens: 500, // Allow more detailed comments
+      // Scale tokens based on number of violations (~300 tokens per comment)
+      max_tokens: Math.min(4000, 300 * violations.length + 200),
       temperature: 0.3,
-      // Enable usage accounting to get cost data
       usage: {
         include: true,
       },
@@ -172,7 +185,8 @@ export async function generateLineComment(
   });
 
   if (!response.ok) {
-    throw new Error(`OpenRouter API error: ${response.status}`);
+    const errorText = await response.text();
+    throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
   }
 
   const data = (await response.json()) as OpenRouterResponse;
@@ -183,48 +197,49 @@ export async function generateLineComment(
 
   if (data.usage) {
     trackUsage(data.usage);
+    const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
+    core.info(
+      `Batch tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`
+    );
   }
 
-  return data.choices[0].message.content;
-}
+  // Parse JSON response
+  const content = data.choices[0].message.content;
+  let commentsMap: Record<string, string>;
 
-/**
- * Generate line comments for multiple violations in parallel
- */
-export async function generateLineComments(
-  violations: ComplexityViolation[],
-  codeSnippets: Map<string, string>,
-  apiKey: string,
-  model: string
-): Promise<Map<ComplexityViolation, string>> {
-  const results = new Map<ComplexityViolation, string>();
-
-  // Process in parallel with concurrency limit
-  const CONCURRENCY = 3;
-  
-  for (let i = 0; i < violations.length; i += CONCURRENCY) {
-    const batch = violations.slice(i, i + CONCURRENCY);
+  try {
+    // Extract JSON from markdown code block if present
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonStr = jsonMatch ? jsonMatch[1].trim() : content.trim();
+    commentsMap = JSON.parse(jsonStr);
+  } catch (parseError) {
+    core.warning(`Failed to parse batched response as JSON: ${parseError}`);
+    core.debug(`Response content: ${content.slice(0, 500)}`);
     
-    const promises = batch.map(async (violation) => {
-      const key = `${violation.filepath}::${violation.symbolName}`;
-      const snippet = codeSnippets.get(key) || null;
-      
-      try {
-        const comment = await generateLineComment(violation, snippet, apiKey, model);
-        return { violation, comment };
-      } catch (error) {
-        core.warning(`Failed to generate comment for ${violation.symbolName}: ${error}`);
-        // Fallback comment
-        return {
-          violation,
-          comment: `⚠️ **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\nThis ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`,
-        };
-      }
-    });
+    // Fallback: generate generic comments for all violations
+    for (const violation of violations) {
+      results.set(
+        violation,
+        `⚠️ **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\nThis ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`
+      );
+    }
+    return results;
+  }
 
-    const batchResults = await Promise.all(promises);
-    for (const { violation, comment } of batchResults) {
-      results.set(violation, comment);
+  // Map comments back to violations
+  for (const violation of violations) {
+    const key = `${violation.filepath}::${violation.symbolName}`;
+    const comment = commentsMap[key];
+
+    if (comment) {
+      // Unescape newlines from JSON
+      results.set(violation, comment.replace(/\\n/g, '\n'));
+    } else {
+      core.warning(`No comment generated for ${key}`);
+      results.set(
+        violation,
+        `⚠️ **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\nThis ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`
+      );
     }
   }
 

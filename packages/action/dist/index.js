@@ -32156,6 +32156,55 @@ See inline comments below for specific suggestions.
 
 *[Lien](https://lien.dev) AI Code Review*`;
 }
+/**
+ * Build a batched prompt for generating multiple line comments at once
+ * This is more efficient than individual prompts as:
+ * - System prompt only sent once
+ * - AI has full context of all violations
+ * - Fewer API calls = faster + cheaper
+ */
+function buildBatchedCommentsPrompt(violations, codeSnippets) {
+    const violationsText = violations
+        .map((v, i) => {
+        const key = `${v.filepath}::${v.symbolName}`;
+        const snippet = codeSnippets.get(key);
+        const snippetSection = snippet
+            ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\``
+            : '';
+        return `### ${i + 1}. ${v.filepath}::${v.symbolName}
+- **Function**: \`${v.symbolName}\` (${v.symbolType})
+- **Complexity**: ${v.complexity} (threshold: ${v.threshold})
+- **Severity**: ${v.severity}${snippetSection}`;
+    })
+        .join('\n\n');
+    // Build JSON keys for the response format
+    const jsonKeys = violations
+        .map((v) => `  "${v.filepath}::${v.symbolName}": "your comment here"`)
+        .join(',\n');
+    return `You are reviewing code for complexity violations. Generate actionable review comments for each violation.
+
+## Violations to Review
+
+${violationsText}
+
+## Instructions
+
+For each violation, write a concise code review comment that includes:
+1. **Problem** (1 sentence): What specific pattern makes this complex
+2. **Refactoring** (2-3 sentences): Concrete steps with specific function names to extract
+3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
+
+## Response Format
+
+Respond with ONLY valid JSON. Each key is "filepath::symbolName", value is the comment text.
+Use \\n for newlines within comments.
+
+\`\`\`json
+{
+${jsonKeys}
+}
+\`\`\``;
+}
 
 ;// CONCATENATED MODULE: ./src/openrouter.ts
 /**
@@ -32254,10 +32303,20 @@ async function generateReview(prompt, apiKey, model) {
     return review;
 }
 /**
- * Generate a brief comment for a single violation
+ * Generate line comments for multiple violations in a single API call
+ *
+ * This is more efficient than individual calls:
+ * - System prompt only sent once (saves ~100 tokens per violation)
+ * - AI has full context of all violations (can identify patterns)
+ * - Single API call = faster execution
  */
-async function generateLineComment(violation, codeSnippet, apiKey, model) {
-    const prompt = buildLineCommentPrompt(violation, codeSnippet);
+async function generateLineComments(violations, codeSnippets, apiKey, model) {
+    const results = new Map();
+    if (violations.length === 0) {
+        return results;
+    }
+    core.info(`Generating comments for ${violations.length} violations in single batch`);
+    const prompt = buildBatchedCommentsPrompt(violations, codeSnippets);
     const response = await fetch(OPENROUTER_API_URL, {
         method: 'POST',
         headers: {
@@ -32271,23 +32330,24 @@ async function generateLineComment(violation, codeSnippet, apiKey, model) {
             messages: [
                 {
                     role: 'system',
-                    content: 'You are an expert code reviewer. Write detailed, actionable comments with specific refactoring suggestions. Include concrete function names and patterns.',
+                    content: 'You are an expert code reviewer. Write detailed, actionable comments with specific refactoring suggestions. Respond ONLY with valid JSON.',
                 },
                 {
                     role: 'user',
                     content: prompt,
                 },
             ],
-            max_tokens: 500, // Allow more detailed comments
+            // Scale tokens based on number of violations (~300 tokens per comment)
+            max_tokens: Math.min(4000, 300 * violations.length + 200),
             temperature: 0.3,
-            // Enable usage accounting to get cost data
             usage: {
                 include: true,
             },
         }),
     });
     if (!response.ok) {
-        throw new Error(`OpenRouter API error: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
     }
     const data = (await response.json());
     if (!data.choices || data.choices.length === 0) {
@@ -32295,37 +32355,38 @@ async function generateLineComment(violation, codeSnippet, apiKey, model) {
     }
     if (data.usage) {
         trackUsage(data.usage);
+        const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
+        core.info(`Batch tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`);
     }
-    return data.choices[0].message.content;
-}
-/**
- * Generate line comments for multiple violations in parallel
- */
-async function generateLineComments(violations, codeSnippets, apiKey, model) {
-    const results = new Map();
-    // Process in parallel with concurrency limit
-    const CONCURRENCY = 3;
-    for (let i = 0; i < violations.length; i += CONCURRENCY) {
-        const batch = violations.slice(i, i + CONCURRENCY);
-        const promises = batch.map(async (violation) => {
-            const key = `${violation.filepath}::${violation.symbolName}`;
-            const snippet = codeSnippets.get(key) || null;
-            try {
-                const comment = await generateLineComment(violation, snippet, apiKey, model);
-                return { violation, comment };
-            }
-            catch (error) {
-                core.warning(`Failed to generate comment for ${violation.symbolName}: ${error}`);
-                // Fallback comment
-                return {
-                    violation,
-                    comment: `⚠️ **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\nThis ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`,
-                };
-            }
-        });
-        const batchResults = await Promise.all(promises);
-        for (const { violation, comment } of batchResults) {
-            results.set(violation, comment);
+    // Parse JSON response
+    const content = data.choices[0].message.content;
+    let commentsMap;
+    try {
+        // Extract JSON from markdown code block if present
+        const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+        const jsonStr = jsonMatch ? jsonMatch[1].trim() : content.trim();
+        commentsMap = JSON.parse(jsonStr);
+    }
+    catch (parseError) {
+        core.warning(`Failed to parse batched response as JSON: ${parseError}`);
+        core.debug(`Response content: ${content.slice(0, 500)}`);
+        // Fallback: generate generic comments for all violations
+        for (const violation of violations) {
+            results.set(violation, `⚠️ **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\nThis ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`);
+        }
+        return results;
+    }
+    // Map comments back to violations
+    for (const violation of violations) {
+        const key = `${violation.filepath}::${violation.symbolName}`;
+        const comment = commentsMap[key];
+        if (comment) {
+            // Unescape newlines from JSON
+            results.set(violation, comment.replace(/\\n/g, '\n'));
+        }
+        else {
+            core.warning(`No comment generated for ${key}`);
+            results.set(violation, `⚠️ **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\nThis ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`);
         }
     }
     return results;
