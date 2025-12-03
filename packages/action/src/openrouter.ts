@@ -214,13 +214,14 @@ export async function generateLineComments(
     commentsMap = JSON.parse(jsonStr);
   } catch (parseError) {
     core.warning(`Failed to parse batched response as JSON: ${parseError}`);
-    core.debug(`Response content: ${content.slice(0, 500)}`);
+    // Log full response to help debug
+    core.warning(`Full response content:\n${content}`);
     
-    // Fallback: generate generic comments for all violations
+    // Fallback: generate generic comments for all violations (no header - we add it)
     for (const violation of violations) {
       results.set(
         violation,
-        `⚠️ **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\nThis ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`
+        `This ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`
       );
     }
     return results;
@@ -238,7 +239,7 @@ export async function generateLineComments(
       core.warning(`No comment generated for ${key}`);
       results.set(
         violation,
-        `⚠️ **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\nThis ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`
+        `This ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`
       );
     }
   }
