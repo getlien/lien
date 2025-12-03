@@ -4,7 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize]
 
-# Prevent concurrent reviews on the same PR
+# Cancel previous runs on same PR to save resources
 concurrency:
   group: ai-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -31,10 +31,25 @@ jobs:
           node-version: '22'
           cache: 'npm'
       
+      # Cache the built CLI to avoid rebuilding every run
+      - name: Cache Lien CLI build
+        id: cache-cli
+        uses: actions/cache@v4
+        with:
+          path: |
+            packages/cli/dist
+            node_modules
+            packages/*/node_modules
+          key: lien-cli-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/cli/src/**/*') }}
+          restore-keys: |
+            lien-cli-${{ runner.os }}-
+      
       - name: Install dependencies
+        if: steps.cache-cli.outputs.cache-hit != 'true'
         run: npm ci
       
       - name: Build Lien CLI
+        if: steps.cache-cli.outputs.cache-hit != 'true'
         run: npm run build
       
       - name: Install Lien globally
@@ -51,6 +66,6 @@ jobs:
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
           model: 'anthropic/claude-sonnet-4'
-          threshold: '15'
+          threshold: '10'  # Error threshold = 20, so complexity 20+ will be an error
           github_token: ${{ secrets.GITHUB_TOKEN }}
 

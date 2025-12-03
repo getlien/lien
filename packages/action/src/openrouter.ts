@@ -3,9 +3,100 @@
  */
 
 import * as core from '@actions/core';
-import type { OpenRouterResponse } from './types.js';
+import type { OpenRouterResponse, ComplexityViolation } from './types.js';
+import { buildBatchedCommentsPrompt } from './prompt.js';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+/**
+ * Token usage tracking
+ */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  cost: number; // Actual cost from OpenRouter API
+}
+
+/**
+ * Global token usage accumulator
+ */
+let totalUsage: TokenUsage = {
+  promptTokens: 0,
+  completionTokens: 0,
+  totalTokens: 0,
+  cost: 0,
+};
+
+/**
+ * Reset token usage (call at start of review)
+ */
+export function resetTokenUsage(): void {
+  totalUsage = {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    cost: 0,
+  };
+}
+
+/**
+ * Get current token usage
+ */
+export function getTokenUsage(): TokenUsage {
+  return { ...totalUsage };
+}
+
+/**
+ * Accumulate token usage from API response
+ * Cost is returned in usage.cost when usage accounting is enabled
+ */
+function trackUsage(
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number; cost?: number } | undefined
+): void {
+  if (!usage) return;
+
+  totalUsage.promptTokens += usage.prompt_tokens;
+  totalUsage.completionTokens += usage.completion_tokens;
+  totalUsage.totalTokens += usage.total_tokens;
+  totalUsage.cost += usage.cost || 0;
+}
+
+/**
+ * Parse JSON comments response from AI, handling markdown code blocks
+ * Returns null if parsing fails after retry attempts
+ * Exported for testing
+ */
+export function parseCommentsResponse(content: string): Record<string, string> | null {
+  // Try extracting JSON from markdown code block first
+  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
+
+  core.info(`Parsing JSON response (${jsonStr.length} chars)`);
+
+  try {
+    const parsed = JSON.parse(jsonStr);
+    core.info(`Successfully parsed ${Object.keys(parsed).length} comments`);
+    return parsed;
+  } catch (parseError) {
+    core.warning(`Initial JSON parse failed: ${parseError}`);
+  }
+
+  // Aggressive retry: extract any JSON object from response
+  const objectMatch = content.match(/\{[\s\S]*\}/);
+  if (objectMatch) {
+    try {
+      const parsed = JSON.parse(objectMatch[0]);
+      core.info(`Recovered JSON with aggressive parsing: ${Object.keys(parsed).length} comments`);
+      return parsed;
+    } catch (retryError) {
+      core.warning(`Retry parsing also failed: ${retryError}`);
+    }
+  }
+
+  core.warning(`Full response content:\n${content}`);
+  return null;
+}
 
 /**
  * Generate an AI review using OpenRouter
@@ -40,6 +131,11 @@ export async function generateReview(
       ],
       max_tokens: 2000,
       temperature: 0.3, // Lower temperature for more consistent reviews
+      // Enable usage accounting to get cost data
+      // https://openrouter.ai/docs/guides/guides/usage-accounting
+      usage: {
+        include: true,
+      },
     }),
   });
 
@@ -58,12 +154,128 @@ export async function generateReview(
 
   const review = data.choices[0].message.content;
 
+  // Cost is in usage.cost when usage accounting is enabled
   if (data.usage) {
+    trackUsage(data.usage);
+    const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
     core.info(
-      `Tokens used: ${data.usage.prompt_tokens} prompt, ${data.usage.completion_tokens} completion`
+      `Tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`
     );
   }
 
   return review;
+}
+
+/**
+ * Call OpenRouter API with batched comments prompt
+ */
+async function callBatchedCommentsAPI(
+  prompt: string,
+  apiKey: string,
+  model: string
+): Promise<OpenRouterResponse> {
+  const response = await fetch(OPENROUTER_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://github.com/getlien/lien',
+      'X-Title': 'Lien AI Code Review',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are an expert code reviewer. Write detailed, actionable comments with specific refactoring suggestions. Respond ONLY with valid JSON.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 4096,
+      temperature: 0.3,
+      usage: { include: true },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
+  }
+
+  const data = (await response.json()) as OpenRouterResponse;
+
+  if (!data.choices || data.choices.length === 0) {
+    throw new Error('No response from OpenRouter');
+  }
+
+  return data;
+}
+
+/**
+ * Map parsed comments to violations, with fallback for missing comments
+ * Exported for testing
+ */
+export function mapCommentsToViolations(
+  commentsMap: Record<string, string> | null,
+  violations: ComplexityViolation[]
+): Map<ComplexityViolation, string> {
+  const results = new Map<ComplexityViolation, string>();
+  const fallbackMessage = (v: ComplexityViolation) =>
+    `This ${v.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`;
+
+  if (!commentsMap) {
+    for (const violation of violations) {
+      results.set(violation, fallbackMessage(violation));
+    }
+    return results;
+  }
+
+  for (const violation of violations) {
+    const key = `${violation.filepath}::${violation.symbolName}`;
+    const comment = commentsMap[key];
+
+    if (comment) {
+      results.set(violation, comment.replace(/\\n/g, '\n'));
+    } else {
+      core.warning(`No comment generated for ${key}`);
+      results.set(violation, fallbackMessage(violation));
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Generate line comments for multiple violations in a single API call
+ * 
+ * This is more efficient than individual calls:
+ * - System prompt only sent once (saves ~100 tokens per violation)
+ * - AI has full context of all violations (can identify patterns)
+ * - Single API call = faster execution
+ */
+export async function generateLineComments(
+  violations: ComplexityViolation[],
+  codeSnippets: Map<string, string>,
+  apiKey: string,
+  model: string
+): Promise<Map<ComplexityViolation, string>> {
+  if (violations.length === 0) {
+    return new Map();
+  }
+
+  core.info(`Generating comments for ${violations.length} violations in single batch`);
+
+  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets);
+  const data = await callBatchedCommentsAPI(prompt, apiKey, model);
+
+  if (data.usage) {
+    trackUsage(data.usage);
+    const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
+    core.info(`Batch tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`);
+  }
+
+  const commentsMap = parseCommentsResponse(data.choices[0].message.content);
+  return mapCommentsToViolations(commentsMap, violations);
 }
 

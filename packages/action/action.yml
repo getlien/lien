@@ -18,6 +18,9 @@ inputs:
   github_token:
     description: 'GitHub token for posting comments (defaults to github.token)'
     default: ${{ github.token }}
+  review_style:
+    description: 'Review style: "line" (default) for inline comments on all violations, "summary" for single comment only'
+    default: 'line'
 
 runs:
   using: 'node20'

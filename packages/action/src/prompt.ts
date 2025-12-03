@@ -88,18 +88,38 @@ All analyzed functions are within the configured complexity threshold.`;
 }
 
 /**
+ * Token usage info for display
+ */
+export interface TokenUsageInfo {
+  totalTokens: number;
+  cost: number;
+}
+
+/**
  * Format the AI review as a GitHub comment
+ * @param isFallback - true if this is a fallback because violations aren't on diff lines
+ * @param tokenUsage - optional token usage stats to display
  */
 export function formatReviewComment(
   aiReview: string,
-  report: ComplexityReport
+  report: ComplexityReport,
+  isFallback = false,
+  tokenUsage?: TokenUsageInfo
 ): string {
   const { summary } = report;
+
+  const fallbackNote = isFallback
+    ? `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`
+    : '';
+
+  const tokenStats = tokenUsage && tokenUsage.totalTokens > 0
+    ? `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`
+    : '';
 
   return `<!-- lien-ai-review -->
 ## 🔍 Lien AI Code Review
 
-**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})
+**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${fallbackNote}
 
 ---
 
@@ -112,7 +132,7 @@ ${aiReview}
 
 - Files analyzed: ${summary.filesAnalyzed}
 - Average complexity: ${summary.avgComplexity.toFixed(1)}
-- Max complexity: ${summary.maxComplexity}
+- Max complexity: ${summary.maxComplexity}${tokenStats}
 
 </details>
 
@@ -124,5 +144,138 @@ ${aiReview}
  */
 export function getViolationKey(violation: ComplexityViolation): string {
   return `${violation.filepath}::${violation.symbolName}`;
+}
+
+/**
+ * Build a prompt for generating a single line comment for a violation
+ */
+export function buildLineCommentPrompt(
+  violation: ComplexityViolation,
+  codeSnippet: string | null
+): string {
+  const snippetSection = codeSnippet
+    ? `\n\n**Code:**\n\`\`\`\n${codeSnippet}\n\`\`\``
+    : '';
+
+  return `You are reviewing code for complexity. Generate an actionable review comment.
+
+**Function**: \`${violation.symbolName}\` (${violation.symbolType})
+**Complexity**: ${violation.complexity} (threshold: ${violation.threshold})
+${snippetSection}
+
+Write a code review comment that includes:
+
+1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains")
+
+2. **Refactoring** (2-3 sentences): Concrete steps to reduce complexity. Be SPECIFIC:
+   - Name the exact functions to extract (e.g., "Extract \`handleAdminDelete()\` and \`handleModeratorDelete()\`")
+   - Suggest specific patterns (strategy, lookup table, early returns)
+   - If applicable, show a brief code sketch
+
+3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
+
+Format as a single cohesive comment without headers. Be direct and specific to THIS code.`;
+}
+
+/**
+ * Build a summary comment when using line-specific reviews
+ */
+export function buildLineSummaryComment(
+  report: ComplexityReport,
+  prContext: PRContext
+): string {
+  const { summary } = report;
+  const emoji = summary.bySeverity.error > 0 ? '🔴' : '🟡';
+
+  return `<!-- lien-ai-review -->
+## ${emoji} Lien Complexity Review
+
+Found **${summary.totalViolations}** complexity violation${summary.totalViolations === 1 ? '' : 's'} in this PR:
+- ${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'} (complexity > 2x threshold)
+- ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'} (complexity > threshold)
+
+See inline comments below for specific suggestions.
+
+<details>
+<summary>📊 Details</summary>
+
+- Files analyzed: ${summary.filesAnalyzed}
+- Average complexity: ${summary.avgComplexity.toFixed(1)}
+- Max complexity: ${summary.maxComplexity}
+
+</details>
+
+*[Lien](https://lien.dev) AI Code Review*`;
+}
+
+/**
+ * Build a batched prompt for generating multiple line comments at once
+ * This is more efficient than individual prompts as:
+ * - System prompt only sent once
+ * - AI has full context of all violations
+ * - Fewer API calls = faster + cheaper
+ */
+export function buildBatchedCommentsPrompt(
+  violations: ComplexityViolation[],
+  codeSnippets: Map<string, string>
+): string {
+  const violationsText = violations
+    .map((v, i) => {
+      const key = `${v.filepath}::${v.symbolName}`;
+      const snippet = codeSnippets.get(key);
+      const snippetSection = snippet
+        ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\``
+        : '';
+
+      return `### ${i + 1}. ${v.filepath}::${v.symbolName}
+- **Function**: \`${v.symbolName}\` (${v.symbolType})
+- **Complexity**: ${v.complexity} (threshold: ${v.threshold})
+- **Severity**: ${v.severity}${snippetSection}`;
+    })
+    .join('\n\n');
+
+  // Build JSON keys for the response format
+  const jsonKeys = violations
+    .map((v) => `  "${v.filepath}::${v.symbolName}": "your comment here"`)
+    .join(',\n');
+
+  return `You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.
+
+## Violations to Review
+
+${violationsText}
+
+## Instructions
+
+For each violation, write a code review comment that:
+
+1. **Identifies the specific pattern** causing complexity (not just "too complex")
+   - Is it nested conditionals? Long parameter lists? Multiple responsibilities?
+   - Be specific: "5 levels of nesting" not "deeply nested"
+
+2. **Suggests a concrete fix** with a short code example (3-5 lines)
+   - Consider: early returns, guard clauses, lookup tables, extracting helpers, strategy pattern
+   - Name specific functions: "Extract \`handleAdminCase()\`" not "extract a function"
+   - Choose the SIMPLEST fix that addresses the issue (KISS principle)
+
+3. **Acknowledges context** when relevant
+   - If this is an orchestration function, complexity may be acceptable
+   - If the logic is inherently complex (state machines, parsers), say so
+   - Don't suggest over-engineering for marginal gains
+
+Be direct and specific to THIS code. Avoid generic advice like "break into smaller functions."
+
+IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
+
+## Response Format
+
+Respond with ONLY valid JSON. Each key is "filepath::symbolName", value is the comment text.
+Use \\n for newlines within comments.
+
+\`\`\`json
+{
+${jsonKeys}
+}
+\`\`\``;
 }
 

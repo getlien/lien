@@ -50,6 +50,8 @@ export interface ComplexityReport {
 
 /**
  * OpenRouter API response structure
+ * Cost is returned in usage.cost when usage accounting is enabled
+ * See: https://openrouter.ai/docs/guides/guides/usage-accounting
  */
 export interface OpenRouterResponse {
   id: string;
@@ -64,6 +66,7 @@ export interface OpenRouterResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    cost?: number; // Returned when usage: { include: true } is set in request
   };
 }
 

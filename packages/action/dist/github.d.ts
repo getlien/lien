@@ -24,4 +24,26 @@ export declare function getFileContent(octokit: Octokit, prContext: PRContext, f
  * Create an Octokit instance from token
  */
 export declare function createOctokit(token: string): Octokit;
+/**
+ * Line comment for PR review
+ */
+export interface LineComment {
+    path: string;
+    line: number;
+    body: string;
+}
+/**
+ * Post a review with line-specific comments
+ */
+export declare function postPRReview(octokit: Octokit, prContext: PRContext, comments: LineComment[], summaryBody: string): Promise<void>;
+/**
+ * Parse unified diff patch to extract line numbers that can receive comments
+ * Exported for testing
+ */
+export declare function parsePatchLines(patch: string): Set<number>;
+/**
+ * Get lines that are in the PR diff (only these can have line comments)
+ * Handles pagination for PRs with 100+ files
+ */
+export declare function getPRDiffLines(octokit: Octokit, prContext: PRContext): Promise<Map<string, Set<number>>>;
 export {};

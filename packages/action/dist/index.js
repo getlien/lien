@@ -31819,6 +31819,90 @@ async function getFileContent(octokit, prContext, filepath, startLine, endLine) 
 function createOctokit(token) {
     return github.getOctokit(token);
 }
+/**
+ * Post a review with line-specific comments
+ */
+async function postPRReview(octokit, prContext, comments, summaryBody) {
+    if (comments.length === 0) {
+        // No line comments, just post summary as regular comment
+        await postPRComment(octokit, prContext, summaryBody);
+        return;
+    }
+    core.info(`Creating review with ${comments.length} line comments`);
+    try {
+        // Create a review with line comments
+        await octokit.rest.pulls.createReview({
+            owner: prContext.owner,
+            repo: prContext.repo,
+            pull_number: prContext.pullNumber,
+            commit_id: prContext.headSha,
+            event: 'COMMENT', // Don't approve or request changes, just comment
+            body: summaryBody,
+            comments: comments.map((c) => ({
+                path: c.path,
+                line: c.line,
+                body: c.body,
+            })),
+        });
+        core.info('Review posted successfully');
+    }
+    catch (error) {
+        // If line comments fail (e.g., lines not in diff), fall back to regular comment
+        core.warning(`Failed to post line comments: ${error}`);
+        core.info('Falling back to regular PR comment');
+        await postPRComment(octokit, prContext, summaryBody);
+    }
+}
+/**
+ * Parse unified diff patch to extract line numbers that can receive comments
+ * Exported for testing
+ */
+function parsePatchLines(patch) {
+    const lines = new Set();
+    let currentLine = 0;
+    for (const patchLine of patch.split('\n')) {
+        // Hunk header: @@ -start,count +start,count @@
+        const hunkMatch = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (hunkMatch) {
+            currentLine = parseInt(hunkMatch[1], 10);
+            continue;
+        }
+        // Added or context line (can have comments)
+        if (patchLine.startsWith('+') || patchLine.startsWith(' ')) {
+            if (!patchLine.startsWith('+++')) {
+                lines.add(currentLine);
+                currentLine++;
+            }
+        }
+        // Deleted lines (-) don't increment currentLine
+    }
+    return lines;
+}
+/**
+ * Get lines that are in the PR diff (only these can have line comments)
+ * Handles pagination for PRs with 100+ files
+ */
+async function getPRDiffLines(octokit, prContext) {
+    const diffLines = new Map();
+    // Use pagination to handle PRs with 100+ files
+    const iterator = octokit.paginate.iterator(octokit.rest.pulls.listFiles, {
+        owner: prContext.owner,
+        repo: prContext.repo,
+        pull_number: prContext.pullNumber,
+        per_page: 100,
+    });
+    for await (const response of iterator) {
+        for (const file of response.data) {
+            if (!file.patch)
+                continue;
+            const lines = parsePatchLines(file.patch);
+            if (lines.size > 0) {
+                diffLines.set(file.filename, lines);
+            }
+        }
+    }
+    return diffLines;
+}
 
 // EXTERNAL MODULE: ../../node_modules/@actions/exec/lib/exec.js
 var exec = __nccwpck_require__(9192);
@@ -31920,56 +32004,6 @@ function filterAnalyzableFiles(files) {
     });
 }
 
-;// CONCATENATED MODULE: ./src/openrouter.ts
-/**
- * OpenRouter API client for LLM access
- */
-
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-/**
- * Generate an AI review using OpenRouter
- */
-async function generateReview(prompt, apiKey, model) {
-    core.info(`Calling OpenRouter with model: ${model}`);
-    const response = await fetch(OPENROUTER_API_URL, {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://github.com/getlien/lien',
-            'X-Title': 'Lien AI Code Review',
-        },
-        body: JSON.stringify({
-            model,
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are an expert code reviewer. Provide actionable, specific feedback on code complexity issues. Be concise but thorough.',
-                },
-                {
-                    role: 'user',
-                    content: prompt,
-                },
-            ],
-            max_tokens: 2000,
-            temperature: 0.3, // Lower temperature for more consistent reviews
-        }),
-    });
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
-    }
-    const data = (await response.json());
-    if (!data.choices || data.choices.length === 0) {
-        throw new Error('No response from OpenRouter');
-    }
-    const review = data.choices[0].message.content;
-    if (data.usage) {
-        core.info(`Tokens used: ${data.usage.prompt_tokens} prompt, ${data.usage.completion_tokens} completion`);
-    }
-    return review;
-}
-
 ;// CONCATENATED MODULE: ./src/prompt.ts
 /**
  * Prompt builder for AI code review
@@ -32046,13 +32080,21 @@ All analyzed functions are within the configured complexity threshold.`;
 }
 /**
  * Format the AI review as a GitHub comment
+ * @param isFallback - true if this is a fallback because violations aren't on diff lines
+ * @param tokenUsage - optional token usage stats to display
  */
-function formatReviewComment(aiReview, report) {
+function formatReviewComment(aiReview, report, isFallback = false, tokenUsage) {
     const { summary } = report;
+    const fallbackNote = isFallback
+        ? `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`
+        : '';
+    const tokenStats = tokenUsage && tokenUsage.totalTokens > 0
+        ? `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`
+        : '';
     return `<!-- lien-ai-review -->
 ## 🔍 Lien AI Code Review
 
-**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})
+**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${fallbackNote}
 
 ---
 
@@ -32065,7 +32107,7 @@ ${aiReview}
 
 - Files analyzed: ${summary.filesAnalyzed}
 - Average complexity: ${summary.avgComplexity.toFixed(1)}
-- Max complexity: ${summary.maxComplexity}
+- Max complexity: ${summary.maxComplexity}${tokenStats}
 
 </details>
 
@@ -32077,6 +32119,337 @@ ${aiReview}
 function getViolationKey(violation) {
     return `${violation.filepath}::${violation.symbolName}`;
 }
+/**
+ * Build a prompt for generating a single line comment for a violation
+ */
+function buildLineCommentPrompt(violation, codeSnippet) {
+    const snippetSection = codeSnippet
+        ? `\n\n**Code:**\n\`\`\`\n${codeSnippet}\n\`\`\``
+        : '';
+    return `You are reviewing code for complexity. Generate an actionable review comment.
+
+**Function**: \`${violation.symbolName}\` (${violation.symbolType})
+**Complexity**: ${violation.complexity} (threshold: ${violation.threshold})
+${snippetSection}
+
+Write a code review comment that includes:
+
+1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains")
+
+2. **Refactoring** (2-3 sentences): Concrete steps to reduce complexity. Be SPECIFIC:
+   - Name the exact functions to extract (e.g., "Extract \`handleAdminDelete()\` and \`handleModeratorDelete()\`")
+   - Suggest specific patterns (strategy, lookup table, early returns)
+   - If applicable, show a brief code sketch
+
+3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
+
+Format as a single cohesive comment without headers. Be direct and specific to THIS code.`;
+}
+/**
+ * Build a summary comment when using line-specific reviews
+ */
+function buildLineSummaryComment(report, prContext) {
+    const { summary } = report;
+    const emoji = summary.bySeverity.error > 0 ? '🔴' : '🟡';
+    return `<!-- lien-ai-review -->
+## ${emoji} Lien Complexity Review
+
+Found **${summary.totalViolations}** complexity violation${summary.totalViolations === 1 ? '' : 's'} in this PR:
+- ${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'} (complexity > 2x threshold)
+- ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'} (complexity > threshold)
+
+See inline comments below for specific suggestions.
+
+<details>
+<summary>📊 Details</summary>
+
+- Files analyzed: ${summary.filesAnalyzed}
+- Average complexity: ${summary.avgComplexity.toFixed(1)}
+- Max complexity: ${summary.maxComplexity}
+
+</details>
+
+*[Lien](https://lien.dev) AI Code Review*`;
+}
+/**
+ * Build a batched prompt for generating multiple line comments at once
+ * This is more efficient than individual prompts as:
+ * - System prompt only sent once
+ * - AI has full context of all violations
+ * - Fewer API calls = faster + cheaper
+ */
+function buildBatchedCommentsPrompt(violations, codeSnippets) {
+    const violationsText = violations
+        .map((v, i) => {
+        const key = `${v.filepath}::${v.symbolName}`;
+        const snippet = codeSnippets.get(key);
+        const snippetSection = snippet
+            ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\``
+            : '';
+        return `### ${i + 1}. ${v.filepath}::${v.symbolName}
+- **Function**: \`${v.symbolName}\` (${v.symbolType})
+- **Complexity**: ${v.complexity} (threshold: ${v.threshold})
+- **Severity**: ${v.severity}${snippetSection}`;
+    })
+        .join('\n\n');
+    // Build JSON keys for the response format
+    const jsonKeys = violations
+        .map((v) => `  "${v.filepath}::${v.symbolName}": "your comment here"`)
+        .join(',\n');
+    return `You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.
+
+## Violations to Review
+
+${violationsText}
+
+## Instructions
+
+For each violation, write a code review comment that:
+
+1. **Identifies the specific pattern** causing complexity (not just "too complex")
+   - Is it nested conditionals? Long parameter lists? Multiple responsibilities?
+   - Be specific: "5 levels of nesting" not "deeply nested"
+
+2. **Suggests a concrete fix** with a short code example (3-5 lines)
+   - Consider: early returns, guard clauses, lookup tables, extracting helpers, strategy pattern
+   - Name specific functions: "Extract \`handleAdminCase()\`" not "extract a function"
+   - Choose the SIMPLEST fix that addresses the issue (KISS principle)
+
+3. **Acknowledges context** when relevant
+   - If this is an orchestration function, complexity may be acceptable
+   - If the logic is inherently complex (state machines, parsers), say so
+   - Don't suggest over-engineering for marginal gains
+
+Be direct and specific to THIS code. Avoid generic advice like "break into smaller functions."
+
+IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
+
+## Response Format
+
+Respond with ONLY valid JSON. Each key is "filepath::symbolName", value is the comment text.
+Use \\n for newlines within comments.
+
+\`\`\`json
+{
+${jsonKeys}
+}
+\`\`\``;
+}
+
+;// CONCATENATED MODULE: ./src/openrouter.ts
+/**
+ * OpenRouter API client for LLM access
+ */
+
+
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+/**
+ * Global token usage accumulator
+ */
+let totalUsage = {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    cost: 0,
+};
+/**
+ * Reset token usage (call at start of review)
+ */
+function resetTokenUsage() {
+    totalUsage = {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        cost: 0,
+    };
+}
+/**
+ * Get current token usage
+ */
+function getTokenUsage() {
+    return { ...totalUsage };
+}
+/**
+ * Accumulate token usage from API response
+ * Cost is returned in usage.cost when usage accounting is enabled
+ */
+function trackUsage(usage) {
+    if (!usage)
+        return;
+    totalUsage.promptTokens += usage.prompt_tokens;
+    totalUsage.completionTokens += usage.completion_tokens;
+    totalUsage.totalTokens += usage.total_tokens;
+    totalUsage.cost += usage.cost || 0;
+}
+/**
+ * Parse JSON comments response from AI, handling markdown code blocks
+ * Returns null if parsing fails after retry attempts
+ * Exported for testing
+ */
+function parseCommentsResponse(content) {
+    // Try extracting JSON from markdown code block first
+    const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
+    core.info(`Parsing JSON response (${jsonStr.length} chars)`);
+    try {
+        const parsed = JSON.parse(jsonStr);
+        core.info(`Successfully parsed ${Object.keys(parsed).length} comments`);
+        return parsed;
+    }
+    catch (parseError) {
+        core.warning(`Initial JSON parse failed: ${parseError}`);
+    }
+    // Aggressive retry: extract any JSON object from response
+    const objectMatch = content.match(/\{[\s\S]*\}/);
+    if (objectMatch) {
+        try {
+            const parsed = JSON.parse(objectMatch[0]);
+            core.info(`Recovered JSON with aggressive parsing: ${Object.keys(parsed).length} comments`);
+            return parsed;
+        }
+        catch (retryError) {
+            core.warning(`Retry parsing also failed: ${retryError}`);
+        }
+    }
+    core.warning(`Full response content:\n${content}`);
+    return null;
+}
+/**
+ * Generate an AI review using OpenRouter
+ */
+async function generateReview(prompt, apiKey, model) {
+    core.info(`Calling OpenRouter with model: ${model}`);
+    const response = await fetch(OPENROUTER_API_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/getlien/lien',
+            'X-Title': 'Lien AI Code Review',
+        },
+        body: JSON.stringify({
+            model,
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are an expert code reviewer. Provide actionable, specific feedback on code complexity issues. Be concise but thorough.',
+                },
+                {
+                    role: 'user',
+                    content: prompt,
+                },
+            ],
+            max_tokens: 2000,
+            temperature: 0.3, // Lower temperature for more consistent reviews
+            // Enable usage accounting to get cost data
+            // https://openrouter.ai/docs/guides/guides/usage-accounting
+            usage: {
+                include: true,
+            },
+        }),
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
+    }
+    const data = (await response.json());
+    if (!data.choices || data.choices.length === 0) {
+        throw new Error('No response from OpenRouter');
+    }
+    const review = data.choices[0].message.content;
+    // Cost is in usage.cost when usage accounting is enabled
+    if (data.usage) {
+        trackUsage(data.usage);
+        const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
+        core.info(`Tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`);
+    }
+    return review;
+}
+/**
+ * Call OpenRouter API with batched comments prompt
+ */
+async function callBatchedCommentsAPI(prompt, apiKey, model) {
+    const response = await fetch(OPENROUTER_API_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://github.com/getlien/lien',
+            'X-Title': 'Lien AI Code Review',
+        },
+        body: JSON.stringify({
+            model,
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are an expert code reviewer. Write detailed, actionable comments with specific refactoring suggestions. Respond ONLY with valid JSON.',
+                },
+                { role: 'user', content: prompt },
+            ],
+            max_tokens: 4096,
+            temperature: 0.3,
+            usage: { include: true },
+        }),
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
+    }
+    const data = (await response.json());
+    if (!data.choices || data.choices.length === 0) {
+        throw new Error('No response from OpenRouter');
+    }
+    return data;
+}
+/**
+ * Map parsed comments to violations, with fallback for missing comments
+ * Exported for testing
+ */
+function mapCommentsToViolations(commentsMap, violations) {
+    const results = new Map();
+    const fallbackMessage = (v) => `This ${v.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`;
+    if (!commentsMap) {
+        for (const violation of violations) {
+            results.set(violation, fallbackMessage(violation));
+        }
+        return results;
+    }
+    for (const violation of violations) {
+        const key = `${violation.filepath}::${violation.symbolName}`;
+        const comment = commentsMap[key];
+        if (comment) {
+            results.set(violation, comment.replace(/\\n/g, '\n'));
+        }
+        else {
+            core.warning(`No comment generated for ${key}`);
+            results.set(violation, fallbackMessage(violation));
+        }
+    }
+    return results;
+}
+/**
+ * Generate line comments for multiple violations in a single API call
+ *
+ * This is more efficient than individual calls:
+ * - System prompt only sent once (saves ~100 tokens per violation)
+ * - AI has full context of all violations (can identify patterns)
+ * - Single API call = faster execution
+ */
+async function generateLineComments(violations, codeSnippets, apiKey, model) {
+    if (violations.length === 0) {
+        return new Map();
+    }
+    core.info(`Generating comments for ${violations.length} violations in single batch`);
+    const prompt = buildBatchedCommentsPrompt(violations, codeSnippets);
+    const data = await callBatchedCommentsAPI(prompt, apiKey, model);
+    if (data.usage) {
+        trackUsage(data.usage);
+        const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
+        core.info(`Batch tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`);
+    }
+    const commentsMap = parseCommentsResponse(data.choices[0].message.content);
+    return mapCommentsToViolations(commentsMap, violations);
+}
 
 ;// CONCATENATED MODULE: ./src/index.ts
 /**
@@ -32086,7 +32459,7 @@ function getViolationKey(violation) {
  * 1. Getting PR changed files
  * 2. Running complexity analysis
  * 3. Generating AI review
- * 4. Posting comment to PR
+ * 4. Posting comment to PR (line-specific or summary)
  */
 
 
@@ -32097,101 +32470,185 @@ function getViolationKey(violation) {
  * Get action configuration from inputs
  */
 function getConfig() {
+    const reviewStyle = core.getInput('review_style') || 'line';
     return {
         openrouterApiKey: core.getInput('openrouter_api_key', { required: true }),
         model: core.getInput('model') || 'anthropic/claude-sonnet-4',
         threshold: core.getInput('threshold') || '10',
         githubToken: core.getInput('github_token') || process.env.GITHUB_TOKEN || '',
+        reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
     };
 }
 /**
- * Main action logic
+ * Setup and validate PR analysis prerequisites
+ */
+function setupPRAnalysis() {
+    const config = getConfig();
+    core.info(`Using model: ${config.model}`);
+    core.info(`Complexity threshold: ${config.threshold}`);
+    core.info(`Review style: ${config.reviewStyle}`);
+    if (!config.githubToken) {
+        throw new Error('GitHub token is required');
+    }
+    const prContext = getPRContext();
+    if (!prContext) {
+        core.warning('Not running in PR context, skipping');
+        return null;
+    }
+    core.info(`Reviewing PR #${prContext.pullNumber}: ${prContext.title}`);
+    return { config, prContext, octokit: createOctokit(config.githubToken) };
+}
+/**
+ * Get and filter files eligible for complexity analysis
+ */
+async function getFilesToAnalyze(octokit, prContext) {
+    const allChangedFiles = await getPRChangedFiles(octokit, prContext);
+    core.info(`Found ${allChangedFiles.length} changed files in PR`);
+    const filesToAnalyze = filterAnalyzableFiles(allChangedFiles);
+    core.info(`${filesToAnalyze.length} files eligible for complexity analysis`);
+    return filesToAnalyze;
+}
+/**
+ * Sort violations by severity and collect code snippets
+ */
+async function prepareViolationsForReview(report, octokit, prContext) {
+    // Collect and sort violations
+    const violations = Object.values(report.files)
+        .flatMap((fileData) => fileData.violations)
+        .sort((a, b) => {
+        if (a.severity !== b.severity)
+            return a.severity === 'error' ? -1 : 1;
+        return b.complexity - a.complexity;
+    })
+        .slice(0, 10);
+    // Collect code snippets
+    const codeSnippets = new Map();
+    for (const violation of violations) {
+        const snippet = await getFileContent(octokit, prContext, violation.filepath, violation.startLine, violation.endLine);
+        if (snippet) {
+            codeSnippets.set(getViolationKey(violation), snippet);
+        }
+    }
+    core.info(`Collected ${codeSnippets.size} code snippets for review`);
+    return { violations, codeSnippets };
+}
+/**
+ * Main action logic - orchestrates the review flow
  */
 async function run() {
     try {
-        // 1. Get configuration
-        const config = getConfig();
-        core.info(`Using model: ${config.model}`);
-        core.info(`Complexity threshold: ${config.threshold}`);
-        if (!config.githubToken) {
-            throw new Error('GitHub token is required');
-        }
-        // 2. Get PR context
-        const prContext = getPRContext();
-        if (!prContext) {
-            core.warning('Not running in PR context, skipping');
+        const setup = setupPRAnalysis();
+        if (!setup)
             return;
-        }
-        core.info(`Reviewing PR #${prContext.pullNumber}: ${prContext.title}`);
-        // 3. Get changed files
-        const octokit = createOctokit(config.githubToken);
-        const allChangedFiles = await getPRChangedFiles(octokit, prContext);
-        core.info(`Found ${allChangedFiles.length} changed files in PR`);
-        // 4. Filter to analyzable files
-        const filesToAnalyze = filterAnalyzableFiles(allChangedFiles);
-        core.info(`${filesToAnalyze.length} files eligible for complexity analysis`);
+        const { config, prContext, octokit } = setup;
+        const filesToAnalyze = await getFilesToAnalyze(octokit, prContext);
         if (filesToAnalyze.length === 0) {
             core.info('No analyzable files found, skipping review');
             return;
         }
-        // 5. Run complexity analysis
         const report = await runComplexityAnalysis(filesToAnalyze, config.threshold);
         if (!report) {
             core.warning('Failed to get complexity report');
             return;
         }
         core.info(`Analysis complete: ${report.summary.totalViolations} violations found`);
-        // 6. Handle no violations case
         if (report.summary.totalViolations === 0) {
             core.info('No complexity violations found');
-            const message = buildNoViolationsMessage(prContext);
-            await postPRComment(octokit, prContext, message);
+            await postPRComment(octokit, prContext, buildNoViolationsMessage(prContext));
             return;
         }
-        // 7. Collect code snippets for violations
-        const codeSnippets = new Map();
-        const allViolations = [];
-        for (const [, fileData] of Object.entries(report.files)) {
-            allViolations.push(...fileData.violations);
+        const { violations, codeSnippets } = await prepareViolationsForReview(report, octokit, prContext);
+        resetTokenUsage();
+        if (config.reviewStyle === 'summary') {
+            await postSummaryReview(octokit, prContext, report, codeSnippets, config);
         }
-        // Limit snippets to top 10 most severe violations to avoid token limits
-        const topViolations = allViolations
-            .sort((a, b) => {
-            // Sort by severity (error > warning), then by complexity
-            if (a.severity !== b.severity) {
-                return a.severity === 'error' ? -1 : 1;
-            }
-            return b.complexity - a.complexity;
-        })
-            .slice(0, 10);
-        for (const violation of topViolations) {
-            const snippet = await getFileContent(octokit, prContext, violation.filepath, violation.startLine, violation.endLine);
-            if (snippet) {
-                codeSnippets.set(getViolationKey(violation), snippet);
-            }
+        else {
+            await postLineReview(octokit, prContext, report, violations, codeSnippets, config);
         }
-        core.info(`Collected ${codeSnippets.size} code snippets for review`);
-        // 8. Build prompt and generate AI review
-        const prompt = buildReviewPrompt(report, prContext, codeSnippets);
-        core.debug(`Prompt length: ${prompt.length} characters`);
-        const aiReview = await generateReview(prompt, config.openrouterApiKey, config.model);
-        // 9. Format and post review
-        const comment = formatReviewComment(aiReview, report);
-        await postPRComment(octokit, prContext, comment);
-        core.info('Successfully posted AI review comment');
-        // 10. Set outputs
         core.setOutput('violations', report.summary.totalViolations);
         core.setOutput('errors', report.summary.bySeverity.error);
         core.setOutput('warnings', report.summary.bySeverity.warning);
     }
     catch (error) {
-        if (error instanceof Error) {
-            core.setFailed(error.message);
-        }
-        else {
-            core.setFailed('An unexpected error occurred');
-        }
+        core.setFailed(error instanceof Error ? error.message : 'An unexpected error occurred');
     }
+}
+/**
+ * Post review with line-specific comments for all violations
+ */
+async function postLineReview(octokit, prContext, report, violations, codeSnippets, config) {
+    // Get lines that are in the diff (only these can have line comments)
+    const diffLines = await getPRDiffLines(octokit, prContext);
+    core.info(`Diff covers ${diffLines.size} files`);
+    // Filter violations to only those on lines in the diff
+    const commentableViolations = violations.filter((v) => {
+        const fileLines = diffLines.get(v.filepath);
+        if (!fileLines)
+            return false;
+        // Check if start line is in diff
+        return fileLines.has(v.startLine);
+    });
+    core.info(`${commentableViolations.length}/${violations.length} violations are on diff lines`);
+    if (commentableViolations.length === 0) {
+        // No violations on diff lines, fall back to summary with boy scout note
+        core.info('No violations on diff lines, posting summary comment with fallback note');
+        await postSummaryReview(octokit, prContext, report, codeSnippets, config, true);
+        return;
+    }
+    // Generate AI comments for each violation
+    core.info('Generating AI comments for violations...');
+    const aiComments = await generateLineComments(commentableViolations, codeSnippets, config.openrouterApiKey, config.model);
+    // Build line comments
+    const lineComments = [];
+    for (const [violation, comment] of aiComments) {
+        const severityEmoji = violation.severity === 'error' ? '🔴' : '🟡';
+        core.info(`Adding comment for ${violation.filepath}:${violation.startLine} (${violation.symbolName})`);
+        lineComments.push({
+            path: violation.filepath,
+            line: violation.startLine,
+            body: `${severityEmoji} **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\n${comment}`,
+        });
+    }
+    core.info(`Built ${lineComments.length} line comments`);
+    // Build summary comment with token usage
+    const { summary } = report;
+    const usage = getTokenUsage();
+    const costDisplay = usage.totalTokens > 0
+        ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})`
+        : '';
+    const summaryBody = `<!-- lien-ai-review -->
+## 🔍 Lien Complexity Review
+
+**Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}** (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})
+
+See inline comments on the diff for specific suggestions.
+
+<details>
+<summary>📊 Analysis Details</summary>
+
+- Files analyzed: ${summary.filesAnalyzed}
+- Average complexity: ${summary.avgComplexity.toFixed(1)}
+- Max complexity: ${summary.maxComplexity}${costDisplay}
+
+</details>
+
+*[Lien](https://lien.dev) AI Code Review*`;
+    // Post the review
+    await postPRReview(octokit, prContext, lineComments, summaryBody);
+    core.info(`Posted review with ${lineComments.length} line comments`);
+}
+/**
+ * Post review as a single summary comment
+ * @param isFallback - true if this is a fallback because violations aren't on diff lines
+ */
+async function postSummaryReview(octokit, prContext, report, codeSnippets, config, isFallback = false) {
+    const prompt = buildReviewPrompt(report, prContext, codeSnippets);
+    core.debug(`Prompt length: ${prompt.length} characters`);
+    const aiReview = await generateReview(prompt, config.openrouterApiKey, config.model);
+    const usage = getTokenUsage();
+    const comment = formatReviewComment(aiReview, report, isFallback, usage);
+    await postPRComment(octokit, prContext, comment);
+    core.info('Successfully posted AI review summary comment');
 }
 // Run the action
 run();
