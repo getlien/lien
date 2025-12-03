@@ -227,10 +227,12 @@ ${violationsText}
 
 ## Instructions
 
-For each violation, write a concise code review comment that includes:
-1. **Problem** (1 sentence): What specific pattern makes this complex
-2. **Refactoring** (2-3 sentences): Concrete steps with specific function names to extract
-3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
+For each violation, write a concise code review comment with these sections:
+1. **Problem:** (1 sentence) What specific pattern makes this complex
+2. **Refactoring:** (2-3 sentences) Concrete steps with specific function names to extract
+3. **Benefit:** (1 sentence) What improves (testability, readability, etc.)
+
+IMPORTANT: Do NOT include any header like "Complexity: X" or emojis - we add those automatically.
 
 ## Response Format
 
