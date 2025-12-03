@@ -32189,10 +32189,12 @@ ${violationsText}
 
 ## Instructions
 
-For each violation, write a concise code review comment with these sections:
-1. **Problem:** (1 sentence) What specific pattern makes this complex
-2. **Refactoring:** (2-3 sentences) Concrete steps with specific function names to extract
-3. **Benefit:** (1 sentence) What improves (testability, readability, etc.)
+For each violation, write a concise code review comment with:
+1. **Problem:** (1 sentence) What specific pattern causes the complexity
+2. **Suggestion:** (2-4 sentences) A concrete refactoring approach. Include a brief code snippet if helpful. Consider: early returns, guard clauses, lookup tables, extracting helpers, simplifying conditions, etc.
+3. **Benefit:** (1 sentence) What improves (testability, readability, maintainability)
+
+Follow KISS, DRY, and SOLID principles. Don't over-engineer - suggest the simplest fix that addresses the complexity.
 
 IMPORTANT: Do NOT include any header like "Complexity: X" or emojis - we add those automatically.
 
