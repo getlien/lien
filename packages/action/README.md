@@ -60,7 +60,7 @@ jobs:
 | `model` | LLM model to use | No | `anthropic/claude-sonnet-4` |
 | `threshold` | Complexity threshold for violations | No | `10` |
 | `github_token` | GitHub token for posting comments | No | `${{ github.token }}` |
-| `review_style` | Review comment style: `hybrid` (default) posts inline comments for errors + summary for warnings, `line` posts all as inline comments, `summary` posts a single summary comment | No | `hybrid` |
+| `review_style` | Review comment style: `line` (default) posts inline comments on all violations, `summary` posts a single summary comment only | No | `line` |
 
 ## Outputs
 

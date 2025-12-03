@@ -25,30 +25,24 @@ import {
   buildReviewPrompt,
   buildNoViolationsMessage,
   formatReviewComment,
-  buildLineSummaryComment,
   getViolationKey,
 } from './prompt.js';
 import type { ActionConfig, ComplexityViolation } from './types.js';
 
-type ReviewStyle = 'line' | 'summary' | 'hybrid';
-
-// Max inline comments to generate (controls token costs)
-const MAX_INLINE_COMMENTS = 5;
+type ReviewStyle = 'line' | 'summary';
 
 /**
  * Get action configuration from inputs
  */
 function getConfig(): ActionConfig & { reviewStyle: ReviewStyle } {
-  const reviewStyle = core.getInput('review_style') || 'hybrid';
+  const reviewStyle = core.getInput('review_style') || 'line';
   
   return {
     openrouterApiKey: core.getInput('openrouter_api_key', { required: true }),
     model: core.getInput('model') || 'anthropic/claude-sonnet-4',
     threshold: core.getInput('threshold') || '10',
     githubToken: core.getInput('github_token') || process.env.GITHUB_TOKEN || '',
-    reviewStyle: ['summary', 'line', 'hybrid'].includes(reviewStyle) 
-      ? reviewStyle as ReviewStyle 
-      : 'hybrid',
+    reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
   };
 }
 
@@ -151,19 +145,9 @@ async function run(): Promise<void> {
         codeSnippets,
         config
       );
-    } else if (config.reviewStyle === 'line') {
-      await postLineReview(
-        octokit,
-        prContext,
-        report,
-        sortedViolations,
-        codeSnippets,
-        config,
-        false // don't limit to errors only
-      );
     } else {
-      // hybrid mode: inline for errors, summary for warnings
-      await postHybridReview(
+      // line mode (default): inline comments for all violations
+      await postLineReview(
         octokit,
         prContext,
         report,
@@ -187,7 +171,7 @@ async function run(): Promise<void> {
 }
 
 /**
- * Post review with line-specific comments
+ * Post review with line-specific comments for all violations
  */
 async function postLineReview(
   octokit: ReturnType<typeof createOctokit>,
@@ -195,8 +179,7 @@ async function postLineReview(
   report: Awaited<ReturnType<typeof runComplexityAnalysis>> & object,
   violations: ComplexityViolation[],
   codeSnippets: Map<string, string>,
-  config: ReturnType<typeof getConfig>,
-  _errorsOnly: boolean = false
+  config: ReturnType<typeof getConfig>
 ): Promise<void> {
   // Get lines that are in the diff (only these can have line comments)
   const diffLines = await getPRDiffLines(octokit, prContext);
@@ -241,71 +224,8 @@ async function postLineReview(
     });
   }
 
-  // Build summary comment
-  const summary = buildLineSummaryComment(report, prContext);
-
-  // Post the review
-  await postPRReview(octokit, prContext, lineComments, summary);
-  core.info(`Posted review with ${lineComments.length} line comments`);
-}
-
-/**
- * Hybrid mode: inline comments for errors, summary for warnings
- * Best balance of UX and token costs
- */
-async function postHybridReview(
-  octokit: ReturnType<typeof createOctokit>,
-  prContext: ReturnType<typeof getPRContext> & object,
-  report: Awaited<ReturnType<typeof runComplexityAnalysis>> & object,
-  violations: ComplexityViolation[],
-  codeSnippets: Map<string, string>,
-  config: ReturnType<typeof getConfig>
-): Promise<void> {
-  // Split into errors (inline) and warnings (summary)
-  const errors = violations.filter(v => v.severity === 'error');
-  const warnings = violations.filter(v => v.severity === 'warning');
-  
-  core.info(`Hybrid mode: ${errors.length} errors (inline), ${warnings.length} warnings (summary)`);
-
-  // Get lines in diff for inline comments
-  const diffLines = await getPRDiffLines(octokit, prContext);
-  
-  // Filter errors to those on diff lines, limit to MAX_INLINE_COMMENTS
-  const inlineErrors = errors
-    .filter(v => {
-      const fileLines = diffLines.get(v.filepath);
-      return fileLines?.has(v.startLine);
-    })
-    .slice(0, MAX_INLINE_COMMENTS);
-
-  const lineComments: LineComment[] = [];
-  
-  if (inlineErrors.length > 0) {
-    // Generate AI comments only for errors
-    core.info(`Generating ${inlineErrors.length} inline comments for errors...`);
-    const aiComments = await generateLineComments(
-      inlineErrors,
-      codeSnippets,
-      config.openrouterApiKey,
-      config.model
-    );
-
-    for (const [violation, comment] of aiComments) {
-      lineComments.push({
-        path: violation.filepath,
-        line: violation.startLine,
-        body: `🔴 **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\n${comment}`,
-      });
-    }
-  }
-
-  // Build summary that includes warnings
+  // Build summary comment with token usage
   const { summary } = report;
-  const warningsList = warnings.length > 0
-    ? warnings.map(w => `- \`${w.symbolName}\` in \`${w.filepath}\` (complexity: ${w.complexity})`).join('\n')
-    : '';
-
-  // Get token usage for cost display
   const usage = getTokenUsage();
   const costDisplay = usage.totalTokens > 0
     ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})`
@@ -314,12 +234,9 @@ async function postHybridReview(
   const summaryBody = `<!-- lien-ai-review -->
 ## 🔍 Lien Complexity Review
 
-**Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}:**
-- 🔴 ${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'} (inline comments ${inlineErrors.length > 0 ? 'above' : 'n/a - not in diff'})
-- 🟡 ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'}${warnings.length > 0 ? `
+**Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}** (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})
 
-### Warnings (consider refactoring)
-${warningsList}` : ''}
+See inline comments above for specific suggestions.
 
 <details>
 <summary>📊 Analysis Details</summary>
@@ -334,11 +251,11 @@ ${warningsList}` : ''}
 
   // Post the review
   await postPRReview(octokit, prContext, lineComments, summaryBody);
-  core.info(`Posted hybrid review: ${lineComments.length} inline + summary`);
+  core.info(`Posted review with ${lineComments.length} line comments`);
 }
 
 /**
- * Post review as a single summary comment (original behavior)
+ * Post review as a single summary comment
  */
 async function postSummaryReview(
   octokit: ReturnType<typeof createOctokit>,
