@@ -175,8 +175,8 @@ export async function generateLineComments(
           content: prompt,
         },
       ],
-      // Scale tokens based on number of violations (~500 tokens per detailed comment)
-      max_tokens: Math.min(8000, 500 * violations.length + 500),
+      // Allow plenty of tokens for detailed JSON responses
+      max_tokens: 4096,
       temperature: 0.3,
       usage: {
         include: true,

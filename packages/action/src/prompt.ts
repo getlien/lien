@@ -227,14 +227,14 @@ ${violationsText}
 
 ## Instructions
 
-For each violation, write a concise code review comment with:
-1. **Problem:** (1 sentence) What specific pattern causes the complexity
-2. **Suggestion:** (2-4 sentences) A concrete refactoring approach. Include a brief code snippet if helpful. Consider: early returns, guard clauses, lookup tables, extracting helpers, simplifying conditions, etc.
-3. **Benefit:** (1 sentence) What improves (testability, readability, maintainability)
+For each violation, write a SHORT code review comment (max 150 words) with:
+1. **Problem:** What pattern causes complexity (1 sentence)
+2. **Suggestion:** Concrete fix - early returns, guard clauses, lookup tables, etc. (2-3 sentences)
+3. **Benefit:** What improves (1 sentence)
 
-Follow KISS, DRY, and SOLID principles. Don't over-engineer - suggest the simplest fix that addresses the complexity.
+Keep comments concise. Code snippets are optional - only include if essential.
 
-IMPORTANT: Do NOT include any header like "Complexity: X" or emojis - we add those automatically.
+IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
 
 ## Response Format
 
