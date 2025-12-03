@@ -90,7 +90,7 @@ All analyzed functions are within the configured complexity threshold.`;
 /**
  * Token usage info for display
  */
-interface TokenUsageInfo {
+export interface TokenUsageInfo {
   totalTokens: number;
   cost: number;
 }

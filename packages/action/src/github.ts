@@ -232,8 +232,8 @@ function parsePatchLines(patch: string): Set<number> {
     if (patchLine.startsWith('+') || patchLine.startsWith(' ')) {
       if (!patchLine.startsWith('+++')) {
         lines.add(currentLine);
+        currentLine++;
       }
-      currentLine++;
     }
     // Deleted lines (-) don't increment currentLine
   }

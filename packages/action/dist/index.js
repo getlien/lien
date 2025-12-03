@@ -31870,8 +31870,8 @@ function parsePatchLines(patch) {
         if (patchLine.startsWith('+') || patchLine.startsWith(' ')) {
             if (!patchLine.startsWith('+++')) {
                 lines.add(currentLine);
+                currentLine++;
             }
-            currentLine++;
         }
         // Deleted lines (-) don't increment currentLine
     }

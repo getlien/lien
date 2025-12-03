@@ -134,7 +134,7 @@ The action posts a comment like this:
 
 - Only runs on PRs from the same repository (not forks) due to secrets access
 - Analyzes up to 10 violations per review to stay within token limits
-- Line comments only work for lines that are part of the PR diff
+- Inline comments only work for lines in the PR diff; violations outside the diff get a summary comment with a note about the boy scout rule
 
 ## Development
 

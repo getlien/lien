@@ -13,7 +13,7 @@ export declare function buildNoViolationsMessage(prContext: PRContext): string;
 /**
  * Token usage info for display
  */
-interface TokenUsageInfo {
+export interface TokenUsageInfo {
     totalTokens: number;
     cost: number;
 }
@@ -43,4 +43,3 @@ export declare function buildLineSummaryComment(report: ComplexityReport, prCont
  * - Fewer API calls = faster + cheaper
  */
 export declare function buildBatchedCommentsPrompt(violations: ComplexityViolation[], codeSnippets: Map<string, string>): string;
-export {};
