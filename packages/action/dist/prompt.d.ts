@@ -11,10 +11,18 @@ export declare function buildReviewPrompt(report: ComplexityReport, prContext: P
  */
 export declare function buildNoViolationsMessage(prContext: PRContext): string;
 /**
+ * Token usage info for display
+ */
+interface TokenUsageInfo {
+    totalTokens: number;
+    cost: number;
+}
+/**
  * Format the AI review as a GitHub comment
  * @param isFallback - true if this is a fallback because violations aren't on diff lines
+ * @param tokenUsage - optional token usage stats to display
  */
-export declare function formatReviewComment(aiReview: string, report: ComplexityReport, isFallback?: boolean): string;
+export declare function formatReviewComment(aiReview: string, report: ComplexityReport, isFallback?: boolean, tokenUsage?: TokenUsageInfo): string;
 /**
  * Get the key for a violation (for code snippet mapping)
  */
@@ -35,3 +43,4 @@ export declare function buildLineSummaryComment(report: ComplexityReport, prCont
  * - Fewer API calls = faster + cheaper
  */
 export declare function buildBatchedCommentsPrompt(violations: ComplexityViolation[], codeSnippets: Map<string, string>): string;
+export {};

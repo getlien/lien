@@ -32076,11 +32076,15 @@ All analyzed functions are within the configured complexity threshold.`;
 /**
  * Format the AI review as a GitHub comment
  * @param isFallback - true if this is a fallback because violations aren't on diff lines
+ * @param tokenUsage - optional token usage stats to display
  */
-function formatReviewComment(aiReview, report, isFallback = false) {
+function formatReviewComment(aiReview, report, isFallback = false, tokenUsage) {
     const { summary } = report;
     const fallbackNote = isFallback
         ? `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`
+        : '';
+    const tokenStats = tokenUsage && tokenUsage.totalTokens > 0
+        ? `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`
         : '';
     return `<!-- lien-ai-review -->
 ## 🔍 Lien AI Code Review
@@ -32098,7 +32102,7 @@ ${aiReview}
 
 - Files analyzed: ${summary.filesAnalyzed}
 - Average complexity: ${summary.avgComplexity.toFixed(1)}
-- Max complexity: ${summary.maxComplexity}
+- Max complexity: ${summary.maxComplexity}${tokenStats}
 
 </details>
 
@@ -32619,7 +32623,8 @@ async function postSummaryReview(octokit, prContext, report, codeSnippets, confi
     const prompt = buildReviewPrompt(report, prContext, codeSnippets);
     core.debug(`Prompt length: ${prompt.length} characters`);
     const aiReview = await generateReview(prompt, config.openrouterApiKey, config.model);
-    const comment = formatReviewComment(aiReview, report, isFallback);
+    const usage = getTokenUsage();
+    const comment = formatReviewComment(aiReview, report, isFallback, usage);
     await postPRComment(octokit, prContext, comment);
     core.info('Successfully posted AI review summary comment');
 }

@@ -277,7 +277,8 @@ async function postSummaryReview(
     config.model
   );
 
-  const comment = formatReviewComment(aiReview, report, isFallback);
+  const usage = getTokenUsage();
+  const comment = formatReviewComment(aiReview, report, isFallback, usage);
   await postPRComment(octokit, prContext, comment);
   core.info('Successfully posted AI review summary comment');
 }
