@@ -38,6 +38,7 @@ export interface LineComment {
 export declare function postPRReview(octokit: Octokit, prContext: PRContext, comments: LineComment[], summaryBody: string): Promise<void>;
 /**
  * Get lines that are in the PR diff (only these can have line comments)
+ * Handles pagination for PRs with 100+ files
  */
 export declare function getPRDiffLines(octokit: Octokit, prContext: PRContext): Promise<Map<string, Set<number>>>;
 export {};

@@ -243,26 +243,30 @@ function parsePatchLines(patch: string): Set<number> {
 
 /**
  * Get lines that are in the PR diff (only these can have line comments)
+ * Handles pagination for PRs with 100+ files
  */
 export async function getPRDiffLines(
   octokit: Octokit,
   prContext: PRContext
 ): Promise<Map<string, Set<number>>> {
-  const files = await octokit.rest.pulls.listFiles({
+  const diffLines = new Map<string, Set<number>>();
+
+  // Use pagination to handle PRs with 100+ files
+  const iterator = octokit.paginate.iterator(octokit.rest.pulls.listFiles, {
     owner: prContext.owner,
     repo: prContext.repo,
     pull_number: prContext.pullNumber,
     per_page: 100,
   });
 
-  const diffLines = new Map<string, Set<number>>();
+  for await (const response of iterator) {
+    for (const file of response.data) {
+      if (!file.patch) continue;
 
-  for (const file of files.data) {
-    if (!file.patch) continue;
-
-    const lines = parsePatchLines(file.patch);
-    if (lines.size > 0) {
-      diffLines.set(file.filename, lines);
+      const lines = parsePatchLines(file.patch);
+      if (lines.size > 0) {
+        diffLines.set(file.filename, lines);
+      }
     }
   }
 
