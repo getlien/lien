@@ -32341,8 +32341,8 @@ async function generateLineComments(violations, codeSnippets, apiKey, model) {
                     content: prompt,
                 },
             ],
-            // Scale tokens based on number of violations (~300 tokens per comment)
-            max_tokens: Math.min(4000, 300 * violations.length + 200),
+            // Scale tokens based on number of violations (~500 tokens per detailed comment)
+            max_tokens: Math.min(8000, 500 * violations.length + 500),
             temperature: 0.3,
             usage: {
                 include: true,
