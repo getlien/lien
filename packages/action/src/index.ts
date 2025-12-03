@@ -217,12 +217,14 @@ async function postLineReview(
   const lineComments: LineComment[] = [];
   for (const [violation, comment] of aiComments) {
     const severityEmoji = violation.severity === 'error' ? '🔴' : '🟡';
+    core.info(`Adding comment for ${violation.filepath}:${violation.startLine} (${violation.symbolName})`);
     lineComments.push({
       path: violation.filepath,
       line: violation.startLine,
       body: `${severityEmoji} **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\n${comment}`,
     });
   }
+  core.info(`Built ${lineComments.length} line comments`);
 
   // Build summary comment with token usage
   const { summary } = report;

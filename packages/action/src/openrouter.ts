@@ -210,21 +210,40 @@ export async function generateLineComments(
   try {
     // Extract JSON from markdown code block if present
     const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    const jsonStr = jsonMatch ? jsonMatch[1].trim() : content.trim();
+    let jsonStr = jsonMatch ? jsonMatch[1] : content;
+    
+    // Clean up the JSON string
+    jsonStr = jsonStr.trim();
+    
+    // Log what we're trying to parse
+    core.info(`Parsing JSON response (${jsonStr.length} chars)`);
+    
     commentsMap = JSON.parse(jsonStr);
+    core.info(`Successfully parsed ${Object.keys(commentsMap).length} comments`);
   } catch (parseError) {
     core.warning(`Failed to parse batched response as JSON: ${parseError}`);
-    // Log full response to help debug
     core.warning(`Full response content:\n${content}`);
     
-    // Fallback: generate generic comments for all violations (no header - we add it)
-    for (const violation of violations) {
-      results.set(
-        violation,
-        `This ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`
-      );
+    // Try a more aggressive cleanup - sometimes there are trailing issues
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        commentsMap = JSON.parse(jsonMatch[0]);
+        core.info(`Recovered JSON with aggressive parsing: ${Object.keys(commentsMap).length} comments`);
+      } else {
+        throw new Error('No JSON object found in response');
+      }
+    } catch (retryError) {
+      core.warning(`Retry parsing also failed: ${retryError}`);
+      // Fallback: generate generic comments for all violations (no header - we add it)
+      for (const violation of violations) {
+        results.set(
+          violation,
+          `This ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`
+        );
+      }
+      return results;
     }
-    return results;
   }
 
   // Map comments back to violations
