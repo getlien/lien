@@ -65,8 +65,9 @@ function trackUsage(
 /**
  * Parse JSON comments response from AI, handling markdown code blocks
  * Returns null if parsing fails after retry attempts
+ * Exported for testing
  */
-function parseCommentsResponse(content: string): Record<string, string> | null {
+export function parseCommentsResponse(content: string): Record<string, string> | null {
   // Try extracting JSON from markdown code block first
   const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
   const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
@@ -213,8 +214,9 @@ async function callBatchedCommentsAPI(
 
 /**
  * Map parsed comments to violations, with fallback for missing comments
+ * Exported for testing
  */
-function mapCommentsToViolations(
+export function mapCommentsToViolations(
   commentsMap: Record<string, string> | null,
   violations: ComplexityViolation[]
 ): Map<ComplexityViolation, string> {

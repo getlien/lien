@@ -37,6 +37,11 @@ export interface LineComment {
  */
 export declare function postPRReview(octokit: Octokit, prContext: PRContext, comments: LineComment[], summaryBody: string): Promise<void>;
 /**
+ * Parse unified diff patch to extract line numbers that can receive comments
+ * Exported for testing
+ */
+export declare function parsePatchLines(patch: string): Set<number>;
+/**
  * Get lines that are in the PR diff (only these can have line comments)
  * Handles pagination for PRs with 100+ files
  */

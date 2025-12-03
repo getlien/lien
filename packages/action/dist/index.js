@@ -31855,6 +31855,7 @@ async function postPRReview(octokit, prContext, comments, summaryBody) {
 }
 /**
  * Parse unified diff patch to extract line numbers that can receive comments
+ * Exported for testing
  */
 function parsePatchLines(patch) {
     const lines = new Set();
@@ -32283,6 +32284,7 @@ function trackUsage(usage) {
 /**
  * Parse JSON comments response from AI, handling markdown code blocks
  * Returns null if parsing fails after retry attempts
+ * Exported for testing
  */
 function parseCommentsResponse(content) {
     // Try extracting JSON from markdown code block first
@@ -32401,6 +32403,7 @@ async function callBatchedCommentsAPI(prompt, apiKey, model) {
 }
 /**
  * Map parsed comments to violations, with fallback for missing comments
+ * Exported for testing
  */
 function mapCommentsToViolations(commentsMap, violations) {
     const results = new Map();

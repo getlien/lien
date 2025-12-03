@@ -215,8 +215,9 @@ export async function postPRReview(
 
 /**
  * Parse unified diff patch to extract line numbers that can receive comments
+ * Exported for testing
  */
-function parsePatchLines(patch: string): Set<number> {
+export function parsePatchLines(patch: string): Set<number> {
   const lines = new Set<number>();
   let currentLine = 0;
 

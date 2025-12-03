@@ -20,9 +20,20 @@ export declare function resetTokenUsage(): void;
  */
 export declare function getTokenUsage(): TokenUsage;
 /**
+ * Parse JSON comments response from AI, handling markdown code blocks
+ * Returns null if parsing fails after retry attempts
+ * Exported for testing
+ */
+export declare function parseCommentsResponse(content: string): Record<string, string> | null;
+/**
  * Generate an AI review using OpenRouter
  */
 export declare function generateReview(prompt: string, apiKey: string, model: string): Promise<string>;
+/**
+ * Map parsed comments to violations, with fallback for missing comments
+ * Exported for testing
+ */
+export declare function mapCommentsToViolations(commentsMap: Record<string, string> | null, violations: ComplexityViolation[]): Map<ComplexityViolation, string>;
 /**
  * Generate line comments for multiple violations in a single API call
  *
