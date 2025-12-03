@@ -214,14 +214,40 @@ export async function postPRReview(
 }
 
 /**
+ * Parse unified diff patch to extract line numbers that can receive comments
+ */
+function parsePatchLines(patch: string): Set<number> {
+  const lines = new Set<number>();
+  let currentLine = 0;
+
+  for (const patchLine of patch.split('\n')) {
+    // Hunk header: @@ -start,count +start,count @@
+    const hunkMatch = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunkMatch) {
+      currentLine = parseInt(hunkMatch[1], 10);
+      continue;
+    }
+
+    // Added or context line (can have comments)
+    if (patchLine.startsWith('+') || patchLine.startsWith(' ')) {
+      if (!patchLine.startsWith('+++')) {
+        lines.add(currentLine);
+      }
+      currentLine++;
+    }
+    // Deleted lines (-) don't increment currentLine
+  }
+
+  return lines;
+}
+
+/**
  * Get lines that are in the PR diff (only these can have line comments)
  */
 export async function getPRDiffLines(
   octokit: Octokit,
   prContext: PRContext
 ): Promise<Map<string, Set<number>>> {
-  const diffLines = new Map<string, Set<number>>();
-
   const files = await octokit.rest.pulls.listFiles({
     owner: prContext.owner,
     repo: prContext.repo,
@@ -229,34 +255,12 @@ export async function getPRDiffLines(
     per_page: 100,
   });
 
+  const diffLines = new Map<string, Set<number>>();
+
   for (const file of files.data) {
     if (!file.patch) continue;
 
-    const lines = new Set<number>();
-    let currentLine = 0;
-
-    // Parse the unified diff to find added/modified line numbers
-    const patchLines = file.patch.split('\n');
-    for (const patchLine of patchLines) {
-      // Hunk header: @@ -start,count +start,count @@
-      const hunkMatch = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (hunkMatch) {
-        currentLine = parseInt(hunkMatch[1], 10);
-        continue;
-      }
-
-      // Added or context line (can have comments)
-      if (patchLine.startsWith('+') || patchLine.startsWith(' ')) {
-        if (!patchLine.startsWith('+++')) {
-          lines.add(currentLine);
-        }
-        currentLine++;
-      } else if (patchLine.startsWith('-')) {
-        // Deleted line, don't increment (not in new file)
-        // But don't add to lines set either
-      }
-    }
-
+    const lines = parsePatchLines(file.patch);
     if (lines.size > 0) {
       diffLines.set(file.filename, lines);
     }

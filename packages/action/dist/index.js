@@ -31854,42 +31854,44 @@ async function postPRReview(octokit, prContext, comments, summaryBody) {
     }
 }
 /**
+ * Parse unified diff patch to extract line numbers that can receive comments
+ */
+function parsePatchLines(patch) {
+    const lines = new Set();
+    let currentLine = 0;
+    for (const patchLine of patch.split('\n')) {
+        // Hunk header: @@ -start,count +start,count @@
+        const hunkMatch = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (hunkMatch) {
+            currentLine = parseInt(hunkMatch[1], 10);
+            continue;
+        }
+        // Added or context line (can have comments)
+        if (patchLine.startsWith('+') || patchLine.startsWith(' ')) {
+            if (!patchLine.startsWith('+++')) {
+                lines.add(currentLine);
+            }
+            currentLine++;
+        }
+        // Deleted lines (-) don't increment currentLine
+    }
+    return lines;
+}
+/**
  * Get lines that are in the PR diff (only these can have line comments)
  */
 async function getPRDiffLines(octokit, prContext) {
-    const diffLines = new Map();
     const files = await octokit.rest.pulls.listFiles({
         owner: prContext.owner,
         repo: prContext.repo,
         pull_number: prContext.pullNumber,
         per_page: 100,
     });
+    const diffLines = new Map();
     for (const file of files.data) {
         if (!file.patch)
             continue;
-        const lines = new Set();
-        let currentLine = 0;
-        // Parse the unified diff to find added/modified line numbers
-        const patchLines = file.patch.split('\n');
-        for (const patchLine of patchLines) {
-            // Hunk header: @@ -start,count +start,count @@
-            const hunkMatch = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-            if (hunkMatch) {
-                currentLine = parseInt(hunkMatch[1], 10);
-                continue;
-            }
-            // Added or context line (can have comments)
-            if (patchLine.startsWith('+') || patchLine.startsWith(' ')) {
-                if (!patchLine.startsWith('+++')) {
-                    lines.add(currentLine);
-                }
-                currentLine++;
-            }
-            else if (patchLine.startsWith('-')) {
-                // Deleted line, don't increment (not in new file)
-                // But don't add to lines set either
-            }
-        }
+        const lines = parsePatchLines(file.patch);
         if (lines.size > 0) {
             diffLines.set(file.filename, lines);
         }
@@ -32256,6 +32258,38 @@ function trackUsage(usage) {
     totalUsage.cost += usage.cost || 0;
 }
 /**
+ * Parse JSON comments response from AI, handling markdown code blocks
+ * Returns null if parsing fails after retry attempts
+ */
+function parseCommentsResponse(content) {
+    // Try extracting JSON from markdown code block first
+    const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
+    core.info(`Parsing JSON response (${jsonStr.length} chars)`);
+    try {
+        const parsed = JSON.parse(jsonStr);
+        core.info(`Successfully parsed ${Object.keys(parsed).length} comments`);
+        return parsed;
+    }
+    catch (parseError) {
+        core.warning(`Initial JSON parse failed: ${parseError}`);
+    }
+    // Aggressive retry: extract any JSON object from response
+    const objectMatch = content.match(/\{[\s\S]*\}/);
+    if (objectMatch) {
+        try {
+            const parsed = JSON.parse(objectMatch[0]);
+            core.info(`Recovered JSON with aggressive parsing: ${Object.keys(parsed).length} comments`);
+            return parsed;
+        }
+        catch (retryError) {
+            core.warning(`Retry parsing also failed: ${retryError}`);
+        }
+    }
+    core.warning(`Full response content:\n${content}`);
+    return null;
+}
+/**
  * Generate an AI review using OpenRouter
  */
 async function generateReview(prompt, apiKey, model) {
@@ -32364,40 +32398,13 @@ async function generateLineComments(violations, codeSnippets, apiKey, model) {
     }
     // Parse JSON response
     const content = data.choices[0].message.content;
-    let commentsMap;
-    try {
-        // Extract JSON from markdown code block if present
-        const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-        let jsonStr = jsonMatch ? jsonMatch[1] : content;
-        // Clean up the JSON string
-        jsonStr = jsonStr.trim();
-        // Log what we're trying to parse
-        core.info(`Parsing JSON response (${jsonStr.length} chars)`);
-        commentsMap = JSON.parse(jsonStr);
-        core.info(`Successfully parsed ${Object.keys(commentsMap).length} comments`);
-    }
-    catch (parseError) {
-        core.warning(`Failed to parse batched response as JSON: ${parseError}`);
-        core.warning(`Full response content:\n${content}`);
-        // Try a more aggressive cleanup - sometimes there are trailing issues
-        try {
-            const jsonMatch = content.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                commentsMap = JSON.parse(jsonMatch[0]);
-                core.info(`Recovered JSON with aggressive parsing: ${Object.keys(commentsMap).length} comments`);
-            }
-            else {
-                throw new Error('No JSON object found in response');
-            }
+    const commentsMap = parseCommentsResponse(content);
+    if (!commentsMap) {
+        // Fallback: generate generic comments for all violations
+        for (const violation of violations) {
+            results.set(violation, `This ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`);
         }
-        catch (retryError) {
-            core.warning(`Retry parsing also failed: ${retryError}`);
-            // Fallback: generate generic comments for all violations (no header - we add it)
-            for (const violation of violations) {
-                results.set(violation, `This ${violation.symbolType} exceeds the complexity threshold. Consider refactoring to improve readability and testability.`);
-            }
-            return results;
-        }
+        return results;
     }
     // Map comments back to violations
     for (const violation of violations) {
