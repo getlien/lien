@@ -236,7 +236,7 @@ async function postLineReview(
 
 **Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}** (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})
 
-See inline comments above for specific suggestions.
+See inline comments on the diff for specific suggestions.
 
 <details>
 <summary>📊 Analysis Details</summary>
