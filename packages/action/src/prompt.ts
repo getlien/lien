@@ -227,12 +227,12 @@ ${violationsText}
 
 ## Instructions
 
-For each violation, write a SHORT code review comment (max 150 words) with:
+For each violation, write a code review comment with:
 1. **Problem:** What pattern causes complexity (1 sentence)
-2. **Suggestion:** Concrete fix - early returns, guard clauses, lookup tables, etc. (2-3 sentences)
+2. **Suggestion:** Concrete fix with a short code example showing the refactored approach (3-5 lines of code max)
 3. **Benefit:** What improves (1 sentence)
 
-Keep comments concise. Code snippets are optional - only include if essential.
+Always include a brief code snippet demonstrating the suggested fix.
 
 IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
 
