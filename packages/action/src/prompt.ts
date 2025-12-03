@@ -89,17 +89,23 @@ All analyzed functions are within the configured complexity threshold.`;
 
 /**
  * Format the AI review as a GitHub comment
+ * @param isFallback - true if this is a fallback because violations aren't on diff lines
  */
 export function formatReviewComment(
   aiReview: string,
-  report: ComplexityReport
+  report: ComplexityReport,
+  isFallback = false
 ): string {
   const { summary } = report;
+
+  const fallbackNote = isFallback
+    ? `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`
+    : '';
 
   return `<!-- lien-ai-review -->
 ## 🔍 Lien AI Code Review
 
-**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})
+**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${fallbackNote}
 
 ---
 

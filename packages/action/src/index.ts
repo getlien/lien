@@ -198,9 +198,9 @@ async function postLineReview(
   );
 
   if (commentableViolations.length === 0) {
-    // No violations on diff lines, fall back to summary
-    core.info('No violations on diff lines, posting summary comment');
-    await postSummaryReview(octokit, prContext, report, codeSnippets, config);
+    // No violations on diff lines, fall back to summary with boy scout note
+    core.info('No violations on diff lines, posting summary comment with fallback note');
+    await postSummaryReview(octokit, prContext, report, codeSnippets, config, true);
     return;
   }
 
@@ -258,13 +258,15 @@ See inline comments on the diff for specific suggestions.
 
 /**
  * Post review as a single summary comment
+ * @param isFallback - true if this is a fallback because violations aren't on diff lines
  */
 async function postSummaryReview(
   octokit: ReturnType<typeof createOctokit>,
   prContext: ReturnType<typeof getPRContext> & object,
   report: Awaited<ReturnType<typeof runComplexityAnalysis>> & object,
   codeSnippets: Map<string, string>,
-  config: ReturnType<typeof getConfig>
+  config: ReturnType<typeof getConfig>,
+  isFallback = false
 ): Promise<void> {
   const prompt = buildReviewPrompt(report, prContext, codeSnippets);
   core.debug(`Prompt length: ${prompt.length} characters`);
@@ -275,7 +277,7 @@ async function postSummaryReview(
     config.model
   );
 
-  const comment = formatReviewComment(aiReview, report);
+  const comment = formatReviewComment(aiReview, report, isFallback);
   await postPRComment(octokit, prContext, comment);
   core.info('Successfully posted AI review summary comment');
 }

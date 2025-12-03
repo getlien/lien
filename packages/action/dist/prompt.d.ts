@@ -12,8 +12,9 @@ export declare function buildReviewPrompt(report: ComplexityReport, prContext: P
 export declare function buildNoViolationsMessage(prContext: PRContext): string;
 /**
  * Format the AI review as a GitHub comment
+ * @param isFallback - true if this is a fallback because violations aren't on diff lines
  */
-export declare function formatReviewComment(aiReview: string, report: ComplexityReport): string;
+export declare function formatReviewComment(aiReview: string, report: ComplexityReport, isFallback?: boolean): string;
 /**
  * Get the key for a violation (for code snippet mapping)
  */

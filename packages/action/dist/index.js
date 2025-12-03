@@ -32075,13 +32075,17 @@ All analyzed functions are within the configured complexity threshold.`;
 }
 /**
  * Format the AI review as a GitHub comment
+ * @param isFallback - true if this is a fallback because violations aren't on diff lines
  */
-function formatReviewComment(aiReview, report) {
+function formatReviewComment(aiReview, report, isFallback = false) {
     const { summary } = report;
+    const fallbackNote = isFallback
+        ? `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`
+        : '';
     return `<!-- lien-ai-review -->
 ## 🔍 Lien AI Code Review
 
-**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})
+**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${fallbackNote}
 
 ---
 
@@ -32560,9 +32564,9 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     });
     core.info(`${commentableViolations.length}/${violations.length} violations are on diff lines`);
     if (commentableViolations.length === 0) {
-        // No violations on diff lines, fall back to summary
-        core.info('No violations on diff lines, posting summary comment');
-        await postSummaryReview(octokit, prContext, report, codeSnippets, config);
+        // No violations on diff lines, fall back to summary with boy scout note
+        core.info('No violations on diff lines, posting summary comment with fallback note');
+        await postSummaryReview(octokit, prContext, report, codeSnippets, config, true);
         return;
     }
     // Generate AI comments for each violation
@@ -32609,12 +32613,13 @@ See inline comments on the diff for specific suggestions.
 }
 /**
  * Post review as a single summary comment
+ * @param isFallback - true if this is a fallback because violations aren't on diff lines
  */
-async function postSummaryReview(octokit, prContext, report, codeSnippets, config) {
+async function postSummaryReview(octokit, prContext, report, codeSnippets, config, isFallback = false) {
     const prompt = buildReviewPrompt(report, prContext, codeSnippets);
     core.debug(`Prompt length: ${prompt.length} characters`);
     const aiReview = await generateReview(prompt, config.openrouterApiKey, config.model);
-    const comment = formatReviewComment(aiReview, report);
+    const comment = formatReviewComment(aiReview, report, isFallback);
     await postPRComment(octokit, prContext, comment);
     core.info('Successfully posted AI review summary comment');
 }
