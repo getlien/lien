@@ -40,7 +40,7 @@ jobs:
             packages/cli/dist
             node_modules
             packages/*/node_modules
-          key: lien-cli-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/cli/src/**') }}
+          key: lien-cli-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/cli/src/**/*') }}
           restore-keys: |
             lien-cli-${{ runner.os }}-
       
