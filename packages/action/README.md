@@ -71,13 +71,11 @@ jobs:
           path: ~/.lien
           key: lien-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
       
-      # Clear index and switch to head branch
-      - name: Prepare for head indexing
-        run: |
-          rm -rf ~/.lien
-          git checkout ${{ github.sha }}
+      # Switch to head branch - Lien does incremental indexing
+      - name: Checkout head branch
+        run: git checkout ${{ github.sha }}
       
-      - name: Index head branch
+      - name: Index head branch (incremental)
         run: lien index
       
       - name: AI Code Review

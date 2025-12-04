@@ -191,6 +191,31 @@ describe('calculateDeltas', () => {
     expect(deltas).toHaveLength(1);
     expect(deltas[0].filepath).toBe('src/changed.ts');
   });
+
+  it('handles functions with same name in different files', () => {
+    // Same function name "process" in two different files
+    const baseReport = createReport([
+      createViolation('src/a.ts', 'process', 12),
+      createViolation('src/b.ts', 'process', 15),
+    ]);
+    const headReport = createReport([
+      createViolation('src/a.ts', 'process', 18), // got worse
+      createViolation('src/b.ts', 'process', 11), // improved
+    ]);
+
+    const deltas = calculateDeltas(baseReport, headReport, ['src/a.ts', 'src/b.ts']);
+
+    expect(deltas).toHaveLength(2);
+    
+    const deltaA = deltas.find(d => d.filepath === 'src/a.ts');
+    expect(deltaA?.delta).toBe(6);
+    expect(deltaA?.symbolName).toBe('process');
+
+    const deltaB = deltas.find(d => d.filepath === 'src/b.ts');
+    expect(deltaB?.delta).toBe(-4);
+    expect(deltaB?.symbolName).toBe('process');
+    expect(deltaB?.severity).toBe('improved');
+  });
 });
 
 describe('calculateDeltaSummary', () => {

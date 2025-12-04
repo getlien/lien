@@ -32234,14 +32234,26 @@ function buildReviewPrompt(report, prContext, codeSnippets, deltas = null) {
     // Add delta context if available
     let deltaContext = '';
     if (deltas && deltas.length > 0) {
-        const improved = deltas.filter(d => d.delta < 0);
-        const degraded = deltas.filter(d => d.delta > 0);
+        // Use severity-based filtering for accuracy
+        const improved = deltas.filter(d => d.severity === 'improved');
+        const degraded = deltas.filter(d => (d.severity === 'error' || d.severity === 'warning') && d.delta > 0);
+        const newFuncs = deltas.filter(d => d.severity === 'new');
+        const deleted = deltas.filter(d => d.severity === 'deleted');
+        // Helper to format complexity display (handles null for new/deleted)
+        const formatComplexityChange = (d) => {
+            const from = d.baseComplexity ?? 'new';
+            const to = d.headComplexity ?? 'removed';
+            return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
+        };
         deltaContext = `
 ## Complexity Changes (vs base branch)
 - **Degraded**: ${degraded.length} function(s) got more complex
 - **Improved**: ${improved.length} function(s) got simpler
-${degraded.length > 0 ? `\nFunctions that got worse:\n${degraded.map(d => `  - ${d.symbolName}: ${d.baseComplexity} → ${d.headComplexity} (${formatDelta(d.delta)})`).join('\n')}` : ''}
-${improved.length > 0 ? `\nFunctions that improved:\n${improved.map(d => `  - ${d.symbolName}: ${d.baseComplexity} → ${d.headComplexity} (${formatDelta(d.delta)})`).join('\n')}` : ''}
+- **New**: ${newFuncs.length} new complex function(s)
+- **Removed**: ${deleted.length} complex function(s) deleted
+${degraded.length > 0 ? `\nFunctions that got worse:\n${degraded.map(formatComplexityChange).join('\n')}` : ''}
+${improved.length > 0 ? `\nFunctions that improved:\n${improved.map(formatComplexityChange).join('\n')}` : ''}
+${newFuncs.length > 0 ? `\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}` : ''}
 `;
     }
     return `# Code Complexity Review Request
