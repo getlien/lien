@@ -54,6 +54,7 @@ jobs:
           key: lien-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
       
       # Generate baseline complexity from base branch (for delta tracking)
+      # NOTE: Use same threshold as the action for accurate delta calculation
       - name: Get base complexity
         run: |
           git checkout ${{ github.event.pull_request.base.sha }}

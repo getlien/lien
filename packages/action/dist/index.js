@@ -32006,20 +32006,192 @@ function filterAnalyzableFiles(files) {
     });
 }
 
-;// CONCATENATED MODULE: ./src/prompt.ts
+;// CONCATENATED MODULE: ./src/delta.ts
 /**
- * Prompt builder for AI code review
+ * Complexity delta calculation
+ * Compares base branch complexity to head branch complexity
  */
+
+/**
+ * Create a key for a function to match across base/head
+ */
+function getFunctionKey(filepath, symbolName) {
+    return `${filepath}::${symbolName}`;
+}
+/**
+ * Build a map of function complexities from a report
+ */
+function buildComplexityMap(report, files) {
+    const map = new Map();
+    if (!report)
+        return map;
+    for (const filepath of files) {
+        const fileData = report.files[filepath];
+        if (!fileData)
+            continue;
+        for (const violation of fileData.violations) {
+            const key = getFunctionKey(filepath, violation.symbolName);
+            map.set(key, { complexity: violation.complexity, violation });
+        }
+    }
+    return map;
+}
+/**
+ * Calculate complexity deltas between base and head
+ */
+function calculateDeltas(baseReport, headReport, changedFiles) {
+    const deltas = [];
+    const baseMap = buildComplexityMap(baseReport, changedFiles);
+    const headMap = buildComplexityMap(headReport, changedFiles);
+    // Track which base functions we've seen
+    const seenBaseKeys = new Set();
+    // Process all head violations
+    for (const [key, headData] of headMap) {
+        const baseData = baseMap.get(key);
+        if (baseData) {
+            seenBaseKeys.add(key);
+        }
+        const baseComplexity = baseData?.complexity ?? null;
+        const headComplexity = headData.complexity;
+        const delta = baseComplexity !== null ? headComplexity - baseComplexity : headComplexity;
+        // Determine severity based on delta
+        let severity;
+        if (baseComplexity === null) {
+            severity = 'new';
+        }
+        else if (delta < 0) {
+            severity = 'improved';
+        }
+        else if (headComplexity >= headData.violation.threshold * 2) {
+            severity = 'error';
+        }
+        else {
+            severity = 'warning';
+        }
+        deltas.push({
+            filepath: headData.violation.filepath,
+            symbolName: headData.violation.symbolName,
+            symbolType: headData.violation.symbolType,
+            startLine: headData.violation.startLine,
+            baseComplexity,
+            headComplexity,
+            delta,
+            threshold: headData.violation.threshold,
+            severity,
+        });
+    }
+    // Process deleted functions (in base but not in head)
+    for (const [key, baseData] of baseMap) {
+        if (seenBaseKeys.has(key))
+            continue;
+        deltas.push({
+            filepath: baseData.violation.filepath,
+            symbolName: baseData.violation.symbolName,
+            symbolType: baseData.violation.symbolType,
+            startLine: baseData.violation.startLine,
+            baseComplexity: baseData.complexity,
+            headComplexity: null,
+            delta: -baseData.complexity, // Negative = improvement (removed complexity)
+            threshold: baseData.violation.threshold,
+            severity: 'deleted',
+        });
+    }
+    // Sort by delta (worst first), then by absolute complexity
+    deltas.sort((a, b) => {
+        // Errors first, then warnings, then new, then improved, then deleted
+        const severityOrder = { error: 0, warning: 1, new: 2, improved: 3, deleted: 4 };
+        if (severityOrder[a.severity] !== severityOrder[b.severity]) {
+            return severityOrder[a.severity] - severityOrder[b.severity];
+        }
+        // Within same severity, sort by delta (worse first)
+        return b.delta - a.delta;
+    });
+    return deltas;
+}
+/**
+ * Calculate summary statistics for deltas
+ */
+function calculateDeltaSummary(deltas) {
+    let totalDelta = 0;
+    let improved = 0;
+    let degraded = 0;
+    let newFunctions = 0;
+    let deletedFunctions = 0;
+    let unchanged = 0;
+    for (const d of deltas) {
+        totalDelta += d.delta;
+        switch (d.severity) {
+            case 'improved':
+                improved++;
+                break;
+            case 'error':
+            case 'warning':
+                if (d.delta > 0)
+                    degraded++;
+                else if (d.delta === 0)
+                    unchanged++;
+                else
+                    improved++;
+                break;
+            case 'new':
+                newFunctions++;
+                break;
+            case 'deleted':
+                deletedFunctions++;
+                break;
+        }
+    }
+    return {
+        totalDelta,
+        improved,
+        degraded,
+        newFunctions,
+        deletedFunctions,
+        unchanged,
+    };
+}
 /**
  * Format delta for display
  */
-function formatDeltaStr(delta) {
+function formatDelta(delta) {
     if (delta > 0)
         return `+${delta} ⬆️`;
     if (delta < 0)
         return `${delta} ⬇️`;
     return '±0';
 }
+/**
+ * Format severity emoji
+ */
+function formatSeverityEmoji(severity) {
+    switch (severity) {
+        case 'error':
+            return '🔴';
+        case 'warning':
+            return '🟡';
+        case 'improved':
+            return '🟢';
+        case 'new':
+            return '🆕';
+        case 'deleted':
+            return '🗑️';
+    }
+}
+/**
+ * Log delta summary
+ */
+function logDeltaSummary(summary) {
+    const sign = summary.totalDelta >= 0 ? '+' : '';
+    core.info(`Complexity delta: ${sign}${summary.totalDelta}`);
+    core.info(`  Degraded: ${summary.degraded}, Improved: ${summary.improved}`);
+    core.info(`  New: ${summary.newFunctions}, Deleted: ${summary.deletedFunctions}`);
+}
+
+;// CONCATENATED MODULE: ./src/prompt.ts
+/**
+ * Prompt builder for AI code review
+ */
+
 /**
  * Build the review prompt from complexity report
  */
@@ -32045,7 +32217,7 @@ function buildReviewPrompt(report, prContext, codeSnippets, deltas = null) {
         const violationList = violations
             .map((v) => {
             const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
-            const deltaStr = delta ? ` (${formatDeltaStr(delta.delta)})` : '';
+            const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
             return `  - ${v.symbolName} (${v.symbolType}): complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
         })
             .join('\n');
@@ -32068,8 +32240,8 @@ function buildReviewPrompt(report, prContext, codeSnippets, deltas = null) {
 ## Complexity Changes (vs base branch)
 - **Degraded**: ${degraded.length} function(s) got more complex
 - **Improved**: ${improved.length} function(s) got simpler
-${degraded.length > 0 ? `\nFunctions that got worse:\n${degraded.map(d => `  - ${d.symbolName}: ${d.baseComplexity} → ${d.headComplexity} (${formatDeltaStr(d.delta)})`).join('\n')}` : ''}
-${improved.length > 0 ? `\nFunctions that improved:\n${improved.map(d => `  - ${d.symbolName}: ${d.baseComplexity} → ${d.headComplexity} (${formatDeltaStr(d.delta)})`).join('\n')}` : ''}
+${degraded.length > 0 ? `\nFunctions that got worse:\n${degraded.map(d => `  - ${d.symbolName}: ${d.baseComplexity} → ${d.headComplexity} (${formatDelta(d.delta)})`).join('\n')}` : ''}
+${improved.length > 0 ? `\nFunctions that improved:\n${improved.map(d => `  - ${d.symbolName}: ${d.baseComplexity} → ${d.headComplexity} (${formatDelta(d.delta)})`).join('\n')}` : ''}
 `;
     }
     return `# Code Complexity Review Request
@@ -32519,185 +32691,6 @@ async function generateLineComments(violations, codeSnippets, apiKey, model) {
     }
     const commentsMap = parseCommentsResponse(data.choices[0].message.content);
     return mapCommentsToViolations(commentsMap, violations);
-}
-
-;// CONCATENATED MODULE: ./src/delta.ts
-/**
- * Complexity delta calculation
- * Compares base branch complexity to head branch complexity
- */
-
-/**
- * Create a key for a function to match across base/head
- */
-function getFunctionKey(filepath, symbolName) {
-    return `${filepath}::${symbolName}`;
-}
-/**
- * Build a map of function complexities from a report
- */
-function buildComplexityMap(report, files) {
-    const map = new Map();
-    if (!report)
-        return map;
-    for (const filepath of files) {
-        const fileData = report.files[filepath];
-        if (!fileData)
-            continue;
-        for (const violation of fileData.violations) {
-            const key = getFunctionKey(filepath, violation.symbolName);
-            map.set(key, { complexity: violation.complexity, violation });
-        }
-    }
-    return map;
-}
-/**
- * Calculate complexity deltas between base and head
- */
-function calculateDeltas(baseReport, headReport, changedFiles) {
-    const deltas = [];
-    const baseMap = buildComplexityMap(baseReport, changedFiles);
-    const headMap = buildComplexityMap(headReport, changedFiles);
-    // Track which base functions we've seen
-    const seenBaseKeys = new Set();
-    // Process all head violations
-    for (const [key, headData] of headMap) {
-        const baseData = baseMap.get(key);
-        seenBaseKeys.add(key);
-        const baseComplexity = baseData?.complexity ?? null;
-        const headComplexity = headData.complexity;
-        const delta = baseComplexity !== null ? headComplexity - baseComplexity : headComplexity;
-        // Determine severity based on delta
-        let severity;
-        if (baseComplexity === null) {
-            severity = 'new';
-        }
-        else if (delta < 0) {
-            severity = 'improved';
-        }
-        else if (headComplexity >= headData.violation.threshold * 2) {
-            severity = 'error';
-        }
-        else {
-            severity = 'warning';
-        }
-        deltas.push({
-            filepath: headData.violation.filepath,
-            symbolName: headData.violation.symbolName,
-            symbolType: headData.violation.symbolType,
-            startLine: headData.violation.startLine,
-            baseComplexity,
-            headComplexity,
-            delta,
-            threshold: headData.violation.threshold,
-            severity,
-        });
-    }
-    // Process deleted functions (in base but not in head)
-    for (const [key, baseData] of baseMap) {
-        if (seenBaseKeys.has(key))
-            continue;
-        deltas.push({
-            filepath: baseData.violation.filepath,
-            symbolName: baseData.violation.symbolName,
-            symbolType: baseData.violation.symbolType,
-            startLine: baseData.violation.startLine,
-            baseComplexity: baseData.complexity,
-            headComplexity: null,
-            delta: -baseData.complexity, // Negative = improvement (removed complexity)
-            threshold: baseData.violation.threshold,
-            severity: 'deleted',
-        });
-    }
-    // Sort by delta (worst first), then by absolute complexity
-    deltas.sort((a, b) => {
-        // Errors first, then warnings, then new, then improved, then deleted
-        const severityOrder = { error: 0, warning: 1, new: 2, improved: 3, deleted: 4 };
-        if (severityOrder[a.severity] !== severityOrder[b.severity]) {
-            return severityOrder[a.severity] - severityOrder[b.severity];
-        }
-        // Within same severity, sort by delta (worse first)
-        return b.delta - a.delta;
-    });
-    return deltas;
-}
-/**
- * Calculate summary statistics for deltas
- */
-function calculateDeltaSummary(deltas) {
-    let totalDelta = 0;
-    let improved = 0;
-    let degraded = 0;
-    let newFunctions = 0;
-    let deletedFunctions = 0;
-    let unchanged = 0;
-    for (const d of deltas) {
-        totalDelta += d.delta;
-        switch (d.severity) {
-            case 'improved':
-                improved++;
-                break;
-            case 'error':
-            case 'warning':
-                if (d.delta > 0)
-                    degraded++;
-                else if (d.delta === 0)
-                    unchanged++;
-                else
-                    improved++;
-                break;
-            case 'new':
-                newFunctions++;
-                break;
-            case 'deleted':
-                deletedFunctions++;
-                break;
-        }
-    }
-    return {
-        totalDelta,
-        improved,
-        degraded,
-        newFunctions,
-        deletedFunctions,
-        unchanged,
-    };
-}
-/**
- * Format delta for display
- */
-function formatDelta(delta) {
-    if (delta > 0)
-        return `+${delta} ⬆️`;
-    if (delta < 0)
-        return `${delta} ⬇️`;
-    return '±0';
-}
-/**
- * Format severity emoji
- */
-function formatSeverityEmoji(severity) {
-    switch (severity) {
-        case 'error':
-            return '🔴';
-        case 'warning':
-            return '🟡';
-        case 'improved':
-            return '🟢';
-        case 'new':
-            return '🆕';
-        case 'deleted':
-            return '🗑️';
-    }
-}
-/**
- * Log delta summary
- */
-function logDeltaSummary(summary) {
-    const sign = summary.totalDelta >= 0 ? '+' : '';
-    core.info(`Complexity delta: ${sign}${summary.totalDelta}`);
-    core.info(`  Degraded: ${summary.degraded}, Improved: ${summary.improved}`);
-    core.info(`  New: ${summary.newFunctions}, Deleted: ${summary.deletedFunctions}`);
 }
 
 ;// CONCATENATED MODULE: ./src/index.ts

@@ -56,7 +56,9 @@ export function calculateDeltas(
   // Process all head violations
   for (const [key, headData] of headMap) {
     const baseData = baseMap.get(key);
-    seenBaseKeys.add(key);
+    if (baseData) {
+      seenBaseKeys.add(key);
+    }
 
     const baseComplexity = baseData?.complexity ?? null;
     const headComplexity = headData.complexity;

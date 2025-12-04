@@ -3,15 +3,7 @@
  */
 
 import type { ComplexityReport, ComplexityViolation, PRContext, ComplexityDelta, DeltaSummary } from './types.js';
-
-/**
- * Format delta for display
- */
-function formatDeltaStr(delta: number): string {
-  if (delta > 0) return `+${delta} ⬆️`;
-  if (delta < 0) return `${delta} ⬇️`;
-  return '±0';
-}
+import { formatDelta } from './delta.js';
 
 /**
  * Build the review prompt from complexity report
@@ -46,7 +38,7 @@ export function buildReviewPrompt(
       const violationList = violations
         .map((v) => {
           const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
-          const deltaStr = delta ? ` (${formatDeltaStr(delta.delta)})` : '';
+          const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
           return `  - ${v.symbolName} (${v.symbolType}): complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
         })
         .join('\n');
@@ -71,8 +63,8 @@ export function buildReviewPrompt(
 ## Complexity Changes (vs base branch)
 - **Degraded**: ${degraded.length} function(s) got more complex
 - **Improved**: ${improved.length} function(s) got simpler
-${degraded.length > 0 ? `\nFunctions that got worse:\n${degraded.map(d => `  - ${d.symbolName}: ${d.baseComplexity} → ${d.headComplexity} (${formatDeltaStr(d.delta)})`).join('\n')}` : ''}
-${improved.length > 0 ? `\nFunctions that improved:\n${improved.map(d => `  - ${d.symbolName}: ${d.baseComplexity} → ${d.headComplexity} (${formatDeltaStr(d.delta)})`).join('\n')}` : ''}
+${degraded.length > 0 ? `\nFunctions that got worse:\n${degraded.map(d => `  - ${d.symbolName}: ${d.baseComplexity} → ${d.headComplexity} (${formatDelta(d.delta)})`).join('\n')}` : ''}
+${improved.length > 0 ? `\nFunctions that improved:\n${improved.map(d => `  - ${d.symbolName}: ${d.baseComplexity} → ${d.headComplexity} (${formatDelta(d.delta)})`).join('\n')}` : ''}
 `;
   }
 

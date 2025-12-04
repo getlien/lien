@@ -25,6 +25,20 @@ inputs:
     description: 'Path to baseline complexity JSON from base branch (for delta calculation)'
     default: ''
 
+outputs:
+  violations:
+    description: 'Total number of complexity violations found'
+  errors:
+    description: 'Number of error-level violations'
+  warnings:
+    description: 'Number of warning-level violations'
+  total_delta:
+    description: 'Net complexity change (positive = worse, negative = better)'
+  improved:
+    description: 'Number of functions that got simpler'
+  degraded:
+    description: 'Number of functions that got more complex'
+
 runs:
   using: 'node20'
   main: 'dist/index.js'
