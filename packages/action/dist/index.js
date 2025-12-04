@@ -32852,24 +32852,49 @@ async function run() {
     }
 }
 /**
+ * Find the best line to comment on for a violation
+ * Returns startLine if it's in diff, otherwise first diff line in function range, or null
+ */
+function findCommentLine(violation, diffLines) {
+    const fileLines = diffLines.get(violation.filepath);
+    if (!fileLines)
+        return null;
+    // Prefer startLine (function declaration)
+    if (fileLines.has(violation.startLine)) {
+        return violation.startLine;
+    }
+    // Find first diff line within the function range
+    for (let line = violation.startLine; line <= violation.endLine; line++) {
+        if (fileLines.has(line)) {
+            return line;
+        }
+    }
+    return null;
+}
+/**
  * Post review with line-specific comments for all violations
  */
 async function postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas = null) {
     // Get lines that are in the diff (only these can have line comments)
     const diffLines = await getPRDiffLines(octokit, prContext);
     core.info(`Diff covers ${diffLines.size} files`);
-    // Filter violations to only those on lines in the diff
-    const commentableViolations = violations.filter((v) => {
-        const fileLines = diffLines.get(v.filepath);
-        if (!fileLines)
-            return false;
-        // Check if start line is in diff
-        return fileLines.has(v.startLine);
-    });
-    core.info(`${commentableViolations.length}/${violations.length} violations are on diff lines`);
-    if (commentableViolations.length === 0) {
-        // No violations on diff lines, fall back to summary with boy scout note
-        core.info('No violations on diff lines, posting summary comment with fallback note');
+    // Find the best comment line for each violation
+    const violationsWithLines = [];
+    const uncoveredViolations = [];
+    for (const v of violations) {
+        const commentLine = findCommentLine(v, diffLines);
+        if (commentLine !== null) {
+            violationsWithLines.push({ violation: v, commentLine });
+        }
+        else {
+            uncoveredViolations.push(v);
+        }
+    }
+    core.info(`${violationsWithLines.length}/${violations.length} violations can have inline comments ` +
+        `(${uncoveredViolations.length} outside diff)`);
+    if (violationsWithLines.length === 0) {
+        // No violations can have inline comments, fall back to summary
+        core.info('No violations in diff range, posting summary comment with fallback note');
         await postSummaryReview(octokit, prContext, report, codeSnippets, config, true, deltas);
         return;
     }
@@ -32880,22 +32905,29 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
             deltaMap.set(`${d.filepath}::${d.symbolName}`, d);
         }
     }
-    // Generate AI comments for each violation
+    // Generate AI comments for violations that can have inline comments
+    const commentableViolations = violationsWithLines.map(v => v.violation);
     core.info('Generating AI comments for violations...');
     const aiComments = await generateLineComments(commentableViolations, codeSnippets, config.openrouterApiKey, config.model);
     // Build line comments with delta info
     const lineComments = [];
-    for (const [violation, comment] of aiComments) {
+    for (const { violation, commentLine } of violationsWithLines) {
+        const comment = aiComments.get(violation);
+        if (!comment)
+            continue;
         const delta = deltaMap.get(`${violation.filepath}::${violation.symbolName}`);
         const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
         const severityEmoji = delta
             ? formatSeverityEmoji(delta.severity)
             : (violation.severity === 'error' ? '🔴' : '🟡');
-        core.info(`Adding comment for ${violation.filepath}:${violation.startLine} (${violation.symbolName})${deltaStr}`);
+        const lineNote = commentLine !== violation.startLine
+            ? ` *(function starts at line ${violation.startLine})*`
+            : '';
+        core.info(`Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`);
         lineComments.push({
             path: violation.filepath,
-            line: violation.startLine,
-            body: `${severityEmoji} **Complexity: ${violation.complexity}**${deltaStr} (threshold: ${violation.threshold})\n\n${comment}`,
+            line: commentLine,
+            body: `${severityEmoji} **Complexity: ${violation.complexity}**${deltaStr} (threshold: ${violation.threshold})${lineNote}\n\n${comment}`,
         });
     }
     core.info(`Built ${lineComments.length} line comments`);
@@ -32917,12 +32949,24 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
         if (deltaSummary.degraded > 0)
             deltaDisplay += ` (${deltaSummary.degraded} degraded)`;
     }
+    // Build note about uncovered violations (outside diff range)
+    let uncoveredNote = '';
+    if (uncoveredViolations.length > 0) {
+        const uncoveredList = uncoveredViolations
+            .map(v => {
+            const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+            const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+            return `  - \`${v.symbolName}\` in \`${v.filepath}\`: complexity ${v.complexity}${deltaStr}`;
+        })
+            .join('\n');
+        uncoveredNote = `\n\n<details>\n<summary>⚠️ ${uncoveredViolations.length} violation${uncoveredViolations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${uncoveredList}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
+    }
     const summaryBody = `<!-- lien-ai-review -->
 ## 🔍 Lien Complexity Review
 
 **Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}** (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${deltaDisplay}
 
-See inline comments on the diff for specific suggestions.
+See inline comments on the diff for specific suggestions.${uncoveredNote}
 
 <details>
 <summary>📊 Analysis Details</summary>
