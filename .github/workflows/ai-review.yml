@@ -59,12 +59,13 @@ jobs:
         run: lien init --yes
       
       # Generate baseline complexity from base branch
+      # NOTE: Must use same threshold as action for accurate delta
       - name: Get base branch complexity
         run: |
           echo "Checking out base branch: ${{ github.event.pull_request.base.sha }}"
           git checkout ${{ github.event.pull_request.base.sha }}
           lien index
-          lien complexity --format json > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
+          lien complexity --format json --threshold 10 > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
           echo "Base complexity saved"
           git checkout ${{ github.sha }}
       
