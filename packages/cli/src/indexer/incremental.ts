@@ -19,7 +19,8 @@ import { Result, Ok, Err, isOk } from '../utils/result.js';
  * @returns Relative path from rootDir
  */
 export function normalizeToRelativePath(filepath: string, rootDir?: string): string {
-  const root = (rootDir || process.cwd()).replace(/\\/g, '/');
+  // Normalize root and strip trailing slash to ensure consistent comparison
+  const root = (rootDir || process.cwd()).replace(/\\/g, '/').replace(/\/$/, '');
   const normalized = filepath.replace(/\\/g, '/');
   
   // If already relative, return as-is

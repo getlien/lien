@@ -35,5 +35,3 @@ export const toolHandlers: Record<string, ToolHandler> = {
   'get_dependents': handleGetDependents,
   'get_complexity': handleGetComplexity,
 };
-
-

@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import path from 'path';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { ManifestManager, IndexManifest } from './manifest.js';
 import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
@@ -245,8 +246,8 @@ async function mtimeBasedDetection(
   
   for (const filepath of currentFiles) {
     try {
-      // Construct absolute path for filesystem access
-      const absolutePath = filepath.startsWith('/') ? filepath : `${rootDir}/${filepath}`;
+      // Construct absolute path for filesystem access (use path.join for cross-platform)
+      const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
       const stats = await fs.stat(absolutePath);
       fileStats.set(filepath, stats.mtimeMs);
     } catch {

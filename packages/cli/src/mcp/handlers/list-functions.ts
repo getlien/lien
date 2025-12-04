@@ -66,5 +66,3 @@ export async function handleListFunctions(
     }
   )(args);
 }
-
-

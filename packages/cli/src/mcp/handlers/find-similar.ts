@@ -33,5 +33,3 @@ export async function handleFindSimilar(
     }
   )(args);
 }
-
-

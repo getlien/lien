@@ -185,5 +185,3 @@ export async function handleGetFilesContext(
     }
   )(args);
 }
-
-
