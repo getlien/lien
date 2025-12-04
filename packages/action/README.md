@@ -196,22 +196,11 @@ This badge is always visible at the top of the PR, not buried in comments.
 - Pre-existing unchanged violations are summarized, not re-commented
 - Saves LLM costs by not regenerating comments for unchanged code
 
-### Auto-Resolve (Experimental)
-
-The action attempts to automatically resolve review threads when violations are fixed. This requires the GitHub token to have GraphQL mutation permissions.
-
-**Note**: The default `GITHUB_TOKEN` may not have permission to resolve threads. If you see "Resource not accessible by integration" warnings, you can:
-
-1. **Ignore it** - threads will stay open but the action continues working
-2. **Use a PAT** - create a Personal Access Token with `repo` scope and use it instead of `GITHUB_TOKEN`
-3. **Resolve manually** - click "Resolve conversation" on fixed threads
-
 ## Limitations
 
 - Only runs on PRs from the same repository (not forks) due to secrets access
 - Analyzes up to 10 violations per review to stay within token limits
 - Inline comments only work for lines in the PR diff; violations outside the diff get a summary comment with a note about the boy scout rule
-- Auto-resolve requires additional token permissions (see above)
 
 ## Development
 
