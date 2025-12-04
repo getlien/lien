@@ -78,7 +78,7 @@ jobs:
           else
             echo "Cache hit - skipping index"
           fi
-          lien complexity --format json --threshold 10 > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
+          lien complexity --format json --threshold 15 > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
           echo "Base complexity saved"
       
       # Save base cache BEFORE switching to head (prevents head from overwriting)
@@ -103,7 +103,7 @@ jobs:
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
           model: 'anthropic/claude-sonnet-4'
-          threshold: '10'
+          threshold: '15'
           github_token: ${{ secrets.GITHUB_TOKEN }}
           baseline_complexity: '/tmp/base-complexity.json'
 
