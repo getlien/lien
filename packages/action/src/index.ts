@@ -18,6 +18,7 @@ import {
   postPRReview,
   getPRDiffLines,
   createOctokit,
+  updatePRDescription,
   type LineComment,
 } from './github.js';
 import { runComplexityAnalysis, filterAnalyzableFiles } from './complexity.js';
@@ -27,6 +28,7 @@ import {
   buildNoViolationsMessage,
   formatReviewComment,
   getViolationKey,
+  buildDescriptionBadge,
 } from './prompt.js';
 import {
   calculateDeltas,
@@ -192,17 +194,22 @@ async function run(): Promise<void> {
       ? calculateDeltas(baselineReport, report, filesToAnalyze)
       : null;
 
-    if (deltas) {
-      const deltaSummary = calculateDeltaSummary(deltas);
+    const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
+
+    if (deltaSummary) {
       logDeltaSummary(deltaSummary);
       core.setOutput('total_delta', deltaSummary.totalDelta);
       core.setOutput('improved', deltaSummary.improved);
       core.setOutput('degraded', deltaSummary.degraded);
     }
 
+    // Always update PR description with stats badge
+    const badge = buildDescriptionBadge(report, deltaSummary);
+    await updatePRDescription(octokit, prContext, badge);
+
     if (report.summary.totalViolations === 0) {
       core.info('No complexity violations found');
-      await postPRComment(octokit, prContext, buildNoViolationsMessage(prContext, deltas));
+      // Skip the regular comment - the description badge is sufficient
       return;
     }
 

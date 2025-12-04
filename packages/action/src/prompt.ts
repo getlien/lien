@@ -220,6 +220,72 @@ export function getViolationKey(violation: ComplexityViolation): string {
 }
 
 /**
+ * Build the PR description stats badge
+ * This is appended to the PR description (like Bugbot style)
+ */
+export function buildDescriptionBadge(
+  report: ComplexityReport | null,
+  deltaSummary: DeltaSummary | null
+): string {
+  // Determine status emoji and text
+  let statusEmoji: string;
+  let statusText: string;
+  let deltaDisplay = '—';
+  let maxComplexity = '—';
+  let violations = '0';
+
+  if (report) {
+    violations = String(report.summary.totalViolations);
+    maxComplexity = String(report.summary.maxComplexity);
+  }
+
+  if (deltaSummary) {
+    const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
+    const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+    deltaDisplay = `${sign}${deltaSummary.totalDelta} ${trend}`;
+
+    if (deltaSummary.totalDelta < 0) {
+      statusEmoji = '✅';
+      statusText = 'Improved';
+    } else if (deltaSummary.totalDelta > 0) {
+      statusEmoji = '⚠️';
+      statusText = 'Degraded';
+    } else {
+      statusEmoji = '➡️';
+      statusText = 'No change';
+    }
+  } else if (report && report.summary.totalViolations === 0) {
+    statusEmoji = '✅';
+    statusText = 'Clean';
+  } else if (report && report.summary.totalViolations > 0) {
+    statusEmoji = '⚠️';
+    statusText = `${report.summary.totalViolations} violation${report.summary.totalViolations === 1 ? '' : 's'}`;
+  } else {
+    statusEmoji = '—';
+    statusText = 'Not analyzed';
+  }
+
+  // Build improvement details if any
+  let improvementDetails = '';
+  if (deltaSummary && (deltaSummary.improved > 0 || deltaSummary.degraded > 0)) {
+    const parts: string[] = [];
+    if (deltaSummary.improved > 0) {
+      parts.push(`${deltaSummary.improved} improved`);
+    }
+    if (deltaSummary.degraded > 0) {
+      parts.push(`${deltaSummary.degraded} degraded`);
+    }
+    improvementDetails = `\n\n*${parts.join(' · ')}*`;
+  }
+
+  return `### 🔍 Lien Complexity
+
+| Violations | Max | Delta | Status |
+|:----------:|:---:|:-----:|:------:|
+| ${violations} | ${maxComplexity} | ${deltaDisplay} | ${statusEmoji} ${statusText} |${improvementDetails}`;
+}
+
+/**
  * Build a prompt for generating a single line comment for a violation
  */
 export function buildLineCommentPrompt(

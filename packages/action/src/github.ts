@@ -214,6 +214,66 @@ export async function postPRReview(
 }
 
 /**
+ * Marker comments for the PR description stats badge
+ */
+const DESCRIPTION_START_MARKER = '<!-- lien-stats -->';
+const DESCRIPTION_END_MARKER = '<!-- /lien-stats -->';
+
+/**
+ * Update the PR description with a stats badge
+ * Appends or replaces the stats section at the bottom of the description
+ */
+export async function updatePRDescription(
+  octokit: Octokit,
+  prContext: PRContext,
+  badgeMarkdown: string
+): Promise<void> {
+  try {
+    // Get current PR
+    const { data: pr } = await octokit.rest.pulls.get({
+      owner: prContext.owner,
+      repo: prContext.repo,
+      pull_number: prContext.pullNumber,
+    });
+
+    const currentBody = pr.body || '';
+    const wrappedBadge = `${DESCRIPTION_START_MARKER}\n${badgeMarkdown}\n${DESCRIPTION_END_MARKER}`;
+
+    let newBody: string;
+
+    // Check if we already have a stats section
+    const startIdx = currentBody.indexOf(DESCRIPTION_START_MARKER);
+    const endIdx = currentBody.indexOf(DESCRIPTION_END_MARKER);
+
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      // Replace existing section
+      newBody =
+        currentBody.slice(0, startIdx) +
+        wrappedBadge +
+        currentBody.slice(endIdx + DESCRIPTION_END_MARKER.length);
+      core.info('Updating existing stats badge in PR description');
+    } else {
+      // Append to end
+      newBody = currentBody.trim() + '\n\n---\n\n' + wrappedBadge;
+      core.info('Adding stats badge to PR description');
+    }
+
+    // Update the PR
+    await octokit.rest.pulls.update({
+      owner: prContext.owner,
+      repo: prContext.repo,
+      pull_number: prContext.pullNumber,
+      body: newBody,
+    });
+
+    core.info('PR description updated with complexity stats');
+  } catch (error) {
+    // Don't fail the action if we can't update the description
+    core.warning(`Failed to update PR description: ${error}`);
+  }
+}
+
+/**
  * Parse unified diff patch to extract line numbers that can receive comments
  * Exported for testing
  */

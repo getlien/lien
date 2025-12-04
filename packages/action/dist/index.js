@@ -31856,6 +31856,56 @@ async function postPRReview(octokit, prContext, comments, summaryBody) {
     }
 }
 /**
+ * Marker comments for the PR description stats badge
+ */
+const DESCRIPTION_START_MARKER = '<!-- lien-stats -->';
+const DESCRIPTION_END_MARKER = '<!-- /lien-stats -->';
+/**
+ * Update the PR description with a stats badge
+ * Appends or replaces the stats section at the bottom of the description
+ */
+async function updatePRDescription(octokit, prContext, badgeMarkdown) {
+    try {
+        // Get current PR
+        const { data: pr } = await octokit.rest.pulls.get({
+            owner: prContext.owner,
+            repo: prContext.repo,
+            pull_number: prContext.pullNumber,
+        });
+        const currentBody = pr.body || '';
+        const wrappedBadge = `${DESCRIPTION_START_MARKER}\n${badgeMarkdown}\n${DESCRIPTION_END_MARKER}`;
+        let newBody;
+        // Check if we already have a stats section
+        const startIdx = currentBody.indexOf(DESCRIPTION_START_MARKER);
+        const endIdx = currentBody.indexOf(DESCRIPTION_END_MARKER);
+        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+            // Replace existing section
+            newBody =
+                currentBody.slice(0, startIdx) +
+                    wrappedBadge +
+                    currentBody.slice(endIdx + DESCRIPTION_END_MARKER.length);
+            core.info('Updating existing stats badge in PR description');
+        }
+        else {
+            // Append to end
+            newBody = currentBody.trim() + '\n\n---\n\n' + wrappedBadge;
+            core.info('Adding stats badge to PR description');
+        }
+        // Update the PR
+        await octokit.rest.pulls.update({
+            owner: prContext.owner,
+            repo: prContext.repo,
+            pull_number: prContext.pullNumber,
+            body: newBody,
+        });
+        core.info('PR description updated with complexity stats');
+    }
+    catch (error) {
+        // Don't fail the action if we can't update the description
+        core.warning(`Failed to update PR description: ${error}`);
+    }
+}
+/**
  * Parse unified diff patch to extract line numbers that can receive comments
  * Exported for testing
  */
@@ -32374,6 +32424,68 @@ function getViolationKey(violation) {
     return `${violation.filepath}::${violation.symbolName}`;
 }
 /**
+ * Build the PR description stats badge
+ * This is appended to the PR description (like Bugbot style)
+ */
+function buildDescriptionBadge(report, deltaSummary) {
+    // Determine status emoji and text
+    let statusEmoji;
+    let statusText;
+    let deltaDisplay = '—';
+    let maxComplexity = '—';
+    let violations = '0';
+    if (report) {
+        violations = String(report.summary.totalViolations);
+        maxComplexity = String(report.summary.maxComplexity);
+    }
+    if (deltaSummary) {
+        const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
+        const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+        deltaDisplay = `${sign}${deltaSummary.totalDelta} ${trend}`;
+        if (deltaSummary.totalDelta < 0) {
+            statusEmoji = '✅';
+            statusText = 'Improved';
+        }
+        else if (deltaSummary.totalDelta > 0) {
+            statusEmoji = '⚠️';
+            statusText = 'Degraded';
+        }
+        else {
+            statusEmoji = '➡️';
+            statusText = 'No change';
+        }
+    }
+    else if (report && report.summary.totalViolations === 0) {
+        statusEmoji = '✅';
+        statusText = 'Clean';
+    }
+    else if (report && report.summary.totalViolations > 0) {
+        statusEmoji = '⚠️';
+        statusText = `${report.summary.totalViolations} violation${report.summary.totalViolations === 1 ? '' : 's'}`;
+    }
+    else {
+        statusEmoji = '—';
+        statusText = 'Not analyzed';
+    }
+    // Build improvement details if any
+    let improvementDetails = '';
+    if (deltaSummary && (deltaSummary.improved > 0 || deltaSummary.degraded > 0)) {
+        const parts = [];
+        if (deltaSummary.improved > 0) {
+            parts.push(`${deltaSummary.improved} improved`);
+        }
+        if (deltaSummary.degraded > 0) {
+            parts.push(`${deltaSummary.degraded} degraded`);
+        }
+        improvementDetails = `\n\n*${parts.join(' · ')}*`;
+    }
+    return `### 🔍 Lien Complexity
+
+| Violations | Max | Delta | Status |
+|:----------:|:---:|:-----:|:------:|
+| ${violations} | ${maxComplexity} | ${deltaDisplay} | ${statusEmoji} ${statusText} |${improvementDetails}`;
+}
+/**
  * Build a prompt for generating a single line comment for a violation
  */
 function buildLineCommentPrompt(violation, codeSnippet) {
@@ -32842,16 +32954,19 @@ async function run() {
         const deltas = baselineReport
             ? calculateDeltas(baselineReport, report, filesToAnalyze)
             : null;
-        if (deltas) {
-            const deltaSummary = calculateDeltaSummary(deltas);
+        const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
+        if (deltaSummary) {
             logDeltaSummary(deltaSummary);
             core.setOutput('total_delta', deltaSummary.totalDelta);
             core.setOutput('improved', deltaSummary.improved);
             core.setOutput('degraded', deltaSummary.degraded);
         }
+        // Always update PR description with stats badge
+        const badge = buildDescriptionBadge(report, deltaSummary);
+        await updatePRDescription(octokit, prContext, badge);
         if (report.summary.totalViolations === 0) {
             core.info('No complexity violations found');
-            await postPRComment(octokit, prContext, buildNoViolationsMessage(prContext, deltas));
+            // Skip the regular comment - the description badge is sufficient
             return;
         }
         const { violations, codeSnippets } = await prepareViolationsForReview(report, octokit, prContext);
