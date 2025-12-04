@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import path from 'path';
 import { chunkFile } from './chunker.js';
 import { EmbeddingService } from '../embeddings/types.js';
 import { VectorDB } from '../vectordb/lancedb.js';
@@ -7,6 +8,36 @@ import { ManifestManager } from './manifest.js';
 import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
 import { CodeChunk } from './types.js';
 import { Result, Ok, Err, isOk } from '../utils/result.js';
+
+/**
+ * Normalize a file path to a consistent relative format.
+ * This ensures paths from different sources (git diff, scanner, etc.)
+ * are stored and queried consistently in the index.
+ * 
+ * @param filepath - Absolute or relative file path
+ * @param rootDir - Workspace root directory (defaults to cwd)
+ * @returns Relative path from rootDir
+ */
+export function normalizeToRelativePath(filepath: string, rootDir?: string): string {
+  const root = (rootDir || process.cwd()).replace(/\\/g, '/');
+  const normalized = filepath.replace(/\\/g, '/');
+  
+  // If already relative, return as-is
+  if (!path.isAbsolute(filepath)) {
+    return normalized;
+  }
+  
+  // Convert absolute to relative
+  if (normalized.startsWith(root + '/')) {
+    return normalized.slice(root.length + 1);
+  }
+  if (normalized.startsWith(root)) {
+    return normalized.slice(root.length);
+  }
+  
+  // Fallback: use path.relative
+  return path.relative(root, filepath).replace(/\\/g, '/');
+}
 
 export interface IncrementalIndexOptions {
   verbose?: boolean;
@@ -125,27 +156,31 @@ export async function indexSingleFile(
 ): Promise<void> {
   const { verbose } = options;
   
+  // Normalize to relative path for consistent storage and queries
+  // This ensures paths from git diff (absolute) match paths from scanner (relative)
+  const normalizedPath = normalizeToRelativePath(filepath);
+  
   try {
-    // Check if file exists
+    // Check if file exists (use original filepath for filesystem operations)
     try {
       await fs.access(filepath);
     } catch {
-      // File doesn't exist - delete from index and manifest
+      // File doesn't exist - delete from index and manifest using normalized path
       if (verbose) {
-        console.error(`[Lien] File deleted: ${filepath}`);
+        console.error(`[Lien] File deleted: ${normalizedPath}`);
       }
-      await vectorDB.deleteByFile(filepath);
+      await vectorDB.deleteByFile(normalizedPath);
       
       const manifest = new ManifestManager(vectorDB.dbPath);
-      await manifest.removeFile(filepath);
+      await manifest.removeFile(normalizedPath);
       return;
     }
     
     // Read file content
     const content = await fs.readFile(filepath, 'utf-8');
     
-    // Process file content (chunking + embeddings) - shared logic
-    const result = await processFileContent(filepath, content, embeddings, config, verbose || false);
+    // Process file content (chunking + embeddings) - use normalized path for storage
+    const result = await processFileContent(normalizedPath, content, embeddings, config, verbose || false);
     
     // Get actual file mtime for manifest
     const stats = await fs.stat(filepath);
@@ -153,9 +188,9 @@ export async function indexSingleFile(
     
     if (result === null) {
       // Empty file - remove from vector DB but keep in manifest with chunkCount: 0
-      await vectorDB.deleteByFile(filepath);
-      await manifest.updateFile(filepath, {
-        filepath,
+      await vectorDB.deleteByFile(normalizedPath);
+      await manifest.updateFile(normalizedPath, {
+        filepath: normalizedPath,
         lastModified: stats.mtimeMs,
         chunkCount: 0,
       });
@@ -164,53 +199,57 @@ export async function indexSingleFile(
     
     // Non-empty file - update in database (atomic: delete old + insert new)
     await vectorDB.updateFile(
-      filepath,
+      normalizedPath,
       result.vectors,
       result.chunks.map(c => c.metadata),
       result.texts
     );
     
     // Update manifest after successful indexing
-    await manifest.updateFile(filepath, {
-      filepath,
+    await manifest.updateFile(normalizedPath, {
+      filepath: normalizedPath,
       lastModified: stats.mtimeMs,
       chunkCount: result.chunkCount,
     });
     
     if (verbose) {
-      console.error(`[Lien] ✓ Updated ${filepath} (${result.chunkCount} chunks)`);
+      console.error(`[Lien] ✓ Updated ${normalizedPath} (${result.chunkCount} chunks)`);
     }
   } catch (error) {
     // Log error but don't throw - we want to continue with other files
-    console.error(`[Lien] ⚠️  Failed to index ${filepath}: ${error}`);
+    console.error(`[Lien] ⚠️  Failed to index ${normalizedPath}: ${error}`);
   }
 }
 
 /**
  * Process a single file, returning a Result type.
  * This helper makes error handling explicit and testable.
+ * 
+ * @param filepath - Original filepath (may be absolute)
+ * @param normalizedPath - Normalized relative path for storage
  */
 async function processSingleFileForIndexing(
   filepath: string,
+  normalizedPath: string,
   embeddings: EmbeddingService,
   config: LienConfig | LegacyLienConfig,
   verbose: boolean
 ): Promise<Result<FileProcessResult, string>> {
   try {
-    // Read file stats and content
+    // Read file stats and content using original path (for filesystem access)
     const stats = await fs.stat(filepath);
     const content = await fs.readFile(filepath, 'utf-8');
     
-    // Process content
-    const result = await processFileContent(filepath, content, embeddings, config, verbose);
+    // Process content using normalized path (for storage)
+    const result = await processFileContent(normalizedPath, content, embeddings, config, verbose);
     
     return Ok({
-      filepath,
+      filepath: normalizedPath,  // Store normalized path
       result,
       mtime: stats.mtimeMs,
     });
   } catch (error) {
-    return Err(`Failed to process ${filepath}: ${error}`);
+    return Err(`Failed to process ${normalizedPath}: ${error}`);
   }
 }
 
@@ -246,23 +285,27 @@ export async function indexMultipleFiles(
   
   // Process each file sequentially (simple and reliable)
   for (const filepath of filepaths) {
-    const result = await processSingleFileForIndexing(filepath, embeddings, config, verbose || false);
+    // Normalize to relative path for consistent storage and queries
+    // This ensures paths from git diff (absolute) match paths from scanner (relative)
+    const normalizedPath = normalizeToRelativePath(filepath);
+    
+    const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, config, verbose || false);
     
     if (isOk(result)) {
-      const { result: processResult, mtime } = result.value;
+      const { filepath: storedPath, result: processResult, mtime } = result.value;
       
       if (processResult === null) {
         // Empty file - remove from vector DB but keep in manifest with chunkCount: 0
         try {
-          await vectorDB.deleteByFile(filepath);
+          await vectorDB.deleteByFile(storedPath);
         } catch (error) {
           // Ignore errors if file wasn't in index
         }
         
         // Update manifest immediately for empty files (not batched)
         const manifest = new ManifestManager(vectorDB.dbPath);
-        await manifest.updateFile(filepath, {
-          filepath,
+        await manifest.updateFile(storedPath, {
+          filepath: storedPath,
           lastModified: mtime,
           chunkCount: 0,
         });
@@ -273,7 +316,7 @@ export async function indexMultipleFiles(
       
       // Non-empty file - delete old chunks if they exist
       try {
-        await vectorDB.deleteByFile(filepath);
+        await vectorDB.deleteByFile(storedPath);
       } catch (error) {
         // Ignore - file might not be in index yet
       }
@@ -287,13 +330,13 @@ export async function indexMultipleFiles(
       
       // Queue manifest update (batch at end)
       manifestEntries.push({
-        filepath,
+        filepath: storedPath,
         chunkCount: processResult.chunkCount,
         mtime,
       });
       
       if (verbose) {
-        console.error(`[Lien] ✓ Updated ${filepath} (${processResult.chunkCount} chunks)`);
+        console.error(`[Lien] ✓ Updated ${storedPath} (${processResult.chunkCount} chunks)`);
       }
       
       processedCount++;
@@ -304,13 +347,13 @@ export async function indexMultipleFiles(
       }
       
       try {
-        await vectorDB.deleteByFile(filepath);
+        await vectorDB.deleteByFile(normalizedPath);
         const manifest = new ManifestManager(vectorDB.dbPath);
-        await manifest.removeFile(filepath);
+        await manifest.removeFile(normalizedPath);
       } catch (error) {
         // Ignore errors if file wasn't in index
         if (verbose) {
-          console.error(`[Lien] Note: ${filepath} not in index`);
+          console.error(`[Lien] Note: ${normalizedPath} not in index`);
         }
       }
       

@@ -5,6 +5,7 @@ import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
 import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
 import { GitStateTracker } from '../git/tracker.js';
 import { isGitAvailable, isGitRepo, getChangedFiles } from '../git/utils.js';
+import { normalizeToRelativePath } from './incremental.js';
 
 /**
  * Result of change detection, categorized by type of change
@@ -62,16 +63,26 @@ export async function detectChanges(
       
       try {
         // Get files that changed between old and new commit using git diff
-        const changedFilesPaths = await getChangedFiles(
+        // Note: getChangedFiles returns absolute paths, so we normalize to relative
+        const changedFilesAbsolute = await getChangedFiles(
           rootDir,
           savedManifest.gitState.commit,
           currentState.commit
         );
+        // Normalize to relative paths for consistent comparison with scanner/manifest
+        const changedFilesPaths = changedFilesAbsolute.map(fp => normalizeToRelativePath(fp, rootDir));
         const changedFilesSet = new Set(changedFilesPaths);
         
-        // Get all current files to determine new files and deletions
+        // Get all current files to determine new files and deletions (already normalized)
         const allFiles = await getAllFiles(rootDir, config);
         const currentFileSet = new Set(allFiles);
+        
+        // Build a normalized set of manifest file paths for comparison
+        // This handles cases where manifest has absolute paths (from tests or legacy data)
+        const normalizedManifestFiles = new Set<string>();
+        for (const filepath of Object.keys(savedManifest.files)) {
+          normalizedManifestFiles.add(normalizeToRelativePath(filepath, rootDir));
+        }
         
         const added: string[] = [];
         const modified: string[] = [];
@@ -81,7 +92,7 @@ export async function detectChanges(
         for (const filepath of changedFilesPaths) {
           if (currentFileSet.has(filepath)) {
             // File exists - check if it's new or modified
-            if (savedManifest.files[filepath]) {
+            if (normalizedManifestFiles.has(filepath)) {
               modified.push(filepath);
             } else {
               added.push(filepath);
@@ -92,15 +103,15 @@ export async function detectChanges(
         
         // Find truly new files (not in git diff, but not in old manifest)
         for (const filepath of allFiles) {
-          if (!savedManifest.files[filepath] && !changedFilesSet.has(filepath)) {
+          if (!normalizedManifestFiles.has(filepath) && !changedFilesSet.has(filepath)) {
             added.push(filepath);
           }
         }
         
         // Compute deleted files: files in old manifest but not in new branch
-        for (const filepath of Object.keys(savedManifest.files)) {
-          if (!currentFileSet.has(filepath)) {
-            deleted.push(filepath);
+        for (const normalizedPath of normalizedManifestFiles) {
+          if (!currentFileSet.has(normalizedPath)) {
+            deleted.push(normalizedPath);
           }
         }
         
@@ -118,8 +129,9 @@ export async function detectChanges(
         
         const deleted: string[] = [];
         for (const filepath of Object.keys(savedManifest.files)) {
-          if (!currentFileSet.has(filepath)) {
-            deleted.push(filepath);
+          const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+          if (!currentFileSet.has(normalizedPath)) {
+            deleted.push(normalizedPath);
           }
         }
         
@@ -138,27 +150,33 @@ export async function detectChanges(
 }
 
 /**
- * Gets all files in the project based on configuration
+ * Gets all files in the project based on configuration.
+ * Always returns relative paths for consistent comparison with manifest and git diff.
  */
 async function getAllFiles(
   rootDir: string,
   config: LienConfig | LegacyLienConfig
 ): Promise<string[]> {
+  let files: string[];
+  
   if (isModernConfig(config) && config.frameworks.length > 0) {
-    return await scanCodebaseWithFrameworks(rootDir, config);
+    files = await scanCodebaseWithFrameworks(rootDir, config);
   } else if (isLegacyConfig(config)) {
-    return await scanCodebase({
+    files = await scanCodebase({
       rootDir,
       includePatterns: config.indexing.include,
       excludePatterns: config.indexing.exclude,
     });
   } else {
-    return await scanCodebase({
+    files = await scanCodebase({
       rootDir,
       includePatterns: [],
       excludePatterns: [],
     });
   }
+  
+  // Normalize all paths to relative for consistent comparison
+  return files.map(fp => normalizeToRelativePath(fp, rootDir));
 }
 
 /**
@@ -173,16 +191,27 @@ async function mtimeBasedDetection(
   const modified: string[] = [];
   const deleted: string[] = [];
   
-  // Get all current files
+  // Get all current files (already normalized to relative paths by getAllFiles)
   const currentFiles = await getAllFiles(rootDir, config);
   const currentFileSet = new Set(currentFiles);
   
+  // Build a normalized map of manifest files for comparison
+  // This handles cases where manifest has absolute paths (from tests or legacy data)
+  const normalizedManifestFiles = new Map<string, typeof savedManifest.files[string]>();
+  for (const [filepath, entry] of Object.entries(savedManifest.files)) {
+    const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+    normalizedManifestFiles.set(normalizedPath, entry);
+  }
+  
   // Get mtimes for all current files
+  // Note: need to construct absolute path for fs.stat since currentFiles are relative
   const fileStats = new Map<string, number>();
   
   for (const filepath of currentFiles) {
     try {
-      const stats = await fs.stat(filepath);
+      // Construct absolute path for filesystem access
+      const absolutePath = filepath.startsWith('/') ? filepath : `${rootDir}/${filepath}`;
+      const stats = await fs.stat(absolutePath);
       fileStats.set(filepath, stats.mtimeMs);
     } catch {
       // Ignore files we can't stat
@@ -192,7 +221,7 @@ async function mtimeBasedDetection(
   
   // Check for new and modified files
   for (const [filepath, mtime] of fileStats) {
-    const entry = savedManifest.files[filepath];
+    const entry = normalizedManifestFiles.get(filepath);
     
     if (!entry) {
       // New file
@@ -203,10 +232,10 @@ async function mtimeBasedDetection(
     }
   }
   
-  // Check for deleted files
-  for (const filepath of Object.keys(savedManifest.files)) {
-    if (!currentFileSet.has(filepath)) {
-      deleted.push(filepath);
+  // Check for deleted files (use normalized manifest paths)
+  for (const normalizedPath of normalizedManifestFiles.keys()) {
+    if (!currentFileSet.has(normalizedPath)) {
+      deleted.push(normalizedPath);
     }
   }
   
