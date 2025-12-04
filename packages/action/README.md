@@ -45,12 +45,22 @@ jobs:
       - name: Initialize Lien
         run: lien init --yes
 
+      # Cache base branch index (shared across PRs targeting same base)
+      - name: Cache base branch Lien index
+        id: cache-base
+        uses: actions/cache@v4
+        with:
+          path: ~/.lien
+          key: lien-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+      
       # Generate baseline complexity from base branch (for delta tracking)
       # NOTE: Use same threshold as action for accurate delta calculation
       - name: Get base complexity
         run: |
           git checkout ${{ github.event.pull_request.base.sha }}
-          lien index
+          if [ "${{ steps.cache-base.outputs.cache-hit }}" != "true" ]; then
+            lien index
+          fi
           lien complexity --format json --threshold 10 > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
           git checkout ${{ github.sha }}
       
