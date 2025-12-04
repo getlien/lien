@@ -2,7 +2,8 @@
  * Prompt builder for AI code review
  */
 
-import type { ComplexityReport, ComplexityViolation, PRContext } from './types.js';
+import type { ComplexityReport, ComplexityViolation, PRContext, ComplexityDelta, DeltaSummary } from './types.js';
+import { formatDelta } from './delta.js';
 
 /**
  * Build the review prompt from complexity report
@@ -10,9 +11,18 @@ import type { ComplexityReport, ComplexityViolation, PRContext } from './types.j
 export function buildReviewPrompt(
   report: ComplexityReport,
   prContext: PRContext,
-  codeSnippets: Map<string, string>
+  codeSnippets: Map<string, string>,
+  deltas: ComplexityDelta[] | null = null
 ): string {
   const { summary, files } = report;
+
+  // Build delta lookup map
+  const deltaMap = new Map<string, ComplexityDelta>();
+  if (deltas) {
+    for (const d of deltas) {
+      deltaMap.set(`${d.filepath}::${d.symbolName}`, d);
+    }
+  }
 
   // Build violations summary
   const violationsByFile = Object.entries(files)
@@ -26,10 +36,11 @@ export function buildReviewPrompt(
   const violationsSummary = violationsByFile
     .map(({ filepath, violations, riskLevel }) => {
       const violationList = violations
-        .map(
-          (v) =>
-            `  - ${v.symbolName} (${v.symbolType}): complexity ${v.complexity} (threshold: ${v.threshold}) [${v.severity}]`
-        )
+        .map((v) => {
+          const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+          const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+          return `  - ${v.symbolName} (${v.symbolType}): complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
+        })
         .join('\n');
       return `**${filepath}** (risk: ${riskLevel})\n${violationList}`;
     })
@@ -43,6 +54,34 @@ export function buildReviewPrompt(
     })
     .join('\n\n');
 
+  // Add delta context if available
+  let deltaContext = '';
+  if (deltas && deltas.length > 0) {
+    // Use severity-based filtering for accuracy
+    const improved = deltas.filter(d => d.severity === 'improved');
+    const degraded = deltas.filter(d => (d.severity === 'error' || d.severity === 'warning') && d.delta > 0);
+    const newFuncs = deltas.filter(d => d.severity === 'new');
+    const deleted = deltas.filter(d => d.severity === 'deleted');
+    
+    // Helper to format complexity display (handles null for new/deleted)
+    const formatComplexityChange = (d: ComplexityDelta): string => {
+      const from = d.baseComplexity ?? 'new';
+      const to = d.headComplexity ?? 'removed';
+      return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
+    };
+    
+    deltaContext = `
+## Complexity Changes (vs base branch)
+- **Degraded**: ${degraded.length} function(s) got more complex
+- **Improved**: ${improved.length} function(s) got simpler
+- **New**: ${newFuncs.length} new complex function(s)
+- **Removed**: ${deleted.length} complex function(s) deleted
+${degraded.length > 0 ? `\nFunctions that got worse:\n${degraded.map(formatComplexityChange).join('\n')}` : ''}
+${improved.length > 0 ? `\nFunctions that improved:\n${improved.map(formatComplexityChange).join('\n')}` : ''}
+${newFuncs.length > 0 ? `\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}` : ''}
+`;
+  }
+
   return `# Code Complexity Review Request
 
 ## Context
@@ -50,7 +89,7 @@ export function buildReviewPrompt(
 - **PR**: #${prContext.pullNumber} - ${prContext.title}
 - **Files with violations**: ${violationsByFile.length}
 - **Total violations**: ${summary.totalViolations} (${summary.bySeverity.error} errors, ${summary.bySeverity.warning} warnings)
-
+${deltaContext}
 ## Complexity Violations Found
 
 ${violationsSummary}
@@ -64,8 +103,9 @@ ${snippetsSection || '_No code snippets available_'}
 For each violation:
 1. **Explain** why this complexity is problematic in this specific context
 2. **Suggest** concrete refactoring steps (not generic advice like "break into smaller functions")
-3. **Prioritize** which violations are most important to address
+3. **Prioritize** which violations are most important to address - focus on functions that got WORSE (higher delta)
 4. If the complexity seems justified for the use case, say so
+5. Celebrate improvements! If a function got simpler, acknowledge it.
 
 Format your response as a PR review comment with:
 - A brief summary at the top (2-3 sentences)
@@ -78,13 +118,22 @@ Be concise but actionable. Focus on the highest-impact improvements.`;
 /**
  * Build a minimal prompt when there are no violations
  */
-export function buildNoViolationsMessage(prContext: PRContext): string {
+export function buildNoViolationsMessage(prContext: PRContext, deltas: ComplexityDelta[] | null = null): string {
+  let deltaMessage = '';
+  
+  if (deltas && deltas.length > 0) {
+    const improved = deltas.filter(d => d.severity === 'improved' || d.severity === 'deleted');
+    if (improved.length > 0) {
+      deltaMessage = `\n\n🎉 **Great job!** This PR improved complexity in ${improved.length} function(s).`;
+    }
+  }
+
   return `<!-- lien-ai-review -->
 ## ✅ Lien Complexity Analysis
 
 No complexity violations found in PR #${prContext.pullNumber}.
 
-All analyzed functions are within the configured complexity threshold.`;
+All analyzed functions are within the configured complexity threshold.${deltaMessage}`;
 }
 
 /**
@@ -96,30 +145,54 @@ export interface TokenUsageInfo {
 }
 
 /**
+ * Format delta summary for display
+ */
+function formatDeltaDisplay(deltaSummary: DeltaSummary | null | undefined): string {
+  if (!deltaSummary) return '';
+  
+  const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
+  const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+  let display = `\n\n**Complexity Change:** ${sign}${deltaSummary.totalDelta} ${trend}`;
+  if (deltaSummary.improved > 0) display += ` | ${deltaSummary.improved} improved`;
+  if (deltaSummary.degraded > 0) display += ` | ${deltaSummary.degraded} degraded`;
+  return display;
+}
+
+/**
+ * Format token usage stats for display
+ */
+function formatTokenStats(tokenUsage: TokenUsageInfo | undefined): string {
+  if (!tokenUsage || tokenUsage.totalTokens <= 0) return '';
+  return `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`;
+}
+
+/**
+ * Format fallback note for boy scout rule
+ */
+function formatFallbackNote(isFallback: boolean): string {
+  if (!isFallback) return '';
+  return `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`;
+}
+
+/**
  * Format the AI review as a GitHub comment
- * @param isFallback - true if this is a fallback because violations aren't on diff lines
- * @param tokenUsage - optional token usage stats to display
  */
 export function formatReviewComment(
   aiReview: string,
   report: ComplexityReport,
   isFallback = false,
-  tokenUsage?: TokenUsageInfo
+  tokenUsage?: TokenUsageInfo,
+  deltaSummary?: DeltaSummary | null
 ): string {
   const { summary } = report;
-
-  const fallbackNote = isFallback
-    ? `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`
-    : '';
-
-  const tokenStats = tokenUsage && tokenUsage.totalTokens > 0
-    ? `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`
-    : '';
+  const deltaDisplay = formatDeltaDisplay(deltaSummary);
+  const fallbackNote = formatFallbackNote(isFallback);
+  const tokenStats = formatTokenStats(tokenUsage);
 
   return `<!-- lien-ai-review -->
 ## 🔍 Lien AI Code Review
 
-**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${fallbackNote}
+**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${deltaDisplay}${fallbackNote}
 
 ---
 

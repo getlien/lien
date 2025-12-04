@@ -31692,6 +31692,8 @@ var __webpack_exports__ = {};
 
 // EXTERNAL MODULE: ../../node_modules/@actions/core/lib/core.js
 var core = __nccwpck_require__(7184);
+// EXTERNAL MODULE: external "fs"
+var external_fs_ = __nccwpck_require__(9896);
 // EXTERNAL MODULE: ../../node_modules/@actions/github/lib/github.js
 var github = __nccwpck_require__(5683);
 ;// CONCATENATED MODULE: ./src/github.ts
@@ -32004,15 +32006,204 @@ function filterAnalyzableFiles(files) {
     });
 }
 
+;// CONCATENATED MODULE: ./src/delta.ts
+/**
+ * Complexity delta calculation
+ * Compares base branch complexity to head branch complexity
+ */
+
+/**
+ * Create a key for a function to match across base/head
+ */
+function getFunctionKey(filepath, symbolName) {
+    return `${filepath}::${symbolName}`;
+}
+/**
+ * Build a map of function complexities from a report
+ */
+function buildComplexityMap(report, files) {
+    const map = new Map();
+    if (!report)
+        return map;
+    for (const filepath of files) {
+        const fileData = report.files[filepath];
+        if (!fileData)
+            continue;
+        for (const violation of fileData.violations) {
+            const key = getFunctionKey(filepath, violation.symbolName);
+            map.set(key, { complexity: violation.complexity, violation });
+        }
+    }
+    return map;
+}
+/**
+ * Calculate complexity deltas between base and head
+ */
+function calculateDeltas(baseReport, headReport, changedFiles) {
+    const deltas = [];
+    const baseMap = buildComplexityMap(baseReport, changedFiles);
+    const headMap = buildComplexityMap(headReport, changedFiles);
+    // Track which base functions we've seen
+    const seenBaseKeys = new Set();
+    // Process all head violations
+    for (const [key, headData] of headMap) {
+        const baseData = baseMap.get(key);
+        if (baseData) {
+            seenBaseKeys.add(key);
+        }
+        const baseComplexity = baseData?.complexity ?? null;
+        const headComplexity = headData.complexity;
+        const delta = baseComplexity !== null ? headComplexity - baseComplexity : headComplexity;
+        // Determine severity based on delta
+        let severity;
+        if (baseComplexity === null) {
+            severity = 'new';
+        }
+        else if (delta < 0) {
+            severity = 'improved';
+        }
+        else if (headComplexity >= headData.violation.threshold * 2) {
+            severity = 'error';
+        }
+        else {
+            severity = 'warning';
+        }
+        deltas.push({
+            filepath: headData.violation.filepath,
+            symbolName: headData.violation.symbolName,
+            symbolType: headData.violation.symbolType,
+            startLine: headData.violation.startLine,
+            baseComplexity,
+            headComplexity,
+            delta,
+            threshold: headData.violation.threshold,
+            severity,
+        });
+    }
+    // Process deleted functions (in base but not in head)
+    for (const [key, baseData] of baseMap) {
+        if (seenBaseKeys.has(key))
+            continue;
+        deltas.push({
+            filepath: baseData.violation.filepath,
+            symbolName: baseData.violation.symbolName,
+            symbolType: baseData.violation.symbolType,
+            startLine: baseData.violation.startLine,
+            baseComplexity: baseData.complexity,
+            headComplexity: null,
+            delta: -baseData.complexity, // Negative = improvement (removed complexity)
+            threshold: baseData.violation.threshold,
+            severity: 'deleted',
+        });
+    }
+    // Sort by delta (worst first), then by absolute complexity
+    deltas.sort((a, b) => {
+        // Errors first, then warnings, then new, then improved, then deleted
+        const severityOrder = { error: 0, warning: 1, new: 2, improved: 3, deleted: 4 };
+        if (severityOrder[a.severity] !== severityOrder[b.severity]) {
+            return severityOrder[a.severity] - severityOrder[b.severity];
+        }
+        // Within same severity, sort by delta (worse first)
+        return b.delta - a.delta;
+    });
+    return deltas;
+}
+/**
+ * Calculate summary statistics for deltas
+ */
+function calculateDeltaSummary(deltas) {
+    let totalDelta = 0;
+    let improved = 0;
+    let degraded = 0;
+    let newFunctions = 0;
+    let deletedFunctions = 0;
+    let unchanged = 0;
+    for (const d of deltas) {
+        totalDelta += d.delta;
+        switch (d.severity) {
+            case 'improved':
+                improved++;
+                break;
+            case 'error':
+            case 'warning':
+                if (d.delta > 0)
+                    degraded++;
+                else if (d.delta === 0)
+                    unchanged++;
+                else
+                    improved++;
+                break;
+            case 'new':
+                newFunctions++;
+                break;
+            case 'deleted':
+                deletedFunctions++;
+                break;
+        }
+    }
+    return {
+        totalDelta,
+        improved,
+        degraded,
+        newFunctions,
+        deletedFunctions,
+        unchanged,
+    };
+}
+/**
+ * Format delta for display
+ */
+function formatDelta(delta) {
+    if (delta > 0)
+        return `+${delta} ⬆️`;
+    if (delta < 0)
+        return `${delta} ⬇️`;
+    return '±0';
+}
+/**
+ * Format severity emoji
+ */
+function formatSeverityEmoji(severity) {
+    switch (severity) {
+        case 'error':
+            return '🔴';
+        case 'warning':
+            return '🟡';
+        case 'improved':
+            return '🟢';
+        case 'new':
+            return '🆕';
+        case 'deleted':
+            return '🗑️';
+    }
+}
+/**
+ * Log delta summary
+ */
+function logDeltaSummary(summary) {
+    const sign = summary.totalDelta >= 0 ? '+' : '';
+    core.info(`Complexity delta: ${sign}${summary.totalDelta}`);
+    core.info(`  Degraded: ${summary.degraded}, Improved: ${summary.improved}`);
+    core.info(`  New: ${summary.newFunctions}, Deleted: ${summary.deletedFunctions}`);
+}
+
 ;// CONCATENATED MODULE: ./src/prompt.ts
 /**
  * Prompt builder for AI code review
  */
+
 /**
  * Build the review prompt from complexity report
  */
-function buildReviewPrompt(report, prContext, codeSnippets) {
+function buildReviewPrompt(report, prContext, codeSnippets, deltas = null) {
     const { summary, files } = report;
+    // Build delta lookup map
+    const deltaMap = new Map();
+    if (deltas) {
+        for (const d of deltas) {
+            deltaMap.set(`${d.filepath}::${d.symbolName}`, d);
+        }
+    }
     // Build violations summary
     const violationsByFile = Object.entries(files)
         .filter(([_, data]) => data.violations.length > 0)
@@ -32024,7 +32215,11 @@ function buildReviewPrompt(report, prContext, codeSnippets) {
     const violationsSummary = violationsByFile
         .map(({ filepath, violations, riskLevel }) => {
         const violationList = violations
-            .map((v) => `  - ${v.symbolName} (${v.symbolType}): complexity ${v.complexity} (threshold: ${v.threshold}) [${v.severity}]`)
+            .map((v) => {
+            const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+            const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+            return `  - ${v.symbolName} (${v.symbolType}): complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
+        })
             .join('\n');
         return `**${filepath}** (risk: ${riskLevel})\n${violationList}`;
     })
@@ -32036,6 +32231,31 @@ function buildReviewPrompt(report, prContext, codeSnippets) {
         return `### ${filepath} - ${symbolName}\n\`\`\`\n${code}\n\`\`\``;
     })
         .join('\n\n');
+    // Add delta context if available
+    let deltaContext = '';
+    if (deltas && deltas.length > 0) {
+        // Use severity-based filtering for accuracy
+        const improved = deltas.filter(d => d.severity === 'improved');
+        const degraded = deltas.filter(d => (d.severity === 'error' || d.severity === 'warning') && d.delta > 0);
+        const newFuncs = deltas.filter(d => d.severity === 'new');
+        const deleted = deltas.filter(d => d.severity === 'deleted');
+        // Helper to format complexity display (handles null for new/deleted)
+        const formatComplexityChange = (d) => {
+            const from = d.baseComplexity ?? 'new';
+            const to = d.headComplexity ?? 'removed';
+            return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
+        };
+        deltaContext = `
+## Complexity Changes (vs base branch)
+- **Degraded**: ${degraded.length} function(s) got more complex
+- **Improved**: ${improved.length} function(s) got simpler
+- **New**: ${newFuncs.length} new complex function(s)
+- **Removed**: ${deleted.length} complex function(s) deleted
+${degraded.length > 0 ? `\nFunctions that got worse:\n${degraded.map(formatComplexityChange).join('\n')}` : ''}
+${improved.length > 0 ? `\nFunctions that improved:\n${improved.map(formatComplexityChange).join('\n')}` : ''}
+${newFuncs.length > 0 ? `\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}` : ''}
+`;
+    }
     return `# Code Complexity Review Request
 
 ## Context
@@ -32043,7 +32263,7 @@ function buildReviewPrompt(report, prContext, codeSnippets) {
 - **PR**: #${prContext.pullNumber} - ${prContext.title}
 - **Files with violations**: ${violationsByFile.length}
 - **Total violations**: ${summary.totalViolations} (${summary.bySeverity.error} errors, ${summary.bySeverity.warning} warnings)
-
+${deltaContext}
 ## Complexity Violations Found
 
 ${violationsSummary}
@@ -32057,8 +32277,9 @@ ${snippetsSection || '_No code snippets available_'}
 For each violation:
 1. **Explain** why this complexity is problematic in this specific context
 2. **Suggest** concrete refactoring steps (not generic advice like "break into smaller functions")
-3. **Prioritize** which violations are most important to address
+3. **Prioritize** which violations are most important to address - focus on functions that got WORSE (higher delta)
 4. If the complexity seems justified for the use case, say so
+5. Celebrate improvements! If a function got simpler, acknowledge it.
 
 Format your response as a PR review comment with:
 - A brief summary at the top (2-3 sentences)
@@ -32070,31 +32291,64 @@ Be concise but actionable. Focus on the highest-impact improvements.`;
 /**
  * Build a minimal prompt when there are no violations
  */
-function buildNoViolationsMessage(prContext) {
+function buildNoViolationsMessage(prContext, deltas = null) {
+    let deltaMessage = '';
+    if (deltas && deltas.length > 0) {
+        const improved = deltas.filter(d => d.severity === 'improved' || d.severity === 'deleted');
+        if (improved.length > 0) {
+            deltaMessage = `\n\n🎉 **Great job!** This PR improved complexity in ${improved.length} function(s).`;
+        }
+    }
     return `<!-- lien-ai-review -->
 ## ✅ Lien Complexity Analysis
 
 No complexity violations found in PR #${prContext.pullNumber}.
 
-All analyzed functions are within the configured complexity threshold.`;
+All analyzed functions are within the configured complexity threshold.${deltaMessage}`;
+}
+/**
+ * Format delta summary for display
+ */
+function formatDeltaDisplay(deltaSummary) {
+    if (!deltaSummary)
+        return '';
+    const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
+    const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+    let display = `\n\n**Complexity Change:** ${sign}${deltaSummary.totalDelta} ${trend}`;
+    if (deltaSummary.improved > 0)
+        display += ` | ${deltaSummary.improved} improved`;
+    if (deltaSummary.degraded > 0)
+        display += ` | ${deltaSummary.degraded} degraded`;
+    return display;
+}
+/**
+ * Format token usage stats for display
+ */
+function formatTokenStats(tokenUsage) {
+    if (!tokenUsage || tokenUsage.totalTokens <= 0)
+        return '';
+    return `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`;
+}
+/**
+ * Format fallback note for boy scout rule
+ */
+function formatFallbackNote(isFallback) {
+    if (!isFallback)
+        return '';
+    return `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`;
 }
 /**
  * Format the AI review as a GitHub comment
- * @param isFallback - true if this is a fallback because violations aren't on diff lines
- * @param tokenUsage - optional token usage stats to display
  */
-function formatReviewComment(aiReview, report, isFallback = false, tokenUsage) {
+function formatReviewComment(aiReview, report, isFallback = false, tokenUsage, deltaSummary) {
     const { summary } = report;
-    const fallbackNote = isFallback
-        ? `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`
-        : '';
-    const tokenStats = tokenUsage && tokenUsage.totalTokens > 0
-        ? `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`
-        : '';
+    const deltaDisplay = formatDeltaDisplay(deltaSummary);
+    const fallbackNote = formatFallbackNote(isFallback);
+    const tokenStats = formatTokenStats(tokenUsage);
     return `<!-- lien-ai-review -->
 ## 🔍 Lien AI Code Review
 
-**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${fallbackNote}
+**Summary**: ${summary.totalViolations} complexity violation${summary.totalViolations === 1 ? '' : 's'} found (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${deltaDisplay}${fallbackNote}
 
 ---
 
@@ -32457,10 +32711,12 @@ async function generateLineComments(violations, codeSnippets, apiKey, model) {
  *
  * Entry point for the action. Orchestrates:
  * 1. Getting PR changed files
- * 2. Running complexity analysis
+ * 2. Running complexity analysis (with delta from base branch)
  * 3. Generating AI review
  * 4. Posting comment to PR (line-specific or summary)
  */
+
+
 
 
 
@@ -32477,7 +32733,35 @@ function getConfig() {
         threshold: core.getInput('threshold') || '10',
         githubToken: core.getInput('github_token') || process.env.GITHUB_TOKEN || '',
         reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
+        baselineComplexityPath: core.getInput('baseline_complexity') || '',
     };
+}
+/**
+ * Load baseline complexity report from file
+ */
+function loadBaselineComplexity(path) {
+    if (!path) {
+        core.info('No baseline complexity path provided, skipping delta calculation');
+        return null;
+    }
+    try {
+        if (!external_fs_.existsSync(path)) {
+            core.warning(`Baseline complexity file not found: ${path}`);
+            return null;
+        }
+        const content = external_fs_.readFileSync(path, 'utf-8');
+        const report = JSON.parse(content);
+        if (!report.files || !report.summary) {
+            core.warning('Baseline complexity file has invalid format');
+            return null;
+        }
+        core.info(`Loaded baseline complexity: ${report.summary.totalViolations} violations`);
+        return report;
+    }
+    catch (error) {
+        core.warning(`Failed to load baseline complexity: ${error}`);
+        return null;
+    }
 }
 /**
  * Setup and validate PR analysis prerequisites
@@ -32546,24 +32830,37 @@ async function run() {
             core.info('No analyzable files found, skipping review');
             return;
         }
+        // Load baseline complexity for delta calculation
+        const baselineReport = loadBaselineComplexity(config.baselineComplexityPath);
         const report = await runComplexityAnalysis(filesToAnalyze, config.threshold);
         if (!report) {
             core.warning('Failed to get complexity report');
             return;
         }
         core.info(`Analysis complete: ${report.summary.totalViolations} violations found`);
+        // Calculate deltas if we have a baseline
+        const deltas = baselineReport
+            ? calculateDeltas(baselineReport, report, filesToAnalyze)
+            : null;
+        if (deltas) {
+            const deltaSummary = calculateDeltaSummary(deltas);
+            logDeltaSummary(deltaSummary);
+            core.setOutput('total_delta', deltaSummary.totalDelta);
+            core.setOutput('improved', deltaSummary.improved);
+            core.setOutput('degraded', deltaSummary.degraded);
+        }
         if (report.summary.totalViolations === 0) {
             core.info('No complexity violations found');
-            await postPRComment(octokit, prContext, buildNoViolationsMessage(prContext));
+            await postPRComment(octokit, prContext, buildNoViolationsMessage(prContext, deltas));
             return;
         }
         const { violations, codeSnippets } = await prepareViolationsForReview(report, octokit, prContext);
         resetTokenUsage();
         if (config.reviewStyle === 'summary') {
-            await postSummaryReview(octokit, prContext, report, codeSnippets, config);
+            await postSummaryReview(octokit, prContext, report, codeSnippets, config, false, deltas);
         }
         else {
-            await postLineReview(octokit, prContext, report, violations, codeSnippets, config);
+            await postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas);
         }
         core.setOutput('violations', report.summary.totalViolations);
         core.setOutput('errors', report.summary.bySeverity.error);
@@ -32574,54 +32871,104 @@ async function run() {
     }
 }
 /**
- * Post review with line-specific comments for all violations
+ * Find the best line to comment on for a violation
+ * Returns startLine if it's in diff, otherwise first diff line in function range, or null
  */
-async function postLineReview(octokit, prContext, report, violations, codeSnippets, config) {
-    // Get lines that are in the diff (only these can have line comments)
-    const diffLines = await getPRDiffLines(octokit, prContext);
-    core.info(`Diff covers ${diffLines.size} files`);
-    // Filter violations to only those on lines in the diff
-    const commentableViolations = violations.filter((v) => {
-        const fileLines = diffLines.get(v.filepath);
-        if (!fileLines)
-            return false;
-        // Check if start line is in diff
-        return fileLines.has(v.startLine);
-    });
-    core.info(`${commentableViolations.length}/${violations.length} violations are on diff lines`);
-    if (commentableViolations.length === 0) {
-        // No violations on diff lines, fall back to summary with boy scout note
-        core.info('No violations on diff lines, posting summary comment with fallback note');
-        await postSummaryReview(octokit, prContext, report, codeSnippets, config, true);
-        return;
+function findCommentLine(violation, diffLines) {
+    const fileLines = diffLines.get(violation.filepath);
+    if (!fileLines)
+        return null;
+    // Prefer startLine (function declaration)
+    if (fileLines.has(violation.startLine)) {
+        return violation.startLine;
     }
-    // Generate AI comments for each violation
-    core.info('Generating AI comments for violations...');
-    const aiComments = await generateLineComments(commentableViolations, codeSnippets, config.openrouterApiKey, config.model);
-    // Build line comments
+    // Find first diff line within the function range
+    for (let line = violation.startLine; line <= violation.endLine; line++) {
+        if (fileLines.has(line)) {
+            return line;
+        }
+    }
+    return null;
+}
+/**
+ * Build delta lookup map from deltas array
+ */
+function buildDeltaMap(deltas) {
+    const deltaMap = new Map();
+    if (deltas) {
+        for (const d of deltas) {
+            deltaMap.set(`${d.filepath}::${d.symbolName}`, d);
+        }
+    }
+    return deltaMap;
+}
+/**
+ * Build line comments from violations and AI comments
+ */
+function buildLineComments(violationsWithLines, aiComments, deltaMap) {
     const lineComments = [];
-    for (const [violation, comment] of aiComments) {
-        const severityEmoji = violation.severity === 'error' ? '🔴' : '🟡';
-        core.info(`Adding comment for ${violation.filepath}:${violation.startLine} (${violation.symbolName})`);
+    for (const { violation, commentLine } of violationsWithLines) {
+        const comment = aiComments.get(violation);
+        if (!comment)
+            continue;
+        const delta = deltaMap.get(`${violation.filepath}::${violation.symbolName}`);
+        const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+        const severityEmoji = delta
+            ? formatSeverityEmoji(delta.severity)
+            : (violation.severity === 'error' ? '🔴' : '🟡');
+        const lineNote = commentLine !== violation.startLine
+            ? ` *(function starts at line ${violation.startLine})*`
+            : '';
+        core.info(`Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`);
         lineComments.push({
             path: violation.filepath,
-            line: violation.startLine,
-            body: `${severityEmoji} **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\n${comment}`,
+            line: commentLine,
+            body: `${severityEmoji} **Complexity: ${violation.complexity}**${deltaStr} (threshold: ${violation.threshold})${lineNote}\n\n${comment}`,
         });
     }
-    core.info(`Built ${lineComments.length} line comments`);
-    // Build summary comment with token usage
+    return lineComments;
+}
+/**
+ * Build uncovered violations note for summary
+ */
+function buildUncoveredNote(uncoveredViolations, deltaMap) {
+    if (uncoveredViolations.length === 0)
+        return '';
+    const uncoveredList = uncoveredViolations
+        .map(v => {
+        const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+        const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+        return `  - \`${v.symbolName}\` in \`${v.filepath}\`: complexity ${v.complexity}${deltaStr}`;
+    })
+        .join('\n');
+    return `\n\n<details>\n<summary>⚠️ ${uncoveredViolations.length} violation${uncoveredViolations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${uncoveredList}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
+}
+/**
+ * Build review summary body for line comments mode
+ */
+function buildReviewSummary(report, deltas, uncoveredNote) {
     const { summary } = report;
     const usage = getTokenUsage();
     const costDisplay = usage.totalTokens > 0
         ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})`
         : '';
-    const summaryBody = `<!-- lien-ai-review -->
+    let deltaDisplay = '';
+    if (deltas && deltas.length > 0) {
+        const deltaSummary = calculateDeltaSummary(deltas);
+        const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
+        const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+        deltaDisplay = `\n\n**Complexity Change:** ${sign}${deltaSummary.totalDelta} ${trend}`;
+        if (deltaSummary.improved > 0)
+            deltaDisplay += ` (${deltaSummary.improved} improved)`;
+        if (deltaSummary.degraded > 0)
+            deltaDisplay += ` (${deltaSummary.degraded} degraded)`;
+    }
+    return `<!-- lien-ai-review -->
 ## 🔍 Lien Complexity Review
 
-**Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}** (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})
+**Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}** (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${deltaDisplay}
 
-See inline comments on the diff for specific suggestions.
+See inline comments on the diff for specific suggestions.${uncoveredNote}
 
 <details>
 <summary>📊 Analysis Details</summary>
@@ -32633,20 +32980,57 @@ See inline comments on the diff for specific suggestions.
 </details>
 
 *[Lien](https://lien.dev) AI Code Review*`;
-    // Post the review
+}
+/**
+ * Post review with line-specific comments for all violations
+ */
+async function postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas = null) {
+    const diffLines = await getPRDiffLines(octokit, prContext);
+    core.info(`Diff covers ${diffLines.size} files`);
+    // Partition violations into those we can comment on and those we can't
+    const violationsWithLines = [];
+    const uncoveredViolations = [];
+    for (const v of violations) {
+        const commentLine = findCommentLine(v, diffLines);
+        if (commentLine !== null) {
+            violationsWithLines.push({ violation: v, commentLine });
+        }
+        else {
+            uncoveredViolations.push(v);
+        }
+    }
+    core.info(`${violationsWithLines.length}/${violations.length} violations can have inline comments ` +
+        `(${uncoveredViolations.length} outside diff)`);
+    if (violationsWithLines.length === 0) {
+        core.info('No violations in diff range, posting summary comment with fallback note');
+        await postSummaryReview(octokit, prContext, report, codeSnippets, config, true, deltas);
+        return;
+    }
+    const deltaMap = buildDeltaMap(deltas);
+    // Generate AI comments
+    const commentableViolations = violationsWithLines.map(v => v.violation);
+    core.info('Generating AI comments for violations...');
+    const aiComments = await generateLineComments(commentableViolations, codeSnippets, config.openrouterApiKey, config.model);
+    // Build and post review
+    const lineComments = buildLineComments(violationsWithLines, aiComments, deltaMap);
+    core.info(`Built ${lineComments.length} line comments`);
+    const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
+    const summaryBody = buildReviewSummary(report, deltas, uncoveredNote);
     await postPRReview(octokit, prContext, lineComments, summaryBody);
     core.info(`Posted review with ${lineComments.length} line comments`);
 }
 /**
  * Post review as a single summary comment
  * @param isFallback - true if this is a fallback because violations aren't on diff lines
+ * @param deltas - complexity deltas for delta display
  */
-async function postSummaryReview(octokit, prContext, report, codeSnippets, config, isFallback = false) {
-    const prompt = buildReviewPrompt(report, prContext, codeSnippets);
+async function postSummaryReview(octokit, prContext, report, codeSnippets, config, isFallback = false, deltas = null) {
+    const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas);
     core.debug(`Prompt length: ${prompt.length} characters`);
     const aiReview = await generateReview(prompt, config.openrouterApiKey, config.model);
     const usage = getTokenUsage();
-    const comment = formatReviewComment(aiReview, report, isFallback, usage);
+    const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
+    const comment = formatReviewComment(aiReview, report, isFallback, usage, deltaSummary);
     await postPRComment(octokit, prContext, comment);
     core.info('Successfully posted AI review summary comment');
 }

@@ -1,15 +1,15 @@
 /**
  * Prompt builder for AI code review
  */
-import type { ComplexityReport, ComplexityViolation, PRContext } from './types.js';
+import type { ComplexityReport, ComplexityViolation, PRContext, ComplexityDelta, DeltaSummary } from './types.js';
 /**
  * Build the review prompt from complexity report
  */
-export declare function buildReviewPrompt(report: ComplexityReport, prContext: PRContext, codeSnippets: Map<string, string>): string;
+export declare function buildReviewPrompt(report: ComplexityReport, prContext: PRContext, codeSnippets: Map<string, string>, deltas?: ComplexityDelta[] | null): string;
 /**
  * Build a minimal prompt when there are no violations
  */
-export declare function buildNoViolationsMessage(prContext: PRContext): string;
+export declare function buildNoViolationsMessage(prContext: PRContext, deltas?: ComplexityDelta[] | null): string;
 /**
  * Token usage info for display
  */
@@ -19,10 +19,8 @@ export interface TokenUsageInfo {
 }
 /**
  * Format the AI review as a GitHub comment
- * @param isFallback - true if this is a fallback because violations aren't on diff lines
- * @param tokenUsage - optional token usage stats to display
  */
-export declare function formatReviewComment(aiReview: string, report: ComplexityReport, isFallback?: boolean, tokenUsage?: TokenUsageInfo): string;
+export declare function formatReviewComment(aiReview: string, report: ComplexityReport, isFallback?: boolean, tokenUsage?: TokenUsageInfo, deltaSummary?: DeltaSummary | null): string;
 /**
  * Get the key for a violation (for code snippet mapping)
  */

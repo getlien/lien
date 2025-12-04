@@ -58,7 +58,42 @@ jobs:
       - name: Initialize Lien (auto-detect frameworks)
         run: lien init --yes
       
-      - name: Index codebase
+      # Restore base branch index cache (if exists)
+      - name: Restore base branch Lien index
+        id: cache-base
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.lien
+          key: lien-base-index-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+      
+      # Generate baseline complexity from base branch
+      # NOTE: Must use same threshold as action for accurate delta
+      - name: Get base branch complexity
+        run: |
+          echo "Checking out base branch: ${{ github.event.pull_request.base.sha }}"
+          git checkout ${{ github.event.pull_request.base.sha }}
+          if [ "${{ steps.cache-base.outputs.cache-hit }}" != "true" ]; then
+            echo "Cache miss - indexing base branch"
+            lien index
+          else
+            echo "Cache hit - skipping index"
+          fi
+          lien complexity --format json --threshold 15 > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
+          echo "Base complexity saved"
+      
+      # Save base cache BEFORE switching to head (prevents head from overwriting)
+      - name: Save base branch cache
+        if: steps.cache-base.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.lien
+          key: lien-base-index-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+      
+      # Switch to head branch - Lien will do incremental index from base
+      - name: Checkout head branch
+        run: git checkout ${{ github.sha }}
+      
+      - name: Index head branch (incremental from base)
         run: lien index
       
       - name: Run AI Code Review
@@ -66,6 +101,7 @@ jobs:
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
           model: 'anthropic/claude-sonnet-4'
-          threshold: '10'  # Error threshold = 20, so complexity 20+ will be an error
+          threshold: '15'
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          baseline_complexity: '/tmp/base-complexity.json'
 

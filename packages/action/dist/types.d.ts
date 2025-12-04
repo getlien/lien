@@ -87,3 +87,28 @@ export interface PRContext {
     baseSha: string;
     headSha: string;
 }
+/**
+ * Complexity delta for a single function/method
+ */
+export interface ComplexityDelta {
+    filepath: string;
+    symbolName: string;
+    symbolType: string;
+    startLine: number;
+    baseComplexity: number | null;
+    headComplexity: number | null;
+    delta: number;
+    threshold: number;
+    severity: 'warning' | 'error' | 'improved' | 'new' | 'deleted';
+}
+/**
+ * Summary of complexity changes in a PR
+ */
+export interface DeltaSummary {
+    totalDelta: number;
+    improved: number;
+    degraded: number;
+    newFunctions: number;
+    deletedFunctions: number;
+    unchanged: number;
+}
