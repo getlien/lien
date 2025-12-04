@@ -64,7 +64,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.lien
-          key: lien-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+          key: lien-base-index-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
       
       # Generate baseline complexity from base branch
       # NOTE: Must use same threshold as action for accurate delta
@@ -87,7 +87,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/.lien
-          key: lien-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+          key: lien-base-index-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
       
       # Clear index before head branch (start fresh)
       - name: Prepare for head branch indexing
