@@ -433,8 +433,18 @@ async function postLineReview(
     core.info('No new or degraded violations to comment on');
     // Still post a summary if there are violations, just no inline comments needed
     if (violationsWithLines.length > 0) {
-      const uncoveredNote = buildUncoveredNote([...uncoveredViolations, ...violationsWithLines.map(v => v.violation)], deltaMap);
-      const summaryBody = buildReviewSummary(report, deltas, uncoveredNote);
+      // Only include actual uncovered violations (outside diff)
+      const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
+      // Build skipped note for unchanged violations in the diff (not "outside diff")
+      const skippedInDiff = violationsWithLines
+        .filter(({ violation }) => {
+          const key = `${violation.filepath}::${violation.symbolName}`;
+          const delta = deltaMap.get(key);
+          return delta && delta.severity !== 'new' && delta.delta === 0;
+        })
+        .map(v => v.violation);
+      const skippedNote = buildSkippedNote(skippedInDiff);
+      const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
       await postPRComment(octokit, prContext, summaryBody);
     }
     return;
@@ -454,12 +464,13 @@ async function postLineReview(
   const lineComments = buildLineComments(newOrDegradedViolations, aiComments, deltaMap);
   core.info(`Built ${lineComments.length} line comments for new/degraded violations`);
 
-  // Include skipped (pre-existing unchanged) violations in uncovered note
+  // Include skipped (pre-existing unchanged) violations in skipped note
+  // Note: delta === 0 means truly unchanged; delta < 0 means improved (not "unchanged")
   const skippedViolations = violationsWithLines
     .filter(({ violation }) => {
       const key = `${violation.filepath}::${violation.symbolName}`;
       const delta = deltaMap.get(key);
-      return delta && delta.severity !== 'new' && delta.delta <= 0;
+      return delta && delta.severity !== 'new' && delta.delta === 0;
     })
     .map(v => v.violation);
 
