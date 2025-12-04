@@ -13,6 +13,7 @@ import { LocalEmbeddings } from '../embeddings/local.js';
 import { GitStateTracker } from '../git/tracker.js';
 import { indexMultipleFiles, indexSingleFile } from '../indexer/incremental.js';
 import { configService } from '../config/service.js';
+import { ComplexityAnalyzer } from '../insights/complexity-analyzer.js';
 import { ManifestManager } from '../indexer/manifest.js';
 import { isGitAvailable, isGitRepo } from '../git/utils.js';
 import { FileWatcher } from '../watcher/index.js';
@@ -25,6 +26,7 @@ import {
   GetFilesContextSchema,
   ListFunctionsSchema,
   GetDependentsSchema,
+  GetComplexitySchema,
 } from './schemas/index.js';
 import { LienError, LienErrorCode } from '../errors/index.js';
 
@@ -650,6 +652,72 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
               dependents: uniqueFiles,
               complexityMetrics,
               note,
+            };
+          }
+        )(args);
+      
+      case 'get_complexity':
+        return await wrapToolHandler(
+          GetComplexitySchema,
+          async (validatedArgs) => {
+            log('Analyzing complexity...');
+            
+            // Check if index has been updated and reconnect if needed
+            await checkAndReconnect();
+            
+            // Use ComplexityAnalyzer with current config
+            const analyzer = new ComplexityAnalyzer(vectorDB, config);
+            const report = await analyzer.analyze(validatedArgs.files);
+            
+            log(`Analyzed ${report.summary.filesAnalyzed} files`);
+            
+            // Flatten violations from all files
+            let violations = Object.entries(report.files)
+              .flatMap(([_filepath, fileData]) => 
+                fileData.violations.map(v => ({
+                  filepath: v.filepath,
+                  symbolName: v.symbolName,
+                  symbolType: v.symbolType,
+                  startLine: v.startLine,
+                  endLine: v.endLine,
+                  complexity: v.complexity,
+                  threshold: v.threshold,
+                  severity: v.severity,
+                  language: v.language,
+                  message: v.message,
+                  dependentCount: fileData.dependentCount || 0,
+                  riskLevel: fileData.riskLevel,
+                }))
+              );
+            
+            // Apply custom threshold filter if provided
+            if (validatedArgs.threshold !== undefined) {
+              violations = violations.filter(v => v.complexity >= validatedArgs.threshold!);
+            }
+            
+            // Sort by complexity descending
+            violations.sort((a, b) => b.complexity - a.complexity);
+            
+            // Apply top limit
+            const topViolations = violations.slice(0, validatedArgs.top);
+            
+            // Recalculate bySeverity after threshold filtering for consistency
+            const bySeverity = {
+              error: violations.filter(v => v.severity === 'error').length,
+              warning: violations.filter(v => v.severity === 'warning').length,
+            };
+            
+            // Build response
+            return {
+              indexInfo: getIndexMetadata(),
+              summary: {
+                filesAnalyzed: report.summary.filesAnalyzed,
+                avgComplexity: report.summary.avgComplexity,
+                maxComplexity: report.summary.maxComplexity,
+                violationCount: violations.length,
+                bySeverity,
+              },
+              violations: topViolations,
             };
           }
         )(args);

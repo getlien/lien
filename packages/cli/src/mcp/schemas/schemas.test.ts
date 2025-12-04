@@ -5,6 +5,7 @@ import {
   GetFilesContextSchema,
   ListFunctionsSchema,
   GetDependentsSchema,
+  GetComplexitySchema,
 } from './index.js';
 
 describe('SemanticSearchSchema', () => {
@@ -300,6 +301,86 @@ describe('GetDependentsSchema', () => {
       depth: 1.5 
     }))
       .toThrow();
+  });
+});
+
+describe('GetComplexitySchema', () => {
+  it('should accept empty object with defaults', () => {
+    const result = GetComplexitySchema.parse({});
+    expect(result.top).toBe(10);
+    expect(result.files).toBeUndefined();
+    expect(result.threshold).toBeUndefined();
+  });
+  
+  it('should accept top parameter', () => {
+    const result = GetComplexitySchema.parse({ top: 20 });
+    expect(result.top).toBe(20);
+  });
+  
+  it('should accept files array', () => {
+    const result = GetComplexitySchema.parse({ files: ['src/auth.ts', 'src/api/user.ts'] });
+    expect(result.files).toEqual(['src/auth.ts', 'src/api/user.ts']);
+  });
+  
+  it('should accept threshold parameter', () => {
+    const result = GetComplexitySchema.parse({ threshold: 15 });
+    expect(result.threshold).toBe(15);
+  });
+  
+  it('should accept all parameters together', () => {
+    const result = GetComplexitySchema.parse({ 
+      files: ['src/auth.ts'], 
+      top: 5, 
+      threshold: 20 
+    });
+    expect(result.files).toEqual(['src/auth.ts']);
+    expect(result.top).toBe(5);
+    expect(result.threshold).toBe(20);
+  });
+  
+  it('should reject top > 50', () => {
+    expect(() => GetComplexitySchema.parse({ top: 100 }))
+      .toThrow('Top cannot exceed 50');
+  });
+  
+  it('should reject top < 1', () => {
+    expect(() => GetComplexitySchema.parse({ top: 0 }))
+      .toThrow('Top must be at least 1');
+  });
+  
+  it('should reject non-integer top', () => {
+    expect(() => GetComplexitySchema.parse({ top: 5.5 }))
+      .toThrow();
+  });
+  
+  it('should reject threshold < 1', () => {
+    expect(() => GetComplexitySchema.parse({ threshold: 0 }))
+      .toThrow('Threshold must be at least 1');
+  });
+  
+  it('should reject non-integer threshold', () => {
+    expect(() => GetComplexitySchema.parse({ threshold: 10.5 }))
+      .toThrow();
+  });
+  
+  it('should reject files array with empty strings', () => {
+    expect(() => GetComplexitySchema.parse({ files: ['', 'src/auth.ts'] }))
+      .toThrow('Filepath cannot be empty');
+  });
+  
+  it('should accept minimum valid top', () => {
+    const result = GetComplexitySchema.parse({ top: 1 });
+    expect(result.top).toBe(1);
+  });
+  
+  it('should accept maximum valid top', () => {
+    const result = GetComplexitySchema.parse({ top: 50 });
+    expect(result.top).toBe(50);
+  });
+  
+  it('should accept minimum valid threshold', () => {
+    const result = GetComplexitySchema.parse({ threshold: 1 });
+    expect(result.threshold).toBe(1);
   });
 });
 

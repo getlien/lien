@@ -5,6 +5,7 @@ import {
   GetFilesContextSchema,
   ListFunctionsSchema,
   GetDependentsSchema,
+  GetComplexitySchema,
 } from './schemas/index.js';
 
 /**
@@ -105,5 +106,22 @@ Returns:
 - Risk level (low/medium/high/critical) based on dependent count and complexity
 
 Example: get_dependents({ filepath: "src/utils/validate.ts" })`
+  ),
+  toMCPToolSchema(
+    GetComplexitySchema,
+    'get_complexity',
+    `Get complexity analysis for files or the entire codebase.
+
+Use for tech debt analysis and refactoring prioritization:
+- "What are the most complex functions?"
+- "Show me tech debt hotspots"
+- "What should I refactor?"
+
+Examples:
+  get_complexity({ top: 10 })
+  get_complexity({ files: ["src/auth.ts", "src/api/user.ts"] })
+  get_complexity({ threshold: 15 })
+
+Returns complexity violations with risk levels and dependent counts.`
   ),
 ];

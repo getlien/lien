@@ -13,4 +13,5 @@ export * from './similarity.schema.js';
 export * from './file.schema.js';
 export * from './symbols.schema.js';
 export * from './dependents.schema.js';
+export * from './complexity.schema.js';
 
