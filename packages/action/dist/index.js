@@ -31993,29 +31993,44 @@ function extractViolationKeyFromComment(body, filepath) {
 /**
  * Auto-resolve review threads for violations that have been fixed.
  * Returns the count of resolved threads.
+ *
+ * Note: This requires the GitHub token to have permission to resolve threads.
+ * The default GITHUB_TOKEN may not have this permission in all cases.
+ * If resolution fails, threads will remain open but the action continues.
  */
 async function resolveFixedViolationThreads(octokit, prContext, currentViolationFiles) {
     const threads = await getReviewThreads(octokit, prContext);
-    let resolvedCount = 0;
-    for (const thread of threads) {
-        // Skip already resolved threads
+    // Find threads that should be resolved
+    const threadsToResolve = threads.filter(thread => {
         if (thread.isResolved)
-            continue;
-        // Check if this is a Lien complexity comment
+            return false;
         const firstComment = thread.comments[0]?.body || '';
         if (!firstComment.includes(LIEN_COMMENT_MARKER))
-            continue;
-        // Check if the file still has violations
-        // If the file no longer has violations, resolve the thread
-        if (!currentViolationFiles.has(thread.path)) {
-            core.info(`Resolving outdated thread for ${thread.path}:${thread.line} (violation fixed)`);
-            const resolved = await resolveThread(octokit, thread.id);
-            if (resolved)
-                resolvedCount++;
+            return false;
+        return !currentViolationFiles.has(thread.path);
+    });
+    if (threadsToResolve.length === 0) {
+        return 0;
+    }
+    core.info(`Found ${threadsToResolve.length} outdated thread(s) to resolve`);
+    let resolvedCount = 0;
+    let failedCount = 0;
+    for (const thread of threadsToResolve) {
+        core.info(`Resolving: ${thread.path}:${thread.line ?? 'file'}`);
+        const resolved = await resolveThread(octokit, thread.id);
+        if (resolved) {
+            resolvedCount++;
+        }
+        else {
+            failedCount++;
         }
     }
     if (resolvedCount > 0) {
         core.info(`✓ Auto-resolved ${resolvedCount} outdated review thread(s)`);
+    }
+    if (failedCount > 0) {
+        core.info(`ℹ️ ${failedCount} thread(s) could not be resolved (requires additional token permissions)`);
+        core.info('   To enable auto-resolve, use a PAT with "repo" scope or resolve threads manually.');
     }
     return resolvedCount;
 }
