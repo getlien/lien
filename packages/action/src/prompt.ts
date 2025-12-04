@@ -139,10 +139,37 @@ export interface TokenUsageInfo {
 }
 
 /**
+ * Format delta summary for display
+ */
+function formatDeltaDisplay(deltaSummary: DeltaSummary | null | undefined): string {
+  if (!deltaSummary) return '';
+  
+  const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
+  const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+  let display = `\n\n**Complexity Change:** ${sign}${deltaSummary.totalDelta} ${trend}`;
+  if (deltaSummary.improved > 0) display += ` | ${deltaSummary.improved} improved`;
+  if (deltaSummary.degraded > 0) display += ` | ${deltaSummary.degraded} degraded`;
+  return display;
+}
+
+/**
+ * Format token usage stats for display
+ */
+function formatTokenStats(tokenUsage: TokenUsageInfo | undefined): string {
+  if (!tokenUsage || tokenUsage.totalTokens <= 0) return '';
+  return `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`;
+}
+
+/**
+ * Format fallback note for boy scout rule
+ */
+function formatFallbackNote(isFallback: boolean): string {
+  if (!isFallback) return '';
+  return `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`;
+}
+
+/**
  * Format the AI review as a GitHub comment
- * @param isFallback - true if this is a fallback because violations aren't on diff lines
- * @param tokenUsage - optional token usage stats to display
- * @param deltaSummary - optional delta summary to display
  */
 export function formatReviewComment(
   aiReview: string,
@@ -152,24 +179,9 @@ export function formatReviewComment(
   deltaSummary?: DeltaSummary | null
 ): string {
   const { summary } = report;
-
-  const fallbackNote = isFallback
-    ? `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`
-    : '';
-
-  const tokenStats = tokenUsage && tokenUsage.totalTokens > 0
-    ? `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`
-    : '';
-
-  // Add delta summary if available
-  let deltaDisplay = '';
-  if (deltaSummary) {
-    const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
-    const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
-    deltaDisplay = `\n\n**Complexity Change:** ${sign}${deltaSummary.totalDelta} ${trend}`;
-    if (deltaSummary.improved > 0) deltaDisplay += ` | ${deltaSummary.improved} improved`;
-    if (deltaSummary.degraded > 0) deltaDisplay += ` | ${deltaSummary.degraded} degraded`;
-  }
+  const deltaDisplay = formatDeltaDisplay(deltaSummary);
+  const fallbackNote = formatFallbackNote(isFallback);
+  const tokenStats = formatTokenStats(tokenUsage);
 
   return `<!-- lien-ai-review -->
 ## 🔍 Lien AI Code Review

@@ -19,9 +19,6 @@ export interface TokenUsageInfo {
 }
 /**
  * Format the AI review as a GitHub comment
- * @param isFallback - true if this is a fallback because violations aren't on diff lines
- * @param tokenUsage - optional token usage stats to display
- * @param deltaSummary - optional delta summary to display
  */
 export declare function formatReviewComment(aiReview: string, report: ComplexityReport, isFallback?: boolean, tokenUsage?: TokenUsageInfo, deltaSummary?: DeltaSummary | null): string;
 /**

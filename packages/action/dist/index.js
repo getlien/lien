@@ -32123,30 +32123,44 @@ No complexity violations found in PR #${prContext.pullNumber}.
 All analyzed functions are within the configured complexity threshold.${deltaMessage}`;
 }
 /**
+ * Format delta summary for display
+ */
+function formatDeltaDisplay(deltaSummary) {
+    if (!deltaSummary)
+        return '';
+    const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
+    const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+    let display = `\n\n**Complexity Change:** ${sign}${deltaSummary.totalDelta} ${trend}`;
+    if (deltaSummary.improved > 0)
+        display += ` | ${deltaSummary.improved} improved`;
+    if (deltaSummary.degraded > 0)
+        display += ` | ${deltaSummary.degraded} degraded`;
+    return display;
+}
+/**
+ * Format token usage stats for display
+ */
+function formatTokenStats(tokenUsage) {
+    if (!tokenUsage || tokenUsage.totalTokens <= 0)
+        return '';
+    return `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`;
+}
+/**
+ * Format fallback note for boy scout rule
+ */
+function formatFallbackNote(isFallback) {
+    if (!isFallback)
+        return '';
+    return `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`;
+}
+/**
  * Format the AI review as a GitHub comment
- * @param isFallback - true if this is a fallback because violations aren't on diff lines
- * @param tokenUsage - optional token usage stats to display
- * @param deltaSummary - optional delta summary to display
  */
 function formatReviewComment(aiReview, report, isFallback = false, tokenUsage, deltaSummary) {
     const { summary } = report;
-    const fallbackNote = isFallback
-        ? `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`
-        : '';
-    const tokenStats = tokenUsage && tokenUsage.totalTokens > 0
-        ? `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`
-        : '';
-    // Add delta summary if available
-    let deltaDisplay = '';
-    if (deltaSummary) {
-        const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
-        const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
-        deltaDisplay = `\n\n**Complexity Change:** ${sign}${deltaSummary.totalDelta} ${trend}`;
-        if (deltaSummary.improved > 0)
-            deltaDisplay += ` | ${deltaSummary.improved} improved`;
-        if (deltaSummary.degraded > 0)
-            deltaDisplay += ` | ${deltaSummary.degraded} degraded`;
-    }
+    const deltaDisplay = formatDeltaDisplay(deltaSummary);
+    const fallbackNote = formatFallbackNote(isFallback);
+    const tokenStats = formatTokenStats(tokenUsage);
     return `<!-- lien-ai-review -->
 ## 🔍 Lien AI Code Review
 
@@ -32872,44 +32886,21 @@ function findCommentLine(violation, diffLines) {
     return null;
 }
 /**
- * Post review with line-specific comments for all violations
+ * Build delta lookup map from deltas array
  */
-async function postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas = null) {
-    // Get lines that are in the diff (only these can have line comments)
-    const diffLines = await getPRDiffLines(octokit, prContext);
-    core.info(`Diff covers ${diffLines.size} files`);
-    // Find the best comment line for each violation
-    const violationsWithLines = [];
-    const uncoveredViolations = [];
-    for (const v of violations) {
-        const commentLine = findCommentLine(v, diffLines);
-        if (commentLine !== null) {
-            violationsWithLines.push({ violation: v, commentLine });
-        }
-        else {
-            uncoveredViolations.push(v);
-        }
-    }
-    core.info(`${violationsWithLines.length}/${violations.length} violations can have inline comments ` +
-        `(${uncoveredViolations.length} outside diff)`);
-    if (violationsWithLines.length === 0) {
-        // No violations can have inline comments, fall back to summary
-        core.info('No violations in diff range, posting summary comment with fallback note');
-        await postSummaryReview(octokit, prContext, report, codeSnippets, config, true, deltas);
-        return;
-    }
-    // Build delta lookup map
+function buildDeltaMap(deltas) {
     const deltaMap = new Map();
     if (deltas) {
         for (const d of deltas) {
             deltaMap.set(`${d.filepath}::${d.symbolName}`, d);
         }
     }
-    // Generate AI comments for violations that can have inline comments
-    const commentableViolations = violationsWithLines.map(v => v.violation);
-    core.info('Generating AI comments for violations...');
-    const aiComments = await generateLineComments(commentableViolations, codeSnippets, config.openrouterApiKey, config.model);
-    // Build line comments with delta info
+    return deltaMap;
+}
+/**
+ * Build line comments from violations and AI comments
+ */
+function buildLineComments(violationsWithLines, aiComments, deltaMap) {
     const lineComments = [];
     for (const { violation, commentLine } of violationsWithLines) {
         const comment = aiComments.get(violation);
@@ -32930,14 +32921,32 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
             body: `${severityEmoji} **Complexity: ${violation.complexity}**${deltaStr} (threshold: ${violation.threshold})${lineNote}\n\n${comment}`,
         });
     }
-    core.info(`Built ${lineComments.length} line comments`);
-    // Build summary comment with token usage and delta summary
+    return lineComments;
+}
+/**
+ * Build uncovered violations note for summary
+ */
+function buildUncoveredNote(uncoveredViolations, deltaMap) {
+    if (uncoveredViolations.length === 0)
+        return '';
+    const uncoveredList = uncoveredViolations
+        .map(v => {
+        const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+        const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+        return `  - \`${v.symbolName}\` in \`${v.filepath}\`: complexity ${v.complexity}${deltaStr}`;
+    })
+        .join('\n');
+    return `\n\n<details>\n<summary>⚠️ ${uncoveredViolations.length} violation${uncoveredViolations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${uncoveredList}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
+}
+/**
+ * Build review summary body for line comments mode
+ */
+function buildReviewSummary(report, deltas, uncoveredNote) {
     const { summary } = report;
     const usage = getTokenUsage();
     const costDisplay = usage.totalTokens > 0
         ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})`
         : '';
-    // Add delta summary if available
     let deltaDisplay = '';
     if (deltas && deltas.length > 0) {
         const deltaSummary = calculateDeltaSummary(deltas);
@@ -32949,19 +32958,7 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
         if (deltaSummary.degraded > 0)
             deltaDisplay += ` (${deltaSummary.degraded} degraded)`;
     }
-    // Build note about uncovered violations (outside diff range)
-    let uncoveredNote = '';
-    if (uncoveredViolations.length > 0) {
-        const uncoveredList = uncoveredViolations
-            .map(v => {
-            const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
-            const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-            return `  - \`${v.symbolName}\` in \`${v.filepath}\`: complexity ${v.complexity}${deltaStr}`;
-        })
-            .join('\n');
-        uncoveredNote = `\n\n<details>\n<summary>⚠️ ${uncoveredViolations.length} violation${uncoveredViolations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${uncoveredList}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
-    }
-    const summaryBody = `<!-- lien-ai-review -->
+    return `<!-- lien-ai-review -->
 ## 🔍 Lien Complexity Review
 
 **Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}** (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${deltaDisplay}
@@ -32978,7 +32975,42 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
 </details>
 
 *[Lien](https://lien.dev) AI Code Review*`;
-    // Post the review
+}
+/**
+ * Post review with line-specific comments for all violations
+ */
+async function postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas = null) {
+    const diffLines = await getPRDiffLines(octokit, prContext);
+    core.info(`Diff covers ${diffLines.size} files`);
+    // Partition violations into those we can comment on and those we can't
+    const violationsWithLines = [];
+    const uncoveredViolations = [];
+    for (const v of violations) {
+        const commentLine = findCommentLine(v, diffLines);
+        if (commentLine !== null) {
+            violationsWithLines.push({ violation: v, commentLine });
+        }
+        else {
+            uncoveredViolations.push(v);
+        }
+    }
+    core.info(`${violationsWithLines.length}/${violations.length} violations can have inline comments ` +
+        `(${uncoveredViolations.length} outside diff)`);
+    if (violationsWithLines.length === 0) {
+        core.info('No violations in diff range, posting summary comment with fallback note');
+        await postSummaryReview(octokit, prContext, report, codeSnippets, config, true, deltas);
+        return;
+    }
+    const deltaMap = buildDeltaMap(deltas);
+    // Generate AI comments
+    const commentableViolations = violationsWithLines.map(v => v.violation);
+    core.info('Generating AI comments for violations...');
+    const aiComments = await generateLineComments(commentableViolations, codeSnippets, config.openrouterApiKey, config.model);
+    // Build and post review
+    const lineComments = buildLineComments(violationsWithLines, aiComments, deltaMap);
+    core.info(`Built ${lineComments.length} line comments`);
+    const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
+    const summaryBody = buildReviewSummary(report, deltas, uncoveredNote);
     await postPRReview(octokit, prContext, lineComments, summaryBody);
     core.info(`Posted review with ${lineComments.length} line comments`);
 }
