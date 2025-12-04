@@ -89,13 +89,11 @@ jobs:
           path: ~/.lien
           key: lien-base-index-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
       
-      # Clear index before head branch (start fresh)
-      - name: Prepare for head branch indexing
-        run: |
-          rm -rf ~/.lien
-          git checkout ${{ github.sha }}
+      # Switch to head branch - Lien will do incremental index from base
+      - name: Checkout head branch
+        run: git checkout ${{ github.sha }}
       
-      - name: Index head branch
+      - name: Index head branch (incremental from base)
         run: lien index
       
       - name: Run AI Code Review
