@@ -18,6 +18,7 @@ You have access to Lien semantic search tools. USE THEM INSTEAD OF grep/ripgrep/
 | Edit a file | `get_files_context` FIRST | direct edit |
 | Find similar code | `find_similar` | manual search |
 | "What depends on this file?" | `get_dependents` | manual grep |
+| "What's complex?" / "Tech debt?" | `get_complexity` | manual analysis |
 
 ## Before ANY Code Change
 
@@ -58,6 +59,12 @@ REQUIRED sequence:
   - Dependency count (how many files import it)
   - Complexity metrics (how complex the dependent code is)
 - Highlights top 5 most complex dependents when complexity data available
+
+**`get_complexity({ top: 10 })`**
+- Find most complex functions in the codebase
+- Use for tech debt analysis and refactoring prioritization
+- Returns complexity, dependent count, and risk level for each violation
+- Optional: `files` to filter specific files, `threshold` to set minimum complexity
 
 ## Test Associations
 
