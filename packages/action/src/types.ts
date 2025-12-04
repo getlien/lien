@@ -92,3 +92,30 @@ export interface PRContext {
   headSha: string;
 }
 
+/**
+ * Complexity delta for a single function/method
+ */
+export interface ComplexityDelta {
+  filepath: string;
+  symbolName: string;
+  symbolType: string;
+  startLine: number;
+  baseComplexity: number | null; // null = new function
+  headComplexity: number | null; // null = deleted function
+  delta: number; // positive = worse, negative = better
+  threshold: number;
+  severity: 'warning' | 'error' | 'improved' | 'new' | 'deleted';
+}
+
+/**
+ * Summary of complexity changes in a PR
+ */
+export interface DeltaSummary {
+  totalDelta: number; // net change across all functions
+  improved: number; // count of functions that got simpler
+  degraded: number; // count of functions that got more complex
+  newFunctions: number; // count of new functions with violations
+  deletedFunctions: number; // count of deleted functions (freed complexity)
+  unchanged: number; // count of functions with same complexity
+}
+

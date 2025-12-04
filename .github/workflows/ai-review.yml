@@ -58,7 +58,17 @@ jobs:
       - name: Initialize Lien (auto-detect frameworks)
         run: lien init --yes
       
-      - name: Index codebase
+      # Generate baseline complexity from base branch
+      - name: Get base branch complexity
+        run: |
+          echo "Checking out base branch: ${{ github.event.pull_request.base.sha }}"
+          git checkout ${{ github.event.pull_request.base.sha }}
+          lien index
+          lien complexity --format json > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
+          echo "Base complexity saved"
+          git checkout ${{ github.sha }}
+      
+      - name: Index head branch
         run: lien index
       
       - name: Run AI Code Review
@@ -66,6 +76,7 @@ jobs:
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
           model: 'anthropic/claude-sonnet-4'
-          threshold: '10'  # Error threshold = 20, so complexity 20+ will be an error
+          threshold: '10'
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          baseline_complexity: '/tmp/base-complexity.json'
 

@@ -5,6 +5,7 @@ A GitHub Action that analyzes code complexity in pull requests and posts AI-gene
 ## Features
 
 - 🔍 **Complexity Analysis** - Detects functions exceeding complexity thresholds
+- 📊 **Delta Tracking** - Shows how complexity changed vs base branch (⬆️ worse, ⬇️ better)
 - 🤖 **AI-Powered Reviews** - Generates actionable refactoring suggestions via OpenRouter (Claude, GPT-4, etc.)
 - 📍 **Line-Specific Comments** - Posts inline comments directly on the problematic code lines
 - 💬 **Smart Fallback** - Falls back to summary comment if lines aren't in the diff
@@ -41,15 +42,25 @@ jobs:
       - name: Install Lien
         run: npm install -g @liendev/lien
       
-      - name: Initialize and Index
+      - name: Initialize Lien
+        run: lien init --yes
+
+      # Generate baseline complexity from base branch (for delta tracking)
+      - name: Get base complexity
         run: |
-          lien init --yes
+          git checkout ${{ github.event.pull_request.base.sha }}
           lien index
+          lien complexity --format json > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
+          git checkout ${{ github.sha }}
+      
+      - name: Index head branch
+        run: lien index
       
       - name: AI Code Review
         uses: getlien/lien/packages/action@main
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          baseline_complexity: '/tmp/base-complexity.json'
 ```
 
 ## Inputs
@@ -61,6 +72,7 @@ jobs:
 | `threshold` | Complexity threshold for violations | No | `10` |
 | `github_token` | GitHub token for posting comments | No | `${{ github.token }}` |
 | `review_style` | Review comment style: `line` (default) posts inline comments on all violations, `summary` posts a single summary comment only | No | `line` |
+| `baseline_complexity` | Path to baseline complexity JSON for delta calculation | No | - |
 
 ## Outputs
 
@@ -69,6 +81,9 @@ jobs:
 | `violations` | Total number of complexity violations found |
 | `errors` | Number of error-level violations |
 | `warnings` | Number of warning-level violations |
+| `total_delta` | Net complexity change (positive = worse, negative = better) |
+| `improved` | Number of functions that got simpler |
+| `degraded` | Number of functions that got more complex |
 
 ## Configuration
 
@@ -111,15 +126,20 @@ The action posts a comment like this:
 > 
 > **Summary**: 2 complexity violations found (1 error, 1 warning)
 > 
+> **Complexity Change:** +8 ⬆️ | 1 improved | 1 degraded
+> 
 > ---
 > 
 > ### File-by-File Analysis
 > 
 > **src/utils/parser.ts**
 > 
-> 🔴 `parseConfig` (complexity 18)
+> 🔴 `parseConfig` (complexity 18, +6 ⬆️)
 > - Problem: Nested switch statements create hard-to-follow logic
 > - Suggestion: Extract each case into separate handler functions
+> 
+> 🟢 `validateInput` (complexity 12, -3 ⬇️)
+> - Great improvement! This function got simpler.
 > 
 > ---
 > 

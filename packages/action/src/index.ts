@@ -3,12 +3,13 @@
  *
  * Entry point for the action. Orchestrates:
  * 1. Getting PR changed files
- * 2. Running complexity analysis
+ * 2. Running complexity analysis (with delta from base branch)
  * 3. Generating AI review
  * 4. Posting comment to PR (line-specific or summary)
  */
 
 import * as core from '@actions/core';
+import * as fs from 'fs';
 import {
   getPRContext,
   getPRChangedFiles,
@@ -27,14 +28,21 @@ import {
   formatReviewComment,
   getViolationKey,
 } from './prompt.js';
-import type { ActionConfig, ComplexityViolation } from './types.js';
+import {
+  calculateDeltas,
+  calculateDeltaSummary,
+  formatDelta,
+  formatSeverityEmoji,
+  logDeltaSummary,
+} from './delta.js';
+import type { ActionConfig, ComplexityViolation, ComplexityReport, ComplexityDelta } from './types.js';
 
 type ReviewStyle = 'line' | 'summary';
 
 /**
  * Get action configuration from inputs
  */
-function getConfig(): ActionConfig & { reviewStyle: ReviewStyle } {
+function getConfig(): ActionConfig & { reviewStyle: ReviewStyle; baselineComplexityPath: string } {
   const reviewStyle = core.getInput('review_style') || 'line';
   
   return {
@@ -43,7 +51,39 @@ function getConfig(): ActionConfig & { reviewStyle: ReviewStyle } {
     threshold: core.getInput('threshold') || '10',
     githubToken: core.getInput('github_token') || process.env.GITHUB_TOKEN || '',
     reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
+    baselineComplexityPath: core.getInput('baseline_complexity') || '',
   };
+}
+
+/**
+ * Load baseline complexity report from file
+ */
+function loadBaselineComplexity(path: string): ComplexityReport | null {
+  if (!path) {
+    core.info('No baseline complexity path provided, skipping delta calculation');
+    return null;
+  }
+
+  try {
+    if (!fs.existsSync(path)) {
+      core.warning(`Baseline complexity file not found: ${path}`);
+      return null;
+    }
+
+    const content = fs.readFileSync(path, 'utf-8');
+    const report = JSON.parse(content) as ComplexityReport;
+    
+    if (!report.files || !report.summary) {
+      core.warning('Baseline complexity file has invalid format');
+      return null;
+    }
+
+    core.info(`Loaded baseline complexity: ${report.summary.totalViolations} violations`);
+    return report;
+  } catch (error) {
+    core.warning(`Failed to load baseline complexity: ${error}`);
+    return null;
+  }
 }
 
 type PRContext = NonNullable<ReturnType<typeof getPRContext>>;
@@ -137,6 +177,9 @@ async function run(): Promise<void> {
       return;
     }
 
+    // Load baseline complexity for delta calculation
+    const baselineReport = loadBaselineComplexity(config.baselineComplexityPath);
+
     const report = await runComplexityAnalysis(filesToAnalyze, config.threshold);
     if (!report) {
       core.warning('Failed to get complexity report');
@@ -144,9 +187,22 @@ async function run(): Promise<void> {
     }
     core.info(`Analysis complete: ${report.summary.totalViolations} violations found`);
 
+    // Calculate deltas if we have a baseline
+    const deltas = baselineReport
+      ? calculateDeltas(baselineReport, report, filesToAnalyze)
+      : null;
+
+    if (deltas) {
+      const deltaSummary = calculateDeltaSummary(deltas);
+      logDeltaSummary(deltaSummary);
+      core.setOutput('total_delta', deltaSummary.totalDelta);
+      core.setOutput('improved', deltaSummary.improved);
+      core.setOutput('degraded', deltaSummary.degraded);
+    }
+
     if (report.summary.totalViolations === 0) {
       core.info('No complexity violations found');
-      await postPRComment(octokit, prContext, buildNoViolationsMessage(prContext));
+      await postPRComment(octokit, prContext, buildNoViolationsMessage(prContext, deltas));
       return;
     }
 
@@ -154,9 +210,9 @@ async function run(): Promise<void> {
 
     resetTokenUsage();
     if (config.reviewStyle === 'summary') {
-      await postSummaryReview(octokit, prContext, report, codeSnippets, config);
+      await postSummaryReview(octokit, prContext, report, codeSnippets, config, false, deltas);
     } else {
-      await postLineReview(octokit, prContext, report, violations, codeSnippets, config);
+      await postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas);
     }
 
     core.setOutput('violations', report.summary.totalViolations);
@@ -176,7 +232,8 @@ async function postLineReview(
   report: Awaited<ReturnType<typeof runComplexityAnalysis>> & object,
   violations: ComplexityViolation[],
   codeSnippets: Map<string, string>,
-  config: ReturnType<typeof getConfig>
+  config: ReturnType<typeof getConfig>,
+  deltas: ComplexityDelta[] | null = null
 ): Promise<void> {
   // Get lines that are in the diff (only these can have line comments)
   const diffLines = await getPRDiffLines(octokit, prContext);
@@ -197,8 +254,16 @@ async function postLineReview(
   if (commentableViolations.length === 0) {
     // No violations on diff lines, fall back to summary with boy scout note
     core.info('No violations on diff lines, posting summary comment with fallback note');
-    await postSummaryReview(octokit, prContext, report, codeSnippets, config, true);
+    await postSummaryReview(octokit, prContext, report, codeSnippets, config, true, deltas);
     return;
+  }
+
+  // Build delta lookup map
+  const deltaMap = new Map<string, ComplexityDelta>();
+  if (deltas) {
+    for (const d of deltas) {
+      deltaMap.set(`${d.filepath}::${d.symbolName}`, d);
+    }
   }
 
   // Generate AI comments for each violation
@@ -210,30 +275,46 @@ async function postLineReview(
     config.model
   );
 
-  // Build line comments
+  // Build line comments with delta info
   const lineComments: LineComment[] = [];
   for (const [violation, comment] of aiComments) {
-    const severityEmoji = violation.severity === 'error' ? '🔴' : '🟡';
-    core.info(`Adding comment for ${violation.filepath}:${violation.startLine} (${violation.symbolName})`);
+    const delta = deltaMap.get(`${violation.filepath}::${violation.symbolName}`);
+    const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+    const severityEmoji = delta 
+      ? formatSeverityEmoji(delta.severity)
+      : (violation.severity === 'error' ? '🔴' : '🟡');
+    
+    core.info(`Adding comment for ${violation.filepath}:${violation.startLine} (${violation.symbolName})${deltaStr}`);
     lineComments.push({
       path: violation.filepath,
       line: violation.startLine,
-      body: `${severityEmoji} **Complexity: ${violation.complexity}** (threshold: ${violation.threshold})\n\n${comment}`,
+      body: `${severityEmoji} **Complexity: ${violation.complexity}**${deltaStr} (threshold: ${violation.threshold})\n\n${comment}`,
     });
   }
   core.info(`Built ${lineComments.length} line comments`);
 
-  // Build summary comment with token usage
+  // Build summary comment with token usage and delta summary
   const { summary } = report;
   const usage = getTokenUsage();
   const costDisplay = usage.totalTokens > 0
     ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})`
     : '';
 
+  // Add delta summary if available
+  let deltaDisplay = '';
+  if (deltas && deltas.length > 0) {
+    const deltaSummary = calculateDeltaSummary(deltas);
+    const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
+    const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+    deltaDisplay = `\n\n**Complexity Change:** ${sign}${deltaSummary.totalDelta} ${trend}`;
+    if (deltaSummary.improved > 0) deltaDisplay += ` (${deltaSummary.improved} improved)`;
+    if (deltaSummary.degraded > 0) deltaDisplay += ` (${deltaSummary.degraded} degraded)`;
+  }
+
   const summaryBody = `<!-- lien-ai-review -->
 ## 🔍 Lien Complexity Review
 
-**Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}** (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})
+**Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}** (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${deltaDisplay}
 
 See inline comments on the diff for specific suggestions.
 
@@ -256,6 +337,7 @@ See inline comments on the diff for specific suggestions.
 /**
  * Post review as a single summary comment
  * @param isFallback - true if this is a fallback because violations aren't on diff lines
+ * @param deltas - complexity deltas for delta display
  */
 async function postSummaryReview(
   octokit: ReturnType<typeof createOctokit>,
@@ -263,9 +345,10 @@ async function postSummaryReview(
   report: Awaited<ReturnType<typeof runComplexityAnalysis>> & object,
   codeSnippets: Map<string, string>,
   config: ReturnType<typeof getConfig>,
-  isFallback = false
+  isFallback = false,
+  deltas: ComplexityDelta[] | null = null
 ): Promise<void> {
-  const prompt = buildReviewPrompt(report, prContext, codeSnippets);
+  const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas);
   core.debug(`Prompt length: ${prompt.length} characters`);
 
   const aiReview = await generateReview(
@@ -275,7 +358,8 @@ async function postSummaryReview(
   );
 
   const usage = getTokenUsage();
-  const comment = formatReviewComment(aiReview, report, isFallback, usage);
+  const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
+  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltaSummary);
   await postPRComment(octokit, prContext, comment);
   core.info('Successfully posted AI review summary comment');
 }

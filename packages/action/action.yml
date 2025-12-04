@@ -21,6 +21,9 @@ inputs:
   review_style:
     description: 'Review style: "line" (default) for inline comments on all violations, "summary" for single comment only'
     default: 'line'
+  baseline_complexity:
+    description: 'Path to baseline complexity JSON from base branch (for delta calculation)'
+    default: ''
 
 runs:
   using: 'node20'
