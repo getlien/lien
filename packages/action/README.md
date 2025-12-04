@@ -45,16 +45,15 @@ jobs:
       - name: Initialize Lien
         run: lien init --yes
 
-      # Cache base branch index (shared across PRs targeting same base)
-      - name: Cache base branch Lien index
+      # Restore base branch index cache (shared across PRs targeting same base)
+      - name: Restore base branch Lien index
         id: cache-base
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.lien
           key: lien-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
       
       # Generate baseline complexity from base branch (for delta tracking)
-      # NOTE: Use same threshold as action for accurate delta calculation
       - name: Get base complexity
         run: |
           git checkout ${{ github.event.pull_request.base.sha }}
@@ -62,6 +61,19 @@ jobs:
             lien index
           fi
           lien complexity --format json --threshold 10 > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
+      
+      # Save base cache BEFORE switching to head
+      - name: Save base branch cache
+        if: steps.cache-base.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.lien
+          key: lien-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+      
+      # Clear index and switch to head branch
+      - name: Prepare for head indexing
+        run: |
+          rm -rf ~/.lien
           git checkout ${{ github.sha }}
       
       - name: Index head branch

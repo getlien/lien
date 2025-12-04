@@ -58,10 +58,10 @@ jobs:
       - name: Initialize Lien (auto-detect frameworks)
         run: lien init --yes
       
-      # Cache base branch index (shared across PRs targeting same base)
-      - name: Cache base branch Lien index
+      # Restore base branch index cache (if exists)
+      - name: Restore base branch Lien index
         id: cache-base
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.lien
           key: lien-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
@@ -80,6 +80,19 @@ jobs:
           fi
           lien complexity --format json --threshold 10 > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
           echo "Base complexity saved"
+      
+      # Save base cache BEFORE switching to head (prevents head from overwriting)
+      - name: Save base branch cache
+        if: steps.cache-base.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.lien
+          key: lien-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+      
+      # Clear index before head branch (start fresh)
+      - name: Prepare for head branch indexing
+        run: |
+          rm -rf ~/.lien
           git checkout ${{ github.sha }}
       
       - name: Index head branch
