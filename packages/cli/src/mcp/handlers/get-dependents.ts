@@ -2,6 +2,7 @@ import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetDependentsSchema } from '../schemas/index.js';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
+import type { SearchResult } from '../../vectordb/types.js';
 
 /**
  * Complexity metrics for a single dependent file.
@@ -59,6 +60,170 @@ const COMPLEXITY_THRESHOLDS = {
  */
 const SCAN_LIMIT = 10000;
 
+/** Risk level ordering for comparison */
+const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
+type RiskLevel = keyof typeof RISK_ORDER;
+
+/**
+ * Build import-to-chunk index for O(n) instead of O(n*m) lookup.
+ */
+function buildImportIndex(
+  allChunks: SearchResult[],
+  normalizePathCached: (path: string) => string
+): Map<string, SearchResult[]> {
+  const importIndex = new Map<string, SearchResult[]>();
+  
+  for (const chunk of allChunks) {
+    const imports = chunk.metadata.imports || [];
+    for (const imp of imports) {
+      const normalizedImport = normalizePathCached(imp);
+      if (!importIndex.has(normalizedImport)) {
+        importIndex.set(normalizedImport, []);
+      }
+      importIndex.get(normalizedImport)!.push(chunk);
+    }
+  }
+  
+  return importIndex;
+}
+
+/**
+ * Find dependent chunks using direct lookup and fuzzy matching.
+ */
+function findDependentChunks(
+  importIndex: Map<string, SearchResult[]>,
+  normalizedTarget: string
+): SearchResult[] {
+  const dependentChunks: SearchResult[] = [];
+  const seenChunkIds = new Set<string>();
+
+  const addChunk = (chunk: SearchResult) => {
+    const chunkId = `${chunk.metadata.file}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
+    if (!seenChunkIds.has(chunkId)) {
+      dependentChunks.push(chunk);
+      seenChunkIds.add(chunkId);
+    }
+  };
+
+  // Direct index lookup (fastest path)
+  if (importIndex.has(normalizedTarget)) {
+    for (const chunk of importIndex.get(normalizedTarget)!) {
+      addChunk(chunk);
+    }
+  }
+
+  // Fuzzy match for relative imports and path variations
+  for (const [normalizedImport, chunks] of importIndex.entries()) {
+    if (normalizedImport !== normalizedTarget && matchesFile(normalizedImport, normalizedTarget)) {
+      for (const chunk of chunks) {
+        addChunk(chunk);
+      }
+    }
+  }
+
+  return dependentChunks;
+}
+
+/**
+ * Calculate complexity metrics for each file from its chunks.
+ */
+function calculateFileComplexities(
+  chunksByFile: Map<string, SearchResult[]>
+): FileComplexity[] {
+  const fileComplexities: FileComplexity[] = [];
+
+  for (const [filepath, chunks] of chunksByFile.entries()) {
+    const complexities = chunks
+      .map(c => c.metadata.complexity)
+      .filter((c): c is number => typeof c === 'number' && c > 0);
+
+    if (complexities.length > 0) {
+      const sum = complexities.reduce((a, b) => a + b, 0);
+      fileComplexities.push({
+        filepath,
+        avgComplexity: Math.round((sum / complexities.length) * 10) / 10,
+        maxComplexity: Math.max(...complexities),
+        complexityScore: sum,
+        chunksWithComplexity: complexities.length,
+      });
+    }
+  }
+
+  return fileComplexities;
+}
+
+/**
+ * Calculate overall complexity metrics from per-file complexities.
+ */
+function calculateOverallComplexityMetrics(
+  fileComplexities: FileComplexity[]
+): ComplexityMetrics {
+  if (fileComplexities.length === 0) {
+    return {
+      averageComplexity: 0,
+      maxComplexity: 0,
+      filesWithComplexityData: 0,
+      highComplexityDependents: [],
+      complexityRiskBoost: 'low',
+    };
+  }
+
+  const allAvgs = fileComplexities.map(f => f.avgComplexity);
+  const allMaxes = fileComplexities.map(f => f.maxComplexity);
+  const totalAvg = allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length;
+  const globalMax = Math.max(...allMaxes);
+
+  const highComplexityDependents = fileComplexities
+    .filter(f => f.maxComplexity > COMPLEXITY_THRESHOLDS.HIGH_COMPLEXITY_DEPENDENT)
+    .sort((a, b) => b.maxComplexity - a.maxComplexity)
+    .slice(0, 5)
+    .map(f => ({ filepath: f.filepath, maxComplexity: f.maxComplexity, avgComplexity: f.avgComplexity }));
+
+  const complexityRiskBoost = calculateComplexityRiskBoost(totalAvg, globalMax);
+
+  return {
+    averageComplexity: Math.round(totalAvg * 10) / 10,
+    maxComplexity: globalMax,
+    filesWithComplexityData: fileComplexities.length,
+    highComplexityDependents,
+    complexityRiskBoost,
+  };
+}
+
+/**
+ * Calculate complexity-based risk boost level.
+ */
+function calculateComplexityRiskBoost(avgComplexity: number, maxComplexity: number): RiskLevel {
+  if (avgComplexity > COMPLEXITY_THRESHOLDS.CRITICAL_AVG || maxComplexity > COMPLEXITY_THRESHOLDS.CRITICAL_MAX) {
+    return 'critical';
+  }
+  if (avgComplexity > COMPLEXITY_THRESHOLDS.HIGH_AVG || maxComplexity > COMPLEXITY_THRESHOLDS.HIGH_MAX) {
+    return 'high';
+  }
+  if (avgComplexity > COMPLEXITY_THRESHOLDS.MEDIUM_AVG || maxComplexity > COMPLEXITY_THRESHOLDS.MEDIUM_MAX) {
+    return 'medium';
+  }
+  return 'low';
+}
+
+/**
+ * Calculate risk level based on dependent count and complexity.
+ */
+function calculateRiskLevel(dependentCount: number, complexityRiskBoost: RiskLevel): RiskLevel {
+  let riskLevel: RiskLevel =
+    dependentCount === 0 ? 'low' :
+    dependentCount <= DEPENDENT_COUNT_THRESHOLDS.LOW ? 'low' :
+    dependentCount <= DEPENDENT_COUNT_THRESHOLDS.MEDIUM ? 'medium' :
+    dependentCount <= DEPENDENT_COUNT_THRESHOLDS.HIGH ? 'high' : 'critical';
+
+  // Boost if complexity risk is higher
+  if (RISK_ORDER[complexityRiskBoost] > RISK_ORDER[riskLevel]) {
+    riskLevel = complexityRiskBoost;
+  }
+
+  return riskLevel;
+}
+
 /**
  * Handle get_dependents tool calls.
  * Finds all code that depends on a file (reverse dependency lookup).
@@ -73,84 +238,28 @@ export async function handleGetDependents(
     GetDependentsSchema,
     async (validatedArgs) => {
       log(`Finding dependents of: ${validatedArgs.filepath}`);
-
-      // Check if index has been updated and reconnect if needed
       await checkAndReconnect();
 
-      // Get all chunks - they include imports metadata
       const allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
-
-      // Warn if we hit the limit (results may be truncated)
-      if (allChunks.length === SCAN_LIMIT) {
-        log(`WARNING: Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete for large codebases.`);
+      const hitLimit = allChunks.length === SCAN_LIMIT;
+      if (hitLimit) {
+        log(`WARNING: Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete.`);
       }
-
       log(`Scanning ${allChunks.length} chunks for imports...`);
 
-      // Compute workspace root once (used by normalizePath and getCanonicalPath)
       const workspaceRoot = process.cwd().replace(/\\/g, '/');
-
-      // Path normalization cache to avoid repeated string operations
       const pathCache = new Map<string, string>();
       const normalizePathCached = (path: string): string => {
-        if (pathCache.has(path)) return pathCache.get(path)!;
-        const normalized = normalizePath(path, workspaceRoot);
-        pathCache.set(path, normalized);
-        return normalized;
+        if (!pathCache.has(path)) pathCache.set(path, normalizePath(path, workspaceRoot));
+        return pathCache.get(path)!;
       };
 
-      // Build import-to-chunk index for O(n) instead of O(n*m) lookup
-      // Key: normalized import path, Value: array of chunks that import it
-      const importIndex = new Map<string, typeof allChunks>();
-      for (const chunk of allChunks) {
-        const imports = chunk.metadata.imports || [];
-        for (const imp of imports) {
-          const normalizedImport = normalizePathCached(imp);
-          if (!importIndex.has(normalizedImport)) {
-            importIndex.set(normalizedImport, []);
-          }
-          importIndex.get(normalizedImport)!.push(chunk);
-        }
-      }
-
-      // Find all chunks that import the target file using index + fuzzy matching
+      // Build index and find dependents
+      const importIndex = buildImportIndex(allChunks, normalizePathCached);
       const normalizedTarget = normalizePathCached(validatedArgs.filepath);
-      const dependentChunks: typeof allChunks = [];
-      // Track chunks we've already added to avoid duplicates when the same chunk
-      // matches via multiple strategies (e.g., both direct lookup and fuzzy match)
-      const seenChunkIds = new Set<string>();
+      const dependentChunks = findDependentChunks(importIndex, normalizedTarget);
 
-      // First: Try direct index lookup (fastest path)
-      if (importIndex.has(normalizedTarget)) {
-        for (const chunk of importIndex.get(normalizedTarget)!) {
-          // Use file + line range as unique chunk identifier
-          const chunkId = `${chunk.metadata.file}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
-          if (!seenChunkIds.has(chunkId)) {
-            dependentChunks.push(chunk);
-            seenChunkIds.add(chunkId);
-          }
-        }
-      }
-
-      // Second: Fuzzy match against all unique import paths in the index
-      // This handles relative imports and path variations
-      for (const [normalizedImport, chunks] of importIndex.entries()) {
-        // Skip exact match (already processed in direct lookup above)
-        if (normalizedImport !== normalizedTarget && matchesFile(normalizedImport, normalizedTarget)) {
-          for (const chunk of chunks) {
-            // Use file + line range as unique chunk identifier
-            const chunkId = `${chunk.metadata.file}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
-            if (!seenChunkIds.has(chunkId)) {
-              dependentChunks.push(chunk);
-              seenChunkIds.add(chunkId);
-            }
-          }
-        }
-      }
-
-      // Group chunks by file for complexity analysis
-      // Use canonical paths (with extensions) for the final output to show users actual file names.
-      // Multiple chunks from the same file are grouped together for accurate complexity metrics.
+      // Group by canonical file path
       const chunksByFile = new Map<string, typeof dependentChunks>();
       for (const chunk of dependentChunks) {
         const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
@@ -159,116 +268,26 @@ export async function handleGetDependents(
         chunksByFile.set(canonical, existing);
       }
 
-      // Calculate complexity metrics per file (using module-level interfaces)
-      const fileComplexities: FileComplexity[] = [];
+      // Calculate metrics
+      const fileComplexities = calculateFileComplexities(chunksByFile);
+      const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
 
-      for (const [filepath, chunks] of chunksByFile.entries()) {
-        const complexities = chunks
-          .map(c => c.metadata.complexity)
-          .filter((c): c is number => typeof c === 'number' && c > 0);
-
-        if (complexities.length > 0) {
-          const sum = complexities.reduce((a, b) => a + b, 0);
-          const avg = sum / complexities.length;
-          // Math.max is safe here because complexities.length > 0 is guaranteed by the if condition
-          const max = Math.max(...complexities);
-
-          fileComplexities.push({
-            filepath,
-            avgComplexity: Math.round(avg * 10) / 10, // Round to 1 decimal
-            maxComplexity: max,
-            complexityScore: sum,
-            chunksWithComplexity: complexities.length,
-          });
-        }
-      }
-
-      // Calculate overall complexity metrics (always return for consistent response shape)
-      let complexityMetrics: ComplexityMetrics;
-
-      if (fileComplexities.length > 0) {
-        const allAvgs = fileComplexities.map(f => f.avgComplexity);
-        const allMaxes = fileComplexities.map(f => f.maxComplexity);
-        const totalAvg = allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length;
-        // Math.max is safe here: allMaxes is non-empty because fileComplexities has entries
-        const globalMax = Math.max(...allMaxes);
-
-        // Identify high-complexity dependents
-        const highComplexityDependents = fileComplexities
-          .filter(f => f.maxComplexity > COMPLEXITY_THRESHOLDS.HIGH_COMPLEXITY_DEPENDENT)
-          .sort((a, b) => b.maxComplexity - a.maxComplexity)
-          .slice(0, 5) // Top 5
-          .map(f => ({
-            filepath: f.filepath,
-            maxComplexity: f.maxComplexity,
-            avgComplexity: f.avgComplexity,
-          }));
-
-        // Calculate complexity-based risk boost
-        let complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical' = 'low';
-        if (totalAvg > COMPLEXITY_THRESHOLDS.CRITICAL_AVG || globalMax > COMPLEXITY_THRESHOLDS.CRITICAL_MAX) {
-          complexityRiskBoost = 'critical';
-        } else if (totalAvg > COMPLEXITY_THRESHOLDS.HIGH_AVG || globalMax > COMPLEXITY_THRESHOLDS.HIGH_MAX) {
-          complexityRiskBoost = 'high';
-        } else if (totalAvg > COMPLEXITY_THRESHOLDS.MEDIUM_AVG || globalMax > COMPLEXITY_THRESHOLDS.MEDIUM_MAX) {
-          complexityRiskBoost = 'medium';
-        }
-
-        complexityMetrics = {
-          averageComplexity: Math.round(totalAvg * 10) / 10,
-          maxComplexity: globalMax,
-          filesWithComplexityData: fileComplexities.length,
-          highComplexityDependents,
-          complexityRiskBoost,
-        };
-      } else {
-        // No complexity data available - return empty structure for consistent response shape
-        complexityMetrics = {
-          averageComplexity: 0,
-          maxComplexity: 0,
-          filesWithComplexityData: 0,
-          highComplexityDependents: [],
-          complexityRiskBoost: 'low',
-        };
-      }
-
-      // Use chunksByFile keys for the dependents list (already canonical and deduplicated)
       const uniqueFiles = Array.from(chunksByFile.keys()).map(filepath => ({
         filepath,
         isTestFile: isTestFile(filepath),
       }));
 
-      // Calculate risk level based on dependent count (using module-level thresholds)
-      const count = uniqueFiles.length;
-      let riskLevel: 'low' | 'medium' | 'high' | 'critical' =
-        count === 0 ? 'low' :
-        count <= DEPENDENT_COUNT_THRESHOLDS.LOW ? 'low' :
-        count <= DEPENDENT_COUNT_THRESHOLDS.MEDIUM ? 'medium' :
-        count <= DEPENDENT_COUNT_THRESHOLDS.HIGH ? 'high' : 'critical';
-
-      // Boost risk level if complexity is high
-      // Use explicit risk ordering for maintainability
-      const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
-      if (RISK_ORDER[complexityMetrics.complexityRiskBoost] > RISK_ORDER[riskLevel]) {
-        riskLevel = complexityMetrics.complexityRiskBoost;
-      }
-
-      log(`Found ${count} dependent files (risk: ${riskLevel}${complexityMetrics.filesWithComplexityData > 0 ? ', complexity-boosted' : ''})`);
-
-      // Build warning if scan limit was reached (results may be incomplete)
-      let note: string | undefined;
-      if (allChunks.length === SCAN_LIMIT) {
-        note = `Warning: Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete for large codebases. Some dependents might not be listed.`;
-      }
+      const riskLevel = calculateRiskLevel(uniqueFiles.length, complexityMetrics.complexityRiskBoost);
+      log(`Found ${uniqueFiles.length} dependent files (risk: ${riskLevel}${complexityMetrics.filesWithComplexityData > 0 ? ', complexity-boosted' : ''})`);
 
       return {
         indexInfo: getIndexMetadata(),
         filepath: validatedArgs.filepath,
-        dependentCount: count,
+        dependentCount: uniqueFiles.length,
         riskLevel,
         dependents: uniqueFiles,
         complexityMetrics,
-        note,
+        note: hitLimit ? `Warning: Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete.` : undefined,
       };
     }
   )(args);

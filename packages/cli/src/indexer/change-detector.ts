@@ -18,13 +18,142 @@ export interface ChangeDetectionResult {
 }
 
 /**
+ * Check if git state has changed (branch switch, new commits).
+ */
+async function hasGitStateChanged(
+  rootDir: string,
+  dbPath: string,
+  savedGitState: IndexManifest['gitState']
+): Promise<{ changed: boolean; currentState?: ReturnType<GitStateTracker['getState']> }> {
+  if (!savedGitState) return { changed: false };
+
+  const gitAvailable = await isGitAvailable();
+  const isRepo = await isGitRepo(rootDir);
+  if (!gitAvailable || !isRepo) return { changed: false };
+
+  const gitTracker = new GitStateTracker(rootDir, dbPath);
+  await gitTracker.initialize();
+  const currentState = gitTracker.getState();
+
+  if (!currentState) return { changed: false };
+
+  const changed = currentState.branch !== savedGitState.branch ||
+                  currentState.commit !== savedGitState.commit;
+
+  return { changed, currentState };
+}
+
+/**
+ * Categorize files from git diff into added, modified, deleted.
+ */
+function categorizeChangedFiles(
+  changedFilesPaths: string[],
+  currentFileSet: Set<string>,
+  normalizedManifestFiles: Set<string>,
+  allFiles: string[]
+): { added: string[]; modified: string[]; deleted: string[] } {
+  const changedFilesSet = new Set(changedFilesPaths);
+  const added: string[] = [];
+  const modified: string[] = [];
+  const deleted: string[] = [];
+
+  // Categorize files from git diff
+  for (const filepath of changedFilesPaths) {
+    if (currentFileSet.has(filepath)) {
+      if (normalizedManifestFiles.has(filepath)) {
+        modified.push(filepath);
+      } else {
+        added.push(filepath);
+      }
+    }
+  }
+
+  // Find truly new files (not in git diff, but not in old manifest)
+  for (const filepath of allFiles) {
+    if (!normalizedManifestFiles.has(filepath) && !changedFilesSet.has(filepath)) {
+      added.push(filepath);
+    }
+  }
+
+  // Find deleted files (in old manifest but not in current)
+  for (const normalizedPath of normalizedManifestFiles) {
+    if (!currentFileSet.has(normalizedPath)) {
+      deleted.push(normalizedPath);
+    }
+  }
+
+  return { added, modified, deleted };
+}
+
+/**
+ * Build normalized set of manifest file paths for comparison.
+ */
+function normalizeManifestPaths(
+  manifestFiles: IndexManifest['files'],
+  rootDir: string
+): Set<string> {
+  const normalized = new Set<string>();
+  for (const filepath of Object.keys(manifestFiles)) {
+    normalized.add(normalizeToRelativePath(filepath, rootDir));
+  }
+  return normalized;
+}
+
+/**
+ * Detect changes using git diff between commits.
+ */
+async function detectGitBasedChanges(
+  rootDir: string,
+  savedManifest: IndexManifest,
+  currentCommit: string,
+  config: LienConfig | LegacyLienConfig
+): Promise<ChangeDetectionResult> {
+  const changedFilesAbsolute = await getChangedFiles(
+    rootDir,
+    savedManifest.gitState!.commit,
+    currentCommit
+  );
+  const changedFilesPaths = changedFilesAbsolute.map(fp => normalizeToRelativePath(fp, rootDir));
+
+  const allFiles = await getAllFiles(rootDir, config);
+  const currentFileSet = new Set(allFiles);
+  const normalizedManifestFiles = normalizeManifestPaths(savedManifest.files, rootDir);
+
+  const { added, modified, deleted } = categorizeChangedFiles(
+    changedFilesPaths,
+    currentFileSet,
+    normalizedManifestFiles,
+    allFiles
+  );
+
+  return { added, modified, deleted, reason: 'git-state-changed' };
+}
+
+/**
+ * Fall back to full reindex when git diff fails.
+ */
+async function fallbackToFullReindex(
+  rootDir: string,
+  savedManifest: IndexManifest,
+  config: LienConfig | LegacyLienConfig
+): Promise<ChangeDetectionResult> {
+  const allFiles = await getAllFiles(rootDir, config);
+  const currentFileSet = new Set(allFiles);
+
+  const deleted: string[] = [];
+  for (const filepath of Object.keys(savedManifest.files)) {
+    const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+    if (!currentFileSet.has(normalizedPath)) {
+      deleted.push(normalizedPath);
+    }
+  }
+
+  return { added: allFiles, modified: [], deleted, reason: 'git-state-changed' };
+}
+
+/**
  * Detects which files have changed since last indexing.
  * Uses git state detection to handle branch switches, then falls back to mtime.
- * 
- * @param rootDir - Root directory of the project
- * @param vectorDB - Initialized VectorDB instance
- * @param config - Lien configuration
- * @returns Change detection result
  */
 export async function detectChanges(
   rootDir: string,
@@ -33,118 +162,25 @@ export async function detectChanges(
 ): Promise<ChangeDetectionResult> {
   const manifest = new ManifestManager(vectorDB.dbPath);
   const savedManifest = await manifest.load();
-  
+
   // No manifest = first run = full index
   if (!savedManifest) {
     const allFiles = await getAllFiles(rootDir, config);
-    return {
-      added: allFiles,
-      modified: [],
-      deleted: [],
-      reason: 'full',
-    };
+    return { added: allFiles, modified: [], deleted: [], reason: 'full' };
   }
-  
-  // Check if git state has changed (branch switch, new commits)
-  // This is critical because git doesn't always update mtimes when checking out files
-  const gitAvailable = await isGitAvailable();
-  const isRepo = await isGitRepo(rootDir);
-  
-  if (gitAvailable && isRepo && savedManifest.gitState) {
-    const gitTracker = new GitStateTracker(rootDir, vectorDB.dbPath);
-    await gitTracker.initialize();
-    
-    const currentState = gitTracker.getState();
-    
-    // If branch or commit changed, use git to detect which files actually changed
-    if (currentState && 
-        (currentState.branch !== savedManifest.gitState.branch ||
-         currentState.commit !== savedManifest.gitState.commit)) {
-      
-      try {
-        // Get files that changed between old and new commit using git diff
-        // Note: getChangedFiles returns absolute paths, so we normalize to relative
-        const changedFilesAbsolute = await getChangedFiles(
-          rootDir,
-          savedManifest.gitState.commit,
-          currentState.commit
-        );
-        // Normalize to relative paths for consistent comparison with scanner/manifest
-        const changedFilesPaths = changedFilesAbsolute.map(fp => normalizeToRelativePath(fp, rootDir));
-        const changedFilesSet = new Set(changedFilesPaths);
-        
-        // Get all current files to determine new files and deletions (already normalized)
-        const allFiles = await getAllFiles(rootDir, config);
-        const currentFileSet = new Set(allFiles);
-        
-        // Build a normalized set of manifest file paths for comparison
-        // This handles cases where manifest has absolute paths (from tests or legacy data)
-        const normalizedManifestFiles = new Set<string>();
-        for (const filepath of Object.keys(savedManifest.files)) {
-          normalizedManifestFiles.add(normalizeToRelativePath(filepath, rootDir));
-        }
-        
-        const added: string[] = [];
-        const modified: string[] = [];
-        const deleted: string[] = [];
-        
-        // Categorize changed files
-        for (const filepath of changedFilesPaths) {
-          if (currentFileSet.has(filepath)) {
-            // File exists - check if it's new or modified
-            if (normalizedManifestFiles.has(filepath)) {
-              modified.push(filepath);
-            } else {
-              added.push(filepath);
-            }
-          }
-          // If file doesn't exist in current set, it will be caught by deletion logic below
-        }
-        
-        // Find truly new files (not in git diff, but not in old manifest)
-        for (const filepath of allFiles) {
-          if (!normalizedManifestFiles.has(filepath) && !changedFilesSet.has(filepath)) {
-            added.push(filepath);
-          }
-        }
-        
-        // Compute deleted files: files in old manifest but not in new branch
-        for (const normalizedPath of normalizedManifestFiles) {
-          if (!currentFileSet.has(normalizedPath)) {
-            deleted.push(normalizedPath);
-          }
-        }
-        
-        return {
-          added,
-          modified,
-          deleted,
-          reason: 'git-state-changed',
-        };
-      } catch (error) {
-        // If git diff fails, fall back to full reindex
-        console.warn(`[Lien] Git diff failed, falling back to full reindex: ${error}`);
-        const allFiles = await getAllFiles(rootDir, config);
-        const currentFileSet = new Set(allFiles);
-        
-        const deleted: string[] = [];
-        for (const filepath of Object.keys(savedManifest.files)) {
-          const normalizedPath = normalizeToRelativePath(filepath, rootDir);
-          if (!currentFileSet.has(normalizedPath)) {
-            deleted.push(normalizedPath);
-          }
-        }
-        
-        return {
-          added: allFiles,
-          modified: [],
-          deleted,
-          reason: 'git-state-changed',
-        };
-      }
+
+  // Check if git state has changed
+  const gitCheck = await hasGitStateChanged(rootDir, vectorDB.dbPath, savedManifest.gitState);
+
+  if (gitCheck.changed && gitCheck.currentState) {
+    try {
+      return await detectGitBasedChanges(rootDir, savedManifest, gitCheck.currentState.commit, config);
+    } catch (error) {
+      console.warn(`[Lien] Git diff failed, falling back to full reindex: ${error}`);
+      return await fallbackToFullReindex(rootDir, savedManifest, config);
     }
   }
-  
+
   // Use mtime-based detection for file-level changes
   return await mtimeBasedDetection(rootDir, savedManifest, config);
 }
