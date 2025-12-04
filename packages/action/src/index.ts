@@ -19,6 +19,7 @@ import {
   getPRDiffLines,
   createOctokit,
   updatePRDescription,
+  resolveFixedViolationThreads,
   type LineComment,
 } from './github.js';
 import { runComplexityAnalysis, filterAnalyzableFiles } from './complexity.js';
@@ -206,6 +207,12 @@ async function run(): Promise<void> {
     // Always update PR description with stats badge
     const badge = buildDescriptionBadge(report, deltaSummary);
     await updatePRDescription(octokit, prContext, badge);
+
+    // Auto-resolve threads for violations that have been fixed
+    const currentViolationFiles = new Set(
+      Object.keys(report.files).filter(f => report.files[f].violations.length > 0)
+    );
+    await resolveFixedViolationThreads(octokit, prContext, currentViolationFiles);
 
     if (report.summary.totalViolations === 0) {
       core.info('No complexity violations found');

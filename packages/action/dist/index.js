@@ -31906,6 +31906,120 @@ async function updatePRDescription(octokit, prContext, badgeMarkdown) {
     }
 }
 /**
+ * Marker to identify Lien review comments
+ */
+const LIEN_COMMENT_MARKER = '**Complexity:';
+/**
+ * Get all review threads for a PR using GraphQL
+ */
+async function getReviewThreads(octokit, prContext) {
+    const query = `
+    query($owner: String!, $repo: String!, $prNumber: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $prNumber) {
+          reviewThreads(first: 100) {
+            nodes {
+              id
+              isResolved
+              path
+              line
+              comments(first: 1) {
+                nodes {
+                  body
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+    try {
+        const result = await octokit.graphql(query, {
+            owner: prContext.owner,
+            repo: prContext.repo,
+            prNumber: prContext.pullNumber,
+        });
+        return result.repository.pullRequest.reviewThreads.nodes.map((node) => ({
+            id: node.id,
+            isResolved: node.isResolved,
+            path: node.path,
+            line: node.line,
+            comments: node.comments.nodes.map((c) => ({ body: c.body })),
+        }));
+    }
+    catch (error) {
+        core.warning(`Failed to fetch review threads: ${error}`);
+        return [];
+    }
+}
+/**
+ * Resolve a review thread using GraphQL
+ */
+async function resolveThread(octokit, threadId) {
+    const mutation = `
+    mutation($threadId: ID!) {
+      resolveReviewThread(input: { threadId: $threadId }) {
+        thread {
+          id
+          isResolved
+        }
+      }
+    }
+  `;
+    try {
+        await octokit.graphql(mutation, { threadId });
+        return true;
+    }
+    catch (error) {
+        core.warning(`Failed to resolve thread ${threadId}: ${error}`);
+        return false;
+    }
+}
+/**
+ * Extract violation key from a Lien comment body
+ * Returns filepath::symbolName or null if not a Lien comment
+ */
+function extractViolationKeyFromComment(body, filepath) {
+    if (!body.includes(LIEN_COMMENT_MARKER))
+        return null;
+    // Try to extract function name from the comment
+    // Format: "🔴 **Complexity: 34** (+34 ⬆️) (threshold: 30)"
+    // The function name is in the context, but we can use filepath + line as fallback
+    // Better: look for function name pattern in the suggestion text
+    // For now, use filepath as the key - we'll match by file
+    return filepath;
+}
+/**
+ * Auto-resolve review threads for violations that have been fixed.
+ * Returns the count of resolved threads.
+ */
+async function resolveFixedViolationThreads(octokit, prContext, currentViolationFiles) {
+    const threads = await getReviewThreads(octokit, prContext);
+    let resolvedCount = 0;
+    for (const thread of threads) {
+        // Skip already resolved threads
+        if (thread.isResolved)
+            continue;
+        // Check if this is a Lien complexity comment
+        const firstComment = thread.comments[0]?.body || '';
+        if (!firstComment.includes(LIEN_COMMENT_MARKER))
+            continue;
+        // Check if the file still has violations
+        // If the file no longer has violations, resolve the thread
+        if (!currentViolationFiles.has(thread.path)) {
+            core.info(`Resolving outdated thread for ${thread.path}:${thread.line} (violation fixed)`);
+            const resolved = await resolveThread(octokit, thread.id);
+            if (resolved)
+                resolvedCount++;
+        }
+    }
+    if (resolvedCount > 0) {
+        core.info(`✓ Auto-resolved ${resolvedCount} outdated review thread(s)`);
+    }
+    return resolvedCount;
+}
+/**
  * Parse unified diff patch to extract line numbers that can receive comments
  * Exported for testing
  */
@@ -32961,6 +33075,9 @@ async function run() {
         // Always update PR description with stats badge
         const badge = buildDescriptionBadge(report, deltaSummary);
         await updatePRDescription(octokit, prContext, badge);
+        // Auto-resolve threads for violations that have been fixed
+        const currentViolationFiles = new Set(Object.keys(report.files).filter(f => report.files[f].violations.length > 0));
+        await resolveFixedViolationThreads(octokit, prContext, currentViolationFiles);
         if (report.summary.totalViolations === 0) {
             core.info('No complexity violations found');
             // Skip the regular comment - the description badge is sufficient

@@ -42,6 +42,11 @@ export declare function postPRReview(octokit: Octokit, prContext: PRContext, com
  */
 export declare function updatePRDescription(octokit: Octokit, prContext: PRContext, badgeMarkdown: string): Promise<void>;
 /**
+ * Auto-resolve review threads for violations that have been fixed.
+ * Returns the count of resolved threads.
+ */
+export declare function resolveFixedViolationThreads(octokit: Octokit, prContext: PRContext, currentViolationFiles: Set<string>): Promise<number>;
+/**
  * Parse unified diff patch to extract line numbers that can receive comments
  * Exported for testing
  */
