@@ -18,6 +18,7 @@ import {
   postPRReview,
   getPRDiffLines,
   createOctokit,
+  updatePRDescription,
   type LineComment,
 } from './github.js';
 import { runComplexityAnalysis, filterAnalyzableFiles } from './complexity.js';
@@ -27,6 +28,7 @@ import {
   buildNoViolationsMessage,
   formatReviewComment,
   getViolationKey,
+  buildDescriptionBadge,
 } from './prompt.js';
 import {
   calculateDeltas,
@@ -192,17 +194,22 @@ async function run(): Promise<void> {
       ? calculateDeltas(baselineReport, report, filesToAnalyze)
       : null;
 
-    if (deltas) {
-      const deltaSummary = calculateDeltaSummary(deltas);
+    const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
+
+    if (deltaSummary) {
       logDeltaSummary(deltaSummary);
       core.setOutput('total_delta', deltaSummary.totalDelta);
       core.setOutput('improved', deltaSummary.improved);
       core.setOutput('degraded', deltaSummary.degraded);
     }
 
+    // Always update PR description with stats badge
+    const badge = buildDescriptionBadge(report, deltaSummary);
+    await updatePRDescription(octokit, prContext, badge);
+
     if (report.summary.totalViolations === 0) {
       core.info('No complexity violations found');
-      await postPRComment(octokit, prContext, buildNoViolationsMessage(prContext, deltas));
+      // Skip the regular comment - the description badge is sufficient
       return;
     }
 
@@ -318,6 +325,19 @@ function buildUncoveredNote(
 }
 
 /**
+ * Build note for skipped pre-existing violations (no inline comment, no LLM cost)
+ */
+function buildSkippedNote(skippedViolations: ComplexityViolation[]): string {
+  if (skippedViolations.length === 0) return '';
+
+  const skippedList = skippedViolations
+    .map(v => `  - \`${v.symbolName}\` in \`${v.filepath}\`: complexity ${v.complexity}`)
+    .join('\n');
+
+  return `\n\n<details>\n<summary>ℹ️ ${skippedViolations.length} pre-existing violation${skippedViolations.length === 1 ? '' : 's'} (unchanged)</summary>\n\n${skippedList}\n\n> *These violations existed before this PR and haven't changed. No inline comments added to reduce noise.*\n\n</details>`;
+}
+
+/**
  * Build review summary body for line comments mode
  */
 function buildReviewSummary(
@@ -393,17 +413,46 @@ async function postLineReview(
     `(${uncoveredViolations.length} outside diff)`
   );
 
-  if (violationsWithLines.length === 0) {
-    core.info('No violations in diff range, posting summary comment with fallback note');
-    await postSummaryReview(octokit, prContext, report, codeSnippets, config, true, deltas);
+  const deltaMap = buildDeltaMap(deltas);
+
+  // Filter to only new or degraded violations (skip unchanged pre-existing ones)
+  // This saves LLM costs and prevents duplicate comments on each push
+  const newOrDegradedViolations = violationsWithLines.filter(({ violation }) => {
+    const key = `${violation.filepath}::${violation.symbolName}`;
+    const delta = deltaMap.get(key);
+    // Comment if: no baseline data, or new violation, or got worse
+    return !delta || delta.severity === 'new' || delta.delta > 0;
+  });
+
+  const skippedCount = violationsWithLines.length - newOrDegradedViolations.length;
+  if (skippedCount > 0) {
+    core.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
+  }
+
+  if (newOrDegradedViolations.length === 0) {
+    core.info('No new or degraded violations to comment on');
+    // Still post a summary if there are violations, just no inline comments needed
+    if (violationsWithLines.length > 0) {
+      // Only include actual uncovered violations (outside diff)
+      const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
+      // Build skipped note for unchanged violations in the diff (not "outside diff")
+      const skippedInDiff = violationsWithLines
+        .filter(({ violation }) => {
+          const key = `${violation.filepath}::${violation.symbolName}`;
+          const delta = deltaMap.get(key);
+          return delta && delta.severity !== 'new' && delta.delta === 0;
+        })
+        .map(v => v.violation);
+      const skippedNote = buildSkippedNote(skippedInDiff);
+      const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+      await postPRComment(octokit, prContext, summaryBody);
+    }
     return;
   }
 
-  const deltaMap = buildDeltaMap(deltas);
-
-  // Generate AI comments
-  const commentableViolations = violationsWithLines.map(v => v.violation);
-  core.info('Generating AI comments for violations...');
+  // Generate AI comments only for new/degraded violations
+  const commentableViolations = newOrDegradedViolations.map(v => v.violation);
+  core.info(`Generating AI comments for ${commentableViolations.length} new/degraded violations...`);
   const aiComments = await generateLineComments(
     commentableViolations,
     codeSnippets,
@@ -411,12 +460,23 @@ async function postLineReview(
     config.model
   );
 
-  // Build and post review
-  const lineComments = buildLineComments(violationsWithLines, aiComments, deltaMap);
-  core.info(`Built ${lineComments.length} line comments`);
+  // Build and post review (only for new/degraded)
+  const lineComments = buildLineComments(newOrDegradedViolations, aiComments, deltaMap);
+  core.info(`Built ${lineComments.length} line comments for new/degraded violations`);
+
+  // Include skipped (pre-existing unchanged) violations in skipped note
+  // Note: delta === 0 means truly unchanged; delta < 0 means improved (not "unchanged")
+  const skippedViolations = violationsWithLines
+    .filter(({ violation }) => {
+      const key = `${violation.filepath}::${violation.symbolName}`;
+      const delta = deltaMap.get(key);
+      return delta && delta.severity !== 'new' && delta.delta === 0;
+    })
+    .map(v => v.violation);
 
   const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote);
+  const skippedNote = buildSkippedNote(skippedViolations);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
 
   await postPRReview(octokit, prContext, lineComments, summaryBody);
   core.info(`Posted review with ${lineComments.length} line comments`);

@@ -5,7 +5,9 @@ import {
   formatReviewComment,
   getViolationKey,
   buildBatchedCommentsPrompt,
+  buildDescriptionBadge,
 } from '../src/prompt.js';
+import type { DeltaSummary } from '../src/types.js';
 import type { ComplexityReport, PRContext } from '../src/types.js';
 
 const mockPRContext: PRContext = {
@@ -218,6 +220,127 @@ describe('prompt', () => {
       expect(prompt).toContain('"src/utils.ts::processData"');
       expect(prompt).toContain('"src/handler.ts::handleRequest"');
       expect(prompt).toContain('Respond with ONLY valid JSON');
+    });
+  });
+
+  describe('buildDescriptionBadge', () => {
+    it('should show improved status when delta is negative', () => {
+      const deltaSummary: DeltaSummary = {
+        totalDelta: -15,
+        improved: 2,
+        degraded: 0,
+        newViolations: 0,
+        removedViolations: 1,
+      };
+
+      const badge = buildDescriptionBadge(mockReport, deltaSummary);
+
+      expect(badge).toContain('### 🔍 Lien Complexity');
+      expect(badge).toContain('-15 ⬇️');
+      expect(badge).toContain('✅ Improved');
+      expect(badge).toContain('3'); // violations
+      expect(badge).toContain('23'); // max complexity
+      expect(badge).toContain('2 improved');
+    });
+
+    it('should show degraded status when delta is positive', () => {
+      const deltaSummary: DeltaSummary = {
+        totalDelta: 10,
+        improved: 0,
+        degraded: 2,
+        newViolations: 1,
+        removedViolations: 0,
+      };
+
+      const badge = buildDescriptionBadge(mockReport, deltaSummary);
+
+      expect(badge).toContain('+10 ⬆️');
+      expect(badge).toContain('⚠️ Degraded');
+      expect(badge).toContain('2 degraded');
+    });
+
+    it('should show no change when delta is zero', () => {
+      const deltaSummary: DeltaSummary = {
+        totalDelta: 0,
+        improved: 1,
+        degraded: 1,
+        newViolations: 0,
+        removedViolations: 0,
+      };
+
+      const badge = buildDescriptionBadge(mockReport, deltaSummary);
+
+      expect(badge).toContain('+0 ➡️');
+      expect(badge).toContain('➡️ No change');
+      expect(badge).toContain('1 improved');
+      expect(badge).toContain('1 degraded');
+    });
+
+    it('should show clean status when no violations and no delta', () => {
+      const cleanReport: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 5,
+          totalViolations: 0,
+          bySeverity: { error: 0, warning: 0 },
+          avgComplexity: 5.0,
+          maxComplexity: 8,
+        },
+        files: {},
+      };
+
+      const badge = buildDescriptionBadge(cleanReport, null);
+
+      expect(badge).toContain('0'); // violations
+      expect(badge).toContain('8'); // max complexity
+      expect(badge).toContain('—'); // delta (dash for no delta)
+      expect(badge).toContain('✅ Clean');
+    });
+
+    it('should show violations count in status when no delta but has violations', () => {
+      const badge = buildDescriptionBadge(mockReport, null);
+
+      expect(badge).toContain('3'); // violations in table
+      expect(badge).toContain('⚠️ 3 violations');
+    });
+
+    it('should handle null report gracefully', () => {
+      const deltaSummary: DeltaSummary = {
+        totalDelta: -5,
+        improved: 1,
+        degraded: 0,
+        newViolations: 0,
+        removedViolations: 0,
+      };
+
+      const badge = buildDescriptionBadge(null, deltaSummary);
+
+      expect(badge).toContain('0'); // violations default
+      expect(badge).toContain('—'); // max complexity default
+      expect(badge).toContain('-5 ⬇️');
+    });
+
+    it('should format the table correctly', () => {
+      const badge = buildDescriptionBadge(mockReport, null);
+
+      // Check table structure
+      expect(badge).toContain('| Violations | Max | Delta | Status |');
+      expect(badge).toContain('|:----------:|:---:|:-----:|:------:|');
+    });
+
+    it('should not show improvement details when both are zero', () => {
+      const deltaSummary: DeltaSummary = {
+        totalDelta: 0,
+        improved: 0,
+        degraded: 0,
+        newViolations: 0,
+        removedViolations: 0,
+      };
+
+      const badge = buildDescriptionBadge(mockReport, deltaSummary);
+
+      // Should not contain the italicized improvement details
+      expect(badge).not.toContain('*0 improved');
+      expect(badge).not.toContain('*0 degraded');
     });
   });
 });

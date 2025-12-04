@@ -37,6 +37,11 @@ export interface LineComment {
  */
 export declare function postPRReview(octokit: Octokit, prContext: PRContext, comments: LineComment[], summaryBody: string): Promise<void>;
 /**
+ * Update the PR description with a stats badge
+ * Appends or replaces the stats section at the bottom of the description
+ */
+export declare function updatePRDescription(octokit: Octokit, prContext: PRContext, badgeMarkdown: string): Promise<void>;
+/**
  * Parse unified diff patch to extract line numbers that can receive comments
  * Exported for testing
  */

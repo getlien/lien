@@ -31856,6 +31856,56 @@ async function postPRReview(octokit, prContext, comments, summaryBody) {
     }
 }
 /**
+ * Marker comments for the PR description stats badge
+ */
+const DESCRIPTION_START_MARKER = '<!-- lien-stats -->';
+const DESCRIPTION_END_MARKER = '<!-- /lien-stats -->';
+/**
+ * Update the PR description with a stats badge
+ * Appends or replaces the stats section at the bottom of the description
+ */
+async function updatePRDescription(octokit, prContext, badgeMarkdown) {
+    try {
+        // Get current PR
+        const { data: pr } = await octokit.rest.pulls.get({
+            owner: prContext.owner,
+            repo: prContext.repo,
+            pull_number: prContext.pullNumber,
+        });
+        const currentBody = pr.body || '';
+        const wrappedBadge = `${DESCRIPTION_START_MARKER}\n${badgeMarkdown}\n${DESCRIPTION_END_MARKER}`;
+        let newBody;
+        // Check if we already have a stats section
+        const startIdx = currentBody.indexOf(DESCRIPTION_START_MARKER);
+        const endIdx = currentBody.indexOf(DESCRIPTION_END_MARKER);
+        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+            // Replace existing section
+            newBody =
+                currentBody.slice(0, startIdx) +
+                    wrappedBadge +
+                    currentBody.slice(endIdx + DESCRIPTION_END_MARKER.length);
+            core.info('Updating existing stats badge in PR description');
+        }
+        else {
+            // Append to end
+            newBody = currentBody.trim() + '\n\n---\n\n' + wrappedBadge;
+            core.info('Adding stats badge to PR description');
+        }
+        // Update the PR
+        await octokit.rest.pulls.update({
+            owner: prContext.owner,
+            repo: prContext.repo,
+            pull_number: prContext.pullNumber,
+            body: newBody,
+        });
+        core.info('PR description updated with complexity stats');
+    }
+    catch (error) {
+        // Don't fail the action if we can't update the description
+        core.warning(`Failed to update PR description: ${error}`);
+    }
+}
+/**
  * Parse unified diff patch to extract line numbers that can receive comments
  * Exported for testing
  */
@@ -32374,6 +32424,65 @@ function getViolationKey(violation) {
     return `${violation.filepath}::${violation.symbolName}`;
 }
 /**
+ * Determine status emoji and text based on delta and report
+ */
+function determineStatus(report, deltaSummary) {
+    // Delta-based status takes priority
+    if (deltaSummary) {
+        if (deltaSummary.totalDelta < 0)
+            return { emoji: '✅', text: 'Improved' };
+        if (deltaSummary.totalDelta > 0)
+            return { emoji: '⚠️', text: 'Degraded' };
+        return { emoji: '➡️', text: 'No change' };
+    }
+    // Fall back to report-based status
+    if (!report)
+        return { emoji: '—', text: 'Not analyzed' };
+    if (report.summary.totalViolations === 0)
+        return { emoji: '✅', text: 'Clean' };
+    const count = report.summary.totalViolations;
+    return { emoji: '⚠️', text: `${count} violation${count === 1 ? '' : 's'}` };
+}
+/**
+ * Format delta display string with sign and trend emoji
+ */
+function formatBadgeDelta(deltaSummary) {
+    if (!deltaSummary)
+        return '—';
+    const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
+    const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+    return `${sign}${deltaSummary.totalDelta} ${trend}`;
+}
+/**
+ * Build improvement/degraded details line
+ */
+function buildImprovementDetails(deltaSummary) {
+    if (!deltaSummary)
+        return '';
+    const parts = [];
+    if (deltaSummary.improved > 0)
+        parts.push(`${deltaSummary.improved} improved`);
+    if (deltaSummary.degraded > 0)
+        parts.push(`${deltaSummary.degraded} degraded`);
+    return parts.length > 0 ? `\n\n*${parts.join(' · ')}*` : '';
+}
+/**
+ * Build the PR description stats badge
+ * This is appended to the PR description (like Bugbot style)
+ */
+function buildDescriptionBadge(report, deltaSummary) {
+    const violations = report ? String(report.summary.totalViolations) : '0';
+    const maxComplexity = report ? String(report.summary.maxComplexity) : '—';
+    const deltaDisplay = formatBadgeDelta(deltaSummary);
+    const status = determineStatus(report, deltaSummary);
+    const improvementDetails = buildImprovementDetails(deltaSummary);
+    return `### 🔍 Lien Complexity
+
+| Violations | Max | Delta | Status |
+|:----------:|:---:|:-----:|:------:|
+| ${violations} | ${maxComplexity} | ${deltaDisplay} | ${status.emoji} ${status.text} |${improvementDetails}`;
+}
+/**
  * Build a prompt for generating a single line comment for a violation
  */
 function buildLineCommentPrompt(violation, codeSnippet) {
@@ -32842,16 +32951,19 @@ async function run() {
         const deltas = baselineReport
             ? calculateDeltas(baselineReport, report, filesToAnalyze)
             : null;
-        if (deltas) {
-            const deltaSummary = calculateDeltaSummary(deltas);
+        const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
+        if (deltaSummary) {
             logDeltaSummary(deltaSummary);
             core.setOutput('total_delta', deltaSummary.totalDelta);
             core.setOutput('improved', deltaSummary.improved);
             core.setOutput('degraded', deltaSummary.degraded);
         }
+        // Always update PR description with stats badge
+        const badge = buildDescriptionBadge(report, deltaSummary);
+        await updatePRDescription(octokit, prContext, badge);
         if (report.summary.totalViolations === 0) {
             core.info('No complexity violations found');
-            await postPRComment(octokit, prContext, buildNoViolationsMessage(prContext, deltas));
+            // Skip the regular comment - the description badge is sufficient
             return;
         }
         const { violations, codeSnippets } = await prepareViolationsForReview(report, octokit, prContext);
@@ -32944,6 +33056,17 @@ function buildUncoveredNote(uncoveredViolations, deltaMap) {
     return `\n\n<details>\n<summary>⚠️ ${uncoveredViolations.length} violation${uncoveredViolations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${uncoveredList}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
 }
 /**
+ * Build note for skipped pre-existing violations (no inline comment, no LLM cost)
+ */
+function buildSkippedNote(skippedViolations) {
+    if (skippedViolations.length === 0)
+        return '';
+    const skippedList = skippedViolations
+        .map(v => `  - \`${v.symbolName}\` in \`${v.filepath}\`: complexity ${v.complexity}`)
+        .join('\n');
+    return `\n\n<details>\n<summary>ℹ️ ${skippedViolations.length} pre-existing violation${skippedViolations.length === 1 ? '' : 's'} (unchanged)</summary>\n\n${skippedList}\n\n> *These violations existed before this PR and haven't changed. No inline comments added to reduce noise.*\n\n</details>`;
+}
+/**
  * Build review summary body for line comments mode
  */
 function buildReviewSummary(report, deltas, uncoveredNote) {
@@ -33001,21 +33124,47 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     }
     core.info(`${violationsWithLines.length}/${violations.length} violations can have inline comments ` +
         `(${uncoveredViolations.length} outside diff)`);
-    if (violationsWithLines.length === 0) {
-        core.info('No violations in diff range, posting summary comment with fallback note');
-        await postSummaryReview(octokit, prContext, report, codeSnippets, config, true, deltas);
+    const deltaMap = buildDeltaMap(deltas);
+    // Filter to only new or degraded violations (skip unchanged pre-existing ones)
+    // This saves LLM costs and prevents duplicate comments on each push
+    const newOrDegradedViolations = violationsWithLines.filter(({ violation }) => {
+        const key = `${violation.filepath}::${violation.symbolName}`;
+        const delta = deltaMap.get(key);
+        // Comment if: no baseline data, or new violation, or got worse
+        return !delta || delta.severity === 'new' || delta.delta > 0;
+    });
+    const skippedCount = violationsWithLines.length - newOrDegradedViolations.length;
+    if (skippedCount > 0) {
+        core.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
+    }
+    if (newOrDegradedViolations.length === 0) {
+        core.info('No new or degraded violations to comment on');
+        // Still post a summary if there are violations, just no inline comments needed
+        if (violationsWithLines.length > 0) {
+            const uncoveredNote = buildUncoveredNote([...uncoveredViolations, ...violationsWithLines.map(v => v.violation)], deltaMap);
+            const summaryBody = buildReviewSummary(report, deltas, uncoveredNote);
+            await postPRComment(octokit, prContext, summaryBody);
+        }
         return;
     }
-    const deltaMap = buildDeltaMap(deltas);
-    // Generate AI comments
-    const commentableViolations = violationsWithLines.map(v => v.violation);
-    core.info('Generating AI comments for violations...');
+    // Generate AI comments only for new/degraded violations
+    const commentableViolations = newOrDegradedViolations.map(v => v.violation);
+    core.info(`Generating AI comments for ${commentableViolations.length} new/degraded violations...`);
     const aiComments = await generateLineComments(commentableViolations, codeSnippets, config.openrouterApiKey, config.model);
-    // Build and post review
-    const lineComments = buildLineComments(violationsWithLines, aiComments, deltaMap);
-    core.info(`Built ${lineComments.length} line comments`);
+    // Build and post review (only for new/degraded)
+    const lineComments = buildLineComments(newOrDegradedViolations, aiComments, deltaMap);
+    core.info(`Built ${lineComments.length} line comments for new/degraded violations`);
+    // Include skipped (pre-existing unchanged) violations in uncovered note
+    const skippedViolations = violationsWithLines
+        .filter(({ violation }) => {
+        const key = `${violation.filepath}::${violation.symbolName}`;
+        const delta = deltaMap.get(key);
+        return delta && delta.severity !== 'new' && delta.delta <= 0;
+    })
+        .map(v => v.violation);
     const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
-    const summaryBody = buildReviewSummary(report, deltas, uncoveredNote);
+    const skippedNote = buildSkippedNote(skippedViolations);
+    const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
     await postPRReview(octokit, prContext, lineComments, summaryBody);
     core.info(`Posted review with ${lineComments.length} line comments`);
 }

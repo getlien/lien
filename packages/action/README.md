@@ -172,6 +172,30 @@ The action posts a comment like this:
 - Node.js 20+
 - Repository must be indexable by Lien (supports TypeScript, JavaScript, Python, PHP)
 
+## Features
+
+### PR Description Badge
+
+The action adds a complexity stats badge to your PR description:
+
+```
+### 🔍 Lien Complexity
+
+| Violations | Max | Delta | Status |
+|:----------:|:---:|:-----:|:------:|
+| 3 | 34 | -23 ⬇️ | ✅ Improved |
+
+*1 improved · 1 degraded*
+```
+
+This badge is always visible at the top of the PR, not buried in comments.
+
+### Smart Inline Comments
+
+- Only posts inline comments for **new or degraded** violations
+- Pre-existing unchanged violations are summarized, not re-commented
+- Saves LLM costs by not regenerating comments for unchanged code
+
 ## Limitations
 
 - Only runs on PRs from the same repository (not forks) due to secrets access

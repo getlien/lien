@@ -1,4 +1,45 @@
 import { SearchResult } from '../vectordb/types.js';
+import type { VectorDB } from '../vectordb/lancedb.js';
+import type { LocalEmbeddings } from '../embeddings/local.js';
+import type { LienConfig } from '../config/schema.js';
+
+/**
+ * Shared context passed to all tool handlers.
+ * Contains dependencies and utilities needed by handlers.
+ */
+export interface ToolContext {
+  /** Vector database instance for queries */
+  vectorDB: VectorDB;
+  /** Embeddings instance for generating vectors */
+  embeddings: LocalEmbeddings;
+  /** Loaded configuration */
+  config: LienConfig;
+  /** Workspace root directory */
+  rootDir: string;
+  /** Logging function (logs to stderr in MCP) */
+  log: (message: string) => void;
+  /** Check if index has been updated and reconnect if needed */
+  checkAndReconnect: () => Promise<void>;
+  /** Get current index metadata for responses */
+  getIndexMetadata: () => { indexVersion: number; indexDate: string };
+}
+
+/**
+ * Result type for MCP tool handlers
+ */
+export interface MCPToolResult {
+  isError?: boolean;
+  content?: Array<{ type: 'text'; text: string }>;
+  [key: string]: unknown;
+}
+
+/**
+ * Type for a tool handler function
+ */
+export type ToolHandler = (
+  args: unknown,
+  ctx: ToolContext
+) => Promise<MCPToolResult>;
 
 /**
  * Metadata about the index state

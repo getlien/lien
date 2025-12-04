@@ -220,6 +220,73 @@ export function getViolationKey(violation: ComplexityViolation): string {
 }
 
 /**
+ * Determine status emoji and text based on delta and report
+ */
+function determineStatus(
+  report: ComplexityReport | null,
+  deltaSummary: DeltaSummary | null
+): { emoji: string; text: string } {
+  // Delta-based status takes priority
+  if (deltaSummary) {
+    if (deltaSummary.totalDelta < 0) return { emoji: '✅', text: 'Improved' };
+    if (deltaSummary.totalDelta > 0) return { emoji: '⚠️', text: 'Degraded' };
+    return { emoji: '➡️', text: 'No change' };
+  }
+
+  // Fall back to report-based status
+  if (!report) return { emoji: '—', text: 'Not analyzed' };
+  if (report.summary.totalViolations === 0) return { emoji: '✅', text: 'Clean' };
+
+  const count = report.summary.totalViolations;
+  return { emoji: '⚠️', text: `${count} violation${count === 1 ? '' : 's'}` };
+}
+
+/**
+ * Format delta display string with sign and trend emoji
+ */
+function formatBadgeDelta(deltaSummary: DeltaSummary | null): string {
+  if (!deltaSummary) return '—';
+
+  const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
+  const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+  return `${sign}${deltaSummary.totalDelta} ${trend}`;
+}
+
+/**
+ * Build improvement/degraded details line
+ */
+function buildImprovementDetails(deltaSummary: DeltaSummary | null): string {
+  if (!deltaSummary) return '';
+
+  const parts: string[] = [];
+  if (deltaSummary.improved > 0) parts.push(`${deltaSummary.improved} improved`);
+  if (deltaSummary.degraded > 0) parts.push(`${deltaSummary.degraded} degraded`);
+
+  return parts.length > 0 ? `\n\n*${parts.join(' · ')}*` : '';
+}
+
+/**
+ * Build the PR description stats badge
+ * This is appended to the PR description (like Bugbot style)
+ */
+export function buildDescriptionBadge(
+  report: ComplexityReport | null,
+  deltaSummary: DeltaSummary | null
+): string {
+  const violations = report ? String(report.summary.totalViolations) : '0';
+  const maxComplexity = report ? String(report.summary.maxComplexity) : '—';
+  const deltaDisplay = formatBadgeDelta(deltaSummary);
+  const status = determineStatus(report, deltaSummary);
+  const improvementDetails = buildImprovementDetails(deltaSummary);
+
+  return `### 🔍 Lien Complexity
+
+| Violations | Max | Delta | Status |
+|:----------:|:---:|:-----:|:------:|
+| ${violations} | ${maxComplexity} | ${deltaDisplay} | ${status.emoji} ${status.text} |${improvementDetails}`;
+}
+
+/**
  * Build a prompt for generating a single line comment for a violation
  */
 export function buildLineCommentPrompt(

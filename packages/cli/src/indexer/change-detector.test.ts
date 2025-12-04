@@ -4,6 +4,7 @@ import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { detectChanges } from './change-detector.js';
+import { normalizeToRelativePath } from './incremental.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { ManifestManager, IndexManifest } from './manifest.js';
 import { createTestDir, cleanupTestDir } from '../../test/helpers/test-db.js';
@@ -17,6 +18,14 @@ describe('Change Detector', () => {
   let testDir: string;
   let vectorDB: VectorDB;
   let manifest: ManifestManager;
+
+  /**
+   * Helper to convert absolute paths to relative (for test assertions)
+   * detectChanges now returns relative paths, so we need to normalize test paths too
+   */
+  function toRelative(absolutePath: string): string {
+    return normalizeToRelativePath(absolutePath, testDir);
+  }
 
   /**
    * Helper to create an empty manifest
@@ -56,8 +65,8 @@ describe('Change Detector', () => {
       expect(result.added.length).toBe(2);
       expect(result.modified.length).toBe(0);
       expect(result.deleted.length).toBe(0);
-      expect(result.added).toContain(path.join(testDir, 'file1.ts'));
-      expect(result.added).toContain(path.join(testDir, 'file2.ts'));
+      expect(result.added).toContain(toRelative(path.join(testDir, 'file1.ts')));
+      expect(result.added).toContain(toRelative(path.join(testDir, 'file2.ts')));
     });
   });
 
@@ -83,7 +92,7 @@ describe('Change Detector', () => {
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
       
       expect(result.reason).toBe('mtime');
-      expect(result.added).toContain(file2);
+      expect(result.added).toContain(toRelative(file2));
       expect(result.modified.length).toBe(0);
       expect(result.deleted.length).toBe(0);
     });
@@ -108,7 +117,7 @@ describe('Change Detector', () => {
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
       
       expect(result.reason).toBe('mtime');
-      expect(result.modified).toContain(file1);
+      expect(result.modified).toContain(toRelative(file1));
       expect(result.added.length).toBe(0);
       expect(result.deleted.length).toBe(0);
     });
@@ -143,7 +152,7 @@ describe('Change Detector', () => {
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
       
       expect(result.reason).toBe('mtime');
-      expect(result.deleted).toContain(file2);
+      expect(result.deleted).toContain(toRelative(file2));
       expect(result.added.length).toBe(0);
       expect(result.modified.length).toBe(0);
     });
@@ -179,9 +188,9 @@ describe('Change Detector', () => {
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
       
       expect(result.reason).toBe('mtime');
-      expect(result.modified).toContain(file1);
-      expect(result.deleted).toContain(file2);
-      expect(result.added).toContain(file3);
+      expect(result.modified).toContain(toRelative(file1));
+      expect(result.deleted).toContain(toRelative(file2));
+      expect(result.added).toContain(toRelative(file3));
     });
   });
 
@@ -239,12 +248,12 @@ describe('Change Detector', () => {
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
       
       expect(result.reason).toBe('git-state-changed');
-      expect(result.modified).toContain(file1); // Should detect file1 as modified
-      expect(result.added).toContain(file3); // Should detect file3 as added
+      expect(result.modified).toContain(toRelative(file1)); // Should detect file1 as modified
+      expect(result.added).toContain(toRelative(file3)); // Should detect file3 as added
       expect(result.deleted.length).toBe(0);
       // file2 should NOT be in any category (unchanged)
-      expect(result.modified).not.toContain(file2);
-      expect(result.added).not.toContain(file2);
+      expect(result.modified).not.toContain(toRelative(file2));
+      expect(result.added).not.toContain(toRelative(file2));
     });
 
     it('should detect deleted files on branch switch using git diff', async () => {
@@ -290,7 +299,7 @@ describe('Change Detector', () => {
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
       
       expect(result.reason).toBe('git-state-changed');
-      expect(result.deleted).toContain(file2);
+      expect(result.deleted).toContain(toRelative(file2));
       expect(result.modified.length).toBe(0);
       expect(result.added.length).toBe(0);
     });
@@ -335,14 +344,14 @@ describe('Change Detector', () => {
       
       expect(result.reason).toBe('git-state-changed');
       expect(result.modified.length).toBe(1); // Only 1 file modified
-      expect(result.modified).toContain(files[0]);
+      expect(result.modified).toContain(toRelative(files[0]));
       expect(result.added.length).toBe(0);
       expect(result.deleted.length).toBe(0);
       // The other 4 files should NOT be detected
-      expect(result.modified).not.toContain(files[1]);
-      expect(result.modified).not.toContain(files[2]);
-      expect(result.modified).not.toContain(files[3]);
-      expect(result.modified).not.toContain(files[4]);
+      expect(result.modified).not.toContain(toRelative(files[1]));
+      expect(result.modified).not.toContain(toRelative(files[2]));
+      expect(result.modified).not.toContain(toRelative(files[3]));
+      expect(result.modified).not.toContain(toRelative(files[4]));
     });
 
     it('should fall back to full reindex if git diff fails', async () => {
@@ -419,8 +428,8 @@ describe('Change Detector', () => {
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
       
       expect(result.reason).toBe('git-state-changed');
-      expect(result.added).toContain(file2); // From git diff
-      expect(result.added).toContain(file3); // New file not in git or manifest
+      expect(result.added).toContain(toRelative(file2)); // From git diff
+      expect(result.added).toContain(toRelative(file3)); // New file not in git or manifest
     });
   });
 
@@ -443,7 +452,7 @@ describe('Change Detector', () => {
       
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
       
-      expect(result.added).toContain(file1);
+      expect(result.added).toContain(toRelative(file1));
     });
   });
 });
