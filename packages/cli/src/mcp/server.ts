@@ -19,7 +19,7 @@ import { isGitAvailable, isGitRepo } from '../git/utils.js';
 import { FileWatcher } from '../watcher/index.js';
 import { VERSION_CHECK_INTERVAL_MS } from '../constants.js';
 import { LienError, LienErrorCode } from '../errors/index.js';
-import type { ToolContext } from './types.js';
+import type { ToolContext, LogFn, LogLevel } from './types.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -38,8 +38,6 @@ export interface MCPServerOptions {
   verbose?: boolean;
   watch?: boolean;
 }
-
-type LogFn = (message: string) => void;
 
 /**
  * Initialize embeddings and vector database.
@@ -81,12 +79,12 @@ async function handleAutoIndexing(
       await indexCodebase({ rootDir, verbose: true });
       log('✅ Initial indexing complete!');
     } catch (error) {
-      log(`⚠️  Initial indexing failed: ${error}`);
-      log('You can manually run: lien index');
+      log(`⚠️  Initial indexing failed: ${error}`, 'warning');
+      log('You can manually run: lien index', 'warning');
     }
   } else if (!hasIndex) {
-    log('⚠️  No index found. Auto-indexing is disabled in config.');
-    log('Run "lien index" to index your codebase.');
+    log('⚠️  No index found. Auto-indexing is disabled in config.', 'warning');
+    log('Run "lien index" to index your codebase.', 'warning');
   }
 }
 
@@ -134,7 +132,7 @@ async function setupGitDetection(
       log('✓ Index is up to date with git state');
     }
   } catch (error) {
-    log(`Warning: Failed to check git state on startup: ${error}`);
+    log(`Failed to check git state on startup: ${error}`, 'warning');
   }
 
   // Start background polling
@@ -147,10 +145,10 @@ async function setupGitDetection(
         log(`🌿 Git change detected: ${changedFiles.length} files changed`);
         indexMultipleFiles(changedFiles, vectorDB, embeddings, config, { verbose })
           .then(count => log(`✓ Background reindex complete: ${count} files`))
-          .catch(error => log(`Warning: Background reindex failed: ${error}`));
+          .catch(error => log(`Background reindex failed: ${error}`, 'warning'));
       }
     } catch (error) {
-      log(`Warning: Git detection check failed: ${error}`);
+      log(`Git detection check failed: ${error}`, 'warning');
     }
   }, config.gitDetection.pollIntervalMs);
 
@@ -187,20 +185,20 @@ async function setupFileWatching(
           await manifest.removeFile(filepath);
           log(`✓ Removed ${filepath} from index`);
         } catch (error) {
-          log(`Warning: Failed to remove ${filepath}: ${error}`);
+          log(`Failed to remove ${filepath}: ${error}`, 'warning');
         }
       } else {
         const action = type === 'add' ? 'added' : 'changed';
         log(`📝 File ${action}: ${filepath}`);
         indexSingleFile(filepath, vectorDB, embeddings, config, { verbose })
-          .catch((error) => log(`Warning: Failed to reindex ${filepath}: ${error}`));
+          .catch((error) => log(`Failed to reindex ${filepath}: ${error}`, 'warning'));
       }
     });
 
     log(`✓ File watching enabled (watching ${fileWatcher.getWatchedFiles().length} files)`);
     return fileWatcher;
   } catch (error) {
-    log(`Warning: Failed to start file watcher: ${error}`);
+    log(`Failed to start file watcher: ${error}`, 'warning');
     return null;
   }
 }
@@ -248,21 +246,43 @@ function registerToolCallHandler(
 
 export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   const { rootDir, verbose, watch } = options;
-  const log: LogFn = (message) => { if (verbose) console.error(`[Lien MCP] ${message}`); };
+  
+  // Early log function before server is ready (falls back to stderr)
+  const earlyLog: LogFn = (message, level = 'info') => { 
+    if (verbose || level === 'warning' || level === 'error') {
+      console.error(`[Lien MCP] [${level}] ${message}`); 
+    }
+  };
 
-  log('Initializing MCP server...');
+  earlyLog('Initializing MCP server...');
 
   // Initialize core components
-  const { embeddings, vectorDB } = await initializeDatabase(rootDir, log).catch(error => {
+  const { embeddings, vectorDB } = await initializeDatabase(rootDir, earlyLog).catch(error => {
     console.error(`Failed to initialize: ${error}`);
     process.exit(1);
   });
 
-  // Create MCP server
+  // Create MCP server with logging capability
   const server = new Server(
     { name: 'lien', version: packageJson.version },
-    { capabilities: { tools: {} } }
+    { capabilities: { tools: {}, logging: {} } }
   );
+
+  // Create proper log function that uses MCP logging notifications
+  // - In verbose mode: all levels (debug, info, notice, warning, error)
+  // - In non-verbose mode: only warnings and errors
+  const log: LogFn = (message, level: LogLevel = 'info') => {
+    if (verbose || level === 'warning' || level === 'error') {
+      server.sendLoggingMessage({
+        level,
+        logger: 'lien',
+        data: message,
+      }).catch(() => {
+        // Fallback to stderr if MCP notification fails (e.g., not connected yet)
+        console.error(`[Lien MCP] [${level}] ${message}`);
+      });
+    }
+  };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -274,7 +294,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
         await vectorDB.reconnect();
       }
     } catch (error) {
-      log(`Version check failed: ${error}`);
+      log(`Version check failed: ${error}`, 'warning');
     }
   };
 
