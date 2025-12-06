@@ -113,6 +113,8 @@ Follow Conventional Commits:
 - `test(scope): description` - Tests
 - `chore(scope): description` - Maintenance
 
+**NEVER use `git commit --amend`** - Always create new commits. If a commit needs fixing, create a follow-up commit instead.
+
 ---
 
 ## Before EVERY Commit (MANDATORY)
