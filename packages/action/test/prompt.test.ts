@@ -142,9 +142,7 @@ describe('prompt', () => {
       const comment = formatReviewComment(aiReview, mockReport);
 
       expect(comment).toContain('<!-- lien-ai-review -->');
-      expect(comment).toContain('3 complexity violations');
-      expect(comment).toContain('1 error');
-      expect(comment).toContain('2 warnings');
+      expect(comment).toContain('3 issues spotted in this PR.');
       expect(comment).toContain(aiReview);
     });
 
@@ -168,9 +166,7 @@ describe('prompt', () => {
 
       const comment = formatReviewComment('Review', singleViolationReport);
 
-      expect(comment).toContain('1 complexity violation');
-      expect(comment).toContain('1 error');
-      expect(comment).toContain('0 warnings');
+      expect(comment).toContain('1 issue spotted in this PR.');
     });
   });
 
@@ -235,7 +231,7 @@ describe('prompt', () => {
 
       const badge = buildDescriptionBadge(mockReport, deltaSummary);
 
-      expect(badge).toContain('### 🔍 Lien Complexity');
+      expect(badge).toContain('### 👁️ Veille');
       expect(badge).toContain('-15 ⬇️');
       expect(badge).toContain('✅ Improved');
       expect(badge).toContain('3'); // violations

@@ -114,7 +114,7 @@ export async function generateReview(
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://github.com/getlien/lien',
-      'X-Title': 'Lien AI Code Review',
+      'X-Title': 'Veille by Lien',
     },
     body: JSON.stringify({
       model,
@@ -180,7 +180,7 @@ async function callBatchedCommentsAPI(
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://github.com/getlien/lien',
-      'X-Title': 'Lien AI Code Review',
+      'X-Title': 'Veille by Lien',
     },
     body: JSON.stringify({
       model,

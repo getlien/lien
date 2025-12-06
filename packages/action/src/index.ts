@@ -362,9 +362,9 @@ function buildReviewSummary(
   }
 
   return `<!-- lien-ai-review -->
-## 🔍 Lien Complexity Review
+## 👁️ Veille
 
-**Found ${summary.totalViolations} violation${summary.totalViolations === 1 ? '' : 's'}** (${summary.bySeverity.error} error${summary.bySeverity.error === 1 ? '' : 's'}, ${summary.bySeverity.warning} warning${summary.bySeverity.warning === 1 ? '' : 's'})${deltaDisplay}
+${summary.totalViolations} issue${summary.totalViolations === 1 ? '' : 's'} spotted in this PR.${deltaDisplay}
 
 See inline comments on the diff for specific suggestions.${uncoveredNote}
 
@@ -377,7 +377,7 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
 
 </details>
 
-*[Lien](https://lien.dev) AI Code Review*`;
+*[Veille](https://lien.dev) by Lien*`;
 }
 
 /**
