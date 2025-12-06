@@ -380,6 +380,12 @@ function getLogicalOperator(node: Parser.SyntaxNode): string | null {
 
 /**
  * Traverse children of a node, applying nesting rules
+ * 
+ * Per SonarSource spec:
+ * - Conditions don't increase nesting
+ * - else/elif clauses get +1 complexity but NO nesting penalty
+ *   (they're handled by NON_NESTING_TYPES, so we pass same level)
+ * - Body statements increase nesting
  */
 function traverseChildren(
   node: Parser.SyntaxNode,
@@ -391,7 +397,15 @@ function traverseChildren(
     if (!child) continue;
     
     const isCondition = node.childForFieldName('condition') === child;
-    const childLevel = isCondition ? nestingLevel : nestingLevel + 1;
+    // else_clause/elif_clause handle their own complexity, don't double-nest
+    const isElseClause = NON_NESTING_TYPES.has(child.type);
+    
+    // Determine child nesting level
+    let childLevel = nestingLevel;
+    if (!isCondition && !isElseClause) {
+      childLevel = nestingLevel + 1;
+    }
+    
     traverse(child, childLevel, null);
   }
 }
