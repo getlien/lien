@@ -380,9 +380,6 @@ function getLogicalOperator(node: Parser.SyntaxNode): string | null {
 
 /**
  * Determine nesting level for a child node based on SonarSource spec.
- * - Conditions don't increase nesting
- * - else/elif clauses handle their own complexity (don't double-nest)
- * - Body statements increase nesting
  */
 function getChildNestingLevel(
   parent: Parser.SyntaxNode,
@@ -391,8 +388,57 @@ function getChildNestingLevel(
 ): number {
   const isCondition = parent.childForFieldName('condition') === child;
   const isElseClause = NON_NESTING_TYPES.has(child.type);
-  
   return (!isCondition && !isElseClause) ? currentLevel + 1 : currentLevel;
+}
+
+/**
+ * Get complexity increment for nested lambda (only adds if already nested)
+ */
+function getNestedLambdaIncrement(nodeType: string, nestingLevel: number): number {
+  return (LAMBDA_TYPES.has(nodeType) && nestingLevel > 0) ? 1 : 0;
+}
+
+/** Traversal context passed to handlers */
+interface TraversalContext {
+  traverse: (n: Parser.SyntaxNode, level: number, lastOp: string | null) => void;
+}
+
+/** Traverse logical operator children, passing the operator type */
+function traverseLogicalChildren(
+  n: Parser.SyntaxNode,
+  level: number,
+  op: string,
+  ctx: TraversalContext
+): void {
+  const operator = n.childForFieldName('operator');
+  for (let i = 0; i < n.namedChildCount; i++) {
+    const child = n.namedChild(i);
+    if (child && child !== operator) ctx.traverse(child, level, op);
+  }
+}
+
+/** Traverse nesting type children with proper nesting level adjustment */
+function traverseNestingChildren(
+  n: Parser.SyntaxNode,
+  level: number,
+  ctx: TraversalContext
+): void {
+  for (let i = 0; i < n.namedChildCount; i++) {
+    const child = n.namedChild(i);
+    if (child) ctx.traverse(child, getChildNestingLevel(n, child, level), null);
+  }
+}
+
+/** Traverse all children at specified level */
+function traverseAllChildren(
+  n: Parser.SyntaxNode,
+  level: number,
+  ctx: TraversalContext
+): void {
+  for (let i = 0; i < n.namedChildCount; i++) {
+    const child = n.namedChild(i);
+    if (child) ctx.traverse(child, level, null);
+  }
 }
 
 /**
@@ -403,67 +449,35 @@ function getChildNestingLevel(
  * - +1 for each nesting level when inside a control structure
  * - +1 for each logical operator sequence break (a && b || c)
  * 
- * Unlike cyclomatic complexity, cognitive complexity penalizes NESTING,
- * making it a better measure of code understandability.
- * 
  * @see https://www.sonarsource.com/docs/CognitiveComplexity.pdf
  */
 export function calculateCognitiveComplexity(node: Parser.SyntaxNode): number {
   let complexity = 0;
+  const ctx: TraversalContext = { traverse };
   
   function traverse(n: Parser.SyntaxNode, nestingLevel: number, lastLogicalOp: string | null): void {
     const logicalOp = getLogicalOperator(n);
     
-    // Logical operators: +1 for sequence breaks
     if (logicalOp) {
-      if (lastLogicalOp !== logicalOp) complexity += 1;
-      traverseLogicalChildren(n, nestingLevel, logicalOp);
+      complexity += (lastLogicalOp !== logicalOp) ? 1 : 0;
+      traverseLogicalChildren(n, nestingLevel, logicalOp, ctx);
       return;
     }
     
-    // Nesting types: +1 base + nesting penalty
     if (NESTING_TYPES.has(n.type)) {
       complexity += 1 + nestingLevel;
-      traverseNestingChildren(n, nestingLevel);
+      traverseNestingChildren(n, nestingLevel, ctx);
       return;
     }
     
-    // Non-nesting types: +1 but body at nestingLevel + 1
     if (NON_NESTING_TYPES.has(n.type)) {
       complexity += 1;
-      traverseAllChildren(n, nestingLevel + 1);
+      traverseAllChildren(n, nestingLevel + 1, ctx);
       return;
     }
     
-    // Nested lambdas add complexity
-    if (LAMBDA_TYPES.has(n.type) && nestingLevel > 0) {
-      complexity += 1;
-    }
-    
-    // Default: traverse all children
-    traverseAllChildren(n, nestingLevel);
-  }
-  
-  function traverseLogicalChildren(n: Parser.SyntaxNode, level: number, op: string): void {
-    const operator = n.childForFieldName('operator');
-    for (let i = 0; i < n.namedChildCount; i++) {
-      const child = n.namedChild(i);
-      if (child && child !== operator) traverse(child, level, op);
-    }
-  }
-  
-  function traverseNestingChildren(n: Parser.SyntaxNode, level: number): void {
-    for (let i = 0; i < n.namedChildCount; i++) {
-      const child = n.namedChild(i);
-      if (child) traverse(child, getChildNestingLevel(n, child, level), null);
-    }
-  }
-  
-  function traverseAllChildren(n: Parser.SyntaxNode, level: number): void {
-    for (let i = 0; i < n.namedChildCount; i++) {
-      const child = n.namedChild(i);
-      if (child) traverse(child, level, null);
-    }
+    complexity += getNestedLambdaIncrement(n.type, nestingLevel);
+    traverseAllChildren(n, nestingLevel, ctx);
   }
   
   traverse(node, 0, null);
