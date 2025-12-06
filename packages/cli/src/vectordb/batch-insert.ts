@@ -270,4 +270,3 @@ function throwIfBatchesFailed(failedBatches: BatchToProcess[], lastError?: Error
     }
   );
 }
-

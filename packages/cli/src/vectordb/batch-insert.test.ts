@@ -366,7 +366,7 @@ describe('batch-insert', () => {
           expect(error).toBeInstanceOf(DatabaseError);
           const dbError = error as DatabaseError;
           expect(dbError.context).toHaveProperty('lastError');
-          expect(dbError.context.lastError).toBe('Schema mismatch: column type invalid');
+          expect(dbError.context?.lastError).toBe('Schema mismatch: column type invalid');
         }
       });
     });
