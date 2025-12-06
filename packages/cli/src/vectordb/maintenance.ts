@@ -1,3 +1,5 @@
+import fs from 'fs/promises';
+import path from 'path';
 import { ChunkMetadata } from '../indexer/types.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { writeVersionFile } from './version.js';
@@ -10,12 +12,14 @@ type LanceDBConnection = any;
 type LanceDBTable = any;
 
 /**
- * Clear all data from the vector database
+ * Clear all data from the vector database.
+ * Drops the table AND cleans up the .lance directory to prevent corrupted state.
  */
 export async function clear(
   db: LanceDBConnection,
   table: LanceDBTable | null,
-  tableName: string
+  tableName: string,
+  dbPath?: string
 ): Promise<void> {
   if (!db) {
     throw new DatabaseError('Vector database not initialized');
@@ -25,6 +29,17 @@ export async function clear(
     // Drop table if it exists
     if (table) {
       await db.dropTable(tableName);
+    }
+    
+    // Clean up the .lance directory if dbPath provided
+    // This prevents corrupted state after dropTable
+    if (dbPath) {
+      const lanceDir = path.join(dbPath, `${tableName}.lance`);
+      try {
+        await fs.rm(lanceDir, { recursive: true, force: true });
+      } catch {
+        // Ignore errors - directory may not exist
+      }
     }
   } catch (error) {
     throw wrapError(error, 'Failed to clear vector database');
