@@ -56,6 +56,9 @@ export interface DependencyAnalysisResult {
 
 /**
  * Creates a cached path normalizer to avoid repeated string operations.
+ * 
+ * @param workspaceRoot - The workspace root directory for path normalization
+ * @returns A function that normalizes and caches file paths
  */
 function createPathNormalizer(workspaceRoot: string): (path: string) => string {
   const cache = new Map<string, string>();
@@ -71,6 +74,10 @@ function createPathNormalizer(workspaceRoot: string): (path: string) => string {
 /**
  * Builds an index mapping normalized import paths to chunks that import them.
  * Enables O(1) lookup instead of O(n*m) iteration.
+ * 
+ * @param chunks - All chunks from the vector database
+ * @param normalizePathCached - Cached path normalization function
+ * @returns Map of normalized import paths to chunks that import them
  */
 function buildImportIndex(
   chunks: SearchResult[],
@@ -96,6 +103,10 @@ function buildImportIndex(
 
 /**
  * Finds all chunks that import the target file using index + fuzzy matching.
+ * 
+ * @param normalizedTarget - The normalized path of the target file
+ * @param importIndex - Index mapping import paths to chunks
+ * @returns Array of chunks that import the target file (deduplicated)
  */
 function findDependentChunks(
   normalizedTarget: string,
@@ -136,6 +147,10 @@ function findDependentChunks(
 
 /**
  * Groups chunks by their canonical file path.
+ * 
+ * @param chunks - Array of chunks to group
+ * @param workspaceRoot - The workspace root directory
+ * @returns Map of canonical file paths to their chunks
  */
 function groupChunksByFile(
   chunks: SearchResult[],
@@ -158,6 +173,9 @@ function groupChunksByFile(
 
 /**
  * Calculates complexity metrics for each file based on its chunks.
+ * 
+ * @param chunksByFile - Map of file paths to their chunks
+ * @returns Array of complexity info for files with complexity data
  */
 function calculateFileComplexities(
   chunksByFile: Map<string, SearchResult[]>
@@ -189,6 +207,9 @@ function calculateFileComplexities(
 
 /**
  * Calculates overall complexity metrics from per-file data.
+ * 
+ * @param fileComplexities - Array of per-file complexity info
+ * @returns Aggregated complexity metrics, or undefined if no data
  */
 function calculateOverallComplexityMetrics(
   fileComplexities: FileComplexityInfo[]
@@ -227,6 +248,10 @@ function calculateOverallComplexityMetrics(
 
 /**
  * Determines risk level based on complexity thresholds.
+ * 
+ * @param avgComplexity - Average complexity across all files
+ * @param maxComplexity - Maximum complexity found in any file
+ * @returns Risk level based on complexity thresholds
  */
 function calculateComplexityRiskBoost(avgComplexity: number, maxComplexity: number): RiskLevel {
   if (avgComplexity > COMPLEXITY_THRESHOLDS.CRITICAL_AVG || maxComplexity > COMPLEXITY_THRESHOLDS.CRITICAL_MAX) {
@@ -243,6 +268,9 @@ function calculateComplexityRiskBoost(avgComplexity: number, maxComplexity: numb
 
 /**
  * Calculates risk level based on dependent count.
+ * 
+ * @param count - Number of dependent files
+ * @returns Risk level based on dependent count thresholds
  */
 function calculateRiskLevelFromCount(count: number): RiskLevel {
   if (count <= DEPENDENT_COUNT_THRESHOLDS.LOW) {
