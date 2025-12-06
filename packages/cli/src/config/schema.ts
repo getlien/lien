@@ -58,10 +58,10 @@ export interface LienConfig {
   complexity?: {
     enabled: boolean;
     thresholds: {
-      method: number;      // Cyclomatic complexity threshold (default: 10)
-      cognitive: number;   // Cognitive complexity threshold (default: 15)
-      file: number;        // File-level complexity (default: 50)
-      average: number;     // Average complexity (default: 6)
+      method: number;       // Cyclomatic complexity threshold (default: 10)
+      cognitive?: number;   // Cognitive complexity threshold (default: 15)
+      file: number;         // File-level complexity (default: 50)
+      average: number;      // Average complexity (default: 6)
     };
     severity: {
       warning: number;     // Multiplier for warning threshold (default: 1.0)
