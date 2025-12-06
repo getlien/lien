@@ -144,7 +144,7 @@ export async function search(
     const results = await table
       .search(Array.from(queryVector))
       .limit(limit + 20)
-      .execute();
+      .toArray();
     
     const filtered = (results as unknown as DBRecord[])
       .filter((r: DBRecord) => 
@@ -196,7 +196,7 @@ export async function scanWithFilter(
       .where('file != ""')
       .limit(Math.max(limit * 5, 200));
     
-    const results = await query.execute();
+    const results = await query.toArray();
     
     let filtered = (results as unknown as DBRecord[]).filter((r: DBRecord) => 
       r.content && 
@@ -294,7 +294,7 @@ export async function querySymbols(
       .where('file != ""')
       .limit(Math.max(limit * 10, 500));
     
-    const results = await query.execute();
+    const results = await query.toArray();
     
     let filtered = (results as unknown as DBRecord[]).filter((r: DBRecord) => {
       if (!r.content || r.content.trim().length === 0) {

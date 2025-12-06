@@ -1,4 +1,4 @@
-import * as lancedb from 'vectordb';
+import * as lancedb from '@lancedb/lancedb';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
@@ -262,7 +262,7 @@ export class VectorDB implements VectorDBInterface {
       const sample = await this.table
         .search(Array(EMBEDDING_DIMENSION).fill(0))
         .limit(Math.min(count, 5))
-        .execute();
+        .toArray();
       
       const hasRealData = (sample as unknown as any[]).some((r: any) => 
         r.content && 
