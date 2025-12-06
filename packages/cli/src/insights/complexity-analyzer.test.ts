@@ -22,6 +22,7 @@ describe('ComplexityAnalyzer', () => {
         enabled: true,
         thresholds: {
           method: 10,
+          cognitive: 15,
           file: 50,
           average: 6,
         },
@@ -401,6 +402,148 @@ describe('ComplexityAnalyzer', () => {
       expect(report.files['src/low.ts'].riskLevel).toBe('low');
       expect(report.files['src/medium.ts'].riskLevel).toBe('low'); // Only 1 warning
       expect(report.files['src/high.ts'].riskLevel).toBe('high'); // Has error
+    });
+  });
+
+  describe('cognitive complexity', () => {
+    it('should detect cognitive complexity violations', async () => {
+      const chunks = [
+        {
+          content: 'function complex() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'complex',
+            symbolType: 'function',
+            complexity: 5, // Below cyclomatic threshold
+            cognitiveComplexity: 20, // Above cognitive threshold of 15
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const report = await analyzer.analyze();
+
+      expect(report.summary.totalViolations).toBe(1);
+      const violation = report.files['src/test.ts'].violations[0];
+      expect(violation.metricType).toBe('cognitive');
+      expect(violation.complexity).toBe(20);
+      expect(violation.message).toContain('Cognitive');
+    });
+
+    it('should detect both cyclomatic and cognitive violations for same function', async () => {
+      const chunks = [
+        {
+          content: 'function veryComplex() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'veryComplex',
+            symbolType: 'function',
+            complexity: 12, // Above cyclomatic threshold of 10
+            cognitiveComplexity: 18, // Above cognitive threshold of 15
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const report = await analyzer.analyze();
+
+      // Should have 2 violations: one cyclomatic, one cognitive
+      expect(report.summary.totalViolations).toBe(2);
+      
+      const violations = report.files['src/test.ts'].violations;
+      expect(violations).toHaveLength(2);
+      
+      const cyclomaticViolation = violations.find(v => v.metricType === 'cyclomatic');
+      const cognitiveViolation = violations.find(v => v.metricType === 'cognitive');
+      
+      expect(cyclomaticViolation).toBeDefined();
+      expect(cyclomaticViolation!.complexity).toBe(12);
+      expect(cyclomaticViolation!.message).toContain('Cyclomatic');
+      
+      expect(cognitiveViolation).toBeDefined();
+      expect(cognitiveViolation!.complexity).toBe(18);
+      expect(cognitiveViolation!.message).toContain('Cognitive');
+    });
+
+    it('should not report cognitive violation when below threshold', async () => {
+      const chunks = [
+        {
+          content: 'function moderate() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'moderate',
+            symbolType: 'function',
+            complexity: 5, // Below cyclomatic
+            cognitiveComplexity: 10, // Below cognitive threshold of 15
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const report = await analyzer.analyze();
+
+      expect(report.summary.totalViolations).toBe(0);
+    });
+
+    it('should use custom cognitive threshold from config', async () => {
+      const customConfig = {
+        ...config,
+        complexity: {
+          ...config.complexity!,
+          thresholds: { method: 10, cognitive: 25, file: 50, average: 6 }, // Higher cognitive threshold
+        },
+      };
+
+      const chunks = [
+        {
+          content: 'function test() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'test',
+            symbolType: 'function',
+            complexity: 5,
+            cognitiveComplexity: 20, // Above default 15, but below custom 25
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, customConfig);
+      const report = await analyzer.analyze();
+
+      // No violation because 20 < 25
+      expect(report.summary.totalViolations).toBe(0);
     });
   });
 
