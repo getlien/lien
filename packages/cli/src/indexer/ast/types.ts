@@ -22,6 +22,7 @@ export interface SymbolInfo {
   parameters?: string[];
   returnType?: string;
   complexity?: number;
+  cognitiveComplexity?: number;
 }
 
 /**
@@ -32,6 +33,7 @@ export interface SemanticMetadata {
   symbolType?: 'function' | 'method' | 'class' | 'interface';
   parentClass?: string;
   complexity?: number;
+  cognitiveComplexity?: number;
   parameters?: string[];
   signature?: string;
   imports?: string[];

@@ -40,6 +40,65 @@ describe('VectorDB Query Operations', () => {
       expect(results[0].metadata.file).toBe('src/test.ts');
     });
 
+    it('should include complexity metrics in search results', async () => {
+      const mockTable = {
+        search: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'function complex() { /* nested loops */ }',
+              file: 'src/complex.ts',
+              startLine: 1,
+              endLine: 20,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'complex',
+              symbolType: 'function',
+              complexity: 15,
+              cognitiveComplexity: 25,
+              _distance: 0.3,
+            },
+          ]),
+        }),
+      };
+
+      const queryVector = new Float32Array([1, 2, 3]);
+      const results = await search(mockTable, queryVector, 5, 'complex function');
+
+      expect(results).toHaveLength(1);
+      expect(results[0].metadata.complexity).toBe(15);
+      expect(results[0].metadata.cognitiveComplexity).toBe(25);
+    });
+
+    it('should handle missing complexity metrics gracefully', async () => {
+      const mockTable = {
+        search: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'function simple() {}',
+              file: 'src/simple.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'simple',
+              symbolType: 'function',
+              // No complexity or cognitiveComplexity fields
+              _distance: 0.4,
+            },
+          ]),
+        }),
+      };
+
+      const queryVector = new Float32Array([1, 2, 3]);
+      const results = await search(mockTable, queryVector, 5, 'simple function');
+
+      expect(results).toHaveLength(1);
+      expect(results[0].metadata.complexity).toBeUndefined();
+      expect(results[0].metadata.cognitiveComplexity).toBeUndefined();
+    });
+
     it('should filter out empty content', async () => {
       const mockTable = {
         search: vi.fn().mockReturnValue({

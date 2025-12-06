@@ -50,5 +50,6 @@ export const CURRENT_CONFIG_VERSION = getPackageVersion();
 // - Vector DB schema changes (new metadata fields)
 // - Metadata structure changes
 // v2: AST-based chunking + enhanced metadata (symbolName, complexity, etc.)
-export const INDEX_FORMAT_VERSION = 2;
+// v3: Added cognitiveComplexity field to schema
+export const INDEX_FORMAT_VERSION = 3;
 

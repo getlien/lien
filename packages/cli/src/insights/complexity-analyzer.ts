@@ -79,51 +79,66 @@ export class ComplexityAnalyzer {
   }
 
   /**
+   * Create a violation if complexity exceeds threshold
+   */
+  private createViolation(
+    metadata: ChunkMetadata,
+    complexity: number,
+    baseThreshold: number,
+    metricType: ComplexityViolation['metricType'],
+    severityConfig: { warning: number; error: number }
+  ): ComplexityViolation | null {
+    const warningThreshold = baseThreshold * severityConfig.warning;
+    const errorThreshold = baseThreshold * severityConfig.error;
+
+    if (complexity < warningThreshold) return null;
+
+    const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
+    const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
+    const metricLabel = metricType === 'cognitive' ? 'Cognitive' : 'Cyclomatic';
+
+    return {
+      filepath: metadata.file,
+      startLine: metadata.startLine,
+      endLine: metadata.endLine,
+      symbolName: metadata.symbolName || 'unknown',
+      symbolType: metadata.symbolType as 'function' | 'method',
+      language: metadata.language,
+      complexity,
+      threshold: Math.round(effectiveThreshold),
+      severity: violationSeverity,
+      message: `${metricLabel} complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`,
+      metricType,
+    };
+  }
+
+  /**
    * Find all complexity violations based on thresholds
+   * Checks both cyclomatic and cognitive complexity
    */
   private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
     const violations: ComplexityViolation[] = [];
-    const thresholds = this.config.complexity?.thresholds || { method: 10, file: 50, average: 6 };
+    const thresholds = this.config.complexity?.thresholds || { method: 10, cognitive: 15, file: 50, average: 6 };
     const severity = this.config.complexity?.severity || { warning: 1.0, error: 2.0 };
 
     for (const chunk of chunks) {
-      const metadata = chunk.metadata;
+      const { metadata } = chunk;
       
-      // Skip chunks without complexity data or with 0 complexity
-      if (!metadata.complexity) {
-        continue;
-      }
-
-      // Only check function/method complexity (not file-level yet)
+      // Only check function/method complexity
       if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method') {
         continue;
       }
 
-      const baseThreshold = thresholds.method;
-      const complexity = metadata.complexity;
-      
-      // Apply severity multipliers to threshold
-      const warningThreshold = baseThreshold * severity.warning;
-      const errorThreshold = baseThreshold * severity.error;
+      // Check cyclomatic complexity
+      if (metadata.complexity) {
+        const violation = this.createViolation(metadata, metadata.complexity, thresholds.method, 'cyclomatic', severity);
+        if (violation) violations.push(violation);
+      }
 
-      // Check if complexity meets or exceeds warning threshold
-      if (complexity >= warningThreshold) {
-        // Determine severity: error if exceeds error threshold, otherwise warning
-        const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
-        const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
-
-        violations.push({
-          filepath: metadata.file,
-          startLine: metadata.startLine,
-          endLine: metadata.endLine,
-          symbolName: metadata.symbolName || 'unknown',
-          symbolType: metadata.symbolType as 'function' | 'method',
-          language: metadata.language,
-          complexity,
-          threshold: Math.round(effectiveThreshold), // Show the effective threshold that was exceeded
-          severity: violationSeverity,
-          message: `${metadata.symbolType} complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`,
-        });
+      // Check cognitive complexity
+      if (metadata.cognitiveComplexity) {
+        const violation = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.cognitive ?? 15, 'cognitive', severity);
+        if (violation) violations.push(violation);
       }
     }
 

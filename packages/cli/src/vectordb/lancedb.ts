@@ -162,7 +162,7 @@ export class VectorDB implements VectorDBInterface {
     if (!this.db) {
       throw new DatabaseError('Vector database not initialized');
     }
-    await maintenanceOps.clear(this.db, this.table, this.tableName);
+    await maintenanceOps.clear(this.db, this.table, this.tableName, this.dbPath);
     this.table = null;
   }
   

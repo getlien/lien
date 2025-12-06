@@ -62,8 +62,9 @@ REQUIRED sequence:
 
 **`get_complexity({ top: 10 })`**
 - Find most complex functions in the codebase
+- Analyzes both **cyclomatic** (decision paths) and **cognitive** (nesting penalty) complexity
 - Use for tech debt analysis and refactoring prioritization
-- Returns complexity, dependent count, and risk level for each violation
+- Returns `metricType` ('cyclomatic' or 'cognitive'), dependent count, and risk level
 - Optional: `files` to filter specific files, `threshold` to set minimum complexity
 
 ## Test Associations
@@ -129,10 +130,11 @@ get_files_context({ filepaths: ["src/auth.ts", "src/user.ts"] })
 
 ## AST Metadata
 
-Results include rich metadata: `symbolName`, `symbolType`, `complexity`, `parameters`, `signature`.
+Results include rich metadata: `symbolName`, `symbolType`, `complexity`, `cognitiveComplexity`, `parameters`, `signature`.
 
 Use for filtering:
-- Complex functions: `results.filter(r => r.metadata.complexity > 5)`
+- Complex functions (cyclomatic): `results.filter(r => r.metadata.complexity > 10)`
+- Complex functions (cognitive): `results.filter(r => r.metadata.cognitiveComplexity > 15)`
 - Methods only: `results.filter(r => r.metadata.symbolType === 'method')`
 
 ## When to Use grep Instead

@@ -190,6 +190,10 @@ async function performFullIndex(
   options: IndexingOptions,
   spinner: Ora
 ): Promise<void> {
+  // 0. Clear existing index (required for schema changes)
+  spinner.text = 'Clearing existing index...';
+  await vectorDB.clear();
+  
   // 1. Scan for files (framework-aware if frameworks configured)
   spinner.text = 'Scanning codebase...';
   let files: string[];

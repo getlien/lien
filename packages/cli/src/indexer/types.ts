@@ -21,6 +21,7 @@ export interface ChunkMetadata {
   symbolType?: 'function' | 'method' | 'class' | 'interface' | 'schema' | 'style' | 'javascript' | 'template';
   parentClass?: string;       // For methods
   complexity?: number;        // Cyclomatic complexity
+  cognitiveComplexity?: number; // Cognitive complexity (penalizes nesting)
   parameters?: string[];      // Function parameters
   signature?: string;         // Full signature
   imports?: string[];         // File imports (for context)
