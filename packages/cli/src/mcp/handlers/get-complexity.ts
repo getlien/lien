@@ -37,6 +37,7 @@ export async function handleGetComplexity(
             startLine: v.startLine,
             endLine: v.endLine,
             complexity: v.complexity,
+            metricType: v.metricType, // 'cyclomatic' or 'cognitive'
             threshold: v.threshold,
             severity: v.severity,
             language: v.language,
