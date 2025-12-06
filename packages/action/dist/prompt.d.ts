@@ -27,7 +27,7 @@ export declare function formatReviewComment(aiReview: string, report: Complexity
 export declare function getViolationKey(violation: ComplexityViolation): string;
 /**
  * Build the PR description stats badge
- * This is appended to the PR description (like Bugbot style)
+ * Human-friendly summary with technical details collapsed
  */
 export declare function buildDescriptionBadge(report: ComplexityReport | null, deltaSummary: DeltaSummary | null): string;
 /**

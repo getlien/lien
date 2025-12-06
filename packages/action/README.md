@@ -180,11 +180,16 @@ The action adds a complexity stats badge to your PR description:
 ```
 ### 👁️ Veille
 
-| Violations | Max | Delta | Status |
-|:----------:|:---:|:-----:|:------:|
-| 3 | 34 | -23 ⬇️ | ✅ Improved |
+✅ **Improved** - This PR makes the code easier to maintain.
 
-*1 improved · 1 degraded*
+<details>
+<summary>📊 Details</summary>
+
+| Violations | Max Complexity | Change |
+|:----------:|:--------------:|:------:|
+| 0 | 14 | -23 ⬇️ |
+
+</details>
 ```
 
 This badge is always visible at the top of the PR, not buried in comments.

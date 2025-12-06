@@ -220,59 +220,107 @@ describe('prompt', () => {
   });
 
   describe('buildDescriptionBadge', () => {
-    it('should show improved status when delta is negative', () => {
+    it('should show review required when has errors (violations take priority over delta)', () => {
       const deltaSummary: DeltaSummary = {
         totalDelta: -15,
         improved: 2,
         degraded: 0,
-        newViolations: 0,
-        removedViolations: 1,
+        newFunctions: 0,
+        deletedFunctions: 1,
+        unchanged: 0,
       };
 
       const badge = buildDescriptionBadge(mockReport, deltaSummary);
 
       expect(badge).toContain('### 👁️ Veille');
       expect(badge).toContain('-15 ⬇️');
-      expect(badge).toContain('✅ Improved');
-      expect(badge).toContain('3'); // violations
-      expect(badge).toContain('23'); // max complexity
-      expect(badge).toContain('2 improved');
+      // mockReport has 1 error, so should show review required
+      expect(badge).toContain('🔴 **Review required**');
+      expect(badge).toContain('too complex and should be refactored');
+      expect(badge).toContain('<details>');
+      expect(badge).toContain('📊 Details');
     });
 
-    it('should show degraded status when delta is positive', () => {
+    it('should show review required when has errors', () => {
+      const badge = buildDescriptionBadge(mockReport, null);
+
+      // mockReport has 1 error
+      expect(badge).toContain('🔴 **Review required**');
+      expect(badge).toContain('1 function is too complex');
+    });
+
+    it('should show needs attention when has warnings only', () => {
+      const warningsOnlyReport: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 2,
+          totalViolations: 2,
+          bySeverity: { error: 0, warning: 2 },
+          avgComplexity: 12.0,
+          maxComplexity: 14,
+        },
+        files: {},
+      };
+
+      const badge = buildDescriptionBadge(warningsOnlyReport, null);
+
+      expect(badge).toContain('⚠️ **Needs attention**');
+      expect(badge).toContain('2 functions are more complex than recommended');
+    });
+
+    it('should show improved when delta negative and no violations', () => {
+      const cleanReport: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 5,
+          totalViolations: 0,
+          bySeverity: { error: 0, warning: 0 },
+          avgComplexity: 5.0,
+          maxComplexity: 8,
+        },
+        files: {},
+      };
       const deltaSummary: DeltaSummary = {
-        totalDelta: 10,
+        totalDelta: -10,
+        improved: 2,
+        degraded: 0,
+        newFunctions: 0,
+        deletedFunctions: 0,
+        unchanged: 0,
+      };
+
+      const badge = buildDescriptionBadge(cleanReport, deltaSummary);
+
+      expect(badge).toContain('✅ **Improved**');
+      expect(badge).toContain('makes the code easier to maintain');
+      expect(badge).toContain('-10 ⬇️');
+    });
+
+    it('should show stable when delta positive but no violations', () => {
+      const cleanReport: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 5,
+          totalViolations: 0,
+          bySeverity: { error: 0, warning: 0 },
+          avgComplexity: 5.0,
+          maxComplexity: 8,
+        },
+        files: {},
+      };
+      const deltaSummary: DeltaSummary = {
+        totalDelta: 5,
         improved: 0,
-        degraded: 2,
-        newViolations: 1,
-        removedViolations: 0,
-      };
-
-      const badge = buildDescriptionBadge(mockReport, deltaSummary);
-
-      expect(badge).toContain('+10 ⬆️');
-      expect(badge).toContain('⚠️ Degraded');
-      expect(badge).toContain('2 degraded');
-    });
-
-    it('should show no change when delta is zero', () => {
-      const deltaSummary: DeltaSummary = {
-        totalDelta: 0,
-        improved: 1,
         degraded: 1,
-        newViolations: 0,
-        removedViolations: 0,
+        newFunctions: 0,
+        deletedFunctions: 0,
+        unchanged: 0,
       };
 
-      const badge = buildDescriptionBadge(mockReport, deltaSummary);
+      const badge = buildDescriptionBadge(cleanReport, deltaSummary);
 
-      expect(badge).toContain('+0 ➡️');
-      expect(badge).toContain('➡️ No change');
-      expect(badge).toContain('1 improved');
-      expect(badge).toContain('1 degraded');
+      expect(badge).toContain('➡️ **Stable**');
+      expect(badge).toContain('increased slightly but within limits');
     });
 
-    it('should show clean status when no violations and no delta', () => {
+    it('should show good when no violations and no delta change', () => {
       const cleanReport: ComplexityReport = {
         summary: {
           filesAnalyzed: 5,
@@ -286,17 +334,8 @@ describe('prompt', () => {
 
       const badge = buildDescriptionBadge(cleanReport, null);
 
-      expect(badge).toContain('0'); // violations
-      expect(badge).toContain('8'); // max complexity
-      expect(badge).toContain('—'); // delta (dash for no delta)
-      expect(badge).toContain('✅ Clean');
-    });
-
-    it('should show violations count in status when no delta but has violations', () => {
-      const badge = buildDescriptionBadge(mockReport, null);
-
-      expect(badge).toContain('3'); // violations in table
-      expect(badge).toContain('⚠️ 3 violations');
+      expect(badge).toContain('✅ **Good**');
+      expect(badge).toContain('No complexity issues found');
     });
 
     it('should handle null report gracefully', () => {
@@ -304,8 +343,9 @@ describe('prompt', () => {
         totalDelta: -5,
         improved: 1,
         degraded: 0,
-        newViolations: 0,
-        removedViolations: 0,
+        newFunctions: 0,
+        deletedFunctions: 0,
+        unchanged: 0,
       };
 
       const badge = buildDescriptionBadge(null, deltaSummary);
@@ -313,30 +353,17 @@ describe('prompt', () => {
       expect(badge).toContain('0'); // violations default
       expect(badge).toContain('—'); // max complexity default
       expect(badge).toContain('-5 ⬇️');
+      expect(badge).toContain('✅ **Improved**');
     });
 
-    it('should format the table correctly', () => {
+    it('should format the table inside details correctly', () => {
       const badge = buildDescriptionBadge(mockReport, null);
 
-      // Check table structure
-      expect(badge).toContain('| Violations | Max | Delta | Status |');
-      expect(badge).toContain('|:----------:|:---:|:-----:|:------:|');
-    });
-
-    it('should not show improvement details when both are zero', () => {
-      const deltaSummary: DeltaSummary = {
-        totalDelta: 0,
-        improved: 0,
-        degraded: 0,
-        newViolations: 0,
-        removedViolations: 0,
-      };
-
-      const badge = buildDescriptionBadge(mockReport, deltaSummary);
-
-      // Should not contain the italicized improvement details
-      expect(badge).not.toContain('*0 improved');
-      expect(badge).not.toContain('*0 degraded');
+      // Check new table structure
+      expect(badge).toContain('| Violations | Max Complexity | Change |');
+      expect(badge).toContain('|:----------:|:--------------:|:------:|');
+      expect(badge).toContain('<details>');
+      expect(badge).toContain('</details>');
     });
   });
 });
