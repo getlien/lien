@@ -245,7 +245,7 @@ function calculateComplexityRiskBoost(avgComplexity: number, maxComplexity: numb
  * Calculates risk level based on dependent count.
  */
 function calculateRiskLevelFromCount(count: number): RiskLevel {
-  if (count === 0 || count <= DEPENDENT_COUNT_THRESHOLDS.LOW) {
+  if (count <= DEPENDENT_COUNT_THRESHOLDS.LOW) {
     return 'low';
   }
   if (count <= DEPENDENT_COUNT_THRESHOLDS.MEDIUM) {
