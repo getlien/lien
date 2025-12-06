@@ -66,6 +66,7 @@ interface DBRecord {
   symbolType?: string;
   parentClass?: string;
   complexity?: number;
+  cognitiveComplexity?: number;
   parameters?: string[];
   signature?: string;
   imports?: string[];
@@ -126,6 +127,7 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
     symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
     parentClass: r.parentClass || undefined,
     complexity: r.complexity || undefined,
+    cognitiveComplexity: r.cognitiveComplexity || undefined,
     parameters: hasValidArrayEntries(r.parameters) ? r.parameters : undefined,
     signature: r.signature || undefined,
     imports: hasValidArrayEntries(r.imports) ? r.imports : undefined,

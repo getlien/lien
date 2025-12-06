@@ -173,6 +173,7 @@ describe('batch-insert', () => {
           symbolType: 'function',
           parentClass: 'MyClass',
           complexity: 15,
+          cognitiveComplexity: 0,
           parameters: ['a: string', 'b: number'],
           signature: 'function myFunc(a: string, b: number): void',
           imports: ['./utils.js', './types.js'],
@@ -208,6 +209,7 @@ describe('batch-insert', () => {
         expect(createdRecords[0].symbolType).toBe('');
         expect(createdRecords[0].parentClass).toBe('');
         expect(createdRecords[0].complexity).toBe(0);
+        expect(createdRecords[0].cognitiveComplexity).toBe(0);
         expect(createdRecords[0].signature).toBe('');
       });
 
