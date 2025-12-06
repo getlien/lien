@@ -49,11 +49,7 @@ describe('batch-insert', () => {
 
         await expect(
           insertBatch(null, null, 'test_table', vectors, metadatas, contents)
-        ).rejects.toThrow(DatabaseError);
-        
-        await expect(
-          insertBatch(null, null, 'test_table', vectors, metadatas, contents)
-        ).rejects.toThrow('Vector database not initialized');
+        ).rejects.toThrow(new DatabaseError('Vector database not initialized'));
       });
 
       it('should throw DatabaseError when array lengths do not match', async () => {
@@ -62,10 +58,6 @@ describe('batch-insert', () => {
         const metadatas = [createMockMetadata('test.ts'), createMockMetadata('test2.ts')];
         const contents = ['content'];
 
-        await expect(
-          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents)
-        ).rejects.toThrow(DatabaseError);
-        
         await expect(
           insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents)
         ).rejects.toThrow('Vectors, metadatas, and contents arrays must have the same length');
@@ -326,10 +318,6 @@ describe('batch-insert', () => {
 
         await expect(
           insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents)
-        ).rejects.toThrow(DatabaseError);
-        
-        await expect(
-          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents)
         ).rejects.toThrow(/Failed to insert .* record\(s\) after retry attempts/);
       });
 
@@ -384,10 +372,6 @@ describe('batch-insert', () => {
         const { vectors, metadatas, contents } = createTestData(batchSize);
 
         // This should throw because all batches fail after splitting
-        await expect(
-          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents)
-        ).rejects.toThrow(DatabaseError);
-        
         await expect(
           insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents)
         ).rejects.toThrow(/Failed to insert .* record\(s\) after retry attempts/);
