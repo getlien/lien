@@ -32424,24 +32424,33 @@ function getViolationKey(violation) {
     return `${violation.filepath}::${violation.symbolName}`;
 }
 /**
- * Determine status emoji and text based on delta and report
+ * Determine human-friendly status message based on violations and delta
  */
 function determineStatus(report, deltaSummary) {
-    // Delta-based status takes priority
-    if (deltaSummary) {
-        if (deltaSummary.totalDelta < 0)
-            return { emoji: '✅', text: 'Improved' };
-        if (deltaSummary.totalDelta > 0)
-            return { emoji: '⚠️', text: 'Degraded' };
-        return { emoji: '➡️', text: 'No change' };
+    const violations = report?.summary.totalViolations ?? 0;
+    const errors = report?.summary.bySeverity.error ?? 0;
+    const delta = deltaSummary?.totalDelta ?? 0;
+    // Violations take priority - these need attention
+    if (errors > 0) {
+        return {
+            emoji: '🔴',
+            message: `**Review required** - ${errors} function${errors === 1 ? ' is' : 's are'} too complex and should be refactored.`,
+        };
     }
-    // Fall back to report-based status
-    if (!report)
-        return { emoji: '—', text: 'Not analyzed' };
-    if (report.summary.totalViolations === 0)
-        return { emoji: '✅', text: 'Clean' };
-    const count = report.summary.totalViolations;
-    return { emoji: '⚠️', text: `${count} violation${count === 1 ? '' : 's'}` };
+    if (violations > 0) {
+        return {
+            emoji: '⚠️',
+            message: `**Needs attention** - ${violations} function${violations === 1 ? ' is' : 's are'} more complex than recommended.`,
+        };
+    }
+    // No violations - check delta for status
+    if (delta < 0) {
+        return { emoji: '✅', message: '**Improved** - This PR makes the code easier to maintain.' };
+    }
+    if (delta > 0) {
+        return { emoji: '➡️', message: '**Stable** - Complexity increased slightly but within limits.' };
+    }
+    return { emoji: '✅', message: '**Good** - No complexity issues found.' };
 }
 /**
  * Format delta display string with sign and trend emoji
@@ -32454,33 +32463,26 @@ function formatBadgeDelta(deltaSummary) {
     return `${sign}${deltaSummary.totalDelta} ${trend}`;
 }
 /**
- * Build improvement/degraded details line
- */
-function buildImprovementDetails(deltaSummary) {
-    if (!deltaSummary)
-        return '';
-    const parts = [];
-    if (deltaSummary.improved > 0)
-        parts.push(`${deltaSummary.improved} improved`);
-    if (deltaSummary.degraded > 0)
-        parts.push(`${deltaSummary.degraded} degraded`);
-    return parts.length > 0 ? `\n\n*${parts.join(' · ')}*` : '';
-}
-/**
  * Build the PR description stats badge
- * This is appended to the PR description (like Bugbot style)
+ * Human-friendly summary with technical details collapsed
  */
 function buildDescriptionBadge(report, deltaSummary) {
     const violations = report ? String(report.summary.totalViolations) : '0';
     const maxComplexity = report ? String(report.summary.maxComplexity) : '—';
     const deltaDisplay = formatBadgeDelta(deltaSummary);
     const status = determineStatus(report, deltaSummary);
-    const improvementDetails = buildImprovementDetails(deltaSummary);
     return `### 👁️ Veille
 
-| Violations | Max | Delta | Status |
-|:----------:|:---:|:-----:|:------:|
-| ${violations} | ${maxComplexity} | ${deltaDisplay} | ${status.emoji} ${status.text} |${improvementDetails}`;
+${status.emoji} ${status.message}
+
+<details>
+<summary>📊 Details</summary>
+
+| Violations | Max Complexity | Change |
+|:----------:|:--------------:|:------:|
+| ${violations} | ${maxComplexity} | ${deltaDisplay} |
+
+</details>`;
 }
 /**
  * Build a prompt for generating a single line comment for a violation
