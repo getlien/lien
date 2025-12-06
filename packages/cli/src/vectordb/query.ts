@@ -73,6 +73,66 @@ interface DBRecord {
 }
 
 /**
+ * Check if a DB record has valid content and file path.
+ * Used to filter out empty/invalid records from query results.
+ */
+function isValidRecord(r: DBRecord): boolean {
+  return Boolean(
+    r.content && 
+    r.content.trim().length > 0 &&
+    r.file && 
+    r.file.length > 0
+  );
+}
+
+/**
+ * Check if an array field has valid (non-empty) entries.
+ * LanceDB stores empty arrays as [''] which we need to filter out.
+ */
+function hasValidArrayEntries(arr: string[] | undefined): boolean {
+  return Boolean(arr && arr.length > 0 && arr[0] !== '');
+}
+
+/**
+ * Get symbols for a specific type from a DB record.
+ * Consolidates the symbol extraction logic used across query functions.
+ */
+function getSymbolsForType(
+  r: DBRecord, 
+  symbolType?: 'function' | 'class' | 'interface'
+): string[] {
+  if (symbolType === 'function') return r.functionNames || [];
+  if (symbolType === 'class') return r.classNames || [];
+  if (symbolType === 'interface') return r.interfaceNames || [];
+  return [
+    ...(r.functionNames || []),
+    ...(r.classNames || []),
+    ...(r.interfaceNames || []),
+  ];
+}
+
+/**
+ * Convert a DB record to base SearchResult metadata.
+ * Shared between all query functions to avoid duplication.
+ */
+function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
+  return {
+    file: r.file,
+    startLine: r.startLine,
+    endLine: r.endLine,
+    type: r.type as 'function' | 'class' | 'block',
+    language: r.language,
+    symbolName: r.symbolName || undefined,
+    symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
+    parentClass: r.parentClass || undefined,
+    complexity: r.complexity || undefined,
+    parameters: hasValidArrayEntries(r.parameters) ? r.parameters : undefined,
+    signature: r.signature || undefined,
+    imports: hasValidArrayEntries(r.imports) ? r.imports : undefined,
+  };
+}
+
+/**
  * Apply relevance boosting strategies to a search score.
  * 
  * Uses composable boosting strategies based on query intent:
@@ -107,21 +167,7 @@ function dbRecordToSearchResult(
   
   return {
     content: r.content,
-    metadata: {
-      file: r.file,
-      startLine: r.startLine,
-      endLine: r.endLine,
-      type: r.type as 'function' | 'class' | 'block',
-      language: r.language,
-      // AST-derived metadata (v0.13.0)
-      symbolName: r.symbolName || undefined,
-      symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
-      parentClass: r.parentClass || undefined,
-      complexity: r.complexity || undefined,
-      parameters: (r.parameters && r.parameters.length > 0 && r.parameters[0] !== '') ? r.parameters : undefined,
-      signature: r.signature || undefined,
-      imports: (r.imports && r.imports.length > 0 && r.imports[0] !== '') ? r.imports : undefined,
-    },
+    metadata: buildSearchResultMetadata(r),
     score: boostedScore,
     relevance: calculateRelevance(boostedScore),
   };
@@ -147,12 +193,7 @@ export async function search(
       .toArray();
     
     const filtered = (results as unknown as DBRecord[])
-      .filter((r: DBRecord) => 
-        r.content && 
-        r.content.trim().length > 0 &&
-        r.file && 
-        r.file.length > 0
-      )
+      .filter(isValidRecord)
       .map((r: DBRecord) => dbRecordToSearchResult(r, query))
       .sort((a, b) => a.score - b.score)
       .slice(0, limit);
@@ -198,12 +239,7 @@ export async function scanWithFilter(
     
     const results = await query.toArray();
     
-    let filtered = (results as unknown as DBRecord[]).filter((r: DBRecord) => 
-      r.content && 
-      r.content.trim().length > 0 &&
-      r.file && 
-      r.file.length > 0
-    );
+    let filtered = (results as unknown as DBRecord[]).filter(isValidRecord);
     
     if (language) {
       filtered = filtered.filter((r: DBRecord) => 
@@ -218,29 +254,12 @@ export async function scanWithFilter(
       );
     }
     
-    return filtered.slice(0, limit).map((r: DBRecord) => {
-      const score = 0;
-      return {
-        content: r.content,
-        metadata: {
-          file: r.file,
-          startLine: r.startLine,
-          endLine: r.endLine,
-          type: r.type as 'function' | 'class' | 'block',
-          language: r.language,
-          // AST-derived metadata (v0.13.0)
-          symbolName: r.symbolName || undefined,
-          symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
-          parentClass: r.parentClass || undefined,
-          complexity: r.complexity || undefined,
-          parameters: (r.parameters && r.parameters.length > 0 && r.parameters[0] !== '') ? r.parameters : undefined,
-          signature: r.signature || undefined,
-          imports: (r.imports && r.imports.length > 0 && r.imports[0] !== '') ? r.imports : undefined,
-        },
-        score,
-        relevance: calculateRelevance(score),
-      };
-    });
+    return filtered.slice(0, limit).map((r: DBRecord) => ({
+      content: r.content,
+      metadata: buildSearchResultMetadata(r),
+      score: 0,
+      relevance: calculateRelevance(0),
+    }));
   } catch (error) {
     throw wrapError(error, 'Failed to scan with filter');
   }
@@ -270,6 +289,59 @@ function matchesSymbolType(
   return symbols.length > 0 && symbols.some((s: string) => s.length > 0 && s !== '');
 }
 
+interface SymbolQueryOptions {
+  language?: string;
+  pattern?: string;
+  symbolType?: 'function' | 'class' | 'interface';
+}
+
+/**
+ * Check if a record matches the symbol query filters.
+ * Extracted to reduce complexity of querySymbols.
+ */
+function matchesSymbolFilter(
+  r: DBRecord, 
+  { language, pattern, symbolType }: SymbolQueryOptions
+): boolean {
+  // Language filter
+  if (language && (!r.language || r.language.toLowerCase() !== language.toLowerCase())) {
+    return false;
+  }
+  
+  const symbols = getSymbolsForType(r, symbolType);
+  const astSymbolName = r.symbolName || '';
+  
+  // Must have at least one symbol (legacy or AST-based)
+  if (symbols.length === 0 && !astSymbolName) {
+    return false;
+  }
+  
+  // Pattern filter (if provided)
+  if (pattern) {
+    const regex = new RegExp(pattern, 'i');
+    const nameMatches = symbols.some((s: string) => regex.test(s)) || regex.test(astSymbolName);
+    if (!nameMatches) return false;
+  }
+  
+  // Symbol type filter (if provided)
+  if (symbolType) {
+    return matchesSymbolType(r, symbolType, symbols);
+  }
+  
+  return true;
+}
+
+/**
+ * Build legacy symbols object for backwards compatibility.
+ */
+function buildLegacySymbols(r: DBRecord) {
+  return {
+    functions: hasValidArrayEntries(r.functionNames) ? r.functionNames : [],
+    classes: hasValidArrayEntries(r.classNames) ? r.classNames : [],
+    interfaces: hasValidArrayEntries(r.interfaceNames) ? r.interfaceNames : [],
+  };
+}
+
 /**
  * Query symbols (functions, classes, interfaces)
  */
@@ -287,6 +359,7 @@ export async function querySymbols(
   }
   
   const { language, pattern, symbolType, limit = 50 } = options;
+  const filterOpts: SymbolQueryOptions = { language, pattern, symbolType };
   
   try {
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
@@ -296,79 +369,18 @@ export async function querySymbols(
     
     const results = await query.toArray();
     
-    let filtered = (results as unknown as DBRecord[]).filter((r: DBRecord) => {
-      if (!r.content || r.content.trim().length === 0) {
-        return false;
-      }
-      if (!r.file || r.file.length === 0) {
-        return false;
-      }
-      
-      if (language && (!r.language || r.language.toLowerCase() !== language.toLowerCase())) {
-        return false;
-      }
-      
-      const symbols = symbolType === 'function' ? (r.functionNames || []) :
-                     symbolType === 'class' ? (r.classNames || []) :
-                     symbolType === 'interface' ? (r.interfaceNames || []) :
-                     [...(r.functionNames || []), ...(r.classNames || []), ...(r.interfaceNames || [])];
-      
-      const astSymbolName = r.symbolName || '';
-      
-      if (symbols.length === 0 && !astSymbolName) {
-        return false;
-      }
-      
-      if (pattern) {
-        const regex = new RegExp(pattern, 'i');
-        const matchesOldSymbols = symbols.some((s: string) => regex.test(s));
-        const matchesASTSymbol = regex.test(astSymbolName);
-        const nameMatches = matchesOldSymbols || matchesASTSymbol;
-        
-        if (!nameMatches) return false;
-        
-        if (symbolType) {
-          return matchesSymbolType(r, symbolType, symbols);
-        }
-        
-        return nameMatches;
-      }
-      
-      if (symbolType) {
-        return matchesSymbolType(r, symbolType, symbols);
-      }
-      
-      return true;
-    });
+    const filtered = (results as unknown as DBRecord[])
+      .filter((r) => isValidRecord(r) && matchesSymbolFilter(r, filterOpts));
     
-    return filtered.slice(0, limit).map((r: DBRecord) => {
-      const score = 0;
-      return {
-        content: r.content,
-        metadata: {
-          file: r.file,
-          startLine: r.startLine,
-          endLine: r.endLine,
-          type: r.type as 'function' | 'class' | 'block',
-          language: r.language,
-          symbols: {
-            functions: (r.functionNames && r.functionNames.length > 0 && r.functionNames[0] !== '') ? r.functionNames : [],
-            classes: (r.classNames && r.classNames.length > 0 && r.classNames[0] !== '') ? r.classNames : [],
-            interfaces: (r.interfaceNames && r.interfaceNames.length > 0 && r.interfaceNames[0] !== '') ? r.interfaceNames : [],
-          },
-          // AST-derived metadata (v0.13.0)
-          symbolName: r.symbolName || undefined,
-          symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
-          parentClass: r.parentClass || undefined,
-          complexity: r.complexity || undefined,
-          parameters: (r.parameters && r.parameters.length > 0 && r.parameters[0] !== '') ? r.parameters : undefined,
-          signature: r.signature || undefined,
-          imports: (r.imports && r.imports.length > 0 && r.imports[0] !== '') ? r.imports : undefined,
-        },
-        score,
-        relevance: calculateRelevance(score),
-      };
-    });
+    return filtered.slice(0, limit).map((r: DBRecord) => ({
+      content: r.content,
+      metadata: {
+        ...buildSearchResultMetadata(r),
+        symbols: buildLegacySymbols(r),
+      },
+      score: 0,
+      relevance: calculateRelevance(0),
+    }));
   } catch (error) {
     throw wrapError(error, 'Failed to query symbols');
   }
