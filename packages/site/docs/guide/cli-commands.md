@@ -217,6 +217,144 @@ Frameworks:
     - 478 chunks
 ```
 
+## lien complexity
+
+Analyze code complexity across your codebase. Identifies functions exceeding complexity thresholds for tech debt analysis and refactoring prioritization.
+
+```bash
+lien complexity [options]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--files <paths...>` | Specific files to analyze |
+| `--format <type>` | Output format: `text` (default), `json`, `sarif` |
+| `--threshold <n>` | Complexity threshold (overrides config, default: 10) |
+| `--fail-on <severity>` | Exit with code 1 if violations found: `error`, `warning` |
+
+### Output Formats
+
+**Text (default)** - Human-readable output for terminal:
+
+```
+📊 Complexity Analysis
+
+Found 3 violations in 2 files
+
+⚠️  src/utils/parser.ts:45 - parseComplexData (complexity: 18)
+   Severity: error | Threshold: 10
+
+⚠️  src/api/handler.ts:23 - handleRequest (complexity: 14)
+   Severity: error | Threshold: 10
+
+⚠️  src/api/handler.ts:89 - processResponse (complexity: 11)
+   Severity: warning | Threshold: 10
+
+Summary:
+  Files analyzed: 156
+  Violations: 3 (2 error, 1 warning)
+  Max complexity: 18
+  Avg complexity: 4.2
+```
+
+**JSON** - Machine-readable output for CI pipelines:
+
+```bash
+lien complexity --format json
+```
+
+```json
+{
+  "summary": {
+    "filesAnalyzed": 156,
+    "avgComplexity": 4.2,
+    "maxComplexity": 18,
+    "violationCount": 3,
+    "bySeverity": { "error": 2, "warning": 1 }
+  },
+  "files": {
+    "src/utils/parser.ts": {
+      "violations": [
+        {
+          "symbolName": "parseComplexData",
+          "startLine": 45,
+          "complexity": 18,
+          "severity": "error"
+        }
+      ]
+    }
+  }
+}
+```
+
+**SARIF** - For GitHub Code Scanning and IDE integrations:
+
+```bash
+lien complexity --format sarif > results.sarif
+```
+
+### Use Cases
+
+**CI Pipeline - Fail on new violations:**
+
+```bash
+lien complexity --fail-on error
+```
+
+**Analyze specific files (e.g., PR changed files):**
+
+```bash
+lien complexity --files src/api/handler.ts src/utils/parser.ts
+```
+
+**Generate baseline for delta tracking:**
+
+```bash
+lien complexity --format json --threshold 10 > baseline.json
+```
+
+**Custom threshold for strict review:**
+
+```bash
+lien complexity --threshold 5
+```
+
+### Complexity Scoring
+
+Lien uses **cyclomatic complexity** - the number of independent paths through code:
+
+| Complexity | Severity | Interpretation |
+|------------|----------|----------------|
+| 1-10 | OK | Simple, easy to test |
+| 11-15 | Warning | Moderate complexity, consider refactoring |
+| 16+ | Error | High complexity, hard to maintain |
+
+Decision points that increase complexity:
+- `if`, `else if`, `else`
+- `for`, `while`, `do...while`
+- `switch` `case`
+- `catch`
+- `&&`, `||`, `??`
+- `? :` (ternary)
+
+### Examples
+
+```bash
+# Basic analysis
+lien complexity
+
+# Strict mode for code review
+lien complexity --threshold 5 --fail-on warning
+
+# JSON output for CI
+lien complexity --format json --fail-on error
+
+# Analyze only changed files
+git diff --name-only HEAD~1 | xargs lien complexity --files
+```
+
 ## lien --version
 
 Show installed version.
@@ -248,6 +386,7 @@ Commands:
   index [options]    Index your codebase
   serve [options]    Start MCP server
   status             Show indexing status
+  complexity         Analyze code complexity
   help [command]     display help for command
 ```
 

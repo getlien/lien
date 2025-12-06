@@ -44,6 +44,12 @@ export default withMermaid(
               { text: 'MCP Tools', link: '/guide/mcp-tools' },
               { text: 'CLI Commands', link: '/guide/cli-commands' },
             ]
+          },
+          {
+            text: 'Integrations',
+            items: [
+              { text: 'GitHub Action (Veille)', link: '/guide/github-action' },
+            ]
           }
         ]
       },

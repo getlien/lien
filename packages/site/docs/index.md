@@ -30,13 +30,13 @@ features:
     title: Fast Performance
     details: Queries return in <500ms. Indexing completes in minutes, not hours. Optimized for large codebases.
   
-  - icon: 🆓
-    title: Free Forever
-    details: No API costs, no subscriptions, no usage limits. Run as many queries as you want on as many projects as you need.
+  - icon: 📊
+    title: Complexity Analysis
+    details: Identify tech debt hotspots with cyclomatic complexity analysis. Prioritize refactoring and track code health over time.
   
   - icon: 📦
     title: Framework-Aware
-    details: Auto-detects frameworks (Node.js, Laravel, Shopify) with zero config. Full monorepo support - index multiple frameworks in one repo seamlessly.
+    details: Auto-detects frameworks (Node.js, Laravel, Shopify, PHP) with zero config. Full monorepo support for multi-framework repos.
 ---
 
 ## Quick Start
@@ -83,6 +83,8 @@ Restart Cursor and start asking questions about your codebase!
 - **Find Implementations**: "Where are API endpoints defined?"
 - **Locate Patterns**: "Find similar error handling code"
 - **Discover Related Code**: "What tests cover this module?"
+- **Tech Debt Analysis**: "What are the most complex functions?"
+- **Impact Analysis**: "What depends on this file?"
 
 ## Privacy First
 

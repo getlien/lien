@@ -1,6 +1,6 @@
 # MCP Tools
 
-Lien exposes four powerful tools via the Model Context Protocol (MCP) that enable AI assistants to understand your codebase.
+Lien exposes six powerful tools via the Model Context Protocol (MCP) that enable AI assistants to understand your codebase.
 
 ## semantic_search
 
@@ -228,6 +228,155 @@ Show all TypeScript classes
 - Find all API handlers: `pattern: "handle.*"`
 - Find all TypeScript utilities: `pattern: ".*", language: "typescript"`
 
+## get_dependents
+
+Find all files that depend on a given file (reverse dependency lookup). Essential for impact analysis before refactoring.
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `filepath` | string | Yes | - | Path to file (relative to project root) |
+| `depth` | number | No | 1 | Dependency depth (currently only 1 supported) |
+
+### Usage
+
+```
+What depends on src/utils/validate.ts?
+```
+
+```
+Is it safe to change this file?
+```
+
+### Response
+
+```json
+{
+  "filepath": "src/utils/validate.ts",
+  "dependentCount": 12,
+  "riskLevel": "medium",
+  "dependents": [
+    { "filepath": "src/api/users.ts", "isTestFile": false },
+    { "filepath": "src/api/auth.ts", "isTestFile": false },
+    { "filepath": "src/__tests__/validate.test.ts", "isTestFile": true }
+  ],
+  "complexityMetrics": {
+    "averageComplexity": 6.2,
+    "maxComplexity": 15,
+    "filesWithComplexityData": 10,
+    "highComplexityDependents": [
+      { "filepath": "src/api/users.ts", "maxComplexity": 15, "avgComplexity": 8.3 }
+    ],
+    "complexityRiskBoost": "medium"
+  }
+}
+```
+
+### Risk Levels
+
+| Level | Dependent Count | Meaning |
+|-------|-----------------|---------|
+| `low` | 0-5 | Safe to change, few dependents |
+| `medium` | 6-15 | Review dependents before changing |
+| `high` | 16-30 | Careful planning needed |
+| `critical` | 30+ | Major impact, extensive testing required |
+
+::: tip Complexity-Aware Risk
+Risk level is boosted if dependents have high complexity. A file with 10 dependents but complex dependent code may be rated "high" instead of "medium".
+:::
+
+### Use Cases
+
+- **Impact Analysis**: "What breaks if I change this?"
+- **Safe Deletion**: "Is this file still used?"
+- **Refactoring Planning**: "How many files need updating?"
+- **Code Review**: "What's affected by this PR?"
+
+## get_complexity
+
+Analyze code complexity for tech debt identification and refactoring prioritization.
+
+### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `files` | string[] | No | - | Specific files to analyze (analyzes all if omitted) |
+| `top` | number | No | 10 | Return top N most complex functions |
+| `threshold` | number | No | config | Only return functions above this complexity |
+
+### Usage
+
+```
+What are the most complex functions in this codebase?
+```
+
+```
+Show me tech debt hotspots
+```
+
+```
+Analyze complexity of src/api/
+```
+
+### Response
+
+```json
+{
+  "summary": {
+    "filesAnalyzed": 156,
+    "avgComplexity": 4.2,
+    "maxComplexity": 23,
+    "violationCount": 8,
+    "bySeverity": { "error": 3, "warning": 5 }
+  },
+  "violations": [
+    {
+      "filepath": "src/parser/index.ts",
+      "symbolName": "parseComplexExpression",
+      "symbolType": "function",
+      "startLine": 45,
+      "endLine": 120,
+      "complexity": 23,
+      "threshold": 10,
+      "severity": "error",
+      "language": "typescript",
+      "message": "Function has cyclomatic complexity of 23 (threshold: 10)",
+      "dependentCount": 5,
+      "riskLevel": "high"
+    }
+  ]
+}
+```
+
+### Severity Levels
+
+| Severity | Complexity | Action |
+|----------|------------|--------|
+| `warning` | 11-15 | Consider refactoring |
+| `error` | 16+ | Should refactor |
+
+### Use Cases
+
+- **Tech Debt Analysis**: "What needs refactoring?"
+- **Code Review**: "Are there complexity issues in this PR?"
+- **Prioritization**: "Which functions should I simplify first?"
+- **Metrics Tracking**: Monitor complexity over time
+
+### Examples
+
+```
+Get top 20 most complex functions
+```
+
+```
+Analyze complexity of src/api/ directory
+```
+
+```
+Show functions with complexity > 15
+```
+
 ## Understanding Relevance Categories
 
 All search tools include a **relevance category** alongside the numeric similarity score:
@@ -294,6 +443,18 @@ All search results include test association metadata:
 - Refactoring multiple similar pieces of code
 - Ensuring new code matches existing patterns
 - Finding duplicated logic
+
+### Use `get_dependents` when:
+- Checking impact before modifying a file
+- Determining if a file is safe to delete
+- Planning refactoring scope
+- Understanding how changes will propagate
+
+### Use `get_complexity` when:
+- Identifying tech debt hotspots
+- Prioritizing refactoring efforts
+- Reviewing code quality in a PR
+- Tracking codebase health over time
 
 ## Performance Tips
 

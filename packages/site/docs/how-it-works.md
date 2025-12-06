@@ -63,7 +63,13 @@ Each framework gets appropriate test patterns, file exclusions, and indexing str
 
 Lien indexes and understands code in:
 
-TypeScript, JavaScript (JSX/TSX), Vue, Python, PHP, Go, Rust, Java, C/C++, Ruby, Swift, Kotlin, C#, Scala, and more!
+**Full AST Support** (function detection, complexity analysis):
+- TypeScript, JavaScript (JSX/TSX)
+- Python
+- PHP
+
+**Semantic Search** (chunking and embeddings):
+- All of the above, plus Go, Rust, Java, C/C++, Vue, Ruby, Swift, Kotlin, C#, Scala, and more!
 
 ## Performance
 

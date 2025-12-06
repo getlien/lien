@@ -30,6 +30,9 @@ Lien is configured via a `.lien.config.json` file in your project root. This fil
   "mcp": {
     "port": 7133,
     "transport": "stdio"
+  },
+  "complexity": {
+    "threshold": 10
   }
 }
 ```
@@ -260,6 +263,37 @@ These apply to individual frameworks:
 - **Type**: `string`
 - **Default**: `"stdio"`
 - **Description**: MCP transport protocol (currently only "stdio" supported)
+
+## Complexity Analysis
+
+Configure complexity analysis for the `lien complexity` command and `get_complexity` MCP tool:
+
+```json
+{
+  "complexity": {
+    "threshold": 10
+  }
+}
+```
+
+#### `threshold`
+- **Type**: `number`
+- **Default**: `10`
+- **Description**: Cyclomatic complexity threshold for violations
+- **Recommendation**:
+  - `10` (default): Standard threshold, catches most issues
+  - `15`: More lenient, fewer false positives
+  - `5`: Strict, flags even moderately complex functions
+
+### Severity Levels
+
+Functions are flagged based on how much they exceed the threshold:
+
+| Complexity | Severity | Action |
+|------------|----------|--------|
+| Below threshold | OK | No violation |
+| 11-15 (with threshold 10) | Warning | Consider refactoring |
+| 16+ (with threshold 10) | Error | Should refactor |
 
 ## Performance Tuning
 
