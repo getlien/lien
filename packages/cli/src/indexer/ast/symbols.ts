@@ -348,6 +348,54 @@ export function calculateComplexity(node: Parser.SyntaxNode): number {
   return complexity;
 }
 
+// Node types that increase complexity AND increment nesting for children
+const NESTING_TYPES = new Set([
+  'if_statement', 'for_statement', 'while_statement', 'switch_statement',
+  'catch_clause', 'except_clause', 'do_statement', 'for_in_statement',
+  'for_of_statement', 'foreach_statement', 'match_statement',
+]);
+
+// Types that add complexity but DON'T nest (hybrid increments)
+const NON_NESTING_TYPES = new Set([
+  'else_clause', 'elif_clause', 'ternary_expression', 'conditional_expression',
+]);
+
+// Lambda types that add complexity when nested
+const LAMBDA_TYPES = new Set(['arrow_function', 'function_expression', 'lambda']);
+
+/**
+ * Check if node is a logical operator and return normalized form
+ */
+function getLogicalOperator(node: Parser.SyntaxNode): string | null {
+  if (node.type !== 'binary_expression' && node.type !== 'boolean_operator') {
+    return null;
+  }
+  const operator = node.childForFieldName('operator');
+  const opText = operator?.text;
+  
+  if (opText === '&&' || opText === 'and') return '&&';
+  if (opText === '||' || opText === 'or') return '||';
+  return null;
+}
+
+/**
+ * Traverse children of a node, applying nesting rules
+ */
+function traverseChildren(
+  node: Parser.SyntaxNode,
+  nestingLevel: number,
+  traverse: (n: Parser.SyntaxNode, level: number, lastOp: string | null) => void
+): void {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    
+    const isCondition = node.childForFieldName('condition') === child;
+    const childLevel = isCondition ? nestingLevel : nestingLevel + 1;
+    traverse(child, childLevel, null);
+  }
+}
+
 /**
  * Calculate cognitive complexity of a function
  * 
@@ -364,99 +412,29 @@ export function calculateComplexity(node: Parser.SyntaxNode): number {
 export function calculateCognitiveComplexity(node: Parser.SyntaxNode): number {
   let complexity = 0;
   
-  // Node types that increase complexity AND increment nesting for children
-  const nestingTypes = new Set([
-    // Common across languages
-    'if_statement',
-    'for_statement',
-    'while_statement',
-    'switch_statement',
-    'catch_clause',
-    'except_clause',      // Python
-    
-    // TypeScript/JavaScript specific
-    'do_statement',
-    'for_in_statement',
-    'for_of_statement',
-    
-    // PHP specific
-    'foreach_statement',
-    
-    // Python specific (match/case)
-    'match_statement',
-  ]);
-  
-  // Types that add complexity but DON'T nest (hybrid increments)
-  const nonNestingTypes = new Set([
-    'else_clause',        // else doesn't add nesting penalty
-    'elif_clause',        // Python elif
-    'ternary_expression', // Ternary operator
-    'conditional_expression', // Python ternary
-  ]);
-  
-  // Types that contain the body we should traverse with increased nesting
-  const bodyFieldNames = ['consequence', 'body', 'alternative'];
-  
   function traverse(n: Parser.SyntaxNode, nestingLevel: number, lastLogicalOp: string | null): void {
-    // Check for binary logical operators (&&, ||, and, or)
-    if (n.type === 'binary_expression' || n.type === 'boolean_operator') {
+    // Handle logical operators (&&, ||, and, or)
+    const logicalOp = getLogicalOperator(n);
+    if (logicalOp) {
+      if (lastLogicalOp !== logicalOp) complexity += 1;
       const operator = n.childForFieldName('operator');
-      const opText = operator?.text;
-      
-      // Only count &&, ||, and, or
-      if (opText === '&&' || opText === '||' || opText === 'and' || opText === 'or') {
-        // Normalize operator (treat 'and' as '&&', 'or' as '||')
-        const normalizedOp = (opText === 'and' || opText === '&&') ? '&&' : '||';
-        
-        // Only increment when operator CHANGES (sequence break)
-        // e.g., a && b && c = +1, but a && b || c = +2
-        if (lastLogicalOp !== normalizedOp) {
-          complexity += 1;
-        }
-        
-        // Traverse children with this operator context
-        for (let i = 0; i < n.namedChildCount; i++) {
-          const child = n.namedChild(i);
-          if (child && child !== operator) {
-            traverse(child, nestingLevel, normalizedOp);
-          }
-        }
-        return;
-      }
-    }
-    
-    // Check for nesting control structures
-    if (nestingTypes.has(n.type)) {
-      // Base increment for the structure itself
-      complexity += 1;
-      // Nesting penalty (this is the key difference from cyclomatic!)
-      complexity += nestingLevel;
-      
-      // Find and traverse children with increased nesting
       for (let i = 0; i < n.namedChildCount; i++) {
         const child = n.namedChild(i);
-        if (child) {
-          // Condition doesn't increase nesting
-          const isCondition = n.childForFieldName('condition') === child;
-          // Body/consequence/alternative increase nesting
-          const isBody = bodyFieldNames.some(field => n.childForFieldName(field) === child);
-          
-          if (isCondition) {
-            traverse(child, nestingLevel, null);
-          } else if (isBody) {
-            traverse(child, nestingLevel + 1, null);
-          } else {
-            traverse(child, nestingLevel + 1, null);
-          }
-        }
+        if (child && child !== operator) traverse(child, nestingLevel, logicalOp);
       }
       return;
     }
     
-    // Non-nesting increments (else, elif, ternary)
-    if (nonNestingTypes.has(n.type)) {
+    // Handle nesting control structures
+    if (NESTING_TYPES.has(n.type)) {
+      complexity += 1 + nestingLevel; // Base + nesting penalty
+      traverseChildren(n, nestingLevel, traverse);
+      return;
+    }
+    
+    // Handle non-nesting increments (else, elif, ternary)
+    if (NON_NESTING_TYPES.has(n.type)) {
       complexity += 1;
-      // Don't increase nesting for these
       for (let i = 0; i < n.namedChildCount; i++) {
         const child = n.namedChild(i);
         if (child) traverse(child, nestingLevel, null);
@@ -464,18 +442,12 @@ export function calculateCognitiveComplexity(node: Parser.SyntaxNode): number {
       return;
     }
     
-    // Recursion: function calling itself (adds complexity)
-    // We detect this by looking for call expressions with the same name as an ancestor function
-    // This is a simplified check - full detection would require tracking function name
-    
-    // Lambda/arrow functions nested inside other functions add nesting
-    const lambdaTypes = new Set(['arrow_function', 'function_expression', 'lambda']);
-    if (lambdaTypes.has(n.type) && nestingLevel > 0) {
-      // Nested lambda adds a nesting increment
+    // Nested lambdas add complexity
+    if (LAMBDA_TYPES.has(n.type) && nestingLevel > 0) {
       complexity += 1;
     }
     
-    // Regular traversal for other nodes
+    // Regular traversal
     for (let i = 0; i < n.namedChildCount; i++) {
       const child = n.namedChild(i);
       if (child) traverse(child, nestingLevel, null);
