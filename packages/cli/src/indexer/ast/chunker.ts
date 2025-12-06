@@ -1,7 +1,7 @@
 import type Parser from 'tree-sitter';
 import type { ASTChunk } from './types.js';
 import { parseAST, detectLanguage, isASTSupported } from './parser.js';
-import { extractSymbolInfo, extractImports } from './symbols.js';
+import { extractSymbolInfo, extractImports, calculateCognitiveComplexity } from './symbols.js';
 import { getTraverser } from './traversers/index.js';
 
 export interface ASTChunkOptions {
@@ -201,6 +201,12 @@ function createChunk(
     }
   }
   
+  // Calculate cognitive complexity for functions/methods
+  // (only for symbol types that have meaningful complexity)
+  const cognitiveComplexity = (symbolInfo?.type === 'function' || symbolInfo?.type === 'method')
+    ? calculateCognitiveComplexity(node)
+    : undefined;
+  
   return {
     content,
     metadata: {
@@ -216,6 +222,7 @@ function createChunk(
       symbolType: symbolInfo?.type,
       parentClass: symbolInfo?.parentClass,
       complexity: symbolInfo?.complexity,
+      cognitiveComplexity,
       parameters: symbolInfo?.parameters,
       signature: symbolInfo?.signature,
       imports,

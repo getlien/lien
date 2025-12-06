@@ -79,11 +79,11 @@ export async function complexityCommand(options: ComplexityOptions) {
       if (!config.complexity) {
         config.complexity = {
           enabled: true,
-          thresholds: { method: thresholdValue, file: 50, average: 6 },
+          thresholds: { method: thresholdValue, cognitive: 15, file: 50, average: 6 },
           severity: { warning: 1.0, error: 2.0 },
         };
       } else if (!config.complexity.thresholds) {
-        config.complexity.thresholds = { method: thresholdValue, file: 50, average: 6 };
+        config.complexity.thresholds = { method: thresholdValue, cognitive: 15, file: 50, average: 6 };
       } else {
         config.complexity.thresholds.method = thresholdValue;
       }

@@ -23,7 +23,10 @@ function formatViolation(
   
   const symbolText = isBold ? chalk.bold(symbolDisplay) : symbolDisplay;
   lines.push(colorFn(`  ${violation.file}:${violation.startLine}`) + chalk.dim(' - ') + symbolText);
-  lines.push(chalk.dim(`    Complexity: ${violation.complexity} (threshold: ${violation.threshold})`));
+  
+  // Show metric type (cyclomatic vs cognitive)
+  const metricLabel = violation.metricType === 'cognitive' ? 'Cognitive complexity' : 'Cyclomatic complexity';
+  lines.push(chalk.dim(`    ${metricLabel}: ${violation.complexity} (threshold: ${violation.threshold})`));
   
   let percentageText: string;
   if (violation.threshold > 0) {

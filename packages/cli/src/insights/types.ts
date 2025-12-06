@@ -13,6 +13,11 @@ export const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
  */
 export type RiskLevel = keyof typeof RISK_ORDER;
 
+/**
+ * Type of complexity metric being measured
+ */
+export type ComplexityMetricType = 'cyclomatic' | 'cognitive';
+
 export interface ComplexityViolation {
   filepath: string;
   startLine: number;
@@ -24,6 +29,8 @@ export interface ComplexityViolation {
   threshold: number;
   severity: 'warning' | 'error';
   message: string;
+  /** Type of complexity metric (cyclomatic vs cognitive) */
+  metricType: ComplexityMetricType;
 }
 
 export interface FileComplexityData {

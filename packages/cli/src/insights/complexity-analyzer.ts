@@ -80,50 +80,75 @@ export class ComplexityAnalyzer {
 
   /**
    * Find all complexity violations based on thresholds
+   * Checks both cyclomatic and cognitive complexity
    */
   private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
     const violations: ComplexityViolation[] = [];
-    const thresholds = this.config.complexity?.thresholds || { method: 10, file: 50, average: 6 };
+    const thresholds = this.config.complexity?.thresholds || { method: 10, cognitive: 15, file: 50, average: 6 };
     const severity = this.config.complexity?.severity || { warning: 1.0, error: 2.0 };
 
     for (const chunk of chunks) {
       const metadata = chunk.metadata;
       
-      // Skip chunks without complexity data or with 0 complexity
-      if (!metadata.complexity) {
-        continue;
-      }
-
       // Only check function/method complexity (not file-level yet)
       if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method') {
         continue;
       }
 
-      const baseThreshold = thresholds.method;
-      const complexity = metadata.complexity;
-      
-      // Apply severity multipliers to threshold
-      const warningThreshold = baseThreshold * severity.warning;
-      const errorThreshold = baseThreshold * severity.error;
+      // Check cyclomatic complexity
+      if (metadata.complexity) {
+        const baseThreshold = thresholds.method;
+        const complexity = metadata.complexity;
+        
+        const warningThreshold = baseThreshold * severity.warning;
+        const errorThreshold = baseThreshold * severity.error;
 
-      // Check if complexity meets or exceeds warning threshold
-      if (complexity >= warningThreshold) {
-        // Determine severity: error if exceeds error threshold, otherwise warning
-        const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
-        const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
+        if (complexity >= warningThreshold) {
+          const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
+          const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
 
-        violations.push({
-          filepath: metadata.file,
-          startLine: metadata.startLine,
-          endLine: metadata.endLine,
-          symbolName: metadata.symbolName || 'unknown',
-          symbolType: metadata.symbolType as 'function' | 'method',
-          language: metadata.language,
-          complexity,
-          threshold: Math.round(effectiveThreshold), // Show the effective threshold that was exceeded
-          severity: violationSeverity,
-          message: `${metadata.symbolType} complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`,
-        });
+          violations.push({
+            filepath: metadata.file,
+            startLine: metadata.startLine,
+            endLine: metadata.endLine,
+            symbolName: metadata.symbolName || 'unknown',
+            symbolType: metadata.symbolType as 'function' | 'method',
+            language: metadata.language,
+            complexity,
+            threshold: Math.round(effectiveThreshold),
+            severity: violationSeverity,
+            message: `Cyclomatic complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`,
+            metricType: 'cyclomatic',
+          });
+        }
+      }
+
+      // Check cognitive complexity
+      if (metadata.cognitiveComplexity) {
+        const baseThreshold = thresholds.cognitive ?? 15; // Default to 15 if not set
+        const complexity = metadata.cognitiveComplexity;
+        
+        const warningThreshold = baseThreshold * severity.warning;
+        const errorThreshold = baseThreshold * severity.error;
+
+        if (complexity >= warningThreshold) {
+          const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
+          const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
+
+          violations.push({
+            filepath: metadata.file,
+            startLine: metadata.startLine,
+            endLine: metadata.endLine,
+            symbolName: metadata.symbolName || 'unknown',
+            symbolType: metadata.symbolType as 'function' | 'method',
+            language: metadata.language,
+            complexity,
+            threshold: Math.round(effectiveThreshold),
+            severity: violationSeverity,
+            message: `Cognitive complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`,
+            metricType: 'cognitive',
+          });
+        }
       }
     }
 

@@ -39,7 +39,8 @@ export function buildReviewPrompt(
         .map((v) => {
           const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
           const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-          return `  - ${v.symbolName} (${v.symbolType}): complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
+          const metricLabel = v.metricType === 'cognitive' ? 'cognitive' : 'cyclomatic';
+          return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
         })
         .join('\n');
       return `**${filepath}** (risk: ${riskLevel})\n${violationList}`;
@@ -309,7 +310,7 @@ export function buildLineCommentPrompt(
   return `You are reviewing code for complexity. Generate an actionable review comment.
 
 **Function**: \`${violation.symbolName}\` (${violation.symbolType})
-**Complexity**: ${violation.complexity} (threshold: ${violation.threshold})
+**Complexity**: ${violation.complexity} ${violation.metricType || 'cyclomatic'} (threshold: ${violation.threshold})
 ${snippetSection}
 
 Write a code review comment that includes:
@@ -376,7 +377,7 @@ export function buildBatchedCommentsPrompt(
 
       return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
-- **Complexity**: ${v.complexity} (threshold: ${v.threshold})
+- **Complexity**: ${v.complexity} ${v.metricType || 'cyclomatic'} (threshold: ${v.threshold})
 - **Severity**: ${v.severity}${snippetSection}`;
     })
     .join('\n\n');
