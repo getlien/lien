@@ -15,7 +15,7 @@ describe('VectorDB Query Operations', () => {
       const mockTable = {
         search: vi.fn().mockReturnValue({
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'function test() {}',
               file: 'src/test.ts',
@@ -44,7 +44,7 @@ describe('VectorDB Query Operations', () => {
       const mockTable = {
         search: vi.fn().mockReturnValue({
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: '',
               file: 'src/empty.ts',
@@ -85,7 +85,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'function test() {}',
               file: 'src/test.ts',
@@ -109,7 +109,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'function testHelper() {}',
               file: 'src/test-helper.ts',
@@ -142,7 +142,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'function test() {}',
               file: 'src/test.ts',
@@ -179,7 +179,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'function test() {}',
               file: 'src/test.ts',
@@ -215,7 +215,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'function test() {}',
               file: 'src/test.ts',
@@ -253,7 +253,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'class TestClass {}',
               file: 'src/test.ts',
@@ -280,7 +280,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'interface ITest {}',
               file: 'src/test.ts',
@@ -307,7 +307,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'function testHelper() {}',
               file: 'src/test.ts',
@@ -345,7 +345,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'function testHelper() {}',
               file: 'src/test.ts',
@@ -387,7 +387,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'function test() {}',
               file: 'src/test.ts',
@@ -415,7 +415,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: '',
               file: 'src/empty.ts',
@@ -450,7 +450,7 @@ describe('VectorDB Query Operations', () => {
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockResolvedValue([
+          toArray: vi.fn().mockResolvedValue([
             {
               content: 'function test() {}',
               file: '',
