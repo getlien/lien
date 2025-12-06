@@ -447,11 +447,13 @@ export function calculateCognitiveComplexity(node: Parser.SyntaxNode): number {
     }
     
     // Handle non-nesting increments (else, elif, ternary)
+    // These add +1 complexity but no nesting penalty for themselves.
+    // However, their BODY is at the same nesting as the if body (nestingLevel + 1)
     if (NON_NESTING_TYPES.has(n.type)) {
       complexity += 1;
       for (let i = 0; i < n.namedChildCount; i++) {
         const child = n.namedChild(i);
-        if (child) traverse(child, nestingLevel, null);
+        if (child) traverse(child, nestingLevel + 1, null);
       }
       return;
     }
