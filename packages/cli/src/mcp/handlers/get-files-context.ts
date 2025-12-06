@@ -100,7 +100,7 @@ export async function handleGetFilesContext(
 
       // Warn if we hit the limit (similar to get_dependents tool)
       if (allChunks.length === SCAN_LIMIT) {
-        log(`WARNING: Scanned ${SCAN_LIMIT} chunks (limit reached). Test associations may be incomplete for large codebases.`);
+        log(`Scanned ${SCAN_LIMIT} chunks (limit reached). Test associations may be incomplete for large codebases.`, 'warning');
       }
 
       // Path normalization cache to avoid repeated string operations

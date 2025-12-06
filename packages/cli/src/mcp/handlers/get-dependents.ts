@@ -243,7 +243,7 @@ export async function handleGetDependents(
       const allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
       const hitLimit = allChunks.length === SCAN_LIMIT;
       if (hitLimit) {
-        log(`WARNING: Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete.`);
+        log(`Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete.`, 'warning');
       }
       log(`Scanning ${allChunks.length} chunks for imports...`);
 

@@ -4,6 +4,17 @@ import type { LocalEmbeddings } from '../embeddings/local.js';
 import type { LienConfig } from '../config/schema.js';
 
 /**
+ * MCP log levels matching the protocol specification.
+ */
+export type LogLevel = 'debug' | 'info' | 'notice' | 'warning' | 'error';
+
+/**
+ * Logging function type for MCP server.
+ * Supports optional log level (defaults to 'info' for informational messages).
+ */
+export type LogFn = (message: string, level?: LogLevel) => void;
+
+/**
  * Shared context passed to all tool handlers.
  * Contains dependencies and utilities needed by handlers.
  */
@@ -16,8 +27,8 @@ export interface ToolContext {
   config: LienConfig;
   /** Workspace root directory */
   rootDir: string;
-  /** Logging function (logs to stderr in MCP) */
-  log: (message: string) => void;
+  /** Logging function (logs via MCP notifications with proper levels) */
+  log: LogFn;
   /** Check if index has been updated and reconnect if needed */
   checkAndReconnect: () => Promise<void>;
   /** Get current index metadata for responses */
