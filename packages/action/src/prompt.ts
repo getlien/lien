@@ -2,6 +2,7 @@
  * Prompt builder for AI code review
  */
 
+import collect from 'collect.js';
 import type { ComplexityReport, ComplexityViolation, PRContext, ComplexityDelta, DeltaSummary } from './types.js';
 import { formatDelta } from './delta.js';
 
@@ -394,37 +395,34 @@ export function buildDescriptionBadge(
   // Build metric breakdown table with violations and deltas
   let metricTable = '';
   if (report && report.summary.totalViolations > 0) {
-    // Count violations by metric type
-    const byMetric = new Map<string, number>();
-    for (const fileData of Object.values(report.files)) {
-      for (const v of fileData.violations) {
-        const count = byMetric.get(v.metricType) || 0;
-        byMetric.set(v.metricType, count + 1);
-      }
-    }
+    // Count violations by metric type using collect.js
+    const byMetric = collect(Object.values(report.files))
+      .flatMap(f => f.violations)
+      .countBy('metricType')
+      .all() as unknown as Record<string, number>;
 
-    // Calculate delta by metric type
-    const deltaByMetric = new Map<string, number>();
-    if (deltas) {
-      for (const d of deltas) {
-        const current = deltaByMetric.get(d.metricType) || 0;
-        deltaByMetric.set(d.metricType, current + d.delta);
-      }
-    }
+    // Calculate delta by metric type using collect.js
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const deltaByMetric: Record<string, number> = deltas
+      ? collect(deltas)
+          .groupBy('metricType')
+          .map((group: any) => group.sum('delta'))
+          .all() as unknown as Record<string, number>
+      : {};
 
     // Build table rows (only show metrics with violations)
-    const rows: string[] = [];
     const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
-    for (const metricType of metricOrder) {
-      const count = byMetric.get(metricType);
-      if (count && count > 0) {
+    const rows = collect(metricOrder)
+      .filter(metricType => byMetric[metricType] > 0)
+      .map(metricType => {
         const emoji = getMetricEmoji(metricType);
         const label = getMetricLabel(metricType);
-        const delta = deltaByMetric.get(metricType) || 0;
+        const count = byMetric[metricType];
+        const delta = deltaByMetric[metricType] || 0;
         const deltaStr = deltas ? (delta >= 0 ? `+${delta}` : `${delta}`) : '—';
-        rows.push(`| ${emoji} ${label} | ${count} | ${deltaStr} |`);
-      }
-    }
+        return `| ${emoji} ${label} | ${count} | ${deltaStr} |`;
+      })
+      .all() as string[];
 
     if (rows.length > 0) {
       metricTable = `
