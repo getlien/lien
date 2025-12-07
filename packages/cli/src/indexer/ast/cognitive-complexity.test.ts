@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateCognitiveComplexity } from './symbols.js';
+import { calculateCognitiveComplexity } from './complexity/index.js';
 import { parseAST } from './parser.js';
 
 /**

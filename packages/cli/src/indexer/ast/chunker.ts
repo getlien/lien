@@ -1,7 +1,8 @@
 import type Parser from 'tree-sitter';
 import type { ASTChunk } from './types.js';
 import { parseAST, detectLanguage, isASTSupported } from './parser.js';
-import { extractSymbolInfo, extractImports, calculateCognitiveComplexity } from './symbols.js';
+import { extractSymbolInfo, extractImports } from './symbols.js';
+import { calculateCognitiveComplexity, calculateHalstead } from './complexity/index.js';
 import { getTraverser } from './traversers/index.js';
 
 export interface ASTChunkOptions {
@@ -228,8 +229,16 @@ function createChunk(
   language: string
 ): ASTChunk {
   const symbols = buildLegacySymbols(symbolInfo);
-  const cognitiveComplexity = symbolInfo?.type && COMPLEXITY_SYMBOL_TYPES.has(symbolInfo.type)
+  const shouldCalcComplexity = symbolInfo?.type && COMPLEXITY_SYMBOL_TYPES.has(symbolInfo.type);
+  
+  // Calculate complexity metrics only for functions and methods
+  const cognitiveComplexity = shouldCalcComplexity
     ? calculateCognitiveComplexity(node)
+    : undefined;
+  
+  // Calculate Halstead metrics only for functions and methods
+  const halstead = shouldCalcComplexity
+    ? calculateHalstead(node, language)
     : undefined;
   
   return {
@@ -249,6 +258,11 @@ function createChunk(
       parameters: symbolInfo?.parameters,
       signature: symbolInfo?.signature,
       imports,
+      // Halstead metrics
+      halsteadVolume: halstead?.volume,
+      halsteadDifficulty: halstead?.difficulty,
+      halsteadEffort: halstead?.effort,
+      halsteadBugs: halstead?.bugs,
     },
   };
 }

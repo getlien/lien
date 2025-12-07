@@ -7304,6 +7304,3731 @@ function removeHook(state, name, method) {
 
 /***/ }),
 
+/***/ 7543:
+/***/ ((module) => {
+
+
+/**
+ * Clone helper
+ *
+ * Clone an array or object
+ *
+ * @param items
+ * @returns {*}
+ */
+
+function _toConsumableArray(arr) { return _arrayWithoutHoles(arr) || _iterableToArray(arr) || _unsupportedIterableToArray(arr) || _nonIterableSpread(); }
+
+function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _iterableToArray(iter) { if (typeof Symbol !== "undefined" && iter[Symbol.iterator] != null || iter["@@iterator"] != null) return Array.from(iter); }
+
+function _arrayWithoutHoles(arr) { if (Array.isArray(arr)) return _arrayLikeToArray(arr); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+module.exports = function clone(items) {
+  var cloned;
+
+  if (Array.isArray(items)) {
+    var _cloned;
+
+    cloned = [];
+
+    (_cloned = cloned).push.apply(_cloned, _toConsumableArray(items));
+  } else {
+    cloned = {};
+    Object.keys(items).forEach(function (prop) {
+      cloned[prop] = items[prop];
+    });
+  }
+
+  return cloned;
+};
+
+/***/ }),
+
+/***/ 5915:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var variadic = __nccwpck_require__(677);
+/**
+ * Delete keys helper
+ *
+ * Delete one or multiple keys from an object
+ *
+ * @param obj
+ * @param keys
+ * @returns {void}
+ */
+
+
+module.exports = function deleteKeys(obj) {
+  for (var _len = arguments.length, keys = new Array(_len > 1 ? _len - 1 : 0), _key = 1; _key < _len; _key++) {
+    keys[_key - 1] = arguments[_key];
+  }
+
+  variadic(keys).forEach(function (key) {
+    // eslint-disable-next-line
+    delete obj[key];
+  });
+};
+
+/***/ }),
+
+/***/ 8524:
+/***/ ((module) => {
+
+
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+module.exports = {
+  /**
+   * @returns {boolean}
+   */
+  isArray: function isArray(item) {
+    return Array.isArray(item);
+  },
+
+  /**
+   * @returns {boolean}
+   */
+  isObject: function isObject(item) {
+    return _typeof(item) === 'object' && Array.isArray(item) === false && item !== null;
+  },
+
+  /**
+   * @returns {boolean}
+   */
+  isFunction: function isFunction(item) {
+    return typeof item === 'function';
+  }
+};
+
+/***/ }),
+
+/***/ 2634:
+/***/ ((module) => {
+
+
+/**
+ * Get value of a nested property
+ *
+ * @param mainObject
+ * @param key
+ * @returns {*}
+ */
+
+module.exports = function nestedValue(mainObject, key) {
+  try {
+    return key.split('.').reduce(function (obj, property) {
+      return obj[property];
+    }, mainObject);
+  } catch (err) {
+    // If we end up here, we're not working with an object, and @var mainObject is the value itself
+    return mainObject;
+  }
+};
+
+/***/ }),
+
+/***/ 3962:
+/***/ ((module) => {
+
+
+/**
+ * Values helper
+ *
+ * Retrieve values from [this.items] when it is an array, object or Collection
+ *
+ * @param items
+ * @returns {*}
+ */
+
+function _toConsumableArray(arr) { return _arrayWithoutHoles(arr) || _iterableToArray(arr) || _unsupportedIterableToArray(arr) || _nonIterableSpread(); }
+
+function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _iterableToArray(iter) { if (typeof Symbol !== "undefined" && iter[Symbol.iterator] != null || iter["@@iterator"] != null) return Array.from(iter); }
+
+function _arrayWithoutHoles(arr) { if (Array.isArray(arr)) return _arrayLikeToArray(arr); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+module.exports = function values(items) {
+  var valuesArray = [];
+
+  if (Array.isArray(items)) {
+    valuesArray.push.apply(valuesArray, _toConsumableArray(items));
+  } else if (items.constructor.name === 'Collection') {
+    valuesArray.push.apply(valuesArray, _toConsumableArray(items.all()));
+  } else {
+    Object.keys(items).forEach(function (prop) {
+      return valuesArray.push(items[prop]);
+    });
+  }
+
+  return valuesArray;
+};
+
+/***/ }),
+
+/***/ 677:
+/***/ ((module) => {
+
+
+/**
+ * Variadic helper function
+ *
+ * @param args
+ * @returns {Array}
+ */
+
+module.exports = function variadic(args) {
+  if (Array.isArray(args[0])) {
+    return args[0];
+  }
+
+  return args;
+};
+
+/***/ }),
+
+/***/ 2564:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+function Collection(collection) {
+  if (collection !== undefined && !Array.isArray(collection) && _typeof(collection) !== 'object') {
+    this.items = [collection];
+  } else if (collection instanceof this.constructor) {
+    this.items = collection.all();
+  } else {
+    this.items = collection || [];
+  }
+}
+/**
+ * Symbol.iterator
+ * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/iterator
+ */
+
+
+var SymbolIterator = __nccwpck_require__(1789);
+
+if (typeof Symbol !== 'undefined') {
+  Collection.prototype[Symbol.iterator] = SymbolIterator;
+}
+/**
+ * Support JSON.stringify
+ * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify
+ */
+
+
+Collection.prototype.toJSON = function toJSON() {
+  return this.items;
+};
+
+Collection.prototype.all = __nccwpck_require__(1446);
+Collection.prototype.average = __nccwpck_require__(7854);
+Collection.prototype.avg = __nccwpck_require__(6797);
+Collection.prototype.chunk = __nccwpck_require__(4472);
+Collection.prototype.collapse = __nccwpck_require__(8682);
+Collection.prototype.combine = __nccwpck_require__(6584);
+Collection.prototype.concat = __nccwpck_require__(1689);
+Collection.prototype.contains = __nccwpck_require__(1776);
+Collection.prototype.containsOneItem = __nccwpck_require__(5565);
+Collection.prototype.count = __nccwpck_require__(1590);
+Collection.prototype.countBy = __nccwpck_require__(6043);
+Collection.prototype.crossJoin = __nccwpck_require__(6493);
+Collection.prototype.dd = __nccwpck_require__(9129);
+Collection.prototype.diff = __nccwpck_require__(8790);
+Collection.prototype.diffAssoc = __nccwpck_require__(3883);
+Collection.prototype.diffKeys = __nccwpck_require__(2326);
+Collection.prototype.diffUsing = __nccwpck_require__(164);
+Collection.prototype.doesntContain = __nccwpck_require__(6276);
+Collection.prototype.dump = __nccwpck_require__(2379);
+Collection.prototype.duplicates = __nccwpck_require__(8595);
+Collection.prototype.each = __nccwpck_require__(1392);
+Collection.prototype.eachSpread = __nccwpck_require__(8403);
+Collection.prototype.every = __nccwpck_require__(5998);
+Collection.prototype.except = __nccwpck_require__(1936);
+Collection.prototype.filter = __nccwpck_require__(6359);
+Collection.prototype.first = __nccwpck_require__(3707);
+Collection.prototype.firstOrFail = __nccwpck_require__(6258);
+Collection.prototype.firstWhere = __nccwpck_require__(5356);
+Collection.prototype.flatMap = __nccwpck_require__(8398);
+Collection.prototype.flatten = __nccwpck_require__(1631);
+Collection.prototype.flip = __nccwpck_require__(5790);
+Collection.prototype.forPage = __nccwpck_require__(1513);
+Collection.prototype.forget = __nccwpck_require__(5148);
+Collection.prototype.get = __nccwpck_require__(8925);
+Collection.prototype.groupBy = __nccwpck_require__(9583);
+Collection.prototype.has = __nccwpck_require__(3489);
+Collection.prototype.implode = __nccwpck_require__(193);
+Collection.prototype.intersect = __nccwpck_require__(3876);
+Collection.prototype.intersectByKeys = __nccwpck_require__(993);
+Collection.prototype.isEmpty = __nccwpck_require__(7636);
+Collection.prototype.isNotEmpty = __nccwpck_require__(9779);
+Collection.prototype.join = __nccwpck_require__(7069);
+Collection.prototype.keyBy = __nccwpck_require__(7995);
+Collection.prototype.keys = __nccwpck_require__(9869);
+Collection.prototype.last = __nccwpck_require__(1605);
+Collection.prototype.macro = __nccwpck_require__(9101);
+Collection.prototype.make = __nccwpck_require__(11);
+Collection.prototype.map = __nccwpck_require__(9479);
+Collection.prototype.mapSpread = __nccwpck_require__(1540);
+Collection.prototype.mapToDictionary = __nccwpck_require__(1914);
+Collection.prototype.mapInto = __nccwpck_require__(5149);
+Collection.prototype.mapToGroups = __nccwpck_require__(7058);
+Collection.prototype.mapWithKeys = __nccwpck_require__(6035);
+Collection.prototype.max = __nccwpck_require__(3535);
+Collection.prototype.median = __nccwpck_require__(9263);
+Collection.prototype.merge = __nccwpck_require__(4385);
+Collection.prototype.mergeRecursive = __nccwpck_require__(6429);
+Collection.prototype.min = __nccwpck_require__(8373);
+Collection.prototype.mode = __nccwpck_require__(9670);
+Collection.prototype.nth = __nccwpck_require__(9883);
+Collection.prototype.only = __nccwpck_require__(6671);
+Collection.prototype.pad = __nccwpck_require__(7884);
+Collection.prototype.partition = __nccwpck_require__(3187);
+Collection.prototype.pipe = __nccwpck_require__(5445);
+Collection.prototype.pluck = __nccwpck_require__(9992);
+Collection.prototype.pop = __nccwpck_require__(5086);
+Collection.prototype.prepend = __nccwpck_require__(53);
+Collection.prototype.pull = __nccwpck_require__(3638);
+Collection.prototype.push = __nccwpck_require__(3657);
+Collection.prototype.put = __nccwpck_require__(904);
+Collection.prototype.random = __nccwpck_require__(6210);
+Collection.prototype.reduce = __nccwpck_require__(6475);
+Collection.prototype.reject = __nccwpck_require__(566);
+Collection.prototype.replace = __nccwpck_require__(7357);
+Collection.prototype.replaceRecursive = __nccwpck_require__(8497);
+Collection.prototype.reverse = __nccwpck_require__(2135);
+Collection.prototype.search = __nccwpck_require__(8129);
+Collection.prototype.shift = __nccwpck_require__(8145);
+Collection.prototype.shuffle = __nccwpck_require__(3076);
+Collection.prototype.skip = __nccwpck_require__(4102);
+Collection.prototype.skipUntil = __nccwpck_require__(7684);
+Collection.prototype.skipWhile = __nccwpck_require__(3177);
+Collection.prototype.slice = __nccwpck_require__(6395);
+Collection.prototype.sole = __nccwpck_require__(360);
+Collection.prototype.some = __nccwpck_require__(8993);
+Collection.prototype.sort = __nccwpck_require__(6329);
+Collection.prototype.sortDesc = __nccwpck_require__(9628);
+Collection.prototype.sortBy = __nccwpck_require__(980);
+Collection.prototype.sortByDesc = __nccwpck_require__(8053);
+Collection.prototype.sortKeys = __nccwpck_require__(9613);
+Collection.prototype.sortKeysDesc = __nccwpck_require__(9488);
+Collection.prototype.splice = __nccwpck_require__(7369);
+Collection.prototype.split = __nccwpck_require__(3353);
+Collection.prototype.sum = __nccwpck_require__(1973);
+Collection.prototype.take = __nccwpck_require__(2374);
+Collection.prototype.takeUntil = __nccwpck_require__(2388);
+Collection.prototype.takeWhile = __nccwpck_require__(9897);
+Collection.prototype.tap = __nccwpck_require__(2436);
+Collection.prototype.times = __nccwpck_require__(8275);
+Collection.prototype.toArray = __nccwpck_require__(9087);
+Collection.prototype.toJson = __nccwpck_require__(6810);
+Collection.prototype.transform = __nccwpck_require__(4129);
+Collection.prototype.undot = __nccwpck_require__(8359);
+Collection.prototype.unless = __nccwpck_require__(9775);
+Collection.prototype.unlessEmpty = __nccwpck_require__(5871);
+Collection.prototype.unlessNotEmpty = __nccwpck_require__(6016);
+Collection.prototype.union = __nccwpck_require__(6430);
+Collection.prototype.unique = __nccwpck_require__(1346);
+Collection.prototype.unwrap = __nccwpck_require__(5206);
+Collection.prototype.values = __nccwpck_require__(9355);
+Collection.prototype.when = __nccwpck_require__(7809);
+Collection.prototype.whenEmpty = __nccwpck_require__(6016);
+Collection.prototype.whenNotEmpty = __nccwpck_require__(5871);
+Collection.prototype.where = __nccwpck_require__(710);
+Collection.prototype.whereBetween = __nccwpck_require__(4340);
+Collection.prototype.whereIn = __nccwpck_require__(1409);
+Collection.prototype.whereInstanceOf = __nccwpck_require__(4024);
+Collection.prototype.whereNotBetween = __nccwpck_require__(9165);
+Collection.prototype.whereNotIn = __nccwpck_require__(270);
+Collection.prototype.whereNull = __nccwpck_require__(5115);
+Collection.prototype.whereNotNull = __nccwpck_require__(2960);
+Collection.prototype.wrap = __nccwpck_require__(8597);
+Collection.prototype.zip = __nccwpck_require__(9190);
+
+var collect = function collect(collection) {
+  return new Collection(collection);
+};
+
+module.exports = collect;
+module.exports.collect = collect;
+module.exports["default"] = collect;
+module.exports.Collection = Collection;
+
+/***/ }),
+
+/***/ 1446:
+/***/ ((module) => {
+
+
+
+module.exports = function all() {
+  return this.items;
+};
+
+/***/ }),
+
+/***/ 7854:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function average(key) {
+  if (key === undefined) {
+    return this.sum() / this.items.length;
+  }
+
+  if (isFunction(key)) {
+    return new this.constructor(this.items).sum(key) / this.items.length;
+  }
+
+  return new this.constructor(this.items).pluck(key).sum() / this.items.length;
+};
+
+/***/ }),
+
+/***/ 6797:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var average = __nccwpck_require__(7854);
+
+module.exports = average;
+
+/***/ }),
+
+/***/ 4472:
+/***/ ((module) => {
+
+
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+module.exports = function chunk(size) {
+  var _this = this;
+
+  var chunks = [];
+  var index = 0;
+
+  if (Array.isArray(this.items)) {
+    do {
+      var items = this.items.slice(index, index + size);
+      var collection = new this.constructor(items);
+      chunks.push(collection);
+      index += size;
+    } while (index < this.items.length);
+  } else if (_typeof(this.items) === 'object') {
+    var keys = Object.keys(this.items);
+
+    var _loop = function _loop() {
+      var keysOfChunk = keys.slice(index, index + size);
+      var collection = new _this.constructor({});
+      keysOfChunk.forEach(function (key) {
+        return collection.put(key, _this.items[key]);
+      });
+      chunks.push(collection);
+      index += size;
+    };
+
+    do {
+      _loop();
+    } while (index < keys.length);
+  } else {
+    chunks.push(new this.constructor([this.items]));
+  }
+
+  return new this.constructor(chunks);
+};
+
+/***/ }),
+
+/***/ 8682:
+/***/ ((module) => {
+
+
+
+function _toConsumableArray(arr) { return _arrayWithoutHoles(arr) || _iterableToArray(arr) || _unsupportedIterableToArray(arr) || _nonIterableSpread(); }
+
+function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _iterableToArray(iter) { if (typeof Symbol !== "undefined" && iter[Symbol.iterator] != null || iter["@@iterator"] != null) return Array.from(iter); }
+
+function _arrayWithoutHoles(arr) { if (Array.isArray(arr)) return _arrayLikeToArray(arr); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+module.exports = function collapse() {
+  var _ref;
+
+  return new this.constructor((_ref = []).concat.apply(_ref, _toConsumableArray(this.items)));
+};
+
+/***/ }),
+
+/***/ 6584:
+/***/ ((module) => {
+
+
+
+function _slicedToArray(arr, i) { return _arrayWithHoles(arr) || _iterableToArrayLimit(arr, i) || _unsupportedIterableToArray(arr, i) || _nonIterableRest(); }
+
+function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+function _iterableToArrayLimit(arr, i) { var _i = arr == null ? null : typeof Symbol !== "undefined" && arr[Symbol.iterator] || arr["@@iterator"]; if (_i == null) return; var _arr = []; var _n = true; var _d = false; var _s, _e; try { for (_i = _i.call(arr); !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"] != null) _i["return"](); } finally { if (_d) throw _e; } } return _arr; }
+
+function _arrayWithHoles(arr) { if (Array.isArray(arr)) return arr; }
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+module.exports = function combine(array) {
+  var _this = this;
+
+  var values = array;
+
+  if (values instanceof this.constructor) {
+    values = array.all();
+  }
+
+  var collection = {};
+
+  if (Array.isArray(this.items) && Array.isArray(values)) {
+    this.items.forEach(function (key, iterator) {
+      collection[key] = values[iterator];
+    });
+  } else if (_typeof(this.items) === 'object' && _typeof(values) === 'object') {
+    Object.keys(this.items).forEach(function (key, index) {
+      collection[_this.items[key]] = values[Object.keys(values)[index]];
+    });
+  } else if (Array.isArray(this.items)) {
+    collection[this.items[0]] = values;
+  } else if (typeof this.items === 'string' && Array.isArray(values)) {
+    var _values = values;
+
+    var _values2 = _slicedToArray(_values, 1);
+
+    collection[this.items] = _values2[0];
+  } else if (typeof this.items === 'string') {
+    collection[this.items] = values;
+  }
+
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 1689:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+var clone = __nccwpck_require__(7543);
+
+module.exports = function concat(collectionOrArrayOrObject) {
+  var list = collectionOrArrayOrObject;
+
+  if (collectionOrArrayOrObject instanceof this.constructor) {
+    list = collectionOrArrayOrObject.all();
+  } else if (_typeof(collectionOrArrayOrObject) === 'object') {
+    list = [];
+    Object.keys(collectionOrArrayOrObject).forEach(function (property) {
+      list.push(collectionOrArrayOrObject[property]);
+    });
+  }
+
+  var collection = clone(this.items);
+  list.forEach(function (item) {
+    if (_typeof(item) === 'object') {
+      Object.keys(item).forEach(function (key) {
+        return collection.push(item[key]);
+      });
+    } else {
+      collection.push(item);
+    }
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 1776:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+function _toConsumableArray(arr) { return _arrayWithoutHoles(arr) || _iterableToArray(arr) || _unsupportedIterableToArray(arr) || _nonIterableSpread(); }
+
+function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _iterableToArray(iter) { if (typeof Symbol !== "undefined" && iter[Symbol.iterator] != null || iter["@@iterator"] != null) return Array.from(iter); }
+
+function _arrayWithoutHoles(arr) { if (Array.isArray(arr)) return _arrayLikeToArray(arr); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+var values = __nccwpck_require__(3962);
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function contains(key, value) {
+  if (value !== undefined) {
+    if (Array.isArray(this.items)) {
+      return this.items.filter(function (items) {
+        return items[key] !== undefined && items[key] === value;
+      }).length > 0;
+    }
+
+    return this.items[key] !== undefined && this.items[key] === value;
+  }
+
+  if (isFunction(key)) {
+    return this.items.filter(function (item, index) {
+      return key(item, index);
+    }).length > 0;
+  }
+
+  if (Array.isArray(this.items)) {
+    return this.items.indexOf(key) !== -1;
+  }
+
+  var keysAndValues = values(this.items);
+  keysAndValues.push.apply(keysAndValues, _toConsumableArray(Object.keys(this.items)));
+  return keysAndValues.indexOf(key) !== -1;
+};
+
+/***/ }),
+
+/***/ 5565:
+/***/ ((module) => {
+
+
+
+module.exports = function containsOneItem() {
+  return this.count() === 1;
+};
+
+/***/ }),
+
+/***/ 1590:
+/***/ ((module) => {
+
+
+
+module.exports = function count() {
+  var arrayLength = 0;
+
+  if (Array.isArray(this.items)) {
+    arrayLength = this.items.length;
+  }
+
+  return Math.max(Object.keys(this.items).length, arrayLength);
+};
+
+/***/ }),
+
+/***/ 6043:
+/***/ ((module) => {
+
+
+
+module.exports = function countBy() {
+  var fn = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : function (value) {
+    return value;
+  };
+  return new this.constructor(this.items).groupBy(fn).map(function (value) {
+    return value.count();
+  });
+};
+
+/***/ }),
+
+/***/ 6493:
+/***/ ((module) => {
+
+
+
+module.exports = function crossJoin() {
+  function join(collection, constructor, args) {
+    var current = args[0];
+
+    if (current instanceof constructor) {
+      current = current.all();
+    }
+
+    var rest = args.slice(1);
+    var last = !rest.length;
+    var result = [];
+
+    for (var i = 0; i < current.length; i += 1) {
+      var collectionCopy = collection.slice();
+      collectionCopy.push(current[i]);
+
+      if (last) {
+        result.push(collectionCopy);
+      } else {
+        result = result.concat(join(collectionCopy, constructor, rest));
+      }
+    }
+
+    return result;
+  }
+
+  for (var _len = arguments.length, values = new Array(_len), _key = 0; _key < _len; _key++) {
+    values[_key] = arguments[_key];
+  }
+
+  return new this.constructor(join([], this.constructor, [].concat([this.items], values)));
+};
+
+/***/ }),
+
+/***/ 9129:
+/***/ ((module) => {
+
+
+
+module.exports = function dd() {
+  this.dump();
+
+  if (typeof process !== 'undefined') {
+    process.exit(1);
+  }
+};
+
+/***/ }),
+
+/***/ 8790:
+/***/ ((module) => {
+
+
+
+module.exports = function diff(values) {
+  var valuesToDiff;
+
+  if (values instanceof this.constructor) {
+    valuesToDiff = values.all();
+  } else {
+    valuesToDiff = values;
+  }
+
+  var collection = this.items.filter(function (item) {
+    return valuesToDiff.indexOf(item) === -1;
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 3883:
+/***/ ((module) => {
+
+
+
+module.exports = function diffAssoc(values) {
+  var _this = this;
+
+  var diffValues = values;
+
+  if (values instanceof this.constructor) {
+    diffValues = values.all();
+  }
+
+  var collection = {};
+  Object.keys(this.items).forEach(function (key) {
+    if (diffValues[key] === undefined || diffValues[key] !== _this.items[key]) {
+      collection[key] = _this.items[key];
+    }
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 2326:
+/***/ ((module) => {
+
+
+
+module.exports = function diffKeys(object) {
+  var objectToDiff;
+
+  if (object instanceof this.constructor) {
+    objectToDiff = object.all();
+  } else {
+    objectToDiff = object;
+  }
+
+  var objectKeys = Object.keys(objectToDiff);
+  var remainingKeys = Object.keys(this.items).filter(function (item) {
+    return objectKeys.indexOf(item) === -1;
+  });
+  return new this.constructor(this.items).only(remainingKeys);
+};
+
+/***/ }),
+
+/***/ 164:
+/***/ ((module) => {
+
+
+
+module.exports = function diffUsing(values, callback) {
+  var collection = this.items.filter(function (item) {
+    return !(values && values.some(function (otherItem) {
+      return callback(item, otherItem) === 0;
+    }));
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 6276:
+/***/ ((module) => {
+
+
+
+module.exports = function contains(key, value) {
+  return !this.contains(key, value);
+};
+
+/***/ }),
+
+/***/ 2379:
+/***/ ((module) => {
+
+
+
+module.exports = function dump() {
+  // eslint-disable-next-line
+  console.log(this);
+  return this;
+};
+
+/***/ }),
+
+/***/ 8595:
+/***/ ((module) => {
+
+
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+module.exports = function duplicates() {
+  var _this = this;
+
+  var occuredValues = [];
+  var duplicateValues = {};
+
+  var stringifiedValue = function stringifiedValue(value) {
+    if (Array.isArray(value) || _typeof(value) === 'object') {
+      return JSON.stringify(value);
+    }
+
+    return value;
+  };
+
+  if (Array.isArray(this.items)) {
+    this.items.forEach(function (value, index) {
+      var valueAsString = stringifiedValue(value);
+
+      if (occuredValues.indexOf(valueAsString) === -1) {
+        occuredValues.push(valueAsString);
+      } else {
+        duplicateValues[index] = value;
+      }
+    });
+  } else if (_typeof(this.items) === 'object') {
+    Object.keys(this.items).forEach(function (key) {
+      var valueAsString = stringifiedValue(_this.items[key]);
+
+      if (occuredValues.indexOf(valueAsString) === -1) {
+        occuredValues.push(valueAsString);
+      } else {
+        duplicateValues[key] = _this.items[key];
+      }
+    });
+  }
+
+  return new this.constructor(duplicateValues);
+};
+
+/***/ }),
+
+/***/ 1392:
+/***/ ((module) => {
+
+
+
+module.exports = function each(fn) {
+  var stop = false;
+
+  if (Array.isArray(this.items)) {
+    var length = this.items.length;
+
+    for (var index = 0; index < length && !stop; index += 1) {
+      stop = fn(this.items[index], index, this.items) === false;
+    }
+  } else {
+    var keys = Object.keys(this.items);
+    var _length = keys.length;
+
+    for (var _index = 0; _index < _length && !stop; _index += 1) {
+      var key = keys[_index];
+      stop = fn(this.items[key], key, this.items) === false;
+    }
+  }
+
+  return this;
+};
+
+/***/ }),
+
+/***/ 8403:
+/***/ ((module) => {
+
+
+
+function _toConsumableArray(arr) { return _arrayWithoutHoles(arr) || _iterableToArray(arr) || _unsupportedIterableToArray(arr) || _nonIterableSpread(); }
+
+function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _iterableToArray(iter) { if (typeof Symbol !== "undefined" && iter[Symbol.iterator] != null || iter["@@iterator"] != null) return Array.from(iter); }
+
+function _arrayWithoutHoles(arr) { if (Array.isArray(arr)) return _arrayLikeToArray(arr); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+module.exports = function eachSpread(fn) {
+  this.each(function (values, key) {
+    fn.apply(void 0, _toConsumableArray(values).concat([key]));
+  });
+  return this;
+};
+
+/***/ }),
+
+/***/ 5998:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var values = __nccwpck_require__(3962);
+
+module.exports = function every(fn) {
+  var items = values(this.items);
+  return items.every(fn);
+};
+
+/***/ }),
+
+/***/ 1936:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var variadic = __nccwpck_require__(677);
+
+module.exports = function except() {
+  var _this = this;
+
+  for (var _len = arguments.length, args = new Array(_len), _key = 0; _key < _len; _key++) {
+    args[_key] = arguments[_key];
+  }
+
+  var properties = variadic(args);
+
+  if (Array.isArray(this.items)) {
+    var _collection = this.items.filter(function (item) {
+      return properties.indexOf(item) === -1;
+    });
+
+    return new this.constructor(_collection);
+  }
+
+  var collection = {};
+  Object.keys(this.items).forEach(function (property) {
+    if (properties.indexOf(property) === -1) {
+      collection[property] = _this.items[property];
+    }
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 6359:
+/***/ ((module) => {
+
+
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+function falsyValue(item) {
+  if (Array.isArray(item)) {
+    if (item.length) {
+      return false;
+    }
+  } else if (item !== undefined && item !== null && _typeof(item) === 'object') {
+    if (Object.keys(item).length) {
+      return false;
+    }
+  } else if (item) {
+    return false;
+  }
+
+  return true;
+}
+
+function filterObject(func, items) {
+  var result = {};
+  Object.keys(items).forEach(function (key) {
+    if (func) {
+      if (func(items[key], key)) {
+        result[key] = items[key];
+      }
+    } else if (!falsyValue(items[key])) {
+      result[key] = items[key];
+    }
+  });
+  return result;
+}
+
+function filterArray(func, items) {
+  if (func) {
+    return items.filter(func);
+  }
+
+  var result = [];
+
+  for (var i = 0; i < items.length; i += 1) {
+    var item = items[i];
+
+    if (!falsyValue(item)) {
+      result.push(item);
+    }
+  }
+
+  return result;
+}
+
+module.exports = function filter(fn) {
+  var func = fn || false;
+  var filteredItems = null;
+
+  if (Array.isArray(this.items)) {
+    filteredItems = filterArray(func, this.items);
+  } else {
+    filteredItems = filterObject(func, this.items);
+  }
+
+  return new this.constructor(filteredItems);
+};
+
+/***/ }),
+
+/***/ 3707:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function first(fn, defaultValue) {
+  if (isFunction(fn)) {
+    var keys = Object.keys(this.items);
+
+    for (var i = 0; i < keys.length; i += 1) {
+      var key = keys[i];
+      var item = this.items[key];
+
+      if (fn(item, key)) {
+        return item;
+      }
+    }
+
+    if (isFunction(defaultValue)) {
+      return defaultValue();
+    }
+
+    return defaultValue;
+  }
+
+  if (Array.isArray(this.items) && this.items.length || Object.keys(this.items).length) {
+    if (Array.isArray(this.items)) {
+      return this.items[0];
+    }
+
+    var firstKey = Object.keys(this.items)[0];
+    return this.items[firstKey];
+  }
+
+  if (isFunction(defaultValue)) {
+    return defaultValue();
+  }
+
+  return defaultValue;
+};
+
+/***/ }),
+
+/***/ 6258:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function firstOrFail(key, operator, value) {
+  if (isFunction(key)) {
+    return this.first(key, function () {
+      throw new Error('Item not found.');
+    });
+  }
+
+  var collection = this.where(key, operator, value);
+
+  if (collection.isEmpty()) {
+    throw new Error('Item not found.');
+  }
+
+  return collection.first();
+};
+
+/***/ }),
+
+/***/ 5356:
+/***/ ((module) => {
+
+
+
+module.exports = function firstWhere(key, operator, value) {
+  return this.where(key, operator, value).first() || null;
+};
+
+/***/ }),
+
+/***/ 8398:
+/***/ ((module) => {
+
+
+
+module.exports = function flatMap(fn) {
+  return this.map(fn).collapse();
+};
+
+/***/ }),
+
+/***/ 1631:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isArray = _require.isArray,
+    isObject = _require.isObject;
+
+module.exports = function flatten(depth) {
+  var flattenDepth = depth || Infinity;
+  var fullyFlattened = false;
+  var collection = [];
+
+  var flat = function flat(items) {
+    collection = [];
+
+    if (isArray(items)) {
+      items.forEach(function (item) {
+        if (isArray(item)) {
+          collection = collection.concat(item);
+        } else if (isObject(item)) {
+          Object.keys(item).forEach(function (property) {
+            collection = collection.concat(item[property]);
+          });
+        } else {
+          collection.push(item);
+        }
+      });
+    } else {
+      Object.keys(items).forEach(function (property) {
+        if (isArray(items[property])) {
+          collection = collection.concat(items[property]);
+        } else if (isObject(items[property])) {
+          Object.keys(items[property]).forEach(function (prop) {
+            collection = collection.concat(items[property][prop]);
+          });
+        } else {
+          collection.push(items[property]);
+        }
+      });
+    }
+
+    fullyFlattened = collection.filter(function (item) {
+      return isObject(item);
+    });
+    fullyFlattened = fullyFlattened.length === 0;
+    flattenDepth -= 1;
+  };
+
+  flat(this.items);
+
+  while (!fullyFlattened && flattenDepth > 0) {
+    flat(collection);
+  }
+
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 5790:
+/***/ ((module) => {
+
+
+
+module.exports = function flip() {
+  var _this = this;
+
+  var collection = {};
+
+  if (Array.isArray(this.items)) {
+    Object.keys(this.items).forEach(function (key) {
+      collection[_this.items[key]] = Number(key);
+    });
+  } else {
+    Object.keys(this.items).forEach(function (key) {
+      collection[_this.items[key]] = key;
+    });
+  }
+
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 1513:
+/***/ ((module) => {
+
+
+
+module.exports = function forPage(page, chunk) {
+  var _this = this;
+
+  var collection = {};
+
+  if (Array.isArray(this.items)) {
+    collection = this.items.slice(page * chunk - chunk, page * chunk);
+  } else {
+    Object.keys(this.items).slice(page * chunk - chunk, page * chunk).forEach(function (key) {
+      collection[key] = _this.items[key];
+    });
+  }
+
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 5148:
+/***/ ((module) => {
+
+
+
+module.exports = function forget(key) {
+  if (Array.isArray(this.items)) {
+    this.items.splice(key, 1);
+  } else {
+    delete this.items[key];
+  }
+
+  return this;
+};
+
+/***/ }),
+
+/***/ 8925:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function get(key) {
+  var defaultValue = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
+
+  if (this.items[key] !== undefined) {
+    return this.items[key];
+  }
+
+  if (isFunction(defaultValue)) {
+    return defaultValue();
+  }
+
+  if (defaultValue !== null) {
+    return defaultValue;
+  }
+
+  return null;
+};
+
+/***/ }),
+
+/***/ 9583:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var nestedValue = __nccwpck_require__(2634);
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function groupBy(key) {
+  var _this = this;
+
+  var collection = {};
+  this.items.forEach(function (item, index) {
+    var resolvedKey;
+
+    if (isFunction(key)) {
+      resolvedKey = key(item, index);
+    } else if (nestedValue(item, key) || nestedValue(item, key) === 0) {
+      resolvedKey = nestedValue(item, key);
+    } else {
+      resolvedKey = '';
+    }
+
+    if (collection[resolvedKey] === undefined) {
+      collection[resolvedKey] = new _this.constructor([]);
+    }
+
+    collection[resolvedKey].push(item);
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 3489:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var variadic = __nccwpck_require__(677);
+
+module.exports = function has() {
+  var _this = this;
+
+  for (var _len = arguments.length, args = new Array(_len), _key = 0; _key < _len; _key++) {
+    args[_key] = arguments[_key];
+  }
+
+  var properties = variadic(args);
+  return properties.filter(function (key) {
+    return Object.hasOwnProperty.call(_this.items, key);
+  }).length === properties.length;
+};
+
+/***/ }),
+
+/***/ 193:
+/***/ ((module) => {
+
+
+
+module.exports = function implode(key, glue) {
+  if (glue === undefined) {
+    return this.items.join(key);
+  }
+
+  return new this.constructor(this.items).pluck(key).all().join(glue);
+};
+
+/***/ }),
+
+/***/ 3876:
+/***/ ((module) => {
+
+
+
+module.exports = function intersect(values) {
+  var intersectValues = values;
+
+  if (values instanceof this.constructor) {
+    intersectValues = values.all();
+  }
+
+  var collection = this.items.filter(function (item) {
+    return intersectValues.indexOf(item) !== -1;
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 993:
+/***/ ((module) => {
+
+
+
+module.exports = function intersectByKeys(values) {
+  var _this = this;
+
+  var intersectKeys = Object.keys(values);
+
+  if (values instanceof this.constructor) {
+    intersectKeys = Object.keys(values.all());
+  }
+
+  var collection = {};
+  Object.keys(this.items).forEach(function (key) {
+    if (intersectKeys.indexOf(key) !== -1) {
+      collection[key] = _this.items[key];
+    }
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 7636:
+/***/ ((module) => {
+
+
+
+module.exports = function isEmpty() {
+  if (Array.isArray(this.items)) {
+    return !this.items.length;
+  }
+
+  return !Object.keys(this.items).length;
+};
+
+/***/ }),
+
+/***/ 9779:
+/***/ ((module) => {
+
+
+
+module.exports = function isNotEmpty() {
+  return !this.isEmpty();
+};
+
+/***/ }),
+
+/***/ 7069:
+/***/ ((module) => {
+
+
+
+module.exports = function join(glue, finalGlue) {
+  var collection = this.values();
+
+  if (finalGlue === undefined) {
+    return collection.implode(glue);
+  }
+
+  var count = collection.count();
+
+  if (count === 0) {
+    return '';
+  }
+
+  if (count === 1) {
+    return collection.last();
+  }
+
+  var finalItem = collection.pop();
+  return collection.implode(glue) + finalGlue + finalItem;
+};
+
+/***/ }),
+
+/***/ 7995:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var nestedValue = __nccwpck_require__(2634);
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function keyBy(key) {
+  var collection = {};
+
+  if (isFunction(key)) {
+    this.items.forEach(function (item) {
+      collection[key(item)] = item;
+    });
+  } else {
+    this.items.forEach(function (item) {
+      var keyValue = nestedValue(item, key);
+      collection[keyValue || ''] = item;
+    });
+  }
+
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 9869:
+/***/ ((module) => {
+
+
+
+module.exports = function keys() {
+  var collection = Object.keys(this.items);
+
+  if (Array.isArray(this.items)) {
+    collection = collection.map(Number);
+  }
+
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 1605:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function last(fn, defaultValue) {
+  var items = this.items;
+
+  if (isFunction(fn)) {
+    items = this.filter(fn).all();
+  }
+
+  if (Array.isArray(items) && !items.length || !Object.keys(items).length) {
+    if (isFunction(defaultValue)) {
+      return defaultValue();
+    }
+
+    return defaultValue;
+  }
+
+  if (Array.isArray(items)) {
+    return items[items.length - 1];
+  }
+
+  var keys = Object.keys(items);
+  return items[keys[keys.length - 1]];
+};
+
+/***/ }),
+
+/***/ 9101:
+/***/ ((module) => {
+
+
+
+module.exports = function macro(name, fn) {
+  this.constructor.prototype[name] = fn;
+};
+
+/***/ }),
+
+/***/ 11:
+/***/ ((module) => {
+
+
+
+module.exports = function make() {
+  var items = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : [];
+  return new this.constructor(items);
+};
+
+/***/ }),
+
+/***/ 9479:
+/***/ ((module) => {
+
+
+
+module.exports = function map(fn) {
+  var _this = this;
+
+  if (Array.isArray(this.items)) {
+    return new this.constructor(this.items.map(fn));
+  }
+
+  var collection = {};
+  Object.keys(this.items).forEach(function (key) {
+    collection[key] = fn(_this.items[key], key);
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 5149:
+/***/ ((module) => {
+
+
+
+module.exports = function mapInto(ClassName) {
+  return this.map(function (value, key) {
+    return new ClassName(value, key);
+  });
+};
+
+/***/ }),
+
+/***/ 1540:
+/***/ ((module) => {
+
+
+
+function _toConsumableArray(arr) { return _arrayWithoutHoles(arr) || _iterableToArray(arr) || _unsupportedIterableToArray(arr) || _nonIterableSpread(); }
+
+function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _iterableToArray(iter) { if (typeof Symbol !== "undefined" && iter[Symbol.iterator] != null || iter["@@iterator"] != null) return Array.from(iter); }
+
+function _arrayWithoutHoles(arr) { if (Array.isArray(arr)) return _arrayLikeToArray(arr); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+module.exports = function mapSpread(fn) {
+  return this.map(function (values, key) {
+    return fn.apply(void 0, _toConsumableArray(values).concat([key]));
+  });
+};
+
+/***/ }),
+
+/***/ 1914:
+/***/ ((module) => {
+
+
+
+function _slicedToArray(arr, i) { return _arrayWithHoles(arr) || _iterableToArrayLimit(arr, i) || _unsupportedIterableToArray(arr, i) || _nonIterableRest(); }
+
+function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+function _iterableToArrayLimit(arr, i) { var _i = arr == null ? null : typeof Symbol !== "undefined" && arr[Symbol.iterator] || arr["@@iterator"]; if (_i == null) return; var _arr = []; var _n = true; var _d = false; var _s, _e; try { for (_i = _i.call(arr); !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"] != null) _i["return"](); } finally { if (_d) throw _e; } } return _arr; }
+
+function _arrayWithHoles(arr) { if (Array.isArray(arr)) return arr; }
+
+module.exports = function mapToDictionary(fn) {
+  var collection = {};
+  this.items.forEach(function (item, k) {
+    var _fn = fn(item, k),
+        _fn2 = _slicedToArray(_fn, 2),
+        key = _fn2[0],
+        value = _fn2[1];
+
+    if (collection[key] === undefined) {
+      collection[key] = [value];
+    } else {
+      collection[key].push(value);
+    }
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 7058:
+/***/ ((module) => {
+
+
+
+function _slicedToArray(arr, i) { return _arrayWithHoles(arr) || _iterableToArrayLimit(arr, i) || _unsupportedIterableToArray(arr, i) || _nonIterableRest(); }
+
+function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+function _iterableToArrayLimit(arr, i) { var _i = arr == null ? null : typeof Symbol !== "undefined" && arr[Symbol.iterator] || arr["@@iterator"]; if (_i == null) return; var _arr = []; var _n = true; var _d = false; var _s, _e; try { for (_i = _i.call(arr); !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"] != null) _i["return"](); } finally { if (_d) throw _e; } } return _arr; }
+
+function _arrayWithHoles(arr) { if (Array.isArray(arr)) return arr; }
+
+module.exports = function mapToGroups(fn) {
+  var collection = {};
+  this.items.forEach(function (item, key) {
+    var _fn = fn(item, key),
+        _fn2 = _slicedToArray(_fn, 2),
+        keyed = _fn2[0],
+        value = _fn2[1];
+
+    if (collection[keyed] === undefined) {
+      collection[keyed] = [value];
+    } else {
+      collection[keyed].push(value);
+    }
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 6035:
+/***/ ((module) => {
+
+
+
+function _slicedToArray(arr, i) { return _arrayWithHoles(arr) || _iterableToArrayLimit(arr, i) || _unsupportedIterableToArray(arr, i) || _nonIterableRest(); }
+
+function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+function _iterableToArrayLimit(arr, i) { var _i = arr == null ? null : typeof Symbol !== "undefined" && arr[Symbol.iterator] || arr["@@iterator"]; if (_i == null) return; var _arr = []; var _n = true; var _d = false; var _s, _e; try { for (_i = _i.call(arr); !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"] != null) _i["return"](); } finally { if (_d) throw _e; } } return _arr; }
+
+function _arrayWithHoles(arr) { if (Array.isArray(arr)) return arr; }
+
+module.exports = function mapWithKeys(fn) {
+  var _this = this;
+
+  var collection = {};
+
+  if (Array.isArray(this.items)) {
+    this.items.forEach(function (item, index) {
+      var _fn = fn(item, index),
+          _fn2 = _slicedToArray(_fn, 2),
+          keyed = _fn2[0],
+          value = _fn2[1];
+
+      collection[keyed] = value;
+    });
+  } else {
+    Object.keys(this.items).forEach(function (key) {
+      var _fn3 = fn(_this.items[key], key),
+          _fn4 = _slicedToArray(_fn3, 2),
+          keyed = _fn4[0],
+          value = _fn4[1];
+
+      collection[keyed] = value;
+    });
+  }
+
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 3535:
+/***/ ((module) => {
+
+
+
+function _toConsumableArray(arr) { return _arrayWithoutHoles(arr) || _iterableToArray(arr) || _unsupportedIterableToArray(arr) || _nonIterableSpread(); }
+
+function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _iterableToArray(iter) { if (typeof Symbol !== "undefined" && iter[Symbol.iterator] != null || iter["@@iterator"] != null) return Array.from(iter); }
+
+function _arrayWithoutHoles(arr) { if (Array.isArray(arr)) return _arrayLikeToArray(arr); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+module.exports = function max(key) {
+  if (typeof key === 'string') {
+    var filtered = this.items.filter(function (item) {
+      return item[key] !== undefined;
+    });
+    return Math.max.apply(Math, _toConsumableArray(filtered.map(function (item) {
+      return item[key];
+    })));
+  }
+
+  return Math.max.apply(Math, _toConsumableArray(this.items));
+};
+
+/***/ }),
+
+/***/ 9263:
+/***/ ((module) => {
+
+
+
+module.exports = function median(key) {
+  var length = this.items.length;
+
+  if (key === undefined) {
+    if (length % 2 === 0) {
+      return (this.items[length / 2 - 1] + this.items[length / 2]) / 2;
+    }
+
+    return this.items[Math.floor(length / 2)];
+  }
+
+  if (length % 2 === 0) {
+    return (this.items[length / 2 - 1][key] + this.items[length / 2][key]) / 2;
+  }
+
+  return this.items[Math.floor(length / 2)][key];
+};
+
+/***/ }),
+
+/***/ 4385:
+/***/ ((module) => {
+
+
+
+module.exports = function merge(value) {
+  var arrayOrObject = value;
+
+  if (typeof arrayOrObject === 'string') {
+    arrayOrObject = [arrayOrObject];
+  }
+
+  if (Array.isArray(this.items) && Array.isArray(arrayOrObject)) {
+    return new this.constructor(this.items.concat(arrayOrObject));
+  }
+
+  var collection = JSON.parse(JSON.stringify(this.items));
+  Object.keys(arrayOrObject).forEach(function (key) {
+    collection[key] = arrayOrObject[key];
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 6429:
+/***/ ((module) => {
+
+
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+function ownKeys(object, enumerableOnly) { var keys = Object.keys(object); if (Object.getOwnPropertySymbols) { var symbols = Object.getOwnPropertySymbols(object); enumerableOnly && (symbols = symbols.filter(function (sym) { return Object.getOwnPropertyDescriptor(object, sym).enumerable; })), keys.push.apply(keys, symbols); } return keys; }
+
+function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = null != arguments[i] ? arguments[i] : {}; i % 2 ? ownKeys(Object(source), !0).forEach(function (key) { _defineProperty(target, key, source[key]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(target, Object.getOwnPropertyDescriptors(source)) : ownKeys(Object(source)).forEach(function (key) { Object.defineProperty(target, key, Object.getOwnPropertyDescriptor(source, key)); }); } return target; }
+
+function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
+
+module.exports = function mergeRecursive(items) {
+  var merge = function merge(target, source) {
+    var merged = {};
+    var mergedKeys = Object.keys(_objectSpread(_objectSpread({}, target), source));
+    mergedKeys.forEach(function (key) {
+      if (target[key] === undefined && source[key] !== undefined) {
+        merged[key] = source[key];
+      } else if (target[key] !== undefined && source[key] === undefined) {
+        merged[key] = target[key];
+      } else if (target[key] !== undefined && source[key] !== undefined) {
+        if (target[key] === source[key]) {
+          merged[key] = target[key];
+        } else if (!Array.isArray(target[key]) && _typeof(target[key]) === 'object' && !Array.isArray(source[key]) && _typeof(source[key]) === 'object') {
+          merged[key] = merge(target[key], source[key]);
+        } else {
+          merged[key] = [].concat(target[key], source[key]);
+        }
+      }
+    });
+    return merged;
+  };
+
+  if (!items) {
+    return this;
+  }
+
+  if (items.constructor.name === 'Collection') {
+    return new this.constructor(merge(this.items, items.all()));
+  }
+
+  return new this.constructor(merge(this.items, items));
+};
+
+/***/ }),
+
+/***/ 8373:
+/***/ ((module) => {
+
+
+
+function _toConsumableArray(arr) { return _arrayWithoutHoles(arr) || _iterableToArray(arr) || _unsupportedIterableToArray(arr) || _nonIterableSpread(); }
+
+function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+
+function _unsupportedIterableToArray(o, minLen) { if (!o) return; if (typeof o === "string") return _arrayLikeToArray(o, minLen); var n = Object.prototype.toString.call(o).slice(8, -1); if (n === "Object" && o.constructor) n = o.constructor.name; if (n === "Map" || n === "Set") return Array.from(o); if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _arrayLikeToArray(o, minLen); }
+
+function _iterableToArray(iter) { if (typeof Symbol !== "undefined" && iter[Symbol.iterator] != null || iter["@@iterator"] != null) return Array.from(iter); }
+
+function _arrayWithoutHoles(arr) { if (Array.isArray(arr)) return _arrayLikeToArray(arr); }
+
+function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
+module.exports = function min(key) {
+  if (key !== undefined) {
+    var filtered = this.items.filter(function (item) {
+      return item[key] !== undefined;
+    });
+    return Math.min.apply(Math, _toConsumableArray(filtered.map(function (item) {
+      return item[key];
+    })));
+  }
+
+  return Math.min.apply(Math, _toConsumableArray(this.items));
+};
+
+/***/ }),
+
+/***/ 9670:
+/***/ ((module) => {
+
+
+
+module.exports = function mode(key) {
+  var values = [];
+  var highestCount = 1;
+
+  if (!this.items.length) {
+    return null;
+  }
+
+  this.items.forEach(function (item) {
+    var tempValues = values.filter(function (value) {
+      if (key !== undefined) {
+        return value.key === item[key];
+      }
+
+      return value.key === item;
+    });
+
+    if (!tempValues.length) {
+      if (key !== undefined) {
+        values.push({
+          key: item[key],
+          count: 1
+        });
+      } else {
+        values.push({
+          key: item,
+          count: 1
+        });
+      }
+    } else {
+      tempValues[0].count += 1;
+      var count = tempValues[0].count;
+
+      if (count > highestCount) {
+        highestCount = count;
+      }
+    }
+  });
+  return values.filter(function (value) {
+    return value.count === highestCount;
+  }).map(function (value) {
+    return value.key;
+  });
+};
+
+/***/ }),
+
+/***/ 9883:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var values = __nccwpck_require__(3962);
+
+module.exports = function nth(n) {
+  var offset = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
+  var items = values(this.items);
+  var collection = items.slice(offset).filter(function (item, index) {
+    return index % n === 0;
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 6671:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var variadic = __nccwpck_require__(677);
+
+module.exports = function only() {
+  var _this = this;
+
+  for (var _len = arguments.length, args = new Array(_len), _key = 0; _key < _len; _key++) {
+    args[_key] = arguments[_key];
+  }
+
+  var properties = variadic(args);
+
+  if (Array.isArray(this.items)) {
+    var _collection = this.items.filter(function (item) {
+      return properties.indexOf(item) !== -1;
+    });
+
+    return new this.constructor(_collection);
+  }
+
+  var collection = {};
+  Object.keys(this.items).forEach(function (prop) {
+    if (properties.indexOf(prop) !== -1) {
+      collection[prop] = _this.items[prop];
+    }
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 7884:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var clone = __nccwpck_require__(7543);
+
+module.exports = function pad(size, value) {
+  var abs = Math.abs(size);
+  var count = this.count();
+
+  if (abs <= count) {
+    return this;
+  }
+
+  var diff = abs - count;
+  var items = clone(this.items);
+  var isArray = Array.isArray(this.items);
+  var prepend = size < 0;
+
+  for (var iterator = 0; iterator < diff;) {
+    if (!isArray) {
+      if (items[iterator] !== undefined) {
+        diff += 1;
+      } else {
+        items[iterator] = value;
+      }
+    } else if (prepend) {
+      items.unshift(value);
+    } else {
+      items.push(value);
+    }
+
+    iterator += 1;
+  }
+
+  return new this.constructor(items);
+};
+
+/***/ }),
+
+/***/ 3187:
+/***/ ((module) => {
+
+
+
+module.exports = function partition(fn) {
+  var _this = this;
+
+  var arrays;
+
+  if (Array.isArray(this.items)) {
+    arrays = [new this.constructor([]), new this.constructor([])];
+    this.items.forEach(function (item) {
+      if (fn(item) === true) {
+        arrays[0].push(item);
+      } else {
+        arrays[1].push(item);
+      }
+    });
+  } else {
+    arrays = [new this.constructor({}), new this.constructor({})];
+    Object.keys(this.items).forEach(function (prop) {
+      var value = _this.items[prop];
+
+      if (fn(value) === true) {
+        arrays[0].put(prop, value);
+      } else {
+        arrays[1].put(prop, value);
+      }
+    });
+  }
+
+  return new this.constructor(arrays);
+};
+
+/***/ }),
+
+/***/ 5445:
+/***/ ((module) => {
+
+
+
+module.exports = function pipe(fn) {
+  return fn(this);
+};
+
+/***/ }),
+
+/***/ 9992:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isArray = _require.isArray,
+    isObject = _require.isObject;
+
+var nestedValue = __nccwpck_require__(2634);
+
+var buildKeyPathMap = function buildKeyPathMap(items) {
+  var keyPaths = {};
+  items.forEach(function (item, index) {
+    function buildKeyPath(val, keyPath) {
+      if (isObject(val)) {
+        Object.keys(val).forEach(function (prop) {
+          buildKeyPath(val[prop], "".concat(keyPath, ".").concat(prop));
+        });
+      } else if (isArray(val)) {
+        val.forEach(function (v, i) {
+          buildKeyPath(v, "".concat(keyPath, ".").concat(i));
+        });
+      }
+
+      keyPaths[keyPath] = val;
+    }
+
+    buildKeyPath(item, index);
+  });
+  return keyPaths;
+};
+
+module.exports = function pluck(value, key) {
+  if (value.indexOf('*') !== -1) {
+    var keyPathMap = buildKeyPathMap(this.items);
+    var keyMatches = [];
+
+    if (key !== undefined) {
+      var keyRegex = new RegExp("0.".concat(key), 'g');
+      var keyNumberOfLevels = "0.".concat(key).split('.').length;
+      Object.keys(keyPathMap).forEach(function (k) {
+        var matchingKey = k.match(keyRegex);
+
+        if (matchingKey) {
+          var match = matchingKey[0];
+
+          if (match.split('.').length === keyNumberOfLevels) {
+            keyMatches.push(keyPathMap[match]);
+          }
+        }
+      });
+    }
+
+    var valueMatches = [];
+    var valueRegex = new RegExp("0.".concat(value), 'g');
+    var valueNumberOfLevels = "0.".concat(value).split('.').length;
+    Object.keys(keyPathMap).forEach(function (k) {
+      var matchingValue = k.match(valueRegex);
+
+      if (matchingValue) {
+        var match = matchingValue[0];
+
+        if (match.split('.').length === valueNumberOfLevels) {
+          valueMatches.push(keyPathMap[match]);
+        }
+      }
+    });
+
+    if (key !== undefined) {
+      var collection = {};
+      this.items.forEach(function (item, index) {
+        collection[keyMatches[index] || ''] = valueMatches;
+      });
+      return new this.constructor(collection);
+    }
+
+    return new this.constructor([valueMatches]);
+  }
+
+  if (key !== undefined) {
+    var _collection = {};
+    this.items.forEach(function (item) {
+      if (nestedValue(item, value) !== undefined) {
+        _collection[item[key] || ''] = nestedValue(item, value);
+      } else {
+        _collection[item[key] || ''] = null;
+      }
+    });
+    return new this.constructor(_collection);
+  }
+
+  return this.map(function (item) {
+    if (nestedValue(item, value) !== undefined) {
+      return nestedValue(item, value);
+    }
+
+    return null;
+  });
+};
+
+/***/ }),
+
+/***/ 5086:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isArray = _require.isArray,
+    isObject = _require.isObject;
+
+var deleteKeys = __nccwpck_require__(5915);
+
+module.exports = function pop() {
+  var _this = this;
+
+  var count = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 1;
+
+  if (this.isEmpty()) {
+    return null;
+  }
+
+  if (isArray(this.items)) {
+    if (count === 1) {
+      return this.items.pop();
+    }
+
+    return new this.constructor(this.items.splice(-count));
+  }
+
+  if (isObject(this.items)) {
+    var keys = Object.keys(this.items);
+
+    if (count === 1) {
+      var key = keys[keys.length - 1];
+      var last = this.items[key];
+      deleteKeys(this.items, key);
+      return last;
+    }
+
+    var poppedKeys = keys.slice(-count);
+    var newObject = poppedKeys.reduce(function (acc, current) {
+      acc[current] = _this.items[current];
+      return acc;
+    }, {});
+    deleteKeys(this.items, poppedKeys);
+    return new this.constructor(newObject);
+  }
+
+  return null;
+};
+
+/***/ }),
+
+/***/ 53:
+/***/ ((module) => {
+
+
+
+module.exports = function prepend(value, key) {
+  if (key !== undefined) {
+    return this.put(key, value);
+  }
+
+  this.items.unshift(value);
+  return this;
+};
+
+/***/ }),
+
+/***/ 3638:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function pull(key, defaultValue) {
+  var returnValue = this.items[key] || null;
+
+  if (!returnValue && defaultValue !== undefined) {
+    if (isFunction(defaultValue)) {
+      returnValue = defaultValue();
+    } else {
+      returnValue = defaultValue;
+    }
+  }
+
+  delete this.items[key];
+  return returnValue;
+};
+
+/***/ }),
+
+/***/ 3657:
+/***/ ((module) => {
+
+
+
+module.exports = function push() {
+  var _this$items;
+
+  (_this$items = this.items).push.apply(_this$items, arguments);
+
+  return this;
+};
+
+/***/ }),
+
+/***/ 904:
+/***/ ((module) => {
+
+
+
+module.exports = function put(key, value) {
+  this.items[key] = value;
+  return this;
+};
+
+/***/ }),
+
+/***/ 6210:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var values = __nccwpck_require__(3962);
+
+module.exports = function random() {
+  var length = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : null;
+  var items = values(this.items);
+  var collection = new this.constructor(items).shuffle(); // If not a length was specified
+
+  if (length !== parseInt(length, 10)) {
+    return collection.first();
+  }
+
+  return collection.take(length);
+};
+
+/***/ }),
+
+/***/ 6475:
+/***/ ((module) => {
+
+
+
+module.exports = function reduce(fn, carry) {
+  var _this = this;
+
+  var reduceCarry = null;
+
+  if (carry !== undefined) {
+    reduceCarry = carry;
+  }
+
+  if (Array.isArray(this.items)) {
+    this.items.forEach(function (item) {
+      reduceCarry = fn(reduceCarry, item);
+    });
+  } else {
+    Object.keys(this.items).forEach(function (key) {
+      reduceCarry = fn(reduceCarry, _this.items[key], key);
+    });
+  }
+
+  return reduceCarry;
+};
+
+/***/ }),
+
+/***/ 566:
+/***/ ((module) => {
+
+
+
+module.exports = function reject(fn) {
+  return new this.constructor(this.items).filter(function (item) {
+    return !fn(item);
+  });
+};
+
+/***/ }),
+
+/***/ 7357:
+/***/ ((module) => {
+
+
+
+function ownKeys(object, enumerableOnly) { var keys = Object.keys(object); if (Object.getOwnPropertySymbols) { var symbols = Object.getOwnPropertySymbols(object); enumerableOnly && (symbols = symbols.filter(function (sym) { return Object.getOwnPropertyDescriptor(object, sym).enumerable; })), keys.push.apply(keys, symbols); } return keys; }
+
+function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = null != arguments[i] ? arguments[i] : {}; i % 2 ? ownKeys(Object(source), !0).forEach(function (key) { _defineProperty(target, key, source[key]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(target, Object.getOwnPropertyDescriptors(source)) : ownKeys(Object(source)).forEach(function (key) { Object.defineProperty(target, key, Object.getOwnPropertyDescriptor(source, key)); }); } return target; }
+
+function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
+
+module.exports = function replace(items) {
+  if (!items) {
+    return this;
+  }
+
+  if (Array.isArray(items)) {
+    var _replaced = this.items.map(function (value, index) {
+      return items[index] || value;
+    });
+
+    return new this.constructor(_replaced);
+  }
+
+  if (items.constructor.name === 'Collection') {
+    var _replaced2 = _objectSpread(_objectSpread({}, this.items), items.all());
+
+    return new this.constructor(_replaced2);
+  }
+
+  var replaced = _objectSpread(_objectSpread({}, this.items), items);
+
+  return new this.constructor(replaced);
+};
+
+/***/ }),
+
+/***/ 8497:
+/***/ ((module) => {
+
+
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+function ownKeys(object, enumerableOnly) { var keys = Object.keys(object); if (Object.getOwnPropertySymbols) { var symbols = Object.getOwnPropertySymbols(object); enumerableOnly && (symbols = symbols.filter(function (sym) { return Object.getOwnPropertyDescriptor(object, sym).enumerable; })), keys.push.apply(keys, symbols); } return keys; }
+
+function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = null != arguments[i] ? arguments[i] : {}; i % 2 ? ownKeys(Object(source), !0).forEach(function (key) { _defineProperty(target, key, source[key]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(target, Object.getOwnPropertyDescriptors(source)) : ownKeys(Object(source)).forEach(function (key) { Object.defineProperty(target, key, Object.getOwnPropertyDescriptor(source, key)); }); } return target; }
+
+function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
+
+module.exports = function replaceRecursive(items) {
+  var replace = function replace(target, source) {
+    var replaced = _objectSpread({}, target);
+
+    var mergedKeys = Object.keys(_objectSpread(_objectSpread({}, target), source));
+    mergedKeys.forEach(function (key) {
+      if (!Array.isArray(source[key]) && _typeof(source[key]) === 'object') {
+        replaced[key] = replace(target[key], source[key]);
+      } else if (target[key] === undefined && source[key] !== undefined) {
+        if (_typeof(target[key]) === 'object') {
+          replaced[key] = _objectSpread({}, source[key]);
+        } else {
+          replaced[key] = source[key];
+        }
+      } else if (target[key] !== undefined && source[key] === undefined) {
+        if (_typeof(target[key]) === 'object') {
+          replaced[key] = _objectSpread({}, target[key]);
+        } else {
+          replaced[key] = target[key];
+        }
+      } else if (target[key] !== undefined && source[key] !== undefined) {
+        if (_typeof(source[key]) === 'object') {
+          replaced[key] = _objectSpread({}, source[key]);
+        } else {
+          replaced[key] = source[key];
+        }
+      }
+    });
+    return replaced;
+  };
+
+  if (!items) {
+    return this;
+  }
+
+  if (!Array.isArray(items) && _typeof(items) !== 'object') {
+    return new this.constructor(replace(this.items, [items]));
+  }
+
+  if (items.constructor.name === 'Collection') {
+    return new this.constructor(replace(this.items, items.all()));
+  }
+
+  return new this.constructor(replace(this.items, items));
+};
+
+/***/ }),
+
+/***/ 2135:
+/***/ ((module) => {
+
+
+
+module.exports = function reverse() {
+  var collection = [].concat(this.items).reverse();
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 8129:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+/* eslint-disable eqeqeq */
+
+var _require = __nccwpck_require__(8524),
+    isArray = _require.isArray,
+    isObject = _require.isObject,
+    isFunction = _require.isFunction;
+
+module.exports = function search(valueOrFunction, strict) {
+  var _this = this;
+
+  var result;
+
+  var find = function find(item, key) {
+    if (isFunction(valueOrFunction)) {
+      return valueOrFunction(_this.items[key], key);
+    }
+
+    if (strict) {
+      return _this.items[key] === valueOrFunction;
+    }
+
+    return _this.items[key] == valueOrFunction;
+  };
+
+  if (isArray(this.items)) {
+    result = this.items.findIndex(find);
+  } else if (isObject(this.items)) {
+    result = Object.keys(this.items).find(function (key) {
+      return find(_this.items[key], key);
+    });
+  }
+
+  if (result === undefined || result < 0) {
+    return false;
+  }
+
+  return result;
+};
+
+/***/ }),
+
+/***/ 8145:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isArray = _require.isArray,
+    isObject = _require.isObject;
+
+var deleteKeys = __nccwpck_require__(5915);
+
+module.exports = function shift() {
+  var _this = this;
+
+  var count = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 1;
+
+  if (this.isEmpty()) {
+    return null;
+  }
+
+  if (isArray(this.items)) {
+    if (count === 1) {
+      return this.items.shift();
+    }
+
+    return new this.constructor(this.items.splice(0, count));
+  }
+
+  if (isObject(this.items)) {
+    if (count === 1) {
+      var key = Object.keys(this.items)[0];
+      var value = this.items[key];
+      delete this.items[key];
+      return value;
+    }
+
+    var keys = Object.keys(this.items);
+    var poppedKeys = keys.slice(0, count);
+    var newObject = poppedKeys.reduce(function (acc, current) {
+      acc[current] = _this.items[current];
+      return acc;
+    }, {});
+    deleteKeys(this.items, poppedKeys);
+    return new this.constructor(newObject);
+  }
+
+  return null;
+};
+
+/***/ }),
+
+/***/ 3076:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var values = __nccwpck_require__(3962);
+
+module.exports = function shuffle() {
+  var items = values(this.items);
+  var j;
+  var x;
+  var i;
+
+  for (i = items.length; i; i -= 1) {
+    j = Math.floor(Math.random() * i);
+    x = items[i - 1];
+    items[i - 1] = items[j];
+    items[j] = x;
+  }
+
+  this.items = items;
+  return this;
+};
+
+/***/ }),
+
+/***/ 4102:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isObject = _require.isObject;
+
+module.exports = function skip(number) {
+  var _this = this;
+
+  if (isObject(this.items)) {
+    return new this.constructor(Object.keys(this.items).reduce(function (accumulator, key, index) {
+      if (index + 1 > number) {
+        accumulator[key] = _this.items[key];
+      }
+
+      return accumulator;
+    }, {}));
+  }
+
+  return new this.constructor(this.items.slice(number));
+};
+
+/***/ }),
+
+/***/ 7684:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isArray = _require.isArray,
+    isObject = _require.isObject,
+    isFunction = _require.isFunction;
+
+module.exports = function skipUntil(valueOrFunction) {
+  var _this = this;
+
+  var previous = null;
+  var items;
+
+  var callback = function callback(value) {
+    return value === valueOrFunction;
+  };
+
+  if (isFunction(valueOrFunction)) {
+    callback = valueOrFunction;
+  }
+
+  if (isArray(this.items)) {
+    items = this.items.filter(function (item) {
+      if (previous !== true) {
+        previous = callback(item);
+      }
+
+      return previous;
+    });
+  }
+
+  if (isObject(this.items)) {
+    items = Object.keys(this.items).reduce(function (acc, key) {
+      if (previous !== true) {
+        previous = callback(_this.items[key]);
+      }
+
+      if (previous !== false) {
+        acc[key] = _this.items[key];
+      }
+
+      return acc;
+    }, {});
+  }
+
+  return new this.constructor(items);
+};
+
+/***/ }),
+
+/***/ 3177:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isArray = _require.isArray,
+    isObject = _require.isObject,
+    isFunction = _require.isFunction;
+
+module.exports = function skipWhile(valueOrFunction) {
+  var _this = this;
+
+  var previous = null;
+  var items;
+
+  var callback = function callback(value) {
+    return value === valueOrFunction;
+  };
+
+  if (isFunction(valueOrFunction)) {
+    callback = valueOrFunction;
+  }
+
+  if (isArray(this.items)) {
+    items = this.items.filter(function (item) {
+      if (previous !== true) {
+        previous = !callback(item);
+      }
+
+      return previous;
+    });
+  }
+
+  if (isObject(this.items)) {
+    items = Object.keys(this.items).reduce(function (acc, key) {
+      if (previous !== true) {
+        previous = !callback(_this.items[key]);
+      }
+
+      if (previous !== false) {
+        acc[key] = _this.items[key];
+      }
+
+      return acc;
+    }, {});
+  }
+
+  return new this.constructor(items);
+};
+
+/***/ }),
+
+/***/ 6395:
+/***/ ((module) => {
+
+
+
+module.exports = function slice(remove, limit) {
+  var collection = this.items.slice(remove);
+
+  if (limit !== undefined) {
+    collection = collection.slice(0, limit);
+  }
+
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 360:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function sole(key, operator, value) {
+  var collection;
+
+  if (isFunction(key)) {
+    collection = this.filter(key);
+  } else {
+    collection = this.where(key, operator, value);
+  }
+
+  if (collection.isEmpty()) {
+    throw new Error('Item not found.');
+  }
+
+  if (collection.count() > 1) {
+    throw new Error('Multiple items found.');
+  }
+
+  return collection.first();
+};
+
+/***/ }),
+
+/***/ 8993:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var contains = __nccwpck_require__(1776);
+
+module.exports = contains;
+
+/***/ }),
+
+/***/ 6329:
+/***/ ((module) => {
+
+
+
+module.exports = function sort(fn) {
+  var collection = [].concat(this.items);
+
+  if (fn === undefined) {
+    if (this.every(function (item) {
+      return typeof item === 'number';
+    })) {
+      collection.sort(function (a, b) {
+        return a - b;
+      });
+    } else {
+      collection.sort();
+    }
+  } else {
+    collection.sort(fn);
+  }
+
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 980:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var nestedValue = __nccwpck_require__(2634);
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function sortBy(valueOrFunction) {
+  var collection = [].concat(this.items);
+
+  var getValue = function getValue(item) {
+    if (isFunction(valueOrFunction)) {
+      return valueOrFunction(item);
+    }
+
+    return nestedValue(item, valueOrFunction);
+  };
+
+  collection.sort(function (a, b) {
+    var valueA = getValue(a);
+    var valueB = getValue(b);
+
+    if (valueA === null || valueA === undefined) {
+      return 1;
+    }
+
+    if (valueB === null || valueB === undefined) {
+      return -1;
+    }
+
+    if (valueA < valueB) {
+      return -1;
+    }
+
+    if (valueA > valueB) {
+      return 1;
+    }
+
+    return 0;
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 8053:
+/***/ ((module) => {
+
+
+
+module.exports = function sortByDesc(valueOrFunction) {
+  return this.sortBy(valueOrFunction).reverse();
+};
+
+/***/ }),
+
+/***/ 9628:
+/***/ ((module) => {
+
+
+
+module.exports = function sortDesc() {
+  return this.sort().reverse();
+};
+
+/***/ }),
+
+/***/ 9613:
+/***/ ((module) => {
+
+
+
+module.exports = function sortKeys() {
+  var _this = this;
+
+  var ordered = {};
+  Object.keys(this.items).sort().forEach(function (key) {
+    ordered[key] = _this.items[key];
+  });
+  return new this.constructor(ordered);
+};
+
+/***/ }),
+
+/***/ 9488:
+/***/ ((module) => {
+
+
+
+module.exports = function sortKeysDesc() {
+  var _this = this;
+
+  var ordered = {};
+  Object.keys(this.items).sort().reverse().forEach(function (key) {
+    ordered[key] = _this.items[key];
+  });
+  return new this.constructor(ordered);
+};
+
+/***/ }),
+
+/***/ 7369:
+/***/ ((module) => {
+
+
+
+module.exports = function splice(index, limit, replace) {
+  var slicedCollection = this.slice(index, limit);
+  this.items = this.diff(slicedCollection.all()).all();
+
+  if (Array.isArray(replace)) {
+    for (var iterator = 0, length = replace.length; iterator < length; iterator += 1) {
+      this.items.splice(index + iterator, 0, replace[iterator]);
+    }
+  }
+
+  return slicedCollection;
+};
+
+/***/ }),
+
+/***/ 3353:
+/***/ ((module) => {
+
+
+
+module.exports = function split(numberOfGroups) {
+  var itemsPerGroup = Math.round(this.items.length / numberOfGroups);
+  var items = JSON.parse(JSON.stringify(this.items));
+  var collection = [];
+
+  for (var iterator = 0; iterator < numberOfGroups; iterator += 1) {
+    collection.push(new this.constructor(items.splice(0, itemsPerGroup)));
+  }
+
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 1973:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var values = __nccwpck_require__(3962);
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function sum(key) {
+  var items = values(this.items);
+  var total = 0;
+
+  if (key === undefined) {
+    for (var i = 0, length = items.length; i < length; i += 1) {
+      total += parseFloat(items[i]);
+    }
+  } else if (isFunction(key)) {
+    for (var _i = 0, _length = items.length; _i < _length; _i += 1) {
+      total += parseFloat(key(items[_i]));
+    }
+  } else {
+    for (var _i2 = 0, _length2 = items.length; _i2 < _length2; _i2 += 1) {
+      total += parseFloat(items[_i2][key]);
+    }
+  }
+
+  return parseFloat(total.toPrecision(12));
+};
+
+/***/ }),
+
+/***/ 1789:
+/***/ ((module) => {
+
+
+
+module.exports = function SymbolIterator() {
+  var _this = this;
+
+  var index = -1;
+  return {
+    next: function next() {
+      index += 1;
+      return {
+        value: _this.items[index],
+        done: index >= _this.items.length
+      };
+    }
+  };
+};
+
+/***/ }),
+
+/***/ 2374:
+/***/ ((module) => {
+
+
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+module.exports = function take(length) {
+  var _this = this;
+
+  if (!Array.isArray(this.items) && _typeof(this.items) === 'object') {
+    var keys = Object.keys(this.items);
+    var slicedKeys;
+
+    if (length < 0) {
+      slicedKeys = keys.slice(length);
+    } else {
+      slicedKeys = keys.slice(0, length);
+    }
+
+    var collection = {};
+    keys.forEach(function (prop) {
+      if (slicedKeys.indexOf(prop) !== -1) {
+        collection[prop] = _this.items[prop];
+      }
+    });
+    return new this.constructor(collection);
+  }
+
+  if (length < 0) {
+    return new this.constructor(this.items.slice(length));
+  }
+
+  return new this.constructor(this.items.slice(0, length));
+};
+
+/***/ }),
+
+/***/ 2388:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isArray = _require.isArray,
+    isObject = _require.isObject,
+    isFunction = _require.isFunction;
+
+module.exports = function takeUntil(valueOrFunction) {
+  var _this = this;
+
+  var previous = null;
+  var items;
+
+  var callback = function callback(value) {
+    return value === valueOrFunction;
+  };
+
+  if (isFunction(valueOrFunction)) {
+    callback = valueOrFunction;
+  }
+
+  if (isArray(this.items)) {
+    items = this.items.filter(function (item) {
+      if (previous !== false) {
+        previous = !callback(item);
+      }
+
+      return previous;
+    });
+  }
+
+  if (isObject(this.items)) {
+    items = Object.keys(this.items).reduce(function (acc, key) {
+      if (previous !== false) {
+        previous = !callback(_this.items[key]);
+      }
+
+      if (previous !== false) {
+        acc[key] = _this.items[key];
+      }
+
+      return acc;
+    }, {});
+  }
+
+  return new this.constructor(items);
+};
+
+/***/ }),
+
+/***/ 9897:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isArray = _require.isArray,
+    isObject = _require.isObject,
+    isFunction = _require.isFunction;
+
+module.exports = function takeWhile(valueOrFunction) {
+  var _this = this;
+
+  var previous = null;
+  var items;
+
+  var callback = function callback(value) {
+    return value === valueOrFunction;
+  };
+
+  if (isFunction(valueOrFunction)) {
+    callback = valueOrFunction;
+  }
+
+  if (isArray(this.items)) {
+    items = this.items.filter(function (item) {
+      if (previous !== false) {
+        previous = callback(item);
+      }
+
+      return previous;
+    });
+  }
+
+  if (isObject(this.items)) {
+    items = Object.keys(this.items).reduce(function (acc, key) {
+      if (previous !== false) {
+        previous = callback(_this.items[key]);
+      }
+
+      if (previous !== false) {
+        acc[key] = _this.items[key];
+      }
+
+      return acc;
+    }, {});
+  }
+
+  return new this.constructor(items);
+};
+
+/***/ }),
+
+/***/ 2436:
+/***/ ((module) => {
+
+
+
+module.exports = function tap(fn) {
+  fn(this);
+  return this;
+};
+
+/***/ }),
+
+/***/ 8275:
+/***/ ((module) => {
+
+
+
+module.exports = function times(n, fn) {
+  for (var iterator = 1; iterator <= n; iterator += 1) {
+    this.items.push(fn(iterator));
+  }
+
+  return this;
+};
+
+/***/ }),
+
+/***/ 9087:
+/***/ ((module) => {
+
+
+
+module.exports = function toArray() {
+  var collectionInstance = this.constructor;
+
+  function iterate(list, collection) {
+    var childCollection = [];
+
+    if (list instanceof collectionInstance) {
+      list.items.forEach(function (i) {
+        return iterate(i, childCollection);
+      });
+      collection.push(childCollection);
+    } else if (Array.isArray(list)) {
+      list.forEach(function (i) {
+        return iterate(i, childCollection);
+      });
+      collection.push(childCollection);
+    } else {
+      collection.push(list);
+    }
+  }
+
+  if (Array.isArray(this.items)) {
+    var collection = [];
+    this.items.forEach(function (items) {
+      iterate(items, collection);
+    });
+    return collection;
+  }
+
+  return this.values().all();
+};
+
+/***/ }),
+
+/***/ 6810:
+/***/ ((module) => {
+
+
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+module.exports = function toJson() {
+  if (_typeof(this.items) === 'object' && !Array.isArray(this.items)) {
+    return JSON.stringify(this.all());
+  }
+
+  return JSON.stringify(this.toArray());
+};
+
+/***/ }),
+
+/***/ 4129:
+/***/ ((module) => {
+
+
+
+module.exports = function transform(fn) {
+  var _this = this;
+
+  if (Array.isArray(this.items)) {
+    this.items = this.items.map(fn);
+  } else {
+    var collection = {};
+    Object.keys(this.items).forEach(function (key) {
+      collection[key] = fn(_this.items[key], key);
+    });
+    this.items = collection;
+  }
+
+  return this;
+};
+
+/***/ }),
+
+/***/ 8359:
+/***/ ((module) => {
+
+
+
+function ownKeys(object, enumerableOnly) { var keys = Object.keys(object); if (Object.getOwnPropertySymbols) { var symbols = Object.getOwnPropertySymbols(object); enumerableOnly && (symbols = symbols.filter(function (sym) { return Object.getOwnPropertyDescriptor(object, sym).enumerable; })), keys.push.apply(keys, symbols); } return keys; }
+
+function _objectSpread(target) { for (var i = 1; i < arguments.length; i++) { var source = null != arguments[i] ? arguments[i] : {}; i % 2 ? ownKeys(Object(source), !0).forEach(function (key) { _defineProperty(target, key, source[key]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(target, Object.getOwnPropertyDescriptors(source)) : ownKeys(Object(source)).forEach(function (key) { Object.defineProperty(target, key, Object.getOwnPropertyDescriptor(source, key)); }); } return target; }
+
+function _defineProperty(obj, key, value) { if (key in obj) { Object.defineProperty(obj, key, { value: value, enumerable: true, configurable: true, writable: true }); } else { obj[key] = value; } return obj; }
+
+module.exports = function undot() {
+  var _this = this;
+
+  if (Array.isArray(this.items)) {
+    return this;
+  }
+
+  var collection = {};
+  Object.keys(this.items).forEach(function (key) {
+    if (key.indexOf('.') !== -1) {
+      var obj = collection;
+      key.split('.').reduce(function (acc, current, index, array) {
+        if (!acc[current]) {
+          acc[current] = {};
+        }
+
+        if (index === array.length - 1) {
+          acc[current] = _this.items[key];
+        }
+
+        return acc[current];
+      }, obj);
+      collection = _objectSpread(_objectSpread({}, collection), obj);
+    } else {
+      collection[key] = _this.items[key];
+    }
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 6430:
+/***/ ((module) => {
+
+
+
+module.exports = function union(object) {
+  var _this = this;
+
+  var collection = JSON.parse(JSON.stringify(this.items));
+  Object.keys(object).forEach(function (prop) {
+    if (_this.items[prop] === undefined) {
+      collection[prop] = object[prop];
+    }
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 1346:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var _require = __nccwpck_require__(8524),
+    isFunction = _require.isFunction;
+
+module.exports = function unique(key) {
+  var collection;
+
+  if (key === undefined) {
+    collection = this.items.filter(function (element, index, self) {
+      return self.indexOf(element) === index;
+    });
+  } else {
+    collection = [];
+    var usedKeys = [];
+
+    for (var iterator = 0, length = this.items.length; iterator < length; iterator += 1) {
+      var uniqueKey = void 0;
+
+      if (isFunction(key)) {
+        uniqueKey = key(this.items[iterator]);
+      } else {
+        uniqueKey = this.items[iterator][key];
+      }
+
+      if (usedKeys.indexOf(uniqueKey) === -1) {
+        collection.push(this.items[iterator]);
+        usedKeys.push(uniqueKey);
+      }
+    }
+  }
+
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 9775:
+/***/ ((module) => {
+
+
+
+module.exports = function when(value, fn, defaultFn) {
+  if (!value) {
+    fn(this);
+  } else {
+    defaultFn(this);
+  }
+};
+
+/***/ }),
+
+/***/ 5206:
+/***/ ((module) => {
+
+
+
+module.exports = function unwrap(value) {
+  if (value instanceof this.constructor) {
+    return value.all();
+  }
+
+  return value;
+};
+
+/***/ }),
+
+/***/ 9355:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var getValues = __nccwpck_require__(3962);
+
+module.exports = function values() {
+  return new this.constructor(getValues(this.items));
+};
+
+/***/ }),
+
+/***/ 7809:
+/***/ ((module) => {
+
+
+
+module.exports = function when(value, fn, defaultFn) {
+  if (value) {
+    return fn(this, value);
+  }
+
+  if (defaultFn) {
+    return defaultFn(this, value);
+  }
+
+  return this;
+};
+
+/***/ }),
+
+/***/ 6016:
+/***/ ((module) => {
+
+
+
+module.exports = function whenEmpty(fn, defaultFn) {
+  if (Array.isArray(this.items) && !this.items.length) {
+    return fn(this);
+  }
+
+  if (!Object.keys(this.items).length) {
+    return fn(this);
+  }
+
+  if (defaultFn !== undefined) {
+    if (Array.isArray(this.items) && this.items.length) {
+      return defaultFn(this);
+    }
+
+    if (Object.keys(this.items).length) {
+      return defaultFn(this);
+    }
+  }
+
+  return this;
+};
+
+/***/ }),
+
+/***/ 5871:
+/***/ ((module) => {
+
+
+
+module.exports = function whenNotEmpty(fn, defaultFn) {
+  if (Array.isArray(this.items) && this.items.length) {
+    return fn(this);
+  }
+
+  if (Object.keys(this.items).length) {
+    return fn(this);
+  }
+
+  if (defaultFn !== undefined) {
+    if (Array.isArray(this.items) && !this.items.length) {
+      return defaultFn(this);
+    }
+
+    if (!Object.keys(this.items).length) {
+      return defaultFn(this);
+    }
+  }
+
+  return this;
+};
+
+/***/ }),
+
+/***/ 710:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var values = __nccwpck_require__(3962);
+
+var nestedValue = __nccwpck_require__(2634);
+
+module.exports = function where(key, operator, value) {
+  var comparisonOperator = operator;
+  var comparisonValue = value;
+  var items = values(this.items);
+
+  if (operator === undefined || operator === true) {
+    return new this.constructor(items.filter(function (item) {
+      return nestedValue(item, key);
+    }));
+  }
+
+  if (operator === false) {
+    return new this.constructor(items.filter(function (item) {
+      return !nestedValue(item, key);
+    }));
+  }
+
+  if (value === undefined) {
+    comparisonValue = operator;
+    comparisonOperator = '===';
+  }
+
+  var collection = items.filter(function (item) {
+    switch (comparisonOperator) {
+      case '==':
+        return nestedValue(item, key) === Number(comparisonValue) || nestedValue(item, key) === comparisonValue.toString();
+
+      default:
+      case '===':
+        return nestedValue(item, key) === comparisonValue;
+
+      case '!=':
+      case '<>':
+        return nestedValue(item, key) !== Number(comparisonValue) && nestedValue(item, key) !== comparisonValue.toString();
+
+      case '!==':
+        return nestedValue(item, key) !== comparisonValue;
+
+      case '<':
+        return nestedValue(item, key) < comparisonValue;
+
+      case '<=':
+        return nestedValue(item, key) <= comparisonValue;
+
+      case '>':
+        return nestedValue(item, key) > comparisonValue;
+
+      case '>=':
+        return nestedValue(item, key) >= comparisonValue;
+    }
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 4340:
+/***/ ((module) => {
+
+
+
+module.exports = function whereBetween(key, values) {
+  return this.where(key, '>=', values[0]).where(key, '<=', values[values.length - 1]);
+};
+
+/***/ }),
+
+/***/ 1409:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var extractValues = __nccwpck_require__(3962);
+
+var nestedValue = __nccwpck_require__(2634);
+
+module.exports = function whereIn(key, values) {
+  var items = extractValues(values);
+  var collection = this.items.filter(function (item) {
+    return items.indexOf(nestedValue(item, key)) !== -1;
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 4024:
+/***/ ((module) => {
+
+
+
+module.exports = function whereInstanceOf(type) {
+  return this.filter(function (item) {
+    return item instanceof type;
+  });
+};
+
+/***/ }),
+
+/***/ 9165:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var nestedValue = __nccwpck_require__(2634);
+
+module.exports = function whereNotBetween(key, values) {
+  return this.filter(function (item) {
+    return nestedValue(item, key) < values[0] || nestedValue(item, key) > values[values.length - 1];
+  });
+};
+
+/***/ }),
+
+/***/ 270:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+var extractValues = __nccwpck_require__(3962);
+
+var nestedValue = __nccwpck_require__(2634);
+
+module.exports = function whereNotIn(key, values) {
+  var items = extractValues(values);
+  var collection = this.items.filter(function (item) {
+    return items.indexOf(nestedValue(item, key)) === -1;
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
+/***/ 2960:
+/***/ ((module) => {
+
+
+
+module.exports = function whereNotNull() {
+  var key = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : null;
+  return this.where(key, '!==', null);
+};
+
+/***/ }),
+
+/***/ 5115:
+/***/ ((module) => {
+
+
+
+module.exports = function whereNull() {
+  var key = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : null;
+  return this.where(key, '===', null);
+};
+
+/***/ }),
+
+/***/ 8597:
+/***/ ((module) => {
+
+
+
+function _typeof(obj) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) { return typeof obj; } : function (obj) { return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }, _typeof(obj); }
+
+module.exports = function wrap(value) {
+  if (value instanceof this.constructor) {
+    return value;
+  }
+
+  if (_typeof(value) === 'object') {
+    return new this.constructor(value);
+  }
+
+  return new this.constructor([value]);
+};
+
+/***/ }),
+
+/***/ 9190:
+/***/ ((module) => {
+
+
+
+module.exports = function zip(array) {
+  var _this = this;
+
+  var values = array;
+
+  if (values instanceof this.constructor) {
+    values = values.all();
+  }
+
+  var collection = this.items.map(function (item, index) {
+    return new _this.constructor([item, values[index]]);
+  });
+  return new this.constructor(collection);
+};
+
+/***/ }),
+
 /***/ 5802:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -31683,6 +35408,35 @@ module.exports = parseParams
 /******/ }
 /******/ 
 /************************************************************************/
+/******/ /* webpack/runtime/compat get default export */
+/******/ (() => {
+/******/ 	// getDefaultExport function for compatibility with non-harmony modules
+/******/ 	__nccwpck_require__.n = (module) => {
+/******/ 		var getter = module && module.__esModule ?
+/******/ 			() => (module['default']) :
+/******/ 			() => (module);
+/******/ 		__nccwpck_require__.d(getter, { a: getter });
+/******/ 		return getter;
+/******/ 	};
+/******/ })();
+/******/ 
+/******/ /* webpack/runtime/define property getters */
+/******/ (() => {
+/******/ 	// define getter functions for harmony exports
+/******/ 	__nccwpck_require__.d = (exports, definition) => {
+/******/ 		for(var key in definition) {
+/******/ 			if(__nccwpck_require__.o(definition, key) && !__nccwpck_require__.o(exports, key)) {
+/******/ 				Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
+/******/ 			}
+/******/ 		}
+/******/ 	};
+/******/ })();
+/******/ 
+/******/ /* webpack/runtime/hasOwnProperty shorthand */
+/******/ (() => {
+/******/ 	__nccwpck_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
+/******/ })();
+/******/ 
 /******/ /* webpack/runtime/compat */
 /******/ 
 /******/ if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = new URL('.', import.meta.url).pathname.slice(import.meta.url.match(/^file:\/\/\/\w:/) ? 1 : 0, -1) + "/";
@@ -31694,6 +35448,9 @@ var __webpack_exports__ = {};
 var core = __nccwpck_require__(7184);
 // EXTERNAL MODULE: external "fs"
 var external_fs_ = __nccwpck_require__(9896);
+// EXTERNAL MODULE: ../../node_modules/collect.js/dist/index.js
+var dist = __nccwpck_require__(2564);
+var dist_default = /*#__PURE__*/__nccwpck_require__.n(dist);
 // EXTERNAL MODULE: ../../node_modules/@actions/github/lib/github.js
 var github = __nccwpck_require__(5683);
 ;// CONCATENATED MODULE: ./src/github.ts
@@ -32062,90 +35819,87 @@ function filterAnalyzableFiles(files) {
  * Compares base branch complexity to head branch complexity
  */
 
+
 /**
- * Create a key for a function to match across base/head
+ * Create a key for a function+metric to match across base/head
+ * Includes metricType since a function can have multiple metric violations
  */
-function getFunctionKey(filepath, symbolName) {
-    return `${filepath}::${symbolName}`;
+function getFunctionKey(filepath, symbolName, metricType) {
+    return `${filepath}::${symbolName}::${metricType}`;
 }
 /**
  * Build a map of function complexities from a report
  */
 function buildComplexityMap(report, files) {
-    const map = new Map();
     if (!report)
-        return map;
-    for (const filepath of files) {
-        const fileData = report.files[filepath];
-        if (!fileData)
-            continue;
-        for (const violation of fileData.violations) {
-            const key = getFunctionKey(filepath, violation.symbolName);
-            map.set(key, { complexity: violation.complexity, violation });
-        }
-    }
-    return map;
+        return new Map();
+    // Flatten violations from all requested files and build map entries
+    const entries = dist_default()(files)
+        .map(filepath => ({ filepath, fileData: report.files[filepath] }))
+        .filter(({ fileData }) => !!fileData)
+        .flatMap(({ filepath, fileData }) => fileData.violations.map(violation => [
+        getFunctionKey(filepath, violation.symbolName, violation.metricType),
+        { complexity: violation.complexity, violation }
+    ]))
+        .all();
+    return new Map(entries);
+}
+/**
+ * Determine severity based on complexity change
+ */
+function determineSeverity(baseComplexity, headComplexity, delta, threshold) {
+    if (baseComplexity === null)
+        return 'new';
+    if (delta < 0)
+        return 'improved';
+    return headComplexity >= threshold * 2 ? 'error' : 'warning';
+}
+/**
+ * Create a delta object from violation data
+ */
+function createDelta(violation, baseComplexity, headComplexity, severity) {
+    const delta = baseComplexity !== null && headComplexity !== null
+        ? headComplexity - baseComplexity
+        : headComplexity ?? -(baseComplexity ?? 0);
+    return {
+        filepath: violation.filepath,
+        symbolName: violation.symbolName,
+        symbolType: violation.symbolType,
+        startLine: violation.startLine,
+        metricType: violation.metricType,
+        baseComplexity,
+        headComplexity,
+        delta,
+        threshold: violation.threshold,
+        severity,
+    };
 }
 /**
  * Calculate complexity deltas between base and head
  */
 function calculateDeltas(baseReport, headReport, changedFiles) {
-    const deltas = [];
     const baseMap = buildComplexityMap(baseReport, changedFiles);
     const headMap = buildComplexityMap(headReport, changedFiles);
-    // Track which base functions we've seen
     const seenBaseKeys = new Set();
-    // Process all head violations
-    for (const [key, headData] of headMap) {
+    // Process head violations
+    const headDeltas = dist_default()(Array.from(headMap.entries()))
+        .map(([key, headData]) => {
         const baseData = baseMap.get(key);
-        if (baseData) {
+        if (baseData)
             seenBaseKeys.add(key);
-        }
         const baseComplexity = baseData?.complexity ?? null;
         const headComplexity = headData.complexity;
         const delta = baseComplexity !== null ? headComplexity - baseComplexity : headComplexity;
-        // Determine severity based on delta
-        let severity;
-        if (baseComplexity === null) {
-            severity = 'new';
-        }
-        else if (delta < 0) {
-            severity = 'improved';
-        }
-        else if (headComplexity >= headData.violation.threshold * 2) {
-            severity = 'error';
-        }
-        else {
-            severity = 'warning';
-        }
-        deltas.push({
-            filepath: headData.violation.filepath,
-            symbolName: headData.violation.symbolName,
-            symbolType: headData.violation.symbolType,
-            startLine: headData.violation.startLine,
-            baseComplexity,
-            headComplexity,
-            delta,
-            threshold: headData.violation.threshold,
-            severity,
-        });
-    }
+        const severity = determineSeverity(baseComplexity, headComplexity, delta, headData.violation.threshold);
+        return createDelta(headData.violation, baseComplexity, headComplexity, severity);
+    })
+        .all();
     // Process deleted functions (in base but not in head)
-    for (const [key, baseData] of baseMap) {
-        if (seenBaseKeys.has(key))
-            continue;
-        deltas.push({
-            filepath: baseData.violation.filepath,
-            symbolName: baseData.violation.symbolName,
-            symbolType: baseData.violation.symbolType,
-            startLine: baseData.violation.startLine,
-            baseComplexity: baseData.complexity,
-            headComplexity: null,
-            delta: -baseData.complexity, // Negative = improvement (removed complexity)
-            threshold: baseData.violation.threshold,
-            severity: 'deleted',
-        });
-    }
+    const deletedDeltas = dist_default()(Array.from(baseMap.entries()))
+        .filter(([key]) => !seenBaseKeys.has(key))
+        .map(([_, baseData]) => createDelta(baseData.violation, baseData.complexity, null, 'deleted'))
+        .all();
+    const deltas = [...headDeltas, ...deletedDeltas];
     // Sort by delta (worst first), then by absolute complexity
     deltas.sort((a, b) => {
         // Errors first, then warnings, then new, then improved, then deleted
@@ -32162,42 +35916,30 @@ function calculateDeltas(baseReport, headReport, changedFiles) {
  * Calculate summary statistics for deltas
  */
 function calculateDeltaSummary(deltas) {
-    let totalDelta = 0;
-    let improved = 0;
-    let degraded = 0;
-    let newFunctions = 0;
-    let deletedFunctions = 0;
-    let unchanged = 0;
-    for (const d of deltas) {
-        totalDelta += d.delta;
-        switch (d.severity) {
-            case 'improved':
-                improved++;
-                break;
-            case 'error':
-            case 'warning':
-                if (d.delta > 0)
-                    degraded++;
-                else if (d.delta === 0)
-                    unchanged++;
-                else
-                    improved++;
-                break;
-            case 'new':
-                newFunctions++;
-                break;
-            case 'deleted':
-                deletedFunctions++;
-                break;
-        }
-    }
+    const collection = dist_default()(deltas);
+    // Categorize each delta
+    const categorized = collection.map(d => {
+        if (d.severity === 'improved')
+            return 'improved';
+        if (d.severity === 'new')
+            return 'new';
+        if (d.severity === 'deleted')
+            return 'deleted';
+        // error/warning: check delta direction
+        if (d.delta > 0)
+            return 'degraded';
+        if (d.delta === 0)
+            return 'unchanged';
+        return 'improved';
+    });
+    const counts = categorized.countBy().all();
     return {
-        totalDelta,
-        improved,
-        degraded,
-        newFunctions,
-        deletedFunctions,
-        unchanged,
+        totalDelta: collection.sum('delta'),
+        improved: counts['improved'] || 0,
+        degraded: counts['degraded'] || 0,
+        newFunctions: counts['new'] || 0,
+        deletedFunctions: counts['deleted'] || 0,
+        unchanged: counts['unchanged'] || 0,
     };
 }
 /**
@@ -32242,26 +35984,85 @@ function logDeltaSummary(summary) {
  * Prompt builder for AI code review
  */
 
+
+/**
+ * Create a unique key for delta lookups
+ * Includes metricType since a function can have multiple metric violations
+ */
+function createDeltaKey(v) {
+    return `${v.filepath}::${v.symbolName}::${v.metricType}`;
+}
 /**
  * Build a lookup map from deltas for quick access
  */
 function buildDeltaMap(deltas) {
-    const map = new Map();
-    if (deltas) {
-        for (const d of deltas) {
-            map.set(`${d.filepath}::${d.symbolName}`, d);
-        }
+    if (!deltas)
+        return new Map();
+    return new Map(dist_default()(deltas)
+        .map(d => [createDeltaKey(d), d])
+        .all());
+}
+/**
+ * Get human-readable label for a metric type
+ */
+function getMetricLabel(metricType) {
+    switch (metricType) {
+        case 'cognitive': return 'mental load';
+        case 'cyclomatic': return 'test paths';
+        case 'halstead_effort': return 'time to understand';
+        case 'halstead_bugs': return 'estimated bugs';
+        default: return 'complexity';
     }
-    return map;
+}
+/**
+ * Format minutes as human-readable time
+ */
+function formatTime(minutes) {
+    if (minutes >= 60) {
+        const hours = Math.floor(minutes / 60);
+        const mins = Math.round(minutes % 60);
+        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    }
+    return `${Math.round(minutes)}m`;
+}
+/**
+ * Format complexity value based on metric type for display
+ */
+function formatComplexityValue(metricType, value) {
+    switch (metricType) {
+        case 'halstead_effort':
+            return `~${formatTime(value)}`;
+        case 'halstead_bugs':
+            return value.toFixed(2);
+        case 'cyclomatic':
+            return `${value} tests`;
+        default:
+            return value.toString();
+    }
+}
+/**
+ * Format threshold value based on metric type for display
+ */
+function formatThresholdValue(metricType, value) {
+    switch (metricType) {
+        case 'halstead_effort':
+            return formatTime(value);
+        case 'halstead_bugs':
+            return value.toFixed(1);
+        default:
+            return value.toString();
+    }
 }
 /**
  * Format a single violation line with optional delta
  */
 function formatViolationLine(v, deltaMap) {
-    const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+    const delta = deltaMap.get(createDeltaKey(v));
     const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-    const metricLabel = v.metricType === 'cognitive' ? 'cognitive' : 'cyclomatic';
-    return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
+    const metricLabel = getMetricLabel(v.metricType);
+    const valueDisplay = formatComplexityValue(v.metricType, v.complexity);
+    const thresholdDisplay = formatThresholdValue(v.metricType, v.threshold);
+    return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} ${valueDisplay}${deltaStr} (threshold: ${thresholdDisplay}) [${v.severity}]`;
 }
 /**
  * Build violations summary grouped by file
@@ -32502,26 +36303,77 @@ function formatBadgeDelta(deltaSummary) {
     return `${sign}${deltaSummary.totalDelta} ${trend}`;
 }
 /**
- * Build the PR description stats badge
- * Human-friendly summary with technical details collapsed
+ * Get emoji for metric type
  */
-function buildDescriptionBadge(report, deltaSummary) {
-    const violations = report ? String(report.summary.totalViolations) : '0';
-    const maxComplexity = report ? String(report.summary.maxComplexity) : '—';
-    const deltaDisplay = formatBadgeDelta(deltaSummary);
+function getMetricEmoji(metricType) {
+    switch (metricType) {
+        case 'cyclomatic': return '🔀';
+        case 'cognitive': return '🧠';
+        case 'halstead_effort': return '⏱️';
+        case 'halstead_bugs': return '🐛';
+        default: return '📊';
+    }
+}
+/**
+ * Build the PR description stats badge
+ * Human-friendly summary with metrics table
+ */
+function buildDescriptionBadge(report, deltaSummary, deltas) {
     const status = determineStatus(report, deltaSummary);
+    // Build metric breakdown table with violations and deltas
+    let metricTable = '';
+    if (report && report.summary.totalViolations > 0) {
+        // Count violations by metric type using collect.js
+        const byMetric = dist_default()(Object.values(report.files))
+            .flatMap(f => f.violations)
+            .countBy('metricType')
+            .all();
+        // Calculate delta by metric type using collect.js
+        // Note: collect.js groupBy returns groups needing sum() - types are limited
+        const deltaByMetric = deltas
+            ? dist_default()(deltas)
+                .groupBy('metricType')
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                .map((group) => group.sum('delta'))
+                .all()
+            : {};
+        // Build table rows (only show metrics with violations)
+        const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
+        const rows = dist_default()(metricOrder)
+            .filter(metricType => byMetric[metricType] > 0)
+            .map(metricType => {
+            const emoji = getMetricEmoji(metricType);
+            const label = getMetricLabel(metricType);
+            const count = byMetric[metricType];
+            const delta = deltaByMetric[metricType] || 0;
+            const deltaStr = deltas ? (delta >= 0 ? `+${delta}` : `${delta}`) : '—';
+            return `| ${emoji} ${label} | ${count} | ${deltaStr} |`;
+        })
+            .all();
+        if (rows.length > 0) {
+            metricTable = `
+| Metric | Violations | Change |
+|--------|:----------:|:------:|
+${rows.join('\n')}
+`;
+        }
+    }
     return `### 👁️ Veille
 
 ${status.emoji} ${status.message}
-
-<details>
-<summary>📊 Details</summary>
-
-| Violations | Max Complexity | Change |
-|:----------:|:--------------:|:------:|
-| ${violations} | ${maxComplexity} | ${deltaDisplay} |
-
-</details>`;
+${metricTable}
+*[Veille](https://lien.dev) by Lien*`;
+}
+/**
+ * Build Halstead details string for prompts
+ */
+function formatHalsteadContext(violation) {
+    if (!violation.metricType?.startsWith('halstead_'))
+        return '';
+    if (!violation.halsteadDetails)
+        return '';
+    const details = violation.halsteadDetails;
+    return `\n**Halstead Metrics**: Volume: ${details.volume?.toLocaleString()}, Difficulty: ${details.difficulty?.toFixed(1)}, Effort: ${details.effort?.toLocaleString()}, Est. bugs: ${details.bugs?.toFixed(3)}`;
 }
 /**
  * Build a prompt for generating a single line comment for a violation
@@ -32530,19 +36382,25 @@ function buildLineCommentPrompt(violation, codeSnippet) {
     const snippetSection = codeSnippet
         ? `\n\n**Code:**\n\`\`\`\n${codeSnippet}\n\`\`\``
         : '';
+    const metricType = violation.metricType || 'cyclomatic';
+    const metricLabel = getMetricLabel(metricType);
+    const valueDisplay = formatComplexityValue(metricType, violation.complexity);
+    const thresholdDisplay = formatThresholdValue(metricType, violation.threshold);
+    const halsteadContext = formatHalsteadContext(violation);
     return `You are reviewing code for complexity. Generate an actionable review comment.
 
 **Function**: \`${violation.symbolName}\` (${violation.symbolType})
-**Complexity**: ${violation.complexity} ${violation.metricType || 'cyclomatic'} (threshold: ${violation.threshold})
+**Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
 ${snippetSection}
 
 Write a code review comment that includes:
 
-1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains")
+1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains", "many unique operators")
 
 2. **Refactoring** (2-3 sentences): Concrete steps to reduce complexity. Be SPECIFIC:
    - Name the exact functions to extract (e.g., "Extract \`handleAdminDelete()\` and \`handleModeratorDelete()\`")
    - Suggest specific patterns (strategy, lookup table, early returns)
+   - For Halstead metrics: suggest introducing named constants, reducing operator variety, or extracting complex expressions
    - If applicable, show a brief code sketch
 
 3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
@@ -32588,9 +36446,14 @@ function buildBatchedCommentsPrompt(violations, codeSnippets) {
         const snippetSection = snippet
             ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\``
             : '';
+        const metricType = v.metricType || 'cyclomatic';
+        const metricLabel = getMetricLabel(metricType);
+        const valueDisplay = formatComplexityValue(metricType, v.complexity);
+        const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
+        const halsteadContext = formatHalsteadContext(v);
         return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
-- **Complexity**: ${v.complexity} ${v.metricType || 'cyclomatic'} (threshold: ${v.threshold})
+- **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
 - **Severity**: ${v.severity}${snippetSection}`;
     })
         .join('\n\n');
@@ -32610,10 +36473,12 @@ For each violation, write a code review comment that:
 
 1. **Identifies the specific pattern** causing complexity (not just "too complex")
    - Is it nested conditionals? Long parameter lists? Multiple responsibilities?
+   - For Halstead metrics: many unique operators/operands, complex expressions
    - Be specific: "5 levels of nesting" not "deeply nested"
 
 2. **Suggests a concrete fix** with a short code example (3-5 lines)
    - Consider: early returns, guard clauses, lookup tables, extracting helpers, strategy pattern
+   - For Halstead: named constants, reducing operator variety, extracting complex expressions
    - Name specific functions: "Extract \`handleAdminCase()\`" not "extract a function"
    - Choose the SIMPLEST fix that addresses the issue (KISS principle)
 
@@ -32870,6 +36735,7 @@ async function generateLineComments(violations, codeSnippets, apiKey, model) {
 
 
 
+
 /**
  * Get action configuration from inputs
  */
@@ -32998,7 +36864,7 @@ async function run() {
             core.setOutput('degraded', deltaSummary.degraded);
         }
         // Always update PR description with stats badge
-        const badge = buildDescriptionBadge(report, deltaSummary);
+        const badge = buildDescriptionBadge(report, deltaSummary, deltas);
         await updatePRDescription(octokit, prContext, badge);
         if (report.summary.totalViolations === 0) {
             core.info('No complexity violations found');
@@ -33042,42 +36908,63 @@ function findCommentLine(violation, diffLines) {
     return null;
 }
 /**
+ * Create a unique key for delta lookups
+ * Includes metricType since a function can have multiple metric violations
+ */
+function src_createDeltaKey(v) {
+    return `${v.filepath}::${v.symbolName}::${v.metricType}`;
+}
+/**
  * Build delta lookup map from deltas array
  */
 function src_buildDeltaMap(deltas) {
-    const deltaMap = new Map();
-    if (deltas) {
-        for (const d of deltas) {
-            deltaMap.set(`${d.filepath}::${d.symbolName}`, d);
-        }
-    }
-    return deltaMap;
+    if (!deltas)
+        return new Map();
+    return new Map(dist_default()(deltas)
+        .map(d => [src_createDeltaKey(d), d])
+        .all());
 }
 /**
  * Build line comments from violations and AI comments
  */
 function buildLineComments(violationsWithLines, aiComments, deltaMap) {
-    const lineComments = [];
-    for (const { violation, commentLine } of violationsWithLines) {
+    return dist_default()(violationsWithLines)
+        .filter(({ violation }) => aiComments.has(violation))
+        .map(({ violation, commentLine }) => {
         const comment = aiComments.get(violation);
-        if (!comment)
-            continue;
-        const delta = deltaMap.get(`${violation.filepath}::${violation.symbolName}`);
+        const delta = deltaMap.get(src_createDeltaKey(violation));
         const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
         const severityEmoji = delta
             ? formatSeverityEmoji(delta.severity)
             : (violation.severity === 'error' ? '🔴' : '🟡');
+        // If comment is not on symbol's starting line, note where it actually starts
         const lineNote = commentLine !== violation.startLine
-            ? ` *(function starts at line ${violation.startLine})*`
+            ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
             : '';
+        // Format human-friendly complexity display
+        const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
+        const valueDisplay = formatComplexityValue(violation.metricType || 'cyclomatic', violation.complexity);
+        const thresholdDisplay = formatThresholdValue(violation.metricType || 'cyclomatic', violation.threshold);
         core.info(`Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`);
-        lineComments.push({
+        return {
             path: violation.filepath,
             line: commentLine,
-            body: `${severityEmoji} **Complexity: ${violation.complexity}**${deltaStr} (threshold: ${violation.threshold})${lineNote}\n\n${comment}`,
-        });
+            body: `${severityEmoji} **${metricLabel.charAt(0).toUpperCase() + metricLabel.slice(1)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})${lineNote}\n\n${comment}`,
+        };
+    })
+        .all();
+}
+/**
+ * Get emoji for metric type
+ */
+function src_getMetricEmoji(metricType) {
+    switch (metricType) {
+        case 'cyclomatic': return '🔀';
+        case 'cognitive': return '🧠';
+        case 'halstead_effort': return '⏱️';
+        case 'halstead_bugs': return '🐛';
+        default: return '📊';
     }
-    return lineComments;
 }
 /**
  * Build uncovered violations note for summary
@@ -33087,9 +36974,12 @@ function buildUncoveredNote(uncoveredViolations, deltaMap) {
         return '';
     const uncoveredList = uncoveredViolations
         .map(v => {
-        const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+        const delta = deltaMap.get(src_createDeltaKey(v));
         const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-        return `  - \`${v.symbolName}\` in \`${v.filepath}\`: complexity ${v.complexity}${deltaStr}`;
+        const emoji = src_getMetricEmoji(v.metricType);
+        const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
+        const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
+        return `* \`${v.symbolName}\` in \`${v.filepath}\`: ${emoji} ${metricLabel} ${valueDisplay}${deltaStr}`;
     })
         .join('\n');
     return `\n\n<details>\n<summary>⚠️ ${uncoveredViolations.length} violation${uncoveredViolations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${uncoveredList}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
@@ -33106,25 +36996,73 @@ function buildSkippedNote(skippedViolations) {
     return `\n\n<details>\n<summary>ℹ️ ${skippedViolations.length} pre-existing violation${skippedViolations.length === 1 ? '' : 's'} (unchanged)</summary>\n\n${skippedList}\n\n> *These violations existed before this PR and haven't changed. No inline comments added to reduce noise.*\n\n</details>`;
 }
 /**
+ * Format token usage cost display
+ */
+function formatCostDisplay(usage) {
+    return usage.totalTokens > 0
+        ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})`
+        : '';
+}
+/**
+ * Group deltas by metric type and sum their values
+ */
+function groupDeltasByMetric(deltas) {
+    // Note: collect.js groupBy returns groups needing sum() - types are limited
+    return dist_default()(deltas)
+        .groupBy('metricType')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((group) => group.sum('delta'))
+        .all();
+}
+/**
+ * Format delta value for display, rounding bugs to 2 decimals to avoid floating point noise
+ */
+function formatDeltaValue(metricType, delta) {
+    // halstead_bugs uses decimals; others are integers
+    if (metricType === 'halstead_bugs') {
+        return delta.toFixed(2);
+    }
+    return String(Math.round(delta));
+}
+/**
+ * Build metric breakdown string with emojis
+ */
+function buildMetricBreakdown(deltaByMetric) {
+    const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
+    return dist_default()(metricOrder)
+        .map(metricType => {
+        const metricDelta = deltaByMetric[metricType] || 0;
+        const emoji = src_getMetricEmoji(metricType);
+        const sign = metricDelta >= 0 ? '+' : '';
+        return `${emoji} ${sign}${formatDeltaValue(metricType, metricDelta)}`;
+    })
+        .all()
+        .join(' | ');
+}
+/**
+ * Format delta display with metric breakdown and summary
+ */
+function src_formatDeltaDisplay(deltas) {
+    if (!deltas || deltas.length === 0)
+        return '';
+    const deltaSummary = calculateDeltaSummary(deltas);
+    const deltaByMetric = groupDeltasByMetric(deltas);
+    const metricBreakdown = buildMetricBreakdown(deltaByMetric);
+    const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+    let display = `\n\n**Complexity Change:** ${metricBreakdown} ${trend}`;
+    if (deltaSummary.improved > 0)
+        display += ` (${deltaSummary.improved} improved)`;
+    if (deltaSummary.degraded > 0)
+        display += ` (${deltaSummary.degraded} degraded)`;
+    return display;
+}
+/**
  * Build review summary body for line comments mode
  */
 function buildReviewSummary(report, deltas, uncoveredNote) {
     const { summary } = report;
-    const usage = getTokenUsage();
-    const costDisplay = usage.totalTokens > 0
-        ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})`
-        : '';
-    let deltaDisplay = '';
-    if (deltas && deltas.length > 0) {
-        const deltaSummary = calculateDeltaSummary(deltas);
-        const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
-        const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
-        deltaDisplay = `\n\n**Complexity Change:** ${sign}${deltaSummary.totalDelta} ${trend}`;
-        if (deltaSummary.improved > 0)
-            deltaDisplay += ` (${deltaSummary.improved} improved)`;
-        if (deltaSummary.degraded > 0)
-            deltaDisplay += ` (${deltaSummary.degraded} degraded)`;
-    }
+    const costDisplay = formatCostDisplay(getTokenUsage());
+    const deltaDisplay = src_formatDeltaDisplay(deltas);
     return `<!-- lien-ai-review -->
 ## 👁️ Veille
 
@@ -33167,7 +37105,7 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     // Filter to only new or degraded violations (skip unchanged pre-existing ones)
     // This saves LLM costs and prevents duplicate comments on each push
     const newOrDegradedViolations = violationsWithLines.filter(({ violation }) => {
-        const key = `${violation.filepath}::${violation.symbolName}`;
+        const key = src_createDeltaKey(violation);
         const delta = deltaMap.get(key);
         // Comment if: no baseline data, or new violation, or got worse
         return !delta || delta.severity === 'new' || delta.delta > 0;
@@ -33185,7 +37123,7 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
             // Build skipped note for unchanged violations in the diff (not "outside diff")
             const skippedInDiff = violationsWithLines
                 .filter(({ violation }) => {
-                const key = `${violation.filepath}::${violation.symbolName}`;
+                const key = src_createDeltaKey(violation);
                 const delta = deltaMap.get(key);
                 return delta && delta.severity !== 'new' && delta.delta === 0;
             })
@@ -33207,7 +37145,7 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     // Note: delta === 0 means truly unchanged; delta < 0 means improved (not "unchanged")
     const skippedViolations = violationsWithLines
         .filter(({ violation }) => {
-        const key = `${violation.filepath}::${violation.symbolName}`;
+        const key = src_createDeltaKey(violation);
         const delta = deltaMap.get(key);
         return delta && delta.severity !== 'new' && delta.delta === 0;
     })

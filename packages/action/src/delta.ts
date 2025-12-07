@@ -4,13 +4,15 @@
  */
 
 import * as core from '@actions/core';
+import collect from 'collect.js';
 import type { ComplexityReport, ComplexityDelta, DeltaSummary, ComplexityViolation } from './types.js';
 
 /**
- * Create a key for a function to match across base/head
+ * Create a key for a function+metric to match across base/head
+ * Includes metricType since a function can have multiple metric violations
  */
-function getFunctionKey(filepath: string, symbolName: string): string {
-  return `${filepath}::${symbolName}`;
+function getFunctionKey(filepath: string, symbolName: string, metricType: string): string {
+  return `${filepath}::${symbolName}::${metricType}`;
 }
 
 /**
@@ -20,21 +22,64 @@ function buildComplexityMap(
   report: ComplexityReport | null,
   files: string[]
 ): Map<string, { complexity: number; violation: ComplexityViolation }> {
-  const map = new Map<string, { complexity: number; violation: ComplexityViolation }>();
+  if (!report) return new Map();
 
-  if (!report) return map;
+  type MapEntry = [string, { complexity: number; violation: ComplexityViolation }];
 
-  for (const filepath of files) {
-    const fileData = report.files[filepath];
-    if (!fileData) continue;
+  // Flatten violations from all requested files and build map entries
+  const entries = collect(files)
+    .map(filepath => ({ filepath, fileData: report.files[filepath] }))
+    .filter(({ fileData }) => !!fileData)
+    .flatMap(({ filepath, fileData }) =>
+      fileData.violations.map(violation => [
+        getFunctionKey(filepath, violation.symbolName, violation.metricType),
+        { complexity: violation.complexity, violation }
+      ] as MapEntry)
+    )
+    .all() as unknown as MapEntry[];
 
-    for (const violation of fileData.violations) {
-      const key = getFunctionKey(filepath, violation.symbolName);
-      map.set(key, { complexity: violation.complexity, violation });
-    }
-  }
+  return new Map(entries);
+}
 
-  return map;
+/**
+ * Determine severity based on complexity change
+ */
+function determineSeverity(
+  baseComplexity: number | null,
+  headComplexity: number,
+  delta: number,
+  threshold: number
+): ComplexityDelta['severity'] {
+  if (baseComplexity === null) return 'new';
+  if (delta < 0) return 'improved';
+  return headComplexity >= threshold * 2 ? 'error' : 'warning';
+}
+
+/**
+ * Create a delta object from violation data
+ */
+function createDelta(
+  violation: ComplexityViolation,
+  baseComplexity: number | null,
+  headComplexity: number | null,
+  severity: ComplexityDelta['severity']
+): ComplexityDelta {
+  const delta = baseComplexity !== null && headComplexity !== null
+    ? headComplexity - baseComplexity
+    : headComplexity ?? -(baseComplexity ?? 0);
+
+  return {
+    filepath: violation.filepath,
+    symbolName: violation.symbolName,
+    symbolType: violation.symbolType,
+    startLine: violation.startLine,
+    metricType: violation.metricType,
+    baseComplexity,
+    headComplexity,
+    delta,
+    threshold: violation.threshold,
+    severity,
+  };
 }
 
 /**
@@ -45,66 +90,32 @@ export function calculateDeltas(
   headReport: ComplexityReport,
   changedFiles: string[]
 ): ComplexityDelta[] {
-  const deltas: ComplexityDelta[] = [];
-
   const baseMap = buildComplexityMap(baseReport, changedFiles);
   const headMap = buildComplexityMap(headReport, changedFiles);
-
-  // Track which base functions we've seen
   const seenBaseKeys = new Set<string>();
 
-  // Process all head violations
-  for (const [key, headData] of headMap) {
-    const baseData = baseMap.get(key);
-    if (baseData) {
-      seenBaseKeys.add(key);
-    }
+  // Process head violations
+  const headDeltas = collect(Array.from(headMap.entries()))
+    .map(([key, headData]) => {
+      const baseData = baseMap.get(key);
+      if (baseData) seenBaseKeys.add(key);
 
-    const baseComplexity = baseData?.complexity ?? null;
-    const headComplexity = headData.complexity;
-    const delta = baseComplexity !== null ? headComplexity - baseComplexity : headComplexity;
+      const baseComplexity = baseData?.complexity ?? null;
+      const headComplexity = headData.complexity;
+      const delta = baseComplexity !== null ? headComplexity - baseComplexity : headComplexity;
+      const severity = determineSeverity(baseComplexity, headComplexity, delta, headData.violation.threshold);
 
-    // Determine severity based on delta
-    let severity: ComplexityDelta['severity'];
-    if (baseComplexity === null) {
-      severity = 'new';
-    } else if (delta < 0) {
-      severity = 'improved';
-    } else if (headComplexity >= headData.violation.threshold * 2) {
-      severity = 'error';
-    } else {
-      severity = 'warning';
-    }
-
-    deltas.push({
-      filepath: headData.violation.filepath,
-      symbolName: headData.violation.symbolName,
-      symbolType: headData.violation.symbolType,
-      startLine: headData.violation.startLine,
-      baseComplexity,
-      headComplexity,
-      delta,
-      threshold: headData.violation.threshold,
-      severity,
-    });
-  }
+      return createDelta(headData.violation, baseComplexity, headComplexity, severity);
+    })
+    .all() as ComplexityDelta[];
 
   // Process deleted functions (in base but not in head)
-  for (const [key, baseData] of baseMap) {
-    if (seenBaseKeys.has(key)) continue;
+  const deletedDeltas = collect(Array.from(baseMap.entries()))
+    .filter(([key]) => !seenBaseKeys.has(key))
+    .map(([_, baseData]) => createDelta(baseData.violation, baseData.complexity, null, 'deleted'))
+    .all() as ComplexityDelta[];
 
-    deltas.push({
-      filepath: baseData.violation.filepath,
-      symbolName: baseData.violation.symbolName,
-      symbolType: baseData.violation.symbolType,
-      startLine: baseData.violation.startLine,
-      baseComplexity: baseData.complexity,
-      headComplexity: null,
-      delta: -baseData.complexity, // Negative = improvement (removed complexity)
-      threshold: baseData.violation.threshold,
-      severity: 'deleted',
-    });
-  }
+  const deltas = [...headDeltas, ...deletedDeltas];
 
   // Sort by delta (worst first), then by absolute complexity
   deltas.sort((a, b) => {
@@ -124,42 +135,28 @@ export function calculateDeltas(
  * Calculate summary statistics for deltas
  */
 export function calculateDeltaSummary(deltas: ComplexityDelta[]): DeltaSummary {
-  let totalDelta = 0;
-  let improved = 0;
-  let degraded = 0;
-  let newFunctions = 0;
-  let deletedFunctions = 0;
-  let unchanged = 0;
+  const collection = collect(deltas);
+  
+  // Categorize each delta
+  const categorized = collection.map(d => {
+    if (d.severity === 'improved') return 'improved';
+    if (d.severity === 'new') return 'new';
+    if (d.severity === 'deleted') return 'deleted';
+    // error/warning: check delta direction
+    if (d.delta > 0) return 'degraded';
+    if (d.delta === 0) return 'unchanged';
+    return 'improved';
+  });
 
-  for (const d of deltas) {
-    totalDelta += d.delta;
-
-    switch (d.severity) {
-      case 'improved':
-        improved++;
-        break;
-      case 'error':
-      case 'warning':
-        if (d.delta > 0) degraded++;
-        else if (d.delta === 0) unchanged++;
-        else improved++;
-        break;
-      case 'new':
-        newFunctions++;
-        break;
-      case 'deleted':
-        deletedFunctions++;
-        break;
-    }
-  }
+  const counts = categorized.countBy().all() as unknown as Record<string, number>;
 
   return {
-    totalDelta,
-    improved,
-    degraded,
-    newFunctions,
-    deletedFunctions,
-    unchanged,
+    totalDelta: collection.sum('delta') as number,
+    improved: counts['improved'] || 0,
+    degraded: counts['degraded'] || 0,
+    newFunctions: counts['new'] || 0,
+    deletedFunctions: counts['deleted'] || 0,
+    unchanged: counts['unchanged'] || 0,
   };
 }
 

@@ -7,6 +7,114 @@ import { ComplexityReport, ComplexityViolation, FileComplexityData } from '../ty
 type ViolationWithFile = ComplexityViolation & { file: string };
 
 /**
+ * Get the display label for a metric type
+ */
+function getMetricLabel(metricType: ComplexityViolation['metricType']): string {
+  switch (metricType) {
+    case 'cognitive': return '🧠 Mental load';
+    case 'cyclomatic': return '🔀 Test paths';
+    case 'halstead_effort': return '⏱️ Time to understand';
+    case 'halstead_bugs': return '🐛 Estimated bugs';
+    default: return 'Complexity';
+  }
+}
+
+/**
+ * Convert Halstead effort to time in minutes
+ */
+function effortToMinutes(effort: number): number {
+  return effort / 1080;
+}
+
+/**
+ * Format minutes as human-readable time
+ */
+function formatTime(minutes: number): string {
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const mins = Math.round(minutes % 60);
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return `${Math.round(minutes)}m`;
+}
+
+/**
+ * Format Halstead details as additional lines
+ */
+function formatHalsteadDetails(violation: ViolationWithFile): string[] {
+  if (!violation.halsteadDetails) return [];
+  
+  const { volume, difficulty, effort, bugs } = violation.halsteadDetails;
+  const timeStr = formatTime(effortToMinutes(effort));
+  return [
+    chalk.dim(`    📊  Volume: ${Math.round(volume).toLocaleString()}, Difficulty: ${difficulty.toFixed(1)}`),
+    chalk.dim(`    ⏱️  Time: ~${timeStr}, Est. bugs: ${bugs.toFixed(2)}`),
+  ];
+}
+
+/**
+ * Metric-specific formatters for complexity/threshold display.
+ * Each formatter returns { complexity, threshold } as display strings.
+ */
+type MetricFormatter = (val: number, thresh: number) => { complexity: string; threshold: string };
+
+const metricFormatters: Record<string, MetricFormatter> = {
+  halstead_effort: (val, thresh) => ({
+    // val/thresh are already in minutes (human-scale)
+    complexity: '~' + formatTime(val),
+    threshold: formatTime(thresh),
+  }),
+  halstead_bugs: (val, thresh) => ({
+    complexity: val.toFixed(2),
+    threshold: thresh.toFixed(1),
+  }),
+  cyclomatic: (val, thresh) => ({
+    complexity: `${val} (needs ~${val} tests)`,
+    threshold: thresh.toString(),
+  }),
+};
+
+const defaultFormatter: MetricFormatter = (val, thresh) => ({
+  complexity: val.toString(),
+  threshold: thresh.toString(),
+});
+
+/**
+ * Format symbol name with appropriate suffix
+ */
+function formatSymbolDisplay(violation: ViolationWithFile, isBold: boolean): string {
+  const display = ['function', 'method'].includes(violation.symbolType)
+    ? `${violation.symbolName}()`
+    : violation.symbolName;
+  return isBold ? chalk.bold(display) : display;
+}
+
+/**
+ * Format dependency impact information
+ */
+function formatDependencyInfo(fileData: FileComplexityData): string[] {
+  const depCount = fileData.dependentCount ?? fileData.dependents.length;
+  if (depCount === 0) return [];
+
+  const lines = [chalk.dim(`    📦  Imported by ${depCount} file${depCount !== 1 ? 's' : ''}`)];
+  
+  if (fileData.dependentComplexityMetrics) {
+    const { averageComplexity, maxComplexity } = fileData.dependentComplexityMetrics;
+    lines.push(chalk.dim(`    - Dependent avg complexity: ${averageComplexity}, max: ${maxComplexity}`));
+  }
+  
+  return lines;
+}
+
+/**
+ * Format percentage over threshold
+ */
+function formatPercentageOver(complexity: number, threshold: number): string {
+  if (threshold <= 0) return 'N/A (invalid threshold)';
+  return `${Math.round(((complexity - threshold) / threshold) * 100)}% over threshold`;
+}
+
+/**
  * Format a single violation entry with its metadata
  */
 function formatViolation(
@@ -15,42 +123,20 @@ function formatViolation(
   colorFn: typeof chalk.red | typeof chalk.yellow,
   isBold: boolean
 ): string[] {
-  const lines: string[] = [];
-  
-  const symbolDisplay = (violation.symbolType === 'function' || violation.symbolType === 'method')
-    ? violation.symbolName + '()'
-    : violation.symbolName;
-  
-  const symbolText = isBold ? chalk.bold(symbolDisplay) : symbolDisplay;
-  lines.push(colorFn(`  ${violation.file}:${violation.startLine}`) + chalk.dim(' - ') + symbolText);
-  
-  // Show metric type (cyclomatic vs cognitive)
-  const metricLabel = violation.metricType === 'cognitive' ? 'Cognitive complexity' : 'Cyclomatic complexity';
-  lines.push(chalk.dim(`    ${metricLabel}: ${violation.complexity} (threshold: ${violation.threshold})`));
-  
-  let percentageText: string;
-  if (violation.threshold > 0) {
-    const percentage = Math.round(((violation.complexity - violation.threshold) / violation.threshold) * 100);
-    percentageText = `${percentage}% over threshold`;
-  } else {
-    percentageText = 'N/A (invalid threshold)';
-  }
-  lines.push(chalk.dim(`    ⬆️  ${percentageText}`));
-  
-  // Show dependency impact
-  const depCount = fileData.dependentCount ?? fileData.dependents.length;
-  if (depCount > 0) {
-    lines.push(chalk.dim(`    📦  Imported by ${depCount} file${depCount !== 1 ? 's' : ''}`));
-    if (fileData.dependentComplexityMetrics) {
-      const metrics = fileData.dependentComplexityMetrics;
-      lines.push(chalk.dim(`    - Dependent avg complexity: ${metrics.averageComplexity}, max: ${metrics.maxComplexity}`));
-    }
-  }
-  
-  lines.push(chalk.dim(`    ⚠️  Risk: ${fileData.riskLevel.toUpperCase()}`));
-  lines.push('');
-  
-  return lines;
+  const symbolText = formatSymbolDisplay(violation, isBold);
+  const metricLabel = getMetricLabel(violation.metricType);
+  const formatter = metricFormatters[violation.metricType] || defaultFormatter;
+  const { complexity: complexityDisplay, threshold: thresholdDisplay } = formatter(violation.complexity, violation.threshold);
+
+  return [
+    colorFn(`  ${violation.file}:${violation.startLine}`) + chalk.dim(' - ') + symbolText,
+    chalk.dim(`    ${metricLabel}: ${complexityDisplay} (threshold: ${thresholdDisplay})`),
+    chalk.dim(`    ⬆️  ${formatPercentageOver(violation.complexity, violation.threshold)}`),
+    ...formatHalsteadDetails(violation),
+    ...formatDependencyInfo(fileData),
+    chalk.dim(`    ⚠️  Risk: ${fileData.riskLevel.toUpperCase()}`),
+    '',
+  ];
 }
 
 /**

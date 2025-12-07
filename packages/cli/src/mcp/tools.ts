@@ -112,8 +112,11 @@ Example: get_dependents({ filepath: "src/utils/validate.ts" })`
     'get_complexity',
     `Get complexity analysis for files or the entire codebase.
 
-Analyzes both cyclomatic complexity (decision paths) and cognitive complexity
-(mental effort to understand, penalizes nesting depth).
+Analyzes multiple complexity metrics:
+- **Test paths**: Number of test cases needed for full coverage (cyclomatic)
+- **Mental load**: How hard to follow - penalizes nesting (cognitive)
+- **Time to understand**: Estimated reading time based on Halstead effort
+- **Estimated bugs**: Predicted bug count based on Halstead volume
 
 Use for tech debt analysis and refactoring prioritization:
 - "What are the most complex functions?"
@@ -125,7 +128,8 @@ Examples:
   get_complexity({ files: ["src/auth.ts", "src/api/user.ts"] })
   get_complexity({ threshold: 15 })
 
-Returns violations with metricType ('cyclomatic' or 'cognitive'), risk levels,
-and dependent counts. Functions can have violations for both metrics.`
+Returns violations with metricType ('cyclomatic', 'cognitive', 'halstead_effort',
+or 'halstead_bugs'), risk levels, and dependent counts.
+Human-readable output: "23 (needs ~23 tests)", "🧠 45", "~2h 30m", "2.27 bugs".`
   ),
 ];

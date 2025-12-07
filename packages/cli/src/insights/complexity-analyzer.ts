@@ -1,9 +1,16 @@
 import { VectorDB } from '../vectordb/lancedb.js';
 import { LienConfig } from '../config/schema.js';
-import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER, RiskLevel } from './types.js';
+import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER, RiskLevel, HalsteadDetails } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
 import { SearchResult } from '../vectordb/types.js';
+
+/**
+ * Hardcoded severity multipliers:
+ * - Warning: triggers at 1x threshold (e.g., testPaths >= 15)
+ * - Error: triggers at 2x threshold (e.g., testPaths >= 30)
+ */
+const SEVERITY = { warning: 1.0, error: 2.0 } as const;
 
 /**
  * Analyzer for code complexity based on indexed codebase
@@ -85,17 +92,20 @@ export class ComplexityAnalyzer {
     metadata: ChunkMetadata,
     complexity: number,
     baseThreshold: number,
-    metricType: ComplexityViolation['metricType'],
-    severityConfig: { warning: number; error: number }
+    metricType: ComplexityViolation['metricType']
   ): ComplexityViolation | null {
-    const warningThreshold = baseThreshold * severityConfig.warning;
-    const errorThreshold = baseThreshold * severityConfig.error;
+    const warningThreshold = baseThreshold * SEVERITY.warning;
+    const errorThreshold = baseThreshold * SEVERITY.error;
 
     if (complexity < warningThreshold) return null;
 
     const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
     const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
-    const metricLabel = metricType === 'cognitive' ? 'Cognitive' : 'Cyclomatic';
+    
+    // Human-friendly messages
+    const message = metricType === 'cyclomatic'
+      ? `Needs ~${complexity} test cases for full coverage (threshold: ${Math.round(effectiveThreshold)})`
+      : `Mental load ${complexity} exceeds threshold ${Math.round(effectiveThreshold)} (hard to follow)`;
 
     return {
       filepath: metadata.file,
@@ -107,7 +117,7 @@ export class ComplexityAnalyzer {
       complexity,
       threshold: Math.round(effectiveThreshold),
       severity: violationSeverity,
-      message: `${metricLabel} complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`,
+      message,
       metricType,
     };
   }
@@ -136,22 +146,121 @@ export class ComplexityAnalyzer {
   }
 
   /**
+   * Convert Halstead effort to time in minutes.
+   * Formula: Time (seconds) = Effort / 18 (Stroud number for mental discrimination)
+   *          Time (minutes) = Effort / (18 * 60) = Effort / 1080
+   */
+  private effortToMinutes(effort: number): number {
+    return effort / 1080;
+  }
+
+  /**
+   * Format minutes as human-readable time (e.g., "2h 30m" or "45m")
+   */
+  private formatTime(minutes: number): string {
+    if (minutes >= 60) {
+      const hours = Math.floor(minutes / 60);
+      const mins = Math.round(minutes % 60);
+      return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    }
+    return `${Math.round(minutes)}m`;
+  }
+
+  /**
+   * Create a Halstead violation if metrics exceed thresholds
+   */
+  private createHalsteadViolation(
+    metadata: ChunkMetadata,
+    metricValue: number,
+    threshold: number,
+    metricType: 'halstead_effort' | 'halstead_bugs'
+  ): ComplexityViolation | null {
+    const warningThreshold = threshold * SEVERITY.warning;
+    const errorThreshold = threshold * SEVERITY.error;
+
+    if (metricValue < warningThreshold) return null;
+
+    const violationSeverity = metricValue >= errorThreshold ? 'error' : 'warning';
+    const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
+    
+    // For effort, show time in minutes; for bugs, show decimal with 2 places
+    let message: string;
+    if (metricType === 'halstead_effort') {
+      const timeMinutes = this.effortToMinutes(metricValue);
+      const thresholdMinutes = this.effortToMinutes(effectiveThreshold);
+      message = `Time to understand ~${this.formatTime(timeMinutes)} exceeds threshold ${this.formatTime(thresholdMinutes)}`;
+    } else {
+      message = `Estimated bugs ${metricValue.toFixed(2)} exceeds threshold ${effectiveThreshold.toFixed(1)}`;
+    }
+
+    const halsteadDetails: HalsteadDetails = {
+      volume: metadata.halsteadVolume || 0,
+      difficulty: metadata.halsteadDifficulty || 0,
+      effort: metadata.halsteadEffort || 0,
+      bugs: metadata.halsteadBugs || 0,
+    };
+
+    // Store human-scale values for complexity/threshold:
+    // - halstead_effort: rounded to integer minutes for readability (typical values 60-300)
+    // - halstead_bugs: kept as decimal for precision (typical values < 5, e.g. 1.5, 2.27)
+    let complexity: number;
+    let displayThreshold: number;
+    if (metricType === 'halstead_effort') {
+      // Convert raw effort to minutes and round for comparable deltas
+      complexity = Math.round(this.effortToMinutes(metricValue));
+      displayThreshold = Math.round(this.effortToMinutes(effectiveThreshold));
+    } else {
+      // halstead_bugs: store as decimal for precision in small values
+      complexity = metricValue;
+      displayThreshold = effectiveThreshold;
+    }
+
+    return {
+      filepath: metadata.file,
+      startLine: metadata.startLine,
+      endLine: metadata.endLine,
+      symbolName: metadata.symbolName || 'unknown',
+      symbolType: metadata.symbolType as 'function' | 'method',
+      language: metadata.language,
+      complexity,
+      threshold: displayThreshold,
+      severity: violationSeverity,
+      message,
+      metricType,
+      halsteadDetails,
+    };
+  }
+
+  /**
    * Check complexity metrics and create violations for a single chunk.
    */
   private checkChunkComplexity(
     metadata: ChunkMetadata,
-    thresholds: { method: number; cognitive: number },
-    severity: { warning: number; error: number }
+    thresholds: { testPaths: number; mentalLoad: number; halsteadEffort?: number; estimatedBugs?: number }
   ): ComplexityViolation[] {
     const violations: ComplexityViolation[] = [];
     
+    // Check test paths (cyclomatic complexity)
     if (metadata.complexity) {
-      const v = this.createViolation(metadata, metadata.complexity, thresholds.method, 'cyclomatic', severity);
+      const v = this.createViolation(metadata, metadata.complexity, thresholds.testPaths, 'cyclomatic');
       if (v) violations.push(v);
     }
     
+    // Check mental load (cognitive complexity)
     if (metadata.cognitiveComplexity) {
-      const v = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.cognitive, 'cognitive', severity);
+      const v = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.mentalLoad, 'cognitive');
+      if (v) violations.push(v);
+    }
+    
+    // Check time to understand (Halstead effort)
+    if (thresholds.halsteadEffort && metadata.halsteadEffort) {
+      const v = this.createHalsteadViolation(metadata, metadata.halsteadEffort, thresholds.halsteadEffort, 'halstead_effort');
+      if (v) violations.push(v);
+    }
+    
+    // Check estimated bugs
+    if (thresholds.estimatedBugs && metadata.halsteadBugs) {
+      const v = this.createHalsteadViolation(metadata, metadata.halsteadBugs, thresholds.estimatedBugs, 'halstead_bugs');
       if (v) violations.push(v);
     }
     
@@ -159,16 +268,37 @@ export class ComplexityAnalyzer {
   }
 
   /**
+   * Convert time in minutes to Halstead effort.
+   * This is the inverse of effortToMinutes().
+   * Formula: Time (seconds) = Effort / 18 (Stroud number)
+   *          So: Effort = Time (minutes) * 60 * 18 = Time * 1080
+   */
+  private minutesToEffort(minutes: number): number {
+    return minutes * 1080;
+  }
+
+  /**
    * Find all complexity violations based on thresholds.
-   * Checks both cyclomatic and cognitive complexity.
+   * Checks cyclomatic, cognitive, and Halstead complexity.
    */
   private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
-    const thresholds = this.config.complexity?.thresholds || { method: 15, cognitive: 15, file: 50, average: 6 };
-    const severity = this.config.complexity?.severity || { warning: 1.0, error: 2.0 };
+    const configThresholds = this.config.complexity?.thresholds;
+    
+    // Convert timeToUnderstandMinutes to effort internally
+    const halsteadEffort = configThresholds?.timeToUnderstandMinutes 
+      ? this.minutesToEffort(configThresholds.timeToUnderstandMinutes)
+      : this.minutesToEffort(60); // Default: 60 minutes = 64,800 effort
+    
+    const thresholds = { 
+      testPaths: configThresholds?.testPaths ?? 15, 
+      mentalLoad: configThresholds?.mentalLoad ?? 15, 
+      halsteadEffort, // Converted from minutes to effort internally (see above)
+      estimatedBugs: configThresholds?.estimatedBugs ?? 1.5, // Direct decimal value (no conversion needed)
+    };
     const functionChunks = this.getUniqueFunctionChunks(chunks);
     
     return functionChunks.flatMap(metadata => 
-      this.checkChunkComplexity(metadata, thresholds, severity)
+      this.checkChunkComplexity(metadata, thresholds)
     );
   }
 

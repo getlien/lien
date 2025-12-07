@@ -21,14 +21,8 @@ describe('ComplexityAnalyzer', () => {
       complexity: {
         enabled: true,
         thresholds: {
-          method: 15,
-          cognitive: 15,
-          file: 50,
-          average: 6,
-        },
-        severity: {
-          warning: 1.0,
-          error: 2.0,
+          testPaths: 15,
+          mentalLoad: 15,
         },
       },
     } as any;
@@ -122,83 +116,6 @@ describe('ComplexityAnalyzer', () => {
 
       expect(report.summary.bySeverity.warning).toBe(1);
       expect(report.summary.bySeverity.error).toBe(1);
-    });
-
-    it('should respect custom severity.warning multiplier', async () => {
-      // Custom config with severity.warning = 1.5 means violations only when >= 22.5 (15 * 1.5)
-      const customConfig = {
-        ...config,
-        complexity: {
-          enabled: true,
-          thresholds: { method: 15, cognitive: 15, file: 50, average: 6 },
-          severity: { warning: 1.5, error: 2.5 }, // warning at >= 22.5, error at >= 37.5
-        },
-      };
-
-      const chunks = [
-        {
-          content: 'function belowWarning() { }',
-          metadata: {
-            file: 'src/test.ts',
-            startLine: 1,
-            endLine: 10,
-            type: 'function',
-            language: 'typescript',
-            symbolName: 'belowWarning',
-            symbolType: 'function',
-            complexity: 18, // Below warning threshold of 22.5 (15 * 1.5) - NOT a violation
-          } as ChunkMetadata,
-          score: 1.0,
-          relevance: 'highly_relevant' as const,
-        },
-        {
-          content: 'function atWarning() { }',
-          metadata: {
-            file: 'src/test.ts',
-            startLine: 12,
-            endLine: 20,
-            type: 'function',
-            language: 'typescript',
-            symbolName: 'atWarning',
-            symbolType: 'function',
-            complexity: 25, // Above warning (22.5), below error (37.5) = warning
-          } as ChunkMetadata,
-          score: 1.0,
-          relevance: 'highly_relevant' as const,
-        },
-        {
-          content: 'function atError() { }',
-          metadata: {
-            file: 'src/test.ts',
-            startLine: 22,
-            endLine: 30,
-            type: 'function',
-            language: 'typescript',
-            symbolName: 'atError',
-            symbolType: 'function',
-            complexity: 40, // Above error threshold of 37.5 (15 * 2.5) = error
-          } as ChunkMetadata,
-          score: 1.0,
-          relevance: 'highly_relevant' as const,
-        },
-      ];
-
-      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
-
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, customConfig);
-      const report = await analyzer.analyze();
-
-      // Only 2 violations: atWarning (warning) and atError (error)
-      // belowWarning (complexity 18) should NOT be a violation with severity.warning = 1.5
-      expect(report.summary.totalViolations).toBe(2);
-      expect(report.summary.bySeverity.warning).toBe(1);
-      expect(report.summary.bySeverity.error).toBe(1);
-      
-      const violations = report.files['src/test.ts'].violations;
-      expect(violations).toHaveLength(2);
-      expect(violations.find(v => v.symbolName === 'belowWarning')).toBeUndefined();
-      expect(violations.find(v => v.symbolName === 'atWarning')?.severity).toBe('warning');
-      expect(violations.find(v => v.symbolName === 'atError')?.severity).toBe('error');
     });
 
     it('should filter by specific files when provided', async () => {
@@ -435,7 +352,7 @@ describe('ComplexityAnalyzer', () => {
       const violation = report.files['src/test.ts'].violations[0];
       expect(violation.metricType).toBe('cognitive');
       expect(violation.complexity).toBe(20);
-      expect(violation.message).toContain('Cognitive');
+      expect(violation.message).toContain('Mental load');
     });
 
     it('should detect both cyclomatic and cognitive violations for same function', async () => {
@@ -474,11 +391,11 @@ describe('ComplexityAnalyzer', () => {
       
       expect(cyclomaticViolation).toBeDefined();
       expect(cyclomaticViolation!.complexity).toBe(20);
-      expect(cyclomaticViolation!.message).toContain('Cyclomatic');
+      expect(cyclomaticViolation!.message).toContain('test cases');
       
       expect(cognitiveViolation).toBeDefined();
       expect(cognitiveViolation!.complexity).toBe(18);
-      expect(cognitiveViolation!.message).toContain('Cognitive');
+      expect(cognitiveViolation!.message).toContain('Mental load');
     });
 
     it('should not report cognitive violation when below threshold', async () => {
@@ -514,7 +431,7 @@ describe('ComplexityAnalyzer', () => {
         ...config,
         complexity: {
           ...config.complexity!,
-          thresholds: { method: 15, cognitive: 25, file: 50, average: 6 }, // Higher cognitive threshold
+          thresholds: { testPaths: 15, mentalLoad: 25 }, // Higher mental load threshold
         },
       };
 
@@ -543,6 +460,201 @@ describe('ComplexityAnalyzer', () => {
       const report = await analyzer.analyze();
 
       // No violation because 20 < 25
+      expect(report.summary.totalViolations).toBe(0);
+    });
+  });
+
+  describe('Halstead metrics violations', () => {
+    it('should create halstead_effort violation when time to understand exceeds threshold', async () => {
+      const chunks = [
+        {
+          content: 'function complexFunction() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 50,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'complexFunction',
+            symbolType: 'function',
+            complexity: 5,
+            cognitiveComplexity: 5,
+            halsteadEffort: 200000, // ~3h to understand (exceeds 60min default)
+            halsteadVolume: 5000,
+            halsteadDifficulty: 40,
+            halsteadBugs: 1.0,
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const report = await analyzer.analyze();
+
+      expect(report.summary.totalViolations).toBe(1);
+      const violation = report.files['src/test.ts'].violations[0];
+      expect(violation.metricType).toBe('halstead_effort');
+      expect(violation.message).toContain('Time to understand');
+      expect(violation.halsteadDetails).toBeDefined();
+      expect(violation.halsteadDetails?.effort).toBe(200000);
+    });
+
+    it('should create halstead_bugs violation when estimated bugs exceeds threshold', async () => {
+      const chunks = [
+        {
+          content: 'function buggyFunction() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 100,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'buggyFunction',
+            symbolType: 'function',
+            complexity: 5,
+            cognitiveComplexity: 5,
+            halsteadEffort: 50000, // Below effort threshold
+            halsteadVolume: 6000,
+            halsteadDifficulty: 50,
+            halsteadBugs: 2.5, // Exceeds 1.5 default
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const report = await analyzer.analyze();
+
+      expect(report.summary.totalViolations).toBe(1);
+      const violation = report.files['src/test.ts'].violations[0];
+      expect(violation.metricType).toBe('halstead_bugs');
+      expect(violation.message).toContain('Estimated bugs');
+      expect(violation.message).toContain('2.50');
+      expect(violation.halsteadDetails).toBeDefined();
+      expect(violation.halsteadDetails?.bugs).toBe(2.5);
+    });
+
+    it('should create multiple Halstead violations for same function', async () => {
+      const chunks = [
+        {
+          content: 'function veryComplexFunction() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 200,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'veryComplexFunction',
+            symbolType: 'function',
+            complexity: 5,
+            cognitiveComplexity: 5,
+            halsteadEffort: 300000, // Exceeds 60min threshold (~4.6h)
+            halsteadVolume: 9000,
+            halsteadDifficulty: 60,
+            halsteadBugs: 3.0, // Exceeds 1.5 threshold
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const report = await analyzer.analyze();
+
+      // Should have both halstead_effort and halstead_bugs violations
+      expect(report.summary.totalViolations).toBe(2);
+      const violations = report.files['src/test.ts'].violations;
+      const effortViolation = violations.find(v => v.metricType === 'halstead_effort');
+      const bugsViolation = violations.find(v => v.metricType === 'halstead_bugs');
+      
+      expect(effortViolation).toBeDefined();
+      expect(bugsViolation).toBeDefined();
+    });
+
+    it('should convert timeToUnderstandMinutes config to effort correctly', async () => {
+      // Custom config with 30 minute threshold (instead of default 60)
+      const customConfig = {
+        ...config,
+        complexity: {
+          ...config.complexity!,
+          thresholds: { 
+            testPaths: 15, 
+            mentalLoad: 15,
+            timeToUnderstandMinutes: 30, // 30 minutes = 32400 effort
+          },
+        },
+      };
+
+      const chunks = [
+        {
+          content: 'function moderateFunction() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 30,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'moderateFunction',
+            symbolType: 'function',
+            complexity: 5,
+            cognitiveComplexity: 5,
+            halsteadEffort: 40000, // ~37 minutes - above 30min threshold
+            halsteadVolume: 2000,
+            halsteadDifficulty: 20,
+            halsteadBugs: 0.5,
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, customConfig);
+      const report = await analyzer.analyze();
+
+      // Should trigger violation because 37min > 30min threshold
+      expect(report.summary.totalViolations).toBe(1);
+      expect(report.files['src/test.ts'].violations[0].metricType).toBe('halstead_effort');
+    });
+
+    it('should not create Halstead violations when below thresholds', async () => {
+      const chunks = [
+        {
+          content: 'function simpleFunction() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'simpleFunction',
+            symbolType: 'function',
+            complexity: 5,
+            cognitiveComplexity: 5,
+            halsteadEffort: 30000, // ~28 minutes - below 60min threshold
+            halsteadVolume: 1500,
+            halsteadDifficulty: 15,
+            halsteadBugs: 0.5, // Below 1.5 threshold
+          } as ChunkMetadata,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
+        },
+      ];
+
+      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
+
+      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const report = await analyzer.analyze();
+
       expect(report.summary.totalViolations).toBe(0);
     });
   });

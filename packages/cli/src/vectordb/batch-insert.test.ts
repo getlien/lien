@@ -178,6 +178,11 @@ describe('batch-insert', () => {
           parameters: ['a: string', 'b: number'],
           signature: 'function myFunc(a: string, b: number): void',
           imports: ['./utils.js', './types.js'],
+          // Halstead metrics (v0.19.0)
+          halsteadVolume: 0,
+          halsteadDifficulty: 0,
+          halsteadEffort: 0,
+          halsteadBugs: 0,
         });
       });
 

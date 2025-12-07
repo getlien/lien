@@ -58,15 +58,12 @@ export interface LienConfig {
   complexity?: {
     enabled: boolean;
     thresholds: {
-      method: number;      // Cyclomatic complexity threshold (default: 15)
-      cognitive: number;   // Cognitive complexity threshold (default: 15)
-      file: number;        // File-level complexity (default: 50)
-      average: number;     // Average complexity (default: 6)
+      testPaths: number;             // 🔀 Max test paths per function (default: 15)
+      mentalLoad: number;            // 🧠 Max mental load score (default: 15)
+      timeToUnderstandMinutes?: number;  // ⏱️ Max minutes to understand (default: 60)
+      estimatedBugs?: number;            // 🐛 Max estimated bugs (default: 1.5)
     };
-    severity: {
-      warning: number;     // Multiplier for warning threshold (default: 1.0)
-      error: number;       // Multiplier for error threshold (default: 2.0)
-    };
+    // Severity multipliers are hardcoded: warning = 1x threshold, error = 2x threshold
   };
   frameworks: FrameworkInstance[];
 }
@@ -154,14 +151,10 @@ export const defaultConfig: LienConfig = {
   complexity: {
     enabled: true,
     thresholds: {
-      method: 15,      // Cyclomatic complexity threshold
-      cognitive: 15,   // Cognitive complexity threshold (SonarQube default)
-      file: 50,
-      average: 6,
-    },
-    severity: {
-      warning: 1.0,
-      error: 2.0,
+      testPaths: 15,            // 🔀 Max test paths per function
+      mentalLoad: 15,           // 🧠 Max mental load score
+      timeToUnderstandMinutes: 60,  // ⏱️ Functions taking >1 hour to understand
+      estimatedBugs: 1.5,           // 🐛 Functions estimated to have >1.5 bugs
     },
   },
   frameworks: [], // Will be populated by lien init via framework detection

@@ -270,24 +270,22 @@ These apply to individual frameworks:
 
 ## Complexity Analysis
 
-Configure complexity analysis for the `lien complexity` command and `get_complexity` MCP tool. Lien tracks **two metrics**:
+Configure complexity analysis for the `lien complexity` command and `get_complexity` MCP tool. Lien tracks **four metrics**:
 
-- **Cyclomatic Complexity**: Number of independent paths through code (decision points)
-- **Cognitive Complexity**: Mental effort to understand code (penalizes nesting depth)
+- **Test Paths (Cyclomatic)**: Number of test cases needed for full branch coverage
+- **Mental Load**: How hard it is to follow the code (penalizes nesting depth)
+- **Time to Understand**: Estimated reading time based on Halstead effort
+- **Estimated Bugs**: Predicted bug count based on Halstead volume (Volume / 3000)
 
 ```json
 {
   "complexity": {
     "enabled": true,
     "thresholds": {
-      "method": 15,
-      "cognitive": 15,
-      "file": 50,
-      "average": 6
-    },
-    "severity": {
-      "warning": 1.0,
-      "error": 2.0
+      "testPaths": 15,
+      "mentalLoad": 15,
+      "timeToUnderstandMinutes": 60,
+      "estimatedBugs": 1.5
     }
   }
 }
@@ -297,21 +295,15 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 
 | Threshold | Default | Description |
 |-----------|---------|-------------|
-| `method` | 15 | Cyclomatic complexity threshold per function |
-| `cognitive` | 15 | Cognitive complexity threshold per function |
-| `file` | 50 | Maximum total complexity per file |
-| `average` | 6 | Maximum average complexity per file |
+| `testPaths` | 15 | 🔀 Max test paths per function |
+| `mentalLoad` | 15 | 🧠 Max mental load score (nesting penalty) |
+| `timeToUnderstandMinutes` | 60 | ⏱️ Functions taking longer than 1 hour to understand |
+| `estimatedBugs` | 1.5 | 🐛 Flag functions estimated to have >1.5 bugs |
 
-#### Severity Multipliers
-
-| Multiplier | Default | Meaning |
-|------------|---------|---------|
-| `warning` | 1.0 | Violations at or above `threshold × 1.0` are warnings |
-| `error` | 2.0 | Violations at or above `threshold × 2.0` are errors |
-
-With default threshold of 15:
-- **Warning**: complexity ≥ 15
-- **Error**: complexity ≥ 30
+::: tip Severity Levels
+- **Warning**: When value exceeds threshold (e.g., testPaths ≥ 15)
+- **Error**: When value exceeds 2× threshold (e.g., testPaths ≥ 30)
+:::
 
 ## Performance Tuning
 

@@ -2,30 +2,96 @@
  * Prompt builder for AI code review
  */
 
+import collect from 'collect.js';
 import type { ComplexityReport, ComplexityViolation, PRContext, ComplexityDelta, DeltaSummary } from './types.js';
 import { formatDelta } from './delta.js';
+
+/**
+ * Create a unique key for delta lookups
+ * Includes metricType since a function can have multiple metric violations
+ */
+function createDeltaKey(v: { filepath: string; symbolName: string; metricType: string }): string {
+  return `${v.filepath}::${v.symbolName}::${v.metricType}`;
+}
 
 /**
  * Build a lookup map from deltas for quick access
  */
 function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, ComplexityDelta> {
-  const map = new Map<string, ComplexityDelta>();
-  if (deltas) {
-    for (const d of deltas) {
-      map.set(`${d.filepath}::${d.symbolName}`, d);
-    }
+  if (!deltas) return new Map();
+  
+  return new Map(
+    collect(deltas)
+      .map(d => [createDeltaKey(d), d] as [string, ComplexityDelta])
+      .all()
+  );
+}
+
+/**
+ * Get human-readable label for a metric type
+ */
+export function getMetricLabel(metricType: string): string {
+  switch (metricType) {
+    case 'cognitive': return 'mental load';
+    case 'cyclomatic': return 'test paths';
+    case 'halstead_effort': return 'time to understand';
+    case 'halstead_bugs': return 'estimated bugs';
+    default: return 'complexity';
   }
-  return map;
+}
+
+/**
+ * Format minutes as human-readable time
+ */
+function formatTime(minutes: number): string {
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const mins = Math.round(minutes % 60);
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return `${Math.round(minutes)}m`;
+}
+
+/**
+ * Format complexity value based on metric type for display
+ */
+export function formatComplexityValue(metricType: string, value: number): string {
+  switch (metricType) {
+    case 'halstead_effort':
+      return `~${formatTime(value)}`;
+    case 'halstead_bugs':
+      return value.toFixed(2);
+    case 'cyclomatic':
+      return `${value} tests`;
+    default:
+      return value.toString();
+  }
+}
+
+/**
+ * Format threshold value based on metric type for display
+ */
+export function formatThresholdValue(metricType: string, value: number): string {
+  switch (metricType) {
+    case 'halstead_effort':
+      return formatTime(value);
+    case 'halstead_bugs':
+      return value.toFixed(1);
+    default:
+      return value.toString();
+  }
 }
 
 /**
  * Format a single violation line with optional delta
  */
 function formatViolationLine(v: ComplexityViolation, deltaMap: Map<string, ComplexityDelta>): string {
-  const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+  const delta = deltaMap.get(createDeltaKey(v));
   const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-  const metricLabel = v.metricType === 'cognitive' ? 'cognitive' : 'cyclomatic';
-  return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
+  const metricLabel = getMetricLabel(v.metricType);
+  const valueDisplay = formatComplexityValue(v.metricType, v.complexity);
+  const thresholdDisplay = formatThresholdValue(v.metricType, v.threshold);
+  return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} ${valueDisplay}${deltaStr} (threshold: ${thresholdDisplay}) [${v.severity}]`;
 }
 
 /**
@@ -311,30 +377,87 @@ function formatBadgeDelta(deltaSummary: DeltaSummary | null): string {
 }
 
 /**
+ * Get emoji for metric type
+ */
+function getMetricEmoji(metricType: string): string {
+  switch (metricType) {
+    case 'cyclomatic': return '🔀';
+    case 'cognitive': return '🧠';
+    case 'halstead_effort': return '⏱️';
+    case 'halstead_bugs': return '🐛';
+    default: return '📊';
+  }
+}
+
+/**
  * Build the PR description stats badge
- * Human-friendly summary with technical details collapsed
+ * Human-friendly summary with metrics table
  */
 export function buildDescriptionBadge(
   report: ComplexityReport | null,
-  deltaSummary: DeltaSummary | null
+  deltaSummary: DeltaSummary | null,
+  deltas: ComplexityDelta[] | null
 ): string {
-  const violations = report ? String(report.summary.totalViolations) : '0';
-  const maxComplexity = report ? String(report.summary.maxComplexity) : '—';
-  const deltaDisplay = formatBadgeDelta(deltaSummary);
   const status = determineStatus(report, deltaSummary);
+
+  // Build metric breakdown table with violations and deltas
+  let metricTable = '';
+  if (report && report.summary.totalViolations > 0) {
+    // Count violations by metric type using collect.js
+    const byMetric = collect(Object.values(report.files))
+      .flatMap(f => f.violations)
+      .countBy('metricType')
+      .all() as unknown as Record<string, number>;
+
+    // Calculate delta by metric type using collect.js
+    // Note: collect.js groupBy returns groups needing sum() - types are limited
+    const deltaByMetric: Record<string, number> = deltas
+      ? collect(deltas)
+          .groupBy('metricType')
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((group: any) => group.sum('delta'))
+          .all() as unknown as Record<string, number>
+      : {};
+
+    // Build table rows (only show metrics with violations)
+    const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
+    const rows = collect(metricOrder)
+      .filter(metricType => byMetric[metricType] > 0)
+      .map(metricType => {
+        const emoji = getMetricEmoji(metricType);
+        const label = getMetricLabel(metricType);
+        const count = byMetric[metricType];
+        const delta = deltaByMetric[metricType] || 0;
+        const deltaStr = deltas ? (delta >= 0 ? `+${delta}` : `${delta}`) : '—';
+        return `| ${emoji} ${label} | ${count} | ${deltaStr} |`;
+      })
+      .all() as string[];
+
+    if (rows.length > 0) {
+      metricTable = `
+| Metric | Violations | Change |
+|--------|:----------:|:------:|
+${rows.join('\n')}
+`;
+    }
+  }
 
   return `### 👁️ Veille
 
 ${status.emoji} ${status.message}
+${metricTable}
+*[Veille](https://lien.dev) by Lien*`;
+}
 
-<details>
-<summary>📊 Details</summary>
-
-| Violations | Max Complexity | Change |
-|:----------:|:--------------:|:------:|
-| ${violations} | ${maxComplexity} | ${deltaDisplay} |
-
-</details>`;
+/**
+ * Build Halstead details string for prompts
+ */
+function formatHalsteadContext(violation: ComplexityViolation): string {
+  if (!violation.metricType?.startsWith('halstead_')) return '';
+  if (!violation.halsteadDetails) return '';
+  
+  const details = violation.halsteadDetails;
+  return `\n**Halstead Metrics**: Volume: ${details.volume?.toLocaleString()}, Difficulty: ${details.difficulty?.toFixed(1)}, Effort: ${details.effort?.toLocaleString()}, Est. bugs: ${details.bugs?.toFixed(3)}`;
 }
 
 /**
@@ -347,20 +470,27 @@ export function buildLineCommentPrompt(
   const snippetSection = codeSnippet
     ? `\n\n**Code:**\n\`\`\`\n${codeSnippet}\n\`\`\``
     : '';
+  
+  const metricType = violation.metricType || 'cyclomatic';
+  const metricLabel = getMetricLabel(metricType);
+  const valueDisplay = formatComplexityValue(metricType, violation.complexity);
+  const thresholdDisplay = formatThresholdValue(metricType, violation.threshold);
+  const halsteadContext = formatHalsteadContext(violation);
 
   return `You are reviewing code for complexity. Generate an actionable review comment.
 
 **Function**: \`${violation.symbolName}\` (${violation.symbolType})
-**Complexity**: ${violation.complexity} ${violation.metricType || 'cyclomatic'} (threshold: ${violation.threshold})
+**Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
 ${snippetSection}
 
 Write a code review comment that includes:
 
-1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains")
+1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains", "many unique operators")
 
 2. **Refactoring** (2-3 sentences): Concrete steps to reduce complexity. Be SPECIFIC:
    - Name the exact functions to extract (e.g., "Extract \`handleAdminDelete()\` and \`handleModeratorDelete()\`")
    - Suggest specific patterns (strategy, lookup table, early returns)
+   - For Halstead metrics: suggest introducing named constants, reducing operator variety, or extracting complex expressions
    - If applicable, show a brief code sketch
 
 3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
@@ -415,10 +545,16 @@ export function buildBatchedCommentsPrompt(
       const snippetSection = snippet
         ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\``
         : '';
+      
+      const metricType = v.metricType || 'cyclomatic';
+      const metricLabel = getMetricLabel(metricType);
+      const valueDisplay = formatComplexityValue(metricType, v.complexity);
+      const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
+      const halsteadContext = formatHalsteadContext(v);
 
       return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
-- **Complexity**: ${v.complexity} ${v.metricType || 'cyclomatic'} (threshold: ${v.threshold})
+- **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
 - **Severity**: ${v.severity}${snippetSection}`;
     })
     .join('\n\n');
@@ -440,10 +576,12 @@ For each violation, write a code review comment that:
 
 1. **Identifies the specific pattern** causing complexity (not just "too complex")
    - Is it nested conditionals? Long parameter lists? Multiple responsibilities?
+   - For Halstead metrics: many unique operators/operands, complex expressions
    - Be specific: "5 levels of nesting" not "deeply nested"
 
 2. **Suggests a concrete fix** with a short code example (3-5 lines)
    - Consider: early returns, guard clauses, lookup tables, extracting helpers, strategy pattern
+   - For Halstead: named constants, reducing operator variety, extracting complex expressions
    - Name specific functions: "Extract \`handleAdminCase()\`" not "extract a function"
    - Choose the SIMPLEST fix that addresses the issue (KISS principle)
 

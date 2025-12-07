@@ -295,7 +295,12 @@ Risk level is boosted if dependents have high complexity. A file with 10 depende
 
 ## get_complexity
 
-Analyze code complexity for tech debt identification and refactoring prioritization. Tracks both **cyclomatic complexity** (testability) and **cognitive complexity** (understandability).
+Analyze code complexity for tech debt identification and refactoring prioritization. Tracks multiple complexity metrics:
+
+- **Test paths**: Number of test cases needed (cyclomatic complexity)
+- **Mental load**: How hard to follow (penalizes nesting)
+- **Time to understand**: Estimated reading time (Halstead effort)
+- **Estimated bugs**: Predicted bug count (Halstead volume / 3000)
 
 ### Parameters
 
@@ -352,14 +357,20 @@ Analyze complexity of src/api/
       "symbolType": "function",
       "startLine": 45,
       "endLine": 120,
-      "complexity": 18,
-      "threshold": 15,
+      "complexity": 97200,
+      "threshold": 64800,
       "severity": "warning",
-      "metricType": "cognitive",
+      "metricType": "halstead_effort",
       "language": "typescript",
-      "message": "Cognitive complexity 18 exceeds threshold 15",
+      "message": "Time to understand ~1h 30m exceeds threshold 1h",
       "dependentCount": 5,
-      "riskLevel": "medium"
+      "riskLevel": "medium",
+      "halsteadDetails": {
+        "volume": 850.5,
+        "difficulty": 45.2,
+        "effort": 97200,
+        "bugs": 0.283
+      }
     }
   ]
 }
@@ -369,11 +380,15 @@ Analyze complexity of src/api/
 
 | metricType | Description |
 |------------|-------------|
-| `cyclomatic` | Number of independent paths (decision points) |
-| `cognitive` | Mental effort to understand (penalizes nesting) |
+| `cyclomatic` | Test cases needed for full branch coverage |
+| `cognitive` | Mental load - how hard to follow (penalizes nesting) |
+| `halstead_effort` | Time to understand (shown as human-readable duration) |
+| `halstead_bugs` | Estimated bug count (Volume / 3000) |
 
-::: tip Both metrics can fire
-A single function can have violations for **both** cyclomatic and cognitive complexity if it exceeds both thresholds.
+::: tip Halstead Metrics
+Both Halstead metrics use intuitive thresholds:
+- **Time to understand**: Configure with `timeToUnderstandMinutes` (default: 60 minutes = 1 hour)
+- **Estimated bugs**: Configure with `estimatedBugs` (default: 1.5 — functions likely to have >1.5 bugs)
 :::
 
 ### Severity Levels

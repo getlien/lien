@@ -85,6 +85,46 @@ These live in project root and are tracked in git:
 
 ---
 
+## Data Transformation with collect.js
+
+Use `collect.js` for readable data transformations instead of imperative loops.
+
+### When to Use
+- Aggregating data (groupBy, countBy, sum)
+- Chaining multiple transformations (map → filter → sort)
+- Building lookup structures from arrays
+
+### When NOT to Use
+- Simple single operations (use native `.map()`, `.filter()`)
+- Performance-critical hot paths
+- When it adds complexity rather than reducing it
+
+### Patterns
+```typescript
+import collect from 'collect.js';
+
+// ✅ Good: Multiple transformations, aggregation
+const byMetric = collect(violations)
+  .groupBy('metricType')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  .map((group: any) => group.sum('delta'))
+  .all() as unknown as Record<string, number>;
+
+// ✅ Good: Flattening nested structures
+const allItems = collect(Object.values(data))
+  .flatMap(d => d.items)
+  .sortByDesc('score')
+  .all() as Item[];
+
+// ❌ Avoid: Simple operations (use native)
+const names = items.map(i => i.name);  // Not: collect(items).pluck('name').all()
+```
+
+### TypeScript Note
+collect.js has limited type inference. Use `as unknown as T` for complex chains and add explanatory comments.
+
+---
+
 ## Critical Rules
 
 ### Naming Conventions

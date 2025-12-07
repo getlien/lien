@@ -51,5 +51,6 @@ export const CURRENT_CONFIG_VERSION = getPackageVersion();
 // - Metadata structure changes
 // v2: AST-based chunking + enhanced metadata (symbolName, complexity, etc.)
 // v3: Added cognitiveComplexity field to schema
-export const INDEX_FORMAT_VERSION = 3;
+// v4: Added Halstead metrics (volume, difficulty, effort, bugs)
+export const INDEX_FORMAT_VERSION = 4;
 

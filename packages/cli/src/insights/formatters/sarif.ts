@@ -59,6 +59,19 @@ interface SarifResult {
 }
 
 /**
+ * Get the SARIF rule ID for a metric type
+ */
+function getRuleId(metricType: string): string {
+  switch (metricType) {
+    case 'cognitive': return 'lien/high-cognitive-complexity';
+    case 'cyclomatic': return 'lien/high-cyclomatic-complexity';
+    case 'halstead_effort': return 'lien/high-halstead-effort';
+    case 'halstead_bugs': return 'lien/high-estimated-bugs';
+    default: return 'lien/high-complexity';
+  }
+}
+
+/**
  * Format complexity report as SARIF for GitHub Code Scanning
  */
 export function formatSarifReport(report: ComplexityReport): string {
@@ -66,25 +79,49 @@ export function formatSarifReport(report: ComplexityReport): string {
     {
       id: 'lien/high-cyclomatic-complexity',
       shortDescription: {
-        text: 'High cyclomatic complexity',
+        text: 'Too many test paths',
       },
       fullDescription: {
-        text: 'Function or method has high cyclomatic complexity (many decision paths), making it difficult to test exhaustively.',
+        text: 'Function or method requires too many test cases to achieve full branch coverage. Each decision point (if, switch, loop) adds a path that needs testing.',
       },
       help: {
-        text: 'Consider refactoring by extracting methods, using early returns, or simplifying conditional logic.',
+        text: 'Consider refactoring by extracting methods, using early returns, or simplifying conditional logic to reduce the number of test paths.',
       },
     },
     {
       id: 'lien/high-cognitive-complexity',
       shortDescription: {
-        text: 'High cognitive complexity',
+        text: 'High mental load',
       },
       fullDescription: {
-        text: 'Function or method has high cognitive complexity (deeply nested or hard to understand), making it difficult to maintain.',
+        text: 'Function or method has high mental load (deeply nested or hard to follow), requiring too much mental effort to understand and maintain.',
       },
       help: {
-        text: 'Consider flattening nested conditionals, extracting helper functions, or using guard clauses.',
+        text: 'Consider flattening nested conditionals, extracting helper functions, or using guard clauses to reduce mental load.',
+      },
+    },
+    {
+      id: 'lien/high-halstead-effort',
+      shortDescription: {
+        text: 'Long time to understand',
+      },
+      fullDescription: {
+        text: 'Function or method takes too long to understand, based on Halstead metrics (operators and operands count).',
+      },
+      help: {
+        text: 'Consider simplifying expressions, reducing variable count, or breaking into smaller functions.',
+      },
+    },
+    {
+      id: 'lien/high-estimated-bugs',
+      shortDescription: {
+        text: 'High estimated bug count',
+      },
+      fullDescription: {
+        text: 'Function or method is likely to contain bugs based on Halstead metrics (Volume / 3000), which estimates bug count from code complexity.',
+      },
+      help: {
+        text: 'Consider simplifying the function, breaking into smaller units, or adding thorough test coverage.',
       },
     },
   ];
@@ -94,9 +131,7 @@ export function formatSarifReport(report: ComplexityReport): string {
   // Convert violations to SARIF results
   for (const [filepath, fileData] of Object.entries(report.files)) {
     for (const violation of fileData.violations) {
-      const ruleId = violation.metricType === 'cognitive'
-        ? 'lien/high-cognitive-complexity'
-        : 'lien/high-cyclomatic-complexity';
+      const ruleId = getRuleId(violation.metricType);
       
       results.push({
         ruleId,

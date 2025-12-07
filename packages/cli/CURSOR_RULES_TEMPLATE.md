@@ -62,9 +62,14 @@ REQUIRED sequence:
 
 **`get_complexity({ top: 10 })`**
 - Find most complex functions in the codebase
-- Analyzes both **cyclomatic** (decision paths) and **cognitive** (nesting penalty) complexity
+- Analyzes multiple complexity metrics:
+  - **Test paths**: Number of test cases needed for full coverage (cyclomatic)
+  - **Mental load**: How hard to follow - penalizes nesting (cognitive)
+  - **Time to understand**: Estimated reading time (Halstead effort)
+  - **Estimated bugs**: Predicted bug count (Halstead volume / 3000)
 - Use for tech debt analysis and refactoring prioritization
-- Returns `metricType` ('cyclomatic' or 'cognitive'), dependent count, and risk level
+- Returns `metricType` ('cyclomatic', 'cognitive', 'halstead_effort', or 'halstead_bugs')
+- Human-readable output: "23 (needs ~23 tests)", "🧠 45", "~2h 30m", "2.27 bugs"
 - Optional: `files` to filter specific files, `threshold` to set minimum complexity
 
 ## Test Associations
@@ -130,11 +135,12 @@ get_files_context({ filepaths: ["src/auth.ts", "src/user.ts"] })
 
 ## AST Metadata
 
-Results include rich metadata: `symbolName`, `symbolType`, `complexity`, `cognitiveComplexity`, `parameters`, `signature`.
+Results include rich metadata: `symbolName`, `symbolType`, `complexity`, `cognitiveComplexity`, `halsteadVolume`, `halsteadDifficulty`, `halsteadEffort`, `halsteadBugs`, `parameters`, `signature`.
 
 Use for filtering:
 - Complex functions (cyclomatic): `results.filter(r => r.metadata.complexity > 10)`
 - Complex functions (cognitive): `results.filter(r => r.metadata.cognitiveComplexity > 15)`
+- Long to understand (>1 hour): `results.filter(r => r.metadata.halsteadEffort > 64800)`
 - Methods only: `results.filter(r => r.metadata.symbolType === 'method')`
 
 ## When to Use grep Instead
