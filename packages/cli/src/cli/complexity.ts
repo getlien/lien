@@ -11,7 +11,15 @@ interface ComplexityOptions {
   files?: string[];
   format: OutputFormat;
   threshold?: string;
+  cyclomaticThreshold?: string;
+  cognitiveThreshold?: string;
   failOn?: 'error' | 'warning';
+}
+
+/** Parsed threshold overrides */
+interface ThresholdOverrides {
+  cyclomatic: number | null;
+  cognitive: number | null;
 }
 
 const VALID_FAIL_ON = ['error', 'warning'];
@@ -49,34 +57,59 @@ function validateFilesExist(files: string[] | undefined, rootDir: string): void 
   }
 }
 
-/** Parse and validate threshold, returns null if not provided */
-function parseThreshold(threshold: string | undefined): number | null {
-  if (!threshold) return null;
+/** Parse and validate a threshold value */
+function parseThresholdValue(value: string | undefined, flagName: string): number | null {
+  if (!value) return null;
   
-  const value = parseInt(threshold, 10);
-  if (isNaN(value)) {
-    console.error(chalk.red(`Error: Invalid --threshold value "${threshold}". Must be a number`));
+  const parsed = parseInt(value, 10);
+  if (isNaN(parsed)) {
+    console.error(chalk.red(`Error: Invalid ${flagName} value "${value}". Must be a number`));
     process.exit(1);
   }
-  if (value <= 0) {
-    console.error(chalk.red(`Error: Invalid --threshold value "${threshold}". Must be a positive number`));
+  if (parsed <= 0) {
+    console.error(chalk.red(`Error: Invalid ${flagName} value "${value}". Must be a positive number`));
     process.exit(1);
   }
-  return value;
+  return parsed;
 }
 
-/** Apply threshold override to config (mutates config) */
-function applyThresholdOverride(config: LienConfig | LegacyLienConfig, thresholdValue: number): void {
-  const defaultThresholds = { method: thresholdValue, cognitive: 15, file: 50, average: 6 };
-  // Cast to any to allow mutation - both config types support complexity at runtime
+/** Parse all threshold options into overrides */
+function parseThresholdOverrides(options: ComplexityOptions): ThresholdOverrides {
+  const baseThreshold = parseThresholdValue(options.threshold, '--threshold');
+  const cyclomaticOverride = parseThresholdValue(options.cyclomaticThreshold, '--cyclomatic-threshold');
+  const cognitiveOverride = parseThresholdValue(options.cognitiveThreshold, '--cognitive-threshold');
+  
+  return {
+    // Specific flags take precedence over --threshold
+    cyclomatic: cyclomaticOverride ?? baseThreshold,
+    cognitive: cognitiveOverride ?? baseThreshold,
+  };
+}
+
+/** Apply threshold overrides to config (mutates config) */
+function applyThresholdOverrides(config: LienConfig | LegacyLienConfig, overrides: ThresholdOverrides): void {
+  if (overrides.cyclomatic === null && overrides.cognitive === null) return;
+  
+  // Cast to allow mutation - both config types support complexity at runtime
   const cfg = config as { complexity?: LienConfig['complexity'] };
   
+  // Ensure complexity config structure exists
   if (!cfg.complexity) {
-    cfg.complexity = { enabled: true, thresholds: defaultThresholds, severity: { warning: 1.0, error: 2.0 } };
+    cfg.complexity = {
+      enabled: true,
+      thresholds: { method: 10, cognitive: 15, file: 50, average: 6 },
+      severity: { warning: 1.0, error: 2.0 },
+    };
   } else if (!cfg.complexity.thresholds) {
-    cfg.complexity.thresholds = defaultThresholds;
-  } else {
-    cfg.complexity.thresholds.method = thresholdValue;
+    cfg.complexity.thresholds = { method: 10, cognitive: 15, file: 50, average: 6 };
+  }
+  
+  // Apply overrides
+  if (overrides.cyclomatic !== null) {
+    cfg.complexity.thresholds.method = overrides.cyclomatic;
+  }
+  if (overrides.cognitive !== null) {
+    cfg.complexity.thresholds.cognitive = overrides.cognitive;
   }
 }
 
@@ -102,7 +135,7 @@ export async function complexityCommand(options: ComplexityOptions) {
     validateFailOn(options.failOn);
     validateFormat(options.format);
     validateFilesExist(options.files, rootDir);
-    const thresholdValue = parseThreshold(options.threshold);
+    const thresholdOverrides = parseThresholdOverrides(options);
     
     // Load config and database
     const config = await configService.load(rootDir);
@@ -110,10 +143,8 @@ export async function complexityCommand(options: ComplexityOptions) {
     await vectorDB.initialize();
     await ensureIndexExists(vectorDB);
     
-    // Apply threshold override if provided
-    if (thresholdValue !== null) {
-      applyThresholdOverride(config, thresholdValue);
-    }
+    // Apply threshold overrides if provided
+    applyThresholdOverrides(config, thresholdOverrides);
     
     // Run analysis and output
     const analyzer = new ComplexityAnalyzer(vectorDB, config);

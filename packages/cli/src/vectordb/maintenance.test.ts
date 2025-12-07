@@ -1,8 +1,20 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { clear, deleteByFile, updateFile } from './maintenance.js';
 import { DatabaseError } from '../errors/index.js';
+import fs from 'fs/promises';
+
+// Mock fs/promises
+vi.mock('fs/promises', () => ({
+  default: {
+    rm: vi.fn(),
+  },
+}));
 
 describe('VectorDB Maintenance Operations', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   describe('clear', () => {
     it('should drop table if it exists', async () => {
       const mockTable = {
@@ -42,6 +54,37 @@ describe('VectorDB Maintenance Operations', () => {
       await expect(clear(mockDb, { name: 'test' }, 'test_table')).rejects.toThrow(
         'Failed to clear vector database'
       );
+    });
+
+    it('should clean up .lance directory when dbPath is provided', async () => {
+      const mockTable = { name: 'test_table' };
+      const mockDb = { dropTable: vi.fn().mockResolvedValue(undefined) };
+      vi.mocked(fs.rm).mockResolvedValue(undefined);
+
+      await clear(mockDb, mockTable, 'test_table', '/path/to/db');
+
+      expect(fs.rm).toHaveBeenCalledWith('/path/to/db/test_table.lance', {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    it('should skip directory cleanup when dbPath is undefined', async () => {
+      const mockTable = { name: 'test_table' };
+      const mockDb = { dropTable: vi.fn().mockResolvedValue(undefined) };
+
+      await clear(mockDb, mockTable, 'test_table');
+
+      expect(fs.rm).not.toHaveBeenCalled();
+    });
+
+    it('should silently ignore errors when directory cleanup fails', async () => {
+      const mockTable = { name: 'test_table' };
+      const mockDb = { dropTable: vi.fn().mockResolvedValue(undefined) };
+      vi.mocked(fs.rm).mockRejectedValue(new Error('Directory not found'));
+
+      // Should not throw
+      await expect(clear(mockDb, mockTable, 'test_table', '/path/to/db')).resolves.toBeUndefined();
     });
   });
 
