@@ -10,13 +10,13 @@ import { formatDelta } from './delta.js';
  * Build a lookup map from deltas for quick access
  */
 function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, ComplexityDelta> {
-  const map = new Map<string, ComplexityDelta>();
-  if (deltas) {
-    for (const d of deltas) {
-      map.set(`${d.filepath}::${d.symbolName}`, d);
-    }
-  }
-  return map;
+  if (!deltas) return new Map();
+  
+  return new Map(
+    collect(deltas)
+      .map(d => [`${d.filepath}::${d.symbolName}`, d] as [string, ComplexityDelta])
+      .all()
+  );
 }
 
 /**

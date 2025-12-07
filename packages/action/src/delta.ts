@@ -4,6 +4,7 @@
  */
 
 import * as core from '@actions/core';
+import collect from 'collect.js';
 import type { ComplexityReport, ComplexityDelta, DeltaSummary, ComplexityViolation } from './types.js';
 
 /**
@@ -20,21 +21,23 @@ function buildComplexityMap(
   report: ComplexityReport | null,
   files: string[]
 ): Map<string, { complexity: number; violation: ComplexityViolation }> {
-  const map = new Map<string, { complexity: number; violation: ComplexityViolation }>();
+  if (!report) return new Map();
 
-  if (!report) return map;
+  type MapEntry = [string, { complexity: number; violation: ComplexityViolation }];
+  
+  // Flatten violations from all requested files and build map entries
+  const entries = collect(files)
+    .map(filepath => ({ filepath, fileData: report.files[filepath] }))
+    .filter(({ fileData }) => !!fileData)
+    .flatMap(({ filepath, fileData }) =>
+      fileData.violations.map(violation => [
+        getFunctionKey(filepath, violation.symbolName),
+        { complexity: violation.complexity, violation }
+      ] as MapEntry)
+    )
+    .all() as unknown as MapEntry[];
 
-  for (const filepath of files) {
-    const fileData = report.files[filepath];
-    if (!fileData) continue;
-
-    for (const violation of fileData.violations) {
-      const key = getFunctionKey(filepath, violation.symbolName);
-      map.set(key, { complexity: violation.complexity, violation });
-    }
-  }
-
-  return map;
+  return new Map(entries);
 }
 
 /**
@@ -126,42 +129,28 @@ export function calculateDeltas(
  * Calculate summary statistics for deltas
  */
 export function calculateDeltaSummary(deltas: ComplexityDelta[]): DeltaSummary {
-  let totalDelta = 0;
-  let improved = 0;
-  let degraded = 0;
-  let newFunctions = 0;
-  let deletedFunctions = 0;
-  let unchanged = 0;
+  const collection = collect(deltas);
+  
+  // Categorize each delta
+  const categorized = collection.map(d => {
+    if (d.severity === 'improved') return 'improved';
+    if (d.severity === 'new') return 'new';
+    if (d.severity === 'deleted') return 'deleted';
+    // error/warning: check delta direction
+    if (d.delta > 0) return 'degraded';
+    if (d.delta === 0) return 'unchanged';
+    return 'improved';
+  });
 
-  for (const d of deltas) {
-    totalDelta += d.delta;
-
-    switch (d.severity) {
-      case 'improved':
-        improved++;
-        break;
-      case 'error':
-      case 'warning':
-        if (d.delta > 0) degraded++;
-        else if (d.delta === 0) unchanged++;
-        else improved++;
-        break;
-      case 'new':
-        newFunctions++;
-        break;
-      case 'deleted':
-        deletedFunctions++;
-        break;
-    }
-  }
+  const counts = categorized.countBy().all() as unknown as Record<string, number>;
 
   return {
-    totalDelta,
-    improved,
-    degraded,
-    newFunctions,
-    deletedFunctions,
-    unchanged,
+    totalDelta: collection.sum('delta') as number,
+    improved: counts['improved'] || 0,
+    degraded: counts['degraded'] || 0,
+    newFunctions: counts['new'] || 0,
+    deletedFunctions: counts['deleted'] || 0,
+    unchanged: counts['unchanged'] || 0,
   };
 }
 

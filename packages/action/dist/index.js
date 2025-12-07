@@ -35448,6 +35448,9 @@ var __webpack_exports__ = {};
 var core = __nccwpck_require__(7184);
 // EXTERNAL MODULE: external "fs"
 var external_fs_ = __nccwpck_require__(9896);
+// EXTERNAL MODULE: ../../node_modules/collect.js/dist/index.js
+var dist = __nccwpck_require__(2564);
+var dist_default = /*#__PURE__*/__nccwpck_require__.n(dist);
 // EXTERNAL MODULE: ../../node_modules/@actions/github/lib/github.js
 var github = __nccwpck_require__(5683);
 ;// CONCATENATED MODULE: ./src/github.ts
@@ -35810,14 +35813,12 @@ function filterAnalyzableFiles(files) {
     });
 }
 
-// EXTERNAL MODULE: ../../node_modules/collect.js/dist/index.js
-var dist = __nccwpck_require__(2564);
-var dist_default = /*#__PURE__*/__nccwpck_require__.n(dist);
 ;// CONCATENATED MODULE: ./src/delta.ts
 /**
  * Complexity delta calculation
  * Compares base branch complexity to head branch complexity
  */
+
 
 /**
  * Create a key for a function to match across base/head
@@ -35829,19 +35830,18 @@ function getFunctionKey(filepath, symbolName) {
  * Build a map of function complexities from a report
  */
 function buildComplexityMap(report, files) {
-    const map = new Map();
     if (!report)
-        return map;
-    for (const filepath of files) {
-        const fileData = report.files[filepath];
-        if (!fileData)
-            continue;
-        for (const violation of fileData.violations) {
-            const key = getFunctionKey(filepath, violation.symbolName);
-            map.set(key, { complexity: violation.complexity, violation });
-        }
-    }
-    return map;
+        return new Map();
+    // Flatten violations from all requested files and build map entries
+    const entries = dist_default()(files)
+        .map(filepath => ({ filepath, fileData: report.files[filepath] }))
+        .filter(({ fileData }) => !!fileData)
+        .flatMap(({ filepath, fileData }) => fileData.violations.map(violation => [
+        getFunctionKey(filepath, violation.symbolName),
+        { complexity: violation.complexity, violation }
+    ]))
+        .all();
+    return new Map(entries);
 }
 /**
  * Calculate complexity deltas between base and head
@@ -35921,42 +35921,30 @@ function calculateDeltas(baseReport, headReport, changedFiles) {
  * Calculate summary statistics for deltas
  */
 function calculateDeltaSummary(deltas) {
-    let totalDelta = 0;
-    let improved = 0;
-    let degraded = 0;
-    let newFunctions = 0;
-    let deletedFunctions = 0;
-    let unchanged = 0;
-    for (const d of deltas) {
-        totalDelta += d.delta;
-        switch (d.severity) {
-            case 'improved':
-                improved++;
-                break;
-            case 'error':
-            case 'warning':
-                if (d.delta > 0)
-                    degraded++;
-                else if (d.delta === 0)
-                    unchanged++;
-                else
-                    improved++;
-                break;
-            case 'new':
-                newFunctions++;
-                break;
-            case 'deleted':
-                deletedFunctions++;
-                break;
-        }
-    }
+    const collection = dist_default()(deltas);
+    // Categorize each delta
+    const categorized = collection.map(d => {
+        if (d.severity === 'improved')
+            return 'improved';
+        if (d.severity === 'new')
+            return 'new';
+        if (d.severity === 'deleted')
+            return 'deleted';
+        // error/warning: check delta direction
+        if (d.delta > 0)
+            return 'degraded';
+        if (d.delta === 0)
+            return 'unchanged';
+        return 'improved';
+    });
+    const counts = categorized.countBy().all();
     return {
-        totalDelta,
-        improved,
-        degraded,
-        newFunctions,
-        deletedFunctions,
-        unchanged,
+        totalDelta: collection.sum('delta'),
+        improved: counts['improved'] || 0,
+        degraded: counts['degraded'] || 0,
+        newFunctions: counts['new'] || 0,
+        deletedFunctions: counts['deleted'] || 0,
+        unchanged: counts['unchanged'] || 0,
     };
 }
 /**
@@ -36006,13 +35994,11 @@ function logDeltaSummary(summary) {
  * Build a lookup map from deltas for quick access
  */
 function buildDeltaMap(deltas) {
-    const map = new Map();
-    if (deltas) {
-        for (const d of deltas) {
-            map.set(`${d.filepath}::${d.symbolName}`, d);
-        }
-    }
-    return map;
+    if (!deltas)
+        return new Map();
+    return new Map(dist_default()(deltas)
+        .map(d => [`${d.filepath}::${d.symbolName}`, d])
+        .all());
 }
 /**
  * Get human-readable label for a metric type
@@ -36752,6 +36738,7 @@ async function generateLineComments(violations, codeSnippets, apiKey, model) {
 
 
 
+
 /**
  * Get action configuration from inputs
  */
@@ -36927,23 +36914,20 @@ function findCommentLine(violation, diffLines) {
  * Build delta lookup map from deltas array
  */
 function src_buildDeltaMap(deltas) {
-    const deltaMap = new Map();
-    if (deltas) {
-        for (const d of deltas) {
-            deltaMap.set(`${d.filepath}::${d.symbolName}`, d);
-        }
-    }
-    return deltaMap;
+    if (!deltas)
+        return new Map();
+    return new Map(dist_default()(deltas)
+        .map(d => [`${d.filepath}::${d.symbolName}`, d])
+        .all());
 }
 /**
  * Build line comments from violations and AI comments
  */
 function buildLineComments(violationsWithLines, aiComments, deltaMap) {
-    const lineComments = [];
-    for (const { violation, commentLine } of violationsWithLines) {
+    return dist_default()(violationsWithLines)
+        .filter(({ violation }) => aiComments.has(violation))
+        .map(({ violation, commentLine }) => {
         const comment = aiComments.get(violation);
-        if (!comment)
-            continue;
         const delta = deltaMap.get(`${violation.filepath}::${violation.symbolName}`);
         const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
         const severityEmoji = delta
@@ -36957,13 +36941,13 @@ function buildLineComments(violationsWithLines, aiComments, deltaMap) {
         const valueDisplay = formatComplexityValue(violation.metricType || 'cyclomatic', violation.complexity);
         const thresholdDisplay = formatThresholdValue(violation.metricType || 'cyclomatic', violation.threshold);
         core.info(`Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`);
-        lineComments.push({
+        return {
             path: violation.filepath,
             line: commentLine,
             body: `${severityEmoji} **${metricLabel.charAt(0).toUpperCase() + metricLabel.slice(1)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})${lineNote}\n\n${comment}`,
-        });
-    }
-    return lineComments;
+        };
+    })
+        .all();
 }
 /**
  * Get emoji for metric type
@@ -37018,22 +37002,23 @@ function buildReviewSummary(report, deltas, uncoveredNote) {
     let deltaDisplay = '';
     if (deltas && deltas.length > 0) {
         const deltaSummary = calculateDeltaSummary(deltas);
-        // Calculate delta by metric type
-        const deltaByMetric = new Map();
-        for (const d of deltas) {
-            const current = deltaByMetric.get(d.metricType) || 0;
-            deltaByMetric.set(d.metricType, current + d.delta);
-        }
+        // Calculate delta by metric type using collect.js
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const deltaByMetric = dist_default()(deltas)
+            .groupBy('metricType')
+            .map((group) => group.sum('delta'))
+            .all();
         // Build metric breakdown string with emojis (always show all metrics)
-        const metricParts = [];
         const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
-        for (const metricType of metricOrder) {
-            const metricDelta = deltaByMetric.get(metricType) || 0;
+        const metricBreakdown = dist_default()(metricOrder)
+            .map(metricType => {
+            const metricDelta = deltaByMetric[metricType] || 0;
             const emoji = src_getMetricEmoji(metricType);
             const sign = metricDelta >= 0 ? '+' : '';
-            metricParts.push(`${emoji} ${sign}${metricDelta}`);
-        }
-        const metricBreakdown = metricParts.length > 0 ? metricParts.join(' | ') : '';
+            return `${emoji} ${sign}${metricDelta}`;
+        })
+            .all()
+            .join(' | ');
         const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
         deltaDisplay = `\n\n**Complexity Change:** ${metricBreakdown} ${trend}`;
         if (deltaSummary.improved > 0)

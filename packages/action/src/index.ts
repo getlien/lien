@@ -10,6 +10,7 @@
 
 import * as core from '@actions/core';
 import * as fs from 'fs';
+import collect from 'collect.js';
 import {
   getPRContext,
   getPRChangedFiles,
@@ -263,13 +264,13 @@ function findCommentLine(
  * Build delta lookup map from deltas array
  */
 function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, ComplexityDelta> {
-  const deltaMap = new Map<string, ComplexityDelta>();
-  if (deltas) {
-    for (const d of deltas) {
-      deltaMap.set(`${d.filepath}::${d.symbolName}`, d);
-    }
-  }
-  return deltaMap;
+  if (!deltas) return new Map();
+  
+  return new Map(
+    collect(deltas)
+      .map(d => [`${d.filepath}::${d.symbolName}`, d] as [string, ComplexityDelta])
+      .all()
+  );
 }
 
 /**
@@ -280,36 +281,34 @@ function buildLineComments(
   aiComments: Map<ComplexityViolation, string>,
   deltaMap: Map<string, ComplexityDelta>
 ): LineComment[] {
-  const lineComments: LineComment[] = [];
-
-  for (const { violation, commentLine } of violationsWithLines) {
-    const comment = aiComments.get(violation);
-    if (!comment) continue;
-
-    const delta = deltaMap.get(`${violation.filepath}::${violation.symbolName}`);
-    const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-    const severityEmoji = delta 
-      ? formatSeverityEmoji(delta.severity)
-      : (violation.severity === 'error' ? '🔴' : '🟡');
-    
-    const lineNote = commentLine !== violation.startLine 
-      ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
-      : '';
-    
-    // Format human-friendly complexity display
-    const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
-    const valueDisplay = formatComplexityValue(violation.metricType || 'cyclomatic', violation.complexity);
-    const thresholdDisplay = formatThresholdValue(violation.metricType || 'cyclomatic', violation.threshold);
-    
-    core.info(`Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`);
-    lineComments.push({
-      path: violation.filepath,
-      line: commentLine,
-      body: `${severityEmoji} **${metricLabel.charAt(0).toUpperCase() + metricLabel.slice(1)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})${lineNote}\n\n${comment}`,
-    });
-  }
-
-  return lineComments;
+  return collect(violationsWithLines)
+    .filter(({ violation }) => aiComments.has(violation))
+    .map(({ violation, commentLine }) => {
+      const comment = aiComments.get(violation)!;
+      const delta = deltaMap.get(`${violation.filepath}::${violation.symbolName}`);
+      const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+      const severityEmoji = delta 
+        ? formatSeverityEmoji(delta.severity)
+        : (violation.severity === 'error' ? '🔴' : '🟡');
+      
+      const lineNote = commentLine !== violation.startLine 
+        ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
+        : '';
+      
+      // Format human-friendly complexity display
+      const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
+      const valueDisplay = formatComplexityValue(violation.metricType || 'cyclomatic', violation.complexity);
+      const thresholdDisplay = formatThresholdValue(violation.metricType || 'cyclomatic', violation.threshold);
+      
+      core.info(`Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`);
+      
+      return {
+        path: violation.filepath,
+        line: commentLine,
+        body: `${severityEmoji} **${metricLabel.charAt(0).toUpperCase() + metricLabel.slice(1)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})${lineNote}\n\n${comment}`,
+      };
+    })
+    .all() as LineComment[];
 }
 
 /**
@@ -379,24 +378,25 @@ function buildReviewSummary(
   if (deltas && deltas.length > 0) {
     const deltaSummary = calculateDeltaSummary(deltas);
     
-    // Calculate delta by metric type
-    const deltaByMetric = new Map<string, number>();
-    for (const d of deltas) {
-      const current = deltaByMetric.get(d.metricType) || 0;
-      deltaByMetric.set(d.metricType, current + d.delta);
-    }
+    // Calculate delta by metric type using collect.js
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const deltaByMetric = collect(deltas)
+      .groupBy('metricType')
+      .map((group: any) => group.sum('delta'))
+      .all() as unknown as Record<string, number>;
     
     // Build metric breakdown string with emojis (always show all metrics)
-    const metricParts: string[] = [];
     const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
-    for (const metricType of metricOrder) {
-      const metricDelta = deltaByMetric.get(metricType) || 0;
-      const emoji = getMetricEmoji(metricType);
-      const sign = metricDelta >= 0 ? '+' : '';
-      metricParts.push(`${emoji} ${sign}${metricDelta}`);
-    }
+    const metricBreakdown = collect(metricOrder)
+      .map(metricType => {
+        const metricDelta = deltaByMetric[metricType] || 0;
+        const emoji = getMetricEmoji(metricType);
+        const sign = metricDelta >= 0 ? '+' : '';
+        return `${emoji} ${sign}${metricDelta}`;
+      })
+      .all()
+      .join(' | ');
     
-    const metricBreakdown = metricParts.length > 0 ? metricParts.join(' | ') : '';
     const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
     
     deltaDisplay = `\n\n**Complexity Change:** ${metricBreakdown} ${trend}`;
