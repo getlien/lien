@@ -50,6 +50,11 @@ export async function generateLaravelConfig(
       'public/**/*.js',  // Compiled JS in public
       'public/**/*.css', // Compiled CSS in public
       
+      // Database boilerplate (not useful for semantic search)
+      'database/migrations/**',
+      'database/seeders/**',
+      'database/factories/**',
+      
       // Node.js dependencies
       '**/node_modules/**',
       'node_modules/**',
