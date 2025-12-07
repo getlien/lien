@@ -1,4 +1,5 @@
 import chokidar from 'chokidar';
+import path from 'path';
 import { LienConfig, LegacyLienConfig, isLegacyConfig, isModernConfig } from '../config/schema.js';
 
 export interface FileChangeEvent {
@@ -58,10 +59,16 @@ export class FileWatcher {
       ignored: excludePatterns,
       persistent: true,
       ignoreInitial: true, // Don't trigger for existing files
+      
+      // Handle atomic saves from modern editors (VS Code, Sublime, etc.)
+      // Editors write to temp file then rename - without this, we get unlink+add instead of change
+      atomic: true,
+      
       awaitWriteFinish: {
-        stabilityThreshold: 500, // Wait 500ms for file to stop changing
+        stabilityThreshold: 300, // Reduced from 500ms for faster detection
         pollInterval: 100,
       },
+      
       // Performance optimizations
       usePolling: false,
       interval: 100,
@@ -102,9 +109,10 @@ export class FileWatcher {
       
       // Call handler
       if (this.onChangeHandler) {
-        const absolutePath = filepath.startsWith('/')
+        // Use path.join for proper cross-platform path handling
+        const absolutePath = path.isAbsolute(filepath)
           ? filepath
-          : `${this.rootDir}/${filepath}`;
+          : path.join(this.rootDir, filepath);
         
         try {
           const result = this.onChangeHandler({

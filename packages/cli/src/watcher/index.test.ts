@@ -136,13 +136,14 @@ describe('FileWatcher', () => {
       await watcher.start(handler);
       
       // Wait for watcher to be ready
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Delete the file
       await fs.unlink(testFile);
       
-      // Wait for debounce + processing
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Wait for debounce + processing + atomic detection window (100ms)
+      // atomic: true makes chokidar wait to see if add follows unlink
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       expect(events.length).toBeGreaterThan(0);
       expect(events.some(e => e.type === 'unlink')).toBe(true);
