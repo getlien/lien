@@ -292,8 +292,8 @@ function buildLineComments(
       ? formatSeverityEmoji(delta.severity)
       : (violation.severity === 'error' ? '🔴' : '🟡');
     
-    const lineNote = commentLine !== violation.startLine 
-      ? ` *(function starts at line ${violation.startLine})*` 
+    const lineNote = commentLine !== violation.startLine
+      ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
       : '';
     
     // Format human-friendly complexity display

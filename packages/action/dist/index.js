@@ -33189,7 +33189,7 @@ function buildLineComments(violationsWithLines, aiComments, deltaMap) {
             ? formatSeverityEmoji(delta.severity)
             : (violation.severity === 'error' ? '🔴' : '🟡');
         const lineNote = commentLine !== violation.startLine
-            ? ` *(function starts at line ${violation.startLine})*`
+            ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
             : '';
         // Format human-friendly complexity display
         const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
