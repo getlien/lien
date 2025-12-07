@@ -57,232 +57,256 @@ export async function initCommand(options: InitOptions = {}) {
   }
 }
 
-async function createNewConfig(rootDir: string, options: InitOptions) {
-  // Show banner for new initialization
-  showCompactBanner();
-  console.log(chalk.bold('Initializing Lien...\n'));
-  
-  // 1. Run framework detection
-  console.log(chalk.dim('🔍 Detecting frameworks in'), chalk.bold(rootDir));
-  const detections = await detectAllFrameworks(rootDir);
-  
-  let frameworks: FrameworkInstance[] = [];
-  
-  if (detections.length === 0) {
-    console.log(chalk.yellow('\n⚠️  No frameworks detected'));
-    
-    if (!options.yes) {
-      const { useGeneric } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'useGeneric',
-          message: 'Create a generic config (index all supported file types)?',
-          default: true,
-        },
-      ]);
-      
-      if (!useGeneric) {
-        console.log(chalk.dim('Aborted.'));
-        return;
-      }
-    }
-    
-    // Create generic framework
-    frameworks.push({
-      name: 'generic',
-      path: '.',
-      enabled: true,
-      config: {
-        include: ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,c,cpp,cs}'],
-        exclude: [
-          '**/node_modules/**',
-          '**/dist/**',
-          '**/build/**',
-          '**/.git/**',
-          '**/coverage/**',
-          '**/.next/**',
-          '**/.nuxt/**',
-          '**/vendor/**',
-        ],
-      },
-    });
-  } else {
-    // 2. Display detected frameworks
-    console.log(chalk.green(`\n✓ Found ${detections.length} framework(s):\n`));
-    
-    for (const det of detections) {
-      const pathDisplay = det.path === '.' ? 'root' : det.path;
-      console.log(chalk.bold(`  ${det.name}`), chalk.dim(`(${det.confidence} confidence)`));
-      console.log(chalk.dim(`    Location: ${pathDisplay}`));
-      
-      if (det.evidence.length > 0) {
-        det.evidence.forEach((e) => {
-          console.log(chalk.dim(`    • ${e}`));
-        });
-      }
-      console.log();
-    }
-    
-    // 3. Interactive confirmation
-    if (!options.yes) {
-      const { confirm } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'confirm',
-          message: 'Configure these frameworks?',
-          default: true,
-        },
-      ]);
-      
-      if (!confirm) {
-        console.log(chalk.dim('Aborted.'));
-        return;
-      }
-    }
-    
-    // 4. Generate configs for each detected framework
-    for (const det of detections) {
-      const detector = getFrameworkDetector(det.name);
-      if (!detector) {
-        console.warn(chalk.yellow(`⚠️  No detector found for ${det.name}, skipping`));
-        continue;
-      }
-      
-      // Generate default config
-      const frameworkConfig = await detector.generateConfig(rootDir, det.path);
-      
-      // Optional: Ask to customize (only in interactive mode)
-      let shouldCustomize = false;
-      if (!options.yes) {
-        const { customize } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'customize',
-            message: `Customize ${det.name} settings?`,
-            default: false,
-          },
-        ]);
-        shouldCustomize = customize;
-      }
-      
-      let finalConfig = frameworkConfig;
-      if (shouldCustomize) {
-        const customized = await promptForCustomization(det.name, frameworkConfig);
-        finalConfig = { ...frameworkConfig, ...customized };
-      } else {
-        const pathDisplay = det.path === '.' ? 'root' : det.path;
-        console.log(chalk.dim(`  → Using defaults for ${det.name} at ${pathDisplay}`));
-      }
-      
-      frameworks.push({
-        name: det.name,
-        path: det.path,
-        enabled: true,
-        config: finalConfig,
-      });
-    }
-  }
-  
-  // 5. Ask about Cursor rules installation
-  if (!options.yes) {
-    const { installCursorRules } = await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'installCursorRules',
-        message: 'Install recommended Cursor rules?',
-        default: true,
-      },
-    ]);
-    
-    if (installCursorRules) {
-      try {
-        const cursorRulesDir = path.join(rootDir, '.cursor');
-        await fs.mkdir(cursorRulesDir, { recursive: true });
-        
-        // Find template - it's in the package root (same dir as package.json)
-        // When compiled: everything bundles to dist/index.js, so __dirname is dist/
-        // Go up one level from dist/ to reach package root
-        const templatePath = path.join(__dirname, '../CURSOR_RULES_TEMPLATE.md');
-        
-        const rulesPath = path.join(cursorRulesDir, 'rules');
-        let targetPath: string;
-        let isDirectory = false;
-        let isFile = false;
-
-        try {
-          const stats = await fs.stat(rulesPath);
-          isDirectory = stats.isDirectory();
-          isFile = stats.isFile();
-        } catch {
-          // Doesn't exist, that's fine
-        }
-
-        if (isDirectory) {
-          // .cursor/rules is already a directory, create lien.mdc inside it
-          targetPath = path.join(rulesPath, 'lien.mdc');
-          await fs.copyFile(templatePath, targetPath);
-          console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
-        } else if (isFile) {
-          // .cursor/rules exists as a file - ask to convert to directory structure
-          const { convertToDir } = await inquirer.prompt([
-            {
-              type: 'confirm',
-              name: 'convertToDir',
-              message: 'Existing .cursor/rules file found. Convert to directory and preserve your rules?',
-              default: true,
-            },
-          ]);
-
-          if (convertToDir) {
-            // Convert file to directory structure
-            // 1. Read existing rules
-            const existingRules = await fs.readFile(rulesPath, 'utf-8');
-            // 2. Delete the file
-            await fs.unlink(rulesPath);
-            // 3. Create rules as a directory
-            await fs.mkdir(rulesPath);
-            // 4. Save original rules as project.mdc
-            await fs.writeFile(path.join(rulesPath, 'project.mdc'), existingRules);
-            // 5. Add Lien rules as lien.mdc
-            await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
-            console.log(chalk.green('✓ Converted .cursor/rules to directory'));
-            console.log(chalk.green('  - Your project rules: .cursor/rules/project.mdc'));
-            console.log(chalk.green('  - Lien rules: .cursor/rules/lien.mdc'));
-          } else {
-            console.log(chalk.dim('Skipped Cursor rules installation (preserving existing file)'));
-          }
-        } else {
-          // .cursor/rules doesn't exist, create it as a directory
-          await fs.mkdir(rulesPath, { recursive: true });
-          targetPath = path.join(rulesPath, 'lien.mdc');
-          await fs.copyFile(templatePath, targetPath);
-          console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
-        }
-      } catch (error) {
-        console.log(chalk.yellow('⚠️  Could not install Cursor rules'));
-        console.log(chalk.dim(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`));
-        console.log(chalk.dim('You can manually copy CURSOR_RULES_TEMPLATE.md to .cursor/rules/lien.mdc'));
-      }
-    }
-  }
-  
-  // 6. Build final config
-  const config: LienConfig = {
-    ...defaultConfig,
-    frameworks,
+/** Default generic framework config for projects without detected frameworks */
+function createGenericFramework(): FrameworkInstance {
+  return {
+    name: 'generic',
+    path: '.',
+    enabled: true,
+    config: {
+      include: ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,c,cpp,cs}'],
+      exclude: [
+        '**/node_modules/**',
+        '**/dist/**',
+        '**/build/**',
+        '**/.git/**',
+        '**/coverage/**',
+        '**/.next/**',
+        '**/.nuxt/**',
+        '**/vendor/**',
+      ],
+    },
   };
+}
+
+/** Handle case when no frameworks are detected - returns null if user aborts */
+async function handleNoFrameworksDetected(options: InitOptions): Promise<FrameworkInstance[] | null> {
+  console.log(chalk.yellow('\n⚠️  No frameworks detected'));
   
-  // 7. Write config
+  if (!options.yes) {
+    const { useGeneric } = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'useGeneric',
+      message: 'Create a generic config (index all supported file types)?',
+      default: true,
+    }]);
+    
+    if (!useGeneric) {
+      console.log(chalk.dim('Aborted.'));
+      return null;
+    }
+  }
+  
+  return [createGenericFramework()];
+}
+
+/** Display detected frameworks to console */
+function displayDetectedFrameworks(detections: Array<{ name: string; path: string; confidence: string; evidence: string[] }>) {
+  console.log(chalk.green(`\n✓ Found ${detections.length} framework(s):\n`));
+  
+  for (const det of detections) {
+    const pathDisplay = det.path === '.' ? 'root' : det.path;
+    console.log(chalk.bold(`  ${det.name}`), chalk.dim(`(${det.confidence} confidence)`));
+    console.log(chalk.dim(`    Location: ${pathDisplay}`));
+    
+    if (det.evidence.length > 0) {
+      det.evidence.forEach((e) => console.log(chalk.dim(`    • ${e}`)));
+    }
+    console.log();
+  }
+}
+
+/** Prompt user to confirm framework configuration */
+async function confirmFrameworkConfiguration(options: InitOptions): Promise<boolean> {
+  if (options.yes) return true;
+  
+  const { confirm } = await inquirer.prompt([{
+    type: 'confirm',
+    name: 'confirm',
+    message: 'Configure these frameworks?',
+    default: true,
+  }]);
+  
+  return confirm;
+}
+
+/** Generate config for a single detected framework */
+async function generateSingleFrameworkConfig(
+  det: { name: string; path: string },
+  rootDir: string,
+  options: InitOptions
+): Promise<FrameworkInstance | null> {
+  const detector = getFrameworkDetector(det.name);
+  if (!detector) {
+    console.warn(chalk.yellow(`⚠️  No detector found for ${det.name}, skipping`));
+    return null;
+  }
+  
+  const frameworkConfig = await detector.generateConfig(rootDir, det.path);
+  
+  // Optional customization in interactive mode
+  let finalConfig = frameworkConfig;
+  if (!options.yes) {
+    const { customize } = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'customize',
+      message: `Customize ${det.name} settings?`,
+      default: false,
+    }]);
+    
+    if (customize) {
+      const customized = await promptForCustomization(det.name, frameworkConfig);
+      finalConfig = { ...frameworkConfig, ...customized };
+    } else {
+      const pathDisplay = det.path === '.' ? 'root' : det.path;
+      console.log(chalk.dim(`  → Using defaults for ${det.name} at ${pathDisplay}`));
+    }
+  }
+  
+  return {
+    name: det.name,
+    path: det.path,
+    enabled: true,
+    config: finalConfig,
+  };
+}
+
+/** Generate configs for all detected frameworks - returns null if user aborts */
+async function handleFrameworksDetected(
+  detections: Array<{ name: string; path: string; confidence: string; evidence: string[] }>,
+  rootDir: string,
+  options: InitOptions
+): Promise<FrameworkInstance[] | null> {
+  displayDetectedFrameworks(detections);
+  
+  if (!await confirmFrameworkConfiguration(options)) {
+    console.log(chalk.dim('Aborted.'));
+    return null;
+  }
+  
+  const frameworks: FrameworkInstance[] = [];
+  for (const det of detections) {
+    const framework = await generateSingleFrameworkConfig(det, rootDir, options);
+    if (framework) frameworks.push(framework);
+  }
+  
+  return frameworks;
+}
+
+/** Check if path is a directory, file, or doesn't exist */
+async function getPathType(filepath: string): Promise<'directory' | 'file' | 'none'> {
+  try {
+    const stats = await fs.stat(filepath);
+    if (stats.isDirectory()) return 'directory';
+    if (stats.isFile()) return 'file';
+  } catch {
+    // Doesn't exist
+  }
+  return 'none';
+}
+
+/** Convert existing rules file to directory structure */
+async function convertRulesFileToDirectory(rulesPath: string, templatePath: string) {
+  const existingRules = await fs.readFile(rulesPath, 'utf-8');
+  await fs.unlink(rulesPath);
+  await fs.mkdir(rulesPath);
+  await fs.writeFile(path.join(rulesPath, 'project.mdc'), existingRules);
+  await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
+  
+  console.log(chalk.green('✓ Converted .cursor/rules to directory'));
+  console.log(chalk.green('  - Your project rules: .cursor/rules/project.mdc'));
+  console.log(chalk.green('  - Lien rules: .cursor/rules/lien.mdc'));
+}
+
+/** Install Cursor rules based on existing .cursor/rules state */
+async function installCursorRulesFiles(rootDir: string) {
+  const cursorRulesDir = path.join(rootDir, '.cursor');
+  await fs.mkdir(cursorRulesDir, { recursive: true });
+  
+  const templatePath = path.join(__dirname, '../CURSOR_RULES_TEMPLATE.md');
+  const rulesPath = path.join(cursorRulesDir, 'rules');
+  const pathType = await getPathType(rulesPath);
+
+  if (pathType === 'directory') {
+    await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
+    console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
+  } else if (pathType === 'file') {
+    const { convertToDir } = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'convertToDir',
+      message: 'Existing .cursor/rules file found. Convert to directory and preserve your rules?',
+      default: true,
+    }]);
+
+    if (convertToDir) {
+      await convertRulesFileToDirectory(rulesPath, templatePath);
+    } else {
+      console.log(chalk.dim('Skipped Cursor rules installation (preserving existing file)'));
+    }
+  } else {
+    await fs.mkdir(rulesPath, { recursive: true });
+    await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
+    console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
+  }
+}
+
+/** Prompt and install Cursor rules if user agrees */
+async function promptAndInstallCursorRules(rootDir: string, options: InitOptions) {
+  if (options.yes) return;
+  
+  const { installCursorRules } = await inquirer.prompt([{
+    type: 'confirm',
+    name: 'installCursorRules',
+    message: 'Install recommended Cursor rules?',
+    default: true,
+  }]);
+  
+  if (!installCursorRules) return;
+  
+  try {
+    await installCursorRulesFiles(rootDir);
+  } catch (error) {
+    console.log(chalk.yellow('⚠️  Could not install Cursor rules'));
+    console.log(chalk.dim(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`));
+    console.log(chalk.dim('You can manually copy CURSOR_RULES_TEMPLATE.md to .cursor/rules/lien.mdc'));
+  }
+}
+
+/** Write config file and show success message */
+async function writeConfigAndShowSuccess(rootDir: string, frameworks: FrameworkInstance[]) {
+  const config: LienConfig = { ...defaultConfig, frameworks };
   const configPath = path.join(rootDir, '.lien.config.json');
   await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
   
-  // 8. Show success message
   console.log(chalk.green('\n✓ Created .lien.config.json'));
   console.log(chalk.green(`✓ Configured ${frameworks.length} framework(s)`));
   console.log(chalk.dim('\nNext steps:'));
   console.log(chalk.dim('  1. Run'), chalk.bold('lien index'), chalk.dim('to index your codebase'));
   console.log(chalk.dim('  2. Run'), chalk.bold('lien serve'), chalk.dim('to start the MCP server'));
   console.log(chalk.dim('  3. Configure Cursor to use the MCP server (see README.md)'));
+}
+
+/** Create a new Lien configuration for the project */
+async function createNewConfig(rootDir: string, options: InitOptions) {
+  showCompactBanner();
+  console.log(chalk.bold('Initializing Lien...\n'));
+  
+  // Detect frameworks
+  console.log(chalk.dim('🔍 Detecting frameworks in'), chalk.bold(rootDir));
+  const detections = await detectAllFrameworks(rootDir);
+  
+  // Build framework configs based on detection results
+  const frameworks = detections.length === 0
+    ? await handleNoFrameworksDetected(options)
+    : await handleFrameworksDetected(detections, rootDir, options);
+  
+  if (!frameworks) return; // User aborted
+  
+  // Optional Cursor rules installation
+  await promptAndInstallCursorRules(rootDir, options);
+  
+  // Write config and show success
+  await writeConfigAndShowSuccess(rootDir, frameworks);
 }
 
 async function promptForCustomization(frameworkName: string, config: FrameworkConfig): Promise<Partial<FrameworkConfig>> {
