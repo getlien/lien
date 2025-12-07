@@ -199,6 +199,21 @@ export class ComplexityAnalyzer {
       bugs: metadata.halsteadBugs || 0,
     };
 
+    // Store human-scale values for complexity/threshold:
+    // - halstead_effort: time in minutes (not raw effort)
+    // - halstead_bugs: bugs estimate (decimal)
+    let complexity: number;
+    let displayThreshold: number;
+    if (metricType === 'halstead_effort') {
+      // Store time in minutes for comparable deltas
+      complexity = Math.round(this.effortToMinutes(metricValue));
+      displayThreshold = Math.round(this.effortToMinutes(effectiveThreshold));
+    } else {
+      // halstead_bugs: store as-is (small decimal)
+      complexity = metricValue;
+      displayThreshold = effectiveThreshold;
+    }
+
     return {
       filepath: metadata.file,
       startLine: metadata.startLine,
@@ -206,8 +221,8 @@ export class ComplexityAnalyzer {
       symbolName: metadata.symbolName || 'unknown',
       symbolType: metadata.symbolType as 'function' | 'method',
       language: metadata.language,
-      complexity: metricType === 'halstead_bugs' ? metricValue : Math.round(metricValue),
-      threshold: metricType === 'halstead_bugs' ? effectiveThreshold : Math.round(effectiveThreshold),
+      complexity,
+      threshold: displayThreshold,
       severity: violationSeverity,
       message,
       metricType,

@@ -60,8 +60,9 @@ type MetricFormatter = (val: number, thresh: number) => { complexity: string; th
 
 const metricFormatters: Record<string, MetricFormatter> = {
   halstead_effort: (val, thresh) => ({
-    complexity: '~' + formatTime(effortToMinutes(val)),
-    threshold: formatTime(effortToMinutes(thresh)),
+    // val/thresh are already in minutes (human-scale)
+    complexity: '~' + formatTime(val),
+    threshold: formatTime(thresh),
   }),
   halstead_bugs: (val, thresh) => ({
     complexity: val.toFixed(2),
