@@ -39,6 +39,11 @@ interface DatabaseRecord {
   parameters: string[];
   signature: string;
   imports: string[];
+  // Halstead metrics (v0.19.0)
+  halsteadVolume: number;
+  halsteadDifficulty: number;
+  halsteadEffort: number;
+  halsteadBugs: number;
 }
 
 /**
@@ -71,6 +76,11 @@ function transformChunkToRecord(
     parameters: getNonEmptyArray(metadata.parameters),
     signature: metadata.signature || '',
     imports: getNonEmptyArray(metadata.imports),
+    // Halstead metrics (v0.19.0)
+    halsteadVolume: metadata.halsteadVolume || 0,
+    halsteadDifficulty: metadata.halsteadDifficulty || 0,
+    halsteadEffort: metadata.halsteadEffort || 0,
+    halsteadBugs: metadata.halsteadBugs || 0,
   };
 }
 

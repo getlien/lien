@@ -269,7 +269,7 @@ export function countHalstead(node: Parser.SyntaxNode, language: string): Halste
     }
     
     // Recurse into children
-    for (const child of node.children) {
+    for (const child of n.children) {
       traverse(child);
     }
   }

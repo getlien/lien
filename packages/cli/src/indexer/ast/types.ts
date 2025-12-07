@@ -37,6 +37,12 @@ export interface SemanticMetadata {
   parameters?: string[];
   signature?: string;
   imports?: string[];
+  
+  // Halstead metrics (v0.19.0)
+  halsteadVolume?: number;
+  halsteadDifficulty?: number;
+  halsteadEffort?: number;
+  halsteadBugs?: number;
 }
 
 /**
