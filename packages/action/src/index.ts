@@ -29,6 +29,9 @@ import {
   formatReviewComment,
   getViolationKey,
   buildDescriptionBadge,
+  getMetricLabel,
+  formatComplexityValue,
+  formatThresholdValue,
 } from './prompt.js';
 import {
   calculateDeltas,
@@ -293,11 +296,16 @@ function buildLineComments(
       ? ` *(function starts at line ${violation.startLine})*` 
       : '';
     
+    // Format human-friendly complexity display
+    const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
+    const valueDisplay = formatComplexityValue(violation.metricType || 'cyclomatic', violation.complexity);
+    const thresholdDisplay = formatThresholdValue(violation.metricType || 'cyclomatic', violation.threshold);
+    
     core.info(`Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`);
     lineComments.push({
       path: violation.filepath,
       line: commentLine,
-      body: `${severityEmoji} **Complexity: ${violation.complexity}**${deltaStr} (threshold: ${violation.threshold})${lineNote}\n\n${comment}`,
+      body: `${severityEmoji} **${metricLabel.charAt(0).toUpperCase() + metricLabel.slice(1)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})${lineNote}\n\n${comment}`,
     });
   }
 

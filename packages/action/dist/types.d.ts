@@ -8,7 +8,16 @@ export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 /**
  * Type of complexity metric being measured
  */
-export type ComplexityMetricType = 'cyclomatic' | 'cognitive';
+export type ComplexityMetricType = 'cyclomatic' | 'cognitive' | 'halstead_effort' | 'halstead_bugs';
+/**
+ * Halstead metric details for Halstead-type violations
+ */
+export interface HalsteadDetails {
+    volume: number;
+    difficulty: number;
+    effort: number;
+    bugs: number;
+}
 /**
  * A single complexity violation
  */
@@ -23,8 +32,10 @@ export interface ComplexityViolation {
     threshold: number;
     severity: 'warning' | 'error';
     message: string;
-    /** Type of complexity metric (cyclomatic vs cognitive) */
+    /** Type of complexity metric (cyclomatic vs cognitive vs halstead) */
     metricType: ComplexityMetricType;
+    /** Halstead-specific details when metricType is halstead_* */
+    halsteadDetails?: HalsteadDetails;
 }
 /**
  * Complexity data for a single file

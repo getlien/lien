@@ -21,7 +21,7 @@ function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, Complexity
 /**
  * Get human-readable label for a metric type
  */
-function getMetricLabel(metricType: string): string {
+export function getMetricLabel(metricType: string): string {
   switch (metricType) {
     case 'cognitive': return 'mental load';
     case 'cyclomatic': return 'test paths';
@@ -32,18 +32,56 @@ function getMetricLabel(metricType: string): string {
 }
 
 /**
+ * Format minutes as human-readable time
+ */
+function formatTime(minutes: number): string {
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const mins = Math.round(minutes % 60);
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return `${Math.round(minutes)}m`;
+}
+
+/**
+ * Format complexity value based on metric type for display
+ */
+export function formatComplexityValue(metricType: string, value: number): string {
+  switch (metricType) {
+    case 'halstead_effort':
+      return `~${formatTime(value)}`;
+    case 'halstead_bugs':
+      return value.toFixed(2);
+    case 'cyclomatic':
+      return `${value} tests`;
+    default:
+      return value.toString();
+  }
+}
+
+/**
+ * Format threshold value based on metric type for display
+ */
+export function formatThresholdValue(metricType: string, value: number): string {
+  switch (metricType) {
+    case 'halstead_effort':
+      return formatTime(value);
+    case 'halstead_bugs':
+      return value.toFixed(1);
+    default:
+      return value.toString();
+  }
+}
+
+/**
  * Format a single violation line with optional delta
  */
 function formatViolationLine(v: ComplexityViolation, deltaMap: Map<string, ComplexityDelta>): string {
   const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
   const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
   const metricLabel = getMetricLabel(v.metricType);
-  const valueDisplay = v.metricType?.startsWith('halstead_') 
-    ? v.complexity.toLocaleString() 
-    : v.complexity.toString();
-  const thresholdDisplay = v.metricType?.startsWith('halstead_')
-    ? v.threshold.toLocaleString()
-    : v.threshold.toString();
+  const valueDisplay = formatComplexityValue(v.metricType, v.complexity);
+  const thresholdDisplay = formatThresholdValue(v.metricType, v.threshold);
   return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} ${valueDisplay}${deltaStr} (threshold: ${thresholdDisplay}) [${v.severity}]`;
 }
 

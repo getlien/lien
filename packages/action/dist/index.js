@@ -32255,13 +32255,66 @@ function buildDeltaMap(deltas) {
     return map;
 }
 /**
+ * Get human-readable label for a metric type
+ */
+function getMetricLabel(metricType) {
+    switch (metricType) {
+        case 'cognitive': return 'mental load';
+        case 'cyclomatic': return 'test paths';
+        case 'halstead_effort': return 'time to understand';
+        case 'halstead_bugs': return 'estimated bugs';
+        default: return 'complexity';
+    }
+}
+/**
+ * Format minutes as human-readable time
+ */
+function formatTime(minutes) {
+    if (minutes >= 60) {
+        const hours = Math.floor(minutes / 60);
+        const mins = Math.round(minutes % 60);
+        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    }
+    return `${Math.round(minutes)}m`;
+}
+/**
+ * Format complexity value based on metric type for display
+ */
+function formatComplexityValue(metricType, value) {
+    switch (metricType) {
+        case 'halstead_effort':
+            return `~${formatTime(value)}`;
+        case 'halstead_bugs':
+            return value.toFixed(2);
+        case 'cyclomatic':
+            return `${value} tests`;
+        default:
+            return value.toString();
+    }
+}
+/**
+ * Format threshold value based on metric type for display
+ */
+function formatThresholdValue(metricType, value) {
+    switch (metricType) {
+        case 'halstead_effort':
+            return formatTime(value);
+        case 'halstead_bugs':
+            return value.toFixed(1);
+        default:
+            return value.toString();
+    }
+}
+/**
  * Format a single violation line with optional delta
  */
 function formatViolationLine(v, deltaMap) {
     const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
     const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-    const metricLabel = v.metricType === 'cognitive' ? 'cognitive' : 'cyclomatic';
-    return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
+    const metricLabel = getMetricLabel(v.metricType);
+    const valueDisplay = formatComplexityValue(v.metricType, v.complexity);
+    const thresholdDisplay = formatThresholdValue(v.metricType, v.threshold);
+    return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} ${valueDisplay}${deltaStr} (threshold: ${thresholdDisplay}) [${v.severity}]`;
 }
 /**
  * Build violations summary grouped by file
@@ -32524,25 +32577,45 @@ ${status.emoji} ${status.message}
 </details>`;
 }
 /**
+ * Build Halstead details string for prompts
+ */
+function formatHalsteadContext(violation) {
+    if (!violation.metricType?.startsWith('halstead_'))
+        return '';
+    if (!violation.halsteadDetails)
+        return '';
+    const details = violation.halsteadDetails;
+    return `\n**Halstead Metrics**: Volume: ${details.volume?.toLocaleString()}, Difficulty: ${details.difficulty?.toFixed(1)}, Effort: ${details.effort?.toLocaleString()}, Est. bugs: ${details.bugs?.toFixed(3)}`;
+}
+/**
  * Build a prompt for generating a single line comment for a violation
  */
 function buildLineCommentPrompt(violation, codeSnippet) {
     const snippetSection = codeSnippet
         ? `\n\n**Code:**\n\`\`\`\n${codeSnippet}\n\`\`\``
         : '';
+    const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
+    const valueDisplay = violation.metricType?.startsWith('halstead_')
+        ? violation.complexity.toLocaleString()
+        : violation.complexity.toString();
+    const thresholdDisplay = violation.metricType?.startsWith('halstead_')
+        ? violation.threshold.toLocaleString()
+        : violation.threshold.toString();
+    const halsteadContext = formatHalsteadContext(violation);
     return `You are reviewing code for complexity. Generate an actionable review comment.
 
 **Function**: \`${violation.symbolName}\` (${violation.symbolType})
-**Complexity**: ${violation.complexity} ${violation.metricType || 'cyclomatic'} (threshold: ${violation.threshold})
+**Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
 ${snippetSection}
 
 Write a code review comment that includes:
 
-1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains")
+1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains", "many unique operators")
 
 2. **Refactoring** (2-3 sentences): Concrete steps to reduce complexity. Be SPECIFIC:
    - Name the exact functions to extract (e.g., "Extract \`handleAdminDelete()\` and \`handleModeratorDelete()\`")
    - Suggest specific patterns (strategy, lookup table, early returns)
+   - For Halstead metrics: suggest introducing named constants, reducing operator variety, or extracting complex expressions
    - If applicable, show a brief code sketch
 
 3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
@@ -32588,9 +32661,17 @@ function buildBatchedCommentsPrompt(violations, codeSnippets) {
         const snippetSection = snippet
             ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\``
             : '';
+        const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
+        const valueDisplay = v.metricType?.startsWith('halstead_')
+            ? v.complexity.toLocaleString()
+            : v.complexity.toString();
+        const thresholdDisplay = v.metricType?.startsWith('halstead_')
+            ? v.threshold.toLocaleString()
+            : v.threshold.toString();
+        const halsteadContext = formatHalsteadContext(v);
         return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
-- **Complexity**: ${v.complexity} ${v.metricType || 'cyclomatic'} (threshold: ${v.threshold})
+- **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
 - **Severity**: ${v.severity}${snippetSection}`;
     })
         .join('\n\n');
@@ -32610,10 +32691,12 @@ For each violation, write a code review comment that:
 
 1. **Identifies the specific pattern** causing complexity (not just "too complex")
    - Is it nested conditionals? Long parameter lists? Multiple responsibilities?
+   - For Halstead metrics: many unique operators/operands, complex expressions
    - Be specific: "5 levels of nesting" not "deeply nested"
 
 2. **Suggests a concrete fix** with a short code example (3-5 lines)
    - Consider: early returns, guard clauses, lookup tables, extracting helpers, strategy pattern
+   - For Halstead: named constants, reducing operator variety, extracting complex expressions
    - Name specific functions: "Extract \`handleAdminCase()\`" not "extract a function"
    - Choose the SIMPLEST fix that addresses the issue (KISS principle)
 
@@ -33070,11 +33153,15 @@ function buildLineComments(violationsWithLines, aiComments, deltaMap) {
         const lineNote = commentLine !== violation.startLine
             ? ` *(function starts at line ${violation.startLine})*`
             : '';
+        // Format human-friendly complexity display
+        const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
+        const valueDisplay = formatComplexityValue(violation.metricType || 'cyclomatic', violation.complexity);
+        const thresholdDisplay = formatThresholdValue(violation.metricType || 'cyclomatic', violation.threshold);
         core.info(`Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`);
         lineComments.push({
             path: violation.filepath,
             line: commentLine,
-            body: `${severityEmoji} **Complexity: ${violation.complexity}**${deltaStr} (threshold: ${violation.threshold})${lineNote}\n\n${comment}`,
+            body: `${severityEmoji} **${metricLabel.charAt(0).toUpperCase() + metricLabel.slice(1)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})${lineNote}\n\n${comment}`,
         });
     }
     return lineComments;

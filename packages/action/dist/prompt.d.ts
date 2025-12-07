@@ -3,6 +3,18 @@
  */
 import type { ComplexityReport, ComplexityViolation, PRContext, ComplexityDelta, DeltaSummary } from './types.js';
 /**
+ * Get human-readable label for a metric type
+ */
+export declare function getMetricLabel(metricType: string): string;
+/**
+ * Format complexity value based on metric type for display
+ */
+export declare function formatComplexityValue(metricType: string, value: number): string;
+/**
+ * Format threshold value based on metric type for display
+ */
+export declare function formatThresholdValue(metricType: string, value: number): string;
+/**
  * Build the review prompt from complexity report
  */
 export declare function buildReviewPrompt(report: ComplexityReport, prContext: PRContext, codeSnippets: Map<string, string>, deltas?: ComplexityDelta[] | null): string;
