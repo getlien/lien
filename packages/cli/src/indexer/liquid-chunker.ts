@@ -8,7 +8,7 @@ import type { CodeChunk } from './types.js';
  */
 
 interface LiquidBlock {
-  type: 'schema' | 'style' | 'javascript' | 'template';
+  type: 'schema' | 'style' | 'javascript';
   startLine: number;
   endLine: number;
   content: string;
@@ -169,6 +169,200 @@ function findLiquidBlocks(content: string): LiquidBlock[] {
   return blocks.sort((a, b) => a.startLine - b.startLine);
 }
 
+/** Parameters for chunking operations */
+interface ChunkParams {
+  filepath: string;
+  chunkSize: number;
+  chunkOverlap: number;
+}
+
+/** Context for processing a file - computed once and reused */
+interface ChunkContext {
+  lines: string[];
+  linesWithoutComments: string[];
+  params: ChunkParams;
+}
+
+/**
+ * Create a CodeChunk with consistent structure
+ */
+function createCodeChunk(
+  content: string,
+  startLine: number,
+  endLine: number,
+  filepath: string,
+  type: 'block' | 'template',
+  options: {
+    symbolName?: string;
+    symbolType?: LiquidBlock['type'];
+    imports?: string[];
+  } = {}
+): CodeChunk {
+  return {
+    content,
+    metadata: {
+      file: filepath,
+      startLine,
+      endLine,
+      language: 'liquid',
+      type,
+      symbolName: options.symbolName,
+      symbolType: options.symbolType,
+      imports: options.imports?.length ? options.imports : undefined,
+    },
+  };
+}
+
+/**
+ * Split a large block into multiple chunks with overlap
+ */
+function splitLargeBlock(
+  block: LiquidBlock,
+  ctx: ChunkContext,
+  symbolName: string | undefined,
+  imports: string[]
+): CodeChunk[] {
+  const chunks: CodeChunk[] = [];
+  const blockLines = block.content.split('\n');
+  const { chunkSize, chunkOverlap, filepath } = ctx.params;
+
+  for (let offset = 0; offset < blockLines.length; offset += chunkSize - chunkOverlap) {
+    const endOffset = Math.min(offset + chunkSize, blockLines.length);
+    const chunkContent = blockLines.slice(offset, endOffset).join('\n');
+
+    if (chunkContent.trim().length > 0) {
+      chunks.push(createCodeChunk(
+        chunkContent,
+        block.startLine + offset + 1,
+        block.startLine + endOffset,
+        filepath,
+        'block',
+        { symbolName, symbolType: block.type, imports }
+      ));
+    }
+
+    if (endOffset >= blockLines.length) break;
+  }
+
+  return chunks;
+}
+
+/**
+ * Create chunks from a special Liquid block (schema, style, javascript)
+ * Returns the chunks and marks covered lines
+ */
+function processSpecialBlock(
+  block: LiquidBlock,
+  ctx: ChunkContext,
+  coveredLines: Set<number>
+): CodeChunk[] {
+  // Mark lines as covered
+  for (let i = block.startLine; i <= block.endLine; i++) {
+    coveredLines.add(i);
+  }
+
+  // Extract metadata
+  const symbolName = block.type === 'schema' ? extractSchemaName(block.content) : undefined;
+
+  // Extract imports from cleaned content
+  const blockContentWithoutComments = ctx.linesWithoutComments
+    .slice(block.startLine, block.endLine + 1)
+    .join('\n');
+  const imports = extractRenderTags(blockContentWithoutComments);
+
+  const blockLineCount = block.endLine - block.startLine + 1;
+  const maxBlockSize = ctx.params.chunkSize * 3;
+
+  // Keep small blocks as single chunk, split large ones
+  if (blockLineCount <= maxBlockSize) {
+    return [createCodeChunk(
+      block.content,
+      block.startLine + 1,
+      block.endLine + 1,
+      ctx.params.filepath,
+      'block',
+      { symbolName, symbolType: block.type, imports }
+    )];
+  }
+
+  return splitLargeBlock(block, ctx, symbolName, imports);
+}
+
+/**
+ * Create a template chunk from accumulated lines
+ */
+function flushTemplateChunk(
+  currentChunk: string[],
+  chunkStartLine: number,
+  endLine: number,
+  ctx: ChunkContext
+): CodeChunk | null {
+  if (currentChunk.length === 0) return null;
+
+  const chunkContent = currentChunk.join('\n');
+  if (chunkContent.trim().length === 0) return null;
+
+  const cleanedChunk = ctx.linesWithoutComments.slice(chunkStartLine, endLine).join('\n');
+  const imports = extractRenderTags(cleanedChunk);
+
+  return createCodeChunk(
+    chunkContent,
+    chunkStartLine + 1,
+    endLine,
+    ctx.params.filepath,
+    'template',
+    { imports }
+  );
+}
+
+/**
+ * Process uncovered template content into chunks
+ */
+function processTemplateContent(
+  ctx: ChunkContext,
+  coveredLines: Set<number>
+): CodeChunk[] {
+  const chunks: CodeChunk[] = [];
+  const { lines, params } = ctx;
+  const { chunkSize, chunkOverlap } = params;
+
+  let currentChunk: string[] = [];
+  let chunkStartLine = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    // Skip lines covered by special blocks
+    if (coveredLines.has(i)) {
+      const chunk = flushTemplateChunk(currentChunk, chunkStartLine, i, ctx);
+      if (chunk) chunks.push(chunk);
+      currentChunk = [];
+      continue;
+    }
+
+    // Start new chunk if needed
+    if (currentChunk.length === 0) {
+      chunkStartLine = i;
+    }
+
+    currentChunk.push(lines[i]);
+
+    // Flush if chunk is full
+    if (currentChunk.length >= chunkSize) {
+      const chunk = flushTemplateChunk(currentChunk, chunkStartLine, i + 1, ctx);
+      if (chunk) chunks.push(chunk);
+
+      // Add overlap for next chunk
+      currentChunk = currentChunk.slice(-chunkOverlap);
+      chunkStartLine = Math.max(0, i + 1 - chunkOverlap);
+    }
+  }
+
+  // Flush remaining chunk
+  const finalChunk = flushTemplateChunk(currentChunk, chunkStartLine, lines.length, ctx);
+  if (finalChunk) chunks.push(finalChunk);
+
+  return chunks;
+}
+
 /**
  * Chunk a Liquid template file
  * 
@@ -185,180 +379,25 @@ export function chunkLiquidFile(
   chunkSize: number = 75,
   chunkOverlap: number = 10
 ): CodeChunk[] {
-  const lines = content.split('\n');
-  const blocks = findLiquidBlocks(content);
-  const chunks: CodeChunk[] = [];
-  
-  // Remove comments once for performance (avoids repeated regex operations)
+  // Build context once for reuse across helpers
   const contentWithoutComments = removeComments(content);
-  const linesWithoutComments = contentWithoutComments.split('\n');
-  
-  // Track which lines are covered by special blocks
+  const ctx: ChunkContext = {
+    lines: content.split('\n'),
+    linesWithoutComments: contentWithoutComments.split('\n'),
+    params: { filepath, chunkSize, chunkOverlap },
+  };
+
+  // Find special blocks and track covered lines
+  const blocks = findLiquidBlocks(content);
   const coveredLines = new Set<number>();
-  
-  // Create chunks for special blocks
-  for (const block of blocks) {
-    // Mark lines as covered
-    for (let i = block.startLine; i <= block.endLine; i++) {
-      coveredLines.add(i);
-    }
-    
-    // Extract metadata
-    let symbolName: string | undefined;
-    if (block.type === 'schema') {
-      symbolName = extractSchemaName(block.content);
-    }
-    
-    // Extract render/include tags from cleaned content (comments already removed)
-    const blockContentWithoutComments = linesWithoutComments
-      .slice(block.startLine, block.endLine + 1)
-      .join('\n');
-    const imports = extractRenderTags(blockContentWithoutComments);
-    
-    const blockLineCount = block.endLine - block.startLine + 1;
-    const maxBlockSize = chunkSize * 3; // Allow blocks up to 3x chunk size before splitting
-    
-    // If block is reasonably sized, keep it as one chunk
-    if (blockLineCount <= maxBlockSize) {
-      chunks.push({
-        content: block.content,
-        metadata: {
-          file: filepath,
-          startLine: block.startLine + 1, // 1-indexed
-          endLine: block.endLine + 1,
-          language: 'liquid',
-          type: 'block',
-          symbolName,
-          symbolType: block.type,
-          imports: imports.length > 0 ? imports : undefined,
-        },
-      });
-    } else {
-      // Block is too large - split it into multiple chunks with overlap
-      const blockLines = block.content.split('\n');
-      
-      for (let offset = 0; offset < blockLines.length; offset += chunkSize - chunkOverlap) {
-        const endOffset = Math.min(offset + chunkSize, blockLines.length);
-        const chunkContent = blockLines.slice(offset, endOffset).join('\n');
-        
-        if (chunkContent.trim().length > 0) {
-          chunks.push({
-            content: chunkContent,
-            metadata: {
-              file: filepath,
-              startLine: block.startLine + offset + 1, // 1-indexed
-              endLine: block.startLine + endOffset, // 1-indexed (endOffset already accounts for exclusivity)
-              language: 'liquid',
-              type: 'block',
-              symbolName, // Preserve symbol name for all split chunks
-              symbolType: block.type,
-              imports: imports.length > 0 ? imports : undefined,
-            },
-          });
-        }
-        
-        if (endOffset >= blockLines.length) break;
-      }
-    }
-  }
-  
-  // Chunk uncovered template content
-  let currentChunk: string[] = [];
-  let chunkStartLine = 0;
-  
-  for (let i = 0; i < lines.length; i++) {
-    // Skip lines covered by special blocks
-    if (coveredLines.has(i)) {
-      // Flush current chunk if any
-      if (currentChunk.length > 0) {
-        const chunkContent = currentChunk.join('\n');
-        
-        // Only push non-empty chunks
-        if (chunkContent.trim().length > 0) {
-          // Extract from cleaned content (comments already removed)
-          const cleanedChunk = linesWithoutComments.slice(chunkStartLine, i).join('\n');
-          const imports = extractRenderTags(cleanedChunk);
-          
-          chunks.push({
-            content: chunkContent,
-            metadata: {
-              file: filepath,
-              startLine: chunkStartLine + 1,
-              endLine: i,
-              language: 'liquid',
-              type: 'template',
-              imports: imports.length > 0 ? imports : undefined,
-            },
-          });
-        }
-        currentChunk = [];
-      }
-      continue;
-    }
-    
-    // Start new chunk if needed
-    if (currentChunk.length === 0) {
-      chunkStartLine = i;
-    }
-    
-    currentChunk.push(lines[i]);
-    
-    // Flush if chunk is full
-    if (currentChunk.length >= chunkSize) {
-      const chunkContent = currentChunk.join('\n');
-      
-      // Only push non-empty chunks
-      if (chunkContent.trim().length > 0) {
-        // Extract from cleaned content (comments already removed)
-        const cleanedChunk = linesWithoutComments.slice(chunkStartLine, i + 1).join('\n');
-        const imports = extractRenderTags(cleanedChunk);
-        
-        chunks.push({
-          content: chunkContent,
-          metadata: {
-            file: filepath,
-            startLine: chunkStartLine + 1,
-            endLine: i + 1,
-            language: 'liquid',
-            type: 'template',
-            imports: imports.length > 0 ? imports : undefined,
-          },
-        });
-      }
-      
-      // Add overlap for next chunk
-      currentChunk = currentChunk.slice(-chunkOverlap);
-      chunkStartLine = Math.max(0, i + 1 - chunkOverlap);
-    }
-  }
-  
-  // Flush remaining chunk
-  if (currentChunk.length > 0) {
-    const chunkContent = currentChunk.join('\n');
-    
-    // Skip empty or whitespace-only chunks
-    if (chunkContent.trim().length === 0) {
-      return chunks.sort((a, b) => a.metadata.startLine - b.metadata.startLine);
-    }
-    
-    // Extract from cleaned content (comments already removed)
-    const cleanedChunk = linesWithoutComments.slice(chunkStartLine, lines.length).join('\n');
-    const imports = extractRenderTags(cleanedChunk);
-    
-    chunks.push({
-      content: chunkContent,
-      metadata: {
-        file: filepath,
-        startLine: chunkStartLine + 1,
-        endLine: lines.length,
-        language: 'liquid',
-        type: 'template',
-        imports: imports.length > 0 ? imports : undefined,
-      },
-    });
-  }
-  
-  // Sort by line number
-  return chunks.sort((a, b) => a.metadata.startLine - b.metadata.startLine);
+
+  // Process special blocks
+  const blockChunks = blocks.flatMap(block => processSpecialBlock(block, ctx, coveredLines));
+
+  // Process uncovered template content
+  const templateChunks = processTemplateContent(ctx, coveredLines);
+
+  // Combine and sort by line number
+  return [...blockChunks, ...templateChunks].sort((a, b) => a.metadata.startLine - b.metadata.startLine);
 }
 
