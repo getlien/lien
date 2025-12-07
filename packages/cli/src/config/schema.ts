@@ -58,10 +58,12 @@ export interface LienConfig {
   complexity?: {
     enabled: boolean;
     thresholds: {
-      method: number;      // Cyclomatic complexity threshold (default: 15)
-      cognitive: number;   // Cognitive complexity threshold (default: 15)
-      file: number;        // File-level complexity (default: 50)
-      average: number;     // Average complexity (default: 6)
+      method: number;           // Cyclomatic complexity threshold (default: 15)
+      cognitive: number;        // Cognitive complexity threshold (default: 15)
+      halsteadEffort?: number;  // Halstead effort threshold (default: 1000000)
+      halsteadDifficulty?: number; // Halstead difficulty threshold (default: 50)
+      file: number;             // File-level complexity (default: 50)
+      average: number;          // Average complexity (default: 6)
     };
     severity: {
       warning: number;     // Multiplier for warning threshold (default: 1.0)
@@ -154,8 +156,10 @@ export const defaultConfig: LienConfig = {
   complexity: {
     enabled: true,
     thresholds: {
-      method: 15,      // Cyclomatic complexity threshold
-      cognitive: 15,   // Cognitive complexity threshold (SonarQube default)
+      method: 15,            // Cyclomatic complexity threshold
+      cognitive: 15,         // Cognitive complexity threshold (SonarQube default)
+      halsteadEffort: 1000000,   // ~1 million effort units (~15 min to understand)
+      halsteadDifficulty: 50,    // High error probability
       file: 50,
       average: 6,
     },

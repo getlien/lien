@@ -1,6 +1,6 @@
 import { VectorDB } from '../vectordb/lancedb.js';
 import { LienConfig } from '../config/schema.js';
-import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER, RiskLevel } from './types.js';
+import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER, RiskLevel, HalsteadDetails } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
 import { SearchResult } from '../vectordb/types.js';
@@ -136,22 +136,78 @@ export class ComplexityAnalyzer {
   }
 
   /**
+   * Create a Halstead violation if metrics exceed thresholds
+   */
+  private createHalsteadViolation(
+    metadata: ChunkMetadata,
+    metricValue: number,
+    threshold: number,
+    metricType: 'halstead_effort' | 'halstead_difficulty',
+    severityConfig: { warning: number; error: number }
+  ): ComplexityViolation | null {
+    const warningThreshold = threshold * severityConfig.warning;
+    const errorThreshold = threshold * severityConfig.error;
+
+    if (metricValue < warningThreshold) return null;
+
+    const violationSeverity = metricValue >= errorThreshold ? 'error' : 'warning';
+    const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
+    const metricLabel = metricType === 'halstead_effort' ? 'Halstead effort' : 'Halstead difficulty';
+
+    const halsteadDetails: HalsteadDetails = {
+      volume: metadata.halsteadVolume || 0,
+      difficulty: metadata.halsteadDifficulty || 0,
+      effort: metadata.halsteadEffort || 0,
+      bugs: metadata.halsteadBugs || 0,
+    };
+
+    return {
+      filepath: metadata.file,
+      startLine: metadata.startLine,
+      endLine: metadata.endLine,
+      symbolName: metadata.symbolName || 'unknown',
+      symbolType: metadata.symbolType as 'function' | 'method',
+      language: metadata.language,
+      complexity: Math.round(metricValue),
+      threshold: Math.round(effectiveThreshold),
+      severity: violationSeverity,
+      message: `${metricLabel} ${Math.round(metricValue).toLocaleString()} exceeds threshold ${Math.round(effectiveThreshold).toLocaleString()}`,
+      metricType,
+      halsteadDetails,
+    };
+  }
+
+  /**
    * Check complexity metrics and create violations for a single chunk.
    */
   private checkChunkComplexity(
     metadata: ChunkMetadata,
-    thresholds: { method: number; cognitive: number },
+    thresholds: { method: number; cognitive: number; halsteadEffort?: number; halsteadDifficulty?: number },
     severity: { warning: number; error: number }
   ): ComplexityViolation[] {
     const violations: ComplexityViolation[] = [];
     
+    // Check cyclomatic complexity
     if (metadata.complexity) {
       const v = this.createViolation(metadata, metadata.complexity, thresholds.method, 'cyclomatic', severity);
       if (v) violations.push(v);
     }
     
+    // Check cognitive complexity
     if (metadata.cognitiveComplexity) {
       const v = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.cognitive, 'cognitive', severity);
+      if (v) violations.push(v);
+    }
+    
+    // Check Halstead effort (if threshold configured and metric available)
+    if (thresholds.halsteadEffort && metadata.halsteadEffort) {
+      const v = this.createHalsteadViolation(metadata, metadata.halsteadEffort, thresholds.halsteadEffort, 'halstead_effort', severity);
+      if (v) violations.push(v);
+    }
+    
+    // Check Halstead difficulty (if threshold configured and metric available)
+    if (thresholds.halsteadDifficulty && metadata.halsteadDifficulty) {
+      const v = this.createHalsteadViolation(metadata, metadata.halsteadDifficulty, thresholds.halsteadDifficulty, 'halstead_difficulty', severity);
       if (v) violations.push(v);
     }
     
@@ -160,10 +216,18 @@ export class ComplexityAnalyzer {
 
   /**
    * Find all complexity violations based on thresholds.
-   * Checks both cyclomatic and cognitive complexity.
+   * Checks cyclomatic, cognitive, and Halstead complexity.
    */
   private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
-    const thresholds = this.config.complexity?.thresholds || { method: 15, cognitive: 15, file: 50, average: 6 };
+    const defaultThresholds = { 
+      method: 15, 
+      cognitive: 15, 
+      halsteadEffort: 1000000,
+      halsteadDifficulty: 50,
+      file: 50, 
+      average: 6 
+    };
+    const thresholds = { ...defaultThresholds, ...this.config.complexity?.thresholds };
     const severity = this.config.complexity?.severity || { warning: 1.0, error: 2.0 };
     const functionChunks = this.getUniqueFunctionChunks(chunks);
     
