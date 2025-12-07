@@ -76,7 +76,8 @@ jobs:
       - name: Get base branch complexity
         run: |
           echo "Checking out base branch: ${{ github.event.pull_request.base.sha }}"
-          git checkout ${{ github.event.pull_request.base.sha }}
+          # Use --force because action dist files may differ between branches
+          git checkout --force ${{ github.event.pull_request.base.sha }}
           if [ "${{ steps.cache-base.outputs.cache-hit }}" != "true" ]; then
             echo "Cache miss - indexing base branch"
             lien index
@@ -96,7 +97,7 @@ jobs:
       
       # Switch to head branch - Lien will do incremental index from base
       - name: Checkout head branch
-        run: git checkout ${{ github.sha }}
+        run: git checkout --force ${{ github.sha }}
       
       - name: Index head branch (incremental from base)
         run: lien index
