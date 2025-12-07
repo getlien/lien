@@ -35,6 +35,7 @@ interface DatabaseRecord {
   symbolType: string;
   parentClass: string;
   complexity: number;
+  cognitiveComplexity: number;
   parameters: string[];
   signature: string;
   imports: string[];
@@ -66,6 +67,7 @@ function transformChunkToRecord(
     symbolType: metadata.symbolType || '',
     parentClass: metadata.parentClass || '',
     complexity: metadata.complexity || 0,
+    cognitiveComplexity: metadata.cognitiveComplexity || 0,
     parameters: getNonEmptyArray(metadata.parameters),
     signature: metadata.signature || '',
     imports: getNonEmptyArray(metadata.imports),

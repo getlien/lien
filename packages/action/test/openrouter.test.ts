@@ -106,7 +106,7 @@ describe('mapCommentsToViolations', () => {
     symbolName,
     symbolType,
     complexity: 15,
-    threshold: 10,
+    threshold: 15,
     startLine: 1,
     endLine: 10,
     severity: 'warning',

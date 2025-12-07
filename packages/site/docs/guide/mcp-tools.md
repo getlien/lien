@@ -295,7 +295,7 @@ Risk level is boosted if dependents have high complexity. A file with 10 depende
 
 ## get_complexity
 
-Analyze code complexity for tech debt identification and refactoring prioritization.
+Analyze code complexity for tech debt identification and refactoring prioritization. Tracks both **cyclomatic complexity** (testability) and **cognitive complexity** (understandability).
 
 ### Parameters
 
@@ -338,23 +338,50 @@ Analyze complexity of src/api/
       "startLine": 45,
       "endLine": 120,
       "complexity": 23,
-      "threshold": 10,
+      "threshold": 15,
       "severity": "error",
+      "metricType": "cyclomatic",
       "language": "typescript",
-      "message": "Function has cyclomatic complexity of 23 (threshold: 10)",
+      "message": "Cyclomatic complexity 23 exceeds threshold 15",
       "dependentCount": 5,
       "riskLevel": "high"
+    },
+    {
+      "filepath": "src/parser/index.ts",
+      "symbolName": "parseComplexExpression",
+      "symbolType": "function",
+      "startLine": 45,
+      "endLine": 120,
+      "complexity": 18,
+      "threshold": 15,
+      "severity": "warning",
+      "metricType": "cognitive",
+      "language": "typescript",
+      "message": "Cognitive complexity 18 exceeds threshold 15",
+      "dependentCount": 5,
+      "riskLevel": "medium"
     }
   ]
 }
 ```
 
+### Metric Types
+
+| metricType | Description |
+|------------|-------------|
+| `cyclomatic` | Number of independent paths (decision points) |
+| `cognitive` | Mental effort to understand (penalizes nesting) |
+
+::: tip Both metrics can fire
+A single function can have violations for **both** cyclomatic and cognitive complexity if it exceeds both thresholds.
+:::
+
 ### Severity Levels
 
 | Severity | Complexity | Action |
 |----------|------------|--------|
-| `warning` | 11-15 | Consider refactoring |
-| `error` | 16+ | Should refactor |
+| `warning` | 15-29 | Consider refactoring |
+| `error` | 30+ | Should refactor |
 
 ### Use Cases
 

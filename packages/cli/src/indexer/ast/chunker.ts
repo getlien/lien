@@ -1,7 +1,7 @@
 import type Parser from 'tree-sitter';
 import type { ASTChunk } from './types.js';
 import { parseAST, detectLanguage, isASTSupported } from './parser.js';
-import { extractSymbolInfo, extractImports } from './symbols.js';
+import { extractSymbolInfo, extractImports, calculateCognitiveComplexity } from './symbols.js';
 import { getTraverser } from './traversers/index.js';
 
 export interface ASTChunkOptions {
@@ -107,6 +107,25 @@ export function chunkByAST(
   return chunks;
 }
 
+/** Check if node is a function-containing declaration at top level */
+function isFunctionDeclaration(
+  node: Parser.SyntaxNode,
+  depth: number,
+  traverser: ReturnType<typeof getTraverser>
+): boolean {
+  if (depth !== 0 || !traverser.isDeclarationWithFunction(node)) return false;
+  return traverser.findFunctionInDeclaration(node).hasFunction;
+}
+
+/** Check if node is a target type at valid depth */
+function isTargetNode(
+  node: Parser.SyntaxNode,
+  depth: number,
+  traverser: ReturnType<typeof getTraverser>
+): boolean {
+  return depth <= 1 && traverser.targetNodeTypes.includes(node.type);
+}
+
 /**
  * Find all top-level nodes that should become chunks
  * 
@@ -124,37 +143,25 @@ function findTopLevelNodes(
 ): Parser.SyntaxNode[] {
   const nodes: Parser.SyntaxNode[] = [];
   
-  function traverse(node: Parser.SyntaxNode, depth: number) {
-    // Check if this is a declaration that might contain a function
-    if (traverser.isDeclarationWithFunction(node) && depth === 0) {
-      const declInfo = traverser.findFunctionInDeclaration(node);
-      if (declInfo.hasFunction) {
-        nodes.push(node);
-        return;
-      }
-    }
-    
-    // Check if this is a target node type (function, method, etc.)
-    if (depth <= 1 && traverser.targetNodeTypes.includes(node.type)) {
+  function traverse(node: Parser.SyntaxNode, depth: number): void {
+    // Capture function declarations and target nodes
+    if (isFunctionDeclaration(node, depth, traverser) || isTargetNode(node, depth, traverser)) {
       nodes.push(node);
-      return; // Don't traverse into this node
-    }
-    
-    // Check if this is a container whose children should be extracted
-    if (traverser.shouldExtractChildren(node)) {
-      const body = traverser.getContainerBody(node);
-      if (body) {
-        traverse(body, depth + 1);
-      }
       return;
     }
     
-    // Check if we should traverse this node's children
-    if (traverser.shouldTraverseChildren(node)) {
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child) traverse(child, depth);
-      }
+    // Handle containers - traverse body at increased depth
+    if (traverser.shouldExtractChildren(node)) {
+      const body = traverser.getContainerBody(node);
+      if (body) traverse(body, depth + 1);
+      return;
+    }
+    
+    // Traverse children of traversable nodes
+    if (!traverser.shouldTraverseChildren(node)) return;
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (child) traverse(child, depth);
     }
   }
   
@@ -172,6 +179,43 @@ function getNodeContent(node: Parser.SyntaxNode, lines: string[]): string {
   return lines.slice(startLine, endLine + 1).join('\n');
 }
 
+/** Maps symbol types to legacy symbol array keys */
+const SYMBOL_TYPE_TO_ARRAY: Record<string, 'functions' | 'classes' | 'interfaces'> = {
+  function: 'functions',
+  method: 'functions',
+  class: 'classes',
+  interface: 'interfaces',
+};
+
+/** Symbol types that have meaningful complexity metrics */
+const COMPLEXITY_SYMBOL_TYPES = new Set(['function', 'method']);
+
+/**
+ * Build legacy symbols object for backward compatibility
+ */
+function buildLegacySymbols(symbolInfo: ReturnType<typeof extractSymbolInfo>): {
+  functions: string[];
+  classes: string[];
+  interfaces: string[];
+} {
+  const symbols = { functions: [] as string[], classes: [] as string[], interfaces: [] as string[] };
+  
+  if (symbolInfo?.name && symbolInfo.type) {
+    const arrayKey = SYMBOL_TYPE_TO_ARRAY[symbolInfo.type];
+    if (arrayKey) symbols[arrayKey].push(symbolInfo.name);
+  }
+  
+  return symbols;
+}
+
+/**
+ * Determine chunk type from symbol info
+ */
+function getChunkType(symbolInfo: ReturnType<typeof extractSymbolInfo>): 'block' | 'class' | 'function' {
+  if (!symbolInfo) return 'block';
+  return symbolInfo.type === 'class' ? 'class' : 'function';
+}
+
 /**
  * Create a chunk from an AST node
  */
@@ -183,23 +227,10 @@ function createChunk(
   imports: string[],
   language: string
 ): ASTChunk {
-  // Populate legacy symbols field for backward compatibility
-  const symbols = {
-    functions: [] as string[],
-    classes: [] as string[],
-    interfaces: [] as string[],
-  };
-  
-  if (symbolInfo?.name) {
-    // Populate legacy symbols arrays based on symbol type
-    if (symbolInfo.type === 'function' || symbolInfo.type === 'method') {
-      symbols.functions.push(symbolInfo.name);
-    } else if (symbolInfo.type === 'class') {
-      symbols.classes.push(symbolInfo.name);
-    } else if (symbolInfo.type === 'interface') {
-      symbols.interfaces.push(symbolInfo.name);
-    }
-  }
+  const symbols = buildLegacySymbols(symbolInfo);
+  const cognitiveComplexity = symbolInfo?.type && COMPLEXITY_SYMBOL_TYPES.has(symbolInfo.type)
+    ? calculateCognitiveComplexity(node)
+    : undefined;
   
   return {
     content,
@@ -207,15 +238,14 @@ function createChunk(
       file: filepath,
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
-      type: symbolInfo == null ? 'block' : (symbolInfo.type === 'class' ? 'class' : 'function'),
+      type: getChunkType(symbolInfo),
       language,
-      // Legacy symbols field for backward compatibility
       symbols,
-      // New AST-derived metadata
       symbolName: symbolInfo?.name,
       symbolType: symbolInfo?.type,
       parentClass: symbolInfo?.parentClass,
       complexity: symbolInfo?.complexity,
+      cognitiveComplexity,
       parameters: symbolInfo?.parameters,
       signature: symbolInfo?.signature,
       imports,

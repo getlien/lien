@@ -32243,69 +32243,91 @@ function logDeltaSummary(summary) {
  */
 
 /**
- * Build the review prompt from complexity report
+ * Build a lookup map from deltas for quick access
  */
-function buildReviewPrompt(report, prContext, codeSnippets, deltas = null) {
-    const { summary, files } = report;
-    // Build delta lookup map
-    const deltaMap = new Map();
+function buildDeltaMap(deltas) {
+    const map = new Map();
     if (deltas) {
         for (const d of deltas) {
-            deltaMap.set(`${d.filepath}::${d.symbolName}`, d);
+            map.set(`${d.filepath}::${d.symbolName}`, d);
         }
     }
-    // Build violations summary
-    const violationsByFile = Object.entries(files)
+    return map;
+}
+/**
+ * Format a single violation line with optional delta
+ */
+function formatViolationLine(v, deltaMap) {
+    const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+    const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+    const metricLabel = v.metricType === 'cognitive' ? 'cognitive' : 'cyclomatic';
+    return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
+}
+/**
+ * Build violations summary grouped by file
+ */
+function buildViolationsSummary(files, deltaMap) {
+    return Object.entries(files)
         .filter(([_, data]) => data.violations.length > 0)
-        .map(([filepath, data]) => ({
-        filepath,
-        violations: data.violations,
-        riskLevel: data.riskLevel,
-    }));
-    const violationsSummary = violationsByFile
-        .map(({ filepath, violations, riskLevel }) => {
-        const violationList = violations
-            .map((v) => {
-            const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
-            const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-            return `  - ${v.symbolName} (${v.symbolType}): complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
-        })
+        .map(([filepath, data]) => {
+        const violationList = data.violations
+            .map(v => formatViolationLine(v, deltaMap))
             .join('\n');
-        return `**${filepath}** (risk: ${riskLevel})\n${violationList}`;
+        return `**${filepath}** (risk: ${data.riskLevel})\n${violationList}`;
     })
         .join('\n\n');
-    // Build code snippets section
-    const snippetsSection = Array.from(codeSnippets.entries())
+}
+/**
+ * Build delta context section showing complexity changes
+ */
+function buildDeltaContext(deltas) {
+    if (!deltas || deltas.length === 0)
+        return '';
+    const improved = deltas.filter(d => d.severity === 'improved');
+    const degraded = deltas.filter(d => (d.severity === 'error' || d.severity === 'warning') && d.delta > 0);
+    const newFuncs = deltas.filter(d => d.severity === 'new');
+    const deleted = deltas.filter(d => d.severity === 'deleted');
+    const formatChange = (d) => {
+        const from = d.baseComplexity ?? 'new';
+        const to = d.headComplexity ?? 'removed';
+        return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
+    };
+    const sections = [
+        `\n## Complexity Changes (vs base branch)`,
+        `- **Degraded**: ${degraded.length} function(s) got more complex`,
+        `- **Improved**: ${improved.length} function(s) got simpler`,
+        `- **New**: ${newFuncs.length} new complex function(s)`,
+        `- **Removed**: ${deleted.length} complex function(s) deleted`,
+    ];
+    if (degraded.length > 0)
+        sections.push(`\nFunctions that got worse:\n${degraded.map(formatChange).join('\n')}`);
+    if (improved.length > 0)
+        sections.push(`\nFunctions that improved:\n${improved.map(formatChange).join('\n')}`);
+    if (newFuncs.length > 0)
+        sections.push(`\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}`);
+    return sections.join('\n');
+}
+/**
+ * Build code snippets section
+ */
+function buildSnippetsSection(codeSnippets) {
+    return Array.from(codeSnippets.entries())
         .map(([key, code]) => {
         const [filepath, symbolName] = key.split('::');
         return `### ${filepath} - ${symbolName}\n\`\`\`\n${code}\n\`\`\``;
     })
         .join('\n\n');
-    // Add delta context if available
-    let deltaContext = '';
-    if (deltas && deltas.length > 0) {
-        // Use severity-based filtering for accuracy
-        const improved = deltas.filter(d => d.severity === 'improved');
-        const degraded = deltas.filter(d => (d.severity === 'error' || d.severity === 'warning') && d.delta > 0);
-        const newFuncs = deltas.filter(d => d.severity === 'new');
-        const deleted = deltas.filter(d => d.severity === 'deleted');
-        // Helper to format complexity display (handles null for new/deleted)
-        const formatComplexityChange = (d) => {
-            const from = d.baseComplexity ?? 'new';
-            const to = d.headComplexity ?? 'removed';
-            return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
-        };
-        deltaContext = `
-## Complexity Changes (vs base branch)
-- **Degraded**: ${degraded.length} function(s) got more complex
-- **Improved**: ${improved.length} function(s) got simpler
-- **New**: ${newFuncs.length} new complex function(s)
-- **Removed**: ${deleted.length} complex function(s) deleted
-${degraded.length > 0 ? `\nFunctions that got worse:\n${degraded.map(formatComplexityChange).join('\n')}` : ''}
-${improved.length > 0 ? `\nFunctions that improved:\n${improved.map(formatComplexityChange).join('\n')}` : ''}
-${newFuncs.length > 0 ? `\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}` : ''}
-`;
-    }
+}
+/**
+ * Build the review prompt from complexity report
+ */
+function buildReviewPrompt(report, prContext, codeSnippets, deltas = null) {
+    const { summary, files } = report;
+    const deltaMap = buildDeltaMap(deltas);
+    const violationsByFile = Object.entries(files).filter(([_, data]) => data.violations.length > 0);
+    const violationsSummary = buildViolationsSummary(files, deltaMap);
+    const snippetsSection = buildSnippetsSection(codeSnippets);
+    const deltaContext = buildDeltaContext(deltas);
     return `# Code Complexity Review Request
 
 ## Context
@@ -32424,29 +32446,46 @@ function getViolationKey(violation) {
     return `${violation.filepath}::${violation.symbolName}`;
 }
 /**
- * Determine human-friendly status message based on violations and delta
+ * Determine human-friendly status message based on violations and delta.
+ * Prioritizes positive messaging when PR improves complexity.
  */
 function determineStatus(report, deltaSummary) {
     const violations = report?.summary.totalViolations ?? 0;
     const errors = report?.summary.bySeverity.error ?? 0;
     const delta = deltaSummary?.totalDelta ?? 0;
-    // Violations take priority - these need attention
-    if (errors > 0) {
+    const newViolations = deltaSummary?.newFunctions ?? 0;
+    const preExisting = Math.max(0, violations - newViolations);
+    // PR improved complexity - celebrate it!
+    if (delta < 0) {
+        if (preExisting > 0) {
+            return {
+                emoji: '✅',
+                message: `**Improved!** Complexity reduced by ${Math.abs(delta)}. ${preExisting} pre-existing issue${preExisting === 1 ? '' : 's'} remain${preExisting === 1 ? 's' : ''} in touched files.`,
+            };
+        }
+        return { emoji: '✅', message: `**Improved!** This PR reduces complexity by ${Math.abs(delta)}.` };
+    }
+    // New violations introduced - these need attention
+    if (newViolations > 0 && errors > 0) {
         return {
             emoji: '🔴',
-            message: `**Review required** - ${errors} function${errors === 1 ? ' is' : 's are'} too complex and should be refactored.`,
+            message: `**Review required** - ${newViolations} new function${newViolations === 1 ? ' is' : 's are'} too complex.`,
         };
     }
-    if (violations > 0) {
+    if (newViolations > 0) {
         return {
             emoji: '⚠️',
-            message: `**Needs attention** - ${violations} function${violations === 1 ? ' is' : 's are'} more complex than recommended.`,
+            message: `**Needs attention** - ${newViolations} new function${newViolations === 1 ? ' is' : 's are'} more complex than recommended.`,
         };
     }
-    // No violations - check delta for status
-    if (delta < 0) {
-        return { emoji: '✅', message: '**Improved** - This PR makes the code easier to maintain.' };
+    // Only pre-existing violations (no new ones)
+    if (violations > 0) {
+        return {
+            emoji: '➡️',
+            message: `**Stable** - ${preExisting} pre-existing issue${preExisting === 1 ? '' : 's'} in touched files (none introduced).`,
+        };
     }
+    // No violations at all
     if (delta > 0) {
         return { emoji: '➡️', message: '**Stable** - Complexity increased slightly but within limits.' };
     }
@@ -32494,7 +32533,7 @@ function buildLineCommentPrompt(violation, codeSnippet) {
     return `You are reviewing code for complexity. Generate an actionable review comment.
 
 **Function**: \`${violation.symbolName}\` (${violation.symbolType})
-**Complexity**: ${violation.complexity} (threshold: ${violation.threshold})
+**Complexity**: ${violation.complexity} ${violation.metricType || 'cyclomatic'} (threshold: ${violation.threshold})
 ${snippetSection}
 
 Write a code review comment that includes:
@@ -32551,7 +32590,7 @@ function buildBatchedCommentsPrompt(violations, codeSnippets) {
             : '';
         return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
-- **Complexity**: ${v.complexity} (threshold: ${v.threshold})
+- **Complexity**: ${v.complexity} ${v.metricType || 'cyclomatic'} (threshold: ${v.threshold})
 - **Severity**: ${v.severity}${snippetSection}`;
     })
         .join('\n\n');
@@ -32839,7 +32878,7 @@ function getConfig() {
     return {
         openrouterApiKey: core.getInput('openrouter_api_key', { required: true }),
         model: core.getInput('model') || 'anthropic/claude-sonnet-4',
-        threshold: core.getInput('threshold') || '10',
+        threshold: core.getInput('threshold') || '15',
         githubToken: core.getInput('github_token') || process.env.GITHUB_TOKEN || '',
         reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
         baselineComplexityPath: core.getInput('baseline_complexity') || '',
@@ -33005,7 +33044,7 @@ function findCommentLine(violation, diffLines) {
 /**
  * Build delta lookup map from deltas array
  */
-function buildDeltaMap(deltas) {
+function src_buildDeltaMap(deltas) {
     const deltaMap = new Map();
     if (deltas) {
         for (const d of deltas) {
@@ -33124,7 +33163,7 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     }
     core.info(`${violationsWithLines.length}/${violations.length} violations can have inline comments ` +
         `(${uncoveredViolations.length} outside diff)`);
-    const deltaMap = buildDeltaMap(deltas);
+    const deltaMap = src_buildDeltaMap(deltas);
     // Filter to only new or degraded violations (skip unchanged pre-existing ones)
     // This saves LLM costs and prevents duplicate comments on each push
     const newOrDegradedViolations = violationsWithLines.filter(({ violation }) => {

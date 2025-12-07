@@ -79,55 +79,97 @@ export class ComplexityAnalyzer {
   }
 
   /**
-   * Find all complexity violations based on thresholds
+   * Create a violation if complexity exceeds threshold
+   */
+  private createViolation(
+    metadata: ChunkMetadata,
+    complexity: number,
+    baseThreshold: number,
+    metricType: ComplexityViolation['metricType'],
+    severityConfig: { warning: number; error: number }
+  ): ComplexityViolation | null {
+    const warningThreshold = baseThreshold * severityConfig.warning;
+    const errorThreshold = baseThreshold * severityConfig.error;
+
+    if (complexity < warningThreshold) return null;
+
+    const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
+    const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
+    const metricLabel = metricType === 'cognitive' ? 'Cognitive' : 'Cyclomatic';
+
+    return {
+      filepath: metadata.file,
+      startLine: metadata.startLine,
+      endLine: metadata.endLine,
+      symbolName: metadata.symbolName || 'unknown',
+      symbolType: metadata.symbolType as 'function' | 'method',
+      language: metadata.language,
+      complexity,
+      threshold: Math.round(effectiveThreshold),
+      severity: violationSeverity,
+      message: `${metricLabel} complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`,
+      metricType,
+    };
+  }
+
+  /**
+   * Deduplicate and filter chunks to only function/method types.
+   * Handles potential index duplicates by tracking file+line ranges.
+   */
+  private getUniqueFunctionChunks(
+    chunks: Array<{ content: string; metadata: ChunkMetadata }>
+  ): ChunkMetadata[] {
+    const seen = new Set<string>();
+    const result: ChunkMetadata[] = [];
+    
+    for (const { metadata } of chunks) {
+      if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method') continue;
+      
+      const key = `${metadata.file}:${metadata.startLine}-${metadata.endLine}`;
+      if (seen.has(key)) continue;
+      
+      seen.add(key);
+      result.push(metadata);
+    }
+    
+    return result;
+  }
+
+  /**
+   * Check complexity metrics and create violations for a single chunk.
+   */
+  private checkChunkComplexity(
+    metadata: ChunkMetadata,
+    thresholds: { method: number; cognitive: number },
+    severity: { warning: number; error: number }
+  ): ComplexityViolation[] {
+    const violations: ComplexityViolation[] = [];
+    
+    if (metadata.complexity) {
+      const v = this.createViolation(metadata, metadata.complexity, thresholds.method, 'cyclomatic', severity);
+      if (v) violations.push(v);
+    }
+    
+    if (metadata.cognitiveComplexity) {
+      const v = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.cognitive, 'cognitive', severity);
+      if (v) violations.push(v);
+    }
+    
+    return violations;
+  }
+
+  /**
+   * Find all complexity violations based on thresholds.
+   * Checks both cyclomatic and cognitive complexity.
    */
   private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
-    const violations: ComplexityViolation[] = [];
-    const thresholds = this.config.complexity?.thresholds || { method: 10, file: 50, average: 6 };
+    const thresholds = this.config.complexity?.thresholds || { method: 15, cognitive: 15, file: 50, average: 6 };
     const severity = this.config.complexity?.severity || { warning: 1.0, error: 2.0 };
-
-    for (const chunk of chunks) {
-      const metadata = chunk.metadata;
-      
-      // Skip chunks without complexity data or with 0 complexity
-      if (!metadata.complexity) {
-        continue;
-      }
-
-      // Only check function/method complexity (not file-level yet)
-      if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method') {
-        continue;
-      }
-
-      const baseThreshold = thresholds.method;
-      const complexity = metadata.complexity;
-      
-      // Apply severity multipliers to threshold
-      const warningThreshold = baseThreshold * severity.warning;
-      const errorThreshold = baseThreshold * severity.error;
-
-      // Check if complexity meets or exceeds warning threshold
-      if (complexity >= warningThreshold) {
-        // Determine severity: error if exceeds error threshold, otherwise warning
-        const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
-        const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
-
-        violations.push({
-          filepath: metadata.file,
-          startLine: metadata.startLine,
-          endLine: metadata.endLine,
-          symbolName: metadata.symbolName || 'unknown',
-          symbolType: metadata.symbolType as 'function' | 'method',
-          language: metadata.language,
-          complexity,
-          threshold: Math.round(effectiveThreshold), // Show the effective threshold that was exceeded
-          severity: violationSeverity,
-          message: `${metadata.symbolType} complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`,
-        });
-      }
-    }
-
-    return violations;
+    const functionChunks = this.getUniqueFunctionChunks(chunks);
+    
+    return functionChunks.flatMap(metadata => 
+      this.checkChunkComplexity(metadata, thresholds, severity)
+    );
   }
 
   /**

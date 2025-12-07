@@ -32,7 +32,11 @@ Lien is configured via a `.lien.config.json` file in your project root. This fil
     "transport": "stdio"
   },
   "complexity": {
-    "threshold": 10
+    "enabled": true,
+    "thresholds": {
+      "method": 15,
+      "cognitive": 15
+    }
   }
 }
 ```
@@ -266,34 +270,48 @@ These apply to individual frameworks:
 
 ## Complexity Analysis
 
-Configure complexity analysis for the `lien complexity` command and `get_complexity` MCP tool:
+Configure complexity analysis for the `lien complexity` command and `get_complexity` MCP tool. Lien tracks **two metrics**:
+
+- **Cyclomatic Complexity**: Number of independent paths through code (decision points)
+- **Cognitive Complexity**: Mental effort to understand code (penalizes nesting depth)
 
 ```json
 {
   "complexity": {
-    "threshold": 10
+    "enabled": true,
+    "thresholds": {
+      "method": 15,
+      "cognitive": 15,
+      "file": 50,
+      "average": 6
+    },
+    "severity": {
+      "warning": 1.0,
+      "error": 2.0
+    }
   }
 }
 ```
 
-#### `threshold`
-- **Type**: `number`
-- **Default**: `10`
-- **Description**: Cyclomatic complexity threshold for violations
-- **Recommendation**:
-  - `10` (default): Standard threshold, catches most issues
-  - `15`: More lenient, fewer false positives
-  - `5`: Strict, flags even moderately complex functions
+#### Thresholds
 
-### Severity Levels
+| Threshold | Default | Description |
+|-----------|---------|-------------|
+| `method` | 15 | Cyclomatic complexity threshold per function |
+| `cognitive` | 15 | Cognitive complexity threshold per function |
+| `file` | 50 | Maximum total complexity per file |
+| `average` | 6 | Maximum average complexity per file |
 
-Functions are flagged based on how much they exceed the threshold:
+#### Severity Multipliers
 
-| Complexity | Severity | Action |
-|------------|----------|--------|
-| Below threshold | OK | No violation |
-| 11-15 (with threshold 10) | Warning | Consider refactoring |
-| 16+ (with threshold 10) | Error | Should refactor |
+| Multiplier | Default | Meaning |
+|------------|---------|---------|
+| `warning` | 1.0 | Violations at or above `threshold × 1.0` are warnings |
+| `error` | 2.0 | Violations at or above `threshold × 2.0` are errors |
+
+With default threshold of 15:
+- **Warning**: complexity ≥ 15
+- **Error**: complexity ≥ 30
 
 ## Performance Tuning
 

@@ -231,7 +231,9 @@ lien complexity [options]
 |--------|-------------|
 | `--files <paths...>` | Specific files to analyze |
 | `--format <type>` | Output format: `text` (default), `json`, `sarif` |
-| `--threshold <n>` | Complexity threshold (overrides config, default: 10) |
+| `--threshold <n>` | Override both complexity thresholds (cyclomatic & cognitive) |
+| `--cyclomatic-threshold <n>` | Override cyclomatic complexity threshold only |
+| `--cognitive-threshold <n>` | Override cognitive complexity threshold only |
 | `--fail-on <severity>` | Exit with code 1 if violations found: `error`, `warning` |
 
 ### Output Formats
@@ -318,26 +320,46 @@ lien complexity --format json --threshold 10 > baseline.json
 **Custom threshold for strict review:**
 
 ```bash
-lien complexity --threshold 5
+lien complexity --threshold 10
 ```
 
-### Complexity Scoring
+**Override specific metric:**
 
-Lien uses **cyclomatic complexity** - the number of independent paths through code:
+```bash
+# Stricter cognitive, lenient cyclomatic
+lien complexity --threshold 20 --cognitive-threshold 10
+```
 
-| Complexity | Severity | Interpretation |
-|------------|----------|----------------|
-| 1-10 | OK | Simple, easy to test |
-| 11-15 | Warning | Moderate complexity, consider refactoring |
-| 16+ | Error | High complexity, hard to maintain |
+### Complexity Metrics
 
-Decision points that increase complexity:
+Lien tracks **two complementary metrics**:
+
+#### Cyclomatic Complexity
+The number of independent paths through code. Increased by:
 - `if`, `else if`, `else`
 - `for`, `while`, `do...while`
 - `switch` `case`
 - `catch`
 - `&&`, `||`, `??`
 - `? :` (ternary)
+
+#### Cognitive Complexity
+Mental effort to understand code (based on [SonarSource's specification](https://www.sonarsource.com/docs/CognitiveComplexity.pdf)). Penalizes:
+- **Nesting depth**: Deeply nested code is harder to understand
+- **Control flow breaks**: `break`, `continue`, `goto`
+- **Recursion**: Functions calling themselves
+
+| Complexity | Severity | Interpretation |
+|------------|----------|----------------|
+| 1-14 | OK | Simple, easy to understand |
+| 15-29 | Warning | Consider refactoring |
+| 30+ | Error | Should refactor |
+
+::: tip Both metrics matter
+Cyclomatic complexity measures **testability** (paths to cover).
+Cognitive complexity measures **understandability** (mental effort).
+A function can have low cyclomatic but high cognitive complexity if deeply nested!
+:::
 
 ### Examples
 

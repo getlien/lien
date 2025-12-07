@@ -64,17 +64,28 @@ interface SarifResult {
 export function formatSarifReport(report: ComplexityReport): string {
   const rules: SarifRule[] = [
     {
-      id: 'lien/high-complexity',
+      id: 'lien/high-cyclomatic-complexity',
       shortDescription: {
         text: 'High cyclomatic complexity',
       },
       fullDescription: {
-        text: 'Function or method has high cyclomatic complexity, making it difficult to understand and maintain.',
+        text: 'Function or method has high cyclomatic complexity (many decision paths), making it difficult to test exhaustively.',
       },
       help: {
         text: 'Consider refactoring by extracting methods, using early returns, or simplifying conditional logic.',
       },
-      // No defaultConfiguration - level is determined by actual violation severity
+    },
+    {
+      id: 'lien/high-cognitive-complexity',
+      shortDescription: {
+        text: 'High cognitive complexity',
+      },
+      fullDescription: {
+        text: 'Function or method has high cognitive complexity (deeply nested or hard to understand), making it difficult to maintain.',
+      },
+      help: {
+        text: 'Consider flattening nested conditionals, extracting helper functions, or using guard clauses.',
+      },
     },
   ];
 
@@ -83,8 +94,12 @@ export function formatSarifReport(report: ComplexityReport): string {
   // Convert violations to SARIF results
   for (const [filepath, fileData] of Object.entries(report.files)) {
     for (const violation of fileData.violations) {
+      const ruleId = violation.metricType === 'cognitive'
+        ? 'lien/high-cognitive-complexity'
+        : 'lien/high-cyclomatic-complexity';
+      
       results.push({
-        ruleId: 'lien/high-complexity',
+        ruleId,
         level: violation.severity,
         message: {
           text: `${violation.symbolName}: ${violation.message}`,

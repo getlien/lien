@@ -38,9 +38,9 @@ const mockReport: ComplexityReport = {
           symbolType: 'function',
           language: 'typescript',
           complexity: 23,
-          threshold: 10,
+          threshold: 15,
           severity: 'error',
-          message: 'Function complexity 23 exceeds threshold 10',
+          message: 'Function complexity 23 exceeds threshold 15',
         },
         {
           filepath: 'src/utils.ts',
@@ -50,9 +50,9 @@ const mockReport: ComplexityReport = {
           symbolType: 'function',
           language: 'typescript',
           complexity: 12,
-          threshold: 10,
+          threshold: 15,
           severity: 'warning',
-          message: 'Function complexity 12 exceeds threshold 10',
+          message: 'Function complexity 12 exceeds threshold 15',
         },
       ],
       dependents: [],
@@ -69,9 +69,9 @@ const mockReport: ComplexityReport = {
           symbolType: 'function',
           language: 'typescript',
           complexity: 11,
-          threshold: 10,
+          threshold: 15,
           severity: 'warning',
-          message: 'Function complexity 11 exceeds threshold 10',
+          message: 'Function complexity 11 exceeds threshold 15',
         },
       ],
       dependents: [],
@@ -220,7 +220,7 @@ describe('prompt', () => {
   });
 
   describe('buildDescriptionBadge', () => {
-    it('should show review required when has errors (violations take priority over delta)', () => {
+    it('should show improved when complexity reduced even with pre-existing violations', () => {
       const deltaSummary: DeltaSummary = {
         totalDelta: -15,
         improved: 2,
@@ -234,22 +234,22 @@ describe('prompt', () => {
 
       expect(badge).toContain('### 👁️ Veille');
       expect(badge).toContain('-15 ⬇️');
-      // mockReport has 1 error, so should show review required
-      expect(badge).toContain('🔴 **Review required**');
-      expect(badge).toContain('too complex and should be refactored');
+      // mockReport has violations but delta is negative - show improved with pre-existing note
+      expect(badge).toContain('✅ **Improved!**');
+      expect(badge).toContain('pre-existing');
       expect(badge).toContain('<details>');
       expect(badge).toContain('📊 Details');
     });
 
-    it('should show review required when has errors', () => {
+    it('should show stable when pre-existing violations but no new ones', () => {
       const badge = buildDescriptionBadge(mockReport, null);
 
-      // mockReport has 1 error
-      expect(badge).toContain('🔴 **Review required**');
-      expect(badge).toContain('1 function is too complex');
+      // mockReport has violations but no delta info - show stable with pre-existing note
+      expect(badge).toContain('➡️ **Stable**');
+      expect(badge).toContain('pre-existing');
     });
 
-    it('should show needs attention when has warnings only', () => {
+    it('should show stable when warnings only and no delta', () => {
       const warningsOnlyReport: ComplexityReport = {
         summary: {
           filesAnalyzed: 2,
@@ -263,8 +263,9 @@ describe('prompt', () => {
 
       const badge = buildDescriptionBadge(warningsOnlyReport, null);
 
-      expect(badge).toContain('⚠️ **Needs attention**');
-      expect(badge).toContain('2 functions are more complex than recommended');
+      // No delta info, has violations - show stable with pre-existing note
+      expect(badge).toContain('➡️ **Stable**');
+      expect(badge).toContain('pre-existing');
     });
 
     it('should show improved when delta negative and no violations', () => {
@@ -289,8 +290,8 @@ describe('prompt', () => {
 
       const badge = buildDescriptionBadge(cleanReport, deltaSummary);
 
-      expect(badge).toContain('✅ **Improved**');
-      expect(badge).toContain('makes the code easier to maintain');
+      expect(badge).toContain('✅ **Improved!**');
+      expect(badge).toContain('reduces complexity');
       expect(badge).toContain('-10 ⬇️');
     });
 
@@ -353,7 +354,7 @@ describe('prompt', () => {
       expect(badge).toContain('0'); // violations default
       expect(badge).toContain('—'); // max complexity default
       expect(badge).toContain('-5 ⬇️');
-      expect(badge).toContain('✅ **Improved**');
+      expect(badge).toContain('✅ **Improved!**');
     });
 
     it('should format the table inside details correctly', () => {

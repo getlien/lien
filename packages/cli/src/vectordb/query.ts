@@ -66,6 +66,7 @@ interface DBRecord {
   symbolType?: string;
   parentClass?: string;
   complexity?: number;
+  cognitiveComplexity?: number;
   parameters?: string[];
   signature?: string;
   imports?: string[];
@@ -126,6 +127,7 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
     symbolType: r.symbolType as 'function' | 'method' | 'class' | 'interface' | undefined,
     parentClass: r.parentClass || undefined,
     complexity: r.complexity || undefined,
+    cognitiveComplexity: r.cognitiveComplexity || undefined,
     parameters: hasValidArrayEntries(r.parameters) ? r.parameters : undefined,
     signature: r.signature || undefined,
     imports: hasValidArrayEntries(r.imports) ? r.imports : undefined,
@@ -268,23 +270,23 @@ export async function scanWithFilter(
 /**
  * Helper to check if a record matches the requested symbol type
  */
+/** Maps query symbolType to acceptable AST symbolType values */
+const SYMBOL_TYPE_MATCHES: Record<string, Set<string>> = {
+  function: new Set(['function', 'method']),
+  class: new Set(['class']),
+  interface: new Set(['interface']),
+};
+
 function matchesSymbolType(
   record: DBRecord,
   symbolType: 'function' | 'class' | 'interface',
   symbols: string[]
 ): boolean {
-  // If AST-based symbolType exists, use it (more accurate)
+  // If AST-based symbolType exists, use lookup table
   if (record.symbolType) {
-    if (symbolType === 'function') {
-      return record.symbolType === 'function' || record.symbolType === 'method';
-    } else if (symbolType === 'class') {
-      return record.symbolType === 'class';
-    } else if (symbolType === 'interface') {
-      return record.symbolType === 'interface';
-    }
-    return false;
+    return SYMBOL_TYPE_MATCHES[symbolType]?.has(record.symbolType) ?? false;
   }
-  
+
   // Fallback: check if pre-AST symbols array has valid entries
   return symbols.length > 0 && symbols.some((s: string) => s.length > 0 && s !== '');
 }

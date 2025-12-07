@@ -5,12 +5,123 @@ import { VectorDB } from '../vectordb/lancedb.js';
 import { configService } from '../config/service.js';
 import { ComplexityAnalyzer } from '../insights/complexity-analyzer.js';
 import { formatReport, OutputFormat } from '../insights/formatters/index.js';
+import type { LienConfig, LegacyLienConfig } from '../config/schema.js';
 
 interface ComplexityOptions {
   files?: string[];
   format: OutputFormat;
   threshold?: string;
+  cyclomaticThreshold?: string;
+  cognitiveThreshold?: string;
   failOn?: 'error' | 'warning';
+}
+
+/** Parsed threshold overrides */
+interface ThresholdOverrides {
+  cyclomatic: number | null;
+  cognitive: number | null;
+}
+
+const VALID_FAIL_ON = ['error', 'warning'];
+const VALID_FORMATS = ['text', 'json', 'sarif'];
+
+/** Validate --fail-on option */
+function validateFailOn(failOn: string | undefined): void {
+  if (failOn && !VALID_FAIL_ON.includes(failOn)) {
+    console.error(chalk.red(`Error: Invalid --fail-on value "${failOn}". Must be either 'error' or 'warning'`));
+    process.exit(1);
+  }
+}
+
+/** Validate --format option */
+function validateFormat(format: string): void {
+  if (!VALID_FORMATS.includes(format)) {
+    console.error(chalk.red(`Error: Invalid --format value "${format}". Must be one of: text, json, sarif`));
+    process.exit(1);
+  }
+}
+
+/** Validate that specified files exist */
+function validateFilesExist(files: string[] | undefined, rootDir: string): void {
+  if (!files || files.length === 0) return;
+  
+  const missingFiles = files.filter(file => {
+    const fullPath = path.isAbsolute(file) ? file : path.join(rootDir, file);
+    return !fs.existsSync(fullPath);
+  });
+  
+  if (missingFiles.length > 0) {
+    console.error(chalk.red(`Error: File${missingFiles.length > 1 ? 's' : ''} not found:`));
+    missingFiles.forEach(file => console.error(chalk.red(`  - ${file}`)));
+    process.exit(1);
+  }
+}
+
+/** Parse and validate a threshold value */
+function parseThresholdValue(value: string | undefined, flagName: string): number | null {
+  if (!value) return null;
+  
+  const parsed = parseInt(value, 10);
+  if (isNaN(parsed)) {
+    console.error(chalk.red(`Error: Invalid ${flagName} value "${value}". Must be a number`));
+    process.exit(1);
+  }
+  if (parsed <= 0) {
+    console.error(chalk.red(`Error: Invalid ${flagName} value "${value}". Must be a positive number`));
+    process.exit(1);
+  }
+  return parsed;
+}
+
+/** Parse all threshold options into overrides */
+function parseThresholdOverrides(options: ComplexityOptions): ThresholdOverrides {
+  const baseThreshold = parseThresholdValue(options.threshold, '--threshold');
+  const cyclomaticOverride = parseThresholdValue(options.cyclomaticThreshold, '--cyclomatic-threshold');
+  const cognitiveOverride = parseThresholdValue(options.cognitiveThreshold, '--cognitive-threshold');
+  
+  return {
+    // Specific flags take precedence over --threshold
+    cyclomatic: cyclomaticOverride ?? baseThreshold,
+    cognitive: cognitiveOverride ?? baseThreshold,
+  };
+}
+
+/** Apply threshold overrides to config (mutates config) */
+function applyThresholdOverrides(config: LienConfig | LegacyLienConfig, overrides: ThresholdOverrides): void {
+  if (overrides.cyclomatic === null && overrides.cognitive === null) return;
+  
+  // Cast to allow mutation - both config types support complexity at runtime
+  const cfg = config as { complexity?: LienConfig['complexity'] };
+  
+  // Ensure complexity config structure exists
+  if (!cfg.complexity) {
+    cfg.complexity = {
+      enabled: true,
+      thresholds: { method: 15, cognitive: 15, file: 50, average: 6 },
+      severity: { warning: 1.0, error: 2.0 },
+    };
+  } else if (!cfg.complexity.thresholds) {
+    cfg.complexity.thresholds = { method: 15, cognitive: 15, file: 50, average: 6 };
+  }
+  
+  // Apply overrides
+  if (overrides.cyclomatic !== null) {
+    cfg.complexity.thresholds.method = overrides.cyclomatic;
+  }
+  if (overrides.cognitive !== null) {
+    cfg.complexity.thresholds.cognitive = overrides.cognitive;
+  }
+}
+
+/** Check if index exists */
+async function ensureIndexExists(vectorDB: VectorDB): Promise<void> {
+  try {
+    await vectorDB.scanWithFilter({ limit: 1 });
+  } catch {
+    console.error(chalk.red('Error: Index not found'));
+    console.log(chalk.yellow('\nRun'), chalk.bold('lien index'), chalk.yellow('to index your codebase first'));
+    process.exit(1);
+  }
 }
 
 /**
@@ -20,92 +131,32 @@ export async function complexityCommand(options: ComplexityOptions) {
   const rootDir = process.cwd();
   
   try {
-    // Validate --fail-on option
-    if (options.failOn && !['error', 'warning'].includes(options.failOn)) {
-      console.error(chalk.red(`Error: Invalid --fail-on value "${options.failOn}". Must be either 'error' or 'warning'`));
-      process.exit(1);
-    }
-    
-    // Validate --format option (always has a default, but validate in case of programmatic use)
-    if (!['text', 'json', 'sarif'].includes(options.format)) {
-      console.error(chalk.red(`Error: Invalid --format value "${options.format}". Must be one of: text, json, sarif`));
-      process.exit(1);
-    }
-    
-    // Validate --files option: check if files exist
-    if (options.files && options.files.length > 0) {
-      const missingFiles: string[] = [];
-      for (const file of options.files) {
-        const fullPath = path.isAbsolute(file) ? file : path.join(rootDir, file);
-        if (!fs.existsSync(fullPath)) {
-          missingFiles.push(file);
-        }
-      }
-      if (missingFiles.length > 0) {
-        console.error(chalk.red(`Error: File${missingFiles.length > 1 ? 's' : ''} not found:`));
-        for (const file of missingFiles) {
-          console.error(chalk.red(`  - ${file}`));
-        }
-        process.exit(1);
-      }
-    }
+    // Validate options
+    validateFailOn(options.failOn);
+    validateFormat(options.format);
+    validateFilesExist(options.files, rootDir);
+    const thresholdOverrides = parseThresholdOverrides(options);
     
     // Load config and database
     const config = await configService.load(rootDir);
     const vectorDB = new VectorDB(rootDir);
     await vectorDB.initialize();
+    await ensureIndexExists(vectorDB);
     
-    // Check if index exists by attempting to scan
-    try {
-      await vectorDB.scanWithFilter({ limit: 1 });
-    } catch (error) {
-      console.error(chalk.red('Error: Index not found'));
-      console.log(chalk.yellow('\nRun'), chalk.bold('lien index'), chalk.yellow('to index your codebase first'));
-      process.exit(1);
-    }
+    // Apply threshold overrides if provided
+    applyThresholdOverrides(config, thresholdOverrides);
     
-    // Override threshold if provided via CLI
-    if (options.threshold) {
-      const thresholdValue = parseInt(options.threshold, 10);
-      if (isNaN(thresholdValue)) {
-        console.error(chalk.red(`Error: Invalid --threshold value "${options.threshold}". Must be a number`));
-        process.exit(1);
-      }
-      if (thresholdValue <= 0) {
-        console.error(chalk.red(`Error: Invalid --threshold value "${options.threshold}". Must be a positive number`));
-        process.exit(1);
-      }
-      // Update config with CLI override
-      if (!config.complexity) {
-        config.complexity = {
-          enabled: true,
-          thresholds: { method: thresholdValue, file: 50, average: 6 },
-          severity: { warning: 1.0, error: 2.0 },
-        };
-      } else if (!config.complexity.thresholds) {
-        config.complexity.thresholds = { method: thresholdValue, file: 50, average: 6 };
-      } else {
-        config.complexity.thresholds.method = thresholdValue;
-      }
-    }
-    
-    // Run analysis
+    // Run analysis and output
     const analyzer = new ComplexityAnalyzer(vectorDB, config);
     const report = await analyzer.analyze(options.files);
-    
-    // Output in requested format
-    const output = formatReport(report, options.format);
-    console.log(output);
+    console.log(formatReport(report, options.format));
     
     // Exit code for CI integration
     if (options.failOn) {
       const hasViolations = options.failOn === 'error' 
         ? report.summary.bySeverity.error > 0
         : report.summary.totalViolations > 0;
-      
-      if (hasViolations) {
-        process.exit(1);
-      }
+      if (hasViolations) process.exit(1);
     }
   } catch (error) {
     console.error(chalk.red('Error analyzing complexity:'), error);

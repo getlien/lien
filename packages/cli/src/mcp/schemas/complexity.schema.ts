@@ -30,7 +30,7 @@ export const GetComplexitySchema = z.object({
     .optional()
     .describe(
       "Only return functions above this complexity threshold.\n\n" +
-      "Note: Violations are first identified using the threshold from lien.config.json (default: 10). " +
+      "Note: Violations are first identified using the threshold from lien.config.json (default: 15). " +
       "This parameter filters those violations to show only items above the specified value. " +
       "Setting threshold below the config threshold will not show additional functions."
     ),
