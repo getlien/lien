@@ -244,7 +244,8 @@ export function getViolationKey(violation: ComplexityViolation): string {
 }
 
 /**
- * Determine human-friendly status message based on violations and delta
+ * Determine human-friendly status message based on violations and delta.
+ * Prioritizes positive messaging when PR improves complexity.
  */
 function determineStatus(
   report: ComplexityReport | null,
@@ -253,27 +254,44 @@ function determineStatus(
   const violations = report?.summary.totalViolations ?? 0;
   const errors = report?.summary.bySeverity.error ?? 0;
   const delta = deltaSummary?.totalDelta ?? 0;
+  const newViolations = deltaSummary?.newFunctions ?? 0;
+  const preExisting = Math.max(0, violations - newViolations);
 
-  // Violations take priority - these need attention
-  if (errors > 0) {
+  // PR improved complexity - celebrate it!
+  if (delta < 0) {
+    if (preExisting > 0) {
+      return {
+        emoji: '✅',
+        message: `**Improved!** Complexity reduced by ${Math.abs(delta)}. ${preExisting} pre-existing issue${preExisting === 1 ? '' : 's'} remain${preExisting === 1 ? 's' : ''} in touched files.`,
+      };
+    }
+    return { emoji: '✅', message: `**Improved!** This PR reduces complexity by ${Math.abs(delta)}.` };
+  }
+
+  // New violations introduced - these need attention
+  if (newViolations > 0 && errors > 0) {
     return {
       emoji: '🔴',
-      message: `**Review required** - ${errors} function${errors === 1 ? ' is' : 's are'} too complex and should be refactored.`,
+      message: `**Review required** - ${newViolations} new function${newViolations === 1 ? ' is' : 's are'} too complex.`,
     };
   }
 
-  if (violations > 0) {
+  if (newViolations > 0) {
     return {
       emoji: '⚠️',
-      message: `**Needs attention** - ${violations} function${violations === 1 ? ' is' : 's are'} more complex than recommended.`,
+      message: `**Needs attention** - ${newViolations} new function${newViolations === 1 ? ' is' : 's are'} more complex than recommended.`,
     };
   }
 
-  // No violations - check delta for status
-  if (delta < 0) {
-    return { emoji: '✅', message: '**Improved** - This PR makes the code easier to maintain.' };
+  // Only pre-existing violations (no new ones)
+  if (violations > 0) {
+    return {
+      emoji: '➡️',
+      message: `**Stable** - ${preExisting} pre-existing issue${preExisting === 1 ? '' : 's'} in touched files (none introduced).`,
+    };
   }
 
+  // No violations at all
   if (delta > 0) {
     return { emoji: '➡️', message: '**Stable** - Complexity increased slightly but within limits.' };
   }

@@ -1,4 +1,4 @@
-name: AI Code Review
+name: Veille Code Review
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
 
 # Cancel previous runs on same PR to save resources
 concurrency:
-  group: ai-review-${{ github.event.pull_request.number }}
+  group: veille-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -103,5 +103,6 @@ jobs:
           model: 'anthropic/claude-sonnet-4'
           threshold: '15'
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          review_style: 'summary'
           baseline_complexity: '/tmp/base-complexity.json'
 
