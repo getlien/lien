@@ -120,6 +120,9 @@ export class ComplexityAnalyzer {
     const violations: ComplexityViolation[] = [];
     const thresholds = this.config.complexity?.thresholds || { method: 10, cognitive: 15, file: 50, average: 6 };
     const severity = this.config.complexity?.severity || { warning: 1.0, error: 2.0 };
+    
+    // Deduplicate chunks by file+startLine+endLine to handle potential index duplicates
+    const seenChunks = new Set<string>();
 
     for (const chunk of chunks) {
       const { metadata } = chunk;
@@ -128,6 +131,13 @@ export class ComplexityAnalyzer {
       if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method') {
         continue;
       }
+      
+      // Skip duplicate chunks (same file and line range)
+      const chunkKey = `${metadata.file}:${metadata.startLine}-${metadata.endLine}`;
+      if (seenChunks.has(chunkKey)) {
+        continue;
+      }
+      seenChunks.add(chunkKey);
 
       // Check cyclomatic complexity
       if (metadata.complexity) {
