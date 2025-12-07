@@ -215,7 +215,7 @@ export class ComplexityAnalyzer {
    */
   private checkChunkComplexity(
     metadata: ChunkMetadata,
-    thresholds: { testPaths: number; mentalLoad: number; halsteadEffort?: number; halsteadBugs?: number },
+    thresholds: { testPaths: number; mentalLoad: number; halsteadEffort?: number; estimatedBugs?: number },
     severity: { warning: number; error: number }
   ): ComplexityViolation[] {
     const violations: ComplexityViolation[] = [];
@@ -238,9 +238,9 @@ export class ComplexityAnalyzer {
       if (v) violations.push(v);
     }
     
-    // Check estimated bugs (Halstead bugs)
-    if (thresholds.halsteadBugs && metadata.halsteadBugs) {
-      const v = this.createHalsteadViolation(metadata, metadata.halsteadBugs, thresholds.halsteadBugs, 'halstead_bugs', severity);
+    // Check estimated bugs
+    if (thresholds.estimatedBugs && metadata.halsteadBugs) {
+      const v = this.createHalsteadViolation(metadata, metadata.halsteadBugs, thresholds.estimatedBugs, 'halstead_bugs', severity);
       if (v) violations.push(v);
     }
     
@@ -262,16 +262,16 @@ export class ComplexityAnalyzer {
   private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
     const configThresholds = this.config.complexity?.thresholds;
     
-    // Convert halsteadTimeMinutes to effort internally
-    const halsteadEffort = configThresholds?.halsteadTimeMinutes 
-      ? this.minutesToEffort(configThresholds.halsteadTimeMinutes)
+    // Convert timeToUnderstandMinutes to effort internally
+    const halsteadEffort = configThresholds?.timeToUnderstandMinutes 
+      ? this.minutesToEffort(configThresholds.timeToUnderstandMinutes)
       : this.minutesToEffort(60); // Default: 60 minutes = 64,800 effort
     
     const thresholds = { 
       testPaths: configThresholds?.testPaths ?? 15, 
       mentalLoad: configThresholds?.mentalLoad ?? 15, 
       halsteadEffort,
-      halsteadBugs: configThresholds?.halsteadBugs ?? 1.5,
+      estimatedBugs: configThresholds?.estimatedBugs ?? 1.5,
       file: configThresholds?.file ?? 50, 
       average: configThresholds?.average ?? 6 
     };

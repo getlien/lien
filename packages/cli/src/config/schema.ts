@@ -60,8 +60,8 @@ export interface LienConfig {
     thresholds: {
       testPaths: number;             // 🔀 Max test paths per function (default: 15)
       mentalLoad: number;            // 🧠 Max mental load score (default: 15)
-      halsteadTimeMinutes?: number;  // ⏱️ Time to understand in minutes (default: 60)
-      halsteadBugs?: number;         // 🐛 Estimated bugs threshold (default: 1.5)
+      timeToUnderstandMinutes?: number;  // ⏱️ Max minutes to understand (default: 60)
+      estimatedBugs?: number;            // 🐛 Max estimated bugs (default: 1.5)
       file: number;                  // File-level complexity (default: 50)
       average: number;               // Average complexity (default: 6)
     };
@@ -158,8 +158,8 @@ export const defaultConfig: LienConfig = {
     thresholds: {
       testPaths: 15,            // 🔀 Max test paths per function
       mentalLoad: 15,           // 🧠 Max mental load score
-      halsteadTimeMinutes: 60,  // ⏱️ Functions taking >1 hour to understand
-      halsteadBugs: 1.5,        // 🐛 Functions estimated to have >1.5 bugs
+      timeToUnderstandMinutes: 60,  // ⏱️ Functions taking >1 hour to understand
+      estimatedBugs: 1.5,           // 🐛 Functions estimated to have >1.5 bugs
       file: 50,
       average: 6,
     },

@@ -387,8 +387,8 @@ Analyze complexity of src/api/
 
 ::: tip Halstead Metrics
 Both Halstead metrics use intuitive thresholds:
-- **Time to understand**: Configure with `halsteadTimeMinutes` (default: 60 minutes = 1 hour)
-- **Estimated bugs**: Configure with `halsteadBugs` (default: 1.5 — functions likely to have >1.5 bugs)
+- **Time to understand**: Configure with `timeToUnderstandMinutes` (default: 60 minutes = 1 hour)
+- **Estimated bugs**: Configure with `estimatedBugs` (default: 1.5 — functions likely to have >1.5 bugs)
 :::
 
 ### Severity Levels

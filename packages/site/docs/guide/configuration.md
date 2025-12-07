@@ -284,8 +284,8 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
     "thresholds": {
       "testPaths": 15,
       "mentalLoad": 15,
-      "halsteadTimeMinutes": 60,
-      "halsteadBugs": 1.5,
+      "timeToUnderstandMinutes": 60,
+      "estimatedBugs": 1.5,
       "file": 50,
       "average": 6
     },
@@ -303,8 +303,8 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 |-----------|---------|-------------|
 | `testPaths` | 15 | 🔀 Max test paths per function |
 | `mentalLoad` | 15 | 🧠 Max mental load score (nesting penalty) |
-| `halsteadTimeMinutes` | 60 | ⏱️ Functions taking longer than 1 hour to understand |
-| `halsteadBugs` | 1.5 | 🐛 Flag functions estimated to have >1.5 bugs |
+| `timeToUnderstandMinutes` | 60 | ⏱️ Functions taking longer than 1 hour to understand |
+| `estimatedBugs` | 1.5 | 🐛 Flag functions estimated to have >1.5 bugs |
 | `file` | 50 | Maximum total complexity per file |
 | `average` | 6 | Maximum average complexity per file |
 
