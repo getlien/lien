@@ -2,7 +2,10 @@
 set -e
 
 # Lien Release Automation Script
-# Usage: npm run release -- patch|minor|major "commit message"
+# Usage: npm run release -- patch|minor|major "commit message" [--changelog path/to/notes.md]
+#
+# For detailed releases, create a markdown file with the changelog content and pass it:
+#   npm run release -- minor "feat: big feature" --changelog .wip/release-notes.md
 
 # Colors for output
 RED='\033[0;31m'
@@ -14,15 +17,33 @@ NC='\033[0m' # No Color
 # Parse arguments
 BUMP_TYPE=$1
 COMMIT_MSG=$2
+CHANGELOG_FILE=""
+
+# Check for --changelog flag
+shift 2 2>/dev/null || true
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --changelog)
+      CHANGELOG_FILE="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
 
 if [ -z "$BUMP_TYPE" ] || [ -z "$COMMIT_MSG" ]; then
   echo -e "${RED}Error: Missing arguments${NC}"
-  echo "Usage: npm run release -- patch|minor|major \"commit message\""
+  echo "Usage: npm run release -- patch|minor|major \"commit message\" [--changelog path/to/notes.md]"
   echo ""
   echo "Examples:"
   echo "  npm run release -- patch \"fix: improve reconnection logic\""
   echo "  npm run release -- minor \"feat: add Python test detection\""
   echo "  npm run release -- major \"BREAKING: new API structure\""
+  echo ""
+  echo "For detailed changelogs:"
+  echo "  npm run release -- minor \"feat: big feature\" --changelog .wip/release-notes.md"
   exit 1
 fi
 
@@ -94,43 +115,56 @@ fi
 
 # Update CHANGELOG.md
 echo -e "${YELLOW}📋 Updating CHANGELOG.md...${NC}"
-CURRENT_DATE=$(date +"%Y-%m-%d")
 CHANGELOG_DATE=$(date +"%Y-%m-%d")
 
-# Extract the type and description from commit message
-if [[ $COMMIT_MSG =~ ^(feat|fix|docs|chore|refactor|test|perf|style|ci|build|revert)(\(.+\))?:\ (.+)$ ]]; then
-  TYPE="${BASH_REMATCH[1]}"
-  DESCRIPTION="${BASH_REMATCH[3]}"
+# Check if a custom changelog file was provided
+if [ -n "$CHANGELOG_FILE" ] && [ -f "$CHANGELOG_FILE" ]; then
+  echo -e "${BLUE}📄 Using custom changelog from: $CHANGELOG_FILE${NC}"
   
-  # Capitalize first letter
-  DESCRIPTION="$(tr '[:lower:]' '[:upper:]' <<< ${DESCRIPTION:0:1})${DESCRIPTION:1}"
+  # Read the changelog file content
+  CHANGELOG_CONTENT=$(cat "$CHANGELOG_FILE")
   
-  # Determine changelog category
-  case $TYPE in
-    feat)
-      CATEGORY="Added"
-      ;;
-    fix|perf)
-      CATEGORY="Fixed"
-      ;;
-    docs)
-      CATEGORY="Documentation"
-      ;;
-    refactor|style)
-      CATEGORY="Changed"
-      ;;
-    *)
-      CATEGORY="Changed"
-      ;;
-  esac
+  # Create changelog entry with header and custom content
+  CHANGELOG_ENTRY="## [$NEW_VERSION] - $CHANGELOG_DATE\n\n$CHANGELOG_CONTENT\n\n"
 else
-  # Fallback if commit message doesn't follow conventional commits
-  CATEGORY="Changed"
-  DESCRIPTION="$COMMIT_MSG"
-fi
+  # Fall back to single-line entry from commit message
+  echo -e "${BLUE}📄 Generating changelog from commit message${NC}"
+  
+  # Extract the type and description from commit message
+  if [[ $COMMIT_MSG =~ ^(feat|fix|docs|chore|refactor|test|perf|style|ci|build|revert)(\(.+\))?:\ (.+)$ ]]; then
+    TYPE="${BASH_REMATCH[1]}"
+    DESCRIPTION="${BASH_REMATCH[3]}"
+    
+    # Capitalize first letter
+    DESCRIPTION="$(tr '[:lower:]' '[:upper:]' <<< ${DESCRIPTION:0:1})${DESCRIPTION:1}"
+    
+    # Determine changelog category
+    case $TYPE in
+      feat)
+        CATEGORY="Added"
+        ;;
+      fix|perf)
+        CATEGORY="Fixed"
+        ;;
+      docs)
+        CATEGORY="Documentation"
+        ;;
+      refactor|style)
+        CATEGORY="Changed"
+        ;;
+      *)
+        CATEGORY="Changed"
+        ;;
+    esac
+  else
+    # Fallback if commit message doesn't follow conventional commits
+    CATEGORY="Changed"
+    DESCRIPTION="$COMMIT_MSG"
+  fi
 
-# Create changelog entry
-CHANGELOG_ENTRY="## [$NEW_VERSION] - $CHANGELOG_DATE\n\n### $CATEGORY\n- **$DESCRIPTION**\n\n"
+  # Create simple changelog entry
+  CHANGELOG_ENTRY="## [$NEW_VERSION] - $CHANGELOG_DATE\n\n### $CATEGORY\n- **$DESCRIPTION**\n\n"
+fi
 
 # Insert new entry after the header
 if [ -f "CHANGELOG.md" ]; then
