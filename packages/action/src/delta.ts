@@ -25,7 +25,7 @@ function buildComplexityMap(
   if (!report) return new Map();
 
   type MapEntry = [string, { complexity: number; violation: ComplexityViolation }];
-  
+
   // Flatten violations from all requested files and build map entries
   const entries = collect(files)
     .map(filepath => ({ filepath, fileData: report.files[filepath] }))

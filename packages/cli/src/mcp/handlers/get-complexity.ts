@@ -50,7 +50,7 @@ export async function handleGetComplexity(
       // Transform violations using collect.js
       type TransformedViolation = ReturnType<typeof transformViolation>;
       const allViolations: TransformedViolation[] = collect(Object.entries(report.files))
-        .flatMap(([_, fileData]) => 
+        .flatMap(([/* filepath unused */, fileData]) => 
           fileData.violations.map(v => transformViolation(v, fileData))
         )
         .sortByDesc('complexity')

@@ -269,7 +269,9 @@ export class ComplexityAnalyzer {
 
   /**
    * Convert time in minutes to Halstead effort.
-   * Formula: Time (seconds) = Effort / 18, so Effort = Time (minutes) * 60 * 18 = Time * 1080
+   * This is the inverse of effortToMinutes().
+   * Formula: Time (seconds) = Effort / 18 (Stroud number)
+   *          So: Effort = Time (minutes) * 60 * 18 = Time * 1080
    */
   private minutesToEffort(minutes: number): number {
     return minutes * 1080;
