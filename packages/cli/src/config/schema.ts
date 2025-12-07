@@ -63,10 +63,7 @@ export interface LienConfig {
       timeToUnderstandMinutes?: number;  // ⏱️ Max minutes to understand (default: 60)
       estimatedBugs?: number;            // 🐛 Max estimated bugs (default: 1.5)
     };
-    severity: {
-      warning: number;     // Multiplier for warning threshold (default: 1.0)
-      error: number;       // Multiplier for error threshold (default: 2.0)
-    };
+    // Severity multipliers are hardcoded: warning = 1x threshold, error = 2x threshold
   };
   frameworks: FrameworkInstance[];
 }
@@ -158,10 +155,6 @@ export const defaultConfig: LienConfig = {
       mentalLoad: 15,           // 🧠 Max mental load score
       timeToUnderstandMinutes: 60,  // ⏱️ Functions taking >1 hour to understand
       estimatedBugs: 1.5,           // 🐛 Functions estimated to have >1.5 bugs
-    },
-    severity: {
-      warning: 1.0,
-      error: 2.0,
     },
   },
   frameworks: [], // Will be populated by lien init via framework detection

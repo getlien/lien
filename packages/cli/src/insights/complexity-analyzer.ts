@@ -6,6 +6,13 @@ import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
 import { SearchResult } from '../vectordb/types.js';
 
 /**
+ * Hardcoded severity multipliers:
+ * - Warning: triggers at 1x threshold (e.g., testPaths >= 15)
+ * - Error: triggers at 2x threshold (e.g., testPaths >= 30)
+ */
+const SEVERITY = { warning: 1.0, error: 2.0 } as const;
+
+/**
  * Analyzer for code complexity based on indexed codebase
  */
 export class ComplexityAnalyzer {
@@ -85,11 +92,10 @@ export class ComplexityAnalyzer {
     metadata: ChunkMetadata,
     complexity: number,
     baseThreshold: number,
-    metricType: ComplexityViolation['metricType'],
-    severityConfig: { warning: number; error: number }
+    metricType: ComplexityViolation['metricType']
   ): ComplexityViolation | null {
-    const warningThreshold = baseThreshold * severityConfig.warning;
-    const errorThreshold = baseThreshold * severityConfig.error;
+    const warningThreshold = baseThreshold * SEVERITY.warning;
+    const errorThreshold = baseThreshold * SEVERITY.error;
 
     if (complexity < warningThreshold) return null;
 
@@ -166,11 +172,10 @@ export class ComplexityAnalyzer {
     metadata: ChunkMetadata,
     metricValue: number,
     threshold: number,
-    metricType: 'halstead_effort' | 'halstead_bugs',
-    severityConfig: { warning: number; error: number }
+    metricType: 'halstead_effort' | 'halstead_bugs'
   ): ComplexityViolation | null {
-    const warningThreshold = threshold * severityConfig.warning;
-    const errorThreshold = threshold * severityConfig.error;
+    const warningThreshold = threshold * SEVERITY.warning;
+    const errorThreshold = threshold * SEVERITY.error;
 
     if (metricValue < warningThreshold) return null;
 
@@ -215,32 +220,31 @@ export class ComplexityAnalyzer {
    */
   private checkChunkComplexity(
     metadata: ChunkMetadata,
-    thresholds: { testPaths: number; mentalLoad: number; halsteadEffort?: number; estimatedBugs?: number },
-    severity: { warning: number; error: number }
+    thresholds: { testPaths: number; mentalLoad: number; halsteadEffort?: number; estimatedBugs?: number }
   ): ComplexityViolation[] {
     const violations: ComplexityViolation[] = [];
     
     // Check test paths (cyclomatic complexity)
     if (metadata.complexity) {
-      const v = this.createViolation(metadata, metadata.complexity, thresholds.testPaths, 'cyclomatic', severity);
+      const v = this.createViolation(metadata, metadata.complexity, thresholds.testPaths, 'cyclomatic');
       if (v) violations.push(v);
     }
     
     // Check mental load (cognitive complexity)
     if (metadata.cognitiveComplexity) {
-      const v = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.mentalLoad, 'cognitive', severity);
+      const v = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.mentalLoad, 'cognitive');
       if (v) violations.push(v);
     }
     
     // Check time to understand (Halstead effort)
     if (thresholds.halsteadEffort && metadata.halsteadEffort) {
-      const v = this.createHalsteadViolation(metadata, metadata.halsteadEffort, thresholds.halsteadEffort, 'halstead_effort', severity);
+      const v = this.createHalsteadViolation(metadata, metadata.halsteadEffort, thresholds.halsteadEffort, 'halstead_effort');
       if (v) violations.push(v);
     }
     
     // Check estimated bugs
     if (thresholds.estimatedBugs && metadata.halsteadBugs) {
-      const v = this.createHalsteadViolation(metadata, metadata.halsteadBugs, thresholds.estimatedBugs, 'halstead_bugs', severity);
+      const v = this.createHalsteadViolation(metadata, metadata.halsteadBugs, thresholds.estimatedBugs, 'halstead_bugs');
       if (v) violations.push(v);
     }
     
@@ -273,11 +277,10 @@ export class ComplexityAnalyzer {
       halsteadEffort,
       estimatedBugs: configThresholds?.estimatedBugs ?? 1.5,
     };
-    const severity = this.config.complexity?.severity || { warning: 1.0, error: 2.0 };
     const functionChunks = this.getUniqueFunctionChunks(chunks);
     
     return functionChunks.flatMap(metadata => 
-      this.checkChunkComplexity(metadata, thresholds, severity)
+      this.checkChunkComplexity(metadata, thresholds)
     );
   }
 

@@ -34,13 +34,8 @@ describe('complexityCommand', () => {
       complexity: {
         enabled: true,
         thresholds: {
-          method: 15,
-          file: 50,
-          average: 6,
-        },
-        severity: {
-          warning: 1.0,
-          error: 2.0,
+          testPaths: 15,
+          mentalLoad: 15,
         },
       },
     };

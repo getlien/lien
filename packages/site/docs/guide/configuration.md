@@ -286,10 +286,6 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
       "mentalLoad": 15,
       "timeToUnderstandMinutes": 60,
       "estimatedBugs": 1.5
-    },
-    "severity": {
-      "warning": 1.0,
-      "error": 2.0
     }
   }
 }
@@ -304,22 +300,10 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 | `timeToUnderstandMinutes` | 60 | ⏱️ Functions taking longer than 1 hour to understand |
 | `estimatedBugs` | 1.5 | 🐛 Flag functions estimated to have >1.5 bugs |
 
-::: tip Halstead Metrics
-Both Halstead metrics are based on scientific research:
-- **Time to understand**: Functions taking >1 hour to comprehend need simplification
-- **Estimated bugs**: Formula is `Volume / 3000` — functions with ~1.5+ predicted bugs need attention
+::: tip Severity Levels
+- **Warning**: When value exceeds threshold (e.g., testPaths ≥ 15)
+- **Error**: When value exceeds 2× threshold (e.g., testPaths ≥ 30)
 :::
-
-#### Severity Multipliers
-
-| Multiplier | Default | Meaning |
-|------------|---------|---------|
-| `warning` | 1.0 | Violations at or above `threshold × 1.0` are warnings |
-| `error` | 2.0 | Violations at or above `threshold × 2.0` are errors |
-
-With default threshold of 15 (cyclomatic/cognitive):
-- **Warning**: complexity ≥ 15
-- **Error**: complexity ≥ 30
 
 ## Performance Tuning
 

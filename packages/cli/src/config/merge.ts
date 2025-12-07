@@ -37,10 +37,6 @@ export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>)
         ...defaults.complexity?.thresholds,
         ...(user.complexity.thresholds || {}),
       },
-      severity: {
-        ...defaults.complexity?.severity,
-        ...(user.complexity.severity || {}),
-      },
     } : defaults.complexity,
     frameworks: user.frameworks ?? defaults.frameworks,
   };
