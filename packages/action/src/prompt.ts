@@ -368,6 +368,19 @@ function formatBadgeDelta(deltaSummary: DeltaSummary | null): string {
 }
 
 /**
+ * Get emoji for metric type
+ */
+function getMetricEmoji(metricType: string): string {
+  switch (metricType) {
+    case 'cyclomatic': return '🔀';
+    case 'cognitive': return '🧠';
+    case 'halstead_effort': return '⏱️';
+    case 'halstead_bugs': return '🐛';
+    default: return '📊';
+  }
+}
+
+/**
  * Build the PR description stats badge
  * Human-friendly summary with technical details collapsed
  */
@@ -375,10 +388,43 @@ export function buildDescriptionBadge(
   report: ComplexityReport | null,
   deltaSummary: DeltaSummary | null
 ): string {
-  const violations = report ? String(report.summary.totalViolations) : '0';
-  const maxComplexity = report ? String(report.summary.maxComplexity) : '—';
   const deltaDisplay = formatBadgeDelta(deltaSummary);
   const status = determineStatus(report, deltaSummary);
+
+  // Build metric breakdown table
+  let metricTable = '';
+  if (report && report.summary.totalViolations > 0) {
+    // Count violations by metric type
+    const byMetric = new Map<string, number>();
+    for (const fileData of Object.values(report.files)) {
+      for (const v of fileData.violations) {
+        const count = byMetric.get(v.metricType) || 0;
+        byMetric.set(v.metricType, count + 1);
+      }
+    }
+
+    // Build table rows
+    const rows: string[] = [];
+    const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
+    for (const metricType of metricOrder) {
+      const count = byMetric.get(metricType);
+      if (count && count > 0) {
+        const emoji = getMetricEmoji(metricType);
+        const label = getMetricLabel(metricType);
+        rows.push(`| ${emoji} ${label} | ${count} |`);
+      }
+    }
+
+    if (rows.length > 0) {
+      metricTable = `
+| Metric | Violations |
+|--------|:----------:|
+${rows.join('\n')}
+`;
+    }
+  }
+
+  const changeRow = deltaSummary ? `\n**Complexity Change:** ${deltaDisplay}` : '';
 
   return `### 👁️ Veille
 
@@ -386,10 +432,7 @@ ${status.emoji} ${status.message}
 
 <details>
 <summary>📊 Details</summary>
-
-| Violations | Max Complexity | Change |
-|:----------:|:--------------:|:------:|
-| ${violations} | ${maxComplexity} | ${deltaDisplay} |
+${metricTable}${changeRow}
 
 </details>`;
 }
