@@ -71,6 +71,17 @@ Lien indexes and understands code in:
 **Semantic Search** (chunking and embeddings):
 - All of the above, plus Go, Rust, Java, C/C++, Vue, Ruby, Swift, Kotlin, C#, Scala, and more!
 
+## Complexity Analysis
+
+Lien tracks two complementary complexity metrics:
+
+| Metric | What it Measures | Best For |
+|--------|-----------------|----------|
+| **Cyclomatic** | Decision paths (if, for, switch) | Testability - how many tests needed? |
+| **Cognitive** | Mental effort (nesting depth, breaks) | Understandability - how hard to read? |
+
+Both are calculated during indexing using Tree-sitter AST parsing. Cognitive complexity is based on [SonarSource's specification](https://www.sonarsource.com/docs/CognitiveComplexity.pdf).
+
 ## Performance
 
 - **Query time:** < 500ms
