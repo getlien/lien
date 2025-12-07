@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { countHalstead, calculateHalstead, calculateHalsteadMetrics } from './complexity/index.js';
 import { parseAST } from './parser.js';
+import type { SupportedLanguage } from './types.js';
 import type Parser from 'tree-sitter';
 
 /**
  * Helper to calculate Halstead metrics of a function in TypeScript code
  */
-function getHalstead(code: string, language = 'typescript') {
+function getHalstead(code: string, language: SupportedLanguage = 'typescript') {
   const result = parseAST(code, language);
   if (!result.tree) throw new Error('Failed to parse code');
   
@@ -39,7 +40,7 @@ function getHalstead(code: string, language = 'typescript') {
 /**
  * Helper to get raw Halstead counts
  */
-function getHalsteadCounts(code: string, language = 'typescript') {
+function getHalsteadCounts(code: string, language: SupportedLanguage = 'typescript') {
   const result = parseAST(code, language);
   if (!result.tree) throw new Error('Failed to parse code');
   

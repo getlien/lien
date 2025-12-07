@@ -222,8 +222,8 @@ export class ComplexityAnalyzer {
     const defaultThresholds = { 
       method: 15, 
       cognitive: 15, 
-      halsteadEffort: 1000000,
-      halsteadDifficulty: 50,
+      halsteadEffort: 300000,    // P99 - catches top 1%
+      halsteadDifficulty: 30,    // P90 - catches top 10%
       file: 50, 
       average: 6 
     };

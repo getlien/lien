@@ -70,6 +70,11 @@ interface DBRecord {
   parameters?: string[];
   signature?: string;
   imports?: string[];
+  // Halstead metrics (v0.19.0)
+  halsteadVolume?: number;
+  halsteadDifficulty?: number;
+  halsteadEffort?: number;
+  halsteadBugs?: number;
   _distance?: number; // Added by LanceDB for search results
 }
 
@@ -131,6 +136,11 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
     parameters: hasValidArrayEntries(r.parameters) ? r.parameters : undefined,
     signature: r.signature || undefined,
     imports: hasValidArrayEntries(r.imports) ? r.imports : undefined,
+    // Halstead metrics (v0.19.0)
+    halsteadVolume: r.halsteadVolume || undefined,
+    halsteadDifficulty: r.halsteadDifficulty || undefined,
+    halsteadEffort: r.halsteadEffort || undefined,
+    halsteadBugs: r.halsteadBugs || undefined,
   };
 }
 

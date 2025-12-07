@@ -303,8 +303,8 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 |-----------|---------|-------------|
 | `method` | 15 | Cyclomatic complexity threshold per function |
 | `cognitive` | 15 | Cognitive complexity threshold per function |
-| `halsteadEffort` | 1000000 | Halstead effort threshold (~15 min to understand) |
-| `halsteadDifficulty` | 50 | Halstead difficulty threshold (error-proneness) |
+| `halsteadEffort` | 300000 | Halstead effort threshold (P99 - top 1%) |
+| `halsteadDifficulty` | 30 | Halstead difficulty threshold (P90 - top 10%) |
 | `file` | 50 | Maximum total complexity per file |
 | `average` | 6 | Maximum average complexity per file |
 

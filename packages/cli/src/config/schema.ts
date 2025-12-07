@@ -158,8 +158,8 @@ export const defaultConfig: LienConfig = {
     thresholds: {
       method: 15,            // Cyclomatic complexity threshold
       cognitive: 15,         // Cognitive complexity threshold (SonarQube default)
-      halsteadEffort: 1000000,   // ~1 million effort units (~15 min to understand)
-      halsteadDifficulty: 50,    // High error probability
+      halsteadEffort: 300000,    // P99 - catches top 1% most complex functions
+      halsteadDifficulty: 30,    // P90 - catches top 10% error-prone functions
       file: 50,
       average: 6,
     },
