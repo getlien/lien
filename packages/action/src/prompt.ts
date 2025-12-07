@@ -8,13 +8,14 @@ import { formatDelta } from './delta.js';
 
 /**
  * Build a lookup map from deltas for quick access
+ * Key includes metricType since a function can have multiple metric violations
  */
 function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, ComplexityDelta> {
   if (!deltas) return new Map();
   
   return new Map(
     collect(deltas)
-      .map(d => [`${d.filepath}::${d.symbolName}`, d] as [string, ComplexityDelta])
+      .map(d => [`${d.filepath}::${d.symbolName}::${d.metricType}`, d] as [string, ComplexityDelta])
       .all()
   );
 }
@@ -78,7 +79,7 @@ export function formatThresholdValue(metricType: string, value: number): string 
  * Format a single violation line with optional delta
  */
 function formatViolationLine(v: ComplexityViolation, deltaMap: Map<string, ComplexityDelta>): string {
-  const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+  const delta = deltaMap.get(`${v.filepath}::${v.symbolName}::${v.metricType}`);
   const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
   const metricLabel = getMetricLabel(v.metricType);
   const valueDisplay = formatComplexityValue(v.metricType, v.complexity);

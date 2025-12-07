@@ -35821,10 +35821,11 @@ function filterAnalyzableFiles(files) {
 
 
 /**
- * Create a key for a function to match across base/head
+ * Create a key for a function+metric to match across base/head
+ * Includes metricType since a function can have multiple metric violations
  */
-function getFunctionKey(filepath, symbolName) {
-    return `${filepath}::${symbolName}`;
+function getFunctionKey(filepath, symbolName, metricType) {
+    return `${filepath}::${symbolName}::${metricType}`;
 }
 /**
  * Build a map of function complexities from a report
@@ -35837,7 +35838,7 @@ function buildComplexityMap(report, files) {
         .map(filepath => ({ filepath, fileData: report.files[filepath] }))
         .filter(({ fileData }) => !!fileData)
         .flatMap(({ filepath, fileData }) => fileData.violations.map(violation => [
-        getFunctionKey(filepath, violation.symbolName),
+        getFunctionKey(filepath, violation.symbolName, violation.metricType),
         { complexity: violation.complexity, violation }
     ]))
         .all();
@@ -35986,12 +35987,13 @@ function logDeltaSummary(summary) {
 
 /**
  * Build a lookup map from deltas for quick access
+ * Key includes metricType since a function can have multiple metric violations
  */
 function buildDeltaMap(deltas) {
     if (!deltas)
         return new Map();
     return new Map(dist_default()(deltas)
-        .map(d => [`${d.filepath}::${d.symbolName}`, d])
+        .map(d => [`${d.filepath}::${d.symbolName}::${d.metricType}`, d])
         .all());
 }
 /**
@@ -36049,7 +36051,7 @@ function formatThresholdValue(metricType, value) {
  * Format a single violation line with optional delta
  */
 function formatViolationLine(v, deltaMap) {
-    const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+    const delta = deltaMap.get(`${v.filepath}::${v.symbolName}::${v.metricType}`);
     const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
     const metricLabel = getMetricLabel(v.metricType);
     const valueDisplay = formatComplexityValue(v.metricType, v.complexity);
@@ -36901,12 +36903,13 @@ function findCommentLine(violation, diffLines) {
 }
 /**
  * Build delta lookup map from deltas array
+ * Key includes metricType since a function can have multiple metric violations
  */
 function src_buildDeltaMap(deltas) {
     if (!deltas)
         return new Map();
     return new Map(dist_default()(deltas)
-        .map(d => [`${d.filepath}::${d.symbolName}`, d])
+        .map(d => [`${d.filepath}::${d.symbolName}::${d.metricType}`, d])
         .all());
 }
 /**
@@ -36917,7 +36920,7 @@ function buildLineComments(violationsWithLines, aiComments, deltaMap) {
         .filter(({ violation }) => aiComments.has(violation))
         .map(({ violation, commentLine }) => {
         const comment = aiComments.get(violation);
-        const delta = deltaMap.get(`${violation.filepath}::${violation.symbolName}`);
+        const delta = deltaMap.get(`${violation.filepath}::${violation.symbolName}::${violation.metricType}`);
         const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
         const severityEmoji = delta
             ? formatSeverityEmoji(delta.severity)
@@ -36959,7 +36962,7 @@ function buildUncoveredNote(uncoveredViolations, deltaMap) {
         return '';
     const uncoveredList = uncoveredViolations
         .map(v => {
-        const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+        const delta = deltaMap.get(`${v.filepath}::${v.symbolName}::${v.metricType}`);
         const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
         const emoji = src_getMetricEmoji(v.metricType);
         const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
@@ -37080,7 +37083,7 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     // Filter to only new or degraded violations (skip unchanged pre-existing ones)
     // This saves LLM costs and prevents duplicate comments on each push
     const newOrDegradedViolations = violationsWithLines.filter(({ violation }) => {
-        const key = `${violation.filepath}::${violation.symbolName}`;
+        const key = `${violation.filepath}::${violation.symbolName}::${violation.metricType}`;
         const delta = deltaMap.get(key);
         // Comment if: no baseline data, or new violation, or got worse
         return !delta || delta.severity === 'new' || delta.delta > 0;
@@ -37098,7 +37101,7 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
             // Build skipped note for unchanged violations in the diff (not "outside diff")
             const skippedInDiff = violationsWithLines
                 .filter(({ violation }) => {
-                const key = `${violation.filepath}::${violation.symbolName}`;
+                const key = `${violation.filepath}::${violation.symbolName}::${violation.metricType}`;
                 const delta = deltaMap.get(key);
                 return delta && delta.severity !== 'new' && delta.delta === 0;
             })
@@ -37120,7 +37123,7 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     // Note: delta === 0 means truly unchanged; delta < 0 means improved (not "unchanged")
     const skippedViolations = violationsWithLines
         .filter(({ violation }) => {
-        const key = `${violation.filepath}::${violation.symbolName}`;
+        const key = `${violation.filepath}::${violation.symbolName}::${violation.metricType}`;
         const delta = deltaMap.get(key);
         return delta && delta.severity !== 'new' && delta.delta === 0;
     })

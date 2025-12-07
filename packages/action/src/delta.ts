@@ -8,10 +8,11 @@ import collect from 'collect.js';
 import type { ComplexityReport, ComplexityDelta, DeltaSummary, ComplexityViolation } from './types.js';
 
 /**
- * Create a key for a function to match across base/head
+ * Create a key for a function+metric to match across base/head
+ * Includes metricType since a function can have multiple metric violations
  */
-function getFunctionKey(filepath: string, symbolName: string): string {
-  return `${filepath}::${symbolName}`;
+function getFunctionKey(filepath: string, symbolName: string, metricType: string): string {
+  return `${filepath}::${symbolName}::${metricType}`;
 }
 
 /**
@@ -31,7 +32,7 @@ function buildComplexityMap(
     .filter(({ fileData }) => !!fileData)
     .flatMap(({ filepath, fileData }) =>
       fileData.violations.map(violation => [
-        getFunctionKey(filepath, violation.symbolName),
+        getFunctionKey(filepath, violation.symbolName, violation.metricType),
         { complexity: violation.complexity, violation }
       ] as MapEntry)
     )
