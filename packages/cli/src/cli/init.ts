@@ -219,7 +219,7 @@ async function convertRulesFileToDirectory(rulesPath: string, templatePath: stri
 }
 
 /** Install Cursor rules based on existing .cursor/rules state */
-async function installCursorRulesFiles(rootDir: string) {
+async function installCursorRulesFiles(rootDir: string, options: InitOptions) {
   const cursorRulesDir = path.join(rootDir, '.cursor');
   await fs.mkdir(cursorRulesDir, { recursive: true });
   
@@ -231,14 +231,15 @@ async function installCursorRulesFiles(rootDir: string) {
     await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
     console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
   } else if (pathType === 'file') {
-    const { convertToDir } = await inquirer.prompt([{
+    // In non-interactive mode, auto-convert to directory structure
+    const shouldConvert = options.yes || (await inquirer.prompt([{
       type: 'confirm',
       name: 'convertToDir',
       message: 'Existing .cursor/rules file found. Convert to directory and preserve your rules?',
       default: true,
-    }]);
+    }])).convertToDir;
 
-    if (convertToDir) {
+    if (shouldConvert) {
       await convertRulesFileToDirectory(rulesPath, templatePath);
     } else {
       console.log(chalk.dim('Skipped Cursor rules installation (preserving existing file)'));
@@ -264,7 +265,7 @@ async function promptAndInstallCursorRules(rootDir: string, options: InitOptions
   if (!installCursorRules) return;
   
   try {
-    await installCursorRulesFiles(rootDir);
+    await installCursorRulesFiles(rootDir, options);
   } catch (error) {
     console.log(chalk.yellow('⚠️  Could not install Cursor rules'));
     console.log(chalk.dim(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`));
