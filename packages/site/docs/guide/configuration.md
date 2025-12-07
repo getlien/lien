@@ -270,10 +270,12 @@ These apply to individual frameworks:
 
 ## Complexity Analysis
 
-Configure complexity analysis for the `lien complexity` command and `get_complexity` MCP tool. Lien tracks **two metrics**:
+Configure complexity analysis for the `lien complexity` command and `get_complexity` MCP tool. Lien tracks **four metrics**:
 
 - **Cyclomatic Complexity**: Number of independent paths through code (decision points)
 - **Cognitive Complexity**: Mental effort to understand code (penalizes nesting depth)
+- **Halstead Effort**: Mental effort based on operators and operands
+- **Halstead Difficulty**: Error-proneness based on program vocabulary
 
 ```json
 {
@@ -282,6 +284,8 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
     "thresholds": {
       "method": 15,
       "cognitive": 15,
+      "halsteadEffort": 1000000,
+      "halsteadDifficulty": 50,
       "file": 50,
       "average": 6
     },
@@ -299,8 +303,18 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 |-----------|---------|-------------|
 | `method` | 15 | Cyclomatic complexity threshold per function |
 | `cognitive` | 15 | Cognitive complexity threshold per function |
+| `halsteadEffort` | 1000000 | Halstead effort threshold (~15 min to understand) |
+| `halsteadDifficulty` | 50 | Halstead difficulty threshold (error-proneness) |
 | `file` | 50 | Maximum total complexity per file |
 | `average` | 6 | Maximum average complexity per file |
+
+::: tip Halstead Metrics
+Halstead metrics are based on counts of operators (keywords, symbols) and operands (variables, literals):
+- **Volume**: Size of implementation (N × log₂(n))
+- **Difficulty**: Error-proneness ((n1/2) × (N2/n2))
+- **Effort**: Mental effort required (D × V)
+- **Bugs**: Estimated delivered bugs (V / 3000)
+:::
 
 #### Severity Multipliers
 
@@ -309,7 +323,7 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 | `warning` | 1.0 | Violations at or above `threshold × 1.0` are warnings |
 | `error` | 2.0 | Violations at or above `threshold × 2.0` are errors |
 
-With default threshold of 15:
+With default threshold of 15 (cyclomatic/cognitive):
 - **Warning**: complexity ≥ 15
 - **Error**: complexity ≥ 30
 

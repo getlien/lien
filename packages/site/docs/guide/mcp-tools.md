@@ -295,7 +295,12 @@ Risk level is boosted if dependents have high complexity. A file with 10 depende
 
 ## get_complexity
 
-Analyze code complexity for tech debt identification and refactoring prioritization. Tracks both **cyclomatic complexity** (testability) and **cognitive complexity** (understandability).
+Analyze code complexity for tech debt identification and refactoring prioritization. Tracks multiple complexity metrics:
+
+- **Cyclomatic complexity**: Testability (decision paths)
+- **Cognitive complexity**: Understandability (penalizes nesting)
+- **Halstead effort**: Mental effort based on operators/operands
+- **Halstead difficulty**: Error-proneness based on program vocabulary
 
 ### Parameters
 
@@ -352,14 +357,20 @@ Analyze complexity of src/api/
       "symbolType": "function",
       "startLine": 45,
       "endLine": 120,
-      "complexity": 18,
-      "threshold": 15,
+      "complexity": 1250000,
+      "threshold": 1000000,
       "severity": "warning",
-      "metricType": "cognitive",
+      "metricType": "halstead_effort",
       "language": "typescript",
-      "message": "Cognitive complexity 18 exceeds threshold 15",
+      "message": "Halstead effort 1,250,000 exceeds threshold 1,000,000",
       "dependentCount": 5,
-      "riskLevel": "medium"
+      "riskLevel": "medium",
+      "halsteadDetails": {
+        "volume": 850.5,
+        "difficulty": 45.2,
+        "effort": 1250000,
+        "bugs": 0.283
+      }
     }
   ]
 }
@@ -371,9 +382,11 @@ Analyze complexity of src/api/
 |------------|-------------|
 | `cyclomatic` | Number of independent paths (decision points) |
 | `cognitive` | Mental effort to understand (penalizes nesting) |
+| `halstead_effort` | Mental effort based on operators and operands |
+| `halstead_difficulty` | Error-proneness (how hard to write/maintain) |
 
-::: tip Both metrics can fire
-A single function can have violations for **both** cyclomatic and cognitive complexity if it exceeds both thresholds.
+::: tip Multiple metrics can fire
+A single function can have violations for **multiple** metrics if it exceeds multiple thresholds. Halstead violations include a `halsteadDetails` object with volume, difficulty, effort, and estimated bugs.
 :::
 
 ### Severity Levels
