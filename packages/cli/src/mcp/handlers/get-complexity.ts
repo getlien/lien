@@ -49,22 +49,22 @@ export async function handleGetComplexity(
 
       // Transform violations using collect.js
       type TransformedViolation = ReturnType<typeof transformViolation>;
-      let violations = collect(Object.entries(report.files))
+      const allViolations: TransformedViolation[] = collect(Object.entries(report.files))
         .flatMap(([_, fileData]) => 
           fileData.violations.map(v => transformViolation(v, fileData))
         )
         .sortByDesc('complexity')
-        .all() as unknown as TransformedViolation[];
+        .all() as TransformedViolation[];
 
       // Apply custom threshold filter if provided
-      if (validatedArgs.threshold !== undefined) {
-        violations = violations.filter(v => v.complexity >= validatedArgs.threshold!);
-      }
+      const violations = validatedArgs.threshold !== undefined
+        ? allViolations.filter(v => v.complexity >= validatedArgs.threshold!)
+        : allViolations;
 
       const topViolations = violations.slice(0, validatedArgs.top);
 
-      // Calculate severity counts
-      const bySeverity = collect(violations).countBy('severity').all() as unknown as Record<string, number>;
+      // Calculate severity counts - countBy returns { error?: number, warning?: number }
+      const bySeverity = collect(violations).countBy('severity').all() as { error?: number; warning?: number };
 
       return {
         indexInfo: getIndexMetadata(),

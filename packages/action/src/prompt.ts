@@ -402,10 +402,11 @@ export function buildDescriptionBadge(
       .all() as unknown as Record<string, number>;
 
     // Calculate delta by metric type using collect.js
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // Note: collect.js groupBy returns groups needing sum() - types are limited
     const deltaByMetric: Record<string, number> = deltas
       ? collect(deltas)
           .groupBy('metricType')
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .map((group: any) => group.sum('delta'))
           .all() as unknown as Record<string, number>
       : {};

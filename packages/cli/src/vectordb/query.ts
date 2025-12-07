@@ -136,11 +136,11 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
     parameters: hasValidArrayEntries(r.parameters) ? r.parameters : undefined,
     signature: r.signature || undefined,
     imports: hasValidArrayEntries(r.imports) ? r.imports : undefined,
-    // Halstead metrics (v0.19.0)
-    halsteadVolume: r.halsteadVolume || undefined,
-    halsteadDifficulty: r.halsteadDifficulty || undefined,
-    halsteadEffort: r.halsteadEffort || undefined,
-    halsteadBugs: r.halsteadBugs || undefined,
+    // Halstead metrics (v0.19.0) - use explicit null check to preserve valid 0 values
+    halsteadVolume: r.halsteadVolume != null ? r.halsteadVolume : undefined,
+    halsteadDifficulty: r.halsteadDifficulty != null ? r.halsteadDifficulty : undefined,
+    halsteadEffort: r.halsteadEffort != null ? r.halsteadEffort : undefined,
+    halsteadBugs: r.halsteadBugs != null ? r.halsteadBugs : undefined,
   };
 }
 

@@ -291,6 +291,7 @@ function buildLineComments(
         ? formatSeverityEmoji(delta.severity)
         : (violation.severity === 'error' ? '🔴' : '🟡');
       
+      // If comment is not on symbol's starting line, note where it actually starts
       const lineNote = commentLine !== violation.startLine 
         ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
         : '';
@@ -373,9 +374,10 @@ function formatCostDisplay(usage: { totalTokens: number; cost: number }): string
  * Group deltas by metric type and sum their values
  */
 function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // Note: collect.js groupBy returns groups needing sum() - types are limited
   return collect(deltas)
     .groupBy('metricType')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .map((group: any) => group.sum('delta'))
     .all() as unknown as Record<string, number>;
 }

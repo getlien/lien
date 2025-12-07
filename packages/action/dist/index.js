@@ -36321,10 +36321,11 @@ function buildDescriptionBadge(report, deltaSummary, deltas) {
             .countBy('metricType')
             .all();
         // Calculate delta by metric type using collect.js
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // Note: collect.js groupBy returns groups needing sum() - types are limited
         const deltaByMetric = deltas
             ? dist_default()(deltas)
                 .groupBy('metricType')
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 .map((group) => group.sum('delta'))
                 .all()
             : {};
@@ -36921,6 +36922,7 @@ function buildLineComments(violationsWithLines, aiComments, deltaMap) {
         const severityEmoji = delta
             ? formatSeverityEmoji(delta.severity)
             : (violation.severity === 'error' ? '🔴' : '🟡');
+        // If comment is not on symbol's starting line, note where it actually starts
         const lineNote = commentLine !== violation.startLine
             ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
             : '';
@@ -36990,9 +36992,10 @@ function formatCostDisplay(usage) {
  * Group deltas by metric type and sum their values
  */
 function groupDeltasByMetric(deltas) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // Note: collect.js groupBy returns groups needing sum() - types are limited
     return dist_default()(deltas)
         .groupBy('metricType')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .map((group) => group.sum('delta'))
         .all();
 }

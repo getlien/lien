@@ -147,7 +147,8 @@ export class ComplexityAnalyzer {
 
   /**
    * Convert Halstead effort to time in minutes.
-   * Formula: Time (seconds) = Effort / 18, so Time (minutes) = Effort / 1080
+   * Formula: Time (seconds) = Effort / 18 (Stroud number for mental discrimination)
+   *          Time (minutes) = Effort / (18 * 60) = Effort / 1080
    */
   private effortToMinutes(effort: number): number {
     return effort / 1080;
@@ -200,16 +201,16 @@ export class ComplexityAnalyzer {
     };
 
     // Store human-scale values for complexity/threshold:
-    // - halstead_effort: time in minutes (not raw effort)
-    // - halstead_bugs: bugs estimate (decimal)
+    // - halstead_effort: rounded to integer minutes for readability (typical values 60-300)
+    // - halstead_bugs: kept as decimal for precision (typical values < 5, e.g. 1.5, 2.27)
     let complexity: number;
     let displayThreshold: number;
     if (metricType === 'halstead_effort') {
-      // Store time in minutes for comparable deltas
+      // Convert raw effort to minutes and round for comparable deltas
       complexity = Math.round(this.effortToMinutes(metricValue));
       displayThreshold = Math.round(this.effortToMinutes(effectiveThreshold));
     } else {
-      // halstead_bugs: store as-is (small decimal)
+      // halstead_bugs: store as decimal for precision in small values
       complexity = metricValue;
       displayThreshold = effectiveThreshold;
     }
@@ -289,8 +290,8 @@ export class ComplexityAnalyzer {
     const thresholds = { 
       testPaths: configThresholds?.testPaths ?? 15, 
       mentalLoad: configThresholds?.mentalLoad ?? 15, 
-      halsteadEffort,
-      estimatedBugs: configThresholds?.estimatedBugs ?? 1.5,
+      halsteadEffort, // Converted from minutes to effort internally (see above)
+      estimatedBugs: configThresholds?.estimatedBugs ?? 1.5, // Direct decimal value (no conversion needed)
     };
     const functionChunks = this.getUniqueFunctionChunks(chunks);
     
