@@ -235,16 +235,84 @@ export interface TokenUsageInfo {
 }
 
 /**
- * Format delta summary for display
+ * Group deltas by metric type and sum their values
  */
-function formatDeltaDisplay(deltaSummary: DeltaSummary | null | undefined): string {
-  if (!deltaSummary) return '';
+function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> {
+  return collect(deltas)
+    .groupBy('metricType')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((group: any) => group.sum('delta'))
+    .all() as unknown as Record<string, number>;
+}
+
+/**
+ * Format delta value for display, rounding bugs to 2 decimals
+ */
+function formatDeltaValue(metricType: string, delta: number): string {
+  if (metricType === 'halstead_bugs') {
+    return delta.toFixed(2);
+  }
+  return String(Math.round(delta));
+}
+
+/**
+ * Build metric breakdown string with emojis
+ * Note: getMetricEmoji is defined below (line ~441) to avoid duplication
+ */
+function buildMetricBreakdownForDisplay(deltaByMetric: Record<string, number>): string {
+  const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
+  const emojiMap: Record<string, string> = {
+    cyclomatic: '🔀',
+    cognitive: '🧠',
+    halstead_effort: '⏱️',
+    halstead_bugs: '🐛',
+  };
+  return collect(metricOrder)
+    .map(metricType => {
+      const metricDelta = deltaByMetric[metricType] || 0;
+      const emoji = emojiMap[metricType] || '📊';
+      const sign = metricDelta >= 0 ? '+' : '';
+      return `${emoji} ${sign}${formatDeltaValue(metricType, metricDelta)}`;
+    })
+    .all()
+    .join(' | ');
+}
+
+/**
+ * Categorize deltas into improved vs degraded counts
+ */
+function categorizeDeltas(deltas: ComplexityDelta[]): { improved: number; degraded: number } {
+  return deltas.reduce((acc, d) => {
+    if (['improved', 'deleted'].includes(d.severity)) acc.improved++;
+    else if (['warning', 'error', 'new'].includes(d.severity)) acc.degraded++;
+    return acc;
+  }, { improved: 0, degraded: 0 });
+}
+
+/**
+ * Determine trend emoji based on total delta
+ */
+function getTrendEmoji(totalDelta: number): string {
+  if (totalDelta > 0) return '⬆️';
+  if (totalDelta < 0) return '⬇️';
+  return '➡️';
+}
+
+/**
+ * Format delta display with per-metric breakdown
+ */
+function formatDeltaDisplay(deltas: ComplexityDelta[] | null | undefined): string {
+  if (!deltas || deltas.length === 0) return '';
   
-  const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
-  const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
-  let display = `\n\n**Complexity Change:** ${sign}${deltaSummary.totalDelta} ${trend}`;
-  if (deltaSummary.improved > 0) display += ` | ${deltaSummary.improved} improved`;
-  if (deltaSummary.degraded > 0) display += ` | ${deltaSummary.degraded} degraded`;
+  const { improved, degraded } = categorizeDeltas(deltas);
+  const deltaByMetric = groupDeltasByMetric(deltas);
+  const metricBreakdown = buildMetricBreakdownForDisplay(deltaByMetric);
+  const totalDelta = Object.values(deltaByMetric).reduce((sum, v) => sum + v, 0);
+  const trend = getTrendEmoji(totalDelta);
+
+  let display = `\n\n**Complexity Change:** ${metricBreakdown} ${trend}`;
+  if (improved > 0) display += ` | ${improved} improved`;
+  if (degraded > 0) display += ` | ${degraded} degraded`;
   return display;
 }
 
@@ -272,10 +340,10 @@ export function formatReviewComment(
   report: ComplexityReport,
   isFallback = false,
   tokenUsage?: TokenUsageInfo,
-  deltaSummary?: DeltaSummary | null
+  deltas?: ComplexityDelta[] | null
 ): string {
   const { summary } = report;
-  const deltaDisplay = formatDeltaDisplay(deltaSummary);
+  const deltaDisplay = formatDeltaDisplay(deltas);
   const fallbackNote = formatFallbackNote(isFallback);
   const tokenStats = formatTokenStats(tokenUsage);
 
