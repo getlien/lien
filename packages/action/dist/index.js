@@ -33265,16 +33265,14 @@ function buildReviewSummary(report, deltas, uncoveredNote) {
             const current = deltaByMetric.get(d.metricType) || 0;
             deltaByMetric.set(d.metricType, current + d.delta);
         }
-        // Build metric breakdown string with emojis
+        // Build metric breakdown string with emojis (always show all metrics)
         const metricParts = [];
         const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
         for (const metricType of metricOrder) {
-            const metricDelta = deltaByMetric.get(metricType);
-            if (metricDelta !== undefined && metricDelta !== 0) {
-                const emoji = src_getMetricEmoji(metricType);
-                const sign = metricDelta >= 0 ? '+' : '';
-                metricParts.push(`${emoji} ${sign}${metricDelta}`);
-            }
+            const metricDelta = deltaByMetric.get(metricType) || 0;
+            const emoji = src_getMetricEmoji(metricType);
+            const sign = metricDelta >= 0 ? '+' : '';
+            metricParts.push(`${emoji} ${sign}${metricDelta}`);
         }
         const metricBreakdown = metricParts.length > 0 ? metricParts.join(' | ') : '';
         const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';

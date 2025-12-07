@@ -386,16 +386,14 @@ function buildReviewSummary(
       deltaByMetric.set(d.metricType, current + d.delta);
     }
     
-    // Build metric breakdown string with emojis
+    // Build metric breakdown string with emojis (always show all metrics)
     const metricParts: string[] = [];
     const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
     for (const metricType of metricOrder) {
-      const metricDelta = deltaByMetric.get(metricType);
-      if (metricDelta !== undefined && metricDelta !== 0) {
-        const emoji = getMetricEmoji(metricType);
-        const sign = metricDelta >= 0 ? '+' : '';
-        metricParts.push(`${emoji} ${sign}${metricDelta}`);
-      }
+      const metricDelta = deltaByMetric.get(metricType) || 0;
+      const emoji = getMetricEmoji(metricType);
+      const sign = metricDelta >= 0 ? '+' : '';
+      metricParts.push(`${emoji} ${sign}${metricDelta}`);
     }
     
     const metricBreakdown = metricParts.length > 0 ? metricParts.join(' | ') : '';
