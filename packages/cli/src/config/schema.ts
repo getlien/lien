@@ -58,7 +58,7 @@ export interface LienConfig {
   complexity?: {
     enabled: boolean;
     thresholds: {
-      method: number;      // Cyclomatic complexity threshold (default: 10)
+      method: number;      // Cyclomatic complexity threshold (default: 15)
       cognitive: number;   // Cognitive complexity threshold (default: 15)
       file: number;        // File-level complexity (default: 50)
       average: number;     // Average complexity (default: 6)
@@ -154,7 +154,7 @@ export const defaultConfig: LienConfig = {
   complexity: {
     enabled: true,
     thresholds: {
-      method: 10,      // Cyclomatic complexity threshold
+      method: 15,      // Cyclomatic complexity threshold
       cognitive: 15,   // Cognitive complexity threshold (SonarQube default)
       file: 50,
       average: 6,

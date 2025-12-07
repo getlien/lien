@@ -50,7 +50,7 @@ function getConfig(): ActionConfig & { reviewStyle: ReviewStyle; baselineComplex
   return {
     openrouterApiKey: core.getInput('openrouter_api_key', { required: true }),
     model: core.getInput('model') || 'anthropic/claude-sonnet-4',
-    threshold: core.getInput('threshold') || '10',
+    threshold: core.getInput('threshold') || '15',
     githubToken: core.getInput('github_token') || process.env.GITHUB_TOKEN || '',
     reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
     baselineComplexityPath: core.getInput('baseline_complexity') || '',

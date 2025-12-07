@@ -163,7 +163,7 @@ export class ComplexityAnalyzer {
    * Checks both cyclomatic and cognitive complexity.
    */
   private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
-    const thresholds = this.config.complexity?.thresholds || { method: 10, cognitive: 15, file: 50, average: 6 };
+    const thresholds = this.config.complexity?.thresholds || { method: 15, cognitive: 15, file: 50, average: 6 };
     const severity = this.config.complexity?.severity || { warning: 1.0, error: 2.0 };
     const functionChunks = this.getUniqueFunctionChunks(chunks);
     

@@ -97,7 +97,7 @@ function applyThresholdOverrides(config: LienConfig | LegacyLienConfig, override
   if (!cfg.complexity) {
     cfg.complexity = {
       enabled: true,
-      thresholds: { method: 10, cognitive: 15, file: 50, average: 6 },
+      thresholds: { method: 15, cognitive: 15, file: 50, average: 6 },
       severity: { warning: 1.0, error: 2.0 },
     };
   } else if (!cfg.complexity.thresholds) {

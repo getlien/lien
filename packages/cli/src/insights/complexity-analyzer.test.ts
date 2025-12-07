@@ -21,7 +21,7 @@ describe('ComplexityAnalyzer', () => {
       complexity: {
         enabled: true,
         thresholds: {
-          method: 10,
+          method: 15,
           cognitive: 15,
           file: 50,
           average: 6,
@@ -47,7 +47,7 @@ describe('ComplexityAnalyzer', () => {
             language: 'typescript',
             symbolName: 'complex',
             symbolType: 'function',
-            complexity: 15, // Above threshold of 10
+            complexity: 20, // Above threshold of 15
           } as ChunkMetadata,
           score: 1.0,
           relevance: 'highly_relevant' as const,
@@ -78,7 +78,7 @@ describe('ComplexityAnalyzer', () => {
       expect(report.summary.filesAnalyzed).toBe(1);
       expect(report.files['src/test.ts'].violations).toHaveLength(1);
       expect(report.files['src/test.ts'].violations[0].symbolName).toBe('complex');
-      expect(report.files['src/test.ts'].violations[0].complexity).toBe(15);
+      expect(report.files['src/test.ts'].violations[0].complexity).toBe(20);
     });
 
     it('should calculate correct severity based on multiplier', async () => {
@@ -93,7 +93,7 @@ describe('ComplexityAnalyzer', () => {
             language: 'typescript',
             symbolName: 'warning',
             symbolType: 'function',
-            complexity: 15, // 1.5x threshold = warning
+            complexity: 20, // Above threshold (15), warning level
           } as ChunkMetadata,
         score: 1.0,
         relevance: 'highly_relevant' as const,
@@ -108,7 +108,7 @@ describe('ComplexityAnalyzer', () => {
             language: 'typescript',
             symbolName: 'error',
             symbolType: 'function',
-            complexity: 25, // 2.5x threshold = error
+            complexity: 32, // >= 2x threshold (30) = error
           } as ChunkMetadata,
         score: 1.0,
         relevance: 'highly_relevant' as const,
@@ -125,13 +125,13 @@ describe('ComplexityAnalyzer', () => {
     });
 
     it('should respect custom severity.warning multiplier', async () => {
-      // Custom config with severity.warning = 1.5 means violations only when > 15 (10 * 1.5)
+      // Custom config with severity.warning = 1.5 means violations only when >= 22.5 (15 * 1.5)
       const customConfig = {
         ...config,
         complexity: {
           enabled: true,
-          thresholds: { method: 10, cognitive: 15, file: 50, average: 6 },
-          severity: { warning: 1.5, error: 2.5 }, // warning at > 15, error at >= 25
+          thresholds: { method: 15, cognitive: 15, file: 50, average: 6 },
+          severity: { warning: 1.5, error: 2.5 }, // warning at >= 22.5, error at >= 37.5
         },
       };
 
@@ -146,7 +146,7 @@ describe('ComplexityAnalyzer', () => {
             language: 'typescript',
             symbolName: 'belowWarning',
             symbolType: 'function',
-            complexity: 12, // Below warning threshold of 15 (10 * 1.5)
+            complexity: 18, // Below warning threshold of 22.5 (15 * 1.5) - NOT a violation
           } as ChunkMetadata,
           score: 1.0,
           relevance: 'highly_relevant' as const,
@@ -161,7 +161,7 @@ describe('ComplexityAnalyzer', () => {
             language: 'typescript',
             symbolName: 'atWarning',
             symbolType: 'function',
-            complexity: 18, // Above warning (15), below error (25) = warning
+            complexity: 25, // Above warning (22.5), below error (37.5) = warning
           } as ChunkMetadata,
           score: 1.0,
           relevance: 'highly_relevant' as const,
@@ -176,7 +176,7 @@ describe('ComplexityAnalyzer', () => {
             language: 'typescript',
             symbolName: 'atError',
             symbolType: 'function',
-            complexity: 30, // Above error threshold of 25 (10 * 2.5) = error
+            complexity: 40, // Above error threshold of 37.5 (15 * 2.5) = error
           } as ChunkMetadata,
           score: 1.0,
           relevance: 'highly_relevant' as const,
@@ -189,7 +189,7 @@ describe('ComplexityAnalyzer', () => {
       const report = await analyzer.analyze();
 
       // Only 2 violations: atWarning (warning) and atError (error)
-      // belowWarning (complexity 12) should NOT be a violation with severity.warning = 1.5
+      // belowWarning (complexity 18) should NOT be a violation with severity.warning = 1.5
       expect(report.summary.totalViolations).toBe(2);
       expect(report.summary.bySeverity.warning).toBe(1);
       expect(report.summary.bySeverity.error).toBe(1);
@@ -360,7 +360,7 @@ describe('ComplexityAnalyzer', () => {
         score: 1.0,
         relevance: 'highly_relevant' as const,
         },
-        // File with 1 warning
+        // File with 1 warning (>= 15, < 30)
         {
           content: 'function medium() { }',
           metadata: {
@@ -371,12 +371,12 @@ describe('ComplexityAnalyzer', () => {
             language: 'typescript',
             symbolName: 'medium',
             symbolType: 'function',
-            complexity: 12,
+            complexity: 20, // Warning level (>= 15, < 30)
           } as ChunkMetadata,
         score: 1.0,
         relevance: 'highly_relevant' as const,
         },
-        // File with 1 error
+        // File with 1 error (>= 30)
         {
           content: 'function high() { }',
           metadata: {
@@ -387,7 +387,7 @@ describe('ComplexityAnalyzer', () => {
             language: 'typescript',
             symbolName: 'high',
             symbolType: 'function',
-            complexity: 25,
+            complexity: 35, // Error level (>= 30)
           } as ChunkMetadata,
         score: 1.0,
         relevance: 'highly_relevant' as const,
@@ -450,7 +450,7 @@ describe('ComplexityAnalyzer', () => {
             language: 'typescript',
             symbolName: 'veryComplex',
             symbolType: 'function',
-            complexity: 12, // Above cyclomatic threshold of 10
+            complexity: 20, // Above cyclomatic threshold of 15
             cognitiveComplexity: 18, // Above cognitive threshold of 15
           } as ChunkMetadata,
           score: 1.0,
@@ -473,7 +473,7 @@ describe('ComplexityAnalyzer', () => {
       const cognitiveViolation = violations.find(v => v.metricType === 'cognitive');
       
       expect(cyclomaticViolation).toBeDefined();
-      expect(cyclomaticViolation!.complexity).toBe(12);
+      expect(cyclomaticViolation!.complexity).toBe(20);
       expect(cyclomaticViolation!.message).toContain('Cyclomatic');
       
       expect(cognitiveViolation).toBeDefined();
@@ -514,7 +514,7 @@ describe('ComplexityAnalyzer', () => {
         ...config,
         complexity: {
           ...config.complexity!,
-          thresholds: { method: 10, cognitive: 25, file: 50, average: 6 }, // Higher cognitive threshold
+          thresholds: { method: 15, cognitive: 25, file: 50, average: 6 }, // Higher cognitive threshold
         },
       };
 
@@ -627,7 +627,7 @@ describe('ComplexityAnalyzer', () => {
             language: 'typescript',
             symbolName: 'complex',
             symbolType: 'function',
-            complexity: 12, // Just slightly above threshold (10)
+            complexity: 18, // Just slightly above threshold (15)
             imports: [],
           } as ChunkMetadata,
           score: 1.0,

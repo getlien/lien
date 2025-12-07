@@ -34,7 +34,7 @@ describe('complexityCommand', () => {
       complexity: {
         enabled: true,
         thresholds: {
-          method: 10,
+          method: 15,
           file: 50,
           average: 6,
         },
@@ -229,7 +229,7 @@ describe('complexityCommand', () => {
           language: 'typescript',
           symbolName: 'test',
           symbolType: 'function',
-          complexity: 25, // Will be error (2.5x threshold)
+          complexity: 35, // Will be error (>= 30, which is 2.0x threshold of 15)
         } as ChunkMetadata,
         score: 1.0,
         relevance: 'highly_relevant' as const,
@@ -260,7 +260,7 @@ describe('complexityCommand', () => {
           language: 'typescript',
           symbolName: 'test',
           symbolType: 'function',
-          complexity: 15, // Warning only (1.5x threshold)
+          complexity: 20, // Warning only (>= 15, < 30)
         } as ChunkMetadata,
         score: 1.0,
         relevance: 'highly_relevant' as const,
@@ -291,7 +291,7 @@ describe('complexityCommand', () => {
           language: 'typescript',
           symbolName: 'test',
           symbolType: 'function',
-          complexity: 12, // Warning
+          complexity: 20, // Warning (>= 15)
         } as ChunkMetadata,
         score: 1.0,
         relevance: 'highly_relevant' as const,
@@ -333,7 +333,7 @@ describe('complexityCommand', () => {
     mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
     mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
-    // With default threshold of 10, this would be a violation
+    // With default threshold of 15, this would be a violation
     // But with threshold of 15, it should not be
     await complexityCommand({
       format: 'json',

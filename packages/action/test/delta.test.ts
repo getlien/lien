@@ -22,7 +22,7 @@ function createViolation(
   filepath: string,
   symbolName: string,
   complexity: number,
-  threshold = 10
+  threshold = 15
 ): ComplexityViolation {
   return {
     filepath,
@@ -221,10 +221,10 @@ describe('calculateDeltas', () => {
 describe('calculateDeltaSummary', () => {
   it('calculates correct summary stats', () => {
     const deltas = [
-      { delta: 6, severity: 'warning' as const, filepath: '', symbolName: '', symbolType: '', startLine: 0, baseComplexity: 10, headComplexity: 16, threshold: 10 },
-      { delta: -4, severity: 'improved' as const, filepath: '', symbolName: '', symbolType: '', startLine: 0, baseComplexity: 14, headComplexity: 10, threshold: 10 },
-      { delta: 15, severity: 'new' as const, filepath: '', symbolName: '', symbolType: '', startLine: 0, baseComplexity: null, headComplexity: 15, threshold: 10 },
-      { delta: -12, severity: 'deleted' as const, filepath: '', symbolName: '', symbolType: '', startLine: 0, baseComplexity: 12, headComplexity: null, threshold: 10 },
+      { delta: 6, severity: 'warning' as const, filepath: '', symbolName: '', symbolType: '', startLine: 0, baseComplexity: 15, headComplexity: 21, threshold: 15 },
+      { delta: -4, severity: 'improved' as const, filepath: '', symbolName: '', symbolType: '', startLine: 0, baseComplexity: 19, headComplexity: 15, threshold: 15 },
+      { delta: 20, severity: 'new' as const, filepath: '', symbolName: '', symbolType: '', startLine: 0, baseComplexity: null, headComplexity: 20, threshold: 15 },
+      { delta: -17, severity: 'deleted' as const, filepath: '', symbolName: '', symbolType: '', startLine: 0, baseComplexity: 17, headComplexity: null, threshold: 15 },
     ];
 
     const summary = calculateDeltaSummary(deltas);

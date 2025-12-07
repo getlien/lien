@@ -109,6 +109,5 @@ jobs:
           model: 'anthropic/claude-sonnet-4'
           threshold: '15'
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          review_style: 'summary'
           baseline_complexity: '/tmp/base-complexity.json'
 
