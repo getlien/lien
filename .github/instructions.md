@@ -31,6 +31,7 @@ Use these instructions when reviewing PRs for the Lien project.
 - [ ] **Imports**: Ordered (Node built-ins → external deps → internal modules)
 - [ ] **Error Handling**: Errors thrown early, contextual error messages
 - [ ] **Comments**: Only where necessary (complex logic), no obvious comments
+- [ ] **Data Transformations**: Use `collect.js` for complex aggregations (groupBy, countBy, sum chains), native methods for simple operations
 
 ### 2. Architecture & Design
 
@@ -164,6 +165,7 @@ Use these instructions when reviewing PRs for the Lien project.
 - Unclear variable names (`x`, `temp`, `data`)
 - Nested callbacks (use async/await)
 - Copy-pasted code blocks
+- Nested `for` loops with manual aggregation (consider `collect.js`)
 
 ---
 
@@ -216,6 +218,12 @@ Consider using the contextualError utility for consistency with the rest of the 
 ```
 💭 Consider extracting this logic into a separate utility function.
 It's being duplicated in multiple places and would benefit from DRY.
+```
+
+### Data Transformation
+```
+💡 This nested loop with manual aggregation could be cleaner using collect.js:
+collect(items).groupBy('type').map(group => group.sum('value')).all()
 ```
 
 ---
