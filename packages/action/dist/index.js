@@ -35844,67 +35844,61 @@ function buildComplexityMap(report, files) {
     return new Map(entries);
 }
 /**
+ * Determine severity based on complexity change
+ */
+function determineSeverity(baseComplexity, headComplexity, delta, threshold) {
+    if (baseComplexity === null)
+        return 'new';
+    if (delta < 0)
+        return 'improved';
+    return headComplexity >= threshold * 2 ? 'error' : 'warning';
+}
+/**
+ * Create a delta object from violation data
+ */
+function createDelta(violation, baseComplexity, headComplexity, severity) {
+    const delta = baseComplexity !== null && headComplexity !== null
+        ? headComplexity - baseComplexity
+        : headComplexity ?? -(baseComplexity ?? 0);
+    return {
+        filepath: violation.filepath,
+        symbolName: violation.symbolName,
+        symbolType: violation.symbolType,
+        startLine: violation.startLine,
+        metricType: violation.metricType,
+        baseComplexity,
+        headComplexity,
+        delta,
+        threshold: violation.threshold,
+        severity,
+    };
+}
+/**
  * Calculate complexity deltas between base and head
  */
 function calculateDeltas(baseReport, headReport, changedFiles) {
-    const deltas = [];
     const baseMap = buildComplexityMap(baseReport, changedFiles);
     const headMap = buildComplexityMap(headReport, changedFiles);
-    // Track which base functions we've seen
     const seenBaseKeys = new Set();
-    // Process all head violations
-    for (const [key, headData] of headMap) {
+    // Process head violations
+    const headDeltas = dist_default()(Array.from(headMap.entries()))
+        .map(([key, headData]) => {
         const baseData = baseMap.get(key);
-        if (baseData) {
+        if (baseData)
             seenBaseKeys.add(key);
-        }
         const baseComplexity = baseData?.complexity ?? null;
         const headComplexity = headData.complexity;
         const delta = baseComplexity !== null ? headComplexity - baseComplexity : headComplexity;
-        // Determine severity based on delta
-        let severity;
-        if (baseComplexity === null) {
-            severity = 'new';
-        }
-        else if (delta < 0) {
-            severity = 'improved';
-        }
-        else if (headComplexity >= headData.violation.threshold * 2) {
-            severity = 'error';
-        }
-        else {
-            severity = 'warning';
-        }
-        deltas.push({
-            filepath: headData.violation.filepath,
-            symbolName: headData.violation.symbolName,
-            symbolType: headData.violation.symbolType,
-            startLine: headData.violation.startLine,
-            metricType: headData.violation.metricType,
-            baseComplexity,
-            headComplexity,
-            delta,
-            threshold: headData.violation.threshold,
-            severity,
-        });
-    }
+        const severity = determineSeverity(baseComplexity, headComplexity, delta, headData.violation.threshold);
+        return createDelta(headData.violation, baseComplexity, headComplexity, severity);
+    })
+        .all();
     // Process deleted functions (in base but not in head)
-    for (const [key, baseData] of baseMap) {
-        if (seenBaseKeys.has(key))
-            continue;
-        deltas.push({
-            filepath: baseData.violation.filepath,
-            symbolName: baseData.violation.symbolName,
-            symbolType: baseData.violation.symbolType,
-            startLine: baseData.violation.startLine,
-            metricType: baseData.violation.metricType,
-            baseComplexity: baseData.complexity,
-            headComplexity: null,
-            delta: -baseData.complexity, // Negative = improvement (removed complexity)
-            threshold: baseData.violation.threshold,
-            severity: 'deleted',
-        });
-    }
+    const deletedDeltas = dist_default()(Array.from(baseMap.entries()))
+        .filter(([key]) => !seenBaseKeys.has(key))
+        .map(([_, baseData]) => createDelta(baseData.violation, baseData.complexity, null, 'deleted'))
+        .all();
+    const deltas = [...headDeltas, ...deletedDeltas];
     // Sort by delta (worst first), then by absolute complexity
     deltas.sort((a, b) => {
         // Errors first, then warnings, then new, then improved, then deleted

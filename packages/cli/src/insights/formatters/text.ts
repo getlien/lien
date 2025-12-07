@@ -80,6 +80,41 @@ const defaultFormatter: MetricFormatter = (val, thresh) => ({
 });
 
 /**
+ * Format symbol name with appropriate suffix
+ */
+function formatSymbolDisplay(violation: ViolationWithFile, isBold: boolean): string {
+  const display = ['function', 'method'].includes(violation.symbolType)
+    ? `${violation.symbolName}()`
+    : violation.symbolName;
+  return isBold ? chalk.bold(display) : display;
+}
+
+/**
+ * Format dependency impact information
+ */
+function formatDependencyInfo(fileData: FileComplexityData): string[] {
+  const depCount = fileData.dependentCount ?? fileData.dependents.length;
+  if (depCount === 0) return [];
+
+  const lines = [chalk.dim(`    📦  Imported by ${depCount} file${depCount !== 1 ? 's' : ''}`)];
+  
+  if (fileData.dependentComplexityMetrics) {
+    const { averageComplexity, maxComplexity } = fileData.dependentComplexityMetrics;
+    lines.push(chalk.dim(`    - Dependent avg complexity: ${averageComplexity}, max: ${maxComplexity}`));
+  }
+  
+  return lines;
+}
+
+/**
+ * Format percentage over threshold
+ */
+function formatPercentageOver(complexity: number, threshold: number): string {
+  if (threshold <= 0) return 'N/A (invalid threshold)';
+  return `${Math.round(((complexity - threshold) / threshold) * 100)}% over threshold`;
+}
+
+/**
  * Format a single violation entry with its metadata
  */
 function formatViolation(
@@ -88,44 +123,20 @@ function formatViolation(
   colorFn: typeof chalk.red | typeof chalk.yellow,
   isBold: boolean
 ): string[] {
-  const lines: string[] = [];
-  
-  // Symbol display
-  const symbolDisplay = (violation.symbolType === 'function' || violation.symbolType === 'method')
-    ? violation.symbolName + '()'
-    : violation.symbolName;
-  const symbolText = isBold ? chalk.bold(symbolDisplay) : symbolDisplay;
-  lines.push(colorFn(`  ${violation.file}:${violation.startLine}`) + chalk.dim(' - ') + symbolText);
-  
-  // Metric display using lookup table
+  const symbolText = formatSymbolDisplay(violation, isBold);
   const metricLabel = getMetricLabel(violation.metricType);
   const formatter = metricFormatters[violation.metricType] || defaultFormatter;
   const { complexity: complexityDisplay, threshold: thresholdDisplay } = formatter(violation.complexity, violation.threshold);
-  lines.push(chalk.dim(`    ${metricLabel}: ${complexityDisplay} (threshold: ${thresholdDisplay})`));
-  
-  // Percentage over threshold
-  const percentageText = violation.threshold > 0
-    ? `${Math.round(((violation.complexity - violation.threshold) / violation.threshold) * 100)}% over threshold`
-    : 'N/A (invalid threshold)';
-  lines.push(chalk.dim(`    ⬆️  ${percentageText}`));
-  
-  // Halstead details if available
-  lines.push(...formatHalsteadDetails(violation));
-  
-  // Dependency impact
-  const depCount = fileData.dependentCount ?? fileData.dependents.length;
-  if (depCount > 0) {
-    lines.push(chalk.dim(`    📦  Imported by ${depCount} file${depCount !== 1 ? 's' : ''}`));
-    if (fileData.dependentComplexityMetrics) {
-      const metrics = fileData.dependentComplexityMetrics;
-      lines.push(chalk.dim(`    - Dependent avg complexity: ${metrics.averageComplexity}, max: ${metrics.maxComplexity}`));
-    }
-  }
-  
-  lines.push(chalk.dim(`    ⚠️  Risk: ${fileData.riskLevel.toUpperCase()}`));
-  lines.push('');
-  
-  return lines;
+
+  return [
+    colorFn(`  ${violation.file}:${violation.startLine}`) + chalk.dim(' - ') + symbolText,
+    chalk.dim(`    ${metricLabel}: ${complexityDisplay} (threshold: ${thresholdDisplay})`),
+    chalk.dim(`    ⬆️  ${formatPercentageOver(violation.complexity, violation.threshold)}`),
+    ...formatHalsteadDetails(violation),
+    ...formatDependencyInfo(fileData),
+    chalk.dim(`    ⚠️  Risk: ${fileData.riskLevel.toUpperCase()}`),
+    '',
+  ];
 }
 
 /**

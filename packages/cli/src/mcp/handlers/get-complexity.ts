@@ -1,7 +1,31 @@
+import collect from 'collect.js';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetComplexitySchema } from '../schemas/index.js';
 import { ComplexityAnalyzer } from '../../insights/complexity-analyzer.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
+import type { ComplexityViolation, FileComplexityData } from '../../insights/types.js';
+
+/**
+ * Transform a violation with file-level metadata for API response
+ */
+function transformViolation(v: ComplexityViolation, fileData: FileComplexityData) {
+  return {
+    filepath: v.filepath,
+    symbolName: v.symbolName,
+    symbolType: v.symbolType,
+    startLine: v.startLine,
+    endLine: v.endLine,
+    complexity: v.complexity,
+    metricType: v.metricType,
+    threshold: v.threshold,
+    severity: v.severity,
+    language: v.language,
+    message: v.message,
+    dependentCount: fileData.dependentCount || 0,
+    riskLevel: fileData.riskLevel,
+    ...(v.halsteadDetails && { halsteadDetails: v.halsteadDetails }),
+  };
+}
 
 /**
  * Handle get_complexity tool calls.
@@ -17,56 +41,28 @@ export async function handleGetComplexity(
     GetComplexitySchema,
     async (validatedArgs) => {
       log('Analyzing complexity...');
-
-      // Check if index has been updated and reconnect if needed
       await checkAndReconnect();
 
-      // Use ComplexityAnalyzer with current config
       const analyzer = new ComplexityAnalyzer(vectorDB, config);
       const report = await analyzer.analyze(validatedArgs.files);
-
       log(`Analyzed ${report.summary.filesAnalyzed} files`);
 
-      // Flatten violations from all files
-      let violations = Object.entries(report.files)
-        .flatMap(([_filepath, fileData]) =>
-          fileData.violations.map(v => ({
-            filepath: v.filepath,
-            symbolName: v.symbolName,
-            symbolType: v.symbolType,
-            startLine: v.startLine,
-            endLine: v.endLine,
-            complexity: v.complexity,
-            metricType: v.metricType, // 'cyclomatic', 'cognitive', 'halstead_effort', or 'halstead_bugs'
-            threshold: v.threshold,
-            severity: v.severity,
-            language: v.language,
-            message: v.message,
-            dependentCount: fileData.dependentCount || 0,
-            riskLevel: fileData.riskLevel,
-            // Include Halstead details for Halstead-type violations
-            ...(v.halsteadDetails && { halsteadDetails: v.halsteadDetails }),
-          }))
-        );
+      // Transform and filter violations using collect.js
+      const violations = collect(Object.entries(report.files))
+        .flatMap(([_, fileData]) => 
+          fileData.violations.map(v => transformViolation(v, fileData))
+        )
+        .when(validatedArgs.threshold !== undefined, items => 
+          items.filter(v => v.complexity >= validatedArgs.threshold!)
+        )
+        .sortByDesc('complexity')
+        .all();
 
-      // Apply custom threshold filter if provided
-      if (validatedArgs.threshold !== undefined) {
-        violations = violations.filter(v => v.complexity >= validatedArgs.threshold!);
-      }
+      const topViolations = collect(violations).take(validatedArgs.top).all();
 
-      // Sort by complexity descending
-      violations.sort((a, b) => b.complexity - a.complexity);
+      // Calculate severity counts
+      const bySeverity = collect(violations).countBy('severity').all() as unknown as Record<string, number>;
 
-      // Apply top limit
-      const topViolations = violations.slice(0, validatedArgs.top);
-
-      // Recalculate bySeverity after threshold filtering for consistency
-      const bySeverity = {
-        error: violations.filter(v => v.severity === 'error').length,
-        warning: violations.filter(v => v.severity === 'warning').length,
-      };
-
-      // Build response
       return {
         indexInfo: getIndexMetadata(),
         summary: {
@@ -74,7 +70,10 @@ export async function handleGetComplexity(
           avgComplexity: report.summary.avgComplexity,
           maxComplexity: report.summary.maxComplexity,
           violationCount: violations.length,
-          bySeverity,
+          bySeverity: {
+            error: bySeverity['error'] || 0,
+            warning: bySeverity['warning'] || 0,
+          },
         },
         violations: topViolations,
       };
