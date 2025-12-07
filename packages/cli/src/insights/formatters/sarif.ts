@@ -59,6 +59,19 @@ interface SarifResult {
 }
 
 /**
+ * Get the SARIF rule ID for a metric type
+ */
+function getRuleId(metricType: string): string {
+  switch (metricType) {
+    case 'cognitive': return 'lien/high-cognitive-complexity';
+    case 'cyclomatic': return 'lien/high-cyclomatic-complexity';
+    case 'halstead_effort': return 'lien/high-halstead-effort';
+    case 'halstead_difficulty': return 'lien/high-halstead-difficulty';
+    default: return 'lien/high-complexity';
+  }
+}
+
+/**
  * Format complexity report as SARIF for GitHub Code Scanning
  */
 export function formatSarifReport(report: ComplexityReport): string {
@@ -87,6 +100,30 @@ export function formatSarifReport(report: ComplexityReport): string {
         text: 'Consider flattening nested conditionals, extracting helper functions, or using guard clauses.',
       },
     },
+    {
+      id: 'lien/high-halstead-effort',
+      shortDescription: {
+        text: 'High Halstead effort',
+      },
+      fullDescription: {
+        text: 'Function or method requires significant mental effort to understand, based on operator and operand counts (Halstead metrics).',
+      },
+      help: {
+        text: 'Consider simplifying expressions, reducing variable count, or breaking into smaller functions.',
+      },
+    },
+    {
+      id: 'lien/high-halstead-difficulty',
+      shortDescription: {
+        text: 'High Halstead difficulty',
+      },
+      fullDescription: {
+        text: 'Function or method is error-prone based on Halstead difficulty metric, which measures program complexity from operators and operands.',
+      },
+      help: {
+        text: 'Consider introducing named constants, reducing operator variety, or extracting complex expressions.',
+      },
+    },
   ];
 
   const results: SarifResult[] = [];
@@ -94,9 +131,7 @@ export function formatSarifReport(report: ComplexityReport): string {
   // Convert violations to SARIF results
   for (const [filepath, fileData] of Object.entries(report.files)) {
     for (const violation of fileData.violations) {
-      const ruleId = violation.metricType === 'cognitive'
-        ? 'lien/high-cognitive-complexity'
-        : 'lien/high-cyclomatic-complexity';
+      const ruleId = getRuleId(violation.metricType);
       
       results.push({
         ruleId,

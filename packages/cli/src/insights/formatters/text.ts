@@ -7,6 +7,32 @@ import { ComplexityReport, ComplexityViolation, FileComplexityData } from '../ty
 type ViolationWithFile = ComplexityViolation & { file: string };
 
 /**
+ * Get the display label for a metric type
+ */
+function getMetricLabel(metricType: ComplexityViolation['metricType']): string {
+  switch (metricType) {
+    case 'cognitive': return 'Cognitive complexity';
+    case 'cyclomatic': return 'Cyclomatic complexity';
+    case 'halstead_effort': return 'Halstead effort';
+    case 'halstead_difficulty': return 'Halstead difficulty';
+    default: return 'Complexity';
+  }
+}
+
+/**
+ * Format Halstead details as additional lines
+ */
+function formatHalsteadDetails(violation: ViolationWithFile): string[] {
+  if (!violation.halsteadDetails) return [];
+  
+  const { volume, difficulty, effort, bugs } = violation.halsteadDetails;
+  return [
+    chalk.dim(`    📊  Volume: ${volume.toLocaleString()}, Difficulty: ${difficulty.toFixed(1)}`),
+    chalk.dim(`    ⏱️  Effort: ${effort.toLocaleString()}, Est. bugs: ${bugs.toFixed(3)}`),
+  ];
+}
+
+/**
  * Format a single violation entry with its metadata
  */
 function formatViolation(
@@ -24,9 +50,15 @@ function formatViolation(
   const symbolText = isBold ? chalk.bold(symbolDisplay) : symbolDisplay;
   lines.push(colorFn(`  ${violation.file}:${violation.startLine}`) + chalk.dim(' - ') + symbolText);
   
-  // Show metric type (cyclomatic vs cognitive)
-  const metricLabel = violation.metricType === 'cognitive' ? 'Cognitive complexity' : 'Cyclomatic complexity';
-  lines.push(chalk.dim(`    ${metricLabel}: ${violation.complexity} (threshold: ${violation.threshold})`));
+  // Show metric type and value
+  const metricLabel = getMetricLabel(violation.metricType);
+  const complexityDisplay = violation.metricType.startsWith('halstead_')
+    ? violation.complexity.toLocaleString()
+    : violation.complexity.toString();
+  const thresholdDisplay = violation.metricType.startsWith('halstead_')
+    ? violation.threshold.toLocaleString()
+    : violation.threshold.toString();
+  lines.push(chalk.dim(`    ${metricLabel}: ${complexityDisplay} (threshold: ${thresholdDisplay})`));
   
   let percentageText: string;
   if (violation.threshold > 0) {
@@ -36,6 +68,9 @@ function formatViolation(
     percentageText = 'N/A (invalid threshold)';
   }
   lines.push(chalk.dim(`    ⬆️  ${percentageText}`));
+  
+  // Show Halstead details if available
+  lines.push(...formatHalsteadDetails(violation));
   
   // Show dependency impact
   const depCount = fileData.dependentCount ?? fileData.dependents.length;
