@@ -207,7 +207,7 @@ async function run(): Promise<void> {
     }
 
     // Always update PR description with stats badge
-    const badge = buildDescriptionBadge(report, deltaSummary);
+    const badge = buildDescriptionBadge(report, deltaSummary, deltas);
     await updatePRDescription(octokit, prContext, badge);
 
     if (report.summary.totalViolations === 0) {
@@ -292,7 +292,7 @@ function buildLineComments(
       ? formatSeverityEmoji(delta.severity)
       : (violation.severity === 'error' ? '🔴' : '🟡');
     
-    const lineNote = commentLine !== violation.startLine
+    const lineNote = commentLine !== violation.startLine 
       ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
       : '';
     

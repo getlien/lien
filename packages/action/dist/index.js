@@ -32570,12 +32570,11 @@ function getMetricEmoji(metricType) {
 }
 /**
  * Build the PR description stats badge
- * Human-friendly summary with technical details collapsed
+ * Human-friendly summary with metrics table
  */
-function buildDescriptionBadge(report, deltaSummary) {
-    const deltaDisplay = formatBadgeDelta(deltaSummary);
+function buildDescriptionBadge(report, deltaSummary, deltas) {
     const status = determineStatus(report, deltaSummary);
-    // Build metric breakdown table
+    // Build metric breakdown table with violations and deltas
     let metricTable = '';
     if (report && report.summary.totalViolations > 0) {
         // Count violations by metric type
@@ -32586,7 +32585,15 @@ function buildDescriptionBadge(report, deltaSummary) {
                 byMetric.set(v.metricType, count + 1);
             }
         }
-        // Build table rows
+        // Calculate delta by metric type
+        const deltaByMetric = new Map();
+        if (deltas) {
+            for (const d of deltas) {
+                const current = deltaByMetric.get(d.metricType) || 0;
+                deltaByMetric.set(d.metricType, current + d.delta);
+            }
+        }
+        // Build table rows (only show metrics with violations)
         const rows = [];
         const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
         for (const metricType of metricOrder) {
@@ -32594,27 +32601,24 @@ function buildDescriptionBadge(report, deltaSummary) {
             if (count && count > 0) {
                 const emoji = getMetricEmoji(metricType);
                 const label = getMetricLabel(metricType);
-                rows.push(`| ${emoji} ${label} | ${count} |`);
+                const delta = deltaByMetric.get(metricType) || 0;
+                const deltaStr = deltas ? (delta >= 0 ? `+${delta}` : `${delta}`) : '—';
+                rows.push(`| ${emoji} ${label} | ${count} | ${deltaStr} |`);
             }
         }
         if (rows.length > 0) {
             metricTable = `
-| Metric | Violations |
-|--------|:----------:|
+| Metric | Violations | Change |
+|--------|:----------:|:------:|
 ${rows.join('\n')}
 `;
         }
     }
-    const changeRow = deltaSummary ? `\n**Complexity Change:** ${deltaDisplay}` : '';
     return `### 👁️ Veille
 
 ${status.emoji} ${status.message}
-
-<details>
-<summary>📊 Details</summary>
-${metricTable}${changeRow}
-
-</details>`;
+${metricTable}
+*[Veille](https://lien.dev) by Lien*`;
 }
 /**
  * Build Halstead details string for prompts
@@ -33121,7 +33125,7 @@ async function run() {
             core.setOutput('degraded', deltaSummary.degraded);
         }
         // Always update PR description with stats badge
-        const badge = buildDescriptionBadge(report, deltaSummary);
+        const badge = buildDescriptionBadge(report, deltaSummary, deltas);
         await updatePRDescription(octokit, prContext, badge);
         if (report.summary.totalViolations === 0) {
             core.info('No complexity violations found');

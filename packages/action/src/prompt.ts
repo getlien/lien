@@ -382,16 +382,16 @@ function getMetricEmoji(metricType: string): string {
 
 /**
  * Build the PR description stats badge
- * Human-friendly summary with technical details collapsed
+ * Human-friendly summary with metrics table
  */
 export function buildDescriptionBadge(
   report: ComplexityReport | null,
-  deltaSummary: DeltaSummary | null
+  deltaSummary: DeltaSummary | null,
+  deltas: ComplexityDelta[] | null
 ): string {
-  const deltaDisplay = formatBadgeDelta(deltaSummary);
   const status = determineStatus(report, deltaSummary);
 
-  // Build metric breakdown table
+  // Build metric breakdown table with violations and deltas
   let metricTable = '';
   if (report && report.summary.totalViolations > 0) {
     // Count violations by metric type
@@ -403,7 +403,16 @@ export function buildDescriptionBadge(
       }
     }
 
-    // Build table rows
+    // Calculate delta by metric type
+    const deltaByMetric = new Map<string, number>();
+    if (deltas) {
+      for (const d of deltas) {
+        const current = deltaByMetric.get(d.metricType) || 0;
+        deltaByMetric.set(d.metricType, current + d.delta);
+      }
+    }
+
+    // Build table rows (only show metrics with violations)
     const rows: string[] = [];
     const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
     for (const metricType of metricOrder) {
@@ -411,30 +420,26 @@ export function buildDescriptionBadge(
       if (count && count > 0) {
         const emoji = getMetricEmoji(metricType);
         const label = getMetricLabel(metricType);
-        rows.push(`| ${emoji} ${label} | ${count} |`);
+        const delta = deltaByMetric.get(metricType) || 0;
+        const deltaStr = deltas ? (delta >= 0 ? `+${delta}` : `${delta}`) : '—';
+        rows.push(`| ${emoji} ${label} | ${count} | ${deltaStr} |`);
       }
     }
 
     if (rows.length > 0) {
       metricTable = `
-| Metric | Violations |
-|--------|:----------:|
+| Metric | Violations | Change |
+|--------|:----------:|:------:|
 ${rows.join('\n')}
 `;
     }
   }
 
-  const changeRow = deltaSummary ? `\n**Complexity Change:** ${deltaDisplay}` : '';
-
   return `### 👁️ Veille
 
 ${status.emoji} ${status.message}
-
-<details>
-<summary>📊 Details</summary>
-${metricTable}${changeRow}
-
-</details>`;
+${metricTable}
+*[Veille](https://lien.dev) by Lien*`;
 }
 
 /**

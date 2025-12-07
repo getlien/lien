@@ -39,9 +39,9 @@ export declare function formatReviewComment(aiReview: string, report: Complexity
 export declare function getViolationKey(violation: ComplexityViolation): string;
 /**
  * Build the PR description stats badge
- * Human-friendly summary with technical details collapsed
+ * Human-friendly summary with metrics table
  */
-export declare function buildDescriptionBadge(report: ComplexityReport | null, deltaSummary: DeltaSummary | null): string;
+export declare function buildDescriptionBadge(report: ComplexityReport | null, deltaSummary: DeltaSummary | null, deltas: ComplexityDelta[] | null): string;
 /**
  * Build a prompt for generating a single line comment for a violation
  */
