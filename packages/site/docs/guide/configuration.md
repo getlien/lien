@@ -284,8 +284,8 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
     "thresholds": {
       "method": 15,
       "cognitive": 15,
-      "halsteadEffort": 1000000,
-      "halsteadDifficulty": 50,
+      "halsteadEffort": 300000,
+      "halsteadDifficulty": 30,
       "file": 50,
       "average": 6
     },

@@ -357,18 +357,18 @@ Analyze complexity of src/api/
       "symbolType": "function",
       "startLine": 45,
       "endLine": 120,
-      "complexity": 1250000,
-      "threshold": 1000000,
+      "complexity": 450000,
+      "threshold": 300000,
       "severity": "warning",
       "metricType": "halstead_effort",
       "language": "typescript",
-      "message": "Halstead effort 1,250,000 exceeds threshold 1,000,000",
+      "message": "Halstead effort 450,000 exceeds threshold 300,000",
       "dependentCount": 5,
       "riskLevel": "medium",
       "halsteadDetails": {
         "volume": 850.5,
         "difficulty": 45.2,
-        "effort": 1250000,
+        "effort": 450000,
         "bugs": 0.283
       }
     }
