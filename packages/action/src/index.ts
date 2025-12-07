@@ -591,8 +591,7 @@ async function postSummaryReview(
   );
 
   const usage = getTokenUsage();
-  const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
-  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltaSummary);
+  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas);
   await postPRComment(octokit, prContext, comment);
   core.info('Successfully posted AI review summary comment');
 }

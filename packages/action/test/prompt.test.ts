@@ -230,19 +230,16 @@ describe('prompt', () => {
         unchanged: 0,
       };
 
-      const badge = buildDescriptionBadge(mockReport, deltaSummary);
+      const badge = buildDescriptionBadge(mockReport, deltaSummary, null);
 
       expect(badge).toContain('### 👁️ Veille');
-      expect(badge).toContain('-15 ⬇️');
       // mockReport has violations but delta is negative - show improved with pre-existing note
       expect(badge).toContain('✅ **Improved!**');
       expect(badge).toContain('pre-existing');
-      expect(badge).toContain('<details>');
-      expect(badge).toContain('📊 Details');
     });
 
     it('should show stable when pre-existing violations but no new ones', () => {
-      const badge = buildDescriptionBadge(mockReport, null);
+      const badge = buildDescriptionBadge(mockReport, null, null);
 
       // mockReport has violations but no delta info - show stable with pre-existing note
       expect(badge).toContain('➡️ **Stable**');
@@ -261,7 +258,7 @@ describe('prompt', () => {
         files: {},
       };
 
-      const badge = buildDescriptionBadge(warningsOnlyReport, null);
+      const badge = buildDescriptionBadge(warningsOnlyReport, null, null);
 
       // No delta info, has violations - show stable with pre-existing note
       expect(badge).toContain('➡️ **Stable**');
@@ -288,11 +285,10 @@ describe('prompt', () => {
         unchanged: 0,
       };
 
-      const badge = buildDescriptionBadge(cleanReport, deltaSummary);
+      const badge = buildDescriptionBadge(cleanReport, deltaSummary, null);
 
       expect(badge).toContain('✅ **Improved!**');
       expect(badge).toContain('reduces complexity');
-      expect(badge).toContain('-10 ⬇️');
     });
 
     it('should show stable when delta positive but no violations', () => {
@@ -315,7 +311,7 @@ describe('prompt', () => {
         unchanged: 0,
       };
 
-      const badge = buildDescriptionBadge(cleanReport, deltaSummary);
+      const badge = buildDescriptionBadge(cleanReport, deltaSummary, null);
 
       expect(badge).toContain('➡️ **Stable**');
       expect(badge).toContain('increased slightly but within limits');
@@ -333,7 +329,7 @@ describe('prompt', () => {
         files: {},
       };
 
-      const badge = buildDescriptionBadge(cleanReport, null);
+      const badge = buildDescriptionBadge(cleanReport, null, null);
 
       expect(badge).toContain('✅ **Good**');
       expect(badge).toContain('No complexity issues found');
@@ -349,22 +345,67 @@ describe('prompt', () => {
         unchanged: 0,
       };
 
-      const badge = buildDescriptionBadge(null, deltaSummary);
+      const badge = buildDescriptionBadge(null, deltaSummary, null);
 
-      expect(badge).toContain('0'); // violations default
-      expect(badge).toContain('—'); // max complexity default
-      expect(badge).toContain('-5 ⬇️');
+      // Shows improved status with human-friendly message
       expect(badge).toContain('✅ **Improved!**');
+      expect(badge).toContain('reduces complexity');
     });
 
-    it('should format the table inside details correctly', () => {
-      const badge = buildDescriptionBadge(mockReport, null);
+    it('should format the metric table when violations have metricType', () => {
+      // Create a report with metricType set on violations
+      const reportWithMetrics: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 2,
+          totalViolations: 2,
+          bySeverity: { error: 1, warning: 1 },
+          avgComplexity: 15.0,
+          maxComplexity: 20,
+        },
+        files: {
+          'src/complex.ts': {
+            violations: [
+              {
+                filepath: 'src/complex.ts',
+                startLine: 10,
+                endLine: 50,
+                symbolName: 'complexFunction',
+                symbolType: 'function',
+                language: 'typescript',
+                complexity: 20,
+                threshold: 15,
+                severity: 'error',
+                message: 'Cyclomatic complexity exceeds threshold',
+                metricType: 'cyclomatic',
+              },
+              {
+                filepath: 'src/complex.ts',
+                startLine: 60,
+                endLine: 100,
+                symbolName: 'anotherFunction',
+                symbolType: 'function',
+                language: 'typescript',
+                complexity: 18,
+                threshold: 15,
+                severity: 'warning',
+                message: 'Cognitive complexity exceeds threshold',
+                metricType: 'cognitive',
+              },
+            ],
+            dependents: [],
+            testAssociations: [],
+            riskLevel: 'high',
+          },
+        },
+      };
 
-      // Check new table structure
-      expect(badge).toContain('| Violations | Max Complexity | Change |');
-      expect(badge).toContain('|:----------:|:--------------:|:------:|');
-      expect(badge).toContain('<details>');
-      expect(badge).toContain('</details>');
+      const badge = buildDescriptionBadge(reportWithMetrics, null, null);
+
+      // Check metric table structure (only shown when violations have metricType)
+      expect(badge).toContain('| Metric | Violations | Change |');
+      expect(badge).toContain('|--------|:----------:|:------:|');
+      expect(badge).toContain('🔀'); // cyclomatic emoji
+      expect(badge).toContain('🧠'); // cognitive emoji
     });
   });
 });
