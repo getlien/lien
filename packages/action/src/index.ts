@@ -313,6 +313,19 @@ function buildLineComments(
 }
 
 /**
+ * Get emoji for metric type
+ */
+function getMetricEmoji(metricType: string): string {
+  switch (metricType) {
+    case 'cyclomatic': return '🔀';
+    case 'cognitive': return '🧠';
+    case 'halstead_effort': return '⏱️';
+    case 'halstead_bugs': return '🐛';
+    default: return '📊';
+  }
+}
+
+/**
  * Build uncovered violations note for summary
  */
 function buildUncoveredNote(
@@ -325,7 +338,10 @@ function buildUncoveredNote(
     .map(v => {
       const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
       const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-      return `  - \`${v.symbolName}\` in \`${v.filepath}\`: complexity ${v.complexity}${deltaStr}`;
+      const emoji = getMetricEmoji(v.metricType);
+      const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
+      const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
+      return `* \`${v.symbolName}\` in \`${v.filepath}\`: ${emoji} ${metricLabel} ${valueDisplay}${deltaStr}`;
     })
     .join('\n');
 

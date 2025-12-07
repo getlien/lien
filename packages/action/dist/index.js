@@ -33205,6 +33205,18 @@ function buildLineComments(violationsWithLines, aiComments, deltaMap) {
     return lineComments;
 }
 /**
+ * Get emoji for metric type
+ */
+function src_getMetricEmoji(metricType) {
+    switch (metricType) {
+        case 'cyclomatic': return '🔀';
+        case 'cognitive': return '🧠';
+        case 'halstead_effort': return '⏱️';
+        case 'halstead_bugs': return '🐛';
+        default: return '📊';
+    }
+}
+/**
  * Build uncovered violations note for summary
  */
 function buildUncoveredNote(uncoveredViolations, deltaMap) {
@@ -33214,7 +33226,10 @@ function buildUncoveredNote(uncoveredViolations, deltaMap) {
         .map(v => {
         const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
         const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-        return `  - \`${v.symbolName}\` in \`${v.filepath}\`: complexity ${v.complexity}${deltaStr}`;
+        const emoji = src_getMetricEmoji(v.metricType);
+        const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
+        const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
+        return `* \`${v.symbolName}\` in \`${v.filepath}\`: ${emoji} ${metricLabel} ${valueDisplay}${deltaStr}`;
     })
         .join('\n');
     return `\n\n<details>\n<summary>⚠️ ${uncoveredViolations.length} violation${uncoveredViolations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${uncoveredList}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
