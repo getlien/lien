@@ -62,8 +62,6 @@ export interface LienConfig {
       mentalLoad: number;            // 🧠 Max mental load score (default: 15)
       timeToUnderstandMinutes?: number;  // ⏱️ Max minutes to understand (default: 60)
       estimatedBugs?: number;            // 🐛 Max estimated bugs (default: 1.5)
-      file: number;                  // File-level complexity (default: 50)
-      average: number;               // Average complexity (default: 6)
     };
     severity: {
       warning: number;     // Multiplier for warning threshold (default: 1.0)
@@ -160,8 +158,6 @@ export const defaultConfig: LienConfig = {
       mentalLoad: 15,           // 🧠 Max mental load score
       timeToUnderstandMinutes: 60,  // ⏱️ Functions taking >1 hour to understand
       estimatedBugs: 1.5,           // 🐛 Functions estimated to have >1.5 bugs
-      file: 50,
-      average: 6,
     },
     severity: {
       warning: 1.0,

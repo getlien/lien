@@ -97,11 +97,11 @@ function applyThresholdOverrides(config: LienConfig | LegacyLienConfig, override
   if (!cfg.complexity) {
     cfg.complexity = {
       enabled: true,
-      thresholds: { testPaths: 15, mentalLoad: 15, file: 50, average: 6 },
+      thresholds: { testPaths: 15, mentalLoad: 15 },
       severity: { warning: 1.0, error: 2.0 },
     };
   } else if (!cfg.complexity.thresholds) {
-    cfg.complexity.thresholds = { testPaths: 15, mentalLoad: 15, file: 50, average: 6 };
+    cfg.complexity.thresholds = { testPaths: 15, mentalLoad: 15 };
   }
   
   // Apply overrides (CLI flags use --cyclomatic/--cognitive for familiarity)

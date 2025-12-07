@@ -272,8 +272,6 @@ export class ComplexityAnalyzer {
       mentalLoad: configThresholds?.mentalLoad ?? 15, 
       halsteadEffort,
       estimatedBugs: configThresholds?.estimatedBugs ?? 1.5,
-      file: configThresholds?.file ?? 50, 
-      average: configThresholds?.average ?? 6 
     };
     const severity = this.config.complexity?.severity || { warning: 1.0, error: 2.0 };
     const functionChunks = this.getUniqueFunctionChunks(chunks);

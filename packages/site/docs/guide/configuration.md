@@ -285,9 +285,7 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
       "testPaths": 15,
       "mentalLoad": 15,
       "timeToUnderstandMinutes": 60,
-      "estimatedBugs": 1.5,
-      "file": 50,
-      "average": 6
+      "estimatedBugs": 1.5
     },
     "severity": {
       "warning": 1.0,
@@ -305,8 +303,6 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 | `mentalLoad` | 15 | 🧠 Max mental load score (nesting penalty) |
 | `timeToUnderstandMinutes` | 60 | ⏱️ Functions taking longer than 1 hour to understand |
 | `estimatedBugs` | 1.5 | 🐛 Flag functions estimated to have >1.5 bugs |
-| `file` | 50 | Maximum total complexity per file |
-| `average` | 6 | Maximum average complexity per file |
 
 ::: tip Halstead Metrics
 Both Halstead metrics are based on scientific research:
