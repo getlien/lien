@@ -378,9 +378,30 @@ function buildReviewSummary(
   let deltaDisplay = '';
   if (deltas && deltas.length > 0) {
     const deltaSummary = calculateDeltaSummary(deltas);
-    const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
+    
+    // Calculate delta by metric type
+    const deltaByMetric = new Map<string, number>();
+    for (const d of deltas) {
+      const current = deltaByMetric.get(d.metricType) || 0;
+      deltaByMetric.set(d.metricType, current + d.delta);
+    }
+    
+    // Build metric breakdown string with emojis
+    const metricParts: string[] = [];
+    const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
+    for (const metricType of metricOrder) {
+      const metricDelta = deltaByMetric.get(metricType);
+      if (metricDelta !== undefined && metricDelta !== 0) {
+        const emoji = getMetricEmoji(metricType);
+        const sign = metricDelta >= 0 ? '+' : '';
+        metricParts.push(`${emoji} ${sign}${metricDelta}`);
+      }
+    }
+    
+    const metricBreakdown = metricParts.length > 0 ? metricParts.join(' | ') : '';
     const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
-    deltaDisplay = `\n\n**Complexity Change:** ${sign}${deltaSummary.totalDelta} ${trend}`;
+    
+    deltaDisplay = `\n\n**Complexity Change:** ${metricBreakdown} ${trend}`;
     if (deltaSummary.improved > 0) deltaDisplay += ` (${deltaSummary.improved} improved)`;
     if (deltaSummary.degraded > 0) deltaDisplay += ` (${deltaSummary.degraded} degraded)`;
   }

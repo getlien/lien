@@ -112,6 +112,7 @@ export interface ComplexityDelta {
     symbolName: string;
     symbolType: string;
     startLine: number;
+    metricType: ComplexityMetricType;
     baseComplexity: number | null;
     headComplexity: number | null;
     delta: number;

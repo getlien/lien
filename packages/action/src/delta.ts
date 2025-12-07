@@ -81,6 +81,7 @@ export function calculateDeltas(
       symbolName: headData.violation.symbolName,
       symbolType: headData.violation.symbolType,
       startLine: headData.violation.startLine,
+      metricType: headData.violation.metricType,
       baseComplexity,
       headComplexity,
       delta,
@@ -98,6 +99,7 @@ export function calculateDeltas(
       symbolName: baseData.violation.symbolName,
       symbolType: baseData.violation.symbolType,
       startLine: baseData.violation.startLine,
+      metricType: baseData.violation.metricType,
       baseComplexity: baseData.complexity,
       headComplexity: null,
       delta: -baseData.complexity, // Negative = improvement (removed complexity)

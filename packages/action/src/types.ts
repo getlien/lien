@@ -119,6 +119,7 @@ export interface ComplexityDelta {
   symbolName: string;
   symbolType: string;
   startLine: number;
+  metricType: ComplexityMetricType; // which metric this delta is for
   baseComplexity: number | null; // null = new function
   headComplexity: number | null; // null = deleted function
   delta: number; // positive = worse, negative = better
