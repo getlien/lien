@@ -146,6 +146,8 @@ async function generateSingleFrameworkConfig(
   
   // Optional customization in interactive mode
   let finalConfig = frameworkConfig;
+  const pathDisplay = det.path === '.' ? 'root' : det.path;
+  
   if (!options.yes) {
     const { customize } = await inquirer.prompt([{
       type: 'confirm',
@@ -158,9 +160,11 @@ async function generateSingleFrameworkConfig(
       const customized = await promptForCustomization(det.name, frameworkConfig);
       finalConfig = { ...frameworkConfig, ...customized };
     } else {
-      const pathDisplay = det.path === '.' ? 'root' : det.path;
       console.log(chalk.dim(`  → Using defaults for ${det.name} at ${pathDisplay}`));
     }
+  } else {
+    // Log in non-interactive mode so users know what's happening
+    console.log(chalk.dim(`  → Using defaults for ${det.name} at ${pathDisplay}`));
   }
   
   return {
@@ -188,6 +192,12 @@ async function handleFrameworksDetected(
   for (const det of detections) {
     const framework = await generateSingleFrameworkConfig(det, rootDir, options);
     if (framework) frameworks.push(framework);
+  }
+  
+  // Handle edge case where all framework configs failed to generate
+  if (frameworks.length === 0) {
+    console.log(chalk.yellow('\n⚠️  No framework configs could be generated'));
+    return null;
   }
   
   return frameworks;
@@ -240,6 +250,9 @@ async function installCursorRulesFiles(rootDir: string, options: InitOptions) {
     }])).convertToDir;
 
     if (shouldConvert) {
+      if (options.yes) {
+        console.log(chalk.dim('Converting .cursor/rules file to directory structure (auto-convert due to --yes)...'));
+      }
       await convertRulesFileToDirectory(rulesPath, templatePath);
     } else {
       console.log(chalk.dim('Skipped Cursor rules installation (preserving existing file)'));
