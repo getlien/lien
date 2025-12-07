@@ -36373,13 +36373,10 @@ function buildLineCommentPrompt(violation, codeSnippet) {
     const snippetSection = codeSnippet
         ? `\n\n**Code:**\n\`\`\`\n${codeSnippet}\n\`\`\``
         : '';
-    const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
-    const valueDisplay = violation.metricType?.startsWith('halstead_')
-        ? violation.complexity.toLocaleString()
-        : violation.complexity.toString();
-    const thresholdDisplay = violation.metricType?.startsWith('halstead_')
-        ? violation.threshold.toLocaleString()
-        : violation.threshold.toString();
+    const metricType = violation.metricType || 'cyclomatic';
+    const metricLabel = getMetricLabel(metricType);
+    const valueDisplay = formatComplexityValue(metricType, violation.complexity);
+    const thresholdDisplay = formatThresholdValue(metricType, violation.threshold);
     const halsteadContext = formatHalsteadContext(violation);
     return `You are reviewing code for complexity. Generate an actionable review comment.
 
@@ -36440,13 +36437,10 @@ function buildBatchedCommentsPrompt(violations, codeSnippets) {
         const snippetSection = snippet
             ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\``
             : '';
-        const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
-        const valueDisplay = v.metricType?.startsWith('halstead_')
-            ? v.complexity.toLocaleString()
-            : v.complexity.toString();
-        const thresholdDisplay = v.metricType?.startsWith('halstead_')
-            ? v.threshold.toLocaleString()
-            : v.threshold.toString();
+        const metricType = v.metricType || 'cyclomatic';
+        const metricLabel = getMetricLabel(metricType);
+        const valueDisplay = formatComplexityValue(metricType, v.complexity);
+        const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
         const halsteadContext = formatHalsteadContext(v);
         return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
