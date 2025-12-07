@@ -130,7 +130,7 @@ describe('ComplexityAnalyzer', () => {
         ...config,
         complexity: {
           enabled: true,
-          thresholds: { method: 15, cognitive: 15, file: 50, average: 6 },
+          thresholds: { testPaths: 15, mentalLoad: 15, file: 50, average: 6 },
           severity: { warning: 1.5, error: 2.5 }, // warning at >= 22.5, error at >= 37.5
         },
       };
@@ -514,7 +514,7 @@ describe('ComplexityAnalyzer', () => {
         ...config,
         complexity: {
           ...config.complexity!,
-          thresholds: { method: 15, cognitive: 25, file: 50, average: 6 }, // Higher cognitive threshold
+          thresholds: { testPaths: 15, mentalLoad: 25, file: 50, average: 6 }, // Higher mental load threshold
         },
       };
 

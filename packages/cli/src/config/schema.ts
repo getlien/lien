@@ -58,12 +58,12 @@ export interface LienConfig {
   complexity?: {
     enabled: boolean;
     thresholds: {
-      method: number;           // Cyclomatic complexity threshold (default: 15)
-      cognitive: number;        // Cognitive complexity threshold (default: 15)
-      halsteadTimeMinutes?: number;  // Time to understand threshold in minutes (default: 60)
-      halsteadBugs?: number;         // Estimated bugs threshold (default: 1.5)
-      file: number;             // File-level complexity (default: 50)
-      average: number;          // Average complexity (default: 6)
+      testPaths: number;             // 🔀 Max test paths per function (default: 15)
+      mentalLoad: number;            // 🧠 Max mental load score (default: 15)
+      halsteadTimeMinutes?: number;  // ⏱️ Time to understand in minutes (default: 60)
+      halsteadBugs?: number;         // 🐛 Estimated bugs threshold (default: 1.5)
+      file: number;                  // File-level complexity (default: 50)
+      average: number;               // Average complexity (default: 6)
     };
     severity: {
       warning: number;     // Multiplier for warning threshold (default: 1.0)
@@ -156,10 +156,10 @@ export const defaultConfig: LienConfig = {
   complexity: {
     enabled: true,
     thresholds: {
-      method: 15,               // Cyclomatic complexity threshold
-      cognitive: 15,            // Cognitive complexity threshold (SonarQube default)
-      halsteadTimeMinutes: 60,  // Functions taking >1 hour to understand
-      halsteadBugs: 1.5,        // Functions estimated to have >1.5 bugs
+      testPaths: 15,            // 🔀 Max test paths per function
+      mentalLoad: 15,           // 🧠 Max mental load score
+      halsteadTimeMinutes: 60,  // ⏱️ Functions taking >1 hour to understand
+      halsteadBugs: 1.5,        // 🐛 Functions estimated to have >1.5 bugs
       file: 50,
       average: 6,
     },

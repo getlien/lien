@@ -215,30 +215,30 @@ export class ComplexityAnalyzer {
    */
   private checkChunkComplexity(
     metadata: ChunkMetadata,
-    thresholds: { method: number; cognitive: number; halsteadEffort?: number; halsteadBugs?: number },
+    thresholds: { testPaths: number; mentalLoad: number; halsteadEffort?: number; halsteadBugs?: number },
     severity: { warning: number; error: number }
   ): ComplexityViolation[] {
     const violations: ComplexityViolation[] = [];
     
-    // Check cyclomatic complexity
+    // Check test paths (cyclomatic complexity)
     if (metadata.complexity) {
-      const v = this.createViolation(metadata, metadata.complexity, thresholds.method, 'cyclomatic', severity);
+      const v = this.createViolation(metadata, metadata.complexity, thresholds.testPaths, 'cyclomatic', severity);
       if (v) violations.push(v);
     }
     
-    // Check cognitive complexity
+    // Check mental load (cognitive complexity)
     if (metadata.cognitiveComplexity) {
-      const v = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.cognitive, 'cognitive', severity);
+      const v = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.mentalLoad, 'cognitive', severity);
       if (v) violations.push(v);
     }
     
-    // Check Halstead effort (if threshold configured and metric available)
+    // Check time to understand (Halstead effort)
     if (thresholds.halsteadEffort && metadata.halsteadEffort) {
       const v = this.createHalsteadViolation(metadata, metadata.halsteadEffort, thresholds.halsteadEffort, 'halstead_effort', severity);
       if (v) violations.push(v);
     }
     
-    // Check Halstead bugs (if threshold configured and metric available)
+    // Check estimated bugs (Halstead bugs)
     if (thresholds.halsteadBugs && metadata.halsteadBugs) {
       const v = this.createHalsteadViolation(metadata, metadata.halsteadBugs, thresholds.halsteadBugs, 'halstead_bugs', severity);
       if (v) violations.push(v);
@@ -268,8 +268,8 @@ export class ComplexityAnalyzer {
       : this.minutesToEffort(60); // Default: 60 minutes = 64,800 effort
     
     const thresholds = { 
-      method: configThresholds?.method ?? 15, 
-      cognitive: configThresholds?.cognitive ?? 15, 
+      testPaths: configThresholds?.testPaths ?? 15, 
+      mentalLoad: configThresholds?.mentalLoad ?? 15, 
       halsteadEffort,
       halsteadBugs: configThresholds?.halsteadBugs ?? 1.5,
       file: configThresholds?.file ?? 50, 
