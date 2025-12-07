@@ -23,7 +23,7 @@ function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, Complexity
  */
 function getMetricLabel(metricType: string): string {
   switch (metricType) {
-    case 'cognitive': return 'cognitive complexity';
+    case 'cognitive': return 'mental load';
     case 'cyclomatic': return 'test paths';
     case 'halstead_effort': return 'time to understand';
     case 'halstead_bugs': return 'estimated bugs';

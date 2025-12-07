@@ -99,7 +99,7 @@ export class ComplexityAnalyzer {
     // Human-friendly messages
     const message = metricType === 'cyclomatic'
       ? `Needs ~${complexity} test cases for full coverage (threshold: ${Math.round(effectiveThreshold)})`
-      : `Cognitive complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`;
+      : `Mental load ${complexity} exceeds threshold ${Math.round(effectiveThreshold)} (hard to follow)`;
 
     return {
       filepath: metadata.file,

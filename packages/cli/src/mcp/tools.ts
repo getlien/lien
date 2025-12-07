@@ -114,7 +114,7 @@ Example: get_dependents({ filepath: "src/utils/validate.ts" })`
 
 Analyzes multiple complexity metrics:
 - **Test paths**: Number of test cases needed for full coverage (cyclomatic)
-- **Cognitive complexity**: Mental effort to understand (penalizes nesting)
+- **Mental load**: How hard to follow - penalizes nesting (cognitive)
 - **Time to understand**: Estimated reading time based on Halstead effort
 - **Estimated bugs**: Predicted bug count based on Halstead volume
 
@@ -130,6 +130,6 @@ Examples:
 
 Returns violations with metricType ('cyclomatic', 'cognitive', 'halstead_effort',
 or 'halstead_bugs'), risk levels, and dependent counts.
-Human-readable output: "23 (needs ~23 tests)", "~2h 30m", "2.27 bugs".`
+Human-readable output: "23 (needs ~23 tests)", "🧠 45", "~2h 30m", "2.27 bugs".`
   ),
 ];

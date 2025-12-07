@@ -273,7 +273,7 @@ These apply to individual frameworks:
 Configure complexity analysis for the `lien complexity` command and `get_complexity` MCP tool. Lien tracks **four metrics**:
 
 - **Test Paths (Cyclomatic)**: Number of test cases needed for full branch coverage
-- **Cognitive Complexity**: Mental effort to understand code (penalizes nesting depth)
+- **Mental Load**: How hard it is to follow the code (penalizes nesting depth)
 - **Time to Understand**: Estimated reading time based on Halstead effort
 - **Estimated Bugs**: Predicted bug count based on Halstead volume (Volume / 3000)
 
@@ -302,7 +302,7 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 | Threshold | Default | Description |
 |-----------|---------|-------------|
 | `method` | 15 | Max test paths per function (cyclomatic complexity) |
-| `cognitive` | 15 | Cognitive complexity threshold per function |
+| `cognitive` | 15 | Mental load threshold per function (nesting penalty) |
 | `halsteadTimeMinutes` | 60 | Functions taking longer than 1 hour to understand |
 | `halsteadBugs` | 1.5 | Flag functions estimated to have >1.5 bugs |
 | `file` | 50 | Maximum total complexity per file |

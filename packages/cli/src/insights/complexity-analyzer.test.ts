@@ -435,7 +435,7 @@ describe('ComplexityAnalyzer', () => {
       const violation = report.files['src/test.ts'].violations[0];
       expect(violation.metricType).toBe('cognitive');
       expect(violation.complexity).toBe(20);
-      expect(violation.message).toContain('Cognitive');
+      expect(violation.message).toContain('Mental load');
     });
 
     it('should detect both cyclomatic and cognitive violations for same function', async () => {
@@ -478,7 +478,7 @@ describe('ComplexityAnalyzer', () => {
       
       expect(cognitiveViolation).toBeDefined();
       expect(cognitiveViolation!.complexity).toBe(18);
-      expect(cognitiveViolation!.message).toContain('Cognitive');
+      expect(cognitiveViolation!.message).toContain('Mental load');
     });
 
     it('should not report cognitive violation when below threshold', async () => {

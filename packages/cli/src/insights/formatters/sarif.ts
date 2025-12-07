@@ -91,13 +91,13 @@ export function formatSarifReport(report: ComplexityReport): string {
     {
       id: 'lien/high-cognitive-complexity',
       shortDescription: {
-        text: 'High cognitive complexity',
+        text: 'High mental load',
       },
       fullDescription: {
-        text: 'Function or method has high cognitive complexity (deeply nested or hard to understand), making it difficult to maintain.',
+        text: 'Function or method has high mental load (deeply nested or hard to follow), requiring too much mental effort to understand and maintain.',
       },
       help: {
-        text: 'Consider flattening nested conditionals, extracting helper functions, or using guard clauses.',
+        text: 'Consider flattening nested conditionals, extracting helper functions, or using guard clauses to reduce mental load.',
       },
     },
     {

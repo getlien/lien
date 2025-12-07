@@ -64,12 +64,12 @@ REQUIRED sequence:
 - Find most complex functions in the codebase
 - Analyzes multiple complexity metrics:
   - **Test paths**: Number of test cases needed for full coverage (cyclomatic)
-  - **Cognitive**: Mental effort to understand (penalizes nesting)
+  - **Mental load**: How hard to follow - penalizes nesting (cognitive)
   - **Time to understand**: Estimated reading time (Halstead effort)
   - **Estimated bugs**: Predicted bug count (Halstead volume / 3000)
 - Use for tech debt analysis and refactoring prioritization
 - Returns `metricType` ('cyclomatic', 'cognitive', 'halstead_effort', or 'halstead_bugs')
-- Human-readable output: "23 (needs ~23 tests)", "~2h 30m", "2.27 bugs"
+- Human-readable output: "23 (needs ~23 tests)", "🧠 45", "~2h 30m", "2.27 bugs"
 - Optional: `files` to filter specific files, `threshold` to set minimum complexity
 
 ## Test Associations
