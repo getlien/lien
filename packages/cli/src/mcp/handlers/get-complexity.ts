@@ -54,7 +54,7 @@ export async function handleGetComplexity(
           fileData.violations.map(v => transformViolation(v, fileData))
         )
         .sortByDesc('complexity')
-        .all() as TransformedViolation[];
+        .all() as unknown as TransformedViolation[];
 
       // Apply custom threshold filter if provided
       const violations = validatedArgs.threshold !== undefined
