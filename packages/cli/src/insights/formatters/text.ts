@@ -12,9 +12,9 @@ type ViolationWithFile = ComplexityViolation & { file: string };
 function getMetricLabel(metricType: ComplexityViolation['metricType']): string {
   switch (metricType) {
     case 'cognitive': return '🧠 Mental load';
-    case 'cyclomatic': return 'Test paths';
-    case 'halstead_effort': return 'Time to understand';
-    case 'halstead_bugs': return 'Estimated bugs';
+    case 'cyclomatic': return '🔀 Test paths';
+    case 'halstead_effort': return '⏱️ Time to understand';
+    case 'halstead_bugs': return '🐛 Estimated bugs';
     default: return 'Complexity';
   }
 }
