@@ -16,7 +16,7 @@ export type RiskLevel = keyof typeof RISK_ORDER;
 /**
  * Type of complexity metric being measured
  */
-export type ComplexityMetricType = 'cyclomatic' | 'cognitive' | 'halstead_effort' | 'halstead_difficulty';
+export type ComplexityMetricType = 'cyclomatic' | 'cognitive' | 'halstead_effort' | 'halstead_bugs';
 
 /**
  * Halstead metric details for Halstead-type violations

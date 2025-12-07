@@ -115,8 +115,8 @@ Example: get_dependents({ filepath: "src/utils/validate.ts" })`
 Analyzes multiple complexity metrics:
 - **Cyclomatic complexity**: Decision paths (branches) in code
 - **Cognitive complexity**: Mental effort to understand (penalizes nesting)
-- **Time to understand**: Estimated reading time based on Halstead metrics
-- **Halstead difficulty**: Error-proneness based on program vocabulary
+- **Time to understand**: Estimated reading time based on Halstead effort
+- **Estimated bugs**: Predicted bug count based on Halstead volume
 
 Use for tech debt analysis and refactoring prioritization:
 - "What are the most complex functions?"
@@ -129,7 +129,7 @@ Examples:
   get_complexity({ threshold: 15 })
 
 Returns violations with metricType ('cyclomatic', 'cognitive', 'halstead_effort',
-or 'halstead_difficulty'), risk levels, and dependent counts.
+or 'halstead_bugs'), risk levels, and dependent counts.
 Halstead violations include detailed metrics (volume, difficulty, effort, bugs).`
   ),
 ];

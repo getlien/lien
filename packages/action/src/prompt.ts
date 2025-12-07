@@ -25,8 +25,8 @@ function getMetricLabel(metricType: string): string {
   switch (metricType) {
     case 'cognitive': return 'cognitive';
     case 'cyclomatic': return 'cyclomatic';
-    case 'halstead_effort': return 'Halstead effort';
-    case 'halstead_difficulty': return 'Halstead difficulty';
+    case 'halstead_effort': return 'time to understand';
+    case 'halstead_bugs': return 'estimated bugs';
     default: return 'complexity';
   }
 }

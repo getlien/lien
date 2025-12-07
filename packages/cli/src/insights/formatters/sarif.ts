@@ -66,7 +66,7 @@ function getRuleId(metricType: string): string {
     case 'cognitive': return 'lien/high-cognitive-complexity';
     case 'cyclomatic': return 'lien/high-cyclomatic-complexity';
     case 'halstead_effort': return 'lien/high-halstead-effort';
-    case 'halstead_difficulty': return 'lien/high-halstead-difficulty';
+    case 'halstead_bugs': return 'lien/high-estimated-bugs';
     default: return 'lien/high-complexity';
   }
 }
@@ -113,15 +113,15 @@ export function formatSarifReport(report: ComplexityReport): string {
       },
     },
     {
-      id: 'lien/high-halstead-difficulty',
+      id: 'lien/high-estimated-bugs',
       shortDescription: {
-        text: 'High Halstead difficulty',
+        text: 'High estimated bug count',
       },
       fullDescription: {
-        text: 'Function or method is error-prone based on Halstead difficulty metric, which measures program complexity from operators and operands.',
+        text: 'Function or method is likely to contain bugs based on Halstead metrics (Volume / 3000), which estimates bug count from code complexity.',
       },
       help: {
-        text: 'Consider introducing named constants, reducing operator variety, or extracting complex expressions.',
+        text: 'Consider simplifying the function, breaking into smaller units, or adding thorough test coverage.',
       },
     },
   ];

@@ -14,7 +14,7 @@ function getMetricLabel(metricType: ComplexityViolation['metricType']): string {
     case 'cognitive': return 'Cognitive complexity';
     case 'cyclomatic': return 'Cyclomatic complexity';
     case 'halstead_effort': return 'Time to understand';
-    case 'halstead_difficulty': return 'Halstead difficulty';
+    case 'halstead_bugs': return 'Estimated bugs';
     default: return 'Complexity';
   }
 }
@@ -79,9 +79,10 @@ function formatViolation(
     // Show time instead of raw effort
     complexityDisplay = '~' + formatTime(effortToMinutes(violation.complexity));
     thresholdDisplay = formatTime(effortToMinutes(violation.threshold));
-  } else if (violation.metricType === 'halstead_difficulty') {
-    complexityDisplay = violation.complexity.toString();
-    thresholdDisplay = violation.threshold.toString();
+  } else if (violation.metricType === 'halstead_bugs') {
+    // Show bugs with 2 decimal places
+    complexityDisplay = violation.complexity.toFixed(2);
+    thresholdDisplay = violation.threshold.toFixed(1);
   } else {
     complexityDisplay = violation.complexity.toString();
     thresholdDisplay = violation.threshold.toString();

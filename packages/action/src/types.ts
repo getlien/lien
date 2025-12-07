@@ -10,7 +10,7 @@ export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 /**
  * Type of complexity metric being measured
  */
-export type ComplexityMetricType = 'cyclomatic' | 'cognitive' | 'halstead_effort' | 'halstead_difficulty';
+export type ComplexityMetricType = 'cyclomatic' | 'cognitive' | 'halstead_effort' | 'halstead_bugs';
 
 /**
  * Halstead metric details for Halstead-type violations

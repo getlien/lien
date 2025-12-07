@@ -65,10 +65,10 @@ REQUIRED sequence:
 - Analyzes multiple complexity metrics:
   - **Cyclomatic**: Decision paths (branches) in code
   - **Cognitive**: Mental effort to understand (penalizes nesting)
-  - **Time to understand**: Estimated reading time (Halstead-based)
-  - **Halstead difficulty**: Error-proneness based on program vocabulary
+  - **Time to understand**: Estimated reading time (Halstead effort)
+  - **Estimated bugs**: Predicted bug count (Halstead volume / 3000)
 - Use for tech debt analysis and refactoring prioritization
-- Returns `metricType` ('cyclomatic', 'cognitive', 'halstead_effort', or 'halstead_difficulty')
+- Returns `metricType` ('cyclomatic', 'cognitive', 'halstead_effort', or 'halstead_bugs')
 - Time-based violations show human-readable durations (e.g., "~2h 30m")
 - Optional: `files` to filter specific files, `threshold` to set minimum complexity
 

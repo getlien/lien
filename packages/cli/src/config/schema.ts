@@ -61,7 +61,7 @@ export interface LienConfig {
       method: number;           // Cyclomatic complexity threshold (default: 15)
       cognitive: number;        // Cognitive complexity threshold (default: 15)
       halsteadTimeMinutes?: number;  // Time to understand threshold in minutes (default: 60)
-      halsteadDifficulty?: number;   // Halstead difficulty threshold (default: 30)
+      halsteadBugs?: number;         // Estimated bugs threshold (default: 1.5)
       file: number;             // File-level complexity (default: 50)
       average: number;          // Average complexity (default: 6)
     };
@@ -159,7 +159,7 @@ export const defaultConfig: LienConfig = {
       method: 15,               // Cyclomatic complexity threshold
       cognitive: 15,            // Cognitive complexity threshold (SonarQube default)
       halsteadTimeMinutes: 60,  // Functions taking >1 hour to understand
-      halsteadDifficulty: 30,   // Error-proneness threshold (P90)
+      halsteadBugs: 1.5,        // Functions estimated to have >1.5 bugs
       file: 50,
       average: 6,
     },

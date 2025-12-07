@@ -162,7 +162,7 @@ export class ComplexityAnalyzer {
     metadata: ChunkMetadata,
     metricValue: number,
     threshold: number,
-    metricType: 'halstead_effort' | 'halstead_difficulty',
+    metricType: 'halstead_effort' | 'halstead_bugs',
     severityConfig: { warning: number; error: number }
   ): ComplexityViolation | null {
     const warningThreshold = threshold * severityConfig.warning;
@@ -173,14 +173,14 @@ export class ComplexityAnalyzer {
     const violationSeverity = metricValue >= errorThreshold ? 'error' : 'warning';
     const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
     
-    // For effort, show time in minutes; for difficulty, show raw number
+    // For effort, show time in minutes; for bugs, show decimal with 2 places
     let message: string;
     if (metricType === 'halstead_effort') {
       const timeMinutes = this.effortToMinutes(metricValue);
       const thresholdMinutes = this.effortToMinutes(effectiveThreshold);
       message = `Time to understand ~${this.formatTime(timeMinutes)} exceeds threshold ${this.formatTime(thresholdMinutes)}`;
     } else {
-      message = `Halstead difficulty ${Math.round(metricValue)} exceeds threshold ${Math.round(effectiveThreshold)}`;
+      message = `Estimated bugs ${metricValue.toFixed(2)} exceeds threshold ${effectiveThreshold.toFixed(1)}`;
     }
 
     const halsteadDetails: HalsteadDetails = {
@@ -197,8 +197,8 @@ export class ComplexityAnalyzer {
       symbolName: metadata.symbolName || 'unknown',
       symbolType: metadata.symbolType as 'function' | 'method',
       language: metadata.language,
-      complexity: Math.round(metricValue),
-      threshold: Math.round(effectiveThreshold),
+      complexity: metricType === 'halstead_bugs' ? metricValue : Math.round(metricValue),
+      threshold: metricType === 'halstead_bugs' ? effectiveThreshold : Math.round(effectiveThreshold),
       severity: violationSeverity,
       message,
       metricType,
@@ -211,7 +211,7 @@ export class ComplexityAnalyzer {
    */
   private checkChunkComplexity(
     metadata: ChunkMetadata,
-    thresholds: { method: number; cognitive: number; halsteadEffort?: number; halsteadDifficulty?: number },
+    thresholds: { method: number; cognitive: number; halsteadEffort?: number; halsteadBugs?: number },
     severity: { warning: number; error: number }
   ): ComplexityViolation[] {
     const violations: ComplexityViolation[] = [];
@@ -234,9 +234,9 @@ export class ComplexityAnalyzer {
       if (v) violations.push(v);
     }
     
-    // Check Halstead difficulty (if threshold configured and metric available)
-    if (thresholds.halsteadDifficulty && metadata.halsteadDifficulty) {
-      const v = this.createHalsteadViolation(metadata, metadata.halsteadDifficulty, thresholds.halsteadDifficulty, 'halstead_difficulty', severity);
+    // Check Halstead bugs (if threshold configured and metric available)
+    if (thresholds.halsteadBugs && metadata.halsteadBugs) {
+      const v = this.createHalsteadViolation(metadata, metadata.halsteadBugs, thresholds.halsteadBugs, 'halstead_bugs', severity);
       if (v) violations.push(v);
     }
     
@@ -267,7 +267,7 @@ export class ComplexityAnalyzer {
       method: configThresholds?.method ?? 15, 
       cognitive: configThresholds?.cognitive ?? 15, 
       halsteadEffort,
-      halsteadDifficulty: configThresholds?.halsteadDifficulty ?? 30,
+      halsteadBugs: configThresholds?.halsteadBugs ?? 1.5,
       file: configThresholds?.file ?? 50, 
       average: configThresholds?.average ?? 6 
     };

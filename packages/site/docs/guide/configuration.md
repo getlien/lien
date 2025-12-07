@@ -274,8 +274,8 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 
 - **Cyclomatic Complexity**: Number of independent paths through code (decision points)
 - **Cognitive Complexity**: Mental effort to understand code (penalizes nesting depth)
-- **Time to Understand**: Estimated reading time based on Halstead metrics
-- **Halstead Difficulty**: Error-proneness based on program vocabulary
+- **Time to Understand**: Estimated reading time based on Halstead effort
+- **Estimated Bugs**: Predicted bug count based on Halstead volume (Volume / 3000)
 
 ```json
 {
@@ -285,7 +285,7 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
       "method": 15,
       "cognitive": 15,
       "halsteadTimeMinutes": 60,
-      "halsteadDifficulty": 30,
+      "halsteadBugs": 1.5,
       "file": 50,
       "average": 6
     },
@@ -304,15 +304,14 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 | `method` | 15 | Cyclomatic complexity threshold per function |
 | `cognitive` | 15 | Cognitive complexity threshold per function |
 | `halsteadTimeMinutes` | 60 | Functions taking longer than 1 hour to understand |
-| `halsteadDifficulty` | 30 | Halstead difficulty threshold (error-proneness) |
+| `halsteadBugs` | 1.5 | Flag functions estimated to have >1.5 bugs |
 | `file` | 50 | Maximum total complexity per file |
 | `average` | 6 | Maximum average complexity per file |
 
-::: tip Time to Understand
-The "time to understand" metric is based on Halstead research:
-- **60 minutes** = Warning threshold (functions taking >1 hour to read)
-- **120 minutes** = Error threshold (with 2x severity multiplier)
-- Calculated from operators, operands, and program vocabulary
+::: tip Halstead Metrics
+Both Halstead metrics are based on scientific research:
+- **Time to understand**: Functions taking >1 hour to comprehend need simplification
+- **Estimated bugs**: Formula is `Volume / 3000` — functions with ~1.5+ predicted bugs need attention
 :::
 
 #### Severity Multipliers

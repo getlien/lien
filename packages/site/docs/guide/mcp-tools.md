@@ -299,8 +299,8 @@ Analyze code complexity for tech debt identification and refactoring prioritizat
 
 - **Cyclomatic complexity**: Testability (decision paths)
 - **Cognitive complexity**: Understandability (penalizes nesting)
-- **Time to understand**: Estimated reading time (Halstead-based)
-- **Halstead difficulty**: Error-proneness based on program vocabulary
+- **Time to understand**: Estimated reading time (Halstead effort)
+- **Estimated bugs**: Predicted bug count (Halstead volume / 3000)
 
 ### Parameters
 
@@ -383,10 +383,12 @@ Analyze complexity of src/api/
 | `cyclomatic` | Number of independent paths (decision points) |
 | `cognitive` | Mental effort to understand (penalizes nesting) |
 | `halstead_effort` | Time to understand (shown as human-readable duration) |
-| `halstead_difficulty` | Error-proneness (how hard to write/maintain) |
+| `halstead_bugs` | Estimated bug count (Volume / 3000) |
 
-::: tip Human-readable time
-The `halstead_effort` violations show time in human-readable format (e.g., "~1h 30m" instead of raw numbers). Configure the threshold with `halsteadTimeMinutes` in your config (default: 60 minutes).
+::: tip Halstead Metrics
+Both Halstead metrics use intuitive thresholds:
+- **Time to understand**: Configure with `halsteadTimeMinutes` (default: 60 minutes = 1 hour)
+- **Estimated bugs**: Configure with `halsteadBugs` (default: 1.5 — functions likely to have >1.5 bugs)
 :::
 
 ### Severity Levels
