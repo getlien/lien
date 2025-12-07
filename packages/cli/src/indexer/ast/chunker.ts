@@ -107,6 +107,25 @@ export function chunkByAST(
   return chunks;
 }
 
+/** Check if node is a function-containing declaration at top level */
+function isFunctionDeclaration(
+  node: Parser.SyntaxNode,
+  depth: number,
+  traverser: ReturnType<typeof getTraverser>
+): boolean {
+  if (depth !== 0 || !traverser.isDeclarationWithFunction(node)) return false;
+  return traverser.findFunctionInDeclaration(node).hasFunction;
+}
+
+/** Check if node is a target type at valid depth */
+function isTargetNode(
+  node: Parser.SyntaxNode,
+  depth: number,
+  traverser: ReturnType<typeof getTraverser>
+): boolean {
+  return depth <= 1 && traverser.targetNodeTypes.includes(node.type);
+}
+
 /**
  * Find all top-level nodes that should become chunks
  * 
@@ -124,37 +143,25 @@ function findTopLevelNodes(
 ): Parser.SyntaxNode[] {
   const nodes: Parser.SyntaxNode[] = [];
   
-  function traverse(node: Parser.SyntaxNode, depth: number) {
-    // Check if this is a declaration that might contain a function
-    if (traverser.isDeclarationWithFunction(node) && depth === 0) {
-      const declInfo = traverser.findFunctionInDeclaration(node);
-      if (declInfo.hasFunction) {
-        nodes.push(node);
-        return;
-      }
-    }
-    
-    // Check if this is a target node type (function, method, etc.)
-    if (depth <= 1 && traverser.targetNodeTypes.includes(node.type)) {
+  function traverse(node: Parser.SyntaxNode, depth: number): void {
+    // Capture function declarations and target nodes
+    if (isFunctionDeclaration(node, depth, traverser) || isTargetNode(node, depth, traverser)) {
       nodes.push(node);
-      return; // Don't traverse into this node
-    }
-    
-    // Check if this is a container whose children should be extracted
-    if (traverser.shouldExtractChildren(node)) {
-      const body = traverser.getContainerBody(node);
-      if (body) {
-        traverse(body, depth + 1);
-      }
       return;
     }
     
-    // Check if we should traverse this node's children
-    if (traverser.shouldTraverseChildren(node)) {
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child) traverse(child, depth);
-      }
+    // Handle containers - traverse body at increased depth
+    if (traverser.shouldExtractChildren(node)) {
+      const body = traverser.getContainerBody(node);
+      if (body) traverse(body, depth + 1);
+      return;
+    }
+    
+    // Traverse children of traversable nodes
+    if (!traverser.shouldTraverseChildren(node)) return;
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (child) traverse(child, depth);
     }
   }
   

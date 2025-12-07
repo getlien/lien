@@ -29,6 +29,72 @@ interface ChunkWithContent {
   content: string;
 }
 
+/** Extracted config values with defaults for indexing */
+interface IndexingConfig {
+  concurrency: number;
+  embeddingBatchSize: number;
+  chunkSize: number;
+  chunkOverlap: number;
+  useAST: boolean;
+  astFallback: 'line-based' | 'error';
+}
+
+/** Extract indexing config values with defaults */
+function getIndexingConfig(config: LienConfig | LegacyLienConfig): IndexingConfig {
+  if (isModernConfig(config)) {
+    return {
+      concurrency: config.core.concurrency,
+      embeddingBatchSize: config.core.embeddingBatchSize,
+      chunkSize: config.core.chunkSize,
+      chunkOverlap: config.core.chunkOverlap,
+      useAST: config.chunking.useAST,
+      astFallback: config.chunking.astFallback,
+    };
+  }
+  // Legacy defaults
+  return {
+    concurrency: 4,
+    embeddingBatchSize: 50,
+    chunkSize: 75,
+    chunkOverlap: 10,
+    useAST: true,
+    astFallback: 'line-based',
+  };
+}
+
+/** Scan files based on config type */
+async function scanFilesToIndex(
+  rootDir: string,
+  config: LienConfig | LegacyLienConfig
+): Promise<string[]> {
+  if (isModernConfig(config) && config.frameworks.length > 0) {
+    return scanCodebaseWithFrameworks(rootDir, config);
+  }
+  if (isLegacyConfig(config)) {
+    return scanCodebase({
+      rootDir,
+      includePatterns: config.indexing.include,
+      excludePatterns: config.indexing.exclude,
+    });
+  }
+  return scanCodebase({ rootDir, includePatterns: [], excludePatterns: [] });
+}
+
+/** Process embeddings in micro-batches to prevent event loop blocking */
+async function processEmbeddingMicroBatches(
+  texts: string[],
+  embeddings: EmbeddingService
+): Promise<Float32Array[]> {
+  const results: Float32Array[] = [];
+  for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
+    const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
+    const microResults = await embeddings.embedBatch(microBatch);
+    results.push(...microResults);
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  return results;
+}
+
 /**
  * Helper functions extracted from indexCodebase
  * These make the main function more readable and testable
@@ -194,28 +260,9 @@ async function performFullIndex(
   spinner.text = 'Clearing existing index...';
   await vectorDB.clear();
   
-  // 1. Scan for files (framework-aware if frameworks configured)
+  // 1. Scan for files
   spinner.text = 'Scanning codebase...';
-  let files: string[];
-  
-  if (isModernConfig(config) && config.frameworks.length > 0) {
-    // Use framework-aware scanning for new configs
-    files = await scanCodebaseWithFrameworks(rootDir, config);
-  } else if (isLegacyConfig(config)) {
-    // Fall back to legacy scanning for old configs
-    files = await scanCodebase({
-      rootDir,
-      includePatterns: config.indexing.include,
-      excludePatterns: config.indexing.exclude,
-    });
-  } else {
-    // Modern config with no frameworks - use empty patterns
-    files = await scanCodebase({
-      rootDir,
-      includePatterns: [],
-      excludePatterns: [],
-    });
-  }
+  const files = await scanFilesToIndex(rootDir, config);
   
   if (files.length === 0) {
     spinner.fail('No files found to index');
@@ -230,24 +277,18 @@ async function performFullIndex(
   await embeddings.initialize();
   spinner.succeed('Embedding model loaded');
   
-  // 3. Process files concurrently
-  const concurrency = isModernConfig(config) 
-    ? config.core.concurrency 
-    : 4;
-  const embeddingBatchSize = isModernConfig(config)
-    ? config.core.embeddingBatchSize
-    : 50;
-  // Use smaller batch size to keep UI responsive (process more frequently)
-  const vectorDBBatchSize = 100;
+  // 3. Get config values and process files
+  const indexConfig = getIndexingConfig(config);
+  const vectorDBBatchSize = 100; // Smaller batch for UI responsiveness
   
-  spinner.start(`Processing files with ${concurrency}x concurrency...`);
+  spinner.start(`Processing files with ${indexConfig.concurrency}x concurrency...`);
   
   const startTime = Date.now();
   let processedChunks = 0;
   
   // Accumulator for chunks across multiple files
   const chunkAccumulator: ChunkWithContent[] = [];
-  const limit = pLimit(concurrency);
+  const limit = pLimit(indexConfig.concurrency);
   
   // Track successfully indexed files for manifest
   const indexedFileEntries: Array<{ filepath: string; chunkCount: number; mtime: number }> = [];
@@ -281,59 +322,30 @@ async function performFullIndex(
     
     // The actual processing logic (separated for queue-based synchronization)
     const doProcessChunks = async (): Promise<void> => {
-      if (chunkAccumulator.length === 0) {
-        return;
-      }
+      if (chunkAccumulator.length === 0) return;
       
-      // Capture current promise to detect if new work was queued during processing
       const currentPromise = processingQueue;
       
       try {
         const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
         
-        // Process embeddings in smaller batches AND insert incrementally to keep UI responsive
-        for (let i = 0; i < toProcess.length; i += embeddingBatchSize) {
-          const batch = toProcess.slice(i, Math.min(i + embeddingBatchSize, toProcess.length));
-          
-          // Update progress message
-          progressTracker.setMessage(getEmbeddingMessage());
-          
-          // Process embeddings in micro-batches to prevent event loop blocking
+        // Process in batches for UI responsiveness
+        for (let i = 0; i < toProcess.length; i += indexConfig.embeddingBatchSize) {
+          const batch = toProcess.slice(i, Math.min(i + indexConfig.embeddingBatchSize, toProcess.length));
           const texts = batch.map(item => item.content);
-          const embeddingVectors: Float32Array[] = [];
           
-          for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
-            const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
-            const microResults = await embeddings.embedBatch(microBatch);
-            embeddingVectors.push(...microResults);
-            
-            // Yield to event loop so spinner can update
-            await new Promise(resolve => setImmediate(resolve));
-          }
-          
+          progressTracker.setMessage(getEmbeddingMessage());
+          const embeddingVectors = await processEmbeddingMicroBatches(texts, embeddings);
           processedChunks += batch.length;
           
-          // Update progress before DB insertion
           progressTracker.setMessage(`Inserting ${batch.length} chunks into vector space...`);
-          
-          await vectorDB.insertBatch(
-            embeddingVectors,
-            batch.map(item => item.chunk.metadata),
-            texts
-          );
-          
-          // Yield after DB insertion too
+          await vectorDB.insertBatch(embeddingVectors, batch.map(item => item.chunk.metadata), texts);
           await new Promise(resolve => setImmediate(resolve));
         }
         
         progressTracker.setMessage(getIndexingMessage());
       } finally {
-        // Only clear processingQueue if it still points to this operation
-        // If another task chained onto this promise (via .then()), processingQueue
-        // will point to the chained promise and we shouldn't clear it
-        if (processingQueue === currentPromise) {
-          processingQueue = null;
-        }
+        if (processingQueue === currentPromise) processingQueue = null;
       }
     };
   
@@ -344,24 +356,12 @@ async function performFullIndex(
         // Get file stats to capture actual modification time
         const stats = await fs.stat(file);
         const content = await fs.readFile(file, 'utf-8');
-        const chunkSize = isModernConfig(config)
-          ? config.core.chunkSize
-          : 75;
-        const chunkOverlap = isModernConfig(config)
-          ? config.core.chunkOverlap
-          : 10;
-        const useAST = isModernConfig(config)
-          ? config.chunking.useAST
-          : true;
-        const astFallback = isModernConfig(config)
-          ? config.chunking.astFallback
-          : 'line-based';
         
         const chunks = chunkFile(file, content, {
-          chunkSize,
-          chunkOverlap,
-          useAST,
-          astFallback,
+          chunkSize: indexConfig.chunkSize,
+          chunkOverlap: indexConfig.chunkOverlap,
+          useAST: indexConfig.useAST,
+          astFallback: indexConfig.astFallback,
         });
         
         if (chunks.length === 0) {
@@ -454,7 +454,7 @@ async function performFullIndex(
   
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
   spinner.succeed(
-    `Indexed ${progressTracker.getProcessedCount()} files (${processedChunks} chunks) in ${totalTime}s using ${concurrency}x concurrency`
+    `Indexed ${progressTracker.getProcessedCount()} files (${processedChunks} chunks) in ${totalTime}s using ${indexConfig.concurrency}x concurrency`
   );
   
   console.log(chalk.dim('\nNext step: Run'), chalk.bold('lien serve'), chalk.dim('to start the MCP server'));
