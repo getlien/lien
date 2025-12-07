@@ -17,8 +17,10 @@ Lien connects AI coding assistants like Cursor to your codebase through the Mode
 - 🎯 **MCP Integration** - Works seamlessly with Cursor and other MCP-compatible tools
 - ⚡ **Fast** - Sub-500ms queries, minutes to index large codebases
 - 🆓 **Free Forever** - No API costs, no subscriptions, no usage limits
-- 📦 **Framework-Aware** - Auto-detects Node.js, Laravel; supports 15+ languages
+- 📦 **Framework-Aware** - Auto-detects Node.js, Laravel, Shopify; supports 15+ languages
 - 🏗️ **Monorepo Support** - Index multiple frameworks in one repository
+- 📊 **Complexity Analysis** - Human-friendly metrics: test paths, mental load, time to understand
+- 🔍 **Impact Analysis** - Find all dependents before refactoring with risk assessment
 
 ## Quick Start
 
@@ -46,13 +48,35 @@ lien index
 
 **👉 [Full installation guide](https://lien.dev/guide/installation)**
 
+## MCP Tools
+
+Lien exposes **6 powerful tools** via Model Context Protocol:
+
+| Tool | Description |
+|------|-------------|
+| `semantic_search` | Natural language code search |
+| `find_similar` | Find similar code patterns |
+| `get_files_context` | Get file context with test associations |
+| `list_functions` | List symbols by pattern |
+| `get_dependents` | Impact analysis (what depends on this?) |
+| `get_complexity` | Tech debt analysis with human-friendly metrics |
+
+### Complexity Metrics
+
+Lien tracks code complexity with intuitive outputs:
+
+- 🔀 **Test paths** - Cyclomatic complexity as "needs ~X tests for full coverage"
+- 🧠 **Mental load** - Cognitive complexity with nesting penalty
+- ⏱️ **Time to understand** - Halstead effort as readable duration (~2h 30m)
+- 🐛 **Estimated bugs** - Halstead prediction (Volume / 3000)
+
 ## Documentation
 
 - **[Installation](https://lien.dev/guide/installation)** - npm, npx, or local setup
 - **[Getting Started](https://lien.dev/guide/getting-started)** - Step-by-step configuration for Cursor
-- **[Configuration](https://lien.dev/guide/configuration)** - Customize indexing, performance tuning
+- **[Configuration](https://lien.dev/guide/configuration)** - Customize indexing, thresholds, performance
 - **[CLI Commands](https://lien.dev/guide/cli-commands)** - Full command reference
-- **[MCP Tools](https://lien.dev/guide/mcp-tools)** - API for semantic search tools
+- **[MCP Tools](https://lien.dev/guide/mcp-tools)** - Complete API reference for all 6 tools
 - **[How It Works](https://lien.dev/how-it-works)** - Architecture overview
 
 ## Supported Languages
