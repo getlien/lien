@@ -31,26 +31,31 @@ jobs:
           node-version: '22'
           cache: 'npm'
       
-      # Cache the built CLI to avoid rebuilding every run
-      - name: Cache Lien CLI build
-        id: cache-cli
+      # Cache the built packages to avoid rebuilding every run
+      - name: Cache Lien build
+        id: cache-build
         uses: actions/cache@v4
         with:
           path: |
             packages/cli/dist
+            packages/action/dist
             node_modules
             packages/*/node_modules
-          key: lien-cli-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/cli/src/**/*') }}
+          key: lien-build-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/cli/src/**/*', 'packages/action/src/**/*') }}
           restore-keys: |
-            lien-cli-${{ runner.os }}-
+            lien-build-${{ runner.os }}-
       
       - name: Install dependencies
-        if: steps.cache-cli.outputs.cache-hit != 'true'
+        if: steps.cache-build.outputs.cache-hit != 'true'
         run: npm ci
       
       - name: Build Lien CLI
-        if: steps.cache-cli.outputs.cache-hit != 'true'
+        if: steps.cache-build.outputs.cache-hit != 'true'
         run: npm run build
+      
+      - name: Build Lien Action
+        if: steps.cache-build.outputs.cache-hit != 'true'
+        run: npm run build -w packages/action
       
       - name: Install Lien globally
         run: npm install -g ./packages/cli

@@ -6,6 +6,10 @@
  */
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 /**
+ * Type of complexity metric being measured
+ */
+export type ComplexityMetricType = 'cyclomatic' | 'cognitive';
+/**
  * A single complexity violation
  */
 export interface ComplexityViolation {
@@ -19,6 +23,8 @@ export interface ComplexityViolation {
     threshold: number;
     severity: 'warning' | 'error';
     message: string;
+    /** Type of complexity metric (cyclomatic vs cognitive) */
+    metricType: ComplexityMetricType;
 }
 /**
  * Complexity data for a single file
