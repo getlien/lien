@@ -172,6 +172,43 @@ function getNodeContent(node: Parser.SyntaxNode, lines: string[]): string {
   return lines.slice(startLine, endLine + 1).join('\n');
 }
 
+/** Maps symbol types to legacy symbol array keys */
+const SYMBOL_TYPE_TO_ARRAY: Record<string, 'functions' | 'classes' | 'interfaces'> = {
+  function: 'functions',
+  method: 'functions',
+  class: 'classes',
+  interface: 'interfaces',
+};
+
+/** Symbol types that have meaningful complexity metrics */
+const COMPLEXITY_SYMBOL_TYPES = new Set(['function', 'method']);
+
+/**
+ * Build legacy symbols object for backward compatibility
+ */
+function buildLegacySymbols(symbolInfo: ReturnType<typeof extractSymbolInfo>): {
+  functions: string[];
+  classes: string[];
+  interfaces: string[];
+} {
+  const symbols = { functions: [] as string[], classes: [] as string[], interfaces: [] as string[] };
+  
+  if (symbolInfo?.name && symbolInfo.type) {
+    const arrayKey = SYMBOL_TYPE_TO_ARRAY[symbolInfo.type];
+    if (arrayKey) symbols[arrayKey].push(symbolInfo.name);
+  }
+  
+  return symbols;
+}
+
+/**
+ * Determine chunk type from symbol info
+ */
+function getChunkType(symbolInfo: ReturnType<typeof extractSymbolInfo>): 'block' | 'class' | 'function' {
+  if (!symbolInfo) return 'block';
+  return symbolInfo.type === 'class' ? 'class' : 'function';
+}
+
 /**
  * Create a chunk from an AST node
  */
@@ -183,27 +220,8 @@ function createChunk(
   imports: string[],
   language: string
 ): ASTChunk {
-  // Populate legacy symbols field for backward compatibility
-  const symbols = {
-    functions: [] as string[],
-    classes: [] as string[],
-    interfaces: [] as string[],
-  };
-  
-  if (symbolInfo?.name) {
-    // Populate legacy symbols arrays based on symbol type
-    if (symbolInfo.type === 'function' || symbolInfo.type === 'method') {
-      symbols.functions.push(symbolInfo.name);
-    } else if (symbolInfo.type === 'class') {
-      symbols.classes.push(symbolInfo.name);
-    } else if (symbolInfo.type === 'interface') {
-      symbols.interfaces.push(symbolInfo.name);
-    }
-  }
-  
-  // Calculate cognitive complexity for functions/methods
-  // (only for symbol types that have meaningful complexity)
-  const cognitiveComplexity = (symbolInfo?.type === 'function' || symbolInfo?.type === 'method')
+  const symbols = buildLegacySymbols(symbolInfo);
+  const cognitiveComplexity = symbolInfo?.type && COMPLEXITY_SYMBOL_TYPES.has(symbolInfo.type)
     ? calculateCognitiveComplexity(node)
     : undefined;
   
@@ -213,11 +231,9 @@ function createChunk(
       file: filepath,
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
-      type: symbolInfo == null ? 'block' : (symbolInfo.type === 'class' ? 'class' : 'function'),
+      type: getChunkType(symbolInfo),
       language,
-      // Legacy symbols field for backward compatibility
       symbols,
-      // New AST-derived metadata
       symbolName: symbolInfo?.name,
       symbolType: symbolInfo?.type,
       parentClass: symbolInfo?.parentClass,

@@ -113,46 +113,63 @@ export class ComplexityAnalyzer {
   }
 
   /**
-   * Find all complexity violations based on thresholds
-   * Checks both cyclomatic and cognitive complexity
+   * Deduplicate and filter chunks to only function/method types.
+   * Handles potential index duplicates by tracking file+line ranges.
+   */
+  private getUniqueFunctionChunks(
+    chunks: Array<{ content: string; metadata: ChunkMetadata }>
+  ): ChunkMetadata[] {
+    const seen = new Set<string>();
+    const result: ChunkMetadata[] = [];
+    
+    for (const { metadata } of chunks) {
+      if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method') continue;
+      
+      const key = `${metadata.file}:${metadata.startLine}-${metadata.endLine}`;
+      if (seen.has(key)) continue;
+      
+      seen.add(key);
+      result.push(metadata);
+    }
+    
+    return result;
+  }
+
+  /**
+   * Check complexity metrics and create violations for a single chunk.
+   */
+  private checkChunkComplexity(
+    metadata: ChunkMetadata,
+    thresholds: { method: number; cognitive: number },
+    severity: { warning: number; error: number }
+  ): ComplexityViolation[] {
+    const violations: ComplexityViolation[] = [];
+    
+    if (metadata.complexity) {
+      const v = this.createViolation(metadata, metadata.complexity, thresholds.method, 'cyclomatic', severity);
+      if (v) violations.push(v);
+    }
+    
+    if (metadata.cognitiveComplexity) {
+      const v = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.cognitive, 'cognitive', severity);
+      if (v) violations.push(v);
+    }
+    
+    return violations;
+  }
+
+  /**
+   * Find all complexity violations based on thresholds.
+   * Checks both cyclomatic and cognitive complexity.
    */
   private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
-    const violations: ComplexityViolation[] = [];
     const thresholds = this.config.complexity?.thresholds || { method: 10, cognitive: 15, file: 50, average: 6 };
     const severity = this.config.complexity?.severity || { warning: 1.0, error: 2.0 };
+    const functionChunks = this.getUniqueFunctionChunks(chunks);
     
-    // Deduplicate chunks by file+startLine+endLine to handle potential index duplicates
-    const seenChunks = new Set<string>();
-
-    for (const chunk of chunks) {
-      const { metadata } = chunk;
-      
-      // Only check function/method complexity
-      if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method') {
-        continue;
-      }
-      
-      // Skip duplicate chunks (same file and line range)
-      const chunkKey = `${metadata.file}:${metadata.startLine}-${metadata.endLine}`;
-      if (seenChunks.has(chunkKey)) {
-        continue;
-      }
-      seenChunks.add(chunkKey);
-
-      // Check cyclomatic complexity
-      if (metadata.complexity) {
-        const violation = this.createViolation(metadata, metadata.complexity, thresholds.method, 'cyclomatic', severity);
-        if (violation) violations.push(violation);
-      }
-
-      // Check cognitive complexity
-      if (metadata.cognitiveComplexity) {
-        const violation = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.cognitive ?? 15, 'cognitive', severity);
-        if (violation) violations.push(violation);
-      }
-    }
-
-    return violations;
+    return functionChunks.flatMap(metadata => 
+      this.checkChunkComplexity(metadata, thresholds, severity)
+    );
   }
 
   /**

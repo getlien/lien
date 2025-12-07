@@ -6,6 +6,91 @@ import type { ComplexityReport, ComplexityViolation, PRContext, ComplexityDelta,
 import { formatDelta } from './delta.js';
 
 /**
+ * Build a lookup map from deltas for quick access
+ */
+function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, ComplexityDelta> {
+  const map = new Map<string, ComplexityDelta>();
+  if (deltas) {
+    for (const d of deltas) {
+      map.set(`${d.filepath}::${d.symbolName}`, d);
+    }
+  }
+  return map;
+}
+
+/**
+ * Format a single violation line with optional delta
+ */
+function formatViolationLine(v: ComplexityViolation, deltaMap: Map<string, ComplexityDelta>): string {
+  const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
+  const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+  const metricLabel = v.metricType === 'cognitive' ? 'cognitive' : 'cyclomatic';
+  return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
+}
+
+/**
+ * Build violations summary grouped by file
+ */
+function buildViolationsSummary(
+  files: ComplexityReport['files'],
+  deltaMap: Map<string, ComplexityDelta>
+): string {
+  return Object.entries(files)
+    .filter(([_, data]) => data.violations.length > 0)
+    .map(([filepath, data]) => {
+      const violationList = data.violations
+        .map(v => formatViolationLine(v, deltaMap))
+        .join('\n');
+      return `**${filepath}** (risk: ${data.riskLevel})\n${violationList}`;
+    })
+    .join('\n\n');
+}
+
+/**
+ * Build delta context section showing complexity changes
+ */
+function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
+  if (!deltas || deltas.length === 0) return '';
+  
+  const improved = deltas.filter(d => d.severity === 'improved');
+  const degraded = deltas.filter(d => (d.severity === 'error' || d.severity === 'warning') && d.delta > 0);
+  const newFuncs = deltas.filter(d => d.severity === 'new');
+  const deleted = deltas.filter(d => d.severity === 'deleted');
+  
+  const formatChange = (d: ComplexityDelta): string => {
+    const from = d.baseComplexity ?? 'new';
+    const to = d.headComplexity ?? 'removed';
+    return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
+  };
+  
+  const sections = [
+    `\n## Complexity Changes (vs base branch)`,
+    `- **Degraded**: ${degraded.length} function(s) got more complex`,
+    `- **Improved**: ${improved.length} function(s) got simpler`,
+    `- **New**: ${newFuncs.length} new complex function(s)`,
+    `- **Removed**: ${deleted.length} complex function(s) deleted`,
+  ];
+  
+  if (degraded.length > 0) sections.push(`\nFunctions that got worse:\n${degraded.map(formatChange).join('\n')}`);
+  if (improved.length > 0) sections.push(`\nFunctions that improved:\n${improved.map(formatChange).join('\n')}`);
+  if (newFuncs.length > 0) sections.push(`\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}`);
+  
+  return sections.join('\n');
+}
+
+/**
+ * Build code snippets section
+ */
+function buildSnippetsSection(codeSnippets: Map<string, string>): string {
+  return Array.from(codeSnippets.entries())
+    .map(([key, code]) => {
+      const [filepath, symbolName] = key.split('::');
+      return `### ${filepath} - ${symbolName}\n\`\`\`\n${code}\n\`\`\``;
+    })
+    .join('\n\n');
+}
+
+/**
  * Build the review prompt from complexity report
  */
 export function buildReviewPrompt(
@@ -15,73 +100,11 @@ export function buildReviewPrompt(
   deltas: ComplexityDelta[] | null = null
 ): string {
   const { summary, files } = report;
-
-  // Build delta lookup map
-  const deltaMap = new Map<string, ComplexityDelta>();
-  if (deltas) {
-    for (const d of deltas) {
-      deltaMap.set(`${d.filepath}::${d.symbolName}`, d);
-    }
-  }
-
-  // Build violations summary
-  const violationsByFile = Object.entries(files)
-    .filter(([_, data]) => data.violations.length > 0)
-    .map(([filepath, data]) => ({
-      filepath,
-      violations: data.violations,
-      riskLevel: data.riskLevel,
-    }));
-
-  const violationsSummary = violationsByFile
-    .map(({ filepath, violations, riskLevel }) => {
-      const violationList = violations
-        .map((v) => {
-          const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
-          const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-          const metricLabel = v.metricType === 'cognitive' ? 'cognitive' : 'cyclomatic';
-          return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
-        })
-        .join('\n');
-      return `**${filepath}** (risk: ${riskLevel})\n${violationList}`;
-    })
-    .join('\n\n');
-
-  // Build code snippets section
-  const snippetsSection = Array.from(codeSnippets.entries())
-    .map(([key, code]) => {
-      const [filepath, symbolName] = key.split('::');
-      return `### ${filepath} - ${symbolName}\n\`\`\`\n${code}\n\`\`\``;
-    })
-    .join('\n\n');
-
-  // Add delta context if available
-  let deltaContext = '';
-  if (deltas && deltas.length > 0) {
-    // Use severity-based filtering for accuracy
-    const improved = deltas.filter(d => d.severity === 'improved');
-    const degraded = deltas.filter(d => (d.severity === 'error' || d.severity === 'warning') && d.delta > 0);
-    const newFuncs = deltas.filter(d => d.severity === 'new');
-    const deleted = deltas.filter(d => d.severity === 'deleted');
-    
-    // Helper to format complexity display (handles null for new/deleted)
-    const formatComplexityChange = (d: ComplexityDelta): string => {
-      const from = d.baseComplexity ?? 'new';
-      const to = d.headComplexity ?? 'removed';
-      return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
-    };
-    
-    deltaContext = `
-## Complexity Changes (vs base branch)
-- **Degraded**: ${degraded.length} function(s) got more complex
-- **Improved**: ${improved.length} function(s) got simpler
-- **New**: ${newFuncs.length} new complex function(s)
-- **Removed**: ${deleted.length} complex function(s) deleted
-${degraded.length > 0 ? `\nFunctions that got worse:\n${degraded.map(formatComplexityChange).join('\n')}` : ''}
-${improved.length > 0 ? `\nFunctions that improved:\n${improved.map(formatComplexityChange).join('\n')}` : ''}
-${newFuncs.length > 0 ? `\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}` : ''}
-`;
-  }
+  const deltaMap = buildDeltaMap(deltas);
+  const violationsByFile = Object.entries(files).filter(([_, data]) => data.violations.length > 0);
+  const violationsSummary = buildViolationsSummary(files, deltaMap);
+  const snippetsSection = buildSnippetsSection(codeSnippets);
+  const deltaContext = buildDeltaContext(deltas);
 
   return `# Code Complexity Review Request
 
