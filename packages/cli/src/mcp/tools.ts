@@ -115,7 +115,7 @@ Example: get_dependents({ filepath: "src/utils/validate.ts" })`
 Analyzes multiple complexity metrics:
 - **Cyclomatic complexity**: Decision paths (branches) in code
 - **Cognitive complexity**: Mental effort to understand (penalizes nesting)
-- **Halstead effort**: Mental effort based on operators/operands
+- **Time to understand**: Estimated reading time based on Halstead metrics
 - **Halstead difficulty**: Error-proneness based on program vocabulary
 
 Use for tech debt analysis and refactoring prioritization:

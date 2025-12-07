@@ -299,7 +299,7 @@ Analyze code complexity for tech debt identification and refactoring prioritizat
 
 - **Cyclomatic complexity**: Testability (decision paths)
 - **Cognitive complexity**: Understandability (penalizes nesting)
-- **Halstead effort**: Mental effort based on operators/operands
+- **Time to understand**: Estimated reading time (Halstead-based)
 - **Halstead difficulty**: Error-proneness based on program vocabulary
 
 ### Parameters
@@ -357,18 +357,18 @@ Analyze complexity of src/api/
       "symbolType": "function",
       "startLine": 45,
       "endLine": 120,
-      "complexity": 450000,
-      "threshold": 300000,
+      "complexity": 97200,
+      "threshold": 64800,
       "severity": "warning",
       "metricType": "halstead_effort",
       "language": "typescript",
-      "message": "Halstead effort 450,000 exceeds threshold 300,000",
+      "message": "Time to understand ~1h 30m exceeds threshold 1h",
       "dependentCount": 5,
       "riskLevel": "medium",
       "halsteadDetails": {
         "volume": 850.5,
         "difficulty": 45.2,
-        "effort": 450000,
+        "effort": 97200,
         "bugs": 0.283
       }
     }
@@ -382,11 +382,11 @@ Analyze complexity of src/api/
 |------------|-------------|
 | `cyclomatic` | Number of independent paths (decision points) |
 | `cognitive` | Mental effort to understand (penalizes nesting) |
-| `halstead_effort` | Mental effort based on operators and operands |
+| `halstead_effort` | Time to understand (shown as human-readable duration) |
 | `halstead_difficulty` | Error-proneness (how hard to write/maintain) |
 
-::: tip Multiple metrics can fire
-A single function can have violations for **multiple** metrics if it exceeds multiple thresholds. Halstead violations include a `halsteadDetails` object with volume, difficulty, effort, and estimated bugs.
+::: tip Human-readable time
+The `halstead_effort` violations show time in human-readable format (e.g., "~1h 30m" instead of raw numbers). Configure the threshold with `halsteadTimeMinutes` in your config (default: 60 minutes).
 :::
 
 ### Severity Levels

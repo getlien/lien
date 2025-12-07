@@ -103,10 +103,10 @@ export function formatSarifReport(report: ComplexityReport): string {
     {
       id: 'lien/high-halstead-effort',
       shortDescription: {
-        text: 'High Halstead effort',
+        text: 'Long time to understand',
       },
       fullDescription: {
-        text: 'Function or method requires significant mental effort to understand, based on operator and operand counts (Halstead metrics).',
+        text: 'Function or method takes too long to understand, based on Halstead metrics (operators and operands count).',
       },
       help: {
         text: 'Consider simplifying expressions, reducing variable count, or breaking into smaller functions.',

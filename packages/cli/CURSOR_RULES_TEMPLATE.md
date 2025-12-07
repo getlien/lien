@@ -65,11 +65,11 @@ REQUIRED sequence:
 - Analyzes multiple complexity metrics:
   - **Cyclomatic**: Decision paths (branches) in code
   - **Cognitive**: Mental effort to understand (penalizes nesting)
-  - **Halstead effort**: Mental effort based on operators/operands
+  - **Time to understand**: Estimated reading time (Halstead-based)
   - **Halstead difficulty**: Error-proneness based on program vocabulary
 - Use for tech debt analysis and refactoring prioritization
 - Returns `metricType` ('cyclomatic', 'cognitive', 'halstead_effort', or 'halstead_difficulty')
-- Halstead violations include detailed metrics (volume, difficulty, effort, bugs)
+- Time-based violations show human-readable durations (e.g., "~2h 30m")
 - Optional: `files` to filter specific files, `threshold` to set minimum complexity
 
 ## Test Associations
@@ -140,7 +140,7 @@ Results include rich metadata: `symbolName`, `symbolType`, `complexity`, `cognit
 Use for filtering:
 - Complex functions (cyclomatic): `results.filter(r => r.metadata.complexity > 10)`
 - Complex functions (cognitive): `results.filter(r => r.metadata.cognitiveComplexity > 15)`
-- High Halstead effort: `results.filter(r => r.metadata.halsteadEffort > 1000000)`
+- Long to understand (>1 hour): `results.filter(r => r.metadata.halsteadEffort > 64800)`
 - Methods only: `results.filter(r => r.metadata.symbolType === 'method')`
 
 ## When to Use grep Instead

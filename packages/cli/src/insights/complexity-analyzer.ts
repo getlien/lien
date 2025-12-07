@@ -136,6 +136,26 @@ export class ComplexityAnalyzer {
   }
 
   /**
+   * Convert Halstead effort to time in minutes.
+   * Formula: Time (seconds) = Effort / 18, so Time (minutes) = Effort / 1080
+   */
+  private effortToMinutes(effort: number): number {
+    return effort / 1080;
+  }
+
+  /**
+   * Format minutes as human-readable time (e.g., "2h 30m" or "45m")
+   */
+  private formatTime(minutes: number): string {
+    if (minutes >= 60) {
+      const hours = Math.floor(minutes / 60);
+      const mins = Math.round(minutes % 60);
+      return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    }
+    return `${Math.round(minutes)}m`;
+  }
+
+  /**
    * Create a Halstead violation if metrics exceed thresholds
    */
   private createHalsteadViolation(
@@ -152,7 +172,16 @@ export class ComplexityAnalyzer {
 
     const violationSeverity = metricValue >= errorThreshold ? 'error' : 'warning';
     const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
-    const metricLabel = metricType === 'halstead_effort' ? 'Halstead effort' : 'Halstead difficulty';
+    
+    // For effort, show time in minutes; for difficulty, show raw number
+    let message: string;
+    if (metricType === 'halstead_effort') {
+      const timeMinutes = this.effortToMinutes(metricValue);
+      const thresholdMinutes = this.effortToMinutes(effectiveThreshold);
+      message = `Time to understand ~${this.formatTime(timeMinutes)} exceeds threshold ${this.formatTime(thresholdMinutes)}`;
+    } else {
+      message = `Halstead difficulty ${Math.round(metricValue)} exceeds threshold ${Math.round(effectiveThreshold)}`;
+    }
 
     const halsteadDetails: HalsteadDetails = {
       volume: metadata.halsteadVolume || 0,
@@ -171,7 +200,7 @@ export class ComplexityAnalyzer {
       complexity: Math.round(metricValue),
       threshold: Math.round(effectiveThreshold),
       severity: violationSeverity,
-      message: `${metricLabel} ${Math.round(metricValue).toLocaleString()} exceeds threshold ${Math.round(effectiveThreshold).toLocaleString()}`,
+      message,
       metricType,
       halsteadDetails,
     };
@@ -215,19 +244,33 @@ export class ComplexityAnalyzer {
   }
 
   /**
+   * Convert time in minutes to Halstead effort.
+   * Formula: Time (seconds) = Effort / 18, so Effort = Time (minutes) * 60 * 18 = Time * 1080
+   */
+  private minutesToEffort(minutes: number): number {
+    return minutes * 1080;
+  }
+
+  /**
    * Find all complexity violations based on thresholds.
    * Checks cyclomatic, cognitive, and Halstead complexity.
    */
   private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
-    const defaultThresholds = { 
-      method: 15, 
-      cognitive: 15, 
-      halsteadEffort: 300000,    // P99 - catches top 1%
-      halsteadDifficulty: 30,    // P90 - catches top 10%
-      file: 50, 
-      average: 6 
+    const configThresholds = this.config.complexity?.thresholds;
+    
+    // Convert halsteadTimeMinutes to effort internally
+    const halsteadEffort = configThresholds?.halsteadTimeMinutes 
+      ? this.minutesToEffort(configThresholds.halsteadTimeMinutes)
+      : this.minutesToEffort(60); // Default: 60 minutes = 64,800 effort
+    
+    const thresholds = { 
+      method: configThresholds?.method ?? 15, 
+      cognitive: configThresholds?.cognitive ?? 15, 
+      halsteadEffort,
+      halsteadDifficulty: configThresholds?.halsteadDifficulty ?? 30,
+      file: configThresholds?.file ?? 50, 
+      average: configThresholds?.average ?? 6 
     };
-    const thresholds = { ...defaultThresholds, ...this.config.complexity?.thresholds };
     const severity = this.config.complexity?.severity || { warning: 1.0, error: 2.0 };
     const functionChunks = this.getUniqueFunctionChunks(chunks);
     

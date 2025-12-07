@@ -13,10 +13,29 @@ function getMetricLabel(metricType: ComplexityViolation['metricType']): string {
   switch (metricType) {
     case 'cognitive': return 'Cognitive complexity';
     case 'cyclomatic': return 'Cyclomatic complexity';
-    case 'halstead_effort': return 'Halstead effort';
+    case 'halstead_effort': return 'Time to understand';
     case 'halstead_difficulty': return 'Halstead difficulty';
     default: return 'Complexity';
   }
+}
+
+/**
+ * Convert Halstead effort to time in minutes
+ */
+function effortToMinutes(effort: number): number {
+  return effort / 1080;
+}
+
+/**
+ * Format minutes as human-readable time
+ */
+function formatTime(minutes: number): string {
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const mins = Math.round(minutes % 60);
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return `${Math.round(minutes)}m`;
 }
 
 /**
@@ -26,9 +45,10 @@ function formatHalsteadDetails(violation: ViolationWithFile): string[] {
   if (!violation.halsteadDetails) return [];
   
   const { volume, difficulty, effort, bugs } = violation.halsteadDetails;
+  const timeStr = formatTime(effortToMinutes(effort));
   return [
-    chalk.dim(`    📊  Volume: ${volume.toLocaleString()}, Difficulty: ${difficulty.toFixed(1)}`),
-    chalk.dim(`    ⏱️  Effort: ${effort.toLocaleString()}, Est. bugs: ${bugs.toFixed(3)}`),
+    chalk.dim(`    📊  Volume: ${Math.round(volume).toLocaleString()}, Difficulty: ${difficulty.toFixed(1)}`),
+    chalk.dim(`    ⏱️  Time: ~${timeStr}, Est. bugs: ${bugs.toFixed(2)}`),
   ];
 }
 
@@ -52,12 +72,20 @@ function formatViolation(
   
   // Show metric type and value
   const metricLabel = getMetricLabel(violation.metricType);
-  const complexityDisplay = violation.metricType.startsWith('halstead_')
-    ? violation.complexity.toLocaleString()
-    : violation.complexity.toString();
-  const thresholdDisplay = violation.metricType.startsWith('halstead_')
-    ? violation.threshold.toLocaleString()
-    : violation.threshold.toString();
+  let complexityDisplay: string;
+  let thresholdDisplay: string;
+  
+  if (violation.metricType === 'halstead_effort') {
+    // Show time instead of raw effort
+    complexityDisplay = '~' + formatTime(effortToMinutes(violation.complexity));
+    thresholdDisplay = formatTime(effortToMinutes(violation.threshold));
+  } else if (violation.metricType === 'halstead_difficulty') {
+    complexityDisplay = violation.complexity.toString();
+    thresholdDisplay = violation.threshold.toString();
+  } else {
+    complexityDisplay = violation.complexity.toString();
+    thresholdDisplay = violation.threshold.toString();
+  }
   lines.push(chalk.dim(`    ${metricLabel}: ${complexityDisplay} (threshold: ${thresholdDisplay})`));
   
   let percentageText: string;

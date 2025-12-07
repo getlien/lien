@@ -274,7 +274,7 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 
 - **Cyclomatic Complexity**: Number of independent paths through code (decision points)
 - **Cognitive Complexity**: Mental effort to understand code (penalizes nesting depth)
-- **Halstead Effort**: Mental effort based on operators and operands
+- **Time to Understand**: Estimated reading time based on Halstead metrics
 - **Halstead Difficulty**: Error-proneness based on program vocabulary
 
 ```json
@@ -284,7 +284,7 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
     "thresholds": {
       "method": 15,
       "cognitive": 15,
-      "halsteadEffort": 300000,
+      "halsteadTimeMinutes": 60,
       "halsteadDifficulty": 30,
       "file": 50,
       "average": 6
@@ -303,17 +303,16 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 |-----------|---------|-------------|
 | `method` | 15 | Cyclomatic complexity threshold per function |
 | `cognitive` | 15 | Cognitive complexity threshold per function |
-| `halsteadEffort` | 300000 | Halstead effort threshold (P99 - top 1%) |
-| `halsteadDifficulty` | 30 | Halstead difficulty threshold (P90 - top 10%) |
+| `halsteadTimeMinutes` | 60 | Functions taking longer than 1 hour to understand |
+| `halsteadDifficulty` | 30 | Halstead difficulty threshold (error-proneness) |
 | `file` | 50 | Maximum total complexity per file |
 | `average` | 6 | Maximum average complexity per file |
 
-::: tip Halstead Metrics
-Halstead metrics are based on counts of operators (keywords, symbols) and operands (variables, literals):
-- **Volume**: Size of implementation (N × log₂(n))
-- **Difficulty**: Error-proneness ((n1/2) × (N2/n2))
-- **Effort**: Mental effort required (D × V)
-- **Bugs**: Estimated delivered bugs (V / 3000)
+::: tip Time to Understand
+The "time to understand" metric is based on Halstead research:
+- **60 minutes** = Warning threshold (functions taking >1 hour to read)
+- **120 minutes** = Error threshold (with 2x severity multiplier)
+- Calculated from operators, operands, and program vocabulary
 :::
 
 #### Severity Multipliers
