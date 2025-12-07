@@ -279,23 +279,36 @@ function buildMetricBreakdownForDisplay(deltaByMetric: Record<string, number>): 
 }
 
 /**
+ * Categorize deltas into improved vs degraded counts
+ */
+function categorizeDeltas(deltas: ComplexityDelta[]): { improved: number; degraded: number } {
+  return deltas.reduce((acc, d) => {
+    if (['improved', 'deleted'].includes(d.severity)) acc.improved++;
+    else if (['warning', 'error', 'new'].includes(d.severity)) acc.degraded++;
+    return acc;
+  }, { improved: 0, degraded: 0 });
+}
+
+/**
+ * Determine trend emoji based on total delta
+ */
+function getTrendEmoji(totalDelta: number): string {
+  if (totalDelta > 0) return '⬆️';
+  if (totalDelta < 0) return '⬇️';
+  return '➡️';
+}
+
+/**
  * Format delta display with per-metric breakdown
  */
 function formatDeltaDisplay(deltas: ComplexityDelta[] | null | undefined): string {
   if (!deltas || deltas.length === 0) return '';
   
-  // Count improved and degraded functions
-  let improved = 0;
-  let degraded = 0;
-  for (const d of deltas) {
-    if (d.severity === 'improved' || d.severity === 'deleted') improved++;
-    else if (d.severity === 'warning' || d.severity === 'error' || d.severity === 'new') degraded++;
-  }
-  
+  const { improved, degraded } = categorizeDeltas(deltas);
   const deltaByMetric = groupDeltasByMetric(deltas);
   const metricBreakdown = buildMetricBreakdownForDisplay(deltaByMetric);
   const totalDelta = Object.values(deltaByMetric).reduce((sum, v) => sum + v, 0);
-  const trend = totalDelta > 0 ? '⬆️' : totalDelta < 0 ? '⬇️' : '➡️';
+  const trend = getTrendEmoji(totalDelta);
 
   let display = `\n\n**Complexity Change:** ${metricBreakdown} ${trend}`;
   if (improved > 0) display += ` | ${improved} improved`;
