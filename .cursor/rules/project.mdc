@@ -206,12 +206,41 @@ npm run dev              # Watch mode
 npm run typecheck        # Type check only
 npm test                 # Run tests
 npm run build            # Build CLI
-
-# Release (in root)
-npm run release -- patch "fix: description"
-npm run release -- minor "feat: description"
-npm run release -- major "BREAKING: description"
 ```
+
+---
+
+## Release Process
+
+**NEVER run `npm publish` manually.** CI handles npm publishing automatically.
+
+### Release Workflow
+```bash
+# 1. Create release notes (for detailed releases)
+#    Create .wip/vX.Y.Z-release-notes.md with changelog content
+
+# 2. Run release script
+npm run release -- patch "fix: description"
+npm run release -- minor "feat: description" --changelog .wip/vX.Y.Z-release-notes.md
+npm run release -- major "BREAKING: description"
+
+# 3. Push to trigger CI (CI publishes to npm)
+git push origin main
+git push origin vX.Y.Z
+```
+
+### What the Release Script Does
+1. Bumps version in `packages/cli/package.json`
+2. Updates `CHANGELOG.md` (uses `--changelog` file if provided)
+3. Builds the project
+4. Creates commit and git tag
+
+### What CI Does (on tag push)
+1. Runs typecheck, build, and tests
+2. Publishes to npm (skips if version already exists)
+3. Creates GitHub Release with auto-generated notes
+
+**Do NOT run `npm publish` - let CI handle it to ensure tests pass first.**
 
 ---
 
