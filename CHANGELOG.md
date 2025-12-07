@@ -1,6 +1,69 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.19.0] - 2025-12-07
+
+### Added
+
+- **Human-friendly complexity metrics with Halstead support**
+  - 🔀 **Test paths**: Shows cyclomatic complexity as test cases needed for coverage
+  - 🧠 **Mental load**: Cognitive complexity with nesting penalty visualization  
+  - ⏱️ **Time to understand**: Halstead effort converted to readable time (~2h 30m)
+  - 🐛 **Estimated bugs**: Halstead bug prediction (Volume / 3000)
+
+- **Veille: AI-powered code review GitHub Action**
+  - Automatic complexity analysis on pull requests
+  - Line-specific review comments with refactoring suggestions
+  - Complexity delta tracking (base vs head comparison)
+  - Human-friendly PR description badges with metrics table
+
+- **`get_complexity` MCP tool**
+  - Analyze complexity for files or entire codebase
+  - Returns violations sorted by severity with risk levels
+  - Supports all four metric types with detailed Halstead info
+  - Threshold filtering and top-N limiting
+
+- **Cognitive complexity analysis**
+  - Based on SonarSource's specification
+  - Penalizes nesting depth and breaks from linear flow
+  - Separate from cyclomatic for better maintainability insights
+
+### Changed
+
+- **BREAKING: Config keys renamed for clarity**
+  - `method` → `testPaths`
+  - `cognitive` → `mentalLoad`
+  - Added `timeToUnderstandMinutes` (default: 60)
+  - Added `estimatedBugs` (default: 1.5)
+
+- **BREAKING: Removed unused config options**
+  - Removed `file` and `average` thresholds (never implemented)
+  - Removed configurable `severity` multipliers (now hardcoded: warning=1x, error=2x)
+
+- **Index format upgraded to v4**
+  - Added Halstead metrics fields (volume, difficulty, effort, bugs)
+  - Requires reindex: `lien reindex`
+
+### Improved
+
+- **Refactored high-complexity functions**
+  - Reduced `analyzeDependencies` complexity from 32 to 5
+  - Reduced `querySymbols` complexity from 46 to 11
+  - Extracted tool handlers from monolithic MCP server
+  - Migrated from deprecated `vectordb` to `@lancedb/lancedb`
+
+- **Better developer experience**
+  - Added `collect.js` for cleaner data transformations
+  - Extracted complexity metrics into dedicated module
+  - Comprehensive test coverage for all new features
+
+### Documentation
+
+- Updated configuration guide with new threshold options
+- Added MCP tools documentation for `get_complexity`
+- Enhanced CURSOR_RULES_TEMPLATE with Halstead filtering examples
+
+
 ## [0.18.0] - 2025-12-01
 
 ### Added
