@@ -40,7 +40,13 @@ jobs:
         run: npm test --workspace=packages/cli
       
       - name: Publish to npm (with OIDC trusted publishing)
-        run: npm publish --workspace=packages/cli --access public
+        run: |
+          VERSION=$(node -p "require('./packages/cli/package.json').version")
+          if npm view @liendev/lien@$VERSION version 2>/dev/null; then
+            echo "Version $VERSION already published, skipping..."
+          else
+            npm publish --workspace=packages/cli --access public
+          fi
       
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
