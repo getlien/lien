@@ -1,7 +1,8 @@
 import type Parser from 'tree-sitter';
 import type { ASTChunk } from './types.js';
 import { parseAST, detectLanguage, isASTSupported } from './parser.js';
-import { extractSymbolInfo, extractImports, calculateCognitiveComplexity } from './symbols.js';
+import { extractSymbolInfo, extractImports } from './symbols.js';
+import { calculateCognitiveComplexity } from './complexity/index.js';
 import { getTraverser } from './traversers/index.js';
 
 export interface ASTChunkOptions {
