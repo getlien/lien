@@ -12,7 +12,7 @@ type ViolationWithFile = ComplexityViolation & { file: string };
 function getMetricLabel(metricType: ComplexityViolation['metricType']): string {
   switch (metricType) {
     case 'cognitive': return 'Cognitive complexity';
-    case 'cyclomatic': return 'Cyclomatic complexity';
+    case 'cyclomatic': return 'Test paths';
     case 'halstead_effort': return 'Time to understand';
     case 'halstead_bugs': return 'Estimated bugs';
     default: return 'Complexity';
@@ -83,6 +83,10 @@ function formatViolation(
     // Show bugs with 2 decimal places
     complexityDisplay = violation.complexity.toFixed(2);
     thresholdDisplay = violation.threshold.toFixed(1);
+  } else if (violation.metricType === 'cyclomatic') {
+    // Show as test cases needed
+    complexityDisplay = `${violation.complexity} (needs ~${violation.complexity} tests)`;
+    thresholdDisplay = violation.threshold.toString();
   } else {
     complexityDisplay = violation.complexity.toString();
     thresholdDisplay = violation.threshold.toString();

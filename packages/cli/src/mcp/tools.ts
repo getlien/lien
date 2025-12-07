@@ -113,7 +113,7 @@ Example: get_dependents({ filepath: "src/utils/validate.ts" })`
     `Get complexity analysis for files or the entire codebase.
 
 Analyzes multiple complexity metrics:
-- **Cyclomatic complexity**: Decision paths (branches) in code
+- **Test paths**: Number of test cases needed for full coverage (cyclomatic)
 - **Cognitive complexity**: Mental effort to understand (penalizes nesting)
 - **Time to understand**: Estimated reading time based on Halstead effort
 - **Estimated bugs**: Predicted bug count based on Halstead volume
@@ -130,6 +130,6 @@ Examples:
 
 Returns violations with metricType ('cyclomatic', 'cognitive', 'halstead_effort',
 or 'halstead_bugs'), risk levels, and dependent counts.
-Halstead violations include detailed metrics (volume, difficulty, effort, bugs).`
+Human-readable output: "23 (needs ~23 tests)", "~2h 30m", "2.27 bugs".`
   ),
 ];

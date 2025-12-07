@@ -79,13 +79,13 @@ export function formatSarifReport(report: ComplexityReport): string {
     {
       id: 'lien/high-cyclomatic-complexity',
       shortDescription: {
-        text: 'High cyclomatic complexity',
+        text: 'Too many test paths',
       },
       fullDescription: {
-        text: 'Function or method has high cyclomatic complexity (many decision paths), making it difficult to test exhaustively.',
+        text: 'Function or method requires too many test cases to achieve full branch coverage. Each decision point (if, switch, loop) adds a path that needs testing.',
       },
       help: {
-        text: 'Consider refactoring by extracting methods, using early returns, or simplifying conditional logic.',
+        text: 'Consider refactoring by extracting methods, using early returns, or simplifying conditional logic to reduce the number of test paths.',
       },
     },
     {

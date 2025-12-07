@@ -297,7 +297,7 @@ Risk level is boosted if dependents have high complexity. A file with 10 depende
 
 Analyze code complexity for tech debt identification and refactoring prioritization. Tracks multiple complexity metrics:
 
-- **Cyclomatic complexity**: Testability (decision paths)
+- **Test paths**: Number of test cases needed (cyclomatic complexity)
 - **Cognitive complexity**: Understandability (penalizes nesting)
 - **Time to understand**: Estimated reading time (Halstead effort)
 - **Estimated bugs**: Predicted bug count (Halstead volume / 3000)
@@ -380,7 +380,7 @@ Analyze complexity of src/api/
 
 | metricType | Description |
 |------------|-------------|
-| `cyclomatic` | Number of independent paths (decision points) |
+| `cyclomatic` | Test cases needed for full branch coverage |
 | `cognitive` | Mental effort to understand (penalizes nesting) |
 | `halstead_effort` | Time to understand (shown as human-readable duration) |
 | `halstead_bugs` | Estimated bug count (Volume / 3000) |

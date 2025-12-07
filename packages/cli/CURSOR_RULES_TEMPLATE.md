@@ -63,13 +63,13 @@ REQUIRED sequence:
 **`get_complexity({ top: 10 })`**
 - Find most complex functions in the codebase
 - Analyzes multiple complexity metrics:
-  - **Cyclomatic**: Decision paths (branches) in code
+  - **Test paths**: Number of test cases needed for full coverage (cyclomatic)
   - **Cognitive**: Mental effort to understand (penalizes nesting)
   - **Time to understand**: Estimated reading time (Halstead effort)
   - **Estimated bugs**: Predicted bug count (Halstead volume / 3000)
 - Use for tech debt analysis and refactoring prioritization
 - Returns `metricType` ('cyclomatic', 'cognitive', 'halstead_effort', or 'halstead_bugs')
-- Time-based violations show human-readable durations (e.g., "~2h 30m")
+- Human-readable output: "23 (needs ~23 tests)", "~2h 30m", "2.27 bugs"
 - Optional: `files` to filter specific files, `threshold` to set minimum complexity
 
 ## Test Associations

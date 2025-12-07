@@ -95,7 +95,11 @@ export class ComplexityAnalyzer {
 
     const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
     const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
-    const metricLabel = metricType === 'cognitive' ? 'Cognitive' : 'Cyclomatic';
+    
+    // Human-friendly messages
+    const message = metricType === 'cyclomatic'
+      ? `Needs ~${complexity} test cases for full coverage (threshold: ${Math.round(effectiveThreshold)})`
+      : `Cognitive complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`;
 
     return {
       filepath: metadata.file,
@@ -107,7 +111,7 @@ export class ComplexityAnalyzer {
       complexity,
       threshold: Math.round(effectiveThreshold),
       severity: violationSeverity,
-      message: `${metricLabel} complexity ${complexity} exceeds threshold ${Math.round(effectiveThreshold)}`,
+      message,
       metricType,
     };
   }

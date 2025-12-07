@@ -474,7 +474,7 @@ describe('ComplexityAnalyzer', () => {
       
       expect(cyclomaticViolation).toBeDefined();
       expect(cyclomaticViolation!.complexity).toBe(20);
-      expect(cyclomaticViolation!.message).toContain('Cyclomatic');
+      expect(cyclomaticViolation!.message).toContain('test cases');
       
       expect(cognitiveViolation).toBeDefined();
       expect(cognitiveViolation!.complexity).toBe(18);
