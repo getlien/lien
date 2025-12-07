@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.19.2] - 2025-12-07
+
+### Fixed
+- **Exclude database migrations, seeders, factories by default**
+
+
 ## [0.19.1] - 2025-12-07
 
 ### Documentation
