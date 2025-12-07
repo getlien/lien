@@ -53,6 +53,32 @@ function formatHalsteadDetails(violation: ViolationWithFile): string[] {
 }
 
 /**
+ * Metric-specific formatters for complexity/threshold display.
+ * Each formatter returns { complexity, threshold } as display strings.
+ */
+type MetricFormatter = (val: number, thresh: number) => { complexity: string; threshold: string };
+
+const metricFormatters: Record<string, MetricFormatter> = {
+  halstead_effort: (val, thresh) => ({
+    complexity: '~' + formatTime(effortToMinutes(val)),
+    threshold: formatTime(effortToMinutes(thresh)),
+  }),
+  halstead_bugs: (val, thresh) => ({
+    complexity: val.toFixed(2),
+    threshold: thresh.toFixed(1),
+  }),
+  cyclomatic: (val, thresh) => ({
+    complexity: `${val} (needs ~${val} tests)`,
+    threshold: thresh.toString(),
+  }),
+};
+
+const defaultFormatter: MetricFormatter = (val, thresh) => ({
+  complexity: val.toString(),
+  threshold: thresh.toString(),
+});
+
+/**
  * Format a single violation entry with its metadata
  */
 function formatViolation(
@@ -63,49 +89,29 @@ function formatViolation(
 ): string[] {
   const lines: string[] = [];
   
+  // Symbol display
   const symbolDisplay = (violation.symbolType === 'function' || violation.symbolType === 'method')
     ? violation.symbolName + '()'
     : violation.symbolName;
-  
   const symbolText = isBold ? chalk.bold(symbolDisplay) : symbolDisplay;
   lines.push(colorFn(`  ${violation.file}:${violation.startLine}`) + chalk.dim(' - ') + symbolText);
   
-  // Show metric type and value
+  // Metric display using lookup table
   const metricLabel = getMetricLabel(violation.metricType);
-  let complexityDisplay: string;
-  let thresholdDisplay: string;
-  
-  if (violation.metricType === 'halstead_effort') {
-    // Show time instead of raw effort
-    complexityDisplay = '~' + formatTime(effortToMinutes(violation.complexity));
-    thresholdDisplay = formatTime(effortToMinutes(violation.threshold));
-  } else if (violation.metricType === 'halstead_bugs') {
-    // Show bugs with 2 decimal places
-    complexityDisplay = violation.complexity.toFixed(2);
-    thresholdDisplay = violation.threshold.toFixed(1);
-  } else if (violation.metricType === 'cyclomatic') {
-    // Show as test cases needed
-    complexityDisplay = `${violation.complexity} (needs ~${violation.complexity} tests)`;
-    thresholdDisplay = violation.threshold.toString();
-  } else {
-    complexityDisplay = violation.complexity.toString();
-    thresholdDisplay = violation.threshold.toString();
-  }
+  const formatter = metricFormatters[violation.metricType] || defaultFormatter;
+  const { complexity: complexityDisplay, threshold: thresholdDisplay } = formatter(violation.complexity, violation.threshold);
   lines.push(chalk.dim(`    ${metricLabel}: ${complexityDisplay} (threshold: ${thresholdDisplay})`));
   
-  let percentageText: string;
-  if (violation.threshold > 0) {
-    const percentage = Math.round(((violation.complexity - violation.threshold) / violation.threshold) * 100);
-    percentageText = `${percentage}% over threshold`;
-  } else {
-    percentageText = 'N/A (invalid threshold)';
-  }
+  // Percentage over threshold
+  const percentageText = violation.threshold > 0
+    ? `${Math.round(((violation.complexity - violation.threshold) / violation.threshold) * 100)}% over threshold`
+    : 'N/A (invalid threshold)';
   lines.push(chalk.dim(`    ⬆️  ${percentageText}`));
   
-  // Show Halstead details if available
+  // Halstead details if available
   lines.push(...formatHalsteadDetails(violation));
   
-  // Show dependency impact
+  // Dependency impact
   const depCount = fileData.dependentCount ?? fileData.dependents.length;
   if (depCount > 0) {
     lines.push(chalk.dim(`    📦  Imported by ${depCount} file${depCount !== 1 ? 's' : ''}`));
