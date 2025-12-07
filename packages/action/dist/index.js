@@ -36979,41 +36979,62 @@ function buildSkippedNote(skippedViolations) {
     return `\n\n<details>\n<summary>ℹ️ ${skippedViolations.length} pre-existing violation${skippedViolations.length === 1 ? '' : 's'} (unchanged)</summary>\n\n${skippedList}\n\n> *These violations existed before this PR and haven't changed. No inline comments added to reduce noise.*\n\n</details>`;
 }
 /**
+ * Format token usage cost display
+ */
+function formatCostDisplay(usage) {
+    return usage.totalTokens > 0
+        ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})`
+        : '';
+}
+/**
+ * Group deltas by metric type and sum their values
+ */
+function groupDeltasByMetric(deltas) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return dist_default()(deltas)
+        .groupBy('metricType')
+        .map((group) => group.sum('delta'))
+        .all();
+}
+/**
+ * Build metric breakdown string with emojis
+ */
+function buildMetricBreakdown(deltaByMetric) {
+    const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
+    return dist_default()(metricOrder)
+        .map(metricType => {
+        const metricDelta = deltaByMetric[metricType] || 0;
+        const emoji = src_getMetricEmoji(metricType);
+        const sign = metricDelta >= 0 ? '+' : '';
+        return `${emoji} ${sign}${metricDelta}`;
+    })
+        .all()
+        .join(' | ');
+}
+/**
+ * Format delta display with metric breakdown and summary
+ */
+function src_formatDeltaDisplay(deltas) {
+    if (!deltas || deltas.length === 0)
+        return '';
+    const deltaSummary = calculateDeltaSummary(deltas);
+    const deltaByMetric = groupDeltasByMetric(deltas);
+    const metricBreakdown = buildMetricBreakdown(deltaByMetric);
+    const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
+    let display = `\n\n**Complexity Change:** ${metricBreakdown} ${trend}`;
+    if (deltaSummary.improved > 0)
+        display += ` (${deltaSummary.improved} improved)`;
+    if (deltaSummary.degraded > 0)
+        display += ` (${deltaSummary.degraded} degraded)`;
+    return display;
+}
+/**
  * Build review summary body for line comments mode
  */
 function buildReviewSummary(report, deltas, uncoveredNote) {
     const { summary } = report;
-    const usage = getTokenUsage();
-    const costDisplay = usage.totalTokens > 0
-        ? `\n- Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})`
-        : '';
-    let deltaDisplay = '';
-    if (deltas && deltas.length > 0) {
-        const deltaSummary = calculateDeltaSummary(deltas);
-        // Calculate delta by metric type using collect.js
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const deltaByMetric = dist_default()(deltas)
-            .groupBy('metricType')
-            .map((group) => group.sum('delta'))
-            .all();
-        // Build metric breakdown string with emojis (always show all metrics)
-        const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
-        const metricBreakdown = dist_default()(metricOrder)
-            .map(metricType => {
-            const metricDelta = deltaByMetric[metricType] || 0;
-            const emoji = src_getMetricEmoji(metricType);
-            const sign = metricDelta >= 0 ? '+' : '';
-            return `${emoji} ${sign}${metricDelta}`;
-        })
-            .all()
-            .join(' | ');
-        const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
-        deltaDisplay = `\n\n**Complexity Change:** ${metricBreakdown} ${trend}`;
-        if (deltaSummary.improved > 0)
-            deltaDisplay += ` (${deltaSummary.improved} improved)`;
-        if (deltaSummary.degraded > 0)
-            deltaDisplay += ` (${deltaSummary.degraded} degraded)`;
-    }
+    const costDisplay = formatCostDisplay(getTokenUsage());
+    const deltaDisplay = src_formatDeltaDisplay(deltas);
     return `<!-- lien-ai-review -->
 ## 👁️ Veille
 
