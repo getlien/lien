@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.19.3] - 2025-12-07
+
+### Fixed
+- **Improve file change detection for atomic saves**
+
+
 ## [0.19.2] - 2025-12-07
 
 ### Fixed
