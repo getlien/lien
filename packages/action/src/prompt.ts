@@ -19,13 +19,32 @@ function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, Complexity
 }
 
 /**
+ * Get human-readable label for a metric type
+ */
+function getMetricLabel(metricType: string): string {
+  switch (metricType) {
+    case 'cognitive': return 'cognitive';
+    case 'cyclomatic': return 'cyclomatic';
+    case 'halstead_effort': return 'Halstead effort';
+    case 'halstead_difficulty': return 'Halstead difficulty';
+    default: return 'complexity';
+  }
+}
+
+/**
  * Format a single violation line with optional delta
  */
 function formatViolationLine(v: ComplexityViolation, deltaMap: Map<string, ComplexityDelta>): string {
   const delta = deltaMap.get(`${v.filepath}::${v.symbolName}`);
   const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-  const metricLabel = v.metricType === 'cognitive' ? 'cognitive' : 'cyclomatic';
-  return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} complexity ${v.complexity}${deltaStr} (threshold: ${v.threshold}) [${v.severity}]`;
+  const metricLabel = getMetricLabel(v.metricType);
+  const valueDisplay = v.metricType?.startsWith('halstead_') 
+    ? v.complexity.toLocaleString() 
+    : v.complexity.toString();
+  const thresholdDisplay = v.metricType?.startsWith('halstead_')
+    ? v.threshold.toLocaleString()
+    : v.threshold.toString();
+  return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} ${valueDisplay}${deltaStr} (threshold: ${thresholdDisplay}) [${v.severity}]`;
 }
 
 /**
@@ -338,6 +357,17 @@ ${status.emoji} ${status.message}
 }
 
 /**
+ * Build Halstead details string for prompts
+ */
+function formatHalsteadContext(violation: ComplexityViolation): string {
+  if (!violation.metricType?.startsWith('halstead_')) return '';
+  if (!violation.halsteadDetails) return '';
+  
+  const details = violation.halsteadDetails;
+  return `\n**Halstead Metrics**: Volume: ${details.volume?.toLocaleString()}, Difficulty: ${details.difficulty?.toFixed(1)}, Effort: ${details.effort?.toLocaleString()}, Est. bugs: ${details.bugs?.toFixed(3)}`;
+}
+
+/**
  * Build a prompt for generating a single line comment for a violation
  */
 export function buildLineCommentPrompt(
@@ -347,20 +377,30 @@ export function buildLineCommentPrompt(
   const snippetSection = codeSnippet
     ? `\n\n**Code:**\n\`\`\`\n${codeSnippet}\n\`\`\``
     : '';
+  
+  const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
+  const valueDisplay = violation.metricType?.startsWith('halstead_')
+    ? violation.complexity.toLocaleString()
+    : violation.complexity.toString();
+  const thresholdDisplay = violation.metricType?.startsWith('halstead_')
+    ? violation.threshold.toLocaleString()
+    : violation.threshold.toString();
+  const halsteadContext = formatHalsteadContext(violation);
 
   return `You are reviewing code for complexity. Generate an actionable review comment.
 
 **Function**: \`${violation.symbolName}\` (${violation.symbolType})
-**Complexity**: ${violation.complexity} ${violation.metricType || 'cyclomatic'} (threshold: ${violation.threshold})
+**Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
 ${snippetSection}
 
 Write a code review comment that includes:
 
-1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains")
+1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains", "many unique operators")
 
 2. **Refactoring** (2-3 sentences): Concrete steps to reduce complexity. Be SPECIFIC:
    - Name the exact functions to extract (e.g., "Extract \`handleAdminDelete()\` and \`handleModeratorDelete()\`")
    - Suggest specific patterns (strategy, lookup table, early returns)
+   - For Halstead metrics: suggest introducing named constants, reducing operator variety, or extracting complex expressions
    - If applicable, show a brief code sketch
 
 3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
@@ -415,10 +455,19 @@ export function buildBatchedCommentsPrompt(
       const snippetSection = snippet
         ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\``
         : '';
+      
+      const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
+      const valueDisplay = v.metricType?.startsWith('halstead_')
+        ? v.complexity.toLocaleString()
+        : v.complexity.toString();
+      const thresholdDisplay = v.metricType?.startsWith('halstead_')
+        ? v.threshold.toLocaleString()
+        : v.threshold.toString();
+      const halsteadContext = formatHalsteadContext(v);
 
       return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
-- **Complexity**: ${v.complexity} ${v.metricType || 'cyclomatic'} (threshold: ${v.threshold})
+- **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
 - **Severity**: ${v.severity}${snippetSection}`;
     })
     .join('\n\n');
@@ -440,10 +489,12 @@ For each violation, write a code review comment that:
 
 1. **Identifies the specific pattern** causing complexity (not just "too complex")
    - Is it nested conditionals? Long parameter lists? Multiple responsibilities?
+   - For Halstead metrics: many unique operators/operands, complex expressions
    - Be specific: "5 levels of nesting" not "deeply nested"
 
 2. **Suggests a concrete fix** with a short code example (3-5 lines)
    - Consider: early returns, guard clauses, lookup tables, extracting helpers, strategy pattern
+   - For Halstead: named constants, reducing operator variety, extracting complex expressions
    - Name specific functions: "Extract \`handleAdminCase()\`" not "extract a function"
    - Choose the SIMPLEST fix that addresses the issue (KISS principle)
 
