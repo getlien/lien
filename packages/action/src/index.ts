@@ -34,6 +34,7 @@ import {
   formatComplexityValue,
   formatThresholdValue,
 } from './prompt.js';
+import { formatTime } from './format.js';
 import {
   calculateDeltas,
   calculateDeltaSummary,
@@ -391,22 +392,6 @@ function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> 
 }
 
 /**
- * Format time in minutes as human-readable (e.g., "7h 54m", "-7h 54m", or "45m")
- * Preserves the sign for negative values.
- * Rounds total minutes first to avoid edge cases like "1h 60m".
- */
-function formatTimeMinutes(minutes: number): string {
-  const sign = minutes < 0 ? '-' : '';
-  const roundedMinutes = Math.round(Math.abs(minutes));
-  if (roundedMinutes >= 60) {
-    const hours = Math.floor(roundedMinutes / 60);
-    const mins = roundedMinutes % 60;
-    return mins > 0 ? `${sign}${hours}h ${mins}m` : `${sign}${hours}h`;
-  }
-  return `${sign}${roundedMinutes}m`;
-}
-
-/**
  * Format delta value for display, rounding bugs to 2 decimals to avoid floating point noise
  */
 function formatDeltaValue(metricType: string, delta: number): string {
@@ -416,7 +401,7 @@ function formatDeltaValue(metricType: string, delta: number): string {
   }
   // halstead_effort is stored in minutes - format as hours for readability
   if (metricType === 'halstead_effort') {
-    return formatTimeMinutes(delta);
+    return formatTime(delta);
   }
   return String(Math.round(delta));
 }
