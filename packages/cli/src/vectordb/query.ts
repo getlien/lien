@@ -482,7 +482,8 @@ export async function scanAllWithVectors(
         metadata: buildSearchResultMetadata(r),
         score: 0,
         relevance: calculateRelevance(0),
-        vector: r.vector,
+        // Convert LanceDB FloatVector to plain number[] for duplicate detection
+        vector: Array.from(r.vector),
       }));
   } catch (error) {
     throw wrapError(error, 'Failed to scan all chunks with vectors');
