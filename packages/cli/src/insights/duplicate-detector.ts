@@ -44,6 +44,48 @@ export interface DuplicateOptions {
 }
 
 /**
+ * Common build output directories to exclude from duplicate analysis.
+ * These contain compiled versions of source code which aren't useful duplicates.
+ */
+const BUILD_OUTPUT_PATTERNS = [
+  '/dist/',
+  '/build/',
+  '/out/',
+  '/.next/',
+  '/node_modules/',
+];
+
+/**
+ * Check if a file path is in a build output directory.
+ */
+function isBuildOutput(filepath: string): boolean {
+  const normalized = filepath.replace(/\\/g, '/');
+  return BUILD_OUTPUT_PATTERNS.some(pattern => normalized.includes(pattern));
+}
+
+/**
+ * Deduplicate chunks by file + line range and filter out build output.
+ * The index may contain duplicate entries from incremental reindexing.
+ */
+function deduplicateChunks(chunks: SearchResultWithVector[]): SearchResultWithVector[] {
+  const seen = new Set<string>();
+  const result: SearchResultWithVector[] = [];
+  
+  for (const chunk of chunks) {
+    // Skip build output directories
+    if (isBuildOutput(chunk.metadata.file)) continue;
+    
+    const key = `${chunk.metadata.file}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(chunk);
+    }
+  }
+  
+  return result;
+}
+
+/**
  * Find duplicate code clusters using stored embeddings.
  * Uses connected components algorithm on similarity graph.
  */
@@ -57,7 +99,10 @@ export function findDuplicates(
     maxClusters = 20,
   } = options;
 
-  if (chunks.length === 0) {
+  // Deduplicate chunks (index may have duplicates from incremental reindexing)
+  const uniqueChunks = deduplicateChunks(chunks);
+
+  if (uniqueChunks.length === 0) {
     return {
       summary: createEmptySummary(),
       clusters: [],
@@ -69,18 +114,18 @@ export function findDuplicates(
   const distanceThreshold = 2 * (1 - threshold);
   
   // Build adjacency list for similarity graph
-  const adjacency = buildSimilarityGraph(chunks, distanceThreshold);
+  const adjacency = buildSimilarityGraph(uniqueChunks, distanceThreshold);
 
   // Find connected components (clusters)
-  const clusters = findConnectedComponents(adjacency, chunks, minClusterSize);
+  const clusters = findConnectedComponents(adjacency, uniqueChunks, minClusterSize);
 
   // Sort by impact (count * lines) and limit
   const sortedClusters = clusters
     .sort((a, b) => (b.count * b.totalLines) - (a.count * a.totalLines))
     .slice(0, maxClusters);
 
-  // Build summary
-  const summary = buildSummary(sortedClusters, chunks.length);
+  // Build summary (use uniqueChunks count for accuracy)
+  const summary = buildSummary(sortedClusters, uniqueChunks.length);
 
   return { summary, clusters: sortedClusters };
 }
