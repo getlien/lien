@@ -27,7 +27,9 @@ export async function scanCodebaseWithFrameworks(
     allFiles.push(...frameworkFiles);
   }
   
-  return allFiles;
+  // Deduplicate files across frameworks to prevent double-indexing
+  // This handles overlapping framework paths (e.g., root "." and "packages/cli")
+  return Array.from(new Set(allFiles));
 }
 
 /**
