@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.19.4] - 2025-12-08
+
+### Fixed
+- **Deduplicate files across overlapping frameworks**
+
+
 ## [0.19.3] - 2025-12-07
 
 ### Fixed
