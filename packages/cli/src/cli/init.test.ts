@@ -302,14 +302,14 @@ describe('initCommand', () => {
   });
   
   describe('Cursor rules installation', () => {
-    it('should skip Cursor rules installation with --yes flag', async () => {
+    it('should install Cursor rules by default with --yes flag', async () => {
       await initCommand({ yes: true });
       
       const cursorRulesPath = path.join(testDir, '.cursor/rules');
       const exists = await fs.access(cursorRulesPath).then(() => true).catch(() => false);
       
-      // Should NOT create .cursor/rules when using --yes flag
-      expect(exists).toBe(false);
+      // --yes flag should auto-accept Cursor rules installation prompt
+      expect(exists).toBe(true);
     });
     
     it('should create .cursor directory structure when rules are installed', async () => {

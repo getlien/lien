@@ -95,6 +95,9 @@ async function handleNoFrameworksDetected(options: InitOptions): Promise<Framewo
       console.log(chalk.dim('Aborted.'));
       return null;
     }
+  } else {
+    // Log in non-interactive mode so users know what's happening
+    console.log(chalk.dim('Creating generic config (no frameworks detected)...'));
   }
   
   return [createGenericFramework()];
@@ -203,29 +206,55 @@ async function handleFrameworksDetected(
   return frameworks;
 }
 
-/** Check if path is a directory, file, or doesn't exist */
-async function getPathType(filepath: string): Promise<'directory' | 'file' | 'none'> {
+/**
+ * Check if path is a directory, file, other type, or doesn't exist.
+ * Returns:
+ * - 'directory' if path is a directory
+ * - 'file' if path is a regular file
+ * - 'other' if path exists but is not a file or directory (e.g., symlink, socket)
+ * - 'none' if path does not exist
+ */
+async function getPathType(filepath: string): Promise<'directory' | 'file' | 'other' | 'none'> {
   try {
     const stats = await fs.stat(filepath);
     if (stats.isDirectory()) return 'directory';
     if (stats.isFile()) return 'file';
+    // Path exists but is not a regular file or directory (symlink, socket, etc.)
+    return 'other';
   } catch {
     // Doesn't exist
+    return 'none';
   }
-  return 'none';
 }
 
-/** Convert existing rules file to directory structure */
+/** Convert existing rules file to directory structure (atomic to prevent data loss) */
 async function convertRulesFileToDirectory(rulesPath: string, templatePath: string) {
   const existingRules = await fs.readFile(rulesPath, 'utf-8');
-  await fs.unlink(rulesPath);
-  await fs.mkdir(rulesPath);
-  await fs.writeFile(path.join(rulesPath, 'project.mdc'), existingRules);
-  await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
+  const parentDir = path.dirname(rulesPath);
+  const baseName = path.basename(rulesPath);
   
-  console.log(chalk.green('✓ Converted .cursor/rules to directory'));
-  console.log(chalk.green('  - Your project rules: .cursor/rules/project.mdc'));
-  console.log(chalk.green('  - Lien rules: .cursor/rules/lien.mdc'));
+  // Create a temp directory in the same parent as rulesPath
+  const tempDir = await fs.mkdtemp(path.join(parentDir, baseName + '_tmp_'));
+  
+  try {
+    // Write files to temp directory first
+    await fs.writeFile(path.join(tempDir, 'project.mdc'), existingRules);
+    await fs.copyFile(templatePath, path.join(tempDir, 'lien.mdc'));
+    
+    // Remove the original file only after temp dir is ready
+    await fs.unlink(rulesPath);
+    
+    // Atomically move temp dir to final location
+    await fs.rename(tempDir, rulesPath);
+    
+    console.log(chalk.green('✓ Converted .cursor/rules to directory'));
+    console.log(chalk.green('  - Your project rules: .cursor/rules/project.mdc'));
+    console.log(chalk.green('  - Lien rules: .cursor/rules/lien.mdc'));
+  } catch (err) {
+    // Clean up temp dir if something failed
+    try { await fs.rm(tempDir, { recursive: true, force: true }); } catch { /* ignore cleanup errors */ }
+    throw err;
+  }
 }
 
 /** Install Cursor rules based on existing .cursor/rules state */
@@ -241,7 +270,7 @@ async function installCursorRulesFiles(rootDir: string, options: InitOptions) {
     await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
     console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
   } else if (pathType === 'file') {
-    // In non-interactive mode, auto-convert to directory structure
+    // Auto-convert to directory structure in non-interactive mode, otherwise prompt user
     const shouldConvert = options.yes || (await inquirer.prompt([{
       type: 'confirm',
       name: 'convertToDir',
@@ -257,25 +286,34 @@ async function installCursorRulesFiles(rootDir: string, options: InitOptions) {
     } else {
       console.log(chalk.dim('Skipped Cursor rules installation (preserving existing file)'));
     }
+  } else if (pathType === 'other') {
+    // Path exists but is not a file or directory (symlink, socket, etc.)
+    console.log(chalk.yellow('⚠️  .cursor/rules exists but is not a regular file or directory'));
+    console.log(chalk.dim('Skipped Cursor rules installation'));
   } else {
+    // pathType === 'none' - doesn't exist, create fresh
     await fs.mkdir(rulesPath, { recursive: true });
     await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
     console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
   }
 }
 
-/** Prompt and install Cursor rules if user agrees */
+/** Prompt and install Cursor rules if user agrees (auto-install in --yes mode) */
 async function promptAndInstallCursorRules(rootDir: string, options: InitOptions) {
-  if (options.yes) return;
-  
-  const { installCursorRules } = await inquirer.prompt([{
+  // In --yes mode, install by default (accepting the prompt)
+  // In interactive mode, ask user
+  const shouldInstall = options.yes || (await inquirer.prompt([{
     type: 'confirm',
     name: 'installCursorRules',
     message: 'Install recommended Cursor rules?',
     default: true,
-  }]);
+  }])).installCursorRules;
   
-  if (!installCursorRules) return;
+  if (!shouldInstall) return;
+  
+  if (options.yes) {
+    console.log(chalk.dim('Installing Cursor rules (auto-accepted due to --yes)...'));
+  }
   
   try {
     await installCursorRulesFiles(rootDir, options);
