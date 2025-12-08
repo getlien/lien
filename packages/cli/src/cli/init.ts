@@ -265,18 +265,21 @@ async function handleExistingRulesDirectory(rulesPath: string, templatePath: str
 
 /** Handle case when .cursor/rules is an existing file */
 async function handleExistingRulesFile(rulesPath: string, templatePath: string, options: InitOptions) {
-  // Auto-convert in non-interactive mode, otherwise prompt user
-  const shouldConvert = options.yes || (await inquirer.prompt([{
+  // In non-interactive mode, preserve existing file (conservative approach)
+  if (options.yes) {
+    console.log(chalk.dim('Skipped Cursor rules installation (preserving existing .cursor/rules file)'));
+    return;
+  }
+
+  // In interactive mode, prompt user for conversion
+  const { convertToDir } = await inquirer.prompt([{
     type: 'confirm',
     name: 'convertToDir',
     message: 'Existing .cursor/rules file found. Convert to directory and preserve your rules?',
     default: true,
-  }])).convertToDir;
+  }]);
 
-  if (shouldConvert) {
-    if (options.yes) {
-      console.log(chalk.dim('Converting .cursor/rules file to directory structure (auto-convert due to --yes)...'));
-    }
+  if (convertToDir) {
     await convertRulesFileToDirectory(rulesPath, templatePath);
   } else {
     console.log(chalk.dim('Skipped Cursor rules installation (preserving existing file)'));
