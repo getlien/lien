@@ -8,6 +8,7 @@ import { showCompactBanner } from '../utils/banner.js';
 import { MigrationManager } from '../config/migration-manager.js';
 import { detectAllFrameworks } from '../frameworks/detector-service.js';
 import { getFrameworkDetector } from '../frameworks/registry.js';
+import { DetectionResult } from '../frameworks/types.js';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -104,7 +105,7 @@ async function handleNoFrameworksDetected(options: InitOptions): Promise<Framewo
 }
 
 /** Display detected frameworks to console */
-function displayDetectedFrameworks(detections: Array<{ name: string; path: string; confidence: string; evidence: string[] }>) {
+function displayDetectedFrameworks(detections: DetectionResult[]) {
   console.log(chalk.green(`\n✓ Found ${detections.length} framework(s):\n`));
   
   for (const det of detections) {
@@ -180,7 +181,7 @@ async function generateSingleFrameworkConfig(
 
 /** Generate configs for all detected frameworks - returns null if user aborts */
 async function handleFrameworksDetected(
-  detections: Array<{ name: string; path: string; confidence: string; evidence: string[] }>,
+  detections: DetectionResult[],
   rootDir: string,
   options: InitOptions
 ): Promise<FrameworkInstance[] | null> {
@@ -248,8 +249,13 @@ async function convertRulesFileToDirectory(rulesPath: string, templatePath: stri
     try {
       // Move temp dir to final location
       await fs.rename(tempDir, rulesPath);
-      // Success - remove backup
-      await fs.unlink(backupPath);
+      // Success - remove backup (non-critical, so don't fail if this errors)
+      try {
+        await fs.unlink(backupPath);
+      } catch {
+        console.log(chalk.yellow('⚠️  Could not remove backup file, but conversion succeeded'));
+        console.log(chalk.dim(`Backup file: ${backupPath}`));
+      }
     } catch (renameErr) {
       // Rename failed - restore from backup
       await fs.rename(backupPath, rulesPath);
