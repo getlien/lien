@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatTime } from '../src/format.js';
+import { formatTime, formatDeltaValue } from '../src/format.js';
 
 describe('formatTime', () => {
   describe('positive values', () => {
@@ -52,5 +52,25 @@ describe('formatTime', () => {
       expect(formatTime(59.4)).toBe('59m');
       expect(formatTime(59.6)).toBe('1h');
     });
+  });
+});
+
+describe('formatDeltaValue', () => {
+  it('formats halstead_bugs with 2 decimal places', () => {
+    expect(formatDeltaValue('halstead_bugs', 2.5)).toBe('2.50');
+    expect(formatDeltaValue('halstead_bugs', -1.234)).toBe('-1.23');
+    expect(formatDeltaValue('halstead_bugs', 0)).toBe('0.00');
+  });
+
+  it('formats halstead_effort as human-readable time', () => {
+    expect(formatDeltaValue('halstead_effort', 474)).toBe('7h 54m');
+    expect(formatDeltaValue('halstead_effort', -474)).toBe('-7h 54m');
+    expect(formatDeltaValue('halstead_effort', 45)).toBe('45m');
+  });
+
+  it('formats other metrics as rounded integers', () => {
+    expect(formatDeltaValue('cyclomatic', 5)).toBe('5');
+    expect(formatDeltaValue('cognitive', -3)).toBe('-3');
+    expect(formatDeltaValue('cyclomatic', 2.7)).toBe('3');
   });
 });

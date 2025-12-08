@@ -13,3 +13,20 @@ export function formatTime(minutes: number): string {
   }
   return `${sign}${roundedMinutes}m`;
 }
+
+/**
+ * Format delta value for display based on metric type.
+ * - halstead_bugs: 2 decimal places
+ * - halstead_effort: human-readable time (e.g., "-7h 54m")
+ * - others: rounded integer
+ */
+export function formatDeltaValue(metricType: string, delta: number): string {
+  if (metricType === 'halstead_bugs') {
+    return delta.toFixed(2);
+  }
+  // halstead_effort is stored in minutes - format as hours for readability
+  if (metricType === 'halstead_effort') {
+    return formatTime(delta);
+  }
+  return String(Math.round(delta));
+}

@@ -5,7 +5,7 @@
 import collect from 'collect.js';
 import type { ComplexityReport, ComplexityViolation, PRContext, ComplexityDelta, DeltaSummary } from './types.js';
 import { formatDelta } from './delta.js';
-import { formatTime } from './format.js';
+import { formatTime, formatDeltaValue } from './format.js';
 
 /**
  * Create a unique key for delta lookups
@@ -238,17 +238,6 @@ function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> 
 /**
  * Format delta value for display, rounding bugs to 2 decimals
  */
-function formatDeltaValue(metricType: string, delta: number): string {
-  if (metricType === 'halstead_bugs') {
-    return delta.toFixed(2);
-  }
-  // halstead_effort is stored in minutes - format as hours for readability
-  if (metricType === 'halstead_effort') {
-    return formatTime(delta);
-  }
-  return String(Math.round(delta));
-}
-
 /**
  * Build metric breakdown string with emojis
  * Note: getMetricEmoji is defined below (line ~441) to avoid duplication

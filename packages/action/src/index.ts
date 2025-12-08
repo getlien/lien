@@ -34,7 +34,7 @@ import {
   formatComplexityValue,
   formatThresholdValue,
 } from './prompt.js';
-import { formatTime } from './format.js';
+import { formatTime, formatDeltaValue } from './format.js';
 import {
   calculateDeltas,
   calculateDeltaSummary,
@@ -389,21 +389,6 @@ function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .map((group: any) => group.sum('delta'))
     .all() as unknown as Record<string, number>;
-}
-
-/**
- * Format delta value for display, rounding bugs to 2 decimals to avoid floating point noise
- */
-function formatDeltaValue(metricType: string, delta: number): string {
-  // halstead_bugs uses decimals; others are integers
-  if (metricType === 'halstead_bugs') {
-    return delta.toFixed(2);
-  }
-  // halstead_effort is stored in minutes - format as hours for readability
-  if (metricType === 'halstead_effort') {
-    return formatTime(delta);
-  }
-  return String(Math.round(delta));
 }
 
 /**
