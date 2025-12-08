@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { ComplexityReport, ComplexityViolation, FileComplexityData } from '../types.js';
+import { ComplexityReport, ComplexityViolation, FileComplexityData, DuplicateCluster } from '../types.js';
 
 /**
  * Violation with associated file path for rendering
@@ -192,6 +192,61 @@ export function formatTextReport(report: ComplexityReport): string {
     }
   }
 
+  // Duplicates section (if included)
+  if (report.duplicates) {
+    lines.push('');
+    lines.push(...formatDuplicatesSection(report.duplicates.summary, report.duplicates.clusters));
+  }
+
   return lines.join('\n');
+}
+
+/**
+ * Format the duplicates analysis section
+ */
+function formatDuplicatesSection(
+  summary: { functionsAnalyzed: number; clustersFound: number; totalDuplicateInstances: number; estimatedDuplicateLines: number; duplicationRatio: number },
+  clusters: DuplicateCluster[]
+): string[] {
+  const lines: string[] = [];
+  
+  lines.push(chalk.bold.magenta('🔄 Duplicate Code Analysis\n'));
+  
+  // Summary
+  lines.push(chalk.dim('  Functions analyzed: ') + summary.functionsAnalyzed.toString());
+  lines.push(chalk.dim('  Clusters found: ') + summary.clustersFound.toString());
+  lines.push(chalk.dim('  Duplicate instances: ') + summary.totalDuplicateInstances.toString());
+  lines.push(chalk.dim('  Duplicate lines: ') + summary.estimatedDuplicateLines.toString());
+  lines.push(chalk.dim('  Duplication ratio: ') + `${Math.round(summary.duplicationRatio * 100)}%`);
+  lines.push('');
+  
+  if (clusters.length === 0) {
+    lines.push(chalk.green('✓ No significant duplicates found!'));
+    return lines;
+  }
+  
+  // Clusters
+  for (const cluster of clusters) {
+    const similarity = Math.round(cluster.similarity * 100);
+    lines.push(
+      chalk.magenta(`  ${cluster.id} `) + 
+      chalk.dim(`(${similarity}% similar, ${cluster.count} occurrences, ${cluster.totalLines} lines)`)
+    );
+    
+    // Show instances as a tree
+    for (let i = 0; i < cluster.instances.length; i++) {
+      const inst = cluster.instances[i];
+      const isLast = i === cluster.instances.length - 1;
+      const prefix = isLast ? '    └──' : '    ├──';
+      const location = `${inst.filepath}:${inst.startLine}-${inst.endLine}`;
+      const symbol = `${inst.symbolName}()`;
+      lines.push(`${prefix} ${chalk.cyan(location)}  ${chalk.white(symbol)}`);
+    }
+    
+    lines.push(chalk.green(`    💡 ${cluster.suggestion}`));
+    lines.push('');
+  }
+  
+  return lines;
 }
 

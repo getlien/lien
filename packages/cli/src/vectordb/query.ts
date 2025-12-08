@@ -1,4 +1,4 @@
-import { SearchResult } from './types.js';
+import { SearchResult, SearchResultWithVector } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
@@ -431,5 +431,60 @@ export async function scanAll(
     return results;
   } catch (error) {
     throw wrapError(error, 'Failed to scan all chunks');
+  }
+}
+
+/**
+ * Scan all function/method chunks WITH their embedding vectors.
+ * Used for duplicate detection - avoids re-embedding by returning stored vectors.
+ * 
+ * @param table - LanceDB table
+ * @param options - Filter options
+ * @returns Array of search results including the stored embedding vectors
+ */
+export async function scanAllWithVectors(
+  table: LanceDBTable,
+  options: {
+    /** Minimum lines for a function to be included (default: 5) */
+    minLines?: number;
+  } = {}
+): Promise<SearchResultWithVector[]> {
+  if (!table) {
+    throw new DatabaseError('Vector database not initialized');
+  }
+  
+  const { minLines = 5 } = options;
+  
+  try {
+    const totalRows = await table.countRows();
+    const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
+    
+    const results = await table
+      .search(zeroVector)
+      .where('file != ""')
+      .limit(Math.max(totalRows, 1000))
+      .toArray();
+    
+    return (results as unknown as DBRecord[])
+      .filter(r => {
+        if (!isValidRecord(r)) return false;
+        // Only include functions and methods
+        if (r.symbolType !== 'function' && r.symbolType !== 'method') {
+          return false;
+        }
+        // Filter by minimum lines
+        const lines = r.endLine - r.startLine + 1;
+        if (lines < minLines) return false;
+        return true;
+      })
+      .map(r => ({
+        content: r.content,
+        metadata: buildSearchResultMetadata(r),
+        score: 0,
+        relevance: calculateRelevance(0),
+        vector: r.vector,
+      }));
+  } catch (error) {
+    throw wrapError(error, 'Failed to scan all chunks with vectors');
   }
 }

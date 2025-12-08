@@ -2,7 +2,7 @@ import * as lancedb from '@lancedb/lancedb';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import { SearchResult, VectorDBInterface } from './types.js';
+import { SearchResult, SearchResultWithVector, VectorDBInterface } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { readVersionFile } from './version.js';
@@ -144,6 +144,21 @@ export class VectorDB implements VectorDBInterface {
       throw new DatabaseError('Vector database not initialized');
     }
     return queryOps.scanAll(this.table, options);
+  }
+  
+  /**
+   * Scan all function/method chunks WITH their embedding vectors.
+   * Used for duplicate detection - avoids re-embedding by returning stored vectors.
+   * @param options - Filter options (minLines)
+   * @returns All function chunks including their stored embedding vectors
+   */
+  async scanAllWithVectors(options: {
+    minLines?: number;
+  } = {}): Promise<SearchResultWithVector[]> {
+    if (!this.table) {
+      throw new DatabaseError('Vector database not initialized');
+    }
+    return queryOps.scanAllWithVectors(this.table, options);
   }
   
   async querySymbols(options: {

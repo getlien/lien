@@ -14,6 +14,8 @@ interface ComplexityOptions {
   cyclomaticThreshold?: string;
   cognitiveThreshold?: string;
   failOn?: 'error' | 'warning';
+  duplicates?: boolean;
+  duplicateThreshold?: string;
 }
 
 /** Parsed threshold overrides */
@@ -145,9 +147,17 @@ export async function complexityCommand(options: ComplexityOptions) {
     // Apply threshold overrides if provided
     applyThresholdOverrides(config, thresholdOverrides);
     
+    // Parse duplicate threshold if provided
+    const duplicateThreshold = options.duplicateThreshold 
+      ? parseFloat(options.duplicateThreshold) 
+      : undefined;
+    
     // Run analysis and output
     const analyzer = new ComplexityAnalyzer(vectorDB, config);
-    const report = await analyzer.analyze(options.files);
+    const report = await analyzer.analyze(options.files, {
+      includeDuplicates: options.duplicates,
+      duplicateThreshold,
+    });
     console.log(formatReport(report, options.format));
     
     // Exit code for CI integration

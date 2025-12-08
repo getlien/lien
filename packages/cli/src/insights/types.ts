@@ -68,5 +68,60 @@ export interface ComplexityReport {
     maxComplexity: number;
   };
   files: Record<string, FileComplexityData>;
+  /** Optional duplicate analysis (when --duplicates flag used) */
+  duplicates?: DuplicateAnalysis;
+}
+
+// ============================================================================
+// Duplicate Detection Types
+// ============================================================================
+
+/**
+ * A single instance of duplicated code
+ */
+export interface DuplicateInstance {
+  filepath: string;
+  startLine: number;
+  endLine: number;
+  symbolName: string;
+  symbolType: 'function' | 'method';
+  language: string;
+}
+
+/**
+ * A cluster of similar/duplicate code
+ */
+export interface DuplicateCluster {
+  id: string;
+  /** Average similarity within cluster (0-1, higher = more similar) */
+  similarity: number;
+  /** Number of duplicate instances */
+  count: number;
+  /** Total lines of duplicated code */
+  totalLines: number;
+  /** Individual instances */
+  instances: DuplicateInstance[];
+  /** Actionable suggestion */
+  suggestion: string;
+}
+
+/**
+ * Summary of duplicate analysis
+ */
+export interface DuplicateSummary {
+  functionsAnalyzed: number;
+  clustersFound: number;
+  totalDuplicateInstances: number;
+  estimatedDuplicateLines: number;
+  /** Percentage of functions that are duplicated (0-1) */
+  duplicationRatio: number;
+}
+
+/**
+ * Complete duplicate analysis results
+ */
+export interface DuplicateAnalysis {
+  summary: DuplicateSummary;
+  clusters: DuplicateCluster[];
 }
 

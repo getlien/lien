@@ -3,7 +3,18 @@ import { LienConfig } from '../config/schema.js';
 import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER, RiskLevel, HalsteadDetails } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
-import { SearchResult } from '../vectordb/types.js';
+import { SearchResult, SearchResultWithVector } from '../vectordb/types.js';
+import { findDuplicates } from './duplicate-detector.js';
+
+/**
+ * Options for complexity analysis
+ */
+export interface AnalyzeOptions {
+  /** Include duplicate code detection */
+  includeDuplicates?: boolean;
+  /** Similarity threshold for duplicate detection (0-1, default: 0.85) */
+  duplicateThreshold?: number;
+}
 
 /**
  * Hardcoded severity multipliers:
@@ -24,13 +35,26 @@ export class ComplexityAnalyzer {
   /**
    * Analyze complexity of codebase or specific files
    * @param files - Optional list of specific files to analyze
+   * @param options - Analysis options (includeDuplicates, duplicateThreshold)
    * @returns Complexity report with violations and summary
    */
-  async analyze(files?: string[]): Promise<ComplexityReport> {
-    // 1. Get all chunks from index (uses full scan internally for LanceDB)
+  async analyze(files?: string[], options: AnalyzeOptions = {}): Promise<ComplexityReport> {
+    const { includeDuplicates = false, duplicateThreshold } = options;
+    
+    // 1. Get all chunks from index
+    // If duplicates requested, we need chunks with vectors for the duplicate analysis
     // Note: We fetch all chunks even with --files filter because dependency analysis
     // needs the complete dataset to find dependents accurately
-    const allChunks = await this.vectorDB.scanAll();
+    let allChunks: SearchResult[];
+    let allChunksWithVectors: SearchResultWithVector[] | null = null;
+    
+    if (includeDuplicates) {
+      allChunksWithVectors = await this.vectorDB.scanAllWithVectors();
+      // Also get regular chunks for complexity analysis (includes all chunk types, not just functions)
+      allChunks = await this.vectorDB.scanAll();
+    } else {
+      allChunks = await this.vectorDB.scanAll();
+    }
     
     // 2. Filter to specified files if provided
     const chunks = files 
@@ -45,6 +69,18 @@ export class ComplexityAnalyzer {
     
     // 5. Enrich files with violations with dependency data
     this.enrichWithDependencies(report, allChunks as SearchResult[]);
+    
+    // 6. Run duplicate analysis if requested
+    if (includeDuplicates && allChunksWithVectors) {
+      // Filter to specified files if provided
+      const chunksForDuplicates = files
+        ? allChunksWithVectors.filter(c => this.matchesAnyFile(c.metadata.file, files))
+        : allChunksWithVectors;
+      
+      report.duplicates = findDuplicates(chunksForDuplicates, {
+        threshold: duplicateThreshold,
+      });
+    }
     
     return report;
   }

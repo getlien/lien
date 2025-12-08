@@ -59,12 +59,14 @@ program
 
 program
   .command('complexity')
-  .description('Analyze code complexity')
+  .description('Analyze code complexity and optionally detect duplicate code')
   .option('--files <paths...>', 'Specific files to analyze')
   .option('--format <type>', 'Output format: text, json, sarif', 'text')
   .option('--threshold <n>', 'Override both complexity thresholds (cyclomatic & cognitive)')
   .option('--cyclomatic-threshold <n>', 'Override cyclomatic complexity threshold only')
   .option('--cognitive-threshold <n>', 'Override cognitive complexity threshold only')
   .option('--fail-on <severity>', 'Exit 1 if violations: error, warning')
+  .option('--duplicates', 'Include duplicate code detection')
+  .option('--duplicate-threshold <n>', 'Similarity threshold for duplicates (0-1)', '0.85')
   .action(complexityCommand);
 

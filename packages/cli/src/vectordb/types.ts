@@ -8,6 +8,14 @@ export interface SearchResult {
   relevance: RelevanceCategory;
 }
 
+/**
+ * Search result including the stored embedding vector.
+ * Used for duplicate detection to avoid re-embedding.
+ */
+export interface SearchResultWithVector extends SearchResult {
+  vector: number[];
+}
+
 export interface VectorDBInterface {
   initialize(): Promise<void>;
   insertBatch(vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
