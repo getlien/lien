@@ -35,7 +35,7 @@ function distanceToSimilarity(distance: number): number {
 }
 
 export interface DuplicateOptions {
-  /** Minimum similarity to consider duplicate (default: 0.85) */
+  /** Minimum similarity to consider duplicate (default: 0.90) */
   threshold?: number;
   /** Minimum cluster size (default: 2) */
   minClusterSize?: number;
@@ -94,7 +94,7 @@ export function findDuplicates(
   options: DuplicateOptions = {}
 ): DuplicateAnalysis {
   const {
-    threshold = 0.85,
+    threshold = 0.90,
     minClusterSize = 2,
     maxClusters = 20,
   } = options;

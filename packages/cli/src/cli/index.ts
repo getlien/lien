@@ -67,6 +67,6 @@ program
   .option('--cognitive-threshold <n>', 'Override cognitive complexity threshold only')
   .option('--fail-on <severity>', 'Exit 1 if violations: error, warning')
   .option('--duplicates', 'Include duplicate code detection')
-  .option('--duplicate-threshold <n>', 'Similarity threshold for duplicates (0-1)', '0.85')
+  .option('--duplicate-threshold <n>', 'Similarity threshold for duplicates (0-1)', '0.90')
   .action(complexityCommand);
 
