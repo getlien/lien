@@ -234,10 +234,6 @@ function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> 
     .all() as unknown as Record<string, number>;
 }
 
-
-/**
- * Format delta value for display, rounding bugs to 2 decimals
- */
 /**
  * Build metric breakdown string with emojis
  * Note: getMetricEmoji is defined below (line ~441) to avoid duplication
