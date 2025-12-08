@@ -1,5 +1,5 @@
 {
-  "version": "0.13.0",
+  "version": "0.19.3",
   "core": {
     "chunkSize": 75,
     "chunkOverlap": 10,
@@ -23,6 +23,15 @@
     "enabled": true,
     "debounceMs": 1000
   },
+  "complexity": {
+    "enabled": true,
+    "thresholds": {
+      "testPaths": 15,
+      "mentalLoad": 15,
+      "timeToUnderstandMinutes": 60,
+      "estimatedBugs": 1.5
+    }
+  },
   "frameworks": [
     {
       "name": "nodejs",
@@ -41,25 +50,78 @@
           "**/*.mdx"
         ],
         "exclude": [
+          "**/node_modules/**",
           "node_modules/**",
+          "**/vendor/**",
+          "vendor/**",
+          "**/dist/**",
           "dist/**",
+          "**/build/**",
           "build/**",
-          "coverage/**",
+          "**/public/build/**",
+          "public/build/**",
+          "out/**",
           ".next/**",
           ".nuxt/**",
           ".vite/**",
           ".lien/**",
-          "out/**",
-          "*.min.js",
-          "*.min.css",
-          "*.bundle.js",
+          "coverage/**",
           "playwright-report/**",
           "test-results/**",
           "__generated__/**",
           ".cache/**",
           ".turbo/**",
           ".vercel/**",
-          ".netlify/**"
+          ".netlify/**",
+          "**/*.min.js",
+          "**/*.min.css",
+          "**/*.bundle.js"
+        ]
+      }
+    },
+    {
+      "name": "nodejs",
+      "path": "packages/action",
+      "enabled": true,
+      "config": {
+        "include": [
+          "**/*.ts",
+          "**/*.tsx",
+          "**/*.js",
+          "**/*.jsx",
+          "**/*.vue",
+          "**/*.mjs",
+          "**/*.cjs",
+          "**/*.md",
+          "**/*.mdx"
+        ],
+        "exclude": [
+          "**/node_modules/**",
+          "node_modules/**",
+          "**/vendor/**",
+          "vendor/**",
+          "**/dist/**",
+          "dist/**",
+          "**/build/**",
+          "build/**",
+          "**/public/build/**",
+          "public/build/**",
+          "out/**",
+          ".next/**",
+          ".nuxt/**",
+          ".vite/**",
+          ".lien/**",
+          "coverage/**",
+          "playwright-report/**",
+          "test-results/**",
+          "__generated__/**",
+          ".cache/**",
+          ".turbo/**",
+          ".vercel/**",
+          ".netlify/**",
+          "**/*.min.js",
+          "**/*.min.css",
+          "**/*.bundle.js"
         ]
       }
     },
@@ -80,25 +142,32 @@
           "**/*.mdx"
         ],
         "exclude": [
+          "**/node_modules/**",
           "node_modules/**",
+          "**/vendor/**",
+          "vendor/**",
+          "**/dist/**",
           "dist/**",
+          "**/build/**",
           "build/**",
-          "coverage/**",
+          "**/public/build/**",
+          "public/build/**",
+          "out/**",
           ".next/**",
           ".nuxt/**",
           ".vite/**",
           ".lien/**",
-          "out/**",
-          "*.min.js",
-          "*.min.css",
-          "*.bundle.js",
+          "coverage/**",
           "playwright-report/**",
           "test-results/**",
           "__generated__/**",
           ".cache/**",
           ".turbo/**",
           ".vercel/**",
-          ".netlify/**"
+          ".netlify/**",
+          "**/*.min.js",
+          "**/*.min.css",
+          "**/*.bundle.js"
         ]
       }
     },
@@ -119,25 +188,32 @@
           "**/*.mdx"
         ],
         "exclude": [
+          "**/node_modules/**",
           "node_modules/**",
+          "**/vendor/**",
+          "vendor/**",
+          "**/dist/**",
           "dist/**",
+          "**/build/**",
           "build/**",
-          "coverage/**",
+          "**/public/build/**",
+          "public/build/**",
+          "out/**",
           ".next/**",
           ".nuxt/**",
           ".vite/**",
           ".lien/**",
-          "out/**",
-          "*.min.js",
-          "*.min.css",
-          "*.bundle.js",
+          "coverage/**",
           "playwright-report/**",
           "test-results/**",
           "__generated__/**",
           ".cache/**",
           ".turbo/**",
           ".vercel/**",
-          ".netlify/**"
+          ".netlify/**",
+          "**/*.min.js",
+          "**/*.min.css",
+          "**/*.bundle.js"
         ]
       }
     }
