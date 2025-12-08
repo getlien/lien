@@ -5,6 +5,7 @@
 import collect from 'collect.js';
 import type { ComplexityReport, ComplexityViolation, PRContext, ComplexityDelta, DeltaSummary } from './types.js';
 import { formatDelta } from './delta.js';
+import { formatTime, formatDeltaValue } from './format.js';
 
 /**
  * Create a unique key for delta lookups
@@ -38,18 +39,6 @@ export function getMetricLabel(metricType: string): string {
     case 'halstead_bugs': return 'estimated bugs';
     default: return 'complexity';
   }
-}
-
-/**
- * Format minutes as human-readable time
- */
-function formatTime(minutes: number): string {
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    const mins = Math.round(minutes % 60);
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-  }
-  return `${Math.round(minutes)}m`;
 }
 
 /**
@@ -243,16 +232,6 @@ function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .map((group: any) => group.sum('delta'))
     .all() as unknown as Record<string, number>;
-}
-
-/**
- * Format delta value for display, rounding bugs to 2 decimals
- */
-function formatDeltaValue(metricType: string, delta: number): string {
-  if (metricType === 'halstead_bugs') {
-    return delta.toFixed(2);
-  }
-  return String(Math.round(delta));
 }
 
 /**
