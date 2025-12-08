@@ -34,7 +34,7 @@ import {
   formatComplexityValue,
   formatThresholdValue,
 } from './prompt.js';
-import { formatTime, formatDeltaValue } from './format.js';
+import { formatDeltaValue } from './format.js';
 import {
   calculateDeltas,
   calculateDeltaSummary,
