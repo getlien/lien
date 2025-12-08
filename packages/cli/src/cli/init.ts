@@ -256,6 +256,13 @@ async function convertRulesFileToDirectory(rulesPath: string, templatePath: stri
     await fs.writeFile(path.join(tempDir, 'project.mdc'), existingRules);
     await fs.copyFile(templatePath, path.join(tempDir, 'lien.mdc'));
     
+    // Clean up any stale backup from a previous failed run
+    try {
+      await fs.unlink(backupPath);
+    } catch {
+      // Backup doesn't exist, proceed normally
+    }
+    
     // Rename original to backup (preserves data if rename fails)
     await fs.rename(rulesPath, backupPath);
     
