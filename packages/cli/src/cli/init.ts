@@ -299,9 +299,14 @@ async function handleExistingRulesDirectory(rulesPath: string, templatePath: str
   console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
 }
 
-/** Handle case when .cursor/rules is an existing file */
+/**
+ * Handle case when .cursor/rules is an existing file.
+ * Design: --yes auto-accepts prompts that ADD things (fresh install), but does NOT
+ * auto-modify existing user files. This is intentionally different from fresh setup
+ * to avoid unexpected changes to user's existing rules in CI/automated contexts.
+ */
 async function handleExistingRulesFile(rulesPath: string, templatePath: string, options: InitOptions) {
-  // In non-interactive mode, preserve existing file (conservative approach)
+  // In non-interactive mode, preserve existing file (don't auto-modify user files)
   if (options.yes) {
     console.log(chalk.dim('Skipped Cursor rules installation (preserving existing .cursor/rules file)'));
     return;
