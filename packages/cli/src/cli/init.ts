@@ -322,8 +322,12 @@ async function handleExistingRulesFile(rulesPath: string, templatePath: string, 
   }
 }
 
-/** Handle case when .cursor/rules is not a file or directory (symlink, socket, etc.) */
-function handleInvalidRulesPath() {
+/**
+ * Handle case when .cursor/rules exists but is neither a regular file nor directory.
+ * Note: Symlinks are followed by fs.stat and classified based on their target,
+ * so this only applies to special file types like sockets, block devices, etc.
+ */
+async function handleInvalidRulesPath(): Promise<void> {
   console.log(chalk.yellow('⚠️  .cursor/rules exists but is not a regular file or directory'));
   console.log(chalk.dim('Skipped Cursor rules installation'));
 }
