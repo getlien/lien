@@ -391,12 +391,29 @@ function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> 
 }
 
 /**
+ * Format time in minutes as human-readable (e.g., "7h 54m" or "45m")
+ */
+function formatTimeMinutes(minutes: number): string {
+  const absMinutes = Math.abs(minutes);
+  if (absMinutes >= 60) {
+    const hours = Math.floor(absMinutes / 60);
+    const mins = Math.round(absMinutes % 60);
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return `${Math.round(absMinutes)}m`;
+}
+
+/**
  * Format delta value for display, rounding bugs to 2 decimals to avoid floating point noise
  */
 function formatDeltaValue(metricType: string, delta: number): string {
   // halstead_bugs uses decimals; others are integers
   if (metricType === 'halstead_bugs') {
     return delta.toFixed(2);
+  }
+  // halstead_effort is stored in minutes - format as hours for readability
+  if (metricType === 'halstead_effort') {
+    return formatTimeMinutes(delta);
   }
   return String(Math.round(delta));
 }
