@@ -41,9 +41,6 @@ export function getMetricLabel(metricType: string): string {
 }
 
 /**
- * Format minutes as human-readable time
- */
-/**
  * Format time in minutes as human-readable (e.g., "7h 54m", "-7h 54m", or "45m")
  * Handles both positive values (for thresholds) and negative values (for deltas).
  * Rounds total minutes first to avoid edge cases like "1h 60m".
