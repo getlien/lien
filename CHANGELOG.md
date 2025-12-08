@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Lien will be documented in this file.
+## [0.19.5] - 2025-12-08
+
+### Fixed
+- **Exclude files without violations from JSON output**
+
+
 ## [0.19.4] - 2025-12-08
 
 ### Fixed
