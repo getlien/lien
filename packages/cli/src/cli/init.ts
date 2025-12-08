@@ -227,32 +227,41 @@ async function getPathType(filepath: string): Promise<'directory' | 'file' | 'ot
   }
 }
 
-/** Convert existing rules file to directory structure (atomic to prevent data loss) */
+/** Convert existing rules file to directory structure safely using backup */
 async function convertRulesFileToDirectory(rulesPath: string, templatePath: string) {
   const existingRules = await fs.readFile(rulesPath, 'utf-8');
   const parentDir = path.dirname(rulesPath);
   const baseName = path.basename(rulesPath);
   
-  // Create a temp directory in the same parent as rulesPath
+  // Create temp directory with new content
   const tempDir = await fs.mkdtemp(path.join(parentDir, baseName + '_tmp_'));
+  const backupPath = rulesPath + '.backup';
   
   try {
     // Write files to temp directory first
     await fs.writeFile(path.join(tempDir, 'project.mdc'), existingRules);
     await fs.copyFile(templatePath, path.join(tempDir, 'lien.mdc'));
     
-    // Remove the original file only after temp dir is ready
-    await fs.unlink(rulesPath);
+    // Rename original to backup (preserves data if rename fails)
+    await fs.rename(rulesPath, backupPath);
     
-    // Atomically move temp dir to final location
-    await fs.rename(tempDir, rulesPath);
+    try {
+      // Move temp dir to final location
+      await fs.rename(tempDir, rulesPath);
+      // Success - remove backup
+      await fs.unlink(backupPath);
+    } catch (renameErr) {
+      // Rename failed - restore from backup
+      await fs.rename(backupPath, rulesPath);
+      throw renameErr;
+    }
     
     console.log(chalk.green('✓ Converted .cursor/rules to directory'));
     console.log(chalk.green('  - Your project rules: .cursor/rules/project.mdc'));
     console.log(chalk.green('  - Lien rules: .cursor/rules/lien.mdc'));
   } catch (err) {
-    // Clean up temp dir if something failed
-    try { await fs.rm(tempDir, { recursive: true, force: true }); } catch { /* ignore cleanup errors */ }
+    // Clean up temp dir if it still exists
+    try { await fs.rm(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
     throw err;
   }
 }
