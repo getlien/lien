@@ -246,16 +246,18 @@ function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> 
 }
 
 /**
- * Format time in minutes as human-readable (e.g., "7h 54m" or "45m")
+ * Format time in minutes as human-readable (e.g., "7h 54m", "-7h 54m", or "45m")
+ * Preserves the sign for negative values.
  */
 function formatTimeMinutes(minutes: number): string {
   const absMinutes = Math.abs(minutes);
+  const sign = minutes < 0 ? '-' : '';
   if (absMinutes >= 60) {
     const hours = Math.floor(absMinutes / 60);
     const mins = Math.round(absMinutes % 60);
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    return mins > 0 ? `${sign}${hours}h ${mins}m` : `${sign}${hours}h`;
   }
-  return `${Math.round(absMinutes)}m`;
+  return `${sign}${Math.round(absMinutes)}m`;
 }
 
 /**
