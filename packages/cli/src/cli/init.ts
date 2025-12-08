@@ -302,7 +302,18 @@ async function convertRulesFileToDirectory(rulesPath: string, templatePath: stri
 
 /** Handle case when .cursor/rules is an existing directory */
 async function handleExistingRulesDirectory(rulesPath: string, templatePath: string) {
-  await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
+  const targetPath = path.join(rulesPath, 'lien.mdc');
+  
+  // Check if lien.mdc already exists to avoid overwriting user customizations
+  try {
+    await fs.access(targetPath);
+    console.log(chalk.dim('lien.mdc already exists in .cursor/rules/, skipping...'));
+    return;
+  } catch {
+    // File doesn't exist, proceed with copy
+  }
+  
+  await fs.copyFile(templatePath, targetPath);
   console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
 }
 
