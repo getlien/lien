@@ -1,7 +1,10 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetFilesContextSchema } from '../schemas/index.js';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
-import type { ToolContext, MCPToolResult } from '../types.js';
+import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
+import type { SearchResult } from '../../vectordb/types.js';
+import type { LocalEmbeddings } from '../../embeddings/local.js';
+import type { VectorDB } from '../../vectordb/lancedb.js';
 
 /**
  * Maximum number of chunks to scan for test association analysis.
@@ -9,9 +12,286 @@ import type { ToolContext, MCPToolResult } from '../types.js';
  */
 const SCAN_LIMIT = 10000;
 
+// ============================================================================
+// Types
+// ============================================================================
+
+/** Validated input from schema (after Zod defaults applied) */
+interface ValidatedArgs {
+  filepaths: string | string[];
+  includeRelated?: boolean;
+}
+
+/** Context for helper functions (subset of ToolContext) */
+interface HandlerContext {
+  vectorDB: VectorDB;
+  embeddings: LocalEmbeddings;
+  log: LogFn;
+  workspaceRoot: string;
+}
+
+/** File data with chunks and test associations */
+interface FileData {
+  chunks: SearchResult[];
+  testAssociations: string[];
+}
+
+/** Path cache for normalized path lookups */
+type PathCache = Map<string, string>;
+
+// ============================================================================
+// Helper Functions (Exported for Testing)
+// ============================================================================
+
+/**
+ * Search for chunks belonging to specific files.
+ * 
+ * Batches embedding and search operations for all filepaths at once
+ * to reduce latency.
+ * 
+ * @param filepaths - Array of file paths to search for
+ * @param ctx - Handler context with vectorDB and embeddings
+ * @returns Map of filepath index to matching chunks
+ */
+export async function searchFileChunks(
+  filepaths: string[],
+  ctx: HandlerContext
+): Promise<SearchResult[][]> {
+  const { vectorDB, embeddings, workspaceRoot } = ctx;
+  
+  // Batch embedding calls for all filepaths at once
+  const fileEmbeddings = await Promise.all(
+    filepaths.map(fp => embeddings.embed(fp))
+  );
+
+  // Batch all initial file searches in parallel
+  const allFileSearches = await Promise.all(
+    fileEmbeddings.map((embedding, i) =>
+      vectorDB.search(embedding, 50, filepaths[i])
+    )
+  );
+
+  // Filter results to only include chunks from each target file
+  // Use exact matching with getCanonicalPath to avoid false positives
+  return filepaths.map((filepath, i) => {
+    const allResults = allFileSearches[i];
+    const targetCanonical = getCanonicalPath(filepath, workspaceRoot);
+
+    return allResults.filter(r => {
+      const chunkCanonical = getCanonicalPath(r.metadata.file, workspaceRoot);
+      return chunkCanonical === targetCanonical;
+    });
+  });
+}
+
+/**
+ * Find related chunks for files based on semantic similarity.
+ * 
+ * Uses the first chunk of each file to find semantically similar code
+ * in other files.
+ * 
+ * @param filepaths - Array of file paths
+ * @param fileChunksMap - Chunks already found for each file
+ * @param ctx - Handler context
+ * @returns Map of filepath index to related chunks
+ */
+export async function findRelatedChunks(
+  filepaths: string[],
+  fileChunksMap: SearchResult[][],
+  ctx: HandlerContext
+): Promise<SearchResult[][]> {
+  const { vectorDB, embeddings, workspaceRoot } = ctx;
+  
+  // Get files that have chunks (need first chunk for related search)
+  const filesWithChunks = fileChunksMap
+    .map((chunks, i) => ({ chunks, filepath: filepaths[i], index: i }))
+    .filter(({ chunks }) => chunks.length > 0);
+
+  if (filesWithChunks.length === 0) {
+    return Array.from({ length: filepaths.length }, () => []);
+  }
+
+  // Batch embedding calls for all first chunks
+  const relatedEmbeddings = await Promise.all(
+    filesWithChunks.map(({ chunks }) => embeddings.embed(chunks[0].content))
+  );
+
+  // Batch all related chunk searches
+  const relatedSearches = await Promise.all(
+    relatedEmbeddings.map((embedding, i) =>
+      vectorDB.search(embedding, 5, filesWithChunks[i].chunks[0].content)
+    )
+  );
+
+  // Map back to original indices
+  const relatedChunksMap: SearchResult[][] = Array.from(
+    { length: filepaths.length },
+    () => []
+  );
+  
+  filesWithChunks.forEach(({ filepath, index }, i) => {
+    const related = relatedSearches[i];
+    const targetCanonical = getCanonicalPath(filepath, workspaceRoot);
+    
+    // Filter out chunks from the same file using exact matching
+    relatedChunksMap[index] = related.filter(r => {
+      const chunkCanonical = getCanonicalPath(r.metadata.file, workspaceRoot);
+      return chunkCanonical !== targetCanonical;
+    });
+  });
+
+  return relatedChunksMap;
+}
+
+/**
+ * Create a cached path normalizer.
+ * 
+ * Returns a function that normalizes paths with caching
+ * to avoid repeated string operations.
+ * 
+ * @param workspaceRoot - Workspace root directory
+ * @returns Cached normalizer function and the cache
+ */
+export function createPathCache(
+  workspaceRoot: string
+): { normalize: (path: string) => string; cache: PathCache } {
+  const cache: PathCache = new Map();
+  
+  const normalize = (path: string): string => {
+    if (cache.has(path)) return cache.get(path)!;
+    const normalized = normalizePath(path, workspaceRoot);
+    cache.set(path, normalized);
+    return normalized;
+  };
+  
+  return { normalize, cache };
+}
+
+/**
+ * Find test files that import the given source files.
+ * 
+ * Scans all indexed chunks to find test files that have import
+ * statements matching the target files.
+ * 
+ * @param filepaths - Array of source file paths
+ * @param allChunks - All chunks from the vector database
+ * @param ctx - Handler context
+ * @returns Map of filepath index to array of test file paths
+ */
+export function findTestAssociations(
+  filepaths: string[],
+  allChunks: Array<{ metadata: { file: string; imports?: string[] } }>,
+  ctx: HandlerContext
+): string[][] {
+  const { workspaceRoot } = ctx;
+  const { normalize } = createPathCache(workspaceRoot);
+
+  return filepaths.map((filepath) => {
+    const normalizedTarget = normalize(filepath);
+    const testFiles = new Set<string>();
+
+    for (const chunk of allChunks) {
+      const chunkFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+
+      // Skip if not a test file
+      if (!isTestFile(chunkFile)) continue;
+
+      // Check if this test file imports the target
+      const imports = chunk.metadata.imports || [];
+      for (const imp of imports) {
+        const normalizedImport = normalize(imp);
+        if (matchesFile(normalizedImport, normalizedTarget)) {
+          testFiles.add(chunkFile);
+          break;
+        }
+      }
+    }
+
+    return Array.from(testFiles);
+  });
+}
+
+/**
+ * Deduplicate chunks by file path and line range.
+ * 
+ * Combines file chunks and related chunks, removing duplicates
+ * based on canonical file path + line range.
+ * 
+ * @param fileChunks - Primary chunks for the file
+ * @param relatedChunks - Related chunks from other files
+ * @param workspaceRoot - Workspace root for path canonicalization
+ * @returns Deduplicated array of chunks
+ */
+export function deduplicateChunks(
+  fileChunks: SearchResult[],
+  relatedChunks: SearchResult[],
+  workspaceRoot: string
+): SearchResult[] {
+  const seenChunks = new Set<string>();
+  
+  return [...fileChunks, ...relatedChunks].filter(chunk => {
+    const canonicalFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+    const chunkId = `${canonicalFile}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
+    
+    if (seenChunks.has(chunkId)) return false;
+    seenChunks.add(chunkId);
+    return true;
+  });
+}
+
+/**
+ * Build file data map with chunks and test associations.
+ * 
+ * Combines results from chunk search, related chunks search,
+ * and test association analysis into a single data structure.
+ * 
+ * @param filepaths - Array of file paths
+ * @param fileChunksMap - Chunks for each file
+ * @param relatedChunksMap - Related chunks for each file
+ * @param testAssociationsMap - Test associations for each file
+ * @param workspaceRoot - Workspace root for path canonicalization
+ * @returns Map of filepath to file data
+ */
+export function buildFilesData(
+  filepaths: string[],
+  fileChunksMap: SearchResult[][],
+  relatedChunksMap: SearchResult[][],
+  testAssociationsMap: string[][],
+  workspaceRoot: string
+): Record<string, FileData> {
+  const filesData: Record<string, FileData> = {};
+  
+  filepaths.forEach((filepath, i) => {
+    const dedupedChunks = deduplicateChunks(
+      fileChunksMap[i],
+      relatedChunksMap[i] || [],
+      workspaceRoot
+    );
+    
+    filesData[filepath] = {
+      chunks: dedupedChunks,
+      testAssociations: testAssociationsMap[i],
+    };
+  });
+  
+  return filesData;
+}
+
+// ============================================================================
+// Main Handler
+// ============================================================================
+
 /**
  * Handle get_files_context tool calls.
+ * 
  * Gets context for one or more files including dependencies and test coverage.
+ * 
+ * The implementation is decomposed into focused helper functions:
+ * - searchFileChunks: Find chunks belonging to target files
+ * - findRelatedChunks: Find semantically similar code in other files
+ * - findTestAssociations: Find test files that import the target files
+ * - deduplicateChunks: Remove duplicate chunks
+ * - buildFilesData: Combine results into response structure
  */
 export async function handleGetFilesContext(
   args: unknown,
@@ -21,7 +301,7 @@ export async function handleGetFilesContext(
 
   return await wrapToolHandler(
     GetFilesContextSchema,
-    async (validatedArgs) => {
+    async (validatedArgs: ValidatedArgs) => {
       // Normalize input: convert single string to array
       const filepaths = Array.isArray(validatedArgs.filepaths)
         ? validatedArgs.filepaths
@@ -36,138 +316,62 @@ export async function handleGetFilesContext(
 
       // Compute workspace root for path matching
       const workspaceRoot = process.cwd().replace(/\\/g, '/');
-
-      // Batch embedding calls for all filepaths at once to reduce latency
-      const fileEmbeddings = await Promise.all(filepaths.map(fp => embeddings.embed(fp)));
-
-      // Batch all initial file searches in parallel
-      const allFileSearches = await Promise.all(
-        fileEmbeddings.map((embedding, i) =>
-          vectorDB.search(embedding, 50, filepaths[i])
-        )
-      );
-
-      // Filter results to only include chunks from each target file
-      // Use exact matching with getCanonicalPath to avoid false positives
-      const fileChunksMap = filepaths.map((filepath, i) => {
-        const allResults = allFileSearches[i];
-        const targetCanonical = getCanonicalPath(filepath, workspaceRoot);
-
-        return allResults.filter(r => {
-          const chunkCanonical = getCanonicalPath(r.metadata.file, workspaceRoot);
-          return chunkCanonical === targetCanonical;
-        });
-      });
-
-      // Batch related chunk operations if includeRelated is true
-      let relatedChunksMap: any[][] = [];
-      if (validatedArgs.includeRelated) {
-        // Get files that have chunks (need first chunk for related search)
-        const filesWithChunks = fileChunksMap
-          .map((chunks, i) => ({ chunks, filepath: filepaths[i], index: i }))
-          .filter(({ chunks }) => chunks.length > 0);
-
-        if (filesWithChunks.length > 0) {
-          // Batch embedding calls for all first chunks
-          const relatedEmbeddings = await Promise.all(
-            filesWithChunks.map(({ chunks }) => embeddings.embed(chunks[0].content))
-          );
-
-          // Batch all related chunk searches
-          const relatedSearches = await Promise.all(
-            relatedEmbeddings.map((embedding, i) =>
-              vectorDB.search(embedding, 5, filesWithChunks[i].chunks[0].content)
-            )
-          );
-
-          // Map back to original indices
-          relatedChunksMap = Array.from({ length: filepaths.length }, () => []);
-          filesWithChunks.forEach(({ filepath, index }, i) => {
-            const related = relatedSearches[i];
-            const targetCanonical = getCanonicalPath(filepath, workspaceRoot);
-            // Filter out chunks from the same file using exact matching
-            relatedChunksMap[index] = related.filter(r => {
-              const chunkCanonical = getCanonicalPath(r.metadata.file, workspaceRoot);
-              return chunkCanonical !== targetCanonical;
-            });
-          });
-        }
-      }
-
-      // Compute test associations for each file
-      // Scan once for all files to avoid repeated database queries (performance optimization)
-      const allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
-
-      // Warn if we hit the limit (similar to get_dependents tool)
-      if (allChunks.length === SCAN_LIMIT) {
-        log(`Scanned ${SCAN_LIMIT} chunks (limit reached). Test associations may be incomplete for large codebases.`, 'warning');
-      }
-
-      // Path normalization cache to avoid repeated string operations
-      const pathCache = new Map<string, string>();
-      const normalizePathCached = (path: string): string => {
-        if (pathCache.has(path)) return pathCache.get(path)!;
-        const normalized = normalizePath(path, workspaceRoot);
-        pathCache.set(path, normalized);
-        return normalized;
+      
+      // Create handler context for helper functions
+      const handlerCtx: HandlerContext = {
+        vectorDB,
+        embeddings,
+        log,
+        workspaceRoot,
       };
 
-      // Compute test associations for each file using the same scan result
-      const testAssociationsMap = filepaths.map((filepath) => {
-        const normalizedTarget = normalizePathCached(filepath);
+      // Step 1: Search for chunks belonging to each file
+      const fileChunksMap = await searchFileChunks(filepaths, handlerCtx);
 
-        // Find chunks that:
-        // 1. Are from test files
-        // 2. Import the target file
-        const testFiles = new Set<string>();
-        for (const chunk of allChunks) {
-          const chunkFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+      // Step 2: Find related chunks if requested (default: true)
+      let relatedChunksMap: SearchResult[][] = [];
+      if (validatedArgs.includeRelated !== false) {
+        relatedChunksMap = await findRelatedChunks(
+          filepaths,
+          fileChunksMap,
+          handlerCtx
+        );
+      }
 
-          // Skip if not a test file
-          if (!isTestFile(chunkFile)) continue;
+      // Step 3: Scan for test associations
+      const allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
+      
+      if (allChunks.length === SCAN_LIMIT) {
+        log(
+          `Scanned ${SCAN_LIMIT} chunks (limit reached). Test associations may be incomplete for large codebases.`,
+          'warning'
+        );
+      }
 
-          // Check if this test file imports the target
-          const imports = chunk.metadata.imports || [];
-          for (const imp of imports) {
-            const normalizedImport = normalizePathCached(imp);
-            if (matchesFile(normalizedImport, normalizedTarget)) {
-              testFiles.add(chunkFile);
-              break;
-            }
-          }
-        }
+      const testAssociationsMap = findTestAssociations(
+        filepaths,
+        allChunks,
+        handlerCtx
+      );
 
-        return Array.from(testFiles);
-      });
+      // Step 4: Build combined file data with deduplication
+      const filesData = buildFilesData(
+        filepaths,
+        fileChunksMap,
+        relatedChunksMap,
+        testAssociationsMap,
+        workspaceRoot
+      );
 
-      // Combine file chunks with related chunks and test associations
-      const filesData: Record<string, { chunks: any[]; testAssociations: string[] }> = {};
-      filepaths.forEach((filepath, i) => {
-        const fileChunks = fileChunksMap[i];
-        const relatedChunks = relatedChunksMap[i] || [];
+      const totalChunks = Object.values(filesData).reduce(
+        (sum, f) => sum + f.chunks.length,
+        0
+      );
+      log(`Found ${totalChunks} total chunks`);
 
-        // Deduplicate chunks (by canonical file path + line range)
-        // Use canonical paths to avoid duplicates from absolute vs relative paths
-        const seenChunks = new Set<string>();
-        const dedupedChunks = [...fileChunks, ...relatedChunks].filter(chunk => {
-          const canonicalFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
-          const chunkId = `${canonicalFile}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
-          if (seenChunks.has(chunkId)) return false;
-          seenChunks.add(chunkId);
-          return true;
-        });
-
-        filesData[filepath] = {
-          chunks: dedupedChunks,
-          testAssociations: testAssociationsMap[i],
-        };
-      });
-
-      log(`Found ${Object.values(filesData).reduce((sum, f) => sum + f.chunks.length, 0)} total chunks`);
-
-      // Return format depends on single vs multi file
+      // Step 5: Return appropriate response format
       if (isSingleFile) {
-        // Single file: return old format for backward compatibility
+        // Single file: return backward-compatible format
         const filepath = filepaths[0];
         return {
           indexInfo: getIndexMetadata(),
@@ -176,7 +380,7 @@ export async function handleGetFilesContext(
           testAssociations: filesData[filepath].testAssociations,
         };
       } else {
-        // Multiple files: return new format
+        // Multiple files: return keyed structure
         return {
           indexInfo: getIndexMetadata(),
           files: filesData,
