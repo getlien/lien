@@ -43,13 +43,20 @@ export function getMetricLabel(metricType: string): string {
 /**
  * Format minutes as human-readable time
  */
+/**
+ * Format time in minutes as human-readable (e.g., "7h 54m", "-7h 54m", or "45m")
+ * Handles both positive values (for thresholds) and negative values (for deltas).
+ * Rounds total minutes first to avoid edge cases like "1h 60m".
+ */
 function formatTime(minutes: number): string {
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    const mins = Math.round(minutes % 60);
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  const sign = minutes < 0 ? '-' : '';
+  const roundedMinutes = Math.round(Math.abs(minutes));
+  if (roundedMinutes >= 60) {
+    const hours = Math.floor(roundedMinutes / 60);
+    const mins = roundedMinutes % 60;
+    return mins > 0 ? `${sign}${hours}h ${mins}m` : `${sign}${hours}h`;
   }
-  return `${Math.round(minutes)}m`;
+  return `${sign}${roundedMinutes}m`;
 }
 
 /**
@@ -245,21 +252,6 @@ function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> 
     .all() as unknown as Record<string, number>;
 }
 
-/**
- * Format time in minutes as human-readable (e.g., "7h 54m", "-7h 54m", or "45m")
- * Preserves the sign for negative values.
- * Rounds total minutes first to avoid edge cases like "1h 60m".
- */
-function formatTimeMinutes(minutes: number): string {
-  const sign = minutes < 0 ? '-' : '';
-  const roundedMinutes = Math.round(Math.abs(minutes));
-  if (roundedMinutes >= 60) {
-    const hours = Math.floor(roundedMinutes / 60);
-    const mins = roundedMinutes % 60;
-    return mins > 0 ? `${sign}${hours}h ${mins}m` : `${sign}${hours}h`;
-  }
-  return `${sign}${roundedMinutes}m`;
-}
 
 /**
  * Format delta value for display, rounding bugs to 2 decimals
@@ -270,7 +262,7 @@ function formatDeltaValue(metricType: string, delta: number): string {
   }
   // halstead_effort is stored in minutes - format as hours for readability
   if (metricType === 'halstead_effort') {
-    return formatTimeMinutes(delta);
+    return formatTime(delta);
   }
   return String(Math.round(delta));
 }
