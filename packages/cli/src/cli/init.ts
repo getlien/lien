@@ -257,6 +257,45 @@ async function convertRulesFileToDirectory(rulesPath: string, templatePath: stri
   }
 }
 
+/** Handle case when .cursor/rules is an existing directory */
+async function handleExistingRulesDirectory(rulesPath: string, templatePath: string) {
+  await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
+  console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
+}
+
+/** Handle case when .cursor/rules is an existing file */
+async function handleExistingRulesFile(rulesPath: string, templatePath: string, options: InitOptions) {
+  // Auto-convert in non-interactive mode, otherwise prompt user
+  const shouldConvert = options.yes || (await inquirer.prompt([{
+    type: 'confirm',
+    name: 'convertToDir',
+    message: 'Existing .cursor/rules file found. Convert to directory and preserve your rules?',
+    default: true,
+  }])).convertToDir;
+
+  if (shouldConvert) {
+    if (options.yes) {
+      console.log(chalk.dim('Converting .cursor/rules file to directory structure (auto-convert due to --yes)...'));
+    }
+    await convertRulesFileToDirectory(rulesPath, templatePath);
+  } else {
+    console.log(chalk.dim('Skipped Cursor rules installation (preserving existing file)'));
+  }
+}
+
+/** Handle case when .cursor/rules is not a file or directory (symlink, socket, etc.) */
+function handleInvalidRulesPath() {
+  console.log(chalk.yellow('⚠️  .cursor/rules exists but is not a regular file or directory'));
+  console.log(chalk.dim('Skipped Cursor rules installation'));
+}
+
+/** Handle case when .cursor/rules doesn't exist - create fresh */
+async function handleFreshRulesInstall(rulesPath: string, templatePath: string) {
+  await fs.mkdir(rulesPath, { recursive: true });
+  await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
+  console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
+}
+
 /** Install Cursor rules based on existing .cursor/rules state */
 async function installCursorRulesFiles(rootDir: string, options: InitOptions) {
   const cursorRulesDir = path.join(rootDir, '.cursor');
@@ -266,36 +305,14 @@ async function installCursorRulesFiles(rootDir: string, options: InitOptions) {
   const rulesPath = path.join(cursorRulesDir, 'rules');
   const pathType = await getPathType(rulesPath);
 
-  if (pathType === 'directory') {
-    await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
-    console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
-  } else if (pathType === 'file') {
-    // Auto-convert to directory structure in non-interactive mode, otherwise prompt user
-    const shouldConvert = options.yes || (await inquirer.prompt([{
-      type: 'confirm',
-      name: 'convertToDir',
-      message: 'Existing .cursor/rules file found. Convert to directory and preserve your rules?',
-      default: true,
-    }])).convertToDir;
+  const handlers: Record<typeof pathType, () => Promise<void> | void> = {
+    directory: () => handleExistingRulesDirectory(rulesPath, templatePath),
+    file: () => handleExistingRulesFile(rulesPath, templatePath, options),
+    other: () => handleInvalidRulesPath(),
+    none: () => handleFreshRulesInstall(rulesPath, templatePath),
+  };
 
-    if (shouldConvert) {
-      if (options.yes) {
-        console.log(chalk.dim('Converting .cursor/rules file to directory structure (auto-convert due to --yes)...'));
-      }
-      await convertRulesFileToDirectory(rulesPath, templatePath);
-    } else {
-      console.log(chalk.dim('Skipped Cursor rules installation (preserving existing file)'));
-    }
-  } else if (pathType === 'other') {
-    // Path exists but is not a file or directory (symlink, socket, etc.)
-    console.log(chalk.yellow('⚠️  .cursor/rules exists but is not a regular file or directory'));
-    console.log(chalk.dim('Skipped Cursor rules installation'));
-  } else {
-    // pathType === 'none' - doesn't exist, create fresh
-    await fs.mkdir(rulesPath, { recursive: true });
-    await fs.copyFile(templatePath, path.join(rulesPath, 'lien.mdc'));
-    console.log(chalk.green('✓ Installed Cursor rules as .cursor/rules/lien.mdc'));
-  }
+  await handlers[pathType]();
 }
 
 /** Prompt and install Cursor rules if user agrees (auto-install in --yes mode) */
