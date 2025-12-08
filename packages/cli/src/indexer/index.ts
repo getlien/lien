@@ -7,26 +7,20 @@ import { chunkFile } from './chunker.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { configService } from '../config/service.js';
-import { CodeChunk } from './types.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { isLegacyConfig, isModernConfig, type LienConfig, type LegacyLienConfig } from '../config/schema.js';
 import { ManifestManager } from './manifest.js';
 import { detectChanges } from './change-detector.js';
 import { indexMultipleFiles } from './incremental.js';
-import { getIndexingMessage, getEmbeddingMessage, getModelLoadingMessage } from '../utils/loading-messages.js';
-import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
+import { getModelLoadingMessage } from '../utils/loading-messages.js';
 import { IndexingProgressTracker } from './progress-tracker.js';
 import type { EmbeddingService } from '../embeddings/types.js';
+import { ChunkBatchProcessor, type FileIndexEntry } from './chunk-batch-processor.js';
 
 export interface IndexingOptions {
   rootDir?: string;
   verbose?: boolean;
   force?: boolean;  // Force full reindex, skip incremental
-}
-
-interface ChunkWithContent {
-  chunk: CodeChunk;
-  content: string;
 }
 
 /** Extracted config values with defaults for indexing */
@@ -78,21 +72,6 @@ async function scanFilesToIndex(
     });
   }
   return scanCodebase({ rootDir, includePatterns: [], excludePatterns: [] });
-}
-
-/** Process embeddings in micro-batches to prevent event loop blocking */
-async function processEmbeddingMicroBatches(
-  texts: string[],
-  embeddings: EmbeddingService
-): Promise<Float32Array[]> {
-  const results: Float32Array[] = [];
-  for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
-    const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
-    const microResults = await embeddings.embedBatch(microBatch);
-    results.push(...microResults);
-    await new Promise(resolve => setImmediate(resolve));
-  }
-  return results;
 }
 
 /**
@@ -247,7 +226,87 @@ async function tryIncrementalIndex(
 }
 
 /**
+ * Process a single file for indexing.
+ * Extracts chunks and adds them to the batch processor.
+ *
+ * @returns true if file was processed successfully, false if skipped
+ */
+async function processFileForIndexing(
+  file: string,
+  batchProcessor: ChunkBatchProcessor,
+  indexConfig: IndexingConfig,
+  progressTracker: IndexingProgressTracker,
+  verbose: boolean
+): Promise<boolean> {
+  try {
+    // Get file stats to capture actual modification time
+    const stats = await fs.stat(file);
+    const content = await fs.readFile(file, 'utf-8');
+
+    const chunks = chunkFile(file, content, {
+      chunkSize: indexConfig.chunkSize,
+      chunkOverlap: indexConfig.chunkOverlap,
+      useAST: indexConfig.useAST,
+      astFallback: indexConfig.astFallback,
+    });
+
+    if (chunks.length === 0) {
+      progressTracker.incrementFiles();
+      return false;
+    }
+
+    // Add chunks to batch processor (handles mutex internally)
+    await batchProcessor.addChunks(chunks, file, stats.mtimeMs);
+    progressTracker.incrementFiles();
+
+    return true;
+  } catch (error) {
+    if (verbose) {
+      console.error(chalk.yellow(`\n⚠️  Skipping ${file}: ${error}`));
+    }
+    progressTracker.incrementFiles();
+    return false;
+  }
+}
+
+/**
+ * Save index results: manifest, git state, version file.
+ */
+async function saveIndexResults(
+  indexedFiles: FileIndexEntry[],
+  vectorDB: VectorDB,
+  rootDir: string,
+  spinner: Ora
+): Promise<void> {
+  spinner.start('Saving index manifest...');
+
+  const manifest = new ManifestManager(vectorDB.dbPath);
+  await manifest.updateFiles(
+    indexedFiles.map(entry => ({
+      filepath: entry.filepath,
+      lastModified: entry.mtime,
+      chunkCount: entry.chunkCount,
+    }))
+  );
+
+  // Save git state if in a git repo
+  await updateGitState(rootDir, vectorDB, manifest);
+
+  spinner.succeed('Manifest saved');
+
+  // Write version file to mark successful completion
+  await writeVersionFile(vectorDB.dbPath);
+}
+
+/**
  * Perform a full index of the codebase.
+ *
+ * Refactored for maintainability:
+ * - ChunkBatchProcessor handles concurrent chunk accumulation and mutex management
+ * - processFileForIndexing handles individual file processing
+ * - saveIndexResults handles finalization
+ *
+ * Complexity reduced from ~210 lines to ~50 lines in main function.
  */
 async function performFullIndex(
   rootDir: string,
@@ -256,207 +315,71 @@ async function performFullIndex(
   options: IndexingOptions,
   spinner: Ora
 ): Promise<void> {
-  // 0. Clear existing index (required for schema changes)
+  const startTime = Date.now();
+
+  // 1. Clear existing index (required for schema changes)
   spinner.text = 'Clearing existing index...';
   await vectorDB.clear();
-  
-  // 1. Scan for files
+
+  // 2. Scan for files
   spinner.text = 'Scanning codebase...';
   const files = await scanFilesToIndex(rootDir, config);
-  
+
   if (files.length === 0) {
     spinner.fail('No files found to index');
     return;
   }
-  
+
   spinner.text = `Found ${files.length} files`;
-  
-  // 2. Initialize embeddings model
+
+  // 3. Initialize embeddings model
   spinner.text = getModelLoadingMessage();
   const embeddings = new LocalEmbeddings();
   await embeddings.initialize();
   spinner.succeed('Embedding model loaded');
-  
-  // 3. Get config values and process files
+
+  // 4. Setup processing infrastructure
   const indexConfig = getIndexingConfig(config);
-  const vectorDBBatchSize = 100; // Smaller batch for UI responsiveness
-  
-  spinner.start(`Processing files with ${indexConfig.concurrency}x concurrency...`);
-  
-  const startTime = Date.now();
-  let processedChunks = 0;
-  
-  // Accumulator for chunks across multiple files
-  const chunkAccumulator: ChunkWithContent[] = [];
-  const limit = pLimit(indexConfig.concurrency);
-  
-  // Track successfully indexed files for manifest
-  const indexedFileEntries: Array<{ filepath: string; chunkCount: number; mtime: number }> = [];
-  
-  // Create progress tracker
   const progressTracker = new IndexingProgressTracker(files.length, spinner);
+  const batchProcessor = new ChunkBatchProcessor(vectorDB, embeddings, {
+    batchThreshold: 100, // Smaller batch for UI responsiveness
+    embeddingBatchSize: indexConfig.embeddingBatchSize,
+  }, progressTracker);
+
+  spinner.start(`Processing files with ${indexConfig.concurrency}x concurrency...`);
   progressTracker.start();
-  
+
   try {
-    // Mutex to prevent concurrent access to shared state (chunkAccumulator, indexedFileEntries)
-    // This prevents race conditions when multiple concurrent tasks try to:
-    // 1. Push to shared arrays
-    // 2. Check accumulator length threshold
-    // 3. Trigger processing
-    let addChunksLock: Promise<void> | null = null;
-    let processingQueue: Promise<void> | null = null;
-    
-    // Function to process accumulated chunks
-    // Uses queue-based synchronization to prevent TOCTOU race conditions
-    const processAccumulatedChunks = async (): Promise<void> => {
-      // Chain onto existing processing promise to create a queue
-      // This prevents the race condition where multiple tasks check processingQueue
-      // simultaneously and both proceed to process
-      if (processingQueue) {
-        processingQueue = processingQueue.then(() => doProcessChunks());
-      } else {
-        processingQueue = doProcessChunks();
-      }
-      return processingQueue;
-    };
-    
-    // The actual processing logic (separated for queue-based synchronization)
-    const doProcessChunks = async (): Promise<void> => {
-      if (chunkAccumulator.length === 0) return;
-      
-      const currentPromise = processingQueue;
-      
-      try {
-        const toProcess = chunkAccumulator.splice(0, chunkAccumulator.length);
-        
-        // Process in batches for UI responsiveness
-        for (let i = 0; i < toProcess.length; i += indexConfig.embeddingBatchSize) {
-          const batch = toProcess.slice(i, Math.min(i + indexConfig.embeddingBatchSize, toProcess.length));
-          const texts = batch.map(item => item.content);
-          
-          progressTracker.setMessage(getEmbeddingMessage());
-          const embeddingVectors = await processEmbeddingMicroBatches(texts, embeddings);
-          processedChunks += batch.length;
-          
-          progressTracker.setMessage(`Inserting ${batch.length} chunks into vector space...`);
-          await vectorDB.insertBatch(embeddingVectors, batch.map(item => item.chunk.metadata), texts);
-          await new Promise(resolve => setImmediate(resolve));
-        }
-        
-        progressTracker.setMessage(getIndexingMessage());
-      } finally {
-        if (processingQueue === currentPromise) processingQueue = null;
-      }
-    };
-  
-  // Process files with concurrency limit
-  const filePromises = files.map((file) =>
-    limit(async () => {
-      try {
-        // Get file stats to capture actual modification time
-        const stats = await fs.stat(file);
-        const content = await fs.readFile(file, 'utf-8');
-        
-        const chunks = chunkFile(file, content, {
-          chunkSize: indexConfig.chunkSize,
-          chunkOverlap: indexConfig.chunkOverlap,
-          useAST: indexConfig.useAST,
-          astFallback: indexConfig.astFallback,
-        });
-        
-        if (chunks.length === 0) {
-          progressTracker.incrementFiles();
-          return;
-        }
-        
-        // Critical section: add chunks to shared state and check threshold
-        // Must be protected with mutex to prevent race conditions
-        {
-          // Wait for any in-progress add operation
-          if (addChunksLock) {
-            await addChunksLock;
-          }
-          
-          // Acquire lock
-          let releaseAddLock!: () => void;
-          addChunksLock = new Promise<void>(resolve => {
-            releaseAddLock = resolve;
-          });
-          
-          try {
-            // Add chunks to accumulator
-            for (const chunk of chunks) {
-              chunkAccumulator.push({
-                chunk,
-                content: chunk.content,
-              });
-            }
-            
-            // Track this file for manifest with actual file mtime
-            indexedFileEntries.push({
-              filepath: file,
-              chunkCount: chunks.length,
-              mtime: stats.mtimeMs,
-            });
-            
-            progressTracker.incrementFiles();
-            
-            // Process when batch is large enough (use smaller batch for responsiveness)
-            // Check is done inside the mutex to prevent multiple tasks from triggering processing
-            if (chunkAccumulator.length >= vectorDBBatchSize) {
-              await processAccumulatedChunks();
-            }
-          } finally {
-            // Release lock (always defined by Promise constructor)
-            releaseAddLock();
-            addChunksLock = null;
-          }
-        }
-      } catch (error) {
-        if (options.verbose) {
-          console.error(chalk.yellow(`\n⚠️  Skipping ${file}: ${error}`));
-        }
-        progressTracker.incrementFiles();
-      }
-    })
-  );
-  
-    // Wait for all files to be processed
+    // 5. Process files with concurrency limit
+    const limit = pLimit(indexConfig.concurrency);
+    const filePromises = files.map(file =>
+      limit(() => processFileForIndexing(
+        file,
+        batchProcessor,
+        indexConfig,
+        progressTracker,
+        options.verbose ?? false
+      ))
+    );
+
     await Promise.all(filePromises);
-    
-    // Process remaining chunks
-    progressTracker.setMessage('Processing final chunks...');
-    await processAccumulatedChunks();
+
+    // 6. Flush remaining chunks
+    await batchProcessor.flush();
   } finally {
-    // Always stop the progress tracker to clean up the interval
     progressTracker.stop();
   }
-  
-  // Save manifest with all indexed files
-  spinner.start('Saving index manifest...');
-  const manifest = new ManifestManager(vectorDB.dbPath);
-  await manifest.updateFiles(
-    indexedFileEntries.map(entry => ({
-      filepath: entry.filepath,
-      // Use actual file mtime for accurate change detection
-      lastModified: entry.mtime,
-      chunkCount: entry.chunkCount,
-    }))
-  );
-  
-  // Save git state if in a git repo
-  await updateGitState(rootDir, vectorDB, manifest);
-  
-  spinner.succeed('Manifest saved');
-  
-  // Write version file to mark successful completion
-  await writeVersionFile(vectorDB.dbPath);
-  
+
+  // 7. Save results
+  const { processedChunks, indexedFiles } = batchProcessor.getResults();
+  await saveIndexResults(indexedFiles, vectorDB, rootDir, spinner);
+
+  // 8. Report completion
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
   spinner.succeed(
     `Indexed ${progressTracker.getProcessedCount()} files (${processedChunks} chunks) in ${totalTime}s using ${indexConfig.concurrency}x concurrency`
   );
-  
+
   console.log(chalk.dim('\nNext step: Run'), chalk.bold('lien serve'), chalk.dim('to start the MCP server'));
 }
 
