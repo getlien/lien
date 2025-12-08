@@ -80,7 +80,11 @@ function createGenericFramework(): FrameworkInstance {
   };
 }
 
-/** Handle case when no frameworks are detected - returns null if user aborts */
+/**
+ * Handle case when no frameworks are detected.
+ * Returns null if user declines in interactive mode,
+ * or returns generic framework array in non-interactive mode (--yes flag).
+ */
 async function handleNoFrameworksDetected(options: InitOptions): Promise<FrameworkInstance[] | null> {
   console.log(chalk.yellow('\n⚠️  No frameworks detected'));
   
@@ -120,7 +124,11 @@ function displayDetectedFrameworks(detections: DetectionResult[]) {
   }
 }
 
-/** Prompt user to confirm framework configuration */
+/**
+ * Prompt user to confirm framework configuration.
+ * Returns false if user declines in interactive mode,
+ * or returns true in non-interactive mode (--yes flag).
+ */
 async function confirmFrameworkConfiguration(options: InitOptions): Promise<boolean> {
   if (options.yes) return true;
   
@@ -207,20 +215,25 @@ async function handleFrameworksDetected(
   return frameworks;
 }
 
+/** Path type returned by getPathType */
+type PathType = 'directory' | 'file' | 'other' | 'none';
+
 /**
  * Check if path is a directory, file, other type, or doesn't exist.
+ * Note: Symlinks are followed (fs.stat behavior), so a symlink pointing
+ * to a file returns 'file', and a symlink to a directory returns 'directory'.
  * Returns:
- * - 'directory' if path is a directory
- * - 'file' if path is a regular file
- * - 'other' if path exists but is not a file or directory (e.g., symlink, socket)
+ * - 'directory' if path is a directory (or symlink to directory)
+ * - 'file' if path is a regular file (or symlink to file)
+ * - 'other' if path exists but is not a file or directory (e.g., socket, block device)
  * - 'none' if path does not exist
  */
-async function getPathType(filepath: string): Promise<'directory' | 'file' | 'other' | 'none'> {
+async function getPathType(filepath: string): Promise<PathType> {
   try {
     const stats = await fs.stat(filepath);
     if (stats.isDirectory()) return 'directory';
     if (stats.isFile()) return 'file';
-    // Path exists but is not a regular file or directory (symlink, socket, etc.)
+    // Path exists but is not a regular file or directory (socket, block device, etc.)
     return 'other';
   } catch {
     // Doesn't exist
@@ -257,8 +270,16 @@ async function convertRulesFileToDirectory(rulesPath: string, templatePath: stri
         console.log(chalk.dim(`Backup file: ${backupPath}`));
       }
     } catch (renameErr) {
-      // Rename failed - restore from backup
-      await fs.rename(backupPath, rulesPath);
+      // Rename failed - attempt to restore from backup
+      try {
+        await fs.rename(backupPath, rulesPath);
+      } catch (restoreErr) {
+        console.log(chalk.red('❌ Failed to restore original .cursor/rules from backup after failed conversion.'));
+        console.log(chalk.red(`   - Original error: ${renameErr instanceof Error ? renameErr.message : renameErr}`));
+        console.log(chalk.red(`   - Restore error: ${restoreErr instanceof Error ? restoreErr.message : restoreErr}`));
+        console.log(chalk.red(`   - Backup file location: ${backupPath}`));
+        throw new Error('Failed to convert .cursor/rules to directory and failed to restore from backup. Manual recovery needed.');
+      }
       throw renameErr;
     }
     
@@ -323,7 +344,7 @@ async function installCursorRulesFiles(rootDir: string, options: InitOptions) {
   const rulesPath = path.join(cursorRulesDir, 'rules');
   const pathType = await getPathType(rulesPath);
 
-  const handlers: Record<typeof pathType, () => Promise<void> | void> = {
+  const handlers: Record<PathType, () => Promise<void> | void> = {
     directory: () => handleExistingRulesDirectory(rulesPath, templatePath),
     file: () => handleExistingRulesFile(rulesPath, templatePath, options),
     other: () => handleInvalidRulesPath(),
@@ -345,10 +366,6 @@ async function promptAndInstallCursorRules(rootDir: string, options: InitOptions
   }])).installCursorRules;
   
   if (!shouldInstall) return;
-  
-  if (options.yes) {
-    console.log(chalk.dim('Installing Cursor rules (auto-accepted due to --yes)...'));
-  }
   
   try {
     await installCursorRulesFiles(rootDir, options);
