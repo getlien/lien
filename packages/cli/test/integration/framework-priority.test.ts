@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { mkdtemp } from 'fs/promises';
 import os from 'os';
-import { detectAllFrameworks } from '../../src/frameworks/detector-service.js';
+import { detectAllFrameworks } from '@liendev/core';
 
 describe('Framework Priority/Conflict Resolution', () => {
   let testDir: string;

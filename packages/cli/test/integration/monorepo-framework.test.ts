@@ -3,10 +3,12 @@ import { mkdtemp } from 'fs/promises';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { detectAllFrameworks } from '../../src/frameworks/detector-service.js';
-import { getFrameworkDetector } from '../../src/frameworks/registry.js';
-import { scanCodebaseWithFrameworks } from '../../src/indexer/scanner.js';
-import { LienConfig, FrameworkInstance } from '../../src/config/schema.js';
+import {
+  detectAllFrameworks,
+  getFrameworkDetector,
+  scanCodebaseWithFrameworks,
+} from '@liendev/core';
+import type { LienConfig, FrameworkInstance } from '@liendev/core';
 
 describe('Monorepo Framework Integration', () => {
   let testDir: string;

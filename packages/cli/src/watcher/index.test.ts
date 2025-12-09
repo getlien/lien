@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { FileWatcher, FileChangeEvent } from './index.js';
-import { defaultConfig } from '../config/schema.js';
+import { defaultConfig } from '@liendev/core';
 
 describe('FileWatcher', () => {
   let testDir: string;

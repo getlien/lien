@@ -38,14 +38,16 @@ export { ManifestManager } from './indexer/manifest.js';
 export type { IndexManifest, FileEntry } from './indexer/manifest.js';
 
 export { chunkFile } from './indexer/chunker.js';
-export { scanCodebase, scanCodebaseWithFrameworks } from './indexer/scanner.js';
+export { scanCodebase, scanCodebaseWithFrameworks, detectLanguage } from './indexer/scanner.js';
 export { indexSingleFile, indexMultipleFiles, normalizeToRelativePath } from './indexer/incremental.js';
+export { extractSymbols } from './indexer/symbol-extractor.js';
 
 // =============================================================================
 // EMBEDDINGS
 // =============================================================================
 
 export { LocalEmbeddings } from './embeddings/local.js';
+export { CachedEmbeddings } from './embeddings/cache.js';
 export type { EmbeddingService } from './embeddings/types.js';
 export { EMBEDDING_DIMENSION, EMBEDDING_DIMENSIONS } from './embeddings/types.js';
 
@@ -78,6 +80,7 @@ import type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance }
 export { ConfigService, _configService as configService };
 export type { ValidationResult, MigrationResult } from './config/service.js';
 export { MigrationManager } from './config/migration-manager.js';
+export { migrateConfig, migrateConfigFile } from './config/migration.js';
 export { _defaultConfig as defaultConfig, isLegacyConfig, isModernConfig };
 export type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance };
 
@@ -118,6 +121,10 @@ export {
 export type { DetectionWithPriority, GroupedDetections } from './frameworks/detector-service.js';
 export { frameworkDetectors, registerFramework, getFrameworkDetector } from './frameworks/registry.js';
 export type { FrameworkDetector, DetectionResult, DetectionOptions } from './frameworks/types.js';
+export { laravelDetector } from './frameworks/laravel/detector.js';
+export { nodejsDetector } from './frameworks/nodejs/detector.js';
+export { phpDetector } from './frameworks/php/detector.js';
+export { shopifyDetector } from './frameworks/shopify/detector.js';
 
 // =============================================================================
 // ERRORS

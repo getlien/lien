@@ -4,11 +4,14 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { detectAllFrameworks } from '../../src/frameworks/detector-service.js';
-import { getFrameworkDetector } from '../../src/frameworks/registry.js';
-import { LienConfig, FrameworkInstance, defaultConfig } from '../../src/config/schema.js';
-import { loadConfig } from '../../src/config/loader.js';
-import { migrateConfig } from '../../src/config/migration.js';
+import {
+  detectAllFrameworks,
+  getFrameworkDetector,
+  defaultConfig,
+  loadConfig,
+  migrateConfig,
+} from '@liendev/core';
+import type { LienConfig, FrameworkInstance } from '@liendev/core';
 
 // Get current version from package.json dynamically
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
