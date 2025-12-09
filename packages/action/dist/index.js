@@ -7150,6 +7150,76 @@ var request = withDefaults(import_endpoint.endpoint, {
 
 /***/ }),
 
+/***/ 5224:
+/***/ ((module) => {
+
+"use strict";
+
+module.exports = balanced;
+function balanced(a, b, str) {
+  if (a instanceof RegExp) a = maybeMatch(a, str);
+  if (b instanceof RegExp) b = maybeMatch(b, str);
+
+  var r = range(a, b, str);
+
+  return r && {
+    start: r[0],
+    end: r[1],
+    pre: str.slice(0, r[0]),
+    body: str.slice(r[0] + a.length, r[1]),
+    post: str.slice(r[1] + b.length)
+  };
+}
+
+function maybeMatch(reg, str) {
+  var m = str.match(reg);
+  return m ? m[0] : null;
+}
+
+balanced.range = range;
+function range(a, b, str) {
+  var begs, beg, left, right, result;
+  var ai = str.indexOf(a);
+  var bi = str.indexOf(b, ai + 1);
+  var i = ai;
+
+  if (ai >= 0 && bi > 0) {
+    if(a===b) {
+      return [ai, bi];
+    }
+    begs = [];
+    left = str.length;
+
+    while (i >= 0 && !result) {
+      if (i == ai) {
+        begs.push(i);
+        ai = str.indexOf(a, i + 1);
+      } else if (begs.length == 1) {
+        result = [ begs.pop(), bi ];
+      } else {
+        beg = begs.pop();
+        if (beg < left) {
+          left = beg;
+          right = bi;
+        }
+
+        bi = str.indexOf(b, i + 1);
+      }
+
+      i = ai < bi && ai >= 0 ? ai : bi;
+    }
+
+    if (begs.length) {
+      result = [ left, right ];
+    }
+  }
+
+  return result;
+}
+
+
+/***/ }),
+
 /***/ 7544:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -7327,6 +7397,216 @@ function removeHook(state, name, method) {
 
   state.registry[name].splice(index, 1);
 }
+
+
+/***/ }),
+
+/***/ 2503:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+var balanced = __nccwpck_require__(5224);
+
+module.exports = expandTop;
+
+var escSlash = '\0SLASH'+Math.random()+'\0';
+var escOpen = '\0OPEN'+Math.random()+'\0';
+var escClose = '\0CLOSE'+Math.random()+'\0';
+var escComma = '\0COMMA'+Math.random()+'\0';
+var escPeriod = '\0PERIOD'+Math.random()+'\0';
+
+function numeric(str) {
+  return parseInt(str, 10) == str
+    ? parseInt(str, 10)
+    : str.charCodeAt(0);
+}
+
+function escapeBraces(str) {
+  return str.split('\\\\').join(escSlash)
+            .split('\\{').join(escOpen)
+            .split('\\}').join(escClose)
+            .split('\\,').join(escComma)
+            .split('\\.').join(escPeriod);
+}
+
+function unescapeBraces(str) {
+  return str.split(escSlash).join('\\')
+            .split(escOpen).join('{')
+            .split(escClose).join('}')
+            .split(escComma).join(',')
+            .split(escPeriod).join('.');
+}
+
+
+// Basically just str.split(","), but handling cases
+// where we have nested braced sections, which should be
+// treated as individual members, like {a,{b,c},d}
+function parseCommaParts(str) {
+  if (!str)
+    return [''];
+
+  var parts = [];
+  var m = balanced('{', '}', str);
+
+  if (!m)
+    return str.split(',');
+
+  var pre = m.pre;
+  var body = m.body;
+  var post = m.post;
+  var p = pre.split(',');
+
+  p[p.length-1] += '{' + body + '}';
+  var postParts = parseCommaParts(post);
+  if (post.length) {
+    p[p.length-1] += postParts.shift();
+    p.push.apply(p, postParts);
+  }
+
+  parts.push.apply(parts, p);
+
+  return parts;
+}
+
+function expandTop(str) {
+  if (!str)
+    return [];
+
+  // I don't know why Bash 4.3 does this, but it does.
+  // Anything starting with {} will have the first two bytes preserved
+  // but *only* at the top level, so {},a}b will not expand to anything,
+  // but a{},b}c will be expanded to [a}c,abc].
+  // One could argue that this is a bug in Bash, but since the goal of
+  // this module is to match Bash's rules, we escape a leading {}
+  if (str.substr(0, 2) === '{}') {
+    str = '\\{\\}' + str.substr(2);
+  }
+
+  return expand(escapeBraces(str), true).map(unescapeBraces);
+}
+
+function embrace(str) {
+  return '{' + str + '}';
+}
+function isPadded(el) {
+  return /^-?0\d/.test(el);
+}
+
+function lte(i, y) {
+  return i <= y;
+}
+function gte(i, y) {
+  return i >= y;
+}
+
+function expand(str, isTop) {
+  var expansions = [];
+
+  var m = balanced('{', '}', str);
+  if (!m) return [str];
+
+  // no need to expand pre, since it is guaranteed to be free of brace-sets
+  var pre = m.pre;
+  var post = m.post.length
+    ? expand(m.post, false)
+    : [''];
+
+  if (/\$$/.test(m.pre)) {    
+    for (var k = 0; k < post.length; k++) {
+      var expansion = pre+ '{' + m.body + '}' + post[k];
+      expansions.push(expansion);
+    }
+  } else {
+    var isNumericSequence = /^-?\d+\.\.-?\d+(?:\.\.-?\d+)?$/.test(m.body);
+    var isAlphaSequence = /^[a-zA-Z]\.\.[a-zA-Z](?:\.\.-?\d+)?$/.test(m.body);
+    var isSequence = isNumericSequence || isAlphaSequence;
+    var isOptions = m.body.indexOf(',') >= 0;
+    if (!isSequence && !isOptions) {
+      // {a},b}
+      if (m.post.match(/,(?!,).*\}/)) {
+        str = m.pre + '{' + m.body + escClose + m.post;
+        return expand(str);
+      }
+      return [str];
+    }
+
+    var n;
+    if (isSequence) {
+      n = m.body.split(/\.\./);
+    } else {
+      n = parseCommaParts(m.body);
+      if (n.length === 1) {
+        // x{{a,b}}y ==> x{a}y x{b}y
+        n = expand(n[0], false).map(embrace);
+        if (n.length === 1) {
+          return post.map(function(p) {
+            return m.pre + n[0] + p;
+          });
+        }
+      }
+    }
+
+    // at this point, n is the parts, and we know it's not a comma set
+    // with a single entry.
+    var N;
+
+    if (isSequence) {
+      var x = numeric(n[0]);
+      var y = numeric(n[1]);
+      var width = Math.max(n[0].length, n[1].length)
+      var incr = n.length == 3
+        ? Math.abs(numeric(n[2]))
+        : 1;
+      var test = lte;
+      var reverse = y < x;
+      if (reverse) {
+        incr *= -1;
+        test = gte;
+      }
+      var pad = n.some(isPadded);
+
+      N = [];
+
+      for (var i = x; test(i, y); i += incr) {
+        var c;
+        if (isAlphaSequence) {
+          c = String.fromCharCode(i);
+          if (c === '\\')
+            c = '';
+        } else {
+          c = String(i);
+          if (pad) {
+            var need = width - c.length;
+            if (need > 0) {
+              var z = new Array(need + 1).join('0');
+              if (i < 0)
+                c = '-' + z + c.slice(1);
+              else
+                c = z + c;
+            }
+          }
+        }
+        N.push(c);
+      }
+    } else {
+      N = [];
+
+      for (var j = 0; j < n.length; j++) {
+        N.push.apply(N, expand(n[j], false));
+      }
+    }
+
+    for (var j = 0; j < N.length; j++) {
+      for (var k = 0; k < post.length; k++) {
+        var expansion = pre + N[j] + post[k];
+        if (!isTop || isSequence || expansion)
+          expansions.push(expansion);
+      }
+    }
+  }
+
+  return expansions;
+}
+
 
 
 /***/ }),
@@ -11209,6 +11489,631 @@ class Deprecation extends Error {
 }
 
 exports.Deprecation = Deprecation;
+
+
+/***/ }),
+
+/***/ 4134:
+/***/ ((module) => {
+
+// A simple implementation of make-array
+function makeArray (subject) {
+  return Array.isArray(subject)
+    ? subject
+    : [subject]
+}
+
+const EMPTY = ''
+const SPACE = ' '
+const ESCAPE = '\\'
+const REGEX_TEST_BLANK_LINE = /^\s+$/
+const REGEX_INVALID_TRAILING_BACKSLASH = /(?:[^\\]|^)\\$/
+const REGEX_REPLACE_LEADING_EXCAPED_EXCLAMATION = /^\\!/
+const REGEX_REPLACE_LEADING_EXCAPED_HASH = /^\\#/
+const REGEX_SPLITALL_CRLF = /\r?\n/g
+// /foo,
+// ./foo,
+// ../foo,
+// .
+// ..
+const REGEX_TEST_INVALID_PATH = /^\.*\/|^\.+$/
+
+const SLASH = '/'
+
+// Do not use ternary expression here, since "istanbul ignore next" is buggy
+let TMP_KEY_IGNORE = 'node-ignore'
+/* istanbul ignore else */
+if (typeof Symbol !== 'undefined') {
+  TMP_KEY_IGNORE = Symbol.for('node-ignore')
+}
+const KEY_IGNORE = TMP_KEY_IGNORE
+
+const define = (object, key, value) =>
+  Object.defineProperty(object, key, {value})
+
+const REGEX_REGEXP_RANGE = /([0-z])-([0-z])/g
+
+const RETURN_FALSE = () => false
+
+// Sanitize the range of a regular expression
+// The cases are complicated, see test cases for details
+const sanitizeRange = range => range.replace(
+  REGEX_REGEXP_RANGE,
+  (match, from, to) => from.charCodeAt(0) <= to.charCodeAt(0)
+    ? match
+    // Invalid range (out of order) which is ok for gitignore rules but
+    //   fatal for JavaScript regular expression, so eliminate it.
+    : EMPTY
+)
+
+// See fixtures #59
+const cleanRangeBackSlash = slashes => {
+  const {length} = slashes
+  return slashes.slice(0, length - length % 2)
+}
+
+// > If the pattern ends with a slash,
+// > it is removed for the purpose of the following description,
+// > but it would only find a match with a directory.
+// > In other words, foo/ will match a directory foo and paths underneath it,
+// > but will not match a regular file or a symbolic link foo
+// >  (this is consistent with the way how pathspec works in general in Git).
+// '`foo/`' will not match regular file '`foo`' or symbolic link '`foo`'
+// -> ignore-rules will not deal with it, because it costs extra `fs.stat` call
+//      you could use option `mark: true` with `glob`
+
+// '`foo/`' should not continue with the '`..`'
+const REPLACERS = [
+
+  // > Trailing spaces are ignored unless they are quoted with backslash ("\")
+  [
+    // (a\ ) -> (a )
+    // (a  ) -> (a)
+    // (a \ ) -> (a  )
+    /\\?\s+$/,
+    match => match.indexOf('\\') === 0
+      ? SPACE
+      : EMPTY
+  ],
+
+  // replace (\ ) with ' '
+  [
+    /\\\s/g,
+    () => SPACE
+  ],
+
+  // Escape metacharacters
+  // which is written down by users but means special for regular expressions.
+
+  // > There are 12 characters with special meanings:
+  // > - the backslash \,
+  // > - the caret ^,
+  // > - the dollar sign $,
+  // > - the period or dot .,
+  // > - the vertical bar or pipe symbol |,
+  // > - the question mark ?,
+  // > - the asterisk or star *,
+  // > - the plus sign +,
+  // > - the opening parenthesis (,
+  // > - the closing parenthesis ),
+  // > - and the opening square bracket [,
+  // > - the opening curly brace {,
+  // > These special characters are often called "metacharacters".
+  [
+    /[\\$.|*+(){^]/g,
+    match => `\\${match}`
+  ],
+
+  [
+    // > a question mark (?) matches a single character
+    /(?!\\)\?/g,
+    () => '[^/]'
+  ],
+
+  // leading slash
+  [
+
+    // > A leading slash matches the beginning of the pathname.
+    // > For example, "/*.c" matches "cat-file.c" but not "mozilla-sha1/sha1.c".
+    // A leading slash matches the beginning of the pathname
+    /^\//,
+    () => '^'
+  ],
+
+  // replace special metacharacter slash after the leading slash
+  [
+    /\//g,
+    () => '\\/'
+  ],
+
+  [
+    // > A leading "**" followed by a slash means match in all directories.
+    // > For example, "**/foo" matches file or directory "foo" anywhere,
+    // > the same as pattern "foo".
+    // > "**/foo/bar" matches file or directory "bar" anywhere that is directly
+    // >   under directory "foo".
+    // Notice that the '*'s have been replaced as '\\*'
+    /^\^*\\\*\\\*\\\//,
+
+    // '**/foo' <-> 'foo'
+    () => '^(?:.*\\/)?'
+  ],
+
+  // starting
+  [
+    // there will be no leading '/'
+    //   (which has been replaced by section "leading slash")
+    // If starts with '**', adding a '^' to the regular expression also works
+    /^(?=[^^])/,
+    function startingReplacer () {
+      // If has a slash `/` at the beginning or middle
+      return !/\/(?!$)/.test(this)
+        // > Prior to 2.22.1
+        // > If the pattern does not contain a slash /,
+        // >   Git treats it as a shell glob pattern
+        // Actually, if there is only a trailing slash,
+        //   git also treats it as a shell glob pattern
+
+        // After 2.22.1 (compatible but clearer)
+        // > If there is a separator at the beginning or middle (or both)
+        // > of the pattern, then the pattern is relative to the directory
+        // > level of the particular .gitignore file itself.
+        // > Otherwise the pattern may also match at any level below
+        // > the .gitignore level.
+        ? '(?:^|\\/)'
+
+        // > Otherwise, Git treats the pattern as a shell glob suitable for
+        // >   consumption by fnmatch(3)
+        : '^'
+    }
+  ],
+
+  // two globstars
+  [
+    // Use lookahead assertions so that we could match more than one `'/**'`
+    /\\\/\\\*\\\*(?=\\\/|$)/g,
+
+    // Zero, one or several directories
+    // should not use '*', or it will be replaced by the next replacer
+
+    // Check if it is not the last `'/**'`
+    (_, index, str) => index + 6 < str.length
+
+      // case: /**/
+      // > A slash followed by two consecutive asterisks then a slash matches
+      // >   zero or more directories.
+      // > For example, "a/**/b" matches "a/b", "a/x/b", "a/x/y/b" and so on.
+      // '/**/'
+      ? '(?:\\/[^\\/]+)*'
+
+      // case: /**
+      // > A trailing `"/**"` matches everything inside.
+
+      // #21: everything inside but it should not include the current folder
+      : '\\/.+'
+  ],
+
+  // normal intermediate wildcards
+  [
+    // Never replace escaped '*'
+    // ignore rule '\*' will match the path '*'
+
+    // 'abc.*/' -> go
+    // 'abc.*'  -> skip this rule,
+    //    coz trailing single wildcard will be handed by [trailing wildcard]
+    /(^|[^\\]+)(\\\*)+(?=.+)/g,
+
+    // '*.js' matches '.js'
+    // '*.js' doesn't match 'abc'
+    (_, p1, p2) => {
+      // 1.
+      // > An asterisk "*" matches anything except a slash.
+      // 2.
+      // > Other consecutive asterisks are considered regular asterisks
+      // > and will match according to the previous rules.
+      const unescaped = p2.replace(/\\\*/g, '[^\\/]*')
+      return p1 + unescaped
+    }
+  ],
+
+  [
+    // unescape, revert step 3 except for back slash
+    // For example, if a user escape a '\\*',
+    // after step 3, the result will be '\\\\\\*'
+    /\\\\\\(?=[$.|*+(){^])/g,
+    () => ESCAPE
+  ],
+
+  [
+    // '\\\\' -> '\\'
+    /\\\\/g,
+    () => ESCAPE
+  ],
+
+  [
+    // > The range notation, e.g. [a-zA-Z],
+    // > can be used to match one of the characters in a range.
+
+    // `\` is escaped by step 3
+    /(\\)?\[([^\]/]*?)(\\*)($|\])/g,
+    (match, leadEscape, range, endEscape, close) => leadEscape === ESCAPE
+      // '\\[bar]' -> '\\\\[bar\\]'
+      ? `\\[${range}${cleanRangeBackSlash(endEscape)}${close}`
+      : close === ']'
+        ? endEscape.length % 2 === 0
+          // A normal case, and it is a range notation
+          // '[bar]'
+          // '[bar\\\\]'
+          ? `[${sanitizeRange(range)}${endEscape}]`
+          // Invalid range notaton
+          // '[bar\\]' -> '[bar\\\\]'
+          : '[]'
+        : '[]'
+  ],
+
+  // ending
+  [
+    // 'js' will not match 'js.'
+    // 'ab' will not match 'abc'
+    /(?:[^*])$/,
+
+    // WTF!
+    // https://git-scm.com/docs/gitignore
+    // changes in [2.22.1](https://git-scm.com/docs/gitignore/2.22.1)
+    // which re-fixes #24, #38
+
+    // > If there is a separator at the end of the pattern then the pattern
+    // > will only match directories, otherwise the pattern can match both
+    // > files and directories.
+
+    // 'js*' will not match 'a.js'
+    // 'js/' will not match 'a.js'
+    // 'js' will match 'a.js' and 'a.js/'
+    match => /\/$/.test(match)
+      // foo/ will not match 'foo'
+      ? `${match}$`
+      // foo matches 'foo' and 'foo/'
+      : `${match}(?=$|\\/$)`
+  ],
+
+  // trailing wildcard
+  [
+    /(\^|\\\/)?\\\*$/,
+    (_, p1) => {
+      const prefix = p1
+        // '\^':
+        // '/*' does not match EMPTY
+        // '/*' does not match everything
+
+        // '\\\/':
+        // 'abc/*' does not match 'abc/'
+        ? `${p1}[^/]+`
+
+        // 'a*' matches 'a'
+        // 'a*' matches 'aa'
+        : '[^/]*'
+
+      return `${prefix}(?=$|\\/$)`
+    }
+  ],
+]
+
+// A simple cache, because an ignore rule only has only one certain meaning
+const regexCache = Object.create(null)
+
+// @param {pattern}
+const makeRegex = (pattern, ignoreCase) => {
+  let source = regexCache[pattern]
+
+  if (!source) {
+    source = REPLACERS.reduce(
+      (prev, current) => prev.replace(current[0], current[1].bind(pattern)),
+      pattern
+    )
+    regexCache[pattern] = source
+  }
+
+  return ignoreCase
+    ? new RegExp(source, 'i')
+    : new RegExp(source)
+}
+
+const isString = subject => typeof subject === 'string'
+
+// > A blank line matches no files, so it can serve as a separator for readability.
+const checkPattern = pattern => pattern
+  && isString(pattern)
+  && !REGEX_TEST_BLANK_LINE.test(pattern)
+  && !REGEX_INVALID_TRAILING_BACKSLASH.test(pattern)
+
+  // > A line starting with # serves as a comment.
+  && pattern.indexOf('#') !== 0
+
+const splitPattern = pattern => pattern.split(REGEX_SPLITALL_CRLF)
+
+class IgnoreRule {
+  constructor (
+    origin,
+    pattern,
+    negative,
+    regex
+  ) {
+    this.origin = origin
+    this.pattern = pattern
+    this.negative = negative
+    this.regex = regex
+  }
+}
+
+const createRule = (pattern, ignoreCase) => {
+  const origin = pattern
+  let negative = false
+
+  // > An optional prefix "!" which negates the pattern;
+  if (pattern.indexOf('!') === 0) {
+    negative = true
+    pattern = pattern.substr(1)
+  }
+
+  pattern = pattern
+  // > Put a backslash ("\") in front of the first "!" for patterns that
+  // >   begin with a literal "!", for example, `"\!important!.txt"`.
+  .replace(REGEX_REPLACE_LEADING_EXCAPED_EXCLAMATION, '!')
+  // > Put a backslash ("\") in front of the first hash for patterns that
+  // >   begin with a hash.
+  .replace(REGEX_REPLACE_LEADING_EXCAPED_HASH, '#')
+
+  const regex = makeRegex(pattern, ignoreCase)
+
+  return new IgnoreRule(
+    origin,
+    pattern,
+    negative,
+    regex
+  )
+}
+
+const throwError = (message, Ctor) => {
+  throw new Ctor(message)
+}
+
+const checkPath = (path, originalPath, doThrow) => {
+  if (!isString(path)) {
+    return doThrow(
+      `path must be a string, but got \`${originalPath}\``,
+      TypeError
+    )
+  }
+
+  // We don't know if we should ignore EMPTY, so throw
+  if (!path) {
+    return doThrow(`path must not be empty`, TypeError)
+  }
+
+  // Check if it is a relative path
+  if (checkPath.isNotRelative(path)) {
+    const r = '`path.relative()`d'
+    return doThrow(
+      `path should be a ${r} string, but got "${originalPath}"`,
+      RangeError
+    )
+  }
+
+  return true
+}
+
+const isNotRelative = path => REGEX_TEST_INVALID_PATH.test(path)
+
+checkPath.isNotRelative = isNotRelative
+checkPath.convert = p => p
+
+class Ignore {
+  constructor ({
+    ignorecase = true,
+    ignoreCase = ignorecase,
+    allowRelativePaths = false
+  } = {}) {
+    define(this, KEY_IGNORE, true)
+
+    this._rules = []
+    this._ignoreCase = ignoreCase
+    this._allowRelativePaths = allowRelativePaths
+    this._initCache()
+  }
+
+  _initCache () {
+    this._ignoreCache = Object.create(null)
+    this._testCache = Object.create(null)
+  }
+
+  _addPattern (pattern) {
+    // #32
+    if (pattern && pattern[KEY_IGNORE]) {
+      this._rules = this._rules.concat(pattern._rules)
+      this._added = true
+      return
+    }
+
+    if (checkPattern(pattern)) {
+      const rule = createRule(pattern, this._ignoreCase)
+      this._added = true
+      this._rules.push(rule)
+    }
+  }
+
+  // @param {Array<string> | string | Ignore} pattern
+  add (pattern) {
+    this._added = false
+
+    makeArray(
+      isString(pattern)
+        ? splitPattern(pattern)
+        : pattern
+    ).forEach(this._addPattern, this)
+
+    // Some rules have just added to the ignore,
+    // making the behavior changed.
+    if (this._added) {
+      this._initCache()
+    }
+
+    return this
+  }
+
+  // legacy
+  addPattern (pattern) {
+    return this.add(pattern)
+  }
+
+  //          |           ignored : unignored
+  // negative |   0:0   |   0:1   |   1:0   |   1:1
+  // -------- | ------- | ------- | ------- | --------
+  //     0    |  TEST   |  TEST   |  SKIP   |    X
+  //     1    |  TESTIF |  SKIP   |  TEST   |    X
+
+  // - SKIP: always skip
+  // - TEST: always test
+  // - TESTIF: only test if checkUnignored
+  // - X: that never happen
+
+  // @param {boolean} whether should check if the path is unignored,
+  //   setting `checkUnignored` to `false` could reduce additional
+  //   path matching.
+
+  // @returns {TestResult} true if a file is ignored
+  _testOne (path, checkUnignored) {
+    let ignored = false
+    let unignored = false
+
+    this._rules.forEach(rule => {
+      const {negative} = rule
+      if (
+        unignored === negative && ignored !== unignored
+        || negative && !ignored && !unignored && !checkUnignored
+      ) {
+        return
+      }
+
+      const matched = rule.regex.test(path)
+
+      if (matched) {
+        ignored = !negative
+        unignored = negative
+      }
+    })
+
+    return {
+      ignored,
+      unignored
+    }
+  }
+
+  // @returns {TestResult}
+  _test (originalPath, cache, checkUnignored, slices) {
+    const path = originalPath
+      // Supports nullable path
+      && checkPath.convert(originalPath)
+
+    checkPath(
+      path,
+      originalPath,
+      this._allowRelativePaths
+        ? RETURN_FALSE
+        : throwError
+    )
+
+    return this._t(path, cache, checkUnignored, slices)
+  }
+
+  _t (path, cache, checkUnignored, slices) {
+    if (path in cache) {
+      return cache[path]
+    }
+
+    if (!slices) {
+      // path/to/a.js
+      // ['path', 'to', 'a.js']
+      slices = path.split(SLASH)
+    }
+
+    slices.pop()
+
+    // If the path has no parent directory, just test it
+    if (!slices.length) {
+      return cache[path] = this._testOne(path, checkUnignored)
+    }
+
+    const parent = this._t(
+      slices.join(SLASH) + SLASH,
+      cache,
+      checkUnignored,
+      slices
+    )
+
+    // If the path contains a parent directory, check the parent first
+    return cache[path] = parent.ignored
+      // > It is not possible to re-include a file if a parent directory of
+      // >   that file is excluded.
+      ? parent
+      : this._testOne(path, checkUnignored)
+  }
+
+  ignores (path) {
+    return this._test(path, this._ignoreCache, false).ignored
+  }
+
+  createFilter () {
+    return path => !this.ignores(path)
+  }
+
+  filter (paths) {
+    return makeArray(paths).filter(this.createFilter())
+  }
+
+  // @returns {TestResult}
+  test (path) {
+    return this._test(path, this._testCache, true)
+  }
+}
+
+const factory = options => new Ignore(options)
+
+const isPathValid = path =>
+  checkPath(path && checkPath.convert(path), path, RETURN_FALSE)
+
+factory.isPathValid = isPathValid
+
+// Fixes typescript
+factory.default = factory
+
+module.exports = factory
+
+// Windows
+// --------------------------------------------------------------
+/* istanbul ignore if */
+if (
+  // Detect `process` so that it can run in browsers.
+  typeof process !== 'undefined'
+  && (
+    process.env && process.env.IGNORE_TEST_WIN32
+    || process.platform === 'win32'
+  )
+) {
+  /* eslint no-control-regex: "off" */
+  const makePosix = str => /^\\\\\?\\/.test(str)
+  || /["<>|\u0000-\u001F]+/u.test(str)
+    ? str
+    : str.replace(/\\/g, '/')
+
+  checkPath.convert = makePosix
+
+  // 'C:\\foo'     <- 'C:\\foo' has been converted to 'C:/'
+  // 'd:\\foo'
+  const REGIX_IS_WINDOWS_PATH_ABSOLUTE = /^[a-z]:\//i
+  checkPath.isNotRelative = path =>
+    REGIX_IS_WINDOWS_PATH_ABSOLUTE.test(path)
+    || isNotRelative(path)
+}
 
 
 /***/ }),
@@ -34403,7 +35308,7 @@ const core = __importStar(__nccwpck_require__(7184));
 const fs = __importStar(__nccwpck_require__(9896));
 const child_process_1 = __nccwpck_require__(5317);
 const collect_js_1 = __importDefault(__nccwpck_require__(2564));
-const core_1 = __nccwpck_require__(9410);
+const core_1 = __nccwpck_require__(6089);
 const github_js_1 = __nccwpck_require__(3491);
 const openrouter_js_1 = __nccwpck_require__(7729);
 const prompt_js_1 = __nccwpck_require__(5274);
@@ -35854,11 +36759,11 @@ ${jsonKeys}
 
 /***/ }),
 
-/***/ 9410:
+/***/ 3350:
 /***/ ((module) => {
 
-"use strict";
-module.exports = require("@liendev/core");
+module.exports = eval("require")("");
+
 
 /***/ }),
 
@@ -37733,6 +38638,18029 @@ function parseParams (str) {
 module.exports = parseParams
 
 
+/***/ }),
+
+/***/ 6089:
+/***/ ((__unused_webpack___webpack_module__, __webpack_exports__, __nccwpck_require__) => {
+
+"use strict";
+// ESM COMPAT FLAG
+__nccwpck_require__.r(__webpack_exports__);
+
+// EXPORTS
+__nccwpck_require__.d(__webpack_exports__, {
+  CachedEmbeddings: () => (/* reexport */ CachedEmbeddings),
+  ComplexityAnalyzer: () => (/* reexport */ ComplexityAnalyzer),
+  ConfigError: () => (/* reexport */ ConfigError),
+  ConfigService: () => (/* reexport */ ConfigService),
+  DEFAULT_CHUNK_OVERLAP: () => (/* reexport */ DEFAULT_CHUNK_OVERLAP),
+  DEFAULT_CHUNK_SIZE: () => (/* reexport */ DEFAULT_CHUNK_SIZE),
+  DEFAULT_CONCURRENCY: () => (/* reexport */ DEFAULT_CONCURRENCY),
+  DEFAULT_DEBOUNCE_MS: () => (/* reexport */ DEFAULT_DEBOUNCE_MS),
+  DEFAULT_EMBEDDING_BATCH_SIZE: () => (/* reexport */ DEFAULT_EMBEDDING_BATCH_SIZE),
+  DEFAULT_EMBEDDING_MODEL: () => (/* reexport */ DEFAULT_EMBEDDING_MODEL),
+  DEFAULT_GIT_POLL_INTERVAL_MS: () => (/* reexport */ DEFAULT_GIT_POLL_INTERVAL_MS),
+  DEFAULT_PORT: () => (/* reexport */ DEFAULT_PORT),
+  DatabaseError: () => (/* reexport */ DatabaseError),
+  EMBEDDING_DIMENSION: () => (/* reexport */ EMBEDDING_DIMENSION),
+  EMBEDDING_DIMENSIONS: () => (/* reexport */ EMBEDDING_DIMENSIONS),
+  EMBEDDING_MICRO_BATCH_SIZE: () => (/* reexport */ EMBEDDING_MICRO_BATCH_SIZE),
+  EmbeddingError: () => (/* reexport */ EmbeddingError),
+  Err: () => (/* reexport */ Err),
+  GitStateTracker: () => (/* reexport */ GitStateTracker),
+  INDEX_FORMAT_VERSION: () => (/* reexport */ INDEX_FORMAT_VERSION),
+  IndexingError: () => (/* reexport */ IndexingError),
+  LienError: () => (/* reexport */ LienError),
+  LienErrorCode: () => (/* reexport */ LienErrorCode),
+  LocalEmbeddings: () => (/* reexport */ LocalEmbeddings),
+  ManifestManager: () => (/* reexport */ ManifestManager),
+  MigrationManager: () => (/* reexport */ MigrationManager),
+  Ok: () => (/* reexport */ Ok),
+  RISK_ORDER: () => (/* reexport */ RISK_ORDER),
+  VECTOR_DB_MAX_BATCH_SIZE: () => (/* reexport */ VECTOR_DB_MAX_BATCH_SIZE),
+  VECTOR_DB_MIN_BATCH_SIZE: () => (/* reexport */ VECTOR_DB_MIN_BATCH_SIZE),
+  VERSION_CHECK_INTERVAL_MS: () => (/* reexport */ VERSION_CHECK_INTERVAL_MS),
+  VectorDB: () => (/* reexport */ VectorDB),
+  calculateRelevance: () => (/* reexport */ calculateRelevance),
+  chunkFile: () => (/* reexport */ chunkFile),
+  configService: () => (/* reexport */ configService),
+  createDefaultConfig: () => (/* binding */ createDefaultConfig),
+  defaultConfig: () => (/* reexport */ defaultConfig),
+  detectAllFrameworks: () => (/* reexport */ detectAllFrameworks),
+  detectLanguage: () => (/* reexport */ detectLanguage),
+  extractSymbols: () => (/* reexport */ extractSymbols),
+  formatJsonReport: () => (/* reexport */ formatJsonReport),
+  formatReport: () => (/* reexport */ formatReport),
+  formatSarifReport: () => (/* reexport */ formatSarifReport),
+  formatTextReport: () => (/* reexport */ formatTextReport),
+  frameworkDetectors: () => (/* reexport */ frameworkDetectors),
+  getChangedFiles: () => (/* reexport */ getChangedFiles),
+  getChangedFilesBetweenCommits: () => (/* reexport */ getChangedFilesBetweenCommits),
+  getCurrentBranch: () => (/* reexport */ getCurrentBranch),
+  getCurrentCommit: () => (/* reexport */ getCurrentCommit),
+  getDetectionSummary: () => (/* reexport */ getDetectionSummary),
+  getErrorMessage: () => (/* reexport */ getErrorMessage),
+  getErrorStack: () => (/* reexport */ getErrorStack),
+  getFrameworkDetector: () => (/* reexport */ getFrameworkDetector),
+  groupByConfidence: () => (/* reexport */ groupByConfidence),
+  indexCodebase: () => (/* reexport */ indexCodebase),
+  indexMultipleFiles: () => (/* reexport */ indexMultipleFiles),
+  indexSingleFile: () => (/* reexport */ indexSingleFile),
+  isErr: () => (/* reexport */ isErr),
+  isGitAvailable: () => (/* reexport */ isGitAvailable),
+  isGitRepo: () => (/* reexport */ isGitRepo),
+  isLegacyConfig: () => (/* reexport */ isLegacyConfig),
+  isLienError: () => (/* reexport */ isLienError),
+  isModernConfig: () => (/* reexport */ isModernConfig),
+  isOk: () => (/* reexport */ isOk),
+  laravelDetector: () => (/* reexport */ laravelDetector),
+  loadConfig: () => (/* binding */ loadConfig),
+  migrateConfig: () => (/* reexport */ migrateConfig),
+  migrateConfigFile: () => (/* reexport */ migrateConfigFile),
+  nodejsDetector: () => (/* reexport */ nodejsDetector),
+  normalizeToRelativePath: () => (/* reexport */ normalizeToRelativePath),
+  phpDetector: () => (/* reexport */ phpDetector),
+  readVersionFile: () => (/* reexport */ readVersionFile),
+  registerFramework: () => (/* reexport */ registerFramework),
+  resolveFrameworkConflicts: () => (/* reexport */ resolveFrameworkConflicts),
+  runAllDetectors: () => (/* reexport */ runAllDetectors),
+  saveConfig: () => (/* binding */ saveConfig),
+  scanCodebase: () => (/* reexport */ scanCodebase),
+  scanCodebaseWithFrameworks: () => (/* reexport */ scanCodebaseWithFrameworks),
+  selectByPriority: () => (/* reexport */ selectByPriority),
+  shopifyDetector: () => (/* reexport */ shopifyDetector),
+  unwrap: () => (/* reexport */ unwrap),
+  unwrapOr: () => (/* reexport */ unwrapOr),
+  wrapError: () => (/* reexport */ wrapError),
+  writeVersionFile: () => (/* reexport */ writeVersionFile)
+});
+
+;// CONCATENATED MODULE: external "fs/promises"
+const promises_namespaceObject = require("fs/promises");
+;// CONCATENATED MODULE: ../../node_modules/yocto-queue/index.js
+/*
+How it works:
+`this.#head` is an instance of `Node` which keeps track of its current value and nests another instance of `Node` that keeps the value that comes after it. When a value is provided to `.enqueue()`, the code needs to iterate through `this.#head`, going deeper and deeper to find the last value. However, iterating through every single item is slow. This problem is solved by saving a reference to the last value as `this.#tail` so that it can reference it to add a new value.
+*/
+
+class Node {
+	value;
+	next;
+
+	constructor(value) {
+		this.value = value;
+	}
+}
+
+class Queue {
+	#head;
+	#tail;
+	#size;
+
+	constructor() {
+		this.clear();
+	}
+
+	enqueue(value) {
+		const node = new Node(value);
+
+		if (this.#head) {
+			this.#tail.next = node;
+			this.#tail = node;
+		} else {
+			this.#head = node;
+			this.#tail = node;
+		}
+
+		this.#size++;
+	}
+
+	dequeue() {
+		const current = this.#head;
+		if (!current) {
+			return;
+		}
+
+		this.#head = this.#head.next;
+		this.#size--;
+
+		// Clean up tail reference when queue becomes empty
+		if (!this.#head) {
+			this.#tail = undefined;
+		}
+
+		return current.value;
+	}
+
+	peek() {
+		if (!this.#head) {
+			return;
+		}
+
+		return this.#head.value;
+
+		// TODO: Node.js 18.
+		// return this.#head?.value;
+	}
+
+	clear() {
+		this.#head = undefined;
+		this.#tail = undefined;
+		this.#size = 0;
+	}
+
+	get size() {
+		return this.#size;
+	}
+
+	* [Symbol.iterator]() {
+		let current = this.#head;
+
+		while (current) {
+			yield current.value;
+			current = current.next;
+		}
+	}
+
+	* drain() {
+		while (this.#head) {
+			yield this.dequeue();
+		}
+	}
+}
+
+// EXTERNAL MODULE: ../../node_modules/@vercel/ncc/dist/ncc/@@notfound.js?#async_hooks
+var _notfound_async_hooks = __nccwpck_require__(3350);
+;// CONCATENATED MODULE: ../../node_modules/p-limit/index.js
+
+
+
+function pLimit(concurrency) {
+	if (!((Number.isInteger(concurrency) || concurrency === Number.POSITIVE_INFINITY) && concurrency > 0)) {
+		throw new TypeError('Expected `concurrency` to be a number from 1 and up');
+	}
+
+	const queue = new Queue();
+	let activeCount = 0;
+
+	const next = () => {
+		activeCount--;
+
+		if (queue.size > 0) {
+			queue.dequeue()();
+		}
+	};
+
+	const run = async (function_, resolve, arguments_) => {
+		activeCount++;
+
+		const result = (async () => function_(...arguments_))();
+
+		resolve(result);
+
+		try {
+			await result;
+		} catch {}
+
+		next();
+	};
+
+	const enqueue = (function_, resolve, arguments_) => {
+		queue.enqueue(
+			_notfound_async_hooks.AsyncResource.bind(run.bind(undefined, function_, resolve, arguments_)),
+		);
+
+		(async () => {
+			// This function needs to wait until the next microtask before comparing
+			// `activeCount` to `concurrency`, because `activeCount` is updated asynchronously
+			// when the run function is dequeued and called. The comparison in the if-statement
+			// needs to happen asynchronously as well to get an up-to-date value for `activeCount`.
+			await Promise.resolve();
+
+			if (activeCount < concurrency && queue.size > 0) {
+				queue.dequeue()();
+			}
+		})();
+	};
+
+	const generator = (function_, ...arguments_) => new Promise(resolve => {
+		enqueue(function_, resolve, arguments_);
+	});
+
+	Object.defineProperties(generator, {
+		activeCount: {
+			get: () => activeCount,
+		},
+		pendingCount: {
+			get: () => queue.size,
+		},
+		clearQueue: {
+			value() {
+				queue.clear();
+			},
+		},
+	});
+
+	return generator;
+}
+
+// EXTERNAL MODULE: ../../node_modules/brace-expansion/index.js
+var brace_expansion = __nccwpck_require__(2503);
+;// CONCATENATED MODULE: ../../node_modules/minimatch/dist/esm/assert-valid-pattern.js
+const MAX_PATTERN_LENGTH = 1024 * 64;
+const assertValidPattern = (pattern) => {
+    if (typeof pattern !== 'string') {
+        throw new TypeError('invalid pattern');
+    }
+    if (pattern.length > MAX_PATTERN_LENGTH) {
+        throw new TypeError('pattern is too long');
+    }
+};
+//# sourceMappingURL=assert-valid-pattern.js.map
+;// CONCATENATED MODULE: ../../node_modules/minimatch/dist/esm/brace-expressions.js
+// translate the various posix character classes into unicode properties
+// this works across all unicode locales
+// { <posix class>: [<translation>, /u flag required, negated]
+const posixClasses = {
+    '[:alnum:]': ['\\p{L}\\p{Nl}\\p{Nd}', true],
+    '[:alpha:]': ['\\p{L}\\p{Nl}', true],
+    '[:ascii:]': ['\\x' + '00-\\x' + '7f', false],
+    '[:blank:]': ['\\p{Zs}\\t', true],
+    '[:cntrl:]': ['\\p{Cc}', true],
+    '[:digit:]': ['\\p{Nd}', true],
+    '[:graph:]': ['\\p{Z}\\p{C}', true, true],
+    '[:lower:]': ['\\p{Ll}', true],
+    '[:print:]': ['\\p{C}', true],
+    '[:punct:]': ['\\p{P}', true],
+    '[:space:]': ['\\p{Z}\\t\\r\\n\\v\\f', true],
+    '[:upper:]': ['\\p{Lu}', true],
+    '[:word:]': ['\\p{L}\\p{Nl}\\p{Nd}\\p{Pc}', true],
+    '[:xdigit:]': ['A-Fa-f0-9', false],
+};
+// only need to escape a few things inside of brace expressions
+// escapes: [ \ ] -
+const braceEscape = (s) => s.replace(/[[\]\\-]/g, '\\$&');
+// escape all regexp magic characters
+const regexpEscape = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+// everything has already been escaped, we just have to join
+const rangesToString = (ranges) => ranges.join('');
+// takes a glob string at a posix brace expression, and returns
+// an equivalent regular expression source, and boolean indicating
+// whether the /u flag needs to be applied, and the number of chars
+// consumed to parse the character class.
+// This also removes out of order ranges, and returns ($.) if the
+// entire class just no good.
+const parseClass = (glob, position) => {
+    const pos = position;
+    /* c8 ignore start */
+    if (glob.charAt(pos) !== '[') {
+        throw new Error('not in a brace expression');
+    }
+    /* c8 ignore stop */
+    const ranges = [];
+    const negs = [];
+    let i = pos + 1;
+    let sawStart = false;
+    let uflag = false;
+    let escaping = false;
+    let negate = false;
+    let endPos = pos;
+    let rangeStart = '';
+    WHILE: while (i < glob.length) {
+        const c = glob.charAt(i);
+        if ((c === '!' || c === '^') && i === pos + 1) {
+            negate = true;
+            i++;
+            continue;
+        }
+        if (c === ']' && sawStart && !escaping) {
+            endPos = i + 1;
+            break;
+        }
+        sawStart = true;
+        if (c === '\\') {
+            if (!escaping) {
+                escaping = true;
+                i++;
+                continue;
+            }
+            // escaped \ char, fall through and treat like normal char
+        }
+        if (c === '[' && !escaping) {
+            // either a posix class, a collation equivalent, or just a [
+            for (const [cls, [unip, u, neg]] of Object.entries(posixClasses)) {
+                if (glob.startsWith(cls, i)) {
+                    // invalid, [a-[] is fine, but not [a-[:alpha]]
+                    if (rangeStart) {
+                        return ['$.', false, glob.length - pos, true];
+                    }
+                    i += cls.length;
+                    if (neg)
+                        negs.push(unip);
+                    else
+                        ranges.push(unip);
+                    uflag = uflag || u;
+                    continue WHILE;
+                }
+            }
+        }
+        // now it's just a normal character, effectively
+        escaping = false;
+        if (rangeStart) {
+            // throw this range away if it's not valid, but others
+            // can still match.
+            if (c > rangeStart) {
+                ranges.push(braceEscape(rangeStart) + '-' + braceEscape(c));
+            }
+            else if (c === rangeStart) {
+                ranges.push(braceEscape(c));
+            }
+            rangeStart = '';
+            i++;
+            continue;
+        }
+        // now might be the start of a range.
+        // can be either c-d or c-] or c<more...>] or c] at this point
+        if (glob.startsWith('-]', i + 1)) {
+            ranges.push(braceEscape(c + '-'));
+            i += 2;
+            continue;
+        }
+        if (glob.startsWith('-', i + 1)) {
+            rangeStart = c;
+            i += 2;
+            continue;
+        }
+        // not the start of a range, just a single character
+        ranges.push(braceEscape(c));
+        i++;
+    }
+    if (endPos < i) {
+        // didn't see the end of the class, not a valid class,
+        // but might still be valid as a literal match.
+        return ['', false, 0, false];
+    }
+    // if we got no ranges and no negates, then we have a range that
+    // cannot possibly match anything, and that poisons the whole glob
+    if (!ranges.length && !negs.length) {
+        return ['$.', false, glob.length - pos, true];
+    }
+    // if we got one positive range, and it's a single character, then that's
+    // not actually a magic pattern, it's just that one literal character.
+    // we should not treat that as "magic", we should just return the literal
+    // character. [_] is a perfectly valid way to escape glob magic chars.
+    if (negs.length === 0 &&
+        ranges.length === 1 &&
+        /^\\?.$/.test(ranges[0]) &&
+        !negate) {
+        const r = ranges[0].length === 2 ? ranges[0].slice(-1) : ranges[0];
+        return [regexpEscape(r), false, endPos - pos, false];
+    }
+    const sranges = '[' + (negate ? '^' : '') + rangesToString(ranges) + ']';
+    const snegs = '[' + (negate ? '' : '^') + rangesToString(negs) + ']';
+    const comb = ranges.length && negs.length
+        ? '(' + sranges + '|' + snegs + ')'
+        : ranges.length
+            ? sranges
+            : snegs;
+    return [comb, uflag, endPos - pos, true];
+};
+//# sourceMappingURL=brace-expressions.js.map
+;// CONCATENATED MODULE: ../../node_modules/minimatch/dist/esm/unescape.js
+/**
+ * Un-escape a string that has been escaped with {@link escape}.
+ *
+ * If the {@link windowsPathsNoEscape} option is used, then square-brace
+ * escapes are removed, but not backslash escapes.  For example, it will turn
+ * the string `'[*]'` into `*`, but it will not turn `'\\*'` into `'*'`,
+ * becuase `\` is a path separator in `windowsPathsNoEscape` mode.
+ *
+ * When `windowsPathsNoEscape` is not set, then both brace escapes and
+ * backslash escapes are removed.
+ *
+ * Slashes (and backslashes in `windowsPathsNoEscape` mode) cannot be escaped
+ * or unescaped.
+ */
+const unescape_unescape = (s, { windowsPathsNoEscape = false, } = {}) => {
+    return windowsPathsNoEscape
+        ? s.replace(/\[([^\/\\])\]/g, '$1')
+        : s.replace(/((?!\\).|^)\[([^\/\\])\]/g, '$1$2').replace(/\\([^\/])/g, '$1');
+};
+//# sourceMappingURL=unescape.js.map
+;// CONCATENATED MODULE: ../../node_modules/minimatch/dist/esm/ast.js
+// parse a single path portion
+
+
+const types = new Set(['!', '?', '+', '*', '@']);
+const isExtglobType = (c) => types.has(c);
+// Patterns that get prepended to bind to the start of either the
+// entire string, or just a single path portion, to prevent dots
+// and/or traversal patterns, when needed.
+// Exts don't need the ^ or / bit, because the root binds that already.
+const startNoTraversal = '(?!(?:^|/)\\.\\.?(?:$|/))';
+const startNoDot = '(?!\\.)';
+// characters that indicate a start of pattern needs the "no dots" bit,
+// because a dot *might* be matched. ( is not in the list, because in
+// the case of a child extglob, it will handle the prevention itself.
+const addPatternStart = new Set(['[', '.']);
+// cases where traversal is A-OK, no dot prevention needed
+const justDots = new Set(['..', '.']);
+const reSpecials = new Set('().*{}+?[]^$\\!');
+const regExpEscape = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+// any single thing other than /
+const qmark = '[^/]';
+// * => any number of characters
+const star = qmark + '*?';
+// use + when we need to ensure that *something* matches, because the * is
+// the only thing in the path portion.
+const starNoEmpty = qmark + '+?';
+// remove the \ chars that we added if we end up doing a nonmagic compare
+// const deslash = (s: string) => s.replace(/\\(.)/g, '$1')
+class AST {
+    type;
+    #root;
+    #hasMagic;
+    #uflag = false;
+    #parts = [];
+    #parent;
+    #parentIndex;
+    #negs;
+    #filledNegs = false;
+    #options;
+    #toString;
+    // set to true if it's an extglob with no children
+    // (which really means one child of '')
+    #emptyExt = false;
+    constructor(type, parent, options = {}) {
+        this.type = type;
+        // extglobs are inherently magical
+        if (type)
+            this.#hasMagic = true;
+        this.#parent = parent;
+        this.#root = this.#parent ? this.#parent.#root : this;
+        this.#options = this.#root === this ? options : this.#root.#options;
+        this.#negs = this.#root === this ? [] : this.#root.#negs;
+        if (type === '!' && !this.#root.#filledNegs)
+            this.#negs.push(this);
+        this.#parentIndex = this.#parent ? this.#parent.#parts.length : 0;
+    }
+    get hasMagic() {
+        /* c8 ignore start */
+        if (this.#hasMagic !== undefined)
+            return this.#hasMagic;
+        /* c8 ignore stop */
+        for (const p of this.#parts) {
+            if (typeof p === 'string')
+                continue;
+            if (p.type || p.hasMagic)
+                return (this.#hasMagic = true);
+        }
+        // note: will be undefined until we generate the regexp src and find out
+        return this.#hasMagic;
+    }
+    // reconstructs the pattern
+    toString() {
+        if (this.#toString !== undefined)
+            return this.#toString;
+        if (!this.type) {
+            return (this.#toString = this.#parts.map(p => String(p)).join(''));
+        }
+        else {
+            return (this.#toString =
+                this.type + '(' + this.#parts.map(p => String(p)).join('|') + ')');
+        }
+    }
+    #fillNegs() {
+        /* c8 ignore start */
+        if (this !== this.#root)
+            throw new Error('should only call on root');
+        if (this.#filledNegs)
+            return this;
+        /* c8 ignore stop */
+        // call toString() once to fill this out
+        this.toString();
+        this.#filledNegs = true;
+        let n;
+        while ((n = this.#negs.pop())) {
+            if (n.type !== '!')
+                continue;
+            // walk up the tree, appending everthing that comes AFTER parentIndex
+            let p = n;
+            let pp = p.#parent;
+            while (pp) {
+                for (let i = p.#parentIndex + 1; !pp.type && i < pp.#parts.length; i++) {
+                    for (const part of n.#parts) {
+                        /* c8 ignore start */
+                        if (typeof part === 'string') {
+                            throw new Error('string part in extglob AST??');
+                        }
+                        /* c8 ignore stop */
+                        part.copyIn(pp.#parts[i]);
+                    }
+                }
+                p = pp;
+                pp = p.#parent;
+            }
+        }
+        return this;
+    }
+    push(...parts) {
+        for (const p of parts) {
+            if (p === '')
+                continue;
+            /* c8 ignore start */
+            if (typeof p !== 'string' && !(p instanceof AST && p.#parent === this)) {
+                throw new Error('invalid part: ' + p);
+            }
+            /* c8 ignore stop */
+            this.#parts.push(p);
+        }
+    }
+    toJSON() {
+        const ret = this.type === null
+            ? this.#parts.slice().map(p => (typeof p === 'string' ? p : p.toJSON()))
+            : [this.type, ...this.#parts.map(p => p.toJSON())];
+        if (this.isStart() && !this.type)
+            ret.unshift([]);
+        if (this.isEnd() &&
+            (this === this.#root ||
+                (this.#root.#filledNegs && this.#parent?.type === '!'))) {
+            ret.push({});
+        }
+        return ret;
+    }
+    isStart() {
+        if (this.#root === this)
+            return true;
+        // if (this.type) return !!this.#parent?.isStart()
+        if (!this.#parent?.isStart())
+            return false;
+        if (this.#parentIndex === 0)
+            return true;
+        // if everything AHEAD of this is a negation, then it's still the "start"
+        const p = this.#parent;
+        for (let i = 0; i < this.#parentIndex; i++) {
+            const pp = p.#parts[i];
+            if (!(pp instanceof AST && pp.type === '!')) {
+                return false;
+            }
+        }
+        return true;
+    }
+    isEnd() {
+        if (this.#root === this)
+            return true;
+        if (this.#parent?.type === '!')
+            return true;
+        if (!this.#parent?.isEnd())
+            return false;
+        if (!this.type)
+            return this.#parent?.isEnd();
+        // if not root, it'll always have a parent
+        /* c8 ignore start */
+        const pl = this.#parent ? this.#parent.#parts.length : 0;
+        /* c8 ignore stop */
+        return this.#parentIndex === pl - 1;
+    }
+    copyIn(part) {
+        if (typeof part === 'string')
+            this.push(part);
+        else
+            this.push(part.clone(this));
+    }
+    clone(parent) {
+        const c = new AST(this.type, parent);
+        for (const p of this.#parts) {
+            c.copyIn(p);
+        }
+        return c;
+    }
+    static #parseAST(str, ast, pos, opt) {
+        let escaping = false;
+        let inBrace = false;
+        let braceStart = -1;
+        let braceNeg = false;
+        if (ast.type === null) {
+            // outside of a extglob, append until we find a start
+            let i = pos;
+            let acc = '';
+            while (i < str.length) {
+                const c = str.charAt(i++);
+                // still accumulate escapes at this point, but we do ignore
+                // starts that are escaped
+                if (escaping || c === '\\') {
+                    escaping = !escaping;
+                    acc += c;
+                    continue;
+                }
+                if (inBrace) {
+                    if (i === braceStart + 1) {
+                        if (c === '^' || c === '!') {
+                            braceNeg = true;
+                        }
+                    }
+                    else if (c === ']' && !(i === braceStart + 2 && braceNeg)) {
+                        inBrace = false;
+                    }
+                    acc += c;
+                    continue;
+                }
+                else if (c === '[') {
+                    inBrace = true;
+                    braceStart = i;
+                    braceNeg = false;
+                    acc += c;
+                    continue;
+                }
+                if (!opt.noext && isExtglobType(c) && str.charAt(i) === '(') {
+                    ast.push(acc);
+                    acc = '';
+                    const ext = new AST(c, ast);
+                    i = AST.#parseAST(str, ext, i, opt);
+                    ast.push(ext);
+                    continue;
+                }
+                acc += c;
+            }
+            ast.push(acc);
+            return i;
+        }
+        // some kind of extglob, pos is at the (
+        // find the next | or )
+        let i = pos + 1;
+        let part = new AST(null, ast);
+        const parts = [];
+        let acc = '';
+        while (i < str.length) {
+            const c = str.charAt(i++);
+            // still accumulate escapes at this point, but we do ignore
+            // starts that are escaped
+            if (escaping || c === '\\') {
+                escaping = !escaping;
+                acc += c;
+                continue;
+            }
+            if (inBrace) {
+                if (i === braceStart + 1) {
+                    if (c === '^' || c === '!') {
+                        braceNeg = true;
+                    }
+                }
+                else if (c === ']' && !(i === braceStart + 2 && braceNeg)) {
+                    inBrace = false;
+                }
+                acc += c;
+                continue;
+            }
+            else if (c === '[') {
+                inBrace = true;
+                braceStart = i;
+                braceNeg = false;
+                acc += c;
+                continue;
+            }
+            if (isExtglobType(c) && str.charAt(i) === '(') {
+                part.push(acc);
+                acc = '';
+                const ext = new AST(c, part);
+                part.push(ext);
+                i = AST.#parseAST(str, ext, i, opt);
+                continue;
+            }
+            if (c === '|') {
+                part.push(acc);
+                acc = '';
+                parts.push(part);
+                part = new AST(null, ast);
+                continue;
+            }
+            if (c === ')') {
+                if (acc === '' && ast.#parts.length === 0) {
+                    ast.#emptyExt = true;
+                }
+                part.push(acc);
+                acc = '';
+                ast.push(...parts, part);
+                return i;
+            }
+            acc += c;
+        }
+        // unfinished extglob
+        // if we got here, it was a malformed extglob! not an extglob, but
+        // maybe something else in there.
+        ast.type = null;
+        ast.#hasMagic = undefined;
+        ast.#parts = [str.substring(pos - 1)];
+        return i;
+    }
+    static fromGlob(pattern, options = {}) {
+        const ast = new AST(null, undefined, options);
+        AST.#parseAST(pattern, ast, 0, options);
+        return ast;
+    }
+    // returns the regular expression if there's magic, or the unescaped
+    // string if not.
+    toMMPattern() {
+        // should only be called on root
+        /* c8 ignore start */
+        if (this !== this.#root)
+            return this.#root.toMMPattern();
+        /* c8 ignore stop */
+        const glob = this.toString();
+        const [re, body, hasMagic, uflag] = this.toRegExpSource();
+        // if we're in nocase mode, and not nocaseMagicOnly, then we do
+        // still need a regular expression if we have to case-insensitively
+        // match capital/lowercase characters.
+        const anyMagic = hasMagic ||
+            this.#hasMagic ||
+            (this.#options.nocase &&
+                !this.#options.nocaseMagicOnly &&
+                glob.toUpperCase() !== glob.toLowerCase());
+        if (!anyMagic) {
+            return body;
+        }
+        const flags = (this.#options.nocase ? 'i' : '') + (uflag ? 'u' : '');
+        return Object.assign(new RegExp(`^${re}$`, flags), {
+            _src: re,
+            _glob: glob,
+        });
+    }
+    get options() {
+        return this.#options;
+    }
+    // returns the string match, the regexp source, whether there's magic
+    // in the regexp (so a regular expression is required) and whether or
+    // not the uflag is needed for the regular expression (for posix classes)
+    // TODO: instead of injecting the start/end at this point, just return
+    // the BODY of the regexp, along with the start/end portions suitable
+    // for binding the start/end in either a joined full-path makeRe context
+    // (where we bind to (^|/), or a standalone matchPart context (where
+    // we bind to ^, and not /).  Otherwise slashes get duped!
+    //
+    // In part-matching mode, the start is:
+    // - if not isStart: nothing
+    // - if traversal possible, but not allowed: ^(?!\.\.?$)
+    // - if dots allowed or not possible: ^
+    // - if dots possible and not allowed: ^(?!\.)
+    // end is:
+    // - if not isEnd(): nothing
+    // - else: $
+    //
+    // In full-path matching mode, we put the slash at the START of the
+    // pattern, so start is:
+    // - if first pattern: same as part-matching mode
+    // - if not isStart(): nothing
+    // - if traversal possible, but not allowed: /(?!\.\.?(?:$|/))
+    // - if dots allowed or not possible: /
+    // - if dots possible and not allowed: /(?!\.)
+    // end is:
+    // - if last pattern, same as part-matching mode
+    // - else nothing
+    //
+    // Always put the (?:$|/) on negated tails, though, because that has to be
+    // there to bind the end of the negated pattern portion, and it's easier to
+    // just stick it in now rather than try to inject it later in the middle of
+    // the pattern.
+    //
+    // We can just always return the same end, and leave it up to the caller
+    // to know whether it's going to be used joined or in parts.
+    // And, if the start is adjusted slightly, can do the same there:
+    // - if not isStart: nothing
+    // - if traversal possible, but not allowed: (?:/|^)(?!\.\.?$)
+    // - if dots allowed or not possible: (?:/|^)
+    // - if dots possible and not allowed: (?:/|^)(?!\.)
+    //
+    // But it's better to have a simpler binding without a conditional, for
+    // performance, so probably better to return both start options.
+    //
+    // Then the caller just ignores the end if it's not the first pattern,
+    // and the start always gets applied.
+    //
+    // But that's always going to be $ if it's the ending pattern, or nothing,
+    // so the caller can just attach $ at the end of the pattern when building.
+    //
+    // So the todo is:
+    // - better detect what kind of start is needed
+    // - return both flavors of starting pattern
+    // - attach $ at the end of the pattern when creating the actual RegExp
+    //
+    // Ah, but wait, no, that all only applies to the root when the first pattern
+    // is not an extglob. If the first pattern IS an extglob, then we need all
+    // that dot prevention biz to live in the extglob portions, because eg
+    // +(*|.x*) can match .xy but not .yx.
+    //
+    // So, return the two flavors if it's #root and the first child is not an
+    // AST, otherwise leave it to the child AST to handle it, and there,
+    // use the (?:^|/) style of start binding.
+    //
+    // Even simplified further:
+    // - Since the start for a join is eg /(?!\.) and the start for a part
+    // is ^(?!\.), we can just prepend (?!\.) to the pattern (either root
+    // or start or whatever) and prepend ^ or / at the Regexp construction.
+    toRegExpSource(allowDot) {
+        const dot = allowDot ?? !!this.#options.dot;
+        if (this.#root === this)
+            this.#fillNegs();
+        if (!this.type) {
+            const noEmpty = this.isStart() && this.isEnd();
+            const src = this.#parts
+                .map(p => {
+                const [re, _, hasMagic, uflag] = typeof p === 'string'
+                    ? AST.#parseGlob(p, this.#hasMagic, noEmpty)
+                    : p.toRegExpSource(allowDot);
+                this.#hasMagic = this.#hasMagic || hasMagic;
+                this.#uflag = this.#uflag || uflag;
+                return re;
+            })
+                .join('');
+            let start = '';
+            if (this.isStart()) {
+                if (typeof this.#parts[0] === 'string') {
+                    // this is the string that will match the start of the pattern,
+                    // so we need to protect against dots and such.
+                    // '.' and '..' cannot match unless the pattern is that exactly,
+                    // even if it starts with . or dot:true is set.
+                    const dotTravAllowed = this.#parts.length === 1 && justDots.has(this.#parts[0]);
+                    if (!dotTravAllowed) {
+                        const aps = addPatternStart;
+                        // check if we have a possibility of matching . or ..,
+                        // and prevent that.
+                        const needNoTrav = 
+                        // dots are allowed, and the pattern starts with [ or .
+                        (dot && aps.has(src.charAt(0))) ||
+                            // the pattern starts with \., and then [ or .
+                            (src.startsWith('\\.') && aps.has(src.charAt(2))) ||
+                            // the pattern starts with \.\., and then [ or .
+                            (src.startsWith('\\.\\.') && aps.has(src.charAt(4)));
+                        // no need to prevent dots if it can't match a dot, or if a
+                        // sub-pattern will be preventing it anyway.
+                        const needNoDot = !dot && !allowDot && aps.has(src.charAt(0));
+                        start = needNoTrav ? startNoTraversal : needNoDot ? startNoDot : '';
+                    }
+                }
+            }
+            // append the "end of path portion" pattern to negation tails
+            let end = '';
+            if (this.isEnd() &&
+                this.#root.#filledNegs &&
+                this.#parent?.type === '!') {
+                end = '(?:$|\\/)';
+            }
+            const final = start + src + end;
+            return [
+                final,
+                unescape_unescape(src),
+                (this.#hasMagic = !!this.#hasMagic),
+                this.#uflag,
+            ];
+        }
+        // We need to calculate the body *twice* if it's a repeat pattern
+        // at the start, once in nodot mode, then again in dot mode, so a
+        // pattern like *(?) can match 'x.y'
+        const repeated = this.type === '*' || this.type === '+';
+        // some kind of extglob
+        const start = this.type === '!' ? '(?:(?!(?:' : '(?:';
+        let body = this.#partsToRegExp(dot);
+        if (this.isStart() && this.isEnd() && !body && this.type !== '!') {
+            // invalid extglob, has to at least be *something* present, if it's
+            // the entire path portion.
+            const s = this.toString();
+            this.#parts = [s];
+            this.type = null;
+            this.#hasMagic = undefined;
+            return [s, unescape_unescape(this.toString()), false, false];
+        }
+        // XXX abstract out this map method
+        let bodyDotAllowed = !repeated || allowDot || dot || !startNoDot
+            ? ''
+            : this.#partsToRegExp(true);
+        if (bodyDotAllowed === body) {
+            bodyDotAllowed = '';
+        }
+        if (bodyDotAllowed) {
+            body = `(?:${body})(?:${bodyDotAllowed})*?`;
+        }
+        // an empty !() is exactly equivalent to a starNoEmpty
+        let final = '';
+        if (this.type === '!' && this.#emptyExt) {
+            final = (this.isStart() && !dot ? startNoDot : '') + starNoEmpty;
+        }
+        else {
+            const close = this.type === '!'
+                ? // !() must match something,but !(x) can match ''
+                    '))' +
+                        (this.isStart() && !dot && !allowDot ? startNoDot : '') +
+                        star +
+                        ')'
+                : this.type === '@'
+                    ? ')'
+                    : this.type === '?'
+                        ? ')?'
+                        : this.type === '+' && bodyDotAllowed
+                            ? ')'
+                            : this.type === '*' && bodyDotAllowed
+                                ? `)?`
+                                : `)${this.type}`;
+            final = start + body + close;
+        }
+        return [
+            final,
+            unescape_unescape(body),
+            (this.#hasMagic = !!this.#hasMagic),
+            this.#uflag,
+        ];
+    }
+    #partsToRegExp(dot) {
+        return this.#parts
+            .map(p => {
+            // extglob ASTs should only contain parent ASTs
+            /* c8 ignore start */
+            if (typeof p === 'string') {
+                throw new Error('string type in extglob ast??');
+            }
+            /* c8 ignore stop */
+            // can ignore hasMagic, because extglobs are already always magic
+            const [re, _, _hasMagic, uflag] = p.toRegExpSource(dot);
+            this.#uflag = this.#uflag || uflag;
+            return re;
+        })
+            .filter(p => !(this.isStart() && this.isEnd()) || !!p)
+            .join('|');
+    }
+    static #parseGlob(glob, hasMagic, noEmpty = false) {
+        let escaping = false;
+        let re = '';
+        let uflag = false;
+        for (let i = 0; i < glob.length; i++) {
+            const c = glob.charAt(i);
+            if (escaping) {
+                escaping = false;
+                re += (reSpecials.has(c) ? '\\' : '') + c;
+                continue;
+            }
+            if (c === '\\') {
+                if (i === glob.length - 1) {
+                    re += '\\\\';
+                }
+                else {
+                    escaping = true;
+                }
+                continue;
+            }
+            if (c === '[') {
+                const [src, needUflag, consumed, magic] = parseClass(glob, i);
+                if (consumed) {
+                    re += src;
+                    uflag = uflag || needUflag;
+                    i += consumed - 1;
+                    hasMagic = hasMagic || magic;
+                    continue;
+                }
+            }
+            if (c === '*') {
+                if (noEmpty && glob === '*')
+                    re += starNoEmpty;
+                else
+                    re += star;
+                hasMagic = true;
+                continue;
+            }
+            if (c === '?') {
+                re += qmark;
+                hasMagic = true;
+                continue;
+            }
+            re += regExpEscape(c);
+        }
+        return [re, unescape_unescape(glob), !!hasMagic, uflag];
+    }
+}
+//# sourceMappingURL=ast.js.map
+;// CONCATENATED MODULE: ../../node_modules/minimatch/dist/esm/escape.js
+/**
+ * Escape all magic characters in a glob pattern.
+ *
+ * If the {@link windowsPathsNoEscape | GlobOptions.windowsPathsNoEscape}
+ * option is used, then characters are escaped by wrapping in `[]`, because
+ * a magic character wrapped in a character class can only be satisfied by
+ * that exact character.  In this mode, `\` is _not_ escaped, because it is
+ * not interpreted as a magic character, but instead as a path separator.
+ */
+const escape_escape = (s, { windowsPathsNoEscape = false, } = {}) => {
+    // don't need to escape +@! because we escape the parens
+    // that make those magic, and escaping ! as [!] isn't valid,
+    // because [!]] is a valid glob class meaning not ']'.
+    return windowsPathsNoEscape
+        ? s.replace(/[?*()[\]]/g, '[$&]')
+        : s.replace(/[?*()[\]\\]/g, '\\$&');
+};
+//# sourceMappingURL=escape.js.map
+;// CONCATENATED MODULE: ../../node_modules/minimatch/dist/esm/index.js
+
+
+
+
+
+const minimatch = (p, pattern, options = {}) => {
+    assertValidPattern(pattern);
+    // shortcut: comments match nothing.
+    if (!options.nocomment && pattern.charAt(0) === '#') {
+        return false;
+    }
+    return new Minimatch(pattern, options).match(p);
+};
+// Optimized checking for the most common glob patterns.
+const starDotExtRE = /^\*+([^+@!?\*\[\(]*)$/;
+const starDotExtTest = (ext) => (f) => !f.startsWith('.') && f.endsWith(ext);
+const starDotExtTestDot = (ext) => (f) => f.endsWith(ext);
+const starDotExtTestNocase = (ext) => {
+    ext = ext.toLowerCase();
+    return (f) => !f.startsWith('.') && f.toLowerCase().endsWith(ext);
+};
+const starDotExtTestNocaseDot = (ext) => {
+    ext = ext.toLowerCase();
+    return (f) => f.toLowerCase().endsWith(ext);
+};
+const starDotStarRE = /^\*+\.\*+$/;
+const starDotStarTest = (f) => !f.startsWith('.') && f.includes('.');
+const starDotStarTestDot = (f) => f !== '.' && f !== '..' && f.includes('.');
+const dotStarRE = /^\.\*+$/;
+const dotStarTest = (f) => f !== '.' && f !== '..' && f.startsWith('.');
+const starRE = /^\*+$/;
+const starTest = (f) => f.length !== 0 && !f.startsWith('.');
+const starTestDot = (f) => f.length !== 0 && f !== '.' && f !== '..';
+const qmarksRE = /^\?+([^+@!?\*\[\(]*)?$/;
+const qmarksTestNocase = ([$0, ext = '']) => {
+    const noext = qmarksTestNoExt([$0]);
+    if (!ext)
+        return noext;
+    ext = ext.toLowerCase();
+    return (f) => noext(f) && f.toLowerCase().endsWith(ext);
+};
+const qmarksTestNocaseDot = ([$0, ext = '']) => {
+    const noext = qmarksTestNoExtDot([$0]);
+    if (!ext)
+        return noext;
+    ext = ext.toLowerCase();
+    return (f) => noext(f) && f.toLowerCase().endsWith(ext);
+};
+const qmarksTestDot = ([$0, ext = '']) => {
+    const noext = qmarksTestNoExtDot([$0]);
+    return !ext ? noext : (f) => noext(f) && f.endsWith(ext);
+};
+const qmarksTest = ([$0, ext = '']) => {
+    const noext = qmarksTestNoExt([$0]);
+    return !ext ? noext : (f) => noext(f) && f.endsWith(ext);
+};
+const qmarksTestNoExt = ([$0]) => {
+    const len = $0.length;
+    return (f) => f.length === len && !f.startsWith('.');
+};
+const qmarksTestNoExtDot = ([$0]) => {
+    const len = $0.length;
+    return (f) => f.length === len && f !== '.' && f !== '..';
+};
+/* c8 ignore start */
+const defaultPlatform = (typeof process === 'object' && process
+    ? (typeof process.env === 'object' &&
+        process.env &&
+        process.env.__MINIMATCH_TESTING_PLATFORM__) ||
+        process.platform
+    : 'posix');
+const esm_path = {
+    win32: { sep: '\\' },
+    posix: { sep: '/' },
+};
+/* c8 ignore stop */
+const sep = defaultPlatform === 'win32' ? esm_path.win32.sep : esm_path.posix.sep;
+minimatch.sep = sep;
+const GLOBSTAR = Symbol('globstar **');
+minimatch.GLOBSTAR = GLOBSTAR;
+// any single thing other than /
+// don't need to escape / when using new RegExp()
+const esm_qmark = '[^/]';
+// * => any number of characters
+const esm_star = esm_qmark + '*?';
+// ** when dots are allowed.  Anything goes, except .. and .
+// not (^ or / followed by one or two dots followed by $ or /),
+// followed by anything, any number of times.
+const twoStarDot = '(?:(?!(?:\\/|^)(?:\\.{1,2})($|\\/)).)*?';
+// not a ^ or / followed by a dot,
+// followed by anything, any number of times.
+const twoStarNoDot = '(?:(?!(?:\\/|^)\\.).)*?';
+const filter = (pattern, options = {}) => (p) => minimatch(p, pattern, options);
+minimatch.filter = filter;
+const ext = (a, b = {}) => Object.assign({}, a, b);
+const defaults = (def) => {
+    if (!def || typeof def !== 'object' || !Object.keys(def).length) {
+        return minimatch;
+    }
+    const orig = minimatch;
+    const m = (p, pattern, options = {}) => orig(p, pattern, ext(def, options));
+    return Object.assign(m, {
+        Minimatch: class Minimatch extends orig.Minimatch {
+            constructor(pattern, options = {}) {
+                super(pattern, ext(def, options));
+            }
+            static defaults(options) {
+                return orig.defaults(ext(def, options)).Minimatch;
+            }
+        },
+        AST: class AST extends orig.AST {
+            /* c8 ignore start */
+            constructor(type, parent, options = {}) {
+                super(type, parent, ext(def, options));
+            }
+            /* c8 ignore stop */
+            static fromGlob(pattern, options = {}) {
+                return orig.AST.fromGlob(pattern, ext(def, options));
+            }
+        },
+        unescape: (s, options = {}) => orig.unescape(s, ext(def, options)),
+        escape: (s, options = {}) => orig.escape(s, ext(def, options)),
+        filter: (pattern, options = {}) => orig.filter(pattern, ext(def, options)),
+        defaults: (options) => orig.defaults(ext(def, options)),
+        makeRe: (pattern, options = {}) => orig.makeRe(pattern, ext(def, options)),
+        braceExpand: (pattern, options = {}) => orig.braceExpand(pattern, ext(def, options)),
+        match: (list, pattern, options = {}) => orig.match(list, pattern, ext(def, options)),
+        sep: orig.sep,
+        GLOBSTAR: GLOBSTAR,
+    });
+};
+minimatch.defaults = defaults;
+// Brace expansion:
+// a{b,c}d -> abd acd
+// a{b,}c -> abc ac
+// a{0..3}d -> a0d a1d a2d a3d
+// a{b,c{d,e}f}g -> abg acdfg acefg
+// a{b,c}d{e,f}g -> abdeg acdeg abdeg abdfg
+//
+// Invalid sets are not expanded.
+// a{2..}b -> a{2..}b
+// a{b}c -> a{b}c
+const braceExpand = (pattern, options = {}) => {
+    assertValidPattern(pattern);
+    // Thanks to Yeting Li <https://github.com/yetingli> for
+    // improving this regexp to avoid a ReDOS vulnerability.
+    if (options.nobrace || !/\{(?:(?!\{).)*\}/.test(pattern)) {
+        // shortcut. no need to expand.
+        return [pattern];
+    }
+    return brace_expansion(pattern);
+};
+minimatch.braceExpand = braceExpand;
+// parse a component of the expanded set.
+// At this point, no pattern may contain "/" in it
+// so we're going to return a 2d array, where each entry is the full
+// pattern, split on '/', and then turned into a regular expression.
+// A regexp is made at the end which joins each array with an
+// escaped /, and another full one which joins each regexp with |.
+//
+// Following the lead of Bash 4.1, note that "**" only has special meaning
+// when it is the *only* thing in a path portion.  Otherwise, any series
+// of * is equivalent to a single *.  Globstar behavior is enabled by
+// default, and can be disabled by setting options.noglobstar.
+const makeRe = (pattern, options = {}) => new Minimatch(pattern, options).makeRe();
+minimatch.makeRe = makeRe;
+const match = (list, pattern, options = {}) => {
+    const mm = new Minimatch(pattern, options);
+    list = list.filter(f => mm.match(f));
+    if (mm.options.nonull && !list.length) {
+        list.push(pattern);
+    }
+    return list;
+};
+minimatch.match = match;
+// replace stuff like \* with *
+const globMagic = /[?*]|[+@!]\(.*?\)|\[|\]/;
+const esm_regExpEscape = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+class Minimatch {
+    options;
+    set;
+    pattern;
+    windowsPathsNoEscape;
+    nonegate;
+    negate;
+    comment;
+    empty;
+    preserveMultipleSlashes;
+    partial;
+    globSet;
+    globParts;
+    nocase;
+    isWindows;
+    platform;
+    windowsNoMagicRoot;
+    regexp;
+    constructor(pattern, options = {}) {
+        assertValidPattern(pattern);
+        options = options || {};
+        this.options = options;
+        this.pattern = pattern;
+        this.platform = options.platform || defaultPlatform;
+        this.isWindows = this.platform === 'win32';
+        this.windowsPathsNoEscape =
+            !!options.windowsPathsNoEscape || options.allowWindowsEscape === false;
+        if (this.windowsPathsNoEscape) {
+            this.pattern = this.pattern.replace(/\\/g, '/');
+        }
+        this.preserveMultipleSlashes = !!options.preserveMultipleSlashes;
+        this.regexp = null;
+        this.negate = false;
+        this.nonegate = !!options.nonegate;
+        this.comment = false;
+        this.empty = false;
+        this.partial = !!options.partial;
+        this.nocase = !!this.options.nocase;
+        this.windowsNoMagicRoot =
+            options.windowsNoMagicRoot !== undefined
+                ? options.windowsNoMagicRoot
+                : !!(this.isWindows && this.nocase);
+        this.globSet = [];
+        this.globParts = [];
+        this.set = [];
+        // make the set of regexps etc.
+        this.make();
+    }
+    hasMagic() {
+        if (this.options.magicalBraces && this.set.length > 1) {
+            return true;
+        }
+        for (const pattern of this.set) {
+            for (const part of pattern) {
+                if (typeof part !== 'string')
+                    return true;
+            }
+        }
+        return false;
+    }
+    debug(..._) { }
+    make() {
+        const pattern = this.pattern;
+        const options = this.options;
+        // empty patterns and comments match nothing.
+        if (!options.nocomment && pattern.charAt(0) === '#') {
+            this.comment = true;
+            return;
+        }
+        if (!pattern) {
+            this.empty = true;
+            return;
+        }
+        // step 1: figure out negation, etc.
+        this.parseNegate();
+        // step 2: expand braces
+        this.globSet = [...new Set(this.braceExpand())];
+        if (options.debug) {
+            this.debug = (...args) => console.error(...args);
+        }
+        this.debug(this.pattern, this.globSet);
+        // step 3: now we have a set, so turn each one into a series of
+        // path-portion matching patterns.
+        // These will be regexps, except in the case of "**", which is
+        // set to the GLOBSTAR object for globstar behavior,
+        // and will not contain any / characters
+        //
+        // First, we preprocess to make the glob pattern sets a bit simpler
+        // and deduped.  There are some perf-killing patterns that can cause
+        // problems with a glob walk, but we can simplify them down a bit.
+        const rawGlobParts = this.globSet.map(s => this.slashSplit(s));
+        this.globParts = this.preprocess(rawGlobParts);
+        this.debug(this.pattern, this.globParts);
+        // glob --> regexps
+        let set = this.globParts.map((s, _, __) => {
+            if (this.isWindows && this.windowsNoMagicRoot) {
+                // check if it's a drive or unc path.
+                const isUNC = s[0] === '' &&
+                    s[1] === '' &&
+                    (s[2] === '?' || !globMagic.test(s[2])) &&
+                    !globMagic.test(s[3]);
+                const isDrive = /^[a-z]:/i.test(s[0]);
+                if (isUNC) {
+                    return [...s.slice(0, 4), ...s.slice(4).map(ss => this.parse(ss))];
+                }
+                else if (isDrive) {
+                    return [s[0], ...s.slice(1).map(ss => this.parse(ss))];
+                }
+            }
+            return s.map(ss => this.parse(ss));
+        });
+        this.debug(this.pattern, set);
+        // filter out everything that didn't compile properly.
+        this.set = set.filter(s => s.indexOf(false) === -1);
+        // do not treat the ? in UNC paths as magic
+        if (this.isWindows) {
+            for (let i = 0; i < this.set.length; i++) {
+                const p = this.set[i];
+                if (p[0] === '' &&
+                    p[1] === '' &&
+                    this.globParts[i][2] === '?' &&
+                    typeof p[3] === 'string' &&
+                    /^[a-z]:$/i.test(p[3])) {
+                    p[2] = '?';
+                }
+            }
+        }
+        this.debug(this.pattern, this.set);
+    }
+    // various transforms to equivalent pattern sets that are
+    // faster to process in a filesystem walk.  The goal is to
+    // eliminate what we can, and push all ** patterns as far
+    // to the right as possible, even if it increases the number
+    // of patterns that we have to process.
+    preprocess(globParts) {
+        // if we're not in globstar mode, then turn all ** into *
+        if (this.options.noglobstar) {
+            for (let i = 0; i < globParts.length; i++) {
+                for (let j = 0; j < globParts[i].length; j++) {
+                    if (globParts[i][j] === '**') {
+                        globParts[i][j] = '*';
+                    }
+                }
+            }
+        }
+        const { optimizationLevel = 1 } = this.options;
+        if (optimizationLevel >= 2) {
+            // aggressive optimization for the purpose of fs walking
+            globParts = this.firstPhasePreProcess(globParts);
+            globParts = this.secondPhasePreProcess(globParts);
+        }
+        else if (optimizationLevel >= 1) {
+            // just basic optimizations to remove some .. parts
+            globParts = this.levelOneOptimize(globParts);
+        }
+        else {
+            // just collapse multiple ** portions into one
+            globParts = this.adjascentGlobstarOptimize(globParts);
+        }
+        return globParts;
+    }
+    // just get rid of adjascent ** portions
+    adjascentGlobstarOptimize(globParts) {
+        return globParts.map(parts => {
+            let gs = -1;
+            while (-1 !== (gs = parts.indexOf('**', gs + 1))) {
+                let i = gs;
+                while (parts[i + 1] === '**') {
+                    i++;
+                }
+                if (i !== gs) {
+                    parts.splice(gs, i - gs);
+                }
+            }
+            return parts;
+        });
+    }
+    // get rid of adjascent ** and resolve .. portions
+    levelOneOptimize(globParts) {
+        return globParts.map(parts => {
+            parts = parts.reduce((set, part) => {
+                const prev = set[set.length - 1];
+                if (part === '**' && prev === '**') {
+                    return set;
+                }
+                if (part === '..') {
+                    if (prev && prev !== '..' && prev !== '.' && prev !== '**') {
+                        set.pop();
+                        return set;
+                    }
+                }
+                set.push(part);
+                return set;
+            }, []);
+            return parts.length === 0 ? [''] : parts;
+        });
+    }
+    levelTwoFileOptimize(parts) {
+        if (!Array.isArray(parts)) {
+            parts = this.slashSplit(parts);
+        }
+        let didSomething = false;
+        do {
+            didSomething = false;
+            // <pre>/<e>/<rest> -> <pre>/<rest>
+            if (!this.preserveMultipleSlashes) {
+                for (let i = 1; i < parts.length - 1; i++) {
+                    const p = parts[i];
+                    // don't squeeze out UNC patterns
+                    if (i === 1 && p === '' && parts[0] === '')
+                        continue;
+                    if (p === '.' || p === '') {
+                        didSomething = true;
+                        parts.splice(i, 1);
+                        i--;
+                    }
+                }
+                if (parts[0] === '.' &&
+                    parts.length === 2 &&
+                    (parts[1] === '.' || parts[1] === '')) {
+                    didSomething = true;
+                    parts.pop();
+                }
+            }
+            // <pre>/<p>/../<rest> -> <pre>/<rest>
+            let dd = 0;
+            while (-1 !== (dd = parts.indexOf('..', dd + 1))) {
+                const p = parts[dd - 1];
+                if (p && p !== '.' && p !== '..' && p !== '**') {
+                    didSomething = true;
+                    parts.splice(dd - 1, 2);
+                    dd -= 2;
+                }
+            }
+        } while (didSomething);
+        return parts.length === 0 ? [''] : parts;
+    }
+    // First phase: single-pattern processing
+    // <pre> is 1 or more portions
+    // <rest> is 1 or more portions
+    // <p> is any portion other than ., .., '', or **
+    // <e> is . or ''
+    //
+    // **/.. is *brutal* for filesystem walking performance, because
+    // it effectively resets the recursive walk each time it occurs,
+    // and ** cannot be reduced out by a .. pattern part like a regexp
+    // or most strings (other than .., ., and '') can be.
+    //
+    // <pre>/**/../<p>/<p>/<rest> -> {<pre>/../<p>/<p>/<rest>,<pre>/**/<p>/<p>/<rest>}
+    // <pre>/<e>/<rest> -> <pre>/<rest>
+    // <pre>/<p>/../<rest> -> <pre>/<rest>
+    // **/**/<rest> -> **/<rest>
+    //
+    // **/*/<rest> -> */**/<rest> <== not valid because ** doesn't follow
+    // this WOULD be allowed if ** did follow symlinks, or * didn't
+    firstPhasePreProcess(globParts) {
+        let didSomething = false;
+        do {
+            didSomething = false;
+            // <pre>/**/../<p>/<p>/<rest> -> {<pre>/../<p>/<p>/<rest>,<pre>/**/<p>/<p>/<rest>}
+            for (let parts of globParts) {
+                let gs = -1;
+                while (-1 !== (gs = parts.indexOf('**', gs + 1))) {
+                    let gss = gs;
+                    while (parts[gss + 1] === '**') {
+                        // <pre>/**/**/<rest> -> <pre>/**/<rest>
+                        gss++;
+                    }
+                    // eg, if gs is 2 and gss is 4, that means we have 3 **
+                    // parts, and can remove 2 of them.
+                    if (gss > gs) {
+                        parts.splice(gs + 1, gss - gs);
+                    }
+                    let next = parts[gs + 1];
+                    const p = parts[gs + 2];
+                    const p2 = parts[gs + 3];
+                    if (next !== '..')
+                        continue;
+                    if (!p ||
+                        p === '.' ||
+                        p === '..' ||
+                        !p2 ||
+                        p2 === '.' ||
+                        p2 === '..') {
+                        continue;
+                    }
+                    didSomething = true;
+                    // edit parts in place, and push the new one
+                    parts.splice(gs, 1);
+                    const other = parts.slice(0);
+                    other[gs] = '**';
+                    globParts.push(other);
+                    gs--;
+                }
+                // <pre>/<e>/<rest> -> <pre>/<rest>
+                if (!this.preserveMultipleSlashes) {
+                    for (let i = 1; i < parts.length - 1; i++) {
+                        const p = parts[i];
+                        // don't squeeze out UNC patterns
+                        if (i === 1 && p === '' && parts[0] === '')
+                            continue;
+                        if (p === '.' || p === '') {
+                            didSomething = true;
+                            parts.splice(i, 1);
+                            i--;
+                        }
+                    }
+                    if (parts[0] === '.' &&
+                        parts.length === 2 &&
+                        (parts[1] === '.' || parts[1] === '')) {
+                        didSomething = true;
+                        parts.pop();
+                    }
+                }
+                // <pre>/<p>/../<rest> -> <pre>/<rest>
+                let dd = 0;
+                while (-1 !== (dd = parts.indexOf('..', dd + 1))) {
+                    const p = parts[dd - 1];
+                    if (p && p !== '.' && p !== '..' && p !== '**') {
+                        didSomething = true;
+                        const needDot = dd === 1 && parts[dd + 1] === '**';
+                        const splin = needDot ? ['.'] : [];
+                        parts.splice(dd - 1, 2, ...splin);
+                        if (parts.length === 0)
+                            parts.push('');
+                        dd -= 2;
+                    }
+                }
+            }
+        } while (didSomething);
+        return globParts;
+    }
+    // second phase: multi-pattern dedupes
+    // {<pre>/*/<rest>,<pre>/<p>/<rest>} -> <pre>/*/<rest>
+    // {<pre>/<rest>,<pre>/<rest>} -> <pre>/<rest>
+    // {<pre>/**/<rest>,<pre>/<rest>} -> <pre>/**/<rest>
+    //
+    // {<pre>/**/<rest>,<pre>/**/<p>/<rest>} -> <pre>/**/<rest>
+    // ^-- not valid because ** doens't follow symlinks
+    secondPhasePreProcess(globParts) {
+        for (let i = 0; i < globParts.length - 1; i++) {
+            for (let j = i + 1; j < globParts.length; j++) {
+                const matched = this.partsMatch(globParts[i], globParts[j], !this.preserveMultipleSlashes);
+                if (matched) {
+                    globParts[i] = [];
+                    globParts[j] = matched;
+                    break;
+                }
+            }
+        }
+        return globParts.filter(gs => gs.length);
+    }
+    partsMatch(a, b, emptyGSMatch = false) {
+        let ai = 0;
+        let bi = 0;
+        let result = [];
+        let which = '';
+        while (ai < a.length && bi < b.length) {
+            if (a[ai] === b[bi]) {
+                result.push(which === 'b' ? b[bi] : a[ai]);
+                ai++;
+                bi++;
+            }
+            else if (emptyGSMatch && a[ai] === '**' && b[bi] === a[ai + 1]) {
+                result.push(a[ai]);
+                ai++;
+            }
+            else if (emptyGSMatch && b[bi] === '**' && a[ai] === b[bi + 1]) {
+                result.push(b[bi]);
+                bi++;
+            }
+            else if (a[ai] === '*' &&
+                b[bi] &&
+                (this.options.dot || !b[bi].startsWith('.')) &&
+                b[bi] !== '**') {
+                if (which === 'b')
+                    return false;
+                which = 'a';
+                result.push(a[ai]);
+                ai++;
+                bi++;
+            }
+            else if (b[bi] === '*' &&
+                a[ai] &&
+                (this.options.dot || !a[ai].startsWith('.')) &&
+                a[ai] !== '**') {
+                if (which === 'a')
+                    return false;
+                which = 'b';
+                result.push(b[bi]);
+                ai++;
+                bi++;
+            }
+            else {
+                return false;
+            }
+        }
+        // if we fall out of the loop, it means they two are identical
+        // as long as their lengths match
+        return a.length === b.length && result;
+    }
+    parseNegate() {
+        if (this.nonegate)
+            return;
+        const pattern = this.pattern;
+        let negate = false;
+        let negateOffset = 0;
+        for (let i = 0; i < pattern.length && pattern.charAt(i) === '!'; i++) {
+            negate = !negate;
+            negateOffset++;
+        }
+        if (negateOffset)
+            this.pattern = pattern.slice(negateOffset);
+        this.negate = negate;
+    }
+    // set partial to true to test if, for example,
+    // "/a/b" matches the start of "/*/b/*/d"
+    // Partial means, if you run out of file before you run
+    // out of pattern, then that's fine, as long as all
+    // the parts match.
+    matchOne(file, pattern, partial = false) {
+        const options = this.options;
+        // UNC paths like //?/X:/... can match X:/... and vice versa
+        // Drive letters in absolute drive or unc paths are always compared
+        // case-insensitively.
+        if (this.isWindows) {
+            const fileDrive = typeof file[0] === 'string' && /^[a-z]:$/i.test(file[0]);
+            const fileUNC = !fileDrive &&
+                file[0] === '' &&
+                file[1] === '' &&
+                file[2] === '?' &&
+                /^[a-z]:$/i.test(file[3]);
+            const patternDrive = typeof pattern[0] === 'string' && /^[a-z]:$/i.test(pattern[0]);
+            const patternUNC = !patternDrive &&
+                pattern[0] === '' &&
+                pattern[1] === '' &&
+                pattern[2] === '?' &&
+                typeof pattern[3] === 'string' &&
+                /^[a-z]:$/i.test(pattern[3]);
+            const fdi = fileUNC ? 3 : fileDrive ? 0 : undefined;
+            const pdi = patternUNC ? 3 : patternDrive ? 0 : undefined;
+            if (typeof fdi === 'number' && typeof pdi === 'number') {
+                const [fd, pd] = [file[fdi], pattern[pdi]];
+                if (fd.toLowerCase() === pd.toLowerCase()) {
+                    pattern[pdi] = fd;
+                    if (pdi > fdi) {
+                        pattern = pattern.slice(pdi);
+                    }
+                    else if (fdi > pdi) {
+                        file = file.slice(fdi);
+                    }
+                }
+            }
+        }
+        // resolve and reduce . and .. portions in the file as well.
+        // dont' need to do the second phase, because it's only one string[]
+        const { optimizationLevel = 1 } = this.options;
+        if (optimizationLevel >= 2) {
+            file = this.levelTwoFileOptimize(file);
+        }
+        this.debug('matchOne', this, { file, pattern });
+        this.debug('matchOne', file.length, pattern.length);
+        for (var fi = 0, pi = 0, fl = file.length, pl = pattern.length; fi < fl && pi < pl; fi++, pi++) {
+            this.debug('matchOne loop');
+            var p = pattern[pi];
+            var f = file[fi];
+            this.debug(pattern, p, f);
+            // should be impossible.
+            // some invalid regexp stuff in the set.
+            /* c8 ignore start */
+            if (p === false) {
+                return false;
+            }
+            /* c8 ignore stop */
+            if (p === GLOBSTAR) {
+                this.debug('GLOBSTAR', [pattern, p, f]);
+                // "**"
+                // a/**/b/**/c would match the following:
+                // a/b/x/y/z/c
+                // a/x/y/z/b/c
+                // a/b/x/b/x/c
+                // a/b/c
+                // To do this, take the rest of the pattern after
+                // the **, and see if it would match the file remainder.
+                // If so, return success.
+                // If not, the ** "swallows" a segment, and try again.
+                // This is recursively awful.
+                //
+                // a/**/b/**/c matching a/b/x/y/z/c
+                // - a matches a
+                // - doublestar
+                //   - matchOne(b/x/y/z/c, b/**/c)
+                //     - b matches b
+                //     - doublestar
+                //       - matchOne(x/y/z/c, c) -> no
+                //       - matchOne(y/z/c, c) -> no
+                //       - matchOne(z/c, c) -> no
+                //       - matchOne(c, c) yes, hit
+                var fr = fi;
+                var pr = pi + 1;
+                if (pr === pl) {
+                    this.debug('** at the end');
+                    // a ** at the end will just swallow the rest.
+                    // We have found a match.
+                    // however, it will not swallow /.x, unless
+                    // options.dot is set.
+                    // . and .. are *never* matched by **, for explosively
+                    // exponential reasons.
+                    for (; fi < fl; fi++) {
+                        if (file[fi] === '.' ||
+                            file[fi] === '..' ||
+                            (!options.dot && file[fi].charAt(0) === '.'))
+                            return false;
+                    }
+                    return true;
+                }
+                // ok, let's see if we can swallow whatever we can.
+                while (fr < fl) {
+                    var swallowee = file[fr];
+                    this.debug('\nglobstar while', file, fr, pattern, pr, swallowee);
+                    // XXX remove this slice.  Just pass the start index.
+                    if (this.matchOne(file.slice(fr), pattern.slice(pr), partial)) {
+                        this.debug('globstar found match!', fr, fl, swallowee);
+                        // found a match.
+                        return true;
+                    }
+                    else {
+                        // can't swallow "." or ".." ever.
+                        // can only swallow ".foo" when explicitly asked.
+                        if (swallowee === '.' ||
+                            swallowee === '..' ||
+                            (!options.dot && swallowee.charAt(0) === '.')) {
+                            this.debug('dot detected!', file, fr, pattern, pr);
+                            break;
+                        }
+                        // ** swallows a segment, and continue.
+                        this.debug('globstar swallow a segment, and continue');
+                        fr++;
+                    }
+                }
+                // no match was found.
+                // However, in partial mode, we can't say this is necessarily over.
+                /* c8 ignore start */
+                if (partial) {
+                    // ran out of file
+                    this.debug('\n>>> no match, partial?', file, fr, pattern, pr);
+                    if (fr === fl) {
+                        return true;
+                    }
+                }
+                /* c8 ignore stop */
+                return false;
+            }
+            // something other than **
+            // non-magic patterns just have to match exactly
+            // patterns with magic have been turned into regexps.
+            let hit;
+            if (typeof p === 'string') {
+                hit = f === p;
+                this.debug('string match', p, f, hit);
+            }
+            else {
+                hit = p.test(f);
+                this.debug('pattern match', p, f, hit);
+            }
+            if (!hit)
+                return false;
+        }
+        // Note: ending in / means that we'll get a final ""
+        // at the end of the pattern.  This can only match a
+        // corresponding "" at the end of the file.
+        // If the file ends in /, then it can only match a
+        // a pattern that ends in /, unless the pattern just
+        // doesn't have any more for it. But, a/b/ should *not*
+        // match "a/b/*", even though "" matches against the
+        // [^/]*? pattern, except in partial mode, where it might
+        // simply not be reached yet.
+        // However, a/b/ should still satisfy a/*
+        // now either we fell off the end of the pattern, or we're done.
+        if (fi === fl && pi === pl) {
+            // ran out of pattern and filename at the same time.
+            // an exact hit!
+            return true;
+        }
+        else if (fi === fl) {
+            // ran out of file, but still had pattern left.
+            // this is ok if we're doing the match as part of
+            // a glob fs traversal.
+            return partial;
+        }
+        else if (pi === pl) {
+            // ran out of pattern, still have file left.
+            // this is only acceptable if we're on the very last
+            // empty segment of a file with a trailing slash.
+            // a/* should match a/b/
+            return fi === fl - 1 && file[fi] === '';
+            /* c8 ignore start */
+        }
+        else {
+            // should be unreachable.
+            throw new Error('wtf?');
+        }
+        /* c8 ignore stop */
+    }
+    braceExpand() {
+        return braceExpand(this.pattern, this.options);
+    }
+    parse(pattern) {
+        assertValidPattern(pattern);
+        const options = this.options;
+        // shortcuts
+        if (pattern === '**')
+            return GLOBSTAR;
+        if (pattern === '')
+            return '';
+        // far and away, the most common glob pattern parts are
+        // *, *.*, and *.<ext>  Add a fast check method for those.
+        let m;
+        let fastTest = null;
+        if ((m = pattern.match(starRE))) {
+            fastTest = options.dot ? starTestDot : starTest;
+        }
+        else if ((m = pattern.match(starDotExtRE))) {
+            fastTest = (options.nocase
+                ? options.dot
+                    ? starDotExtTestNocaseDot
+                    : starDotExtTestNocase
+                : options.dot
+                    ? starDotExtTestDot
+                    : starDotExtTest)(m[1]);
+        }
+        else if ((m = pattern.match(qmarksRE))) {
+            fastTest = (options.nocase
+                ? options.dot
+                    ? qmarksTestNocaseDot
+                    : qmarksTestNocase
+                : options.dot
+                    ? qmarksTestDot
+                    : qmarksTest)(m);
+        }
+        else if ((m = pattern.match(starDotStarRE))) {
+            fastTest = options.dot ? starDotStarTestDot : starDotStarTest;
+        }
+        else if ((m = pattern.match(dotStarRE))) {
+            fastTest = dotStarTest;
+        }
+        const re = AST.fromGlob(pattern, this.options).toMMPattern();
+        if (fastTest && typeof re === 'object') {
+            // Avoids overriding in frozen environments
+            Reflect.defineProperty(re, 'test', { value: fastTest });
+        }
+        return re;
+    }
+    makeRe() {
+        if (this.regexp || this.regexp === false)
+            return this.regexp;
+        // at this point, this.set is a 2d array of partial
+        // pattern strings, or "**".
+        //
+        // It's better to use .match().  This function shouldn't
+        // be used, really, but it's pretty convenient sometimes,
+        // when you just want to work with a regex.
+        const set = this.set;
+        if (!set.length) {
+            this.regexp = false;
+            return this.regexp;
+        }
+        const options = this.options;
+        const twoStar = options.noglobstar
+            ? esm_star
+            : options.dot
+                ? twoStarDot
+                : twoStarNoDot;
+        const flags = new Set(options.nocase ? ['i'] : []);
+        // regexpify non-globstar patterns
+        // if ** is only item, then we just do one twoStar
+        // if ** is first, and there are more, prepend (\/|twoStar\/)? to next
+        // if ** is last, append (\/twoStar|) to previous
+        // if ** is in the middle, append (\/|\/twoStar\/) to previous
+        // then filter out GLOBSTAR symbols
+        let re = set
+            .map(pattern => {
+            const pp = pattern.map(p => {
+                if (p instanceof RegExp) {
+                    for (const f of p.flags.split(''))
+                        flags.add(f);
+                }
+                return typeof p === 'string'
+                    ? esm_regExpEscape(p)
+                    : p === GLOBSTAR
+                        ? GLOBSTAR
+                        : p._src;
+            });
+            pp.forEach((p, i) => {
+                const next = pp[i + 1];
+                const prev = pp[i - 1];
+                if (p !== GLOBSTAR || prev === GLOBSTAR) {
+                    return;
+                }
+                if (prev === undefined) {
+                    if (next !== undefined && next !== GLOBSTAR) {
+                        pp[i + 1] = '(?:\\/|' + twoStar + '\\/)?' + next;
+                    }
+                    else {
+                        pp[i] = twoStar;
+                    }
+                }
+                else if (next === undefined) {
+                    pp[i - 1] = prev + '(?:\\/|' + twoStar + ')?';
+                }
+                else if (next !== GLOBSTAR) {
+                    pp[i - 1] = prev + '(?:\\/|\\/' + twoStar + '\\/)' + next;
+                    pp[i + 1] = GLOBSTAR;
+                }
+            });
+            return pp.filter(p => p !== GLOBSTAR).join('/');
+        })
+            .join('|');
+        // need to wrap in parens if we had more than one thing with |,
+        // otherwise only the first will be anchored to ^ and the last to $
+        const [open, close] = set.length > 1 ? ['(?:', ')'] : ['', ''];
+        // must match entire pattern
+        // ending in a * or ** will make it less strict.
+        re = '^' + open + re + close + '$';
+        // can match anything, as long as it's not this.
+        if (this.negate)
+            re = '^(?!' + re + ').+$';
+        try {
+            this.regexp = new RegExp(re, [...flags].join(''));
+            /* c8 ignore start */
+        }
+        catch (ex) {
+            // should be impossible
+            this.regexp = false;
+        }
+        /* c8 ignore stop */
+        return this.regexp;
+    }
+    slashSplit(p) {
+        // if p starts with // on windows, we preserve that
+        // so that UNC paths aren't broken.  Otherwise, any number of
+        // / characters are coalesced into one, unless
+        // preserveMultipleSlashes is set to true.
+        if (this.preserveMultipleSlashes) {
+            return p.split('/');
+        }
+        else if (this.isWindows && /^\/\/[^\/]+/.test(p)) {
+            // add an extra '' for the one we lose
+            return ['', ...p.split(/\/+/)];
+        }
+        else {
+            return p.split(/\/+/);
+        }
+    }
+    match(f, partial = this.partial) {
+        this.debug('match', f, this.pattern);
+        // short-circuit in the case of busted things.
+        // comments, etc.
+        if (this.comment) {
+            return false;
+        }
+        if (this.empty) {
+            return f === '';
+        }
+        if (f === '/' && partial) {
+            return true;
+        }
+        const options = this.options;
+        // windows: need to use /, not \
+        if (this.isWindows) {
+            f = f.split('\\').join('/');
+        }
+        // treat the test path as a set of pathparts.
+        const ff = this.slashSplit(f);
+        this.debug(this.pattern, 'split', ff);
+        // just ONE of the pattern sets in this.set needs to match
+        // in order for it to be valid.  If negating, then just one
+        // match means that we have failed.
+        // Either way, return on the first hit.
+        const set = this.set;
+        this.debug(this.pattern, 'set', set);
+        // Find the basename of the path by looking for the last non-empty segment
+        let filename = ff[ff.length - 1];
+        if (!filename) {
+            for (let i = ff.length - 2; !filename && i >= 0; i--) {
+                filename = ff[i];
+            }
+        }
+        for (let i = 0; i < set.length; i++) {
+            const pattern = set[i];
+            let file = ff;
+            if (options.matchBase && pattern.length === 1) {
+                file = [filename];
+            }
+            const hit = this.matchOne(file, pattern, partial);
+            if (hit) {
+                if (options.flipNegate) {
+                    return true;
+                }
+                return !this.negate;
+            }
+        }
+        // didn't get any hits.  this is success if it's a negative
+        // pattern, failure otherwise.
+        if (options.flipNegate) {
+            return false;
+        }
+        return this.negate;
+    }
+    static defaults(def) {
+        return minimatch.defaults(def).Minimatch;
+    }
+}
+/* c8 ignore start */
+
+
+
+/* c8 ignore stop */
+minimatch.AST = AST;
+minimatch.Minimatch = Minimatch;
+minimatch.escape = escape_escape;
+minimatch.unescape = unescape_unescape;
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../../node_modules/lru-cache/dist/esm/index.js
+/**
+ * @module LRUCache
+ */
+const perf = typeof performance === 'object' &&
+    performance &&
+    typeof performance.now === 'function'
+    ? performance
+    : Date;
+const warned = new Set();
+/* c8 ignore start */
+const PROCESS = (typeof process === 'object' && !!process ? process : {});
+/* c8 ignore start */
+const emitWarning = (msg, type, code, fn) => {
+    typeof PROCESS.emitWarning === 'function'
+        ? PROCESS.emitWarning(msg, type, code, fn)
+        : console.error(`[${code}] ${type}: ${msg}`);
+};
+let AC = globalThis.AbortController;
+let AS = globalThis.AbortSignal;
+/* c8 ignore start */
+if (typeof AC === 'undefined') {
+    //@ts-ignore
+    AS = class AbortSignal {
+        onabort;
+        _onabort = [];
+        reason;
+        aborted = false;
+        addEventListener(_, fn) {
+            this._onabort.push(fn);
+        }
+    };
+    //@ts-ignore
+    AC = class AbortController {
+        constructor() {
+            warnACPolyfill();
+        }
+        signal = new AS();
+        abort(reason) {
+            if (this.signal.aborted)
+                return;
+            //@ts-ignore
+            this.signal.reason = reason;
+            //@ts-ignore
+            this.signal.aborted = true;
+            //@ts-ignore
+            for (const fn of this.signal._onabort) {
+                fn(reason);
+            }
+            this.signal.onabort?.(reason);
+        }
+    };
+    let printACPolyfillWarning = PROCESS.env?.LRU_CACHE_IGNORE_AC_WARNING !== '1';
+    const warnACPolyfill = () => {
+        if (!printACPolyfillWarning)
+            return;
+        printACPolyfillWarning = false;
+        emitWarning('AbortController is not defined. If using lru-cache in ' +
+            'node 14, load an AbortController polyfill from the ' +
+            '`node-abort-controller` package. A minimal polyfill is ' +
+            'provided for use by LRUCache.fetch(), but it should not be ' +
+            'relied upon in other contexts (eg, passing it to other APIs that ' +
+            'use AbortController/AbortSignal might have undesirable effects). ' +
+            'You may disable this with LRU_CACHE_IGNORE_AC_WARNING=1 in the env.', 'NO_ABORT_CONTROLLER', 'ENOTSUP', warnACPolyfill);
+    };
+}
+/* c8 ignore stop */
+const shouldWarn = (code) => !warned.has(code);
+const TYPE = Symbol('type');
+const isPosInt = (n) => n && n === Math.floor(n) && n > 0 && isFinite(n);
+/* c8 ignore start */
+// This is a little bit ridiculous, tbh.
+// The maximum array length is 2^32-1 or thereabouts on most JS impls.
+// And well before that point, you're caching the entire world, I mean,
+// that's ~32GB of just integers for the next/prev links, plus whatever
+// else to hold that many keys and values.  Just filling the memory with
+// zeroes at init time is brutal when you get that big.
+// But why not be complete?
+// Maybe in the future, these limits will have expanded.
+const getUintArray = (max) => !isPosInt(max)
+    ? null
+    : max <= Math.pow(2, 8)
+        ? Uint8Array
+        : max <= Math.pow(2, 16)
+            ? Uint16Array
+            : max <= Math.pow(2, 32)
+                ? Uint32Array
+                : max <= Number.MAX_SAFE_INTEGER
+                    ? ZeroArray
+                    : null;
+/* c8 ignore stop */
+class ZeroArray extends Array {
+    constructor(size) {
+        super(size);
+        this.fill(0);
+    }
+}
+class Stack {
+    heap;
+    length;
+    // private constructor
+    static #constructing = false;
+    static create(max) {
+        const HeapCls = getUintArray(max);
+        if (!HeapCls)
+            return [];
+        Stack.#constructing = true;
+        const s = new Stack(max, HeapCls);
+        Stack.#constructing = false;
+        return s;
+    }
+    constructor(max, HeapCls) {
+        /* c8 ignore start */
+        if (!Stack.#constructing) {
+            throw new TypeError('instantiate Stack using Stack.create(n)');
+        }
+        /* c8 ignore stop */
+        this.heap = new HeapCls(max);
+        this.length = 0;
+    }
+    push(n) {
+        this.heap[this.length++] = n;
+    }
+    pop() {
+        return this.heap[--this.length];
+    }
+}
+/**
+ * Default export, the thing you're using this module to get.
+ *
+ * The `K` and `V` types define the key and value types, respectively. The
+ * optional `FC` type defines the type of the `context` object passed to
+ * `cache.fetch()` and `cache.memo()`.
+ *
+ * Keys and values **must not** be `null` or `undefined`.
+ *
+ * All properties from the options object (with the exception of `max`,
+ * `maxSize`, `fetchMethod`, `memoMethod`, `dispose` and `disposeAfter`) are
+ * added as normal public members. (The listed options are read-only getters.)
+ *
+ * Changing any of these will alter the defaults for subsequent method calls.
+ */
+class LRUCache {
+    // options that cannot be changed without disaster
+    #max;
+    #maxSize;
+    #dispose;
+    #disposeAfter;
+    #fetchMethod;
+    #memoMethod;
+    /**
+     * {@link LRUCache.OptionsBase.ttl}
+     */
+    ttl;
+    /**
+     * {@link LRUCache.OptionsBase.ttlResolution}
+     */
+    ttlResolution;
+    /**
+     * {@link LRUCache.OptionsBase.ttlAutopurge}
+     */
+    ttlAutopurge;
+    /**
+     * {@link LRUCache.OptionsBase.updateAgeOnGet}
+     */
+    updateAgeOnGet;
+    /**
+     * {@link LRUCache.OptionsBase.updateAgeOnHas}
+     */
+    updateAgeOnHas;
+    /**
+     * {@link LRUCache.OptionsBase.allowStale}
+     */
+    allowStale;
+    /**
+     * {@link LRUCache.OptionsBase.noDisposeOnSet}
+     */
+    noDisposeOnSet;
+    /**
+     * {@link LRUCache.OptionsBase.noUpdateTTL}
+     */
+    noUpdateTTL;
+    /**
+     * {@link LRUCache.OptionsBase.maxEntrySize}
+     */
+    maxEntrySize;
+    /**
+     * {@link LRUCache.OptionsBase.sizeCalculation}
+     */
+    sizeCalculation;
+    /**
+     * {@link LRUCache.OptionsBase.noDeleteOnFetchRejection}
+     */
+    noDeleteOnFetchRejection;
+    /**
+     * {@link LRUCache.OptionsBase.noDeleteOnStaleGet}
+     */
+    noDeleteOnStaleGet;
+    /**
+     * {@link LRUCache.OptionsBase.allowStaleOnFetchAbort}
+     */
+    allowStaleOnFetchAbort;
+    /**
+     * {@link LRUCache.OptionsBase.allowStaleOnFetchRejection}
+     */
+    allowStaleOnFetchRejection;
+    /**
+     * {@link LRUCache.OptionsBase.ignoreFetchAbort}
+     */
+    ignoreFetchAbort;
+    // computed properties
+    #size;
+    #calculatedSize;
+    #keyMap;
+    #keyList;
+    #valList;
+    #next;
+    #prev;
+    #head;
+    #tail;
+    #free;
+    #disposed;
+    #sizes;
+    #starts;
+    #ttls;
+    #hasDispose;
+    #hasFetchMethod;
+    #hasDisposeAfter;
+    /**
+     * Do not call this method unless you need to inspect the
+     * inner workings of the cache.  If anything returned by this
+     * object is modified in any way, strange breakage may occur.
+     *
+     * These fields are private for a reason!
+     *
+     * @internal
+     */
+    static unsafeExposeInternals(c) {
+        return {
+            // properties
+            starts: c.#starts,
+            ttls: c.#ttls,
+            sizes: c.#sizes,
+            keyMap: c.#keyMap,
+            keyList: c.#keyList,
+            valList: c.#valList,
+            next: c.#next,
+            prev: c.#prev,
+            get head() {
+                return c.#head;
+            },
+            get tail() {
+                return c.#tail;
+            },
+            free: c.#free,
+            // methods
+            isBackgroundFetch: (p) => c.#isBackgroundFetch(p),
+            backgroundFetch: (k, index, options, context) => c.#backgroundFetch(k, index, options, context),
+            moveToTail: (index) => c.#moveToTail(index),
+            indexes: (options) => c.#indexes(options),
+            rindexes: (options) => c.#rindexes(options),
+            isStale: (index) => c.#isStale(index),
+        };
+    }
+    // Protected read-only members
+    /**
+     * {@link LRUCache.OptionsBase.max} (read-only)
+     */
+    get max() {
+        return this.#max;
+    }
+    /**
+     * {@link LRUCache.OptionsBase.maxSize} (read-only)
+     */
+    get maxSize() {
+        return this.#maxSize;
+    }
+    /**
+     * The total computed size of items in the cache (read-only)
+     */
+    get calculatedSize() {
+        return this.#calculatedSize;
+    }
+    /**
+     * The number of items stored in the cache (read-only)
+     */
+    get size() {
+        return this.#size;
+    }
+    /**
+     * {@link LRUCache.OptionsBase.fetchMethod} (read-only)
+     */
+    get fetchMethod() {
+        return this.#fetchMethod;
+    }
+    get memoMethod() {
+        return this.#memoMethod;
+    }
+    /**
+     * {@link LRUCache.OptionsBase.dispose} (read-only)
+     */
+    get dispose() {
+        return this.#dispose;
+    }
+    /**
+     * {@link LRUCache.OptionsBase.disposeAfter} (read-only)
+     */
+    get disposeAfter() {
+        return this.#disposeAfter;
+    }
+    constructor(options) {
+        const { max = 0, ttl, ttlResolution = 1, ttlAutopurge, updateAgeOnGet, updateAgeOnHas, allowStale, dispose, disposeAfter, noDisposeOnSet, noUpdateTTL, maxSize = 0, maxEntrySize = 0, sizeCalculation, fetchMethod, memoMethod, noDeleteOnFetchRejection, noDeleteOnStaleGet, allowStaleOnFetchRejection, allowStaleOnFetchAbort, ignoreFetchAbort, } = options;
+        if (max !== 0 && !isPosInt(max)) {
+            throw new TypeError('max option must be a nonnegative integer');
+        }
+        const UintArray = max ? getUintArray(max) : Array;
+        if (!UintArray) {
+            throw new Error('invalid max value: ' + max);
+        }
+        this.#max = max;
+        this.#maxSize = maxSize;
+        this.maxEntrySize = maxEntrySize || this.#maxSize;
+        this.sizeCalculation = sizeCalculation;
+        if (this.sizeCalculation) {
+            if (!this.#maxSize && !this.maxEntrySize) {
+                throw new TypeError('cannot set sizeCalculation without setting maxSize or maxEntrySize');
+            }
+            if (typeof this.sizeCalculation !== 'function') {
+                throw new TypeError('sizeCalculation set to non-function');
+            }
+        }
+        if (memoMethod !== undefined &&
+            typeof memoMethod !== 'function') {
+            throw new TypeError('memoMethod must be a function if defined');
+        }
+        this.#memoMethod = memoMethod;
+        if (fetchMethod !== undefined &&
+            typeof fetchMethod !== 'function') {
+            throw new TypeError('fetchMethod must be a function if specified');
+        }
+        this.#fetchMethod = fetchMethod;
+        this.#hasFetchMethod = !!fetchMethod;
+        this.#keyMap = new Map();
+        this.#keyList = new Array(max).fill(undefined);
+        this.#valList = new Array(max).fill(undefined);
+        this.#next = new UintArray(max);
+        this.#prev = new UintArray(max);
+        this.#head = 0;
+        this.#tail = 0;
+        this.#free = Stack.create(max);
+        this.#size = 0;
+        this.#calculatedSize = 0;
+        if (typeof dispose === 'function') {
+            this.#dispose = dispose;
+        }
+        if (typeof disposeAfter === 'function') {
+            this.#disposeAfter = disposeAfter;
+            this.#disposed = [];
+        }
+        else {
+            this.#disposeAfter = undefined;
+            this.#disposed = undefined;
+        }
+        this.#hasDispose = !!this.#dispose;
+        this.#hasDisposeAfter = !!this.#disposeAfter;
+        this.noDisposeOnSet = !!noDisposeOnSet;
+        this.noUpdateTTL = !!noUpdateTTL;
+        this.noDeleteOnFetchRejection = !!noDeleteOnFetchRejection;
+        this.allowStaleOnFetchRejection = !!allowStaleOnFetchRejection;
+        this.allowStaleOnFetchAbort = !!allowStaleOnFetchAbort;
+        this.ignoreFetchAbort = !!ignoreFetchAbort;
+        // NB: maxEntrySize is set to maxSize if it's set
+        if (this.maxEntrySize !== 0) {
+            if (this.#maxSize !== 0) {
+                if (!isPosInt(this.#maxSize)) {
+                    throw new TypeError('maxSize must be a positive integer if specified');
+                }
+            }
+            if (!isPosInt(this.maxEntrySize)) {
+                throw new TypeError('maxEntrySize must be a positive integer if specified');
+            }
+            this.#initializeSizeTracking();
+        }
+        this.allowStale = !!allowStale;
+        this.noDeleteOnStaleGet = !!noDeleteOnStaleGet;
+        this.updateAgeOnGet = !!updateAgeOnGet;
+        this.updateAgeOnHas = !!updateAgeOnHas;
+        this.ttlResolution =
+            isPosInt(ttlResolution) || ttlResolution === 0
+                ? ttlResolution
+                : 1;
+        this.ttlAutopurge = !!ttlAutopurge;
+        this.ttl = ttl || 0;
+        if (this.ttl) {
+            if (!isPosInt(this.ttl)) {
+                throw new TypeError('ttl must be a positive integer if specified');
+            }
+            this.#initializeTTLTracking();
+        }
+        // do not allow completely unbounded caches
+        if (this.#max === 0 && this.ttl === 0 && this.#maxSize === 0) {
+            throw new TypeError('At least one of max, maxSize, or ttl is required');
+        }
+        if (!this.ttlAutopurge && !this.#max && !this.#maxSize) {
+            const code = 'LRU_CACHE_UNBOUNDED';
+            if (shouldWarn(code)) {
+                warned.add(code);
+                const msg = 'TTL caching without ttlAutopurge, max, or maxSize can ' +
+                    'result in unbounded memory consumption.';
+                emitWarning(msg, 'UnboundedCacheWarning', code, LRUCache);
+            }
+        }
+    }
+    /**
+     * Return the number of ms left in the item's TTL. If item is not in cache,
+     * returns `0`. Returns `Infinity` if item is in cache without a defined TTL.
+     */
+    getRemainingTTL(key) {
+        return this.#keyMap.has(key) ? Infinity : 0;
+    }
+    #initializeTTLTracking() {
+        const ttls = new ZeroArray(this.#max);
+        const starts = new ZeroArray(this.#max);
+        this.#ttls = ttls;
+        this.#starts = starts;
+        this.#setItemTTL = (index, ttl, start = perf.now()) => {
+            starts[index] = ttl !== 0 ? start : 0;
+            ttls[index] = ttl;
+            if (ttl !== 0 && this.ttlAutopurge) {
+                const t = setTimeout(() => {
+                    if (this.#isStale(index)) {
+                        this.#delete(this.#keyList[index], 'expire');
+                    }
+                }, ttl + 1);
+                // unref() not supported on all platforms
+                /* c8 ignore start */
+                if (t.unref) {
+                    t.unref();
+                }
+                /* c8 ignore stop */
+            }
+        };
+        this.#updateItemAge = index => {
+            starts[index] = ttls[index] !== 0 ? perf.now() : 0;
+        };
+        this.#statusTTL = (status, index) => {
+            if (ttls[index]) {
+                const ttl = ttls[index];
+                const start = starts[index];
+                /* c8 ignore next */
+                if (!ttl || !start)
+                    return;
+                status.ttl = ttl;
+                status.start = start;
+                status.now = cachedNow || getNow();
+                const age = status.now - start;
+                status.remainingTTL = ttl - age;
+            }
+        };
+        // debounce calls to perf.now() to 1s so we're not hitting
+        // that costly call repeatedly.
+        let cachedNow = 0;
+        const getNow = () => {
+            const n = perf.now();
+            if (this.ttlResolution > 0) {
+                cachedNow = n;
+                const t = setTimeout(() => (cachedNow = 0), this.ttlResolution);
+                // not available on all platforms
+                /* c8 ignore start */
+                if (t.unref) {
+                    t.unref();
+                }
+                /* c8 ignore stop */
+            }
+            return n;
+        };
+        this.getRemainingTTL = key => {
+            const index = this.#keyMap.get(key);
+            if (index === undefined) {
+                return 0;
+            }
+            const ttl = ttls[index];
+            const start = starts[index];
+            if (!ttl || !start) {
+                return Infinity;
+            }
+            const age = (cachedNow || getNow()) - start;
+            return ttl - age;
+        };
+        this.#isStale = index => {
+            const s = starts[index];
+            const t = ttls[index];
+            return !!t && !!s && (cachedNow || getNow()) - s > t;
+        };
+    }
+    // conditionally set private methods related to TTL
+    #updateItemAge = () => { };
+    #statusTTL = () => { };
+    #setItemTTL = () => { };
+    /* c8 ignore stop */
+    #isStale = () => false;
+    #initializeSizeTracking() {
+        const sizes = new ZeroArray(this.#max);
+        this.#calculatedSize = 0;
+        this.#sizes = sizes;
+        this.#removeItemSize = index => {
+            this.#calculatedSize -= sizes[index];
+            sizes[index] = 0;
+        };
+        this.#requireSize = (k, v, size, sizeCalculation) => {
+            // provisionally accept background fetches.
+            // actual value size will be checked when they return.
+            if (this.#isBackgroundFetch(v)) {
+                return 0;
+            }
+            if (!isPosInt(size)) {
+                if (sizeCalculation) {
+                    if (typeof sizeCalculation !== 'function') {
+                        throw new TypeError('sizeCalculation must be a function');
+                    }
+                    size = sizeCalculation(v, k);
+                    if (!isPosInt(size)) {
+                        throw new TypeError('sizeCalculation return invalid (expect positive integer)');
+                    }
+                }
+                else {
+                    throw new TypeError('invalid size value (must be positive integer). ' +
+                        'When maxSize or maxEntrySize is used, sizeCalculation ' +
+                        'or size must be set.');
+                }
+            }
+            return size;
+        };
+        this.#addItemSize = (index, size, status) => {
+            sizes[index] = size;
+            if (this.#maxSize) {
+                const maxSize = this.#maxSize - sizes[index];
+                while (this.#calculatedSize > maxSize) {
+                    this.#evict(true);
+                }
+            }
+            this.#calculatedSize += sizes[index];
+            if (status) {
+                status.entrySize = size;
+                status.totalCalculatedSize = this.#calculatedSize;
+            }
+        };
+    }
+    #removeItemSize = _i => { };
+    #addItemSize = (_i, _s, _st) => { };
+    #requireSize = (_k, _v, size, sizeCalculation) => {
+        if (size || sizeCalculation) {
+            throw new TypeError('cannot set size without setting maxSize or maxEntrySize on cache');
+        }
+        return 0;
+    };
+    *#indexes({ allowStale = this.allowStale } = {}) {
+        if (this.#size) {
+            for (let i = this.#tail; true;) {
+                if (!this.#isValidIndex(i)) {
+                    break;
+                }
+                if (allowStale || !this.#isStale(i)) {
+                    yield i;
+                }
+                if (i === this.#head) {
+                    break;
+                }
+                else {
+                    i = this.#prev[i];
+                }
+            }
+        }
+    }
+    *#rindexes({ allowStale = this.allowStale } = {}) {
+        if (this.#size) {
+            for (let i = this.#head; true;) {
+                if (!this.#isValidIndex(i)) {
+                    break;
+                }
+                if (allowStale || !this.#isStale(i)) {
+                    yield i;
+                }
+                if (i === this.#tail) {
+                    break;
+                }
+                else {
+                    i = this.#next[i];
+                }
+            }
+        }
+    }
+    #isValidIndex(index) {
+        return (index !== undefined &&
+            this.#keyMap.get(this.#keyList[index]) === index);
+    }
+    /**
+     * Return a generator yielding `[key, value]` pairs,
+     * in order from most recently used to least recently used.
+     */
+    *entries() {
+        for (const i of this.#indexes()) {
+            if (this.#valList[i] !== undefined &&
+                this.#keyList[i] !== undefined &&
+                !this.#isBackgroundFetch(this.#valList[i])) {
+                yield [this.#keyList[i], this.#valList[i]];
+            }
+        }
+    }
+    /**
+     * Inverse order version of {@link LRUCache.entries}
+     *
+     * Return a generator yielding `[key, value]` pairs,
+     * in order from least recently used to most recently used.
+     */
+    *rentries() {
+        for (const i of this.#rindexes()) {
+            if (this.#valList[i] !== undefined &&
+                this.#keyList[i] !== undefined &&
+                !this.#isBackgroundFetch(this.#valList[i])) {
+                yield [this.#keyList[i], this.#valList[i]];
+            }
+        }
+    }
+    /**
+     * Return a generator yielding the keys in the cache,
+     * in order from most recently used to least recently used.
+     */
+    *keys() {
+        for (const i of this.#indexes()) {
+            const k = this.#keyList[i];
+            if (k !== undefined &&
+                !this.#isBackgroundFetch(this.#valList[i])) {
+                yield k;
+            }
+        }
+    }
+    /**
+     * Inverse order version of {@link LRUCache.keys}
+     *
+     * Return a generator yielding the keys in the cache,
+     * in order from least recently used to most recently used.
+     */
+    *rkeys() {
+        for (const i of this.#rindexes()) {
+            const k = this.#keyList[i];
+            if (k !== undefined &&
+                !this.#isBackgroundFetch(this.#valList[i])) {
+                yield k;
+            }
+        }
+    }
+    /**
+     * Return a generator yielding the values in the cache,
+     * in order from most recently used to least recently used.
+     */
+    *values() {
+        for (const i of this.#indexes()) {
+            const v = this.#valList[i];
+            if (v !== undefined &&
+                !this.#isBackgroundFetch(this.#valList[i])) {
+                yield this.#valList[i];
+            }
+        }
+    }
+    /**
+     * Inverse order version of {@link LRUCache.values}
+     *
+     * Return a generator yielding the values in the cache,
+     * in order from least recently used to most recently used.
+     */
+    *rvalues() {
+        for (const i of this.#rindexes()) {
+            const v = this.#valList[i];
+            if (v !== undefined &&
+                !this.#isBackgroundFetch(this.#valList[i])) {
+                yield this.#valList[i];
+            }
+        }
+    }
+    /**
+     * Iterating over the cache itself yields the same results as
+     * {@link LRUCache.entries}
+     */
+    [Symbol.iterator]() {
+        return this.entries();
+    }
+    /**
+     * A String value that is used in the creation of the default string
+     * description of an object. Called by the built-in method
+     * `Object.prototype.toString`.
+     */
+    [Symbol.toStringTag] = 'LRUCache';
+    /**
+     * Find a value for which the supplied fn method returns a truthy value,
+     * similar to `Array.find()`. fn is called as `fn(value, key, cache)`.
+     */
+    find(fn, getOptions = {}) {
+        for (const i of this.#indexes()) {
+            const v = this.#valList[i];
+            const value = this.#isBackgroundFetch(v)
+                ? v.__staleWhileFetching
+                : v;
+            if (value === undefined)
+                continue;
+            if (fn(value, this.#keyList[i], this)) {
+                return this.get(this.#keyList[i], getOptions);
+            }
+        }
+    }
+    /**
+     * Call the supplied function on each item in the cache, in order from most
+     * recently used to least recently used.
+     *
+     * `fn` is called as `fn(value, key, cache)`.
+     *
+     * If `thisp` is provided, function will be called in the `this`-context of
+     * the provided object, or the cache if no `thisp` object is provided.
+     *
+     * Does not update age or recenty of use, or iterate over stale values.
+     */
+    forEach(fn, thisp = this) {
+        for (const i of this.#indexes()) {
+            const v = this.#valList[i];
+            const value = this.#isBackgroundFetch(v)
+                ? v.__staleWhileFetching
+                : v;
+            if (value === undefined)
+                continue;
+            fn.call(thisp, value, this.#keyList[i], this);
+        }
+    }
+    /**
+     * The same as {@link LRUCache.forEach} but items are iterated over in
+     * reverse order.  (ie, less recently used items are iterated over first.)
+     */
+    rforEach(fn, thisp = this) {
+        for (const i of this.#rindexes()) {
+            const v = this.#valList[i];
+            const value = this.#isBackgroundFetch(v)
+                ? v.__staleWhileFetching
+                : v;
+            if (value === undefined)
+                continue;
+            fn.call(thisp, value, this.#keyList[i], this);
+        }
+    }
+    /**
+     * Delete any stale entries. Returns true if anything was removed,
+     * false otherwise.
+     */
+    purgeStale() {
+        let deleted = false;
+        for (const i of this.#rindexes({ allowStale: true })) {
+            if (this.#isStale(i)) {
+                this.#delete(this.#keyList[i], 'expire');
+                deleted = true;
+            }
+        }
+        return deleted;
+    }
+    /**
+     * Get the extended info about a given entry, to get its value, size, and
+     * TTL info simultaneously. Returns `undefined` if the key is not present.
+     *
+     * Unlike {@link LRUCache#dump}, which is designed to be portable and survive
+     * serialization, the `start` value is always the current timestamp, and the
+     * `ttl` is a calculated remaining time to live (negative if expired).
+     *
+     * Always returns stale values, if their info is found in the cache, so be
+     * sure to check for expirations (ie, a negative {@link LRUCache.Entry#ttl})
+     * if relevant.
+     */
+    info(key) {
+        const i = this.#keyMap.get(key);
+        if (i === undefined)
+            return undefined;
+        const v = this.#valList[i];
+        const value = this.#isBackgroundFetch(v)
+            ? v.__staleWhileFetching
+            : v;
+        if (value === undefined)
+            return undefined;
+        const entry = { value };
+        if (this.#ttls && this.#starts) {
+            const ttl = this.#ttls[i];
+            const start = this.#starts[i];
+            if (ttl && start) {
+                const remain = ttl - (perf.now() - start);
+                entry.ttl = remain;
+                entry.start = Date.now();
+            }
+        }
+        if (this.#sizes) {
+            entry.size = this.#sizes[i];
+        }
+        return entry;
+    }
+    /**
+     * Return an array of [key, {@link LRUCache.Entry}] tuples which can be
+     * passed to {@link LRLUCache#load}.
+     *
+     * The `start` fields are calculated relative to a portable `Date.now()`
+     * timestamp, even if `performance.now()` is available.
+     *
+     * Stale entries are always included in the `dump`, even if
+     * {@link LRUCache.OptionsBase.allowStale} is false.
+     *
+     * Note: this returns an actual array, not a generator, so it can be more
+     * easily passed around.
+     */
+    dump() {
+        const arr = [];
+        for (const i of this.#indexes({ allowStale: true })) {
+            const key = this.#keyList[i];
+            const v = this.#valList[i];
+            const value = this.#isBackgroundFetch(v)
+                ? v.__staleWhileFetching
+                : v;
+            if (value === undefined || key === undefined)
+                continue;
+            const entry = { value };
+            if (this.#ttls && this.#starts) {
+                entry.ttl = this.#ttls[i];
+                // always dump the start relative to a portable timestamp
+                // it's ok for this to be a bit slow, it's a rare operation.
+                const age = perf.now() - this.#starts[i];
+                entry.start = Math.floor(Date.now() - age);
+            }
+            if (this.#sizes) {
+                entry.size = this.#sizes[i];
+            }
+            arr.unshift([key, entry]);
+        }
+        return arr;
+    }
+    /**
+     * Reset the cache and load in the items in entries in the order listed.
+     *
+     * The shape of the resulting cache may be different if the same options are
+     * not used in both caches.
+     *
+     * The `start` fields are assumed to be calculated relative to a portable
+     * `Date.now()` timestamp, even if `performance.now()` is available.
+     */
+    load(arr) {
+        this.clear();
+        for (const [key, entry] of arr) {
+            if (entry.start) {
+                // entry.start is a portable timestamp, but we may be using
+                // node's performance.now(), so calculate the offset, so that
+                // we get the intended remaining TTL, no matter how long it's
+                // been on ice.
+                //
+                // it's ok for this to be a bit slow, it's a rare operation.
+                const age = Date.now() - entry.start;
+                entry.start = perf.now() - age;
+            }
+            this.set(key, entry.value, entry);
+        }
+    }
+    /**
+     * Add a value to the cache.
+     *
+     * Note: if `undefined` is specified as a value, this is an alias for
+     * {@link LRUCache#delete}
+     *
+     * Fields on the {@link LRUCache.SetOptions} options param will override
+     * their corresponding values in the constructor options for the scope
+     * of this single `set()` operation.
+     *
+     * If `start` is provided, then that will set the effective start
+     * time for the TTL calculation. Note that this must be a previous
+     * value of `performance.now()` if supported, or a previous value of
+     * `Date.now()` if not.
+     *
+     * Options object may also include `size`, which will prevent
+     * calling the `sizeCalculation` function and just use the specified
+     * number if it is a positive integer, and `noDisposeOnSet` which
+     * will prevent calling a `dispose` function in the case of
+     * overwrites.
+     *
+     * If the `size` (or return value of `sizeCalculation`) for a given
+     * entry is greater than `maxEntrySize`, then the item will not be
+     * added to the cache.
+     *
+     * Will update the recency of the entry.
+     *
+     * If the value is `undefined`, then this is an alias for
+     * `cache.delete(key)`. `undefined` is never stored in the cache.
+     */
+    set(k, v, setOptions = {}) {
+        if (v === undefined) {
+            this.delete(k);
+            return this;
+        }
+        const { ttl = this.ttl, start, noDisposeOnSet = this.noDisposeOnSet, sizeCalculation = this.sizeCalculation, status, } = setOptions;
+        let { noUpdateTTL = this.noUpdateTTL } = setOptions;
+        const size = this.#requireSize(k, v, setOptions.size || 0, sizeCalculation);
+        // if the item doesn't fit, don't do anything
+        // NB: maxEntrySize set to maxSize by default
+        if (this.maxEntrySize && size > this.maxEntrySize) {
+            if (status) {
+                status.set = 'miss';
+                status.maxEntrySizeExceeded = true;
+            }
+            // have to delete, in case something is there already.
+            this.#delete(k, 'set');
+            return this;
+        }
+        let index = this.#size === 0 ? undefined : this.#keyMap.get(k);
+        if (index === undefined) {
+            // addition
+            index = (this.#size === 0
+                ? this.#tail
+                : this.#free.length !== 0
+                    ? this.#free.pop()
+                    : this.#size === this.#max
+                        ? this.#evict(false)
+                        : this.#size);
+            this.#keyList[index] = k;
+            this.#valList[index] = v;
+            this.#keyMap.set(k, index);
+            this.#next[this.#tail] = index;
+            this.#prev[index] = this.#tail;
+            this.#tail = index;
+            this.#size++;
+            this.#addItemSize(index, size, status);
+            if (status)
+                status.set = 'add';
+            noUpdateTTL = false;
+        }
+        else {
+            // update
+            this.#moveToTail(index);
+            const oldVal = this.#valList[index];
+            if (v !== oldVal) {
+                if (this.#hasFetchMethod && this.#isBackgroundFetch(oldVal)) {
+                    oldVal.__abortController.abort(new Error('replaced'));
+                    const { __staleWhileFetching: s } = oldVal;
+                    if (s !== undefined && !noDisposeOnSet) {
+                        if (this.#hasDispose) {
+                            this.#dispose?.(s, k, 'set');
+                        }
+                        if (this.#hasDisposeAfter) {
+                            this.#disposed?.push([s, k, 'set']);
+                        }
+                    }
+                }
+                else if (!noDisposeOnSet) {
+                    if (this.#hasDispose) {
+                        this.#dispose?.(oldVal, k, 'set');
+                    }
+                    if (this.#hasDisposeAfter) {
+                        this.#disposed?.push([oldVal, k, 'set']);
+                    }
+                }
+                this.#removeItemSize(index);
+                this.#addItemSize(index, size, status);
+                this.#valList[index] = v;
+                if (status) {
+                    status.set = 'replace';
+                    const oldValue = oldVal && this.#isBackgroundFetch(oldVal)
+                        ? oldVal.__staleWhileFetching
+                        : oldVal;
+                    if (oldValue !== undefined)
+                        status.oldValue = oldValue;
+                }
+            }
+            else if (status) {
+                status.set = 'update';
+            }
+        }
+        if (ttl !== 0 && !this.#ttls) {
+            this.#initializeTTLTracking();
+        }
+        if (this.#ttls) {
+            if (!noUpdateTTL) {
+                this.#setItemTTL(index, ttl, start);
+            }
+            if (status)
+                this.#statusTTL(status, index);
+        }
+        if (!noDisposeOnSet && this.#hasDisposeAfter && this.#disposed) {
+            const dt = this.#disposed;
+            let task;
+            while ((task = dt?.shift())) {
+                this.#disposeAfter?.(...task);
+            }
+        }
+        return this;
+    }
+    /**
+     * Evict the least recently used item, returning its value or
+     * `undefined` if cache is empty.
+     */
+    pop() {
+        try {
+            while (this.#size) {
+                const val = this.#valList[this.#head];
+                this.#evict(true);
+                if (this.#isBackgroundFetch(val)) {
+                    if (val.__staleWhileFetching) {
+                        return val.__staleWhileFetching;
+                    }
+                }
+                else if (val !== undefined) {
+                    return val;
+                }
+            }
+        }
+        finally {
+            if (this.#hasDisposeAfter && this.#disposed) {
+                const dt = this.#disposed;
+                let task;
+                while ((task = dt?.shift())) {
+                    this.#disposeAfter?.(...task);
+                }
+            }
+        }
+    }
+    #evict(free) {
+        const head = this.#head;
+        const k = this.#keyList[head];
+        const v = this.#valList[head];
+        if (this.#hasFetchMethod && this.#isBackgroundFetch(v)) {
+            v.__abortController.abort(new Error('evicted'));
+        }
+        else if (this.#hasDispose || this.#hasDisposeAfter) {
+            if (this.#hasDispose) {
+                this.#dispose?.(v, k, 'evict');
+            }
+            if (this.#hasDisposeAfter) {
+                this.#disposed?.push([v, k, 'evict']);
+            }
+        }
+        this.#removeItemSize(head);
+        // if we aren't about to use the index, then null these out
+        if (free) {
+            this.#keyList[head] = undefined;
+            this.#valList[head] = undefined;
+            this.#free.push(head);
+        }
+        if (this.#size === 1) {
+            this.#head = this.#tail = 0;
+            this.#free.length = 0;
+        }
+        else {
+            this.#head = this.#next[head];
+        }
+        this.#keyMap.delete(k);
+        this.#size--;
+        return head;
+    }
+    /**
+     * Check if a key is in the cache, without updating the recency of use.
+     * Will return false if the item is stale, even though it is technically
+     * in the cache.
+     *
+     * Check if a key is in the cache, without updating the recency of
+     * use. Age is updated if {@link LRUCache.OptionsBase.updateAgeOnHas} is set
+     * to `true` in either the options or the constructor.
+     *
+     * Will return `false` if the item is stale, even though it is technically in
+     * the cache. The difference can be determined (if it matters) by using a
+     * `status` argument, and inspecting the `has` field.
+     *
+     * Will not update item age unless
+     * {@link LRUCache.OptionsBase.updateAgeOnHas} is set.
+     */
+    has(k, hasOptions = {}) {
+        const { updateAgeOnHas = this.updateAgeOnHas, status } = hasOptions;
+        const index = this.#keyMap.get(k);
+        if (index !== undefined) {
+            const v = this.#valList[index];
+            if (this.#isBackgroundFetch(v) &&
+                v.__staleWhileFetching === undefined) {
+                return false;
+            }
+            if (!this.#isStale(index)) {
+                if (updateAgeOnHas) {
+                    this.#updateItemAge(index);
+                }
+                if (status) {
+                    status.has = 'hit';
+                    this.#statusTTL(status, index);
+                }
+                return true;
+            }
+            else if (status) {
+                status.has = 'stale';
+                this.#statusTTL(status, index);
+            }
+        }
+        else if (status) {
+            status.has = 'miss';
+        }
+        return false;
+    }
+    /**
+     * Like {@link LRUCache#get} but doesn't update recency or delete stale
+     * items.
+     *
+     * Returns `undefined` if the item is stale, unless
+     * {@link LRUCache.OptionsBase.allowStale} is set.
+     */
+    peek(k, peekOptions = {}) {
+        const { allowStale = this.allowStale } = peekOptions;
+        const index = this.#keyMap.get(k);
+        if (index === undefined ||
+            (!allowStale && this.#isStale(index))) {
+            return;
+        }
+        const v = this.#valList[index];
+        // either stale and allowed, or forcing a refresh of non-stale value
+        return this.#isBackgroundFetch(v) ? v.__staleWhileFetching : v;
+    }
+    #backgroundFetch(k, index, options, context) {
+        const v = index === undefined ? undefined : this.#valList[index];
+        if (this.#isBackgroundFetch(v)) {
+            return v;
+        }
+        const ac = new AC();
+        const { signal } = options;
+        // when/if our AC signals, then stop listening to theirs.
+        signal?.addEventListener('abort', () => ac.abort(signal.reason), {
+            signal: ac.signal,
+        });
+        const fetchOpts = {
+            signal: ac.signal,
+            options,
+            context,
+        };
+        const cb = (v, updateCache = false) => {
+            const { aborted } = ac.signal;
+            const ignoreAbort = options.ignoreFetchAbort && v !== undefined;
+            if (options.status) {
+                if (aborted && !updateCache) {
+                    options.status.fetchAborted = true;
+                    options.status.fetchError = ac.signal.reason;
+                    if (ignoreAbort)
+                        options.status.fetchAbortIgnored = true;
+                }
+                else {
+                    options.status.fetchResolved = true;
+                }
+            }
+            if (aborted && !ignoreAbort && !updateCache) {
+                return fetchFail(ac.signal.reason);
+            }
+            // either we didn't abort, and are still here, or we did, and ignored
+            const bf = p;
+            if (this.#valList[index] === p) {
+                if (v === undefined) {
+                    if (bf.__staleWhileFetching) {
+                        this.#valList[index] = bf.__staleWhileFetching;
+                    }
+                    else {
+                        this.#delete(k, 'fetch');
+                    }
+                }
+                else {
+                    if (options.status)
+                        options.status.fetchUpdated = true;
+                    this.set(k, v, fetchOpts.options);
+                }
+            }
+            return v;
+        };
+        const eb = (er) => {
+            if (options.status) {
+                options.status.fetchRejected = true;
+                options.status.fetchError = er;
+            }
+            return fetchFail(er);
+        };
+        const fetchFail = (er) => {
+            const { aborted } = ac.signal;
+            const allowStaleAborted = aborted && options.allowStaleOnFetchAbort;
+            const allowStale = allowStaleAborted || options.allowStaleOnFetchRejection;
+            const noDelete = allowStale || options.noDeleteOnFetchRejection;
+            const bf = p;
+            if (this.#valList[index] === p) {
+                // if we allow stale on fetch rejections, then we need to ensure that
+                // the stale value is not removed from the cache when the fetch fails.
+                const del = !noDelete || bf.__staleWhileFetching === undefined;
+                if (del) {
+                    this.#delete(k, 'fetch');
+                }
+                else if (!allowStaleAborted) {
+                    // still replace the *promise* with the stale value,
+                    // since we are done with the promise at this point.
+                    // leave it untouched if we're still waiting for an
+                    // aborted background fetch that hasn't yet returned.
+                    this.#valList[index] = bf.__staleWhileFetching;
+                }
+            }
+            if (allowStale) {
+                if (options.status && bf.__staleWhileFetching !== undefined) {
+                    options.status.returnedStale = true;
+                }
+                return bf.__staleWhileFetching;
+            }
+            else if (bf.__returned === bf) {
+                throw er;
+            }
+        };
+        const pcall = (res, rej) => {
+            const fmp = this.#fetchMethod?.(k, v, fetchOpts);
+            if (fmp && fmp instanceof Promise) {
+                fmp.then(v => res(v === undefined ? undefined : v), rej);
+            }
+            // ignored, we go until we finish, regardless.
+            // defer check until we are actually aborting,
+            // so fetchMethod can override.
+            ac.signal.addEventListener('abort', () => {
+                if (!options.ignoreFetchAbort ||
+                    options.allowStaleOnFetchAbort) {
+                    res(undefined);
+                    // when it eventually resolves, update the cache.
+                    if (options.allowStaleOnFetchAbort) {
+                        res = v => cb(v, true);
+                    }
+                }
+            });
+        };
+        if (options.status)
+            options.status.fetchDispatched = true;
+        const p = new Promise(pcall).then(cb, eb);
+        const bf = Object.assign(p, {
+            __abortController: ac,
+            __staleWhileFetching: v,
+            __returned: undefined,
+        });
+        if (index === undefined) {
+            // internal, don't expose status.
+            this.set(k, bf, { ...fetchOpts.options, status: undefined });
+            index = this.#keyMap.get(k);
+        }
+        else {
+            this.#valList[index] = bf;
+        }
+        return bf;
+    }
+    #isBackgroundFetch(p) {
+        if (!this.#hasFetchMethod)
+            return false;
+        const b = p;
+        return (!!b &&
+            b instanceof Promise &&
+            b.hasOwnProperty('__staleWhileFetching') &&
+            b.__abortController instanceof AC);
+    }
+    async fetch(k, fetchOptions = {}) {
+        const { 
+        // get options
+        allowStale = this.allowStale, updateAgeOnGet = this.updateAgeOnGet, noDeleteOnStaleGet = this.noDeleteOnStaleGet, 
+        // set options
+        ttl = this.ttl, noDisposeOnSet = this.noDisposeOnSet, size = 0, sizeCalculation = this.sizeCalculation, noUpdateTTL = this.noUpdateTTL, 
+        // fetch exclusive options
+        noDeleteOnFetchRejection = this.noDeleteOnFetchRejection, allowStaleOnFetchRejection = this.allowStaleOnFetchRejection, ignoreFetchAbort = this.ignoreFetchAbort, allowStaleOnFetchAbort = this.allowStaleOnFetchAbort, context, forceRefresh = false, status, signal, } = fetchOptions;
+        if (!this.#hasFetchMethod) {
+            if (status)
+                status.fetch = 'get';
+            return this.get(k, {
+                allowStale,
+                updateAgeOnGet,
+                noDeleteOnStaleGet,
+                status,
+            });
+        }
+        const options = {
+            allowStale,
+            updateAgeOnGet,
+            noDeleteOnStaleGet,
+            ttl,
+            noDisposeOnSet,
+            size,
+            sizeCalculation,
+            noUpdateTTL,
+            noDeleteOnFetchRejection,
+            allowStaleOnFetchRejection,
+            allowStaleOnFetchAbort,
+            ignoreFetchAbort,
+            status,
+            signal,
+        };
+        let index = this.#keyMap.get(k);
+        if (index === undefined) {
+            if (status)
+                status.fetch = 'miss';
+            const p = this.#backgroundFetch(k, index, options, context);
+            return (p.__returned = p);
+        }
+        else {
+            // in cache, maybe already fetching
+            const v = this.#valList[index];
+            if (this.#isBackgroundFetch(v)) {
+                const stale = allowStale && v.__staleWhileFetching !== undefined;
+                if (status) {
+                    status.fetch = 'inflight';
+                    if (stale)
+                        status.returnedStale = true;
+                }
+                return stale ? v.__staleWhileFetching : (v.__returned = v);
+            }
+            // if we force a refresh, that means do NOT serve the cached value,
+            // unless we are already in the process of refreshing the cache.
+            const isStale = this.#isStale(index);
+            if (!forceRefresh && !isStale) {
+                if (status)
+                    status.fetch = 'hit';
+                this.#moveToTail(index);
+                if (updateAgeOnGet) {
+                    this.#updateItemAge(index);
+                }
+                if (status)
+                    this.#statusTTL(status, index);
+                return v;
+            }
+            // ok, it is stale or a forced refresh, and not already fetching.
+            // refresh the cache.
+            const p = this.#backgroundFetch(k, index, options, context);
+            const hasStale = p.__staleWhileFetching !== undefined;
+            const staleVal = hasStale && allowStale;
+            if (status) {
+                status.fetch = isStale ? 'stale' : 'refresh';
+                if (staleVal && isStale)
+                    status.returnedStale = true;
+            }
+            return staleVal ? p.__staleWhileFetching : (p.__returned = p);
+        }
+    }
+    async forceFetch(k, fetchOptions = {}) {
+        const v = await this.fetch(k, fetchOptions);
+        if (v === undefined)
+            throw new Error('fetch() returned undefined');
+        return v;
+    }
+    memo(k, memoOptions = {}) {
+        const memoMethod = this.#memoMethod;
+        if (!memoMethod) {
+            throw new Error('no memoMethod provided to constructor');
+        }
+        const { context, forceRefresh, ...options } = memoOptions;
+        const v = this.get(k, options);
+        if (!forceRefresh && v !== undefined)
+            return v;
+        const vv = memoMethod(k, v, {
+            options,
+            context,
+        });
+        this.set(k, vv, options);
+        return vv;
+    }
+    /**
+     * Return a value from the cache. Will update the recency of the cache
+     * entry found.
+     *
+     * If the key is not found, get() will return `undefined`.
+     */
+    get(k, getOptions = {}) {
+        const { allowStale = this.allowStale, updateAgeOnGet = this.updateAgeOnGet, noDeleteOnStaleGet = this.noDeleteOnStaleGet, status, } = getOptions;
+        const index = this.#keyMap.get(k);
+        if (index !== undefined) {
+            const value = this.#valList[index];
+            const fetching = this.#isBackgroundFetch(value);
+            if (status)
+                this.#statusTTL(status, index);
+            if (this.#isStale(index)) {
+                if (status)
+                    status.get = 'stale';
+                // delete only if not an in-flight background fetch
+                if (!fetching) {
+                    if (!noDeleteOnStaleGet) {
+                        this.#delete(k, 'expire');
+                    }
+                    if (status && allowStale)
+                        status.returnedStale = true;
+                    return allowStale ? value : undefined;
+                }
+                else {
+                    if (status &&
+                        allowStale &&
+                        value.__staleWhileFetching !== undefined) {
+                        status.returnedStale = true;
+                    }
+                    return allowStale ? value.__staleWhileFetching : undefined;
+                }
+            }
+            else {
+                if (status)
+                    status.get = 'hit';
+                // if we're currently fetching it, we don't actually have it yet
+                // it's not stale, which means this isn't a staleWhileRefetching.
+                // If it's not stale, and fetching, AND has a __staleWhileFetching
+                // value, then that means the user fetched with {forceRefresh:true},
+                // so it's safe to return that value.
+                if (fetching) {
+                    return value.__staleWhileFetching;
+                }
+                this.#moveToTail(index);
+                if (updateAgeOnGet) {
+                    this.#updateItemAge(index);
+                }
+                return value;
+            }
+        }
+        else if (status) {
+            status.get = 'miss';
+        }
+    }
+    #connect(p, n) {
+        this.#prev[n] = p;
+        this.#next[p] = n;
+    }
+    #moveToTail(index) {
+        // if tail already, nothing to do
+        // if head, move head to next[index]
+        // else
+        //   move next[prev[index]] to next[index] (head has no prev)
+        //   move prev[next[index]] to prev[index]
+        // prev[index] = tail
+        // next[tail] = index
+        // tail = index
+        if (index !== this.#tail) {
+            if (index === this.#head) {
+                this.#head = this.#next[index];
+            }
+            else {
+                this.#connect(this.#prev[index], this.#next[index]);
+            }
+            this.#connect(this.#tail, index);
+            this.#tail = index;
+        }
+    }
+    /**
+     * Deletes a key out of the cache.
+     *
+     * Returns true if the key was deleted, false otherwise.
+     */
+    delete(k) {
+        return this.#delete(k, 'delete');
+    }
+    #delete(k, reason) {
+        let deleted = false;
+        if (this.#size !== 0) {
+            const index = this.#keyMap.get(k);
+            if (index !== undefined) {
+                deleted = true;
+                if (this.#size === 1) {
+                    this.#clear(reason);
+                }
+                else {
+                    this.#removeItemSize(index);
+                    const v = this.#valList[index];
+                    if (this.#isBackgroundFetch(v)) {
+                        v.__abortController.abort(new Error('deleted'));
+                    }
+                    else if (this.#hasDispose || this.#hasDisposeAfter) {
+                        if (this.#hasDispose) {
+                            this.#dispose?.(v, k, reason);
+                        }
+                        if (this.#hasDisposeAfter) {
+                            this.#disposed?.push([v, k, reason]);
+                        }
+                    }
+                    this.#keyMap.delete(k);
+                    this.#keyList[index] = undefined;
+                    this.#valList[index] = undefined;
+                    if (index === this.#tail) {
+                        this.#tail = this.#prev[index];
+                    }
+                    else if (index === this.#head) {
+                        this.#head = this.#next[index];
+                    }
+                    else {
+                        const pi = this.#prev[index];
+                        this.#next[pi] = this.#next[index];
+                        const ni = this.#next[index];
+                        this.#prev[ni] = this.#prev[index];
+                    }
+                    this.#size--;
+                    this.#free.push(index);
+                }
+            }
+        }
+        if (this.#hasDisposeAfter && this.#disposed?.length) {
+            const dt = this.#disposed;
+            let task;
+            while ((task = dt?.shift())) {
+                this.#disposeAfter?.(...task);
+            }
+        }
+        return deleted;
+    }
+    /**
+     * Clear the cache entirely, throwing away all values.
+     */
+    clear() {
+        return this.#clear('delete');
+    }
+    #clear(reason) {
+        for (const index of this.#rindexes({ allowStale: true })) {
+            const v = this.#valList[index];
+            if (this.#isBackgroundFetch(v)) {
+                v.__abortController.abort(new Error('deleted'));
+            }
+            else {
+                const k = this.#keyList[index];
+                if (this.#hasDispose) {
+                    this.#dispose?.(v, k, reason);
+                }
+                if (this.#hasDisposeAfter) {
+                    this.#disposed?.push([v, k, reason]);
+                }
+            }
+        }
+        this.#keyMap.clear();
+        this.#valList.fill(undefined);
+        this.#keyList.fill(undefined);
+        if (this.#ttls && this.#starts) {
+            this.#ttls.fill(0);
+            this.#starts.fill(0);
+        }
+        if (this.#sizes) {
+            this.#sizes.fill(0);
+        }
+        this.#head = 0;
+        this.#tail = 0;
+        this.#free.length = 0;
+        this.#calculatedSize = 0;
+        this.#size = 0;
+        if (this.#hasDisposeAfter && this.#disposed) {
+            const dt = this.#disposed;
+            let task;
+            while ((task = dt?.shift())) {
+                this.#disposeAfter?.(...task);
+            }
+        }
+    }
+}
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: external "node:path"
+const external_node_path_namespaceObject = require("node:path");
+;// CONCATENATED MODULE: external "node:url"
+const external_node_url_namespaceObject = require("node:url");
+// EXTERNAL MODULE: external "fs"
+var external_fs_ = __nccwpck_require__(9896);
+;// CONCATENATED MODULE: external "node:fs"
+const external_node_fs_namespaceObject = require("node:fs");
+var external_node_fs_namespaceObject_0 = /*#__PURE__*/__nccwpck_require__.t(external_node_fs_namespaceObject, 2);
+;// CONCATENATED MODULE: external "node:fs/promises"
+const external_node_fs_promises_namespaceObject = require("node:fs/promises");
+// EXTERNAL MODULE: external "node:events"
+var external_node_events_ = __nccwpck_require__(8474);
+// EXTERNAL MODULE: external "node:stream"
+var external_node_stream_ = __nccwpck_require__(7075);
+;// CONCATENATED MODULE: external "node:string_decoder"
+const external_node_string_decoder_namespaceObject = require("node:string_decoder");
+;// CONCATENATED MODULE: ../../node_modules/minipass/dist/esm/index.js
+const proc = typeof process === 'object' && process
+    ? process
+    : {
+        stdout: null,
+        stderr: null,
+    };
+
+
+
+/**
+ * Return true if the argument is a Minipass stream, Node stream, or something
+ * else that Minipass can interact with.
+ */
+const isStream = (s) => !!s &&
+    typeof s === 'object' &&
+    (s instanceof Minipass ||
+        s instanceof external_node_stream_ ||
+        isReadable(s) ||
+        isWritable(s));
+/**
+ * Return true if the argument is a valid {@link Minipass.Readable}
+ */
+const isReadable = (s) => !!s &&
+    typeof s === 'object' &&
+    s instanceof external_node_events_.EventEmitter &&
+    typeof s.pipe === 'function' &&
+    // node core Writable streams have a pipe() method, but it throws
+    s.pipe !== external_node_stream_.Writable.prototype.pipe;
+/**
+ * Return true if the argument is a valid {@link Minipass.Writable}
+ */
+const isWritable = (s) => !!s &&
+    typeof s === 'object' &&
+    s instanceof external_node_events_.EventEmitter &&
+    typeof s.write === 'function' &&
+    typeof s.end === 'function';
+const EOF = Symbol('EOF');
+const MAYBE_EMIT_END = Symbol('maybeEmitEnd');
+const EMITTED_END = Symbol('emittedEnd');
+const EMITTING_END = Symbol('emittingEnd');
+const EMITTED_ERROR = Symbol('emittedError');
+const CLOSED = Symbol('closed');
+const READ = Symbol('read');
+const FLUSH = Symbol('flush');
+const FLUSHCHUNK = Symbol('flushChunk');
+const ENCODING = Symbol('encoding');
+const DECODER = Symbol('decoder');
+const FLOWING = Symbol('flowing');
+const PAUSED = Symbol('paused');
+const RESUME = Symbol('resume');
+const BUFFER = Symbol('buffer');
+const PIPES = Symbol('pipes');
+const BUFFERLENGTH = Symbol('bufferLength');
+const BUFFERPUSH = Symbol('bufferPush');
+const BUFFERSHIFT = Symbol('bufferShift');
+const OBJECTMODE = Symbol('objectMode');
+// internal event when stream is destroyed
+const DESTROYED = Symbol('destroyed');
+// internal event when stream has an error
+const ERROR = Symbol('error');
+const EMITDATA = Symbol('emitData');
+const EMITEND = Symbol('emitEnd');
+const EMITEND2 = Symbol('emitEnd2');
+const ASYNC = Symbol('async');
+const ABORT = Symbol('abort');
+const ABORTED = Symbol('aborted');
+const SIGNAL = Symbol('signal');
+const DATALISTENERS = Symbol('dataListeners');
+const DISCARDED = Symbol('discarded');
+const defer = (fn) => Promise.resolve().then(fn);
+const nodefer = (fn) => fn();
+const isEndish = (ev) => ev === 'end' || ev === 'finish' || ev === 'prefinish';
+const isArrayBufferLike = (b) => b instanceof ArrayBuffer ||
+    (!!b &&
+        typeof b === 'object' &&
+        b.constructor &&
+        b.constructor.name === 'ArrayBuffer' &&
+        b.byteLength >= 0);
+const isArrayBufferView = (b) => !Buffer.isBuffer(b) && ArrayBuffer.isView(b);
+/**
+ * Internal class representing a pipe to a destination stream.
+ *
+ * @internal
+ */
+class Pipe {
+    src;
+    dest;
+    opts;
+    ondrain;
+    constructor(src, dest, opts) {
+        this.src = src;
+        this.dest = dest;
+        this.opts = opts;
+        this.ondrain = () => src[RESUME]();
+        this.dest.on('drain', this.ondrain);
+    }
+    unpipe() {
+        this.dest.removeListener('drain', this.ondrain);
+    }
+    // only here for the prototype
+    /* c8 ignore start */
+    proxyErrors(_er) { }
+    /* c8 ignore stop */
+    end() {
+        this.unpipe();
+        if (this.opts.end)
+            this.dest.end();
+    }
+}
+/**
+ * Internal class representing a pipe to a destination stream where
+ * errors are proxied.
+ *
+ * @internal
+ */
+class PipeProxyErrors extends Pipe {
+    unpipe() {
+        this.src.removeListener('error', this.proxyErrors);
+        super.unpipe();
+    }
+    constructor(src, dest, opts) {
+        super(src, dest, opts);
+        this.proxyErrors = er => dest.emit('error', er);
+        src.on('error', this.proxyErrors);
+    }
+}
+const isObjectModeOptions = (o) => !!o.objectMode;
+const isEncodingOptions = (o) => !o.objectMode && !!o.encoding && o.encoding !== 'buffer';
+/**
+ * Main export, the Minipass class
+ *
+ * `RType` is the type of data emitted, defaults to Buffer
+ *
+ * `WType` is the type of data to be written, if RType is buffer or string,
+ * then any {@link Minipass.ContiguousData} is allowed.
+ *
+ * `Events` is the set of event handler signatures that this object
+ * will emit, see {@link Minipass.Events}
+ */
+class Minipass extends external_node_events_.EventEmitter {
+    [FLOWING] = false;
+    [PAUSED] = false;
+    [PIPES] = [];
+    [BUFFER] = [];
+    [OBJECTMODE];
+    [ENCODING];
+    [ASYNC];
+    [DECODER];
+    [EOF] = false;
+    [EMITTED_END] = false;
+    [EMITTING_END] = false;
+    [CLOSED] = false;
+    [EMITTED_ERROR] = null;
+    [BUFFERLENGTH] = 0;
+    [DESTROYED] = false;
+    [SIGNAL];
+    [ABORTED] = false;
+    [DATALISTENERS] = 0;
+    [DISCARDED] = false;
+    /**
+     * true if the stream can be written
+     */
+    writable = true;
+    /**
+     * true if the stream can be read
+     */
+    readable = true;
+    /**
+     * If `RType` is Buffer, then options do not need to be provided.
+     * Otherwise, an options object must be provided to specify either
+     * {@link Minipass.SharedOptions.objectMode} or
+     * {@link Minipass.SharedOptions.encoding}, as appropriate.
+     */
+    constructor(...args) {
+        const options = (args[0] ||
+            {});
+        super();
+        if (options.objectMode && typeof options.encoding === 'string') {
+            throw new TypeError('Encoding and objectMode may not be used together');
+        }
+        if (isObjectModeOptions(options)) {
+            this[OBJECTMODE] = true;
+            this[ENCODING] = null;
+        }
+        else if (isEncodingOptions(options)) {
+            this[ENCODING] = options.encoding;
+            this[OBJECTMODE] = false;
+        }
+        else {
+            this[OBJECTMODE] = false;
+            this[ENCODING] = null;
+        }
+        this[ASYNC] = !!options.async;
+        this[DECODER] = this[ENCODING]
+            ? new external_node_string_decoder_namespaceObject.StringDecoder(this[ENCODING])
+            : null;
+        //@ts-ignore - private option for debugging and testing
+        if (options && options.debugExposeBuffer === true) {
+            Object.defineProperty(this, 'buffer', { get: () => this[BUFFER] });
+        }
+        //@ts-ignore - private option for debugging and testing
+        if (options && options.debugExposePipes === true) {
+            Object.defineProperty(this, 'pipes', { get: () => this[PIPES] });
+        }
+        const { signal } = options;
+        if (signal) {
+            this[SIGNAL] = signal;
+            if (signal.aborted) {
+                this[ABORT]();
+            }
+            else {
+                signal.addEventListener('abort', () => this[ABORT]());
+            }
+        }
+    }
+    /**
+     * The amount of data stored in the buffer waiting to be read.
+     *
+     * For Buffer strings, this will be the total byte length.
+     * For string encoding streams, this will be the string character length,
+     * according to JavaScript's `string.length` logic.
+     * For objectMode streams, this is a count of the items waiting to be
+     * emitted.
+     */
+    get bufferLength() {
+        return this[BUFFERLENGTH];
+    }
+    /**
+     * The `BufferEncoding` currently in use, or `null`
+     */
+    get encoding() {
+        return this[ENCODING];
+    }
+    /**
+     * @deprecated - This is a read only property
+     */
+    set encoding(_enc) {
+        throw new Error('Encoding must be set at instantiation time');
+    }
+    /**
+     * @deprecated - Encoding may only be set at instantiation time
+     */
+    setEncoding(_enc) {
+        throw new Error('Encoding must be set at instantiation time');
+    }
+    /**
+     * True if this is an objectMode stream
+     */
+    get objectMode() {
+        return this[OBJECTMODE];
+    }
+    /**
+     * @deprecated - This is a read-only property
+     */
+    set objectMode(_om) {
+        throw new Error('objectMode must be set at instantiation time');
+    }
+    /**
+     * true if this is an async stream
+     */
+    get ['async']() {
+        return this[ASYNC];
+    }
+    /**
+     * Set to true to make this stream async.
+     *
+     * Once set, it cannot be unset, as this would potentially cause incorrect
+     * behavior.  Ie, a sync stream can be made async, but an async stream
+     * cannot be safely made sync.
+     */
+    set ['async'](a) {
+        this[ASYNC] = this[ASYNC] || !!a;
+    }
+    // drop everything and get out of the flow completely
+    [ABORT]() {
+        this[ABORTED] = true;
+        this.emit('abort', this[SIGNAL]?.reason);
+        this.destroy(this[SIGNAL]?.reason);
+    }
+    /**
+     * True if the stream has been aborted.
+     */
+    get aborted() {
+        return this[ABORTED];
+    }
+    /**
+     * No-op setter. Stream aborted status is set via the AbortSignal provided
+     * in the constructor options.
+     */
+    set aborted(_) { }
+    write(chunk, encoding, cb) {
+        if (this[ABORTED])
+            return false;
+        if (this[EOF])
+            throw new Error('write after end');
+        if (this[DESTROYED]) {
+            this.emit('error', Object.assign(new Error('Cannot call write after a stream was destroyed'), { code: 'ERR_STREAM_DESTROYED' }));
+            return true;
+        }
+        if (typeof encoding === 'function') {
+            cb = encoding;
+            encoding = 'utf8';
+        }
+        if (!encoding)
+            encoding = 'utf8';
+        const fn = this[ASYNC] ? defer : nodefer;
+        // convert array buffers and typed array views into buffers
+        // at some point in the future, we may want to do the opposite!
+        // leave strings and buffers as-is
+        // anything is only allowed if in object mode, so throw
+        if (!this[OBJECTMODE] && !Buffer.isBuffer(chunk)) {
+            if (isArrayBufferView(chunk)) {
+                //@ts-ignore - sinful unsafe type changing
+                chunk = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+            }
+            else if (isArrayBufferLike(chunk)) {
+                //@ts-ignore - sinful unsafe type changing
+                chunk = Buffer.from(chunk);
+            }
+            else if (typeof chunk !== 'string') {
+                throw new Error('Non-contiguous data written to non-objectMode stream');
+            }
+        }
+        // handle object mode up front, since it's simpler
+        // this yields better performance, fewer checks later.
+        if (this[OBJECTMODE]) {
+            // maybe impossible?
+            /* c8 ignore start */
+            if (this[FLOWING] && this[BUFFERLENGTH] !== 0)
+                this[FLUSH](true);
+            /* c8 ignore stop */
+            if (this[FLOWING])
+                this.emit('data', chunk);
+            else
+                this[BUFFERPUSH](chunk);
+            if (this[BUFFERLENGTH] !== 0)
+                this.emit('readable');
+            if (cb)
+                fn(cb);
+            return this[FLOWING];
+        }
+        // at this point the chunk is a buffer or string
+        // don't buffer it up or send it to the decoder
+        if (!chunk.length) {
+            if (this[BUFFERLENGTH] !== 0)
+                this.emit('readable');
+            if (cb)
+                fn(cb);
+            return this[FLOWING];
+        }
+        // fast-path writing strings of same encoding to a stream with
+        // an empty buffer, skipping the buffer/decoder dance
+        if (typeof chunk === 'string' &&
+            // unless it is a string already ready for us to use
+            !(encoding === this[ENCODING] && !this[DECODER]?.lastNeed)) {
+            //@ts-ignore - sinful unsafe type change
+            chunk = Buffer.from(chunk, encoding);
+        }
+        if (Buffer.isBuffer(chunk) && this[ENCODING]) {
+            //@ts-ignore - sinful unsafe type change
+            chunk = this[DECODER].write(chunk);
+        }
+        // Note: flushing CAN potentially switch us into not-flowing mode
+        if (this[FLOWING] && this[BUFFERLENGTH] !== 0)
+            this[FLUSH](true);
+        if (this[FLOWING])
+            this.emit('data', chunk);
+        else
+            this[BUFFERPUSH](chunk);
+        if (this[BUFFERLENGTH] !== 0)
+            this.emit('readable');
+        if (cb)
+            fn(cb);
+        return this[FLOWING];
+    }
+    /**
+     * Low-level explicit read method.
+     *
+     * In objectMode, the argument is ignored, and one item is returned if
+     * available.
+     *
+     * `n` is the number of bytes (or in the case of encoding streams,
+     * characters) to consume. If `n` is not provided, then the entire buffer
+     * is returned, or `null` is returned if no data is available.
+     *
+     * If `n` is greater that the amount of data in the internal buffer,
+     * then `null` is returned.
+     */
+    read(n) {
+        if (this[DESTROYED])
+            return null;
+        this[DISCARDED] = false;
+        if (this[BUFFERLENGTH] === 0 ||
+            n === 0 ||
+            (n && n > this[BUFFERLENGTH])) {
+            this[MAYBE_EMIT_END]();
+            return null;
+        }
+        if (this[OBJECTMODE])
+            n = null;
+        if (this[BUFFER].length > 1 && !this[OBJECTMODE]) {
+            // not object mode, so if we have an encoding, then RType is string
+            // otherwise, must be Buffer
+            this[BUFFER] = [
+                (this[ENCODING]
+                    ? this[BUFFER].join('')
+                    : Buffer.concat(this[BUFFER], this[BUFFERLENGTH])),
+            ];
+        }
+        const ret = this[READ](n || null, this[BUFFER][0]);
+        this[MAYBE_EMIT_END]();
+        return ret;
+    }
+    [READ](n, chunk) {
+        if (this[OBJECTMODE])
+            this[BUFFERSHIFT]();
+        else {
+            const c = chunk;
+            if (n === c.length || n === null)
+                this[BUFFERSHIFT]();
+            else if (typeof c === 'string') {
+                this[BUFFER][0] = c.slice(n);
+                chunk = c.slice(0, n);
+                this[BUFFERLENGTH] -= n;
+            }
+            else {
+                this[BUFFER][0] = c.subarray(n);
+                chunk = c.subarray(0, n);
+                this[BUFFERLENGTH] -= n;
+            }
+        }
+        this.emit('data', chunk);
+        if (!this[BUFFER].length && !this[EOF])
+            this.emit('drain');
+        return chunk;
+    }
+    end(chunk, encoding, cb) {
+        if (typeof chunk === 'function') {
+            cb = chunk;
+            chunk = undefined;
+        }
+        if (typeof encoding === 'function') {
+            cb = encoding;
+            encoding = 'utf8';
+        }
+        if (chunk !== undefined)
+            this.write(chunk, encoding);
+        if (cb)
+            this.once('end', cb);
+        this[EOF] = true;
+        this.writable = false;
+        // if we haven't written anything, then go ahead and emit,
+        // even if we're not reading.
+        // we'll re-emit if a new 'end' listener is added anyway.
+        // This makes MP more suitable to write-only use cases.
+        if (this[FLOWING] || !this[PAUSED])
+            this[MAYBE_EMIT_END]();
+        return this;
+    }
+    // don't let the internal resume be overwritten
+    [RESUME]() {
+        if (this[DESTROYED])
+            return;
+        if (!this[DATALISTENERS] && !this[PIPES].length) {
+            this[DISCARDED] = true;
+        }
+        this[PAUSED] = false;
+        this[FLOWING] = true;
+        this.emit('resume');
+        if (this[BUFFER].length)
+            this[FLUSH]();
+        else if (this[EOF])
+            this[MAYBE_EMIT_END]();
+        else
+            this.emit('drain');
+    }
+    /**
+     * Resume the stream if it is currently in a paused state
+     *
+     * If called when there are no pipe destinations or `data` event listeners,
+     * this will place the stream in a "discarded" state, where all data will
+     * be thrown away. The discarded state is removed if a pipe destination or
+     * data handler is added, if pause() is called, or if any synchronous or
+     * asynchronous iteration is started.
+     */
+    resume() {
+        return this[RESUME]();
+    }
+    /**
+     * Pause the stream
+     */
+    pause() {
+        this[FLOWING] = false;
+        this[PAUSED] = true;
+        this[DISCARDED] = false;
+    }
+    /**
+     * true if the stream has been forcibly destroyed
+     */
+    get destroyed() {
+        return this[DESTROYED];
+    }
+    /**
+     * true if the stream is currently in a flowing state, meaning that
+     * any writes will be immediately emitted.
+     */
+    get flowing() {
+        return this[FLOWING];
+    }
+    /**
+     * true if the stream is currently in a paused state
+     */
+    get paused() {
+        return this[PAUSED];
+    }
+    [BUFFERPUSH](chunk) {
+        if (this[OBJECTMODE])
+            this[BUFFERLENGTH] += 1;
+        else
+            this[BUFFERLENGTH] += chunk.length;
+        this[BUFFER].push(chunk);
+    }
+    [BUFFERSHIFT]() {
+        if (this[OBJECTMODE])
+            this[BUFFERLENGTH] -= 1;
+        else
+            this[BUFFERLENGTH] -= this[BUFFER][0].length;
+        return this[BUFFER].shift();
+    }
+    [FLUSH](noDrain = false) {
+        do { } while (this[FLUSHCHUNK](this[BUFFERSHIFT]()) &&
+            this[BUFFER].length);
+        if (!noDrain && !this[BUFFER].length && !this[EOF])
+            this.emit('drain');
+    }
+    [FLUSHCHUNK](chunk) {
+        this.emit('data', chunk);
+        return this[FLOWING];
+    }
+    /**
+     * Pipe all data emitted by this stream into the destination provided.
+     *
+     * Triggers the flow of data.
+     */
+    pipe(dest, opts) {
+        if (this[DESTROYED])
+            return dest;
+        this[DISCARDED] = false;
+        const ended = this[EMITTED_END];
+        opts = opts || {};
+        if (dest === proc.stdout || dest === proc.stderr)
+            opts.end = false;
+        else
+            opts.end = opts.end !== false;
+        opts.proxyErrors = !!opts.proxyErrors;
+        // piping an ended stream ends immediately
+        if (ended) {
+            if (opts.end)
+                dest.end();
+        }
+        else {
+            // "as" here just ignores the WType, which pipes don't care about,
+            // since they're only consuming from us, and writing to the dest
+            this[PIPES].push(!opts.proxyErrors
+                ? new Pipe(this, dest, opts)
+                : new PipeProxyErrors(this, dest, opts));
+            if (this[ASYNC])
+                defer(() => this[RESUME]());
+            else
+                this[RESUME]();
+        }
+        return dest;
+    }
+    /**
+     * Fully unhook a piped destination stream.
+     *
+     * If the destination stream was the only consumer of this stream (ie,
+     * there are no other piped destinations or `'data'` event listeners)
+     * then the flow of data will stop until there is another consumer or
+     * {@link Minipass#resume} is explicitly called.
+     */
+    unpipe(dest) {
+        const p = this[PIPES].find(p => p.dest === dest);
+        if (p) {
+            if (this[PIPES].length === 1) {
+                if (this[FLOWING] && this[DATALISTENERS] === 0) {
+                    this[FLOWING] = false;
+                }
+                this[PIPES] = [];
+            }
+            else
+                this[PIPES].splice(this[PIPES].indexOf(p), 1);
+            p.unpipe();
+        }
+    }
+    /**
+     * Alias for {@link Minipass#on}
+     */
+    addListener(ev, handler) {
+        return this.on(ev, handler);
+    }
+    /**
+     * Mostly identical to `EventEmitter.on`, with the following
+     * behavior differences to prevent data loss and unnecessary hangs:
+     *
+     * - Adding a 'data' event handler will trigger the flow of data
+     *
+     * - Adding a 'readable' event handler when there is data waiting to be read
+     *   will cause 'readable' to be emitted immediately.
+     *
+     * - Adding an 'endish' event handler ('end', 'finish', etc.) which has
+     *   already passed will cause the event to be emitted immediately and all
+     *   handlers removed.
+     *
+     * - Adding an 'error' event handler after an error has been emitted will
+     *   cause the event to be re-emitted immediately with the error previously
+     *   raised.
+     */
+    on(ev, handler) {
+        const ret = super.on(ev, handler);
+        if (ev === 'data') {
+            this[DISCARDED] = false;
+            this[DATALISTENERS]++;
+            if (!this[PIPES].length && !this[FLOWING]) {
+                this[RESUME]();
+            }
+        }
+        else if (ev === 'readable' && this[BUFFERLENGTH] !== 0) {
+            super.emit('readable');
+        }
+        else if (isEndish(ev) && this[EMITTED_END]) {
+            super.emit(ev);
+            this.removeAllListeners(ev);
+        }
+        else if (ev === 'error' && this[EMITTED_ERROR]) {
+            const h = handler;
+            if (this[ASYNC])
+                defer(() => h.call(this, this[EMITTED_ERROR]));
+            else
+                h.call(this, this[EMITTED_ERROR]);
+        }
+        return ret;
+    }
+    /**
+     * Alias for {@link Minipass#off}
+     */
+    removeListener(ev, handler) {
+        return this.off(ev, handler);
+    }
+    /**
+     * Mostly identical to `EventEmitter.off`
+     *
+     * If a 'data' event handler is removed, and it was the last consumer
+     * (ie, there are no pipe destinations or other 'data' event listeners),
+     * then the flow of data will stop until there is another consumer or
+     * {@link Minipass#resume} is explicitly called.
+     */
+    off(ev, handler) {
+        const ret = super.off(ev, handler);
+        // if we previously had listeners, and now we don't, and we don't
+        // have any pipes, then stop the flow, unless it's been explicitly
+        // put in a discarded flowing state via stream.resume().
+        if (ev === 'data') {
+            this[DATALISTENERS] = this.listeners('data').length;
+            if (this[DATALISTENERS] === 0 &&
+                !this[DISCARDED] &&
+                !this[PIPES].length) {
+                this[FLOWING] = false;
+            }
+        }
+        return ret;
+    }
+    /**
+     * Mostly identical to `EventEmitter.removeAllListeners`
+     *
+     * If all 'data' event handlers are removed, and they were the last consumer
+     * (ie, there are no pipe destinations), then the flow of data will stop
+     * until there is another consumer or {@link Minipass#resume} is explicitly
+     * called.
+     */
+    removeAllListeners(ev) {
+        const ret = super.removeAllListeners(ev);
+        if (ev === 'data' || ev === undefined) {
+            this[DATALISTENERS] = 0;
+            if (!this[DISCARDED] && !this[PIPES].length) {
+                this[FLOWING] = false;
+            }
+        }
+        return ret;
+    }
+    /**
+     * true if the 'end' event has been emitted
+     */
+    get emittedEnd() {
+        return this[EMITTED_END];
+    }
+    [MAYBE_EMIT_END]() {
+        if (!this[EMITTING_END] &&
+            !this[EMITTED_END] &&
+            !this[DESTROYED] &&
+            this[BUFFER].length === 0 &&
+            this[EOF]) {
+            this[EMITTING_END] = true;
+            this.emit('end');
+            this.emit('prefinish');
+            this.emit('finish');
+            if (this[CLOSED])
+                this.emit('close');
+            this[EMITTING_END] = false;
+        }
+    }
+    /**
+     * Mostly identical to `EventEmitter.emit`, with the following
+     * behavior differences to prevent data loss and unnecessary hangs:
+     *
+     * If the stream has been destroyed, and the event is something other
+     * than 'close' or 'error', then `false` is returned and no handlers
+     * are called.
+     *
+     * If the event is 'end', and has already been emitted, then the event
+     * is ignored. If the stream is in a paused or non-flowing state, then
+     * the event will be deferred until data flow resumes. If the stream is
+     * async, then handlers will be called on the next tick rather than
+     * immediately.
+     *
+     * If the event is 'close', and 'end' has not yet been emitted, then
+     * the event will be deferred until after 'end' is emitted.
+     *
+     * If the event is 'error', and an AbortSignal was provided for the stream,
+     * and there are no listeners, then the event is ignored, matching the
+     * behavior of node core streams in the presense of an AbortSignal.
+     *
+     * If the event is 'finish' or 'prefinish', then all listeners will be
+     * removed after emitting the event, to prevent double-firing.
+     */
+    emit(ev, ...args) {
+        const data = args[0];
+        // error and close are only events allowed after calling destroy()
+        if (ev !== 'error' &&
+            ev !== 'close' &&
+            ev !== DESTROYED &&
+            this[DESTROYED]) {
+            return false;
+        }
+        else if (ev === 'data') {
+            return !this[OBJECTMODE] && !data
+                ? false
+                : this[ASYNC]
+                    ? (defer(() => this[EMITDATA](data)), true)
+                    : this[EMITDATA](data);
+        }
+        else if (ev === 'end') {
+            return this[EMITEND]();
+        }
+        else if (ev === 'close') {
+            this[CLOSED] = true;
+            // don't emit close before 'end' and 'finish'
+            if (!this[EMITTED_END] && !this[DESTROYED])
+                return false;
+            const ret = super.emit('close');
+            this.removeAllListeners('close');
+            return ret;
+        }
+        else if (ev === 'error') {
+            this[EMITTED_ERROR] = data;
+            super.emit(ERROR, data);
+            const ret = !this[SIGNAL] || this.listeners('error').length
+                ? super.emit('error', data)
+                : false;
+            this[MAYBE_EMIT_END]();
+            return ret;
+        }
+        else if (ev === 'resume') {
+            const ret = super.emit('resume');
+            this[MAYBE_EMIT_END]();
+            return ret;
+        }
+        else if (ev === 'finish' || ev === 'prefinish') {
+            const ret = super.emit(ev);
+            this.removeAllListeners(ev);
+            return ret;
+        }
+        // Some other unknown event
+        const ret = super.emit(ev, ...args);
+        this[MAYBE_EMIT_END]();
+        return ret;
+    }
+    [EMITDATA](data) {
+        for (const p of this[PIPES]) {
+            if (p.dest.write(data) === false)
+                this.pause();
+        }
+        const ret = this[DISCARDED] ? false : super.emit('data', data);
+        this[MAYBE_EMIT_END]();
+        return ret;
+    }
+    [EMITEND]() {
+        if (this[EMITTED_END])
+            return false;
+        this[EMITTED_END] = true;
+        this.readable = false;
+        return this[ASYNC]
+            ? (defer(() => this[EMITEND2]()), true)
+            : this[EMITEND2]();
+    }
+    [EMITEND2]() {
+        if (this[DECODER]) {
+            const data = this[DECODER].end();
+            if (data) {
+                for (const p of this[PIPES]) {
+                    p.dest.write(data);
+                }
+                if (!this[DISCARDED])
+                    super.emit('data', data);
+            }
+        }
+        for (const p of this[PIPES]) {
+            p.end();
+        }
+        const ret = super.emit('end');
+        this.removeAllListeners('end');
+        return ret;
+    }
+    /**
+     * Return a Promise that resolves to an array of all emitted data once
+     * the stream ends.
+     */
+    async collect() {
+        const buf = Object.assign([], {
+            dataLength: 0,
+        });
+        if (!this[OBJECTMODE])
+            buf.dataLength = 0;
+        // set the promise first, in case an error is raised
+        // by triggering the flow here.
+        const p = this.promise();
+        this.on('data', c => {
+            buf.push(c);
+            if (!this[OBJECTMODE])
+                buf.dataLength += c.length;
+        });
+        await p;
+        return buf;
+    }
+    /**
+     * Return a Promise that resolves to the concatenation of all emitted data
+     * once the stream ends.
+     *
+     * Not allowed on objectMode streams.
+     */
+    async concat() {
+        if (this[OBJECTMODE]) {
+            throw new Error('cannot concat in objectMode');
+        }
+        const buf = await this.collect();
+        return (this[ENCODING]
+            ? buf.join('')
+            : Buffer.concat(buf, buf.dataLength));
+    }
+    /**
+     * Return a void Promise that resolves once the stream ends.
+     */
+    async promise() {
+        return new Promise((resolve, reject) => {
+            this.on(DESTROYED, () => reject(new Error('stream destroyed')));
+            this.on('error', er => reject(er));
+            this.on('end', () => resolve());
+        });
+    }
+    /**
+     * Asynchronous `for await of` iteration.
+     *
+     * This will continue emitting all chunks until the stream terminates.
+     */
+    [Symbol.asyncIterator]() {
+        // set this up front, in case the consumer doesn't call next()
+        // right away.
+        this[DISCARDED] = false;
+        let stopped = false;
+        const stop = async () => {
+            this.pause();
+            stopped = true;
+            return { value: undefined, done: true };
+        };
+        const next = () => {
+            if (stopped)
+                return stop();
+            const res = this.read();
+            if (res !== null)
+                return Promise.resolve({ done: false, value: res });
+            if (this[EOF])
+                return stop();
+            let resolve;
+            let reject;
+            const onerr = (er) => {
+                this.off('data', ondata);
+                this.off('end', onend);
+                this.off(DESTROYED, ondestroy);
+                stop();
+                reject(er);
+            };
+            const ondata = (value) => {
+                this.off('error', onerr);
+                this.off('end', onend);
+                this.off(DESTROYED, ondestroy);
+                this.pause();
+                resolve({ value, done: !!this[EOF] });
+            };
+            const onend = () => {
+                this.off('error', onerr);
+                this.off('data', ondata);
+                this.off(DESTROYED, ondestroy);
+                stop();
+                resolve({ done: true, value: undefined });
+            };
+            const ondestroy = () => onerr(new Error('stream destroyed'));
+            return new Promise((res, rej) => {
+                reject = rej;
+                resolve = res;
+                this.once(DESTROYED, ondestroy);
+                this.once('error', onerr);
+                this.once('end', onend);
+                this.once('data', ondata);
+            });
+        };
+        return {
+            next,
+            throw: stop,
+            return: stop,
+            [Symbol.asyncIterator]() {
+                return this;
+            },
+        };
+    }
+    /**
+     * Synchronous `for of` iteration.
+     *
+     * The iteration will terminate when the internal buffer runs out, even
+     * if the stream has not yet terminated.
+     */
+    [Symbol.iterator]() {
+        // set this up front, in case the consumer doesn't call next()
+        // right away.
+        this[DISCARDED] = false;
+        let stopped = false;
+        const stop = () => {
+            this.pause();
+            this.off(ERROR, stop);
+            this.off(DESTROYED, stop);
+            this.off('end', stop);
+            stopped = true;
+            return { done: true, value: undefined };
+        };
+        const next = () => {
+            if (stopped)
+                return stop();
+            const value = this.read();
+            return value === null ? stop() : { done: false, value };
+        };
+        this.once('end', stop);
+        this.once(ERROR, stop);
+        this.once(DESTROYED, stop);
+        return {
+            next,
+            throw: stop,
+            return: stop,
+            [Symbol.iterator]() {
+                return this;
+            },
+        };
+    }
+    /**
+     * Destroy a stream, preventing it from being used for any further purpose.
+     *
+     * If the stream has a `close()` method, then it will be called on
+     * destruction.
+     *
+     * After destruction, any attempt to write data, read data, or emit most
+     * events will be ignored.
+     *
+     * If an error argument is provided, then it will be emitted in an
+     * 'error' event.
+     */
+    destroy(er) {
+        if (this[DESTROYED]) {
+            if (er)
+                this.emit('error', er);
+            else
+                this.emit(DESTROYED);
+            return this;
+        }
+        this[DESTROYED] = true;
+        this[DISCARDED] = true;
+        // throw away all buffered data, it's never coming out
+        this[BUFFER].length = 0;
+        this[BUFFERLENGTH] = 0;
+        const wc = this;
+        if (typeof wc.close === 'function' && !this[CLOSED])
+            wc.close();
+        if (er)
+            this.emit('error', er);
+        // if no error to emit, still reject pending promises
+        else
+            this.emit(DESTROYED);
+        return this;
+    }
+    /**
+     * Alias for {@link isStream}
+     *
+     * Former export location, maintained for backwards compatibility.
+     *
+     * @deprecated
+     */
+    static get isStream() {
+        return isStream;
+    }
+}
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../../node_modules/path-scurry/dist/esm/index.js
+
+
+
+
+
+const realpathSync = external_fs_.realpathSync.native;
+// TODO: test perf of fs/promises realpath vs realpathCB,
+// since the promises one uses realpath.native
+
+
+const defaultFS = {
+    lstatSync: external_fs_.lstatSync,
+    readdir: external_fs_.readdir,
+    readdirSync: external_fs_.readdirSync,
+    readlinkSync: external_fs_.readlinkSync,
+    realpathSync,
+    promises: {
+        lstat: external_node_fs_promises_namespaceObject.lstat,
+        readdir: external_node_fs_promises_namespaceObject.readdir,
+        readlink: external_node_fs_promises_namespaceObject.readlink,
+        realpath: external_node_fs_promises_namespaceObject.realpath,
+    },
+};
+// if they just gave us require('fs') then use our default
+const fsFromOption = (fsOption) => !fsOption || fsOption === defaultFS || fsOption === external_node_fs_namespaceObject_0 ?
+    defaultFS
+    : {
+        ...defaultFS,
+        ...fsOption,
+        promises: {
+            ...defaultFS.promises,
+            ...(fsOption.promises || {}),
+        },
+    };
+// turn something like //?/c:/ into c:\
+const uncDriveRegexp = /^\\\\\?\\([a-z]:)\\?$/i;
+const uncToDrive = (rootPath) => rootPath.replace(/\//g, '\\').replace(uncDriveRegexp, '$1\\');
+// windows paths are separated by either / or \
+const eitherSep = /[\\\/]/;
+const UNKNOWN = 0; // may not even exist, for all we know
+const IFIFO = 0b0001;
+const IFCHR = 0b0010;
+const IFDIR = 0b0100;
+const IFBLK = 0b0110;
+const IFREG = 0b1000;
+const IFLNK = 0b1010;
+const IFSOCK = 0b1100;
+const IFMT = 0b1111;
+// mask to unset low 4 bits
+const IFMT_UNKNOWN = ~IFMT;
+// set after successfully calling readdir() and getting entries.
+const READDIR_CALLED = 0b0000_0001_0000;
+// set after a successful lstat()
+const LSTAT_CALLED = 0b0000_0010_0000;
+// set if an entry (or one of its parents) is definitely not a dir
+const ENOTDIR = 0b0000_0100_0000;
+// set if an entry (or one of its parents) does not exist
+// (can also be set on lstat errors like EACCES or ENAMETOOLONG)
+const ENOENT = 0b0000_1000_0000;
+// cannot have child entries -- also verify &IFMT is either IFDIR or IFLNK
+// set if we fail to readlink
+const ENOREADLINK = 0b0001_0000_0000;
+// set if we know realpath() will fail
+const ENOREALPATH = 0b0010_0000_0000;
+const ENOCHILD = ENOTDIR | ENOENT | ENOREALPATH;
+const TYPEMASK = 0b0011_1111_1111;
+const entToType = (s) => s.isFile() ? IFREG
+    : s.isDirectory() ? IFDIR
+        : s.isSymbolicLink() ? IFLNK
+            : s.isCharacterDevice() ? IFCHR
+                : s.isBlockDevice() ? IFBLK
+                    : s.isSocket() ? IFSOCK
+                        : s.isFIFO() ? IFIFO
+                            : UNKNOWN;
+// normalize unicode path names
+const normalizeCache = new Map();
+const normalize = (s) => {
+    const c = normalizeCache.get(s);
+    if (c)
+        return c;
+    const n = s.normalize('NFKD');
+    normalizeCache.set(s, n);
+    return n;
+};
+const normalizeNocaseCache = new Map();
+const normalizeNocase = (s) => {
+    const c = normalizeNocaseCache.get(s);
+    if (c)
+        return c;
+    const n = normalize(s.toLowerCase());
+    normalizeNocaseCache.set(s, n);
+    return n;
+};
+/**
+ * An LRUCache for storing resolved path strings or Path objects.
+ * @internal
+ */
+class ResolveCache extends LRUCache {
+    constructor() {
+        super({ max: 256 });
+    }
+}
+// In order to prevent blowing out the js heap by allocating hundreds of
+// thousands of Path entries when walking extremely large trees, the "children"
+// in this tree are represented by storing an array of Path entries in an
+// LRUCache, indexed by the parent.  At any time, Path.children() may return an
+// empty array, indicating that it doesn't know about any of its children, and
+// thus has to rebuild that cache.  This is fine, it just means that we don't
+// benefit as much from having the cached entries, but huge directory walks
+// don't blow out the stack, and smaller ones are still as fast as possible.
+//
+//It does impose some complexity when building up the readdir data, because we
+//need to pass a reference to the children array that we started with.
+/**
+ * an LRUCache for storing child entries.
+ * @internal
+ */
+class ChildrenCache extends LRUCache {
+    constructor(maxSize = 16 * 1024) {
+        super({
+            maxSize,
+            // parent + children
+            sizeCalculation: a => a.length + 1,
+        });
+    }
+}
+const setAsCwd = Symbol('PathScurry setAsCwd');
+/**
+ * Path objects are sort of like a super-powered
+ * {@link https://nodejs.org/docs/latest/api/fs.html#class-fsdirent fs.Dirent}
+ *
+ * Each one represents a single filesystem entry on disk, which may or may not
+ * exist. It includes methods for reading various types of information via
+ * lstat, readlink, and readdir, and caches all information to the greatest
+ * degree possible.
+ *
+ * Note that fs operations that would normally throw will instead return an
+ * "empty" value. This is in order to prevent excessive overhead from error
+ * stack traces.
+ */
+class PathBase {
+    /**
+     * the basename of this path
+     *
+     * **Important**: *always* test the path name against any test string
+     * usingthe {@link isNamed} method, and not by directly comparing this
+     * string. Otherwise, unicode path strings that the system sees as identical
+     * will not be properly treated as the same path, leading to incorrect
+     * behavior and possible security issues.
+     */
+    name;
+    /**
+     * the Path entry corresponding to the path root.
+     *
+     * @internal
+     */
+    root;
+    /**
+     * All roots found within the current PathScurry family
+     *
+     * @internal
+     */
+    roots;
+    /**
+     * a reference to the parent path, or undefined in the case of root entries
+     *
+     * @internal
+     */
+    parent;
+    /**
+     * boolean indicating whether paths are compared case-insensitively
+     * @internal
+     */
+    nocase;
+    /**
+     * boolean indicating that this path is the current working directory
+     * of the PathScurry collection that contains it.
+     */
+    isCWD = false;
+    // potential default fs override
+    #fs;
+    // Stats fields
+    #dev;
+    get dev() {
+        return this.#dev;
+    }
+    #mode;
+    get mode() {
+        return this.#mode;
+    }
+    #nlink;
+    get nlink() {
+        return this.#nlink;
+    }
+    #uid;
+    get uid() {
+        return this.#uid;
+    }
+    #gid;
+    get gid() {
+        return this.#gid;
+    }
+    #rdev;
+    get rdev() {
+        return this.#rdev;
+    }
+    #blksize;
+    get blksize() {
+        return this.#blksize;
+    }
+    #ino;
+    get ino() {
+        return this.#ino;
+    }
+    #size;
+    get size() {
+        return this.#size;
+    }
+    #blocks;
+    get blocks() {
+        return this.#blocks;
+    }
+    #atimeMs;
+    get atimeMs() {
+        return this.#atimeMs;
+    }
+    #mtimeMs;
+    get mtimeMs() {
+        return this.#mtimeMs;
+    }
+    #ctimeMs;
+    get ctimeMs() {
+        return this.#ctimeMs;
+    }
+    #birthtimeMs;
+    get birthtimeMs() {
+        return this.#birthtimeMs;
+    }
+    #atime;
+    get atime() {
+        return this.#atime;
+    }
+    #mtime;
+    get mtime() {
+        return this.#mtime;
+    }
+    #ctime;
+    get ctime() {
+        return this.#ctime;
+    }
+    #birthtime;
+    get birthtime() {
+        return this.#birthtime;
+    }
+    #matchName;
+    #depth;
+    #fullpath;
+    #fullpathPosix;
+    #relative;
+    #relativePosix;
+    #type;
+    #children;
+    #linkTarget;
+    #realpath;
+    /**
+     * This property is for compatibility with the Dirent class as of
+     * Node v20, where Dirent['parentPath'] refers to the path of the
+     * directory that was passed to readdir. For root entries, it's the path
+     * to the entry itself.
+     */
+    get parentPath() {
+        return (this.parent || this).fullpath();
+    }
+    /**
+     * Deprecated alias for Dirent['parentPath'] Somewhat counterintuitively,
+     * this property refers to the *parent* path, not the path object itself.
+     */
+    get path() {
+        return this.parentPath;
+    }
+    /**
+     * Do not create new Path objects directly.  They should always be accessed
+     * via the PathScurry class or other methods on the Path class.
+     *
+     * @internal
+     */
+    constructor(name, type = UNKNOWN, root, roots, nocase, children, opts) {
+        this.name = name;
+        this.#matchName = nocase ? normalizeNocase(name) : normalize(name);
+        this.#type = type & TYPEMASK;
+        this.nocase = nocase;
+        this.roots = roots;
+        this.root = root || this;
+        this.#children = children;
+        this.#fullpath = opts.fullpath;
+        this.#relative = opts.relative;
+        this.#relativePosix = opts.relativePosix;
+        this.parent = opts.parent;
+        if (this.parent) {
+            this.#fs = this.parent.#fs;
+        }
+        else {
+            this.#fs = fsFromOption(opts.fs);
+        }
+    }
+    /**
+     * Returns the depth of the Path object from its root.
+     *
+     * For example, a path at `/foo/bar` would have a depth of 2.
+     */
+    depth() {
+        if (this.#depth !== undefined)
+            return this.#depth;
+        if (!this.parent)
+            return (this.#depth = 0);
+        return (this.#depth = this.parent.depth() + 1);
+    }
+    /**
+     * @internal
+     */
+    childrenCache() {
+        return this.#children;
+    }
+    /**
+     * Get the Path object referenced by the string path, resolved from this Path
+     */
+    resolve(path) {
+        if (!path) {
+            return this;
+        }
+        const rootPath = this.getRootString(path);
+        const dir = path.substring(rootPath.length);
+        const dirParts = dir.split(this.splitSep);
+        const result = rootPath ?
+            this.getRoot(rootPath).#resolveParts(dirParts)
+            : this.#resolveParts(dirParts);
+        return result;
+    }
+    #resolveParts(dirParts) {
+        let p = this;
+        for (const part of dirParts) {
+            p = p.child(part);
+        }
+        return p;
+    }
+    /**
+     * Returns the cached children Path objects, if still available.  If they
+     * have fallen out of the cache, then returns an empty array, and resets the
+     * READDIR_CALLED bit, so that future calls to readdir() will require an fs
+     * lookup.
+     *
+     * @internal
+     */
+    children() {
+        const cached = this.#children.get(this);
+        if (cached) {
+            return cached;
+        }
+        const children = Object.assign([], { provisional: 0 });
+        this.#children.set(this, children);
+        this.#type &= ~READDIR_CALLED;
+        return children;
+    }
+    /**
+     * Resolves a path portion and returns or creates the child Path.
+     *
+     * Returns `this` if pathPart is `''` or `'.'`, or `parent` if pathPart is
+     * `'..'`.
+     *
+     * This should not be called directly.  If `pathPart` contains any path
+     * separators, it will lead to unsafe undefined behavior.
+     *
+     * Use `Path.resolve()` instead.
+     *
+     * @internal
+     */
+    child(pathPart, opts) {
+        if (pathPart === '' || pathPart === '.') {
+            return this;
+        }
+        if (pathPart === '..') {
+            return this.parent || this;
+        }
+        // find the child
+        const children = this.children();
+        const name = this.nocase ? normalizeNocase(pathPart) : normalize(pathPart);
+        for (const p of children) {
+            if (p.#matchName === name) {
+                return p;
+            }
+        }
+        // didn't find it, create provisional child, since it might not
+        // actually exist.  If we know the parent isn't a dir, then
+        // in fact it CAN'T exist.
+        const s = this.parent ? this.sep : '';
+        const fullpath = this.#fullpath ? this.#fullpath + s + pathPart : undefined;
+        const pchild = this.newChild(pathPart, UNKNOWN, {
+            ...opts,
+            parent: this,
+            fullpath,
+        });
+        if (!this.canReaddir()) {
+            pchild.#type |= ENOENT;
+        }
+        // don't have to update provisional, because if we have real children,
+        // then provisional is set to children.length, otherwise a lower number
+        children.push(pchild);
+        return pchild;
+    }
+    /**
+     * The relative path from the cwd. If it does not share an ancestor with
+     * the cwd, then this ends up being equivalent to the fullpath()
+     */
+    relative() {
+        if (this.isCWD)
+            return '';
+        if (this.#relative !== undefined) {
+            return this.#relative;
+        }
+        const name = this.name;
+        const p = this.parent;
+        if (!p) {
+            return (this.#relative = this.name);
+        }
+        const pv = p.relative();
+        return pv + (!pv || !p.parent ? '' : this.sep) + name;
+    }
+    /**
+     * The relative path from the cwd, using / as the path separator.
+     * If it does not share an ancestor with
+     * the cwd, then this ends up being equivalent to the fullpathPosix()
+     * On posix systems, this is identical to relative().
+     */
+    relativePosix() {
+        if (this.sep === '/')
+            return this.relative();
+        if (this.isCWD)
+            return '';
+        if (this.#relativePosix !== undefined)
+            return this.#relativePosix;
+        const name = this.name;
+        const p = this.parent;
+        if (!p) {
+            return (this.#relativePosix = this.fullpathPosix());
+        }
+        const pv = p.relativePosix();
+        return pv + (!pv || !p.parent ? '' : '/') + name;
+    }
+    /**
+     * The fully resolved path string for this Path entry
+     */
+    fullpath() {
+        if (this.#fullpath !== undefined) {
+            return this.#fullpath;
+        }
+        const name = this.name;
+        const p = this.parent;
+        if (!p) {
+            return (this.#fullpath = this.name);
+        }
+        const pv = p.fullpath();
+        const fp = pv + (!p.parent ? '' : this.sep) + name;
+        return (this.#fullpath = fp);
+    }
+    /**
+     * On platforms other than windows, this is identical to fullpath.
+     *
+     * On windows, this is overridden to return the forward-slash form of the
+     * full UNC path.
+     */
+    fullpathPosix() {
+        if (this.#fullpathPosix !== undefined)
+            return this.#fullpathPosix;
+        if (this.sep === '/')
+            return (this.#fullpathPosix = this.fullpath());
+        if (!this.parent) {
+            const p = this.fullpath().replace(/\\/g, '/');
+            if (/^[a-z]:\//i.test(p)) {
+                return (this.#fullpathPosix = `//?/${p}`);
+            }
+            else {
+                return (this.#fullpathPosix = p);
+            }
+        }
+        const p = this.parent;
+        const pfpp = p.fullpathPosix();
+        const fpp = pfpp + (!pfpp || !p.parent ? '' : '/') + this.name;
+        return (this.#fullpathPosix = fpp);
+    }
+    /**
+     * Is the Path of an unknown type?
+     *
+     * Note that we might know *something* about it if there has been a previous
+     * filesystem operation, for example that it does not exist, or is not a
+     * link, or whether it has child entries.
+     */
+    isUnknown() {
+        return (this.#type & IFMT) === UNKNOWN;
+    }
+    isType(type) {
+        return this[`is${type}`]();
+    }
+    getType() {
+        return (this.isUnknown() ? 'Unknown'
+            : this.isDirectory() ? 'Directory'
+                : this.isFile() ? 'File'
+                    : this.isSymbolicLink() ? 'SymbolicLink'
+                        : this.isFIFO() ? 'FIFO'
+                            : this.isCharacterDevice() ? 'CharacterDevice'
+                                : this.isBlockDevice() ? 'BlockDevice'
+                                    : /* c8 ignore start */ this.isSocket() ? 'Socket'
+                                        : 'Unknown');
+        /* c8 ignore stop */
+    }
+    /**
+     * Is the Path a regular file?
+     */
+    isFile() {
+        return (this.#type & IFMT) === IFREG;
+    }
+    /**
+     * Is the Path a directory?
+     */
+    isDirectory() {
+        return (this.#type & IFMT) === IFDIR;
+    }
+    /**
+     * Is the path a character device?
+     */
+    isCharacterDevice() {
+        return (this.#type & IFMT) === IFCHR;
+    }
+    /**
+     * Is the path a block device?
+     */
+    isBlockDevice() {
+        return (this.#type & IFMT) === IFBLK;
+    }
+    /**
+     * Is the path a FIFO pipe?
+     */
+    isFIFO() {
+        return (this.#type & IFMT) === IFIFO;
+    }
+    /**
+     * Is the path a socket?
+     */
+    isSocket() {
+        return (this.#type & IFMT) === IFSOCK;
+    }
+    /**
+     * Is the path a symbolic link?
+     */
+    isSymbolicLink() {
+        return (this.#type & IFLNK) === IFLNK;
+    }
+    /**
+     * Return the entry if it has been subject of a successful lstat, or
+     * undefined otherwise.
+     *
+     * Does not read the filesystem, so an undefined result *could* simply
+     * mean that we haven't called lstat on it.
+     */
+    lstatCached() {
+        return this.#type & LSTAT_CALLED ? this : undefined;
+    }
+    /**
+     * Return the cached link target if the entry has been the subject of a
+     * successful readlink, or undefined otherwise.
+     *
+     * Does not read the filesystem, so an undefined result *could* just mean we
+     * don't have any cached data. Only use it if you are very sure that a
+     * readlink() has been called at some point.
+     */
+    readlinkCached() {
+        return this.#linkTarget;
+    }
+    /**
+     * Returns the cached realpath target if the entry has been the subject
+     * of a successful realpath, or undefined otherwise.
+     *
+     * Does not read the filesystem, so an undefined result *could* just mean we
+     * don't have any cached data. Only use it if you are very sure that a
+     * realpath() has been called at some point.
+     */
+    realpathCached() {
+        return this.#realpath;
+    }
+    /**
+     * Returns the cached child Path entries array if the entry has been the
+     * subject of a successful readdir(), or [] otherwise.
+     *
+     * Does not read the filesystem, so an empty array *could* just mean we
+     * don't have any cached data. Only use it if you are very sure that a
+     * readdir() has been called recently enough to still be valid.
+     */
+    readdirCached() {
+        const children = this.children();
+        return children.slice(0, children.provisional);
+    }
+    /**
+     * Return true if it's worth trying to readlink.  Ie, we don't (yet) have
+     * any indication that readlink will definitely fail.
+     *
+     * Returns false if the path is known to not be a symlink, if a previous
+     * readlink failed, or if the entry does not exist.
+     */
+    canReadlink() {
+        if (this.#linkTarget)
+            return true;
+        if (!this.parent)
+            return false;
+        // cases where it cannot possibly succeed
+        const ifmt = this.#type & IFMT;
+        return !((ifmt !== UNKNOWN && ifmt !== IFLNK) ||
+            this.#type & ENOREADLINK ||
+            this.#type & ENOENT);
+    }
+    /**
+     * Return true if readdir has previously been successfully called on this
+     * path, indicating that cachedReaddir() is likely valid.
+     */
+    calledReaddir() {
+        return !!(this.#type & READDIR_CALLED);
+    }
+    /**
+     * Returns true if the path is known to not exist. That is, a previous lstat
+     * or readdir failed to verify its existence when that would have been
+     * expected, or a parent entry was marked either enoent or enotdir.
+     */
+    isENOENT() {
+        return !!(this.#type & ENOENT);
+    }
+    /**
+     * Return true if the path is a match for the given path name.  This handles
+     * case sensitivity and unicode normalization.
+     *
+     * Note: even on case-sensitive systems, it is **not** safe to test the
+     * equality of the `.name` property to determine whether a given pathname
+     * matches, due to unicode normalization mismatches.
+     *
+     * Always use this method instead of testing the `path.name` property
+     * directly.
+     */
+    isNamed(n) {
+        return !this.nocase ?
+            this.#matchName === normalize(n)
+            : this.#matchName === normalizeNocase(n);
+    }
+    /**
+     * Return the Path object corresponding to the target of a symbolic link.
+     *
+     * If the Path is not a symbolic link, or if the readlink call fails for any
+     * reason, `undefined` is returned.
+     *
+     * Result is cached, and thus may be outdated if the filesystem is mutated.
+     */
+    async readlink() {
+        const target = this.#linkTarget;
+        if (target) {
+            return target;
+        }
+        if (!this.canReadlink()) {
+            return undefined;
+        }
+        /* c8 ignore start */
+        // already covered by the canReadlink test, here for ts grumples
+        if (!this.parent) {
+            return undefined;
+        }
+        /* c8 ignore stop */
+        try {
+            const read = await this.#fs.promises.readlink(this.fullpath());
+            const linkTarget = (await this.parent.realpath())?.resolve(read);
+            if (linkTarget) {
+                return (this.#linkTarget = linkTarget);
+            }
+        }
+        catch (er) {
+            this.#readlinkFail(er.code);
+            return undefined;
+        }
+    }
+    /**
+     * Synchronous {@link PathBase.readlink}
+     */
+    readlinkSync() {
+        const target = this.#linkTarget;
+        if (target) {
+            return target;
+        }
+        if (!this.canReadlink()) {
+            return undefined;
+        }
+        /* c8 ignore start */
+        // already covered by the canReadlink test, here for ts grumples
+        if (!this.parent) {
+            return undefined;
+        }
+        /* c8 ignore stop */
+        try {
+            const read = this.#fs.readlinkSync(this.fullpath());
+            const linkTarget = this.parent.realpathSync()?.resolve(read);
+            if (linkTarget) {
+                return (this.#linkTarget = linkTarget);
+            }
+        }
+        catch (er) {
+            this.#readlinkFail(er.code);
+            return undefined;
+        }
+    }
+    #readdirSuccess(children) {
+        // succeeded, mark readdir called bit
+        this.#type |= READDIR_CALLED;
+        // mark all remaining provisional children as ENOENT
+        for (let p = children.provisional; p < children.length; p++) {
+            const c = children[p];
+            if (c)
+                c.#markENOENT();
+        }
+    }
+    #markENOENT() {
+        // mark as UNKNOWN and ENOENT
+        if (this.#type & ENOENT)
+            return;
+        this.#type = (this.#type | ENOENT) & IFMT_UNKNOWN;
+        this.#markChildrenENOENT();
+    }
+    #markChildrenENOENT() {
+        // all children are provisional and do not exist
+        const children = this.children();
+        children.provisional = 0;
+        for (const p of children) {
+            p.#markENOENT();
+        }
+    }
+    #markENOREALPATH() {
+        this.#type |= ENOREALPATH;
+        this.#markENOTDIR();
+    }
+    // save the information when we know the entry is not a dir
+    #markENOTDIR() {
+        // entry is not a directory, so any children can't exist.
+        // this *should* be impossible, since any children created
+        // after it's been marked ENOTDIR should be marked ENOENT,
+        // so it won't even get to this point.
+        /* c8 ignore start */
+        if (this.#type & ENOTDIR)
+            return;
+        /* c8 ignore stop */
+        let t = this.#type;
+        // this could happen if we stat a dir, then delete it,
+        // then try to read it or one of its children.
+        if ((t & IFMT) === IFDIR)
+            t &= IFMT_UNKNOWN;
+        this.#type = t | ENOTDIR;
+        this.#markChildrenENOENT();
+    }
+    #readdirFail(code = '') {
+        // markENOTDIR and markENOENT also set provisional=0
+        if (code === 'ENOTDIR' || code === 'EPERM') {
+            this.#markENOTDIR();
+        }
+        else if (code === 'ENOENT') {
+            this.#markENOENT();
+        }
+        else {
+            this.children().provisional = 0;
+        }
+    }
+    #lstatFail(code = '') {
+        // Windows just raises ENOENT in this case, disable for win CI
+        /* c8 ignore start */
+        if (code === 'ENOTDIR') {
+            // already know it has a parent by this point
+            const p = this.parent;
+            p.#markENOTDIR();
+        }
+        else if (code === 'ENOENT') {
+            /* c8 ignore stop */
+            this.#markENOENT();
+        }
+    }
+    #readlinkFail(code = '') {
+        let ter = this.#type;
+        ter |= ENOREADLINK;
+        if (code === 'ENOENT')
+            ter |= ENOENT;
+        // windows gets a weird error when you try to readlink a file
+        if (code === 'EINVAL' || code === 'UNKNOWN') {
+            // exists, but not a symlink, we don't know WHAT it is, so remove
+            // all IFMT bits.
+            ter &= IFMT_UNKNOWN;
+        }
+        this.#type = ter;
+        // windows just gets ENOENT in this case.  We do cover the case,
+        // just disabled because it's impossible on Windows CI
+        /* c8 ignore start */
+        if (code === 'ENOTDIR' && this.parent) {
+            this.parent.#markENOTDIR();
+        }
+        /* c8 ignore stop */
+    }
+    #readdirAddChild(e, c) {
+        return (this.#readdirMaybePromoteChild(e, c) ||
+            this.#readdirAddNewChild(e, c));
+    }
+    #readdirAddNewChild(e, c) {
+        // alloc new entry at head, so it's never provisional
+        const type = entToType(e);
+        const child = this.newChild(e.name, type, { parent: this });
+        const ifmt = child.#type & IFMT;
+        if (ifmt !== IFDIR && ifmt !== IFLNK && ifmt !== UNKNOWN) {
+            child.#type |= ENOTDIR;
+        }
+        c.unshift(child);
+        c.provisional++;
+        return child;
+    }
+    #readdirMaybePromoteChild(e, c) {
+        for (let p = c.provisional; p < c.length; p++) {
+            const pchild = c[p];
+            const name = this.nocase ? normalizeNocase(e.name) : normalize(e.name);
+            if (name !== pchild.#matchName) {
+                continue;
+            }
+            return this.#readdirPromoteChild(e, pchild, p, c);
+        }
+    }
+    #readdirPromoteChild(e, p, index, c) {
+        const v = p.name;
+        // retain any other flags, but set ifmt from dirent
+        p.#type = (p.#type & IFMT_UNKNOWN) | entToType(e);
+        // case sensitivity fixing when we learn the true name.
+        if (v !== e.name)
+            p.name = e.name;
+        // just advance provisional index (potentially off the list),
+        // otherwise we have to splice/pop it out and re-insert at head
+        if (index !== c.provisional) {
+            if (index === c.length - 1)
+                c.pop();
+            else
+                c.splice(index, 1);
+            c.unshift(p);
+        }
+        c.provisional++;
+        return p;
+    }
+    /**
+     * Call lstat() on this Path, and update all known information that can be
+     * determined.
+     *
+     * Note that unlike `fs.lstat()`, the returned value does not contain some
+     * information, such as `mode`, `dev`, `nlink`, and `ino`.  If that
+     * information is required, you will need to call `fs.lstat` yourself.
+     *
+     * If the Path refers to a nonexistent file, or if the lstat call fails for
+     * any reason, `undefined` is returned.  Otherwise the updated Path object is
+     * returned.
+     *
+     * Results are cached, and thus may be out of date if the filesystem is
+     * mutated.
+     */
+    async lstat() {
+        if ((this.#type & ENOENT) === 0) {
+            try {
+                this.#applyStat(await this.#fs.promises.lstat(this.fullpath()));
+                return this;
+            }
+            catch (er) {
+                this.#lstatFail(er.code);
+            }
+        }
+    }
+    /**
+     * synchronous {@link PathBase.lstat}
+     */
+    lstatSync() {
+        if ((this.#type & ENOENT) === 0) {
+            try {
+                this.#applyStat(this.#fs.lstatSync(this.fullpath()));
+                return this;
+            }
+            catch (er) {
+                this.#lstatFail(er.code);
+            }
+        }
+    }
+    #applyStat(st) {
+        const { atime, atimeMs, birthtime, birthtimeMs, blksize, blocks, ctime, ctimeMs, dev, gid, ino, mode, mtime, mtimeMs, nlink, rdev, size, uid, } = st;
+        this.#atime = atime;
+        this.#atimeMs = atimeMs;
+        this.#birthtime = birthtime;
+        this.#birthtimeMs = birthtimeMs;
+        this.#blksize = blksize;
+        this.#blocks = blocks;
+        this.#ctime = ctime;
+        this.#ctimeMs = ctimeMs;
+        this.#dev = dev;
+        this.#gid = gid;
+        this.#ino = ino;
+        this.#mode = mode;
+        this.#mtime = mtime;
+        this.#mtimeMs = mtimeMs;
+        this.#nlink = nlink;
+        this.#rdev = rdev;
+        this.#size = size;
+        this.#uid = uid;
+        const ifmt = entToType(st);
+        // retain any other flags, but set the ifmt
+        this.#type = (this.#type & IFMT_UNKNOWN) | ifmt | LSTAT_CALLED;
+        if (ifmt !== UNKNOWN && ifmt !== IFDIR && ifmt !== IFLNK) {
+            this.#type |= ENOTDIR;
+        }
+    }
+    #onReaddirCB = [];
+    #readdirCBInFlight = false;
+    #callOnReaddirCB(children) {
+        this.#readdirCBInFlight = false;
+        const cbs = this.#onReaddirCB.slice();
+        this.#onReaddirCB.length = 0;
+        cbs.forEach(cb => cb(null, children));
+    }
+    /**
+     * Standard node-style callback interface to get list of directory entries.
+     *
+     * If the Path cannot or does not contain any children, then an empty array
+     * is returned.
+     *
+     * Results are cached, and thus may be out of date if the filesystem is
+     * mutated.
+     *
+     * @param cb The callback called with (er, entries).  Note that the `er`
+     * param is somewhat extraneous, as all readdir() errors are handled and
+     * simply result in an empty set of entries being returned.
+     * @param allowZalgo Boolean indicating that immediately known results should
+     * *not* be deferred with `queueMicrotask`. Defaults to `false`. Release
+     * zalgo at your peril, the dark pony lord is devious and unforgiving.
+     */
+    readdirCB(cb, allowZalgo = false) {
+        if (!this.canReaddir()) {
+            if (allowZalgo)
+                cb(null, []);
+            else
+                queueMicrotask(() => cb(null, []));
+            return;
+        }
+        const children = this.children();
+        if (this.calledReaddir()) {
+            const c = children.slice(0, children.provisional);
+            if (allowZalgo)
+                cb(null, c);
+            else
+                queueMicrotask(() => cb(null, c));
+            return;
+        }
+        // don't have to worry about zalgo at this point.
+        this.#onReaddirCB.push(cb);
+        if (this.#readdirCBInFlight) {
+            return;
+        }
+        this.#readdirCBInFlight = true;
+        // else read the directory, fill up children
+        // de-provisionalize any provisional children.
+        const fullpath = this.fullpath();
+        this.#fs.readdir(fullpath, { withFileTypes: true }, (er, entries) => {
+            if (er) {
+                this.#readdirFail(er.code);
+                children.provisional = 0;
+            }
+            else {
+                // if we didn't get an error, we always get entries.
+                //@ts-ignore
+                for (const e of entries) {
+                    this.#readdirAddChild(e, children);
+                }
+                this.#readdirSuccess(children);
+            }
+            this.#callOnReaddirCB(children.slice(0, children.provisional));
+            return;
+        });
+    }
+    #asyncReaddirInFlight;
+    /**
+     * Return an array of known child entries.
+     *
+     * If the Path cannot or does not contain any children, then an empty array
+     * is returned.
+     *
+     * Results are cached, and thus may be out of date if the filesystem is
+     * mutated.
+     */
+    async readdir() {
+        if (!this.canReaddir()) {
+            return [];
+        }
+        const children = this.children();
+        if (this.calledReaddir()) {
+            return children.slice(0, children.provisional);
+        }
+        // else read the directory, fill up children
+        // de-provisionalize any provisional children.
+        const fullpath = this.fullpath();
+        if (this.#asyncReaddirInFlight) {
+            await this.#asyncReaddirInFlight;
+        }
+        else {
+            /* c8 ignore start */
+            let resolve = () => { };
+            /* c8 ignore stop */
+            this.#asyncReaddirInFlight = new Promise(res => (resolve = res));
+            try {
+                for (const e of await this.#fs.promises.readdir(fullpath, {
+                    withFileTypes: true,
+                })) {
+                    this.#readdirAddChild(e, children);
+                }
+                this.#readdirSuccess(children);
+            }
+            catch (er) {
+                this.#readdirFail(er.code);
+                children.provisional = 0;
+            }
+            this.#asyncReaddirInFlight = undefined;
+            resolve();
+        }
+        return children.slice(0, children.provisional);
+    }
+    /**
+     * synchronous {@link PathBase.readdir}
+     */
+    readdirSync() {
+        if (!this.canReaddir()) {
+            return [];
+        }
+        const children = this.children();
+        if (this.calledReaddir()) {
+            return children.slice(0, children.provisional);
+        }
+        // else read the directory, fill up children
+        // de-provisionalize any provisional children.
+        const fullpath = this.fullpath();
+        try {
+            for (const e of this.#fs.readdirSync(fullpath, {
+                withFileTypes: true,
+            })) {
+                this.#readdirAddChild(e, children);
+            }
+            this.#readdirSuccess(children);
+        }
+        catch (er) {
+            this.#readdirFail(er.code);
+            children.provisional = 0;
+        }
+        return children.slice(0, children.provisional);
+    }
+    canReaddir() {
+        if (this.#type & ENOCHILD)
+            return false;
+        const ifmt = IFMT & this.#type;
+        // we always set ENOTDIR when setting IFMT, so should be impossible
+        /* c8 ignore start */
+        if (!(ifmt === UNKNOWN || ifmt === IFDIR || ifmt === IFLNK)) {
+            return false;
+        }
+        /* c8 ignore stop */
+        return true;
+    }
+    shouldWalk(dirs, walkFilter) {
+        return ((this.#type & IFDIR) === IFDIR &&
+            !(this.#type & ENOCHILD) &&
+            !dirs.has(this) &&
+            (!walkFilter || walkFilter(this)));
+    }
+    /**
+     * Return the Path object corresponding to path as resolved
+     * by realpath(3).
+     *
+     * If the realpath call fails for any reason, `undefined` is returned.
+     *
+     * Result is cached, and thus may be outdated if the filesystem is mutated.
+     * On success, returns a Path object.
+     */
+    async realpath() {
+        if (this.#realpath)
+            return this.#realpath;
+        if ((ENOREALPATH | ENOREADLINK | ENOENT) & this.#type)
+            return undefined;
+        try {
+            const rp = await this.#fs.promises.realpath(this.fullpath());
+            return (this.#realpath = this.resolve(rp));
+        }
+        catch (_) {
+            this.#markENOREALPATH();
+        }
+    }
+    /**
+     * Synchronous {@link realpath}
+     */
+    realpathSync() {
+        if (this.#realpath)
+            return this.#realpath;
+        if ((ENOREALPATH | ENOREADLINK | ENOENT) & this.#type)
+            return undefined;
+        try {
+            const rp = this.#fs.realpathSync(this.fullpath());
+            return (this.#realpath = this.resolve(rp));
+        }
+        catch (_) {
+            this.#markENOREALPATH();
+        }
+    }
+    /**
+     * Internal method to mark this Path object as the scurry cwd,
+     * called by {@link PathScurry#chdir}
+     *
+     * @internal
+     */
+    [setAsCwd](oldCwd) {
+        if (oldCwd === this)
+            return;
+        oldCwd.isCWD = false;
+        this.isCWD = true;
+        const changed = new Set([]);
+        let rp = [];
+        let p = this;
+        while (p && p.parent) {
+            changed.add(p);
+            p.#relative = rp.join(this.sep);
+            p.#relativePosix = rp.join('/');
+            p = p.parent;
+            rp.push('..');
+        }
+        // now un-memoize parents of old cwd
+        p = oldCwd;
+        while (p && p.parent && !changed.has(p)) {
+            p.#relative = undefined;
+            p.#relativePosix = undefined;
+            p = p.parent;
+        }
+    }
+}
+/**
+ * Path class used on win32 systems
+ *
+ * Uses `'\\'` as the path separator for returned paths, either `'\\'` or `'/'`
+ * as the path separator for parsing paths.
+ */
+class PathWin32 extends PathBase {
+    /**
+     * Separator for generating path strings.
+     */
+    sep = '\\';
+    /**
+     * Separator for parsing path strings.
+     */
+    splitSep = eitherSep;
+    /**
+     * Do not create new Path objects directly.  They should always be accessed
+     * via the PathScurry class or other methods on the Path class.
+     *
+     * @internal
+     */
+    constructor(name, type = UNKNOWN, root, roots, nocase, children, opts) {
+        super(name, type, root, roots, nocase, children, opts);
+    }
+    /**
+     * @internal
+     */
+    newChild(name, type = UNKNOWN, opts = {}) {
+        return new PathWin32(name, type, this.root, this.roots, this.nocase, this.childrenCache(), opts);
+    }
+    /**
+     * @internal
+     */
+    getRootString(path) {
+        return external_node_path_namespaceObject.win32.parse(path).root;
+    }
+    /**
+     * @internal
+     */
+    getRoot(rootPath) {
+        rootPath = uncToDrive(rootPath.toUpperCase());
+        if (rootPath === this.root.name) {
+            return this.root;
+        }
+        // ok, not that one, check if it matches another we know about
+        for (const [compare, root] of Object.entries(this.roots)) {
+            if (this.sameRoot(rootPath, compare)) {
+                return (this.roots[rootPath] = root);
+            }
+        }
+        // otherwise, have to create a new one.
+        return (this.roots[rootPath] = new PathScurryWin32(rootPath, this).root);
+    }
+    /**
+     * @internal
+     */
+    sameRoot(rootPath, compare = this.root.name) {
+        // windows can (rarely) have case-sensitive filesystem, but
+        // UNC and drive letters are always case-insensitive, and canonically
+        // represented uppercase.
+        rootPath = rootPath
+            .toUpperCase()
+            .replace(/\//g, '\\')
+            .replace(uncDriveRegexp, '$1\\');
+        return rootPath === compare;
+    }
+}
+/**
+ * Path class used on all posix systems.
+ *
+ * Uses `'/'` as the path separator.
+ */
+class PathPosix extends PathBase {
+    /**
+     * separator for parsing path strings
+     */
+    splitSep = '/';
+    /**
+     * separator for generating path strings
+     */
+    sep = '/';
+    /**
+     * Do not create new Path objects directly.  They should always be accessed
+     * via the PathScurry class or other methods on the Path class.
+     *
+     * @internal
+     */
+    constructor(name, type = UNKNOWN, root, roots, nocase, children, opts) {
+        super(name, type, root, roots, nocase, children, opts);
+    }
+    /**
+     * @internal
+     */
+    getRootString(path) {
+        return path.startsWith('/') ? '/' : '';
+    }
+    /**
+     * @internal
+     */
+    getRoot(_rootPath) {
+        return this.root;
+    }
+    /**
+     * @internal
+     */
+    newChild(name, type = UNKNOWN, opts = {}) {
+        return new PathPosix(name, type, this.root, this.roots, this.nocase, this.childrenCache(), opts);
+    }
+}
+/**
+ * The base class for all PathScurry classes, providing the interface for path
+ * resolution and filesystem operations.
+ *
+ * Typically, you should *not* instantiate this class directly, but rather one
+ * of the platform-specific classes, or the exported {@link PathScurry} which
+ * defaults to the current platform.
+ */
+class PathScurryBase {
+    /**
+     * The root Path entry for the current working directory of this Scurry
+     */
+    root;
+    /**
+     * The string path for the root of this Scurry's current working directory
+     */
+    rootPath;
+    /**
+     * A collection of all roots encountered, referenced by rootPath
+     */
+    roots;
+    /**
+     * The Path entry corresponding to this PathScurry's current working directory.
+     */
+    cwd;
+    #resolveCache;
+    #resolvePosixCache;
+    #children;
+    /**
+     * Perform path comparisons case-insensitively.
+     *
+     * Defaults true on Darwin and Windows systems, false elsewhere.
+     */
+    nocase;
+    #fs;
+    /**
+     * This class should not be instantiated directly.
+     *
+     * Use PathScurryWin32, PathScurryDarwin, PathScurryPosix, or PathScurry
+     *
+     * @internal
+     */
+    constructor(cwd = process.cwd(), pathImpl, sep, { nocase, childrenCacheSize = 16 * 1024, fs = defaultFS, } = {}) {
+        this.#fs = fsFromOption(fs);
+        if (cwd instanceof URL || cwd.startsWith('file://')) {
+            cwd = (0,external_node_url_namespaceObject.fileURLToPath)(cwd);
+        }
+        // resolve and split root, and then add to the store.
+        // this is the only time we call path.resolve()
+        const cwdPath = pathImpl.resolve(cwd);
+        this.roots = Object.create(null);
+        this.rootPath = this.parseRootPath(cwdPath);
+        this.#resolveCache = new ResolveCache();
+        this.#resolvePosixCache = new ResolveCache();
+        this.#children = new ChildrenCache(childrenCacheSize);
+        const split = cwdPath.substring(this.rootPath.length).split(sep);
+        // resolve('/') leaves '', splits to [''], we don't want that.
+        if (split.length === 1 && !split[0]) {
+            split.pop();
+        }
+        /* c8 ignore start */
+        if (nocase === undefined) {
+            throw new TypeError('must provide nocase setting to PathScurryBase ctor');
+        }
+        /* c8 ignore stop */
+        this.nocase = nocase;
+        this.root = this.newRoot(this.#fs);
+        this.roots[this.rootPath] = this.root;
+        let prev = this.root;
+        let len = split.length - 1;
+        const joinSep = pathImpl.sep;
+        let abs = this.rootPath;
+        let sawFirst = false;
+        for (const part of split) {
+            const l = len--;
+            prev = prev.child(part, {
+                relative: new Array(l).fill('..').join(joinSep),
+                relativePosix: new Array(l).fill('..').join('/'),
+                fullpath: (abs += (sawFirst ? '' : joinSep) + part),
+            });
+            sawFirst = true;
+        }
+        this.cwd = prev;
+    }
+    /**
+     * Get the depth of a provided path, string, or the cwd
+     */
+    depth(path = this.cwd) {
+        if (typeof path === 'string') {
+            path = this.cwd.resolve(path);
+        }
+        return path.depth();
+    }
+    /**
+     * Return the cache of child entries.  Exposed so subclasses can create
+     * child Path objects in a platform-specific way.
+     *
+     * @internal
+     */
+    childrenCache() {
+        return this.#children;
+    }
+    /**
+     * Resolve one or more path strings to a resolved string
+     *
+     * Same interface as require('path').resolve.
+     *
+     * Much faster than path.resolve() when called multiple times for the same
+     * path, because the resolved Path objects are cached.  Much slower
+     * otherwise.
+     */
+    resolve(...paths) {
+        // first figure out the minimum number of paths we have to test
+        // we always start at cwd, but any absolutes will bump the start
+        let r = '';
+        for (let i = paths.length - 1; i >= 0; i--) {
+            const p = paths[i];
+            if (!p || p === '.')
+                continue;
+            r = r ? `${p}/${r}` : p;
+            if (this.isAbsolute(p)) {
+                break;
+            }
+        }
+        const cached = this.#resolveCache.get(r);
+        if (cached !== undefined) {
+            return cached;
+        }
+        const result = this.cwd.resolve(r).fullpath();
+        this.#resolveCache.set(r, result);
+        return result;
+    }
+    /**
+     * Resolve one or more path strings to a resolved string, returning
+     * the posix path.  Identical to .resolve() on posix systems, but on
+     * windows will return a forward-slash separated UNC path.
+     *
+     * Same interface as require('path').resolve.
+     *
+     * Much faster than path.resolve() when called multiple times for the same
+     * path, because the resolved Path objects are cached.  Much slower
+     * otherwise.
+     */
+    resolvePosix(...paths) {
+        // first figure out the minimum number of paths we have to test
+        // we always start at cwd, but any absolutes will bump the start
+        let r = '';
+        for (let i = paths.length - 1; i >= 0; i--) {
+            const p = paths[i];
+            if (!p || p === '.')
+                continue;
+            r = r ? `${p}/${r}` : p;
+            if (this.isAbsolute(p)) {
+                break;
+            }
+        }
+        const cached = this.#resolvePosixCache.get(r);
+        if (cached !== undefined) {
+            return cached;
+        }
+        const result = this.cwd.resolve(r).fullpathPosix();
+        this.#resolvePosixCache.set(r, result);
+        return result;
+    }
+    /**
+     * find the relative path from the cwd to the supplied path string or entry
+     */
+    relative(entry = this.cwd) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        return entry.relative();
+    }
+    /**
+     * find the relative path from the cwd to the supplied path string or
+     * entry, using / as the path delimiter, even on Windows.
+     */
+    relativePosix(entry = this.cwd) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        return entry.relativePosix();
+    }
+    /**
+     * Return the basename for the provided string or Path object
+     */
+    basename(entry = this.cwd) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        return entry.name;
+    }
+    /**
+     * Return the dirname for the provided string or Path object
+     */
+    dirname(entry = this.cwd) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        return (entry.parent || entry).fullpath();
+    }
+    async readdir(entry = this.cwd, opts = {
+        withFileTypes: true,
+    }) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            opts = entry;
+            entry = this.cwd;
+        }
+        const { withFileTypes } = opts;
+        if (!entry.canReaddir()) {
+            return [];
+        }
+        else {
+            const p = await entry.readdir();
+            return withFileTypes ? p : p.map(e => e.name);
+        }
+    }
+    readdirSync(entry = this.cwd, opts = {
+        withFileTypes: true,
+    }) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            opts = entry;
+            entry = this.cwd;
+        }
+        const { withFileTypes = true } = opts;
+        if (!entry.canReaddir()) {
+            return [];
+        }
+        else if (withFileTypes) {
+            return entry.readdirSync();
+        }
+        else {
+            return entry.readdirSync().map(e => e.name);
+        }
+    }
+    /**
+     * Call lstat() on the string or Path object, and update all known
+     * information that can be determined.
+     *
+     * Note that unlike `fs.lstat()`, the returned value does not contain some
+     * information, such as `mode`, `dev`, `nlink`, and `ino`.  If that
+     * information is required, you will need to call `fs.lstat` yourself.
+     *
+     * If the Path refers to a nonexistent file, or if the lstat call fails for
+     * any reason, `undefined` is returned.  Otherwise the updated Path object is
+     * returned.
+     *
+     * Results are cached, and thus may be out of date if the filesystem is
+     * mutated.
+     */
+    async lstat(entry = this.cwd) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        return entry.lstat();
+    }
+    /**
+     * synchronous {@link PathScurryBase.lstat}
+     */
+    lstatSync(entry = this.cwd) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        return entry.lstatSync();
+    }
+    async readlink(entry = this.cwd, { withFileTypes } = {
+        withFileTypes: false,
+    }) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            withFileTypes = entry.withFileTypes;
+            entry = this.cwd;
+        }
+        const e = await entry.readlink();
+        return withFileTypes ? e : e?.fullpath();
+    }
+    readlinkSync(entry = this.cwd, { withFileTypes } = {
+        withFileTypes: false,
+    }) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            withFileTypes = entry.withFileTypes;
+            entry = this.cwd;
+        }
+        const e = entry.readlinkSync();
+        return withFileTypes ? e : e?.fullpath();
+    }
+    async realpath(entry = this.cwd, { withFileTypes } = {
+        withFileTypes: false,
+    }) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            withFileTypes = entry.withFileTypes;
+            entry = this.cwd;
+        }
+        const e = await entry.realpath();
+        return withFileTypes ? e : e?.fullpath();
+    }
+    realpathSync(entry = this.cwd, { withFileTypes } = {
+        withFileTypes: false,
+    }) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            withFileTypes = entry.withFileTypes;
+            entry = this.cwd;
+        }
+        const e = entry.realpathSync();
+        return withFileTypes ? e : e?.fullpath();
+    }
+    async walk(entry = this.cwd, opts = {}) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            opts = entry;
+            entry = this.cwd;
+        }
+        const { withFileTypes = true, follow = false, filter, walkFilter, } = opts;
+        const results = [];
+        if (!filter || filter(entry)) {
+            results.push(withFileTypes ? entry : entry.fullpath());
+        }
+        const dirs = new Set();
+        const walk = (dir, cb) => {
+            dirs.add(dir);
+            dir.readdirCB((er, entries) => {
+                /* c8 ignore start */
+                if (er) {
+                    return cb(er);
+                }
+                /* c8 ignore stop */
+                let len = entries.length;
+                if (!len)
+                    return cb();
+                const next = () => {
+                    if (--len === 0) {
+                        cb();
+                    }
+                };
+                for (const e of entries) {
+                    if (!filter || filter(e)) {
+                        results.push(withFileTypes ? e : e.fullpath());
+                    }
+                    if (follow && e.isSymbolicLink()) {
+                        e.realpath()
+                            .then(r => (r?.isUnknown() ? r.lstat() : r))
+                            .then(r => r?.shouldWalk(dirs, walkFilter) ? walk(r, next) : next());
+                    }
+                    else {
+                        if (e.shouldWalk(dirs, walkFilter)) {
+                            walk(e, next);
+                        }
+                        else {
+                            next();
+                        }
+                    }
+                }
+            }, true); // zalgooooooo
+        };
+        const start = entry;
+        return new Promise((res, rej) => {
+            walk(start, er => {
+                /* c8 ignore start */
+                if (er)
+                    return rej(er);
+                /* c8 ignore stop */
+                res(results);
+            });
+        });
+    }
+    walkSync(entry = this.cwd, opts = {}) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            opts = entry;
+            entry = this.cwd;
+        }
+        const { withFileTypes = true, follow = false, filter, walkFilter, } = opts;
+        const results = [];
+        if (!filter || filter(entry)) {
+            results.push(withFileTypes ? entry : entry.fullpath());
+        }
+        const dirs = new Set([entry]);
+        for (const dir of dirs) {
+            const entries = dir.readdirSync();
+            for (const e of entries) {
+                if (!filter || filter(e)) {
+                    results.push(withFileTypes ? e : e.fullpath());
+                }
+                let r = e;
+                if (e.isSymbolicLink()) {
+                    if (!(follow && (r = e.realpathSync())))
+                        continue;
+                    if (r.isUnknown())
+                        r.lstatSync();
+                }
+                if (r.shouldWalk(dirs, walkFilter)) {
+                    dirs.add(r);
+                }
+            }
+        }
+        return results;
+    }
+    /**
+     * Support for `for await`
+     *
+     * Alias for {@link PathScurryBase.iterate}
+     *
+     * Note: As of Node 19, this is very slow, compared to other methods of
+     * walking.  Consider using {@link PathScurryBase.stream} if memory overhead
+     * and backpressure are concerns, or {@link PathScurryBase.walk} if not.
+     */
+    [Symbol.asyncIterator]() {
+        return this.iterate();
+    }
+    iterate(entry = this.cwd, options = {}) {
+        // iterating async over the stream is significantly more performant,
+        // especially in the warm-cache scenario, because it buffers up directory
+        // entries in the background instead of waiting for a yield for each one.
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            options = entry;
+            entry = this.cwd;
+        }
+        return this.stream(entry, options)[Symbol.asyncIterator]();
+    }
+    /**
+     * Iterating over a PathScurry performs a synchronous walk.
+     *
+     * Alias for {@link PathScurryBase.iterateSync}
+     */
+    [Symbol.iterator]() {
+        return this.iterateSync();
+    }
+    *iterateSync(entry = this.cwd, opts = {}) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            opts = entry;
+            entry = this.cwd;
+        }
+        const { withFileTypes = true, follow = false, filter, walkFilter, } = opts;
+        if (!filter || filter(entry)) {
+            yield withFileTypes ? entry : entry.fullpath();
+        }
+        const dirs = new Set([entry]);
+        for (const dir of dirs) {
+            const entries = dir.readdirSync();
+            for (const e of entries) {
+                if (!filter || filter(e)) {
+                    yield withFileTypes ? e : e.fullpath();
+                }
+                let r = e;
+                if (e.isSymbolicLink()) {
+                    if (!(follow && (r = e.realpathSync())))
+                        continue;
+                    if (r.isUnknown())
+                        r.lstatSync();
+                }
+                if (r.shouldWalk(dirs, walkFilter)) {
+                    dirs.add(r);
+                }
+            }
+        }
+    }
+    stream(entry = this.cwd, opts = {}) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            opts = entry;
+            entry = this.cwd;
+        }
+        const { withFileTypes = true, follow = false, filter, walkFilter, } = opts;
+        const results = new Minipass({ objectMode: true });
+        if (!filter || filter(entry)) {
+            results.write(withFileTypes ? entry : entry.fullpath());
+        }
+        const dirs = new Set();
+        const queue = [entry];
+        let processing = 0;
+        const process = () => {
+            let paused = false;
+            while (!paused) {
+                const dir = queue.shift();
+                if (!dir) {
+                    if (processing === 0)
+                        results.end();
+                    return;
+                }
+                processing++;
+                dirs.add(dir);
+                const onReaddir = (er, entries, didRealpaths = false) => {
+                    /* c8 ignore start */
+                    if (er)
+                        return results.emit('error', er);
+                    /* c8 ignore stop */
+                    if (follow && !didRealpaths) {
+                        const promises = [];
+                        for (const e of entries) {
+                            if (e.isSymbolicLink()) {
+                                promises.push(e
+                                    .realpath()
+                                    .then((r) => r?.isUnknown() ? r.lstat() : r));
+                            }
+                        }
+                        if (promises.length) {
+                            Promise.all(promises).then(() => onReaddir(null, entries, true));
+                            return;
+                        }
+                    }
+                    for (const e of entries) {
+                        if (e && (!filter || filter(e))) {
+                            if (!results.write(withFileTypes ? e : e.fullpath())) {
+                                paused = true;
+                            }
+                        }
+                    }
+                    processing--;
+                    for (const e of entries) {
+                        const r = e.realpathCached() || e;
+                        if (r.shouldWalk(dirs, walkFilter)) {
+                            queue.push(r);
+                        }
+                    }
+                    if (paused && !results.flowing) {
+                        results.once('drain', process);
+                    }
+                    else if (!sync) {
+                        process();
+                    }
+                };
+                // zalgo containment
+                let sync = true;
+                dir.readdirCB(onReaddir, true);
+                sync = false;
+            }
+        };
+        process();
+        return results;
+    }
+    streamSync(entry = this.cwd, opts = {}) {
+        if (typeof entry === 'string') {
+            entry = this.cwd.resolve(entry);
+        }
+        else if (!(entry instanceof PathBase)) {
+            opts = entry;
+            entry = this.cwd;
+        }
+        const { withFileTypes = true, follow = false, filter, walkFilter, } = opts;
+        const results = new Minipass({ objectMode: true });
+        const dirs = new Set();
+        if (!filter || filter(entry)) {
+            results.write(withFileTypes ? entry : entry.fullpath());
+        }
+        const queue = [entry];
+        let processing = 0;
+        const process = () => {
+            let paused = false;
+            while (!paused) {
+                const dir = queue.shift();
+                if (!dir) {
+                    if (processing === 0)
+                        results.end();
+                    return;
+                }
+                processing++;
+                dirs.add(dir);
+                const entries = dir.readdirSync();
+                for (const e of entries) {
+                    if (!filter || filter(e)) {
+                        if (!results.write(withFileTypes ? e : e.fullpath())) {
+                            paused = true;
+                        }
+                    }
+                }
+                processing--;
+                for (const e of entries) {
+                    let r = e;
+                    if (e.isSymbolicLink()) {
+                        if (!(follow && (r = e.realpathSync())))
+                            continue;
+                        if (r.isUnknown())
+                            r.lstatSync();
+                    }
+                    if (r.shouldWalk(dirs, walkFilter)) {
+                        queue.push(r);
+                    }
+                }
+            }
+            if (paused && !results.flowing)
+                results.once('drain', process);
+        };
+        process();
+        return results;
+    }
+    chdir(path = this.cwd) {
+        const oldCwd = this.cwd;
+        this.cwd = typeof path === 'string' ? this.cwd.resolve(path) : path;
+        this.cwd[setAsCwd](oldCwd);
+    }
+}
+/**
+ * Windows implementation of {@link PathScurryBase}
+ *
+ * Defaults to case insensitve, uses `'\\'` to generate path strings.  Uses
+ * {@link PathWin32} for Path objects.
+ */
+class PathScurryWin32 extends PathScurryBase {
+    /**
+     * separator for generating path strings
+     */
+    sep = '\\';
+    constructor(cwd = process.cwd(), opts = {}) {
+        const { nocase = true } = opts;
+        super(cwd, external_node_path_namespaceObject.win32, '\\', { ...opts, nocase });
+        this.nocase = nocase;
+        for (let p = this.cwd; p; p = p.parent) {
+            p.nocase = this.nocase;
+        }
+    }
+    /**
+     * @internal
+     */
+    parseRootPath(dir) {
+        // if the path starts with a single separator, it's not a UNC, and we'll
+        // just get separator as the root, and driveFromUNC will return \
+        // In that case, mount \ on the root from the cwd.
+        return external_node_path_namespaceObject.win32.parse(dir).root.toUpperCase();
+    }
+    /**
+     * @internal
+     */
+    newRoot(fs) {
+        return new PathWin32(this.rootPath, IFDIR, undefined, this.roots, this.nocase, this.childrenCache(), { fs });
+    }
+    /**
+     * Return true if the provided path string is an absolute path
+     */
+    isAbsolute(p) {
+        return (p.startsWith('/') || p.startsWith('\\') || /^[a-z]:(\/|\\)/i.test(p));
+    }
+}
+/**
+ * {@link PathScurryBase} implementation for all posix systems other than Darwin.
+ *
+ * Defaults to case-sensitive matching, uses `'/'` to generate path strings.
+ *
+ * Uses {@link PathPosix} for Path objects.
+ */
+class PathScurryPosix extends PathScurryBase {
+    /**
+     * separator for generating path strings
+     */
+    sep = '/';
+    constructor(cwd = process.cwd(), opts = {}) {
+        const { nocase = false } = opts;
+        super(cwd, external_node_path_namespaceObject.posix, '/', { ...opts, nocase });
+        this.nocase = nocase;
+    }
+    /**
+     * @internal
+     */
+    parseRootPath(_dir) {
+        return '/';
+    }
+    /**
+     * @internal
+     */
+    newRoot(fs) {
+        return new PathPosix(this.rootPath, IFDIR, undefined, this.roots, this.nocase, this.childrenCache(), { fs });
+    }
+    /**
+     * Return true if the provided path string is an absolute path
+     */
+    isAbsolute(p) {
+        return p.startsWith('/');
+    }
+}
+/**
+ * {@link PathScurryBase} implementation for Darwin (macOS) systems.
+ *
+ * Defaults to case-insensitive matching, uses `'/'` for generating path
+ * strings.
+ *
+ * Uses {@link PathPosix} for Path objects.
+ */
+class PathScurryDarwin extends PathScurryPosix {
+    constructor(cwd = process.cwd(), opts = {}) {
+        const { nocase = true } = opts;
+        super(cwd, { ...opts, nocase });
+    }
+}
+/**
+ * Default {@link PathBase} implementation for the current platform.
+ *
+ * {@link PathWin32} on Windows systems, {@link PathPosix} on all others.
+ */
+const Path = process.platform === 'win32' ? PathWin32 : PathPosix;
+/**
+ * Default {@link PathScurryBase} implementation for the current platform.
+ *
+ * {@link PathScurryWin32} on Windows systems, {@link PathScurryDarwin} on
+ * Darwin (macOS) systems, {@link PathScurryPosix} on all others.
+ */
+const PathScurry = process.platform === 'win32' ? PathScurryWin32
+    : process.platform === 'darwin' ? PathScurryDarwin
+        : PathScurryPosix;
+//# sourceMappingURL=index.js.map
+// EXTERNAL MODULE: external "url"
+var external_url_ = __nccwpck_require__(7016);
+;// CONCATENATED MODULE: ../core/node_modules/glob/dist/mjs/pattern.js
+// this is just a very light wrapper around 2 arrays with an offset index
+
+const isPatternList = (pl) => pl.length >= 1;
+const isGlobList = (gl) => gl.length >= 1;
+/**
+ * An immutable-ish view on an array of glob parts and their parsed
+ * results
+ */
+class Pattern {
+    #patternList;
+    #globList;
+    #index;
+    length;
+    #platform;
+    #rest;
+    #globString;
+    #isDrive;
+    #isUNC;
+    #isAbsolute;
+    #followGlobstar = true;
+    constructor(patternList, globList, index, platform) {
+        if (!isPatternList(patternList)) {
+            throw new TypeError('empty pattern list');
+        }
+        if (!isGlobList(globList)) {
+            throw new TypeError('empty glob list');
+        }
+        if (globList.length !== patternList.length) {
+            throw new TypeError('mismatched pattern list and glob list lengths');
+        }
+        this.length = patternList.length;
+        if (index < 0 || index >= this.length) {
+            throw new TypeError('index out of range');
+        }
+        this.#patternList = patternList;
+        this.#globList = globList;
+        this.#index = index;
+        this.#platform = platform;
+        // normalize root entries of absolute patterns on initial creation.
+        if (this.#index === 0) {
+            // c: => ['c:/']
+            // C:/ => ['C:/']
+            // C:/x => ['C:/', 'x']
+            // //host/share => ['//host/share/']
+            // //host/share/ => ['//host/share/']
+            // //host/share/x => ['//host/share/', 'x']
+            // /etc => ['/', 'etc']
+            // / => ['/']
+            if (this.isUNC()) {
+                // '' / '' / 'host' / 'share'
+                const [p0, p1, p2, p3, ...prest] = this.#patternList;
+                const [g0, g1, g2, g3, ...grest] = this.#globList;
+                if (prest[0] === '') {
+                    // ends in /
+                    prest.shift();
+                    grest.shift();
+                }
+                const p = [p0, p1, p2, p3, ''].join('/');
+                const g = [g0, g1, g2, g3, ''].join('/');
+                this.#patternList = [p, ...prest];
+                this.#globList = [g, ...grest];
+                this.length = this.#patternList.length;
+            }
+            else if (this.isDrive() || this.isAbsolute()) {
+                const [p1, ...prest] = this.#patternList;
+                const [g1, ...grest] = this.#globList;
+                if (prest[0] === '') {
+                    // ends in /
+                    prest.shift();
+                    grest.shift();
+                }
+                const p = p1 + '/';
+                const g = g1 + '/';
+                this.#patternList = [p, ...prest];
+                this.#globList = [g, ...grest];
+                this.length = this.#patternList.length;
+            }
+        }
+    }
+    /**
+     * The first entry in the parsed list of patterns
+     */
+    pattern() {
+        return this.#patternList[this.#index];
+    }
+    /**
+     * true of if pattern() returns a string
+     */
+    isString() {
+        return typeof this.#patternList[this.#index] === 'string';
+    }
+    /**
+     * true of if pattern() returns GLOBSTAR
+     */
+    isGlobstar() {
+        return this.#patternList[this.#index] === GLOBSTAR;
+    }
+    /**
+     * true if pattern() returns a regexp
+     */
+    isRegExp() {
+        return this.#patternList[this.#index] instanceof RegExp;
+    }
+    /**
+     * The /-joined set of glob parts that make up this pattern
+     */
+    globString() {
+        return (this.#globString =
+            this.#globString ||
+                (this.#index === 0
+                    ? this.isAbsolute()
+                        ? this.#globList[0] + this.#globList.slice(1).join('/')
+                        : this.#globList.join('/')
+                    : this.#globList.slice(this.#index).join('/')));
+    }
+    /**
+     * true if there are more pattern parts after this one
+     */
+    hasMore() {
+        return this.length > this.#index + 1;
+    }
+    /**
+     * The rest of the pattern after this part, or null if this is the end
+     */
+    rest() {
+        if (this.#rest !== undefined)
+            return this.#rest;
+        if (!this.hasMore())
+            return (this.#rest = null);
+        this.#rest = new Pattern(this.#patternList, this.#globList, this.#index + 1, this.#platform);
+        this.#rest.#isAbsolute = this.#isAbsolute;
+        this.#rest.#isUNC = this.#isUNC;
+        this.#rest.#isDrive = this.#isDrive;
+        return this.#rest;
+    }
+    /**
+     * true if the pattern represents a //unc/path/ on windows
+     */
+    isUNC() {
+        const pl = this.#patternList;
+        return this.#isUNC !== undefined
+            ? this.#isUNC
+            : (this.#isUNC =
+                this.#platform === 'win32' &&
+                    this.#index === 0 &&
+                    pl[0] === '' &&
+                    pl[1] === '' &&
+                    typeof pl[2] === 'string' &&
+                    !!pl[2] &&
+                    typeof pl[3] === 'string' &&
+                    !!pl[3]);
+    }
+    // pattern like C:/...
+    // split = ['C:', ...]
+    // XXX: would be nice to handle patterns like `c:*` to test the cwd
+    // in c: for *, but I don't know of a way to even figure out what that
+    // cwd is without actually chdir'ing into it?
+    /**
+     * True if the pattern starts with a drive letter on Windows
+     */
+    isDrive() {
+        const pl = this.#patternList;
+        return this.#isDrive !== undefined
+            ? this.#isDrive
+            : (this.#isDrive =
+                this.#platform === 'win32' &&
+                    this.#index === 0 &&
+                    this.length > 1 &&
+                    typeof pl[0] === 'string' &&
+                    /^[a-z]:$/i.test(pl[0]));
+    }
+    // pattern = '/' or '/...' or '/x/...'
+    // split = ['', ''] or ['', ...] or ['', 'x', ...]
+    // Drive and UNC both considered absolute on windows
+    /**
+     * True if the pattern is rooted on an absolute path
+     */
+    isAbsolute() {
+        const pl = this.#patternList;
+        return this.#isAbsolute !== undefined
+            ? this.#isAbsolute
+            : (this.#isAbsolute =
+                (pl[0] === '' && pl.length > 1) ||
+                    this.isDrive() ||
+                    this.isUNC());
+    }
+    /**
+     * consume the root of the pattern, and return it
+     */
+    root() {
+        const p = this.#patternList[0];
+        return typeof p === 'string' && this.isAbsolute() && this.#index === 0
+            ? p
+            : '';
+    }
+    /**
+     * Check to see if the current globstar pattern is allowed to follow
+     * a symbolic link.
+     */
+    checkFollowGlobstar() {
+        return !(this.#index === 0 ||
+            !this.isGlobstar() ||
+            !this.#followGlobstar);
+    }
+    /**
+     * Mark that the current globstar pattern is following a symbolic link
+     */
+    markFollowGlobstar() {
+        if (this.#index === 0 || !this.isGlobstar() || !this.#followGlobstar)
+            return false;
+        this.#followGlobstar = false;
+        return true;
+    }
+}
+//# sourceMappingURL=pattern.js.map
+// EXTERNAL MODULE: external "events"
+var external_events_ = __nccwpck_require__(4434);
+// EXTERNAL MODULE: external "stream"
+var external_stream_ = __nccwpck_require__(2203);
+// EXTERNAL MODULE: external "string_decoder"
+var external_string_decoder_ = __nccwpck_require__(5574);
+;// CONCATENATED MODULE: ../core/node_modules/minipass/index.mjs
+
+const minipass_proc =
+  typeof process === 'object' && process
+    ? process
+    : {
+        stdout: null,
+        stderr: null,
+      }
+;
+
+
+const SD = external_string_decoder_.StringDecoder
+
+const minipass_EOF = Symbol('EOF')
+const minipass_MAYBE_EMIT_END = Symbol('maybeEmitEnd')
+const minipass_EMITTED_END = Symbol('emittedEnd')
+const minipass_EMITTING_END = Symbol('emittingEnd')
+const minipass_EMITTED_ERROR = Symbol('emittedError')
+const minipass_CLOSED = Symbol('closed')
+const minipass_READ = Symbol('read')
+const minipass_FLUSH = Symbol('flush')
+const minipass_FLUSHCHUNK = Symbol('flushChunk')
+const minipass_ENCODING = Symbol('encoding')
+const minipass_DECODER = Symbol('decoder')
+const minipass_FLOWING = Symbol('flowing')
+const minipass_PAUSED = Symbol('paused')
+const minipass_RESUME = Symbol('resume')
+const minipass_BUFFER = Symbol('buffer')
+const minipass_PIPES = Symbol('pipes')
+const minipass_BUFFERLENGTH = Symbol('bufferLength')
+const minipass_BUFFERPUSH = Symbol('bufferPush')
+const minipass_BUFFERSHIFT = Symbol('bufferShift')
+const minipass_OBJECTMODE = Symbol('objectMode')
+// internal event when stream is destroyed
+const minipass_DESTROYED = Symbol('destroyed')
+// internal event when stream has an error
+const minipass_ERROR = Symbol('error')
+const minipass_EMITDATA = Symbol('emitData')
+const minipass_EMITEND = Symbol('emitEnd')
+const minipass_EMITEND2 = Symbol('emitEnd2')
+const minipass_ASYNC = Symbol('async')
+const minipass_ABORT = Symbol('abort')
+const minipass_ABORTED = Symbol('aborted')
+const minipass_SIGNAL = Symbol('signal')
+
+const minipass_defer = fn => Promise.resolve().then(fn)
+
+// TODO remove when Node v8 support drops
+const doIter = global._MP_NO_ITERATOR_SYMBOLS_ !== '1'
+const ASYNCITERATOR =
+  (doIter && Symbol.asyncIterator) || Symbol('asyncIterator not implemented')
+const ITERATOR =
+  (doIter && Symbol.iterator) || Symbol('iterator not implemented')
+
+// events that mean 'the stream is over'
+// these are treated specially, and re-emitted
+// if they are listened for after emitting.
+const minipass_isEndish = ev => ev === 'end' || ev === 'finish' || ev === 'prefinish'
+
+const isArrayBuffer = b =>
+  b instanceof ArrayBuffer ||
+  (typeof b === 'object' &&
+    b.constructor &&
+    b.constructor.name === 'ArrayBuffer' &&
+    b.byteLength >= 0)
+
+const minipass_isArrayBufferView = b => !Buffer.isBuffer(b) && ArrayBuffer.isView(b)
+
+class minipass_Pipe {
+  constructor(src, dest, opts) {
+    this.src = src
+    this.dest = dest
+    this.opts = opts
+    this.ondrain = () => src[minipass_RESUME]()
+    dest.on('drain', this.ondrain)
+  }
+  unpipe() {
+    this.dest.removeListener('drain', this.ondrain)
+  }
+  // istanbul ignore next - only here for the prototype
+  proxyErrors() {}
+  end() {
+    this.unpipe()
+    if (this.opts.end) this.dest.end()
+  }
+}
+
+class minipass_PipeProxyErrors extends minipass_Pipe {
+  unpipe() {
+    this.src.removeListener('error', this.proxyErrors)
+    super.unpipe()
+  }
+  constructor(src, dest, opts) {
+    super(src, dest, opts)
+    this.proxyErrors = er => dest.emit('error', er)
+    src.on('error', this.proxyErrors)
+  }
+}
+
+class minipass_Minipass extends external_stream_ {
+  constructor(options) {
+    super()
+    this[minipass_FLOWING] = false
+    // whether we're explicitly paused
+    this[minipass_PAUSED] = false
+    this[minipass_PIPES] = []
+    this[minipass_BUFFER] = []
+    this[minipass_OBJECTMODE] = (options && options.objectMode) || false
+    if (this[minipass_OBJECTMODE]) this[minipass_ENCODING] = null
+    else this[minipass_ENCODING] = (options && options.encoding) || null
+    if (this[minipass_ENCODING] === 'buffer') this[minipass_ENCODING] = null
+    this[minipass_ASYNC] = (options && !!options.async) || false
+    this[minipass_DECODER] = this[minipass_ENCODING] ? new SD(this[minipass_ENCODING]) : null
+    this[minipass_EOF] = false
+    this[minipass_EMITTED_END] = false
+    this[minipass_EMITTING_END] = false
+    this[minipass_CLOSED] = false
+    this[minipass_EMITTED_ERROR] = null
+    this.writable = true
+    this.readable = true
+    this[minipass_BUFFERLENGTH] = 0
+    this[minipass_DESTROYED] = false
+    if (options && options.debugExposeBuffer === true) {
+      Object.defineProperty(this, 'buffer', { get: () => this[minipass_BUFFER] })
+    }
+    if (options && options.debugExposePipes === true) {
+      Object.defineProperty(this, 'pipes', { get: () => this[minipass_PIPES] })
+    }
+    this[minipass_SIGNAL] = options && options.signal
+    this[minipass_ABORTED] = false
+    if (this[minipass_SIGNAL]) {
+      this[minipass_SIGNAL].addEventListener('abort', () => this[minipass_ABORT]())
+      if (this[minipass_SIGNAL].aborted) {
+        this[minipass_ABORT]()
+      }
+    }
+  }
+
+  get bufferLength() {
+    return this[minipass_BUFFERLENGTH]
+  }
+
+  get encoding() {
+    return this[minipass_ENCODING]
+  }
+  set encoding(enc) {
+    if (this[minipass_OBJECTMODE]) throw new Error('cannot set encoding in objectMode')
+
+    if (
+      this[minipass_ENCODING] &&
+      enc !== this[minipass_ENCODING] &&
+      ((this[minipass_DECODER] && this[minipass_DECODER].lastNeed) || this[minipass_BUFFERLENGTH])
+    )
+      throw new Error('cannot change encoding')
+
+    if (this[minipass_ENCODING] !== enc) {
+      this[minipass_DECODER] = enc ? new SD(enc) : null
+      if (this[minipass_BUFFER].length)
+        this[minipass_BUFFER] = this[minipass_BUFFER].map(chunk => this[minipass_DECODER].write(chunk))
+    }
+
+    this[minipass_ENCODING] = enc
+  }
+
+  setEncoding(enc) {
+    this.encoding = enc
+  }
+
+  get objectMode() {
+    return this[minipass_OBJECTMODE]
+  }
+  set objectMode(om) {
+    this[minipass_OBJECTMODE] = this[minipass_OBJECTMODE] || !!om
+  }
+
+  get ['async']() {
+    return this[minipass_ASYNC]
+  }
+  set ['async'](a) {
+    this[minipass_ASYNC] = this[minipass_ASYNC] || !!a
+  }
+
+  // drop everything and get out of the flow completely
+  [minipass_ABORT]() {
+    this[minipass_ABORTED] = true
+    this.emit('abort', this[minipass_SIGNAL].reason)
+    this.destroy(this[minipass_SIGNAL].reason)
+  }
+
+  get aborted() {
+    return this[minipass_ABORTED]
+  }
+  set aborted(_) {}
+
+  write(chunk, encoding, cb) {
+    if (this[minipass_ABORTED]) return false
+    if (this[minipass_EOF]) throw new Error('write after end')
+
+    if (this[minipass_DESTROYED]) {
+      this.emit(
+        'error',
+        Object.assign(
+          new Error('Cannot call write after a stream was destroyed'),
+          { code: 'ERR_STREAM_DESTROYED' }
+        )
+      )
+      return true
+    }
+
+    if (typeof encoding === 'function') (cb = encoding), (encoding = 'utf8')
+
+    if (!encoding) encoding = 'utf8'
+
+    const fn = this[minipass_ASYNC] ? minipass_defer : f => f()
+
+    // convert array buffers and typed array views into buffers
+    // at some point in the future, we may want to do the opposite!
+    // leave strings and buffers as-is
+    // anything else switches us into object mode
+    if (!this[minipass_OBJECTMODE] && !Buffer.isBuffer(chunk)) {
+      if (minipass_isArrayBufferView(chunk))
+        chunk = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+      else if (isArrayBuffer(chunk)) chunk = Buffer.from(chunk)
+      else if (typeof chunk !== 'string')
+        // use the setter so we throw if we have encoding set
+        this.objectMode = true
+    }
+
+    // handle object mode up front, since it's simpler
+    // this yields better performance, fewer checks later.
+    if (this[minipass_OBJECTMODE]) {
+      /* istanbul ignore if - maybe impossible? */
+      if (this.flowing && this[minipass_BUFFERLENGTH] !== 0) this[minipass_FLUSH](true)
+
+      if (this.flowing) this.emit('data', chunk)
+      else this[minipass_BUFFERPUSH](chunk)
+
+      if (this[minipass_BUFFERLENGTH] !== 0) this.emit('readable')
+
+      if (cb) fn(cb)
+
+      return this.flowing
+    }
+
+    // at this point the chunk is a buffer or string
+    // don't buffer it up or send it to the decoder
+    if (!chunk.length) {
+      if (this[minipass_BUFFERLENGTH] !== 0) this.emit('readable')
+      if (cb) fn(cb)
+      return this.flowing
+    }
+
+    // fast-path writing strings of same encoding to a stream with
+    // an empty buffer, skipping the buffer/decoder dance
+    if (
+      typeof chunk === 'string' &&
+      // unless it is a string already ready for us to use
+      !(encoding === this[minipass_ENCODING] && !this[minipass_DECODER].lastNeed)
+    ) {
+      chunk = Buffer.from(chunk, encoding)
+    }
+
+    if (Buffer.isBuffer(chunk) && this[minipass_ENCODING])
+      chunk = this[minipass_DECODER].write(chunk)
+
+    // Note: flushing CAN potentially switch us into not-flowing mode
+    if (this.flowing && this[minipass_BUFFERLENGTH] !== 0) this[minipass_FLUSH](true)
+
+    if (this.flowing) this.emit('data', chunk)
+    else this[minipass_BUFFERPUSH](chunk)
+
+    if (this[minipass_BUFFERLENGTH] !== 0) this.emit('readable')
+
+    if (cb) fn(cb)
+
+    return this.flowing
+  }
+
+  read(n) {
+    if (this[minipass_DESTROYED]) return null
+
+    if (this[minipass_BUFFERLENGTH] === 0 || n === 0 || n > this[minipass_BUFFERLENGTH]) {
+      this[minipass_MAYBE_EMIT_END]()
+      return null
+    }
+
+    if (this[minipass_OBJECTMODE]) n = null
+
+    if (this[minipass_BUFFER].length > 1 && !this[minipass_OBJECTMODE]) {
+      if (this.encoding) this[minipass_BUFFER] = [this[minipass_BUFFER].join('')]
+      else this[minipass_BUFFER] = [Buffer.concat(this[minipass_BUFFER], this[minipass_BUFFERLENGTH])]
+    }
+
+    const ret = this[minipass_READ](n || null, this[minipass_BUFFER][0])
+    this[minipass_MAYBE_EMIT_END]()
+    return ret
+  }
+
+  [minipass_READ](n, chunk) {
+    if (n === chunk.length || n === null) this[minipass_BUFFERSHIFT]()
+    else {
+      this[minipass_BUFFER][0] = chunk.slice(n)
+      chunk = chunk.slice(0, n)
+      this[minipass_BUFFERLENGTH] -= n
+    }
+
+    this.emit('data', chunk)
+
+    if (!this[minipass_BUFFER].length && !this[minipass_EOF]) this.emit('drain')
+
+    return chunk
+  }
+
+  end(chunk, encoding, cb) {
+    if (typeof chunk === 'function') (cb = chunk), (chunk = null)
+    if (typeof encoding === 'function') (cb = encoding), (encoding = 'utf8')
+    if (chunk) this.write(chunk, encoding)
+    if (cb) this.once('end', cb)
+    this[minipass_EOF] = true
+    this.writable = false
+
+    // if we haven't written anything, then go ahead and emit,
+    // even if we're not reading.
+    // we'll re-emit if a new 'end' listener is added anyway.
+    // This makes MP more suitable to write-only use cases.
+    if (this.flowing || !this[minipass_PAUSED]) this[minipass_MAYBE_EMIT_END]()
+    return this
+  }
+
+  // don't let the internal resume be overwritten
+  [minipass_RESUME]() {
+    if (this[minipass_DESTROYED]) return
+
+    this[minipass_PAUSED] = false
+    this[minipass_FLOWING] = true
+    this.emit('resume')
+    if (this[minipass_BUFFER].length) this[minipass_FLUSH]()
+    else if (this[minipass_EOF]) this[minipass_MAYBE_EMIT_END]()
+    else this.emit('drain')
+  }
+
+  resume() {
+    return this[minipass_RESUME]()
+  }
+
+  pause() {
+    this[minipass_FLOWING] = false
+    this[minipass_PAUSED] = true
+  }
+
+  get destroyed() {
+    return this[minipass_DESTROYED]
+  }
+
+  get flowing() {
+    return this[minipass_FLOWING]
+  }
+
+  get paused() {
+    return this[minipass_PAUSED]
+  }
+
+  [minipass_BUFFERPUSH](chunk) {
+    if (this[minipass_OBJECTMODE]) this[minipass_BUFFERLENGTH] += 1
+    else this[minipass_BUFFERLENGTH] += chunk.length
+    this[minipass_BUFFER].push(chunk)
+  }
+
+  [minipass_BUFFERSHIFT]() {
+    if (this[minipass_OBJECTMODE]) this[minipass_BUFFERLENGTH] -= 1
+    else this[minipass_BUFFERLENGTH] -= this[minipass_BUFFER][0].length
+    return this[minipass_BUFFER].shift()
+  }
+
+  [minipass_FLUSH](noDrain) {
+    do {} while (this[minipass_FLUSHCHUNK](this[minipass_BUFFERSHIFT]()) && this[minipass_BUFFER].length)
+
+    if (!noDrain && !this[minipass_BUFFER].length && !this[minipass_EOF]) this.emit('drain')
+  }
+
+  [minipass_FLUSHCHUNK](chunk) {
+    this.emit('data', chunk)
+    return this.flowing
+  }
+
+  pipe(dest, opts) {
+    if (this[minipass_DESTROYED]) return
+
+    const ended = this[minipass_EMITTED_END]
+    opts = opts || {}
+    if (dest === minipass_proc.stdout || dest === minipass_proc.stderr) opts.end = false
+    else opts.end = opts.end !== false
+    opts.proxyErrors = !!opts.proxyErrors
+
+    // piping an ended stream ends immediately
+    if (ended) {
+      if (opts.end) dest.end()
+    } else {
+      this[minipass_PIPES].push(
+        !opts.proxyErrors
+          ? new minipass_Pipe(this, dest, opts)
+          : new minipass_PipeProxyErrors(this, dest, opts)
+      )
+      if (this[minipass_ASYNC]) minipass_defer(() => this[minipass_RESUME]())
+      else this[minipass_RESUME]()
+    }
+
+    return dest
+  }
+
+  unpipe(dest) {
+    const p = this[minipass_PIPES].find(p => p.dest === dest)
+    if (p) {
+      this[minipass_PIPES].splice(this[minipass_PIPES].indexOf(p), 1)
+      p.unpipe()
+    }
+  }
+
+  addListener(ev, fn) {
+    return this.on(ev, fn)
+  }
+
+  on(ev, fn) {
+    const ret = super.on(ev, fn)
+    if (ev === 'data' && !this[minipass_PIPES].length && !this.flowing) this[minipass_RESUME]()
+    else if (ev === 'readable' && this[minipass_BUFFERLENGTH] !== 0)
+      super.emit('readable')
+    else if (minipass_isEndish(ev) && this[minipass_EMITTED_END]) {
+      super.emit(ev)
+      this.removeAllListeners(ev)
+    } else if (ev === 'error' && this[minipass_EMITTED_ERROR]) {
+      if (this[minipass_ASYNC]) minipass_defer(() => fn.call(this, this[minipass_EMITTED_ERROR]))
+      else fn.call(this, this[minipass_EMITTED_ERROR])
+    }
+    return ret
+  }
+
+  get emittedEnd() {
+    return this[minipass_EMITTED_END]
+  }
+
+  [minipass_MAYBE_EMIT_END]() {
+    if (
+      !this[minipass_EMITTING_END] &&
+      !this[minipass_EMITTED_END] &&
+      !this[minipass_DESTROYED] &&
+      this[minipass_BUFFER].length === 0 &&
+      this[minipass_EOF]
+    ) {
+      this[minipass_EMITTING_END] = true
+      this.emit('end')
+      this.emit('prefinish')
+      this.emit('finish')
+      if (this[minipass_CLOSED]) this.emit('close')
+      this[minipass_EMITTING_END] = false
+    }
+  }
+
+  emit(ev, data, ...extra) {
+    // error and close are only events allowed after calling destroy()
+    if (ev !== 'error' && ev !== 'close' && ev !== minipass_DESTROYED && this[minipass_DESTROYED])
+      return
+    else if (ev === 'data') {
+      return !this[minipass_OBJECTMODE] && !data
+        ? false
+        : this[minipass_ASYNC]
+        ? minipass_defer(() => this[minipass_EMITDATA](data))
+        : this[minipass_EMITDATA](data)
+    } else if (ev === 'end') {
+      return this[minipass_EMITEND]()
+    } else if (ev === 'close') {
+      this[minipass_CLOSED] = true
+      // don't emit close before 'end' and 'finish'
+      if (!this[minipass_EMITTED_END] && !this[minipass_DESTROYED]) return
+      const ret = super.emit('close')
+      this.removeAllListeners('close')
+      return ret
+    } else if (ev === 'error') {
+      this[minipass_EMITTED_ERROR] = data
+      super.emit(minipass_ERROR, data)
+      const ret =
+        !this[minipass_SIGNAL] || this.listeners('error').length
+          ? super.emit('error', data)
+          : false
+      this[minipass_MAYBE_EMIT_END]()
+      return ret
+    } else if (ev === 'resume') {
+      const ret = super.emit('resume')
+      this[minipass_MAYBE_EMIT_END]()
+      return ret
+    } else if (ev === 'finish' || ev === 'prefinish') {
+      const ret = super.emit(ev)
+      this.removeAllListeners(ev)
+      return ret
+    }
+
+    // Some other unknown event
+    const ret = super.emit(ev, data, ...extra)
+    this[minipass_MAYBE_EMIT_END]()
+    return ret
+  }
+
+  [minipass_EMITDATA](data) {
+    for (const p of this[minipass_PIPES]) {
+      if (p.dest.write(data) === false) this.pause()
+    }
+    const ret = super.emit('data', data)
+    this[minipass_MAYBE_EMIT_END]()
+    return ret
+  }
+
+  [minipass_EMITEND]() {
+    if (this[minipass_EMITTED_END]) return
+
+    this[minipass_EMITTED_END] = true
+    this.readable = false
+    if (this[minipass_ASYNC]) minipass_defer(() => this[minipass_EMITEND2]())
+    else this[minipass_EMITEND2]()
+  }
+
+  [minipass_EMITEND2]() {
+    if (this[minipass_DECODER]) {
+      const data = this[minipass_DECODER].end()
+      if (data) {
+        for (const p of this[minipass_PIPES]) {
+          p.dest.write(data)
+        }
+        super.emit('data', data)
+      }
+    }
+
+    for (const p of this[minipass_PIPES]) {
+      p.end()
+    }
+    const ret = super.emit('end')
+    this.removeAllListeners('end')
+    return ret
+  }
+
+  // const all = await stream.collect()
+  collect() {
+    const buf = []
+    if (!this[minipass_OBJECTMODE]) buf.dataLength = 0
+    // set the promise first, in case an error is raised
+    // by triggering the flow here.
+    const p = this.promise()
+    this.on('data', c => {
+      buf.push(c)
+      if (!this[minipass_OBJECTMODE]) buf.dataLength += c.length
+    })
+    return p.then(() => buf)
+  }
+
+  // const data = await stream.concat()
+  concat() {
+    return this[minipass_OBJECTMODE]
+      ? Promise.reject(new Error('cannot concat in objectMode'))
+      : this.collect().then(buf =>
+          this[minipass_OBJECTMODE]
+            ? Promise.reject(new Error('cannot concat in objectMode'))
+            : this[minipass_ENCODING]
+            ? buf.join('')
+            : Buffer.concat(buf, buf.dataLength)
+        )
+  }
+
+  // stream.promise().then(() => done, er => emitted error)
+  promise() {
+    return new Promise((resolve, reject) => {
+      this.on(minipass_DESTROYED, () => reject(new Error('stream destroyed')))
+      this.on('error', er => reject(er))
+      this.on('end', () => resolve())
+    })
+  }
+
+  // for await (let chunk of stream)
+  [ASYNCITERATOR]() {
+    let stopped = false
+    const stop = () => {
+      this.pause()
+      stopped = true
+      return Promise.resolve({ done: true })
+    }
+    const next = () => {
+      if (stopped) return stop()
+      const res = this.read()
+      if (res !== null) return Promise.resolve({ done: false, value: res })
+
+      if (this[minipass_EOF]) return stop()
+
+      let resolve = null
+      let reject = null
+      const onerr = er => {
+        this.removeListener('data', ondata)
+        this.removeListener('end', onend)
+        this.removeListener(minipass_DESTROYED, ondestroy)
+        stop()
+        reject(er)
+      }
+      const ondata = value => {
+        this.removeListener('error', onerr)
+        this.removeListener('end', onend)
+        this.removeListener(minipass_DESTROYED, ondestroy)
+        this.pause()
+        resolve({ value: value, done: !!this[minipass_EOF] })
+      }
+      const onend = () => {
+        this.removeListener('error', onerr)
+        this.removeListener('data', ondata)
+        this.removeListener(minipass_DESTROYED, ondestroy)
+        stop()
+        resolve({ done: true })
+      }
+      const ondestroy = () => onerr(new Error('stream destroyed'))
+      return new Promise((res, rej) => {
+        reject = rej
+        resolve = res
+        this.once(minipass_DESTROYED, ondestroy)
+        this.once('error', onerr)
+        this.once('end', onend)
+        this.once('data', ondata)
+      })
+    }
+
+    return {
+      next,
+      throw: stop,
+      return: stop,
+      [ASYNCITERATOR]() {
+        return this
+      },
+    }
+  }
+
+  // for (let chunk of stream)
+  [ITERATOR]() {
+    let stopped = false
+    const stop = () => {
+      this.pause()
+      this.removeListener(minipass_ERROR, stop)
+      this.removeListener(minipass_DESTROYED, stop)
+      this.removeListener('end', stop)
+      stopped = true
+      return { done: true }
+    }
+
+    const next = () => {
+      if (stopped) return stop()
+      const value = this.read()
+      return value === null ? stop() : { value }
+    }
+    this.once('end', stop)
+    this.once(minipass_ERROR, stop)
+    this.once(minipass_DESTROYED, stop)
+
+    return {
+      next,
+      throw: stop,
+      return: stop,
+      [ITERATOR]() {
+        return this
+      },
+    }
+  }
+
+  destroy(er) {
+    if (this[minipass_DESTROYED]) {
+      if (er) this.emit('error', er)
+      else this.emit(minipass_DESTROYED)
+      return this
+    }
+
+    this[minipass_DESTROYED] = true
+
+    // throw away all buffered data, it's never coming out
+    this[minipass_BUFFER].length = 0
+    this[minipass_BUFFERLENGTH] = 0
+
+    if (typeof this.close === 'function' && !this[minipass_CLOSED]) this.close()
+
+    if (er) this.emit('error', er)
+    // if no error to emit, still reject pending promises
+    else this.emit(minipass_DESTROYED)
+
+    return this
+  }
+
+  static isStream(s) {
+    return (
+      !!s &&
+      (s instanceof minipass_Minipass ||
+        s instanceof external_stream_ ||
+        (s instanceof external_events_ &&
+          // readable
+          (typeof s.pipe === 'function' ||
+            // writable
+            (typeof s.write === 'function' && typeof s.end === 'function'))))
+    )
+  }
+}
+
+
+
+;// CONCATENATED MODULE: ../core/node_modules/glob/dist/mjs/ignore.js
+// give it a pattern, and it'll be able to tell you if
+// a given path should be ignored.
+// Ignoring a path ignores its children if the pattern ends in /**
+// Ignores are always parsed in dot:true mode
+
+
+const ignore_defaultPlatform = typeof process === 'object' &&
+    process &&
+    typeof process.platform === 'string'
+    ? process.platform
+    : 'linux';
+/**
+ * Class used to process ignored patterns
+ */
+class Ignore {
+    relative;
+    relativeChildren;
+    absolute;
+    absoluteChildren;
+    constructor(ignored, { nobrace, nocase, noext, noglobstar, platform = ignore_defaultPlatform, }) {
+        this.relative = [];
+        this.absolute = [];
+        this.relativeChildren = [];
+        this.absoluteChildren = [];
+        const mmopts = {
+            dot: true,
+            nobrace,
+            nocase,
+            noext,
+            noglobstar,
+            optimizationLevel: 2,
+            platform,
+            nocomment: true,
+            nonegate: true,
+        };
+        // this is a little weird, but it gives us a clean set of optimized
+        // minimatch matchers, without getting tripped up if one of them
+        // ends in /** inside a brace section, and it's only inefficient at
+        // the start of the walk, not along it.
+        // It'd be nice if the Pattern class just had a .test() method, but
+        // handling globstars is a bit of a pita, and that code already lives
+        // in minimatch anyway.
+        // Another way would be if maybe Minimatch could take its set/globParts
+        // as an option, and then we could at least just use Pattern to test
+        // for absolute-ness.
+        // Yet another way, Minimatch could take an array of glob strings, and
+        // a cwd option, and do the right thing.
+        for (const ign of ignored) {
+            const mm = new Minimatch(ign, mmopts);
+            for (let i = 0; i < mm.set.length; i++) {
+                const parsed = mm.set[i];
+                const globParts = mm.globParts[i];
+                const p = new Pattern(parsed, globParts, 0, platform);
+                const m = new Minimatch(p.globString(), mmopts);
+                const children = globParts[globParts.length - 1] === '**';
+                const absolute = p.isAbsolute();
+                if (absolute)
+                    this.absolute.push(m);
+                else
+                    this.relative.push(m);
+                if (children) {
+                    if (absolute)
+                        this.absoluteChildren.push(m);
+                    else
+                        this.relativeChildren.push(m);
+                }
+            }
+        }
+    }
+    ignored(p) {
+        const fullpath = p.fullpath();
+        const fullpaths = `${fullpath}/`;
+        const relative = p.relative() || '.';
+        const relatives = `${relative}/`;
+        for (const m of this.relative) {
+            if (m.match(relative) || m.match(relatives))
+                return true;
+        }
+        for (const m of this.absolute) {
+            if (m.match(fullpath) || m.match(fullpaths))
+                return true;
+        }
+        return false;
+    }
+    childrenIgnored(p) {
+        const fullpath = p.fullpath() + '/';
+        const relative = (p.relative() || '.') + '/';
+        for (const m of this.relativeChildren) {
+            if (m.match(relative))
+                return true;
+        }
+        for (const m of this.absoluteChildren) {
+            if (m.match(fullpath))
+                true;
+        }
+        return false;
+    }
+}
+//# sourceMappingURL=ignore.js.map
+;// CONCATENATED MODULE: ../core/node_modules/glob/dist/mjs/processor.js
+// synchronous utility for filtering entries and calculating subwalks
+
+/**
+ * A cache of which patterns have been processed for a given Path
+ */
+class HasWalkedCache {
+    store;
+    constructor(store = new Map()) {
+        this.store = store;
+    }
+    copy() {
+        return new HasWalkedCache(new Map(this.store));
+    }
+    hasWalked(target, pattern) {
+        return this.store.get(target.fullpath())?.has(pattern.globString());
+    }
+    storeWalked(target, pattern) {
+        const fullpath = target.fullpath();
+        const cached = this.store.get(fullpath);
+        if (cached)
+            cached.add(pattern.globString());
+        else
+            this.store.set(fullpath, new Set([pattern.globString()]));
+    }
+}
+/**
+ * A record of which paths have been matched in a given walk step,
+ * and whether they only are considered a match if they are a directory,
+ * and whether their absolute or relative path should be returned.
+ */
+class MatchRecord {
+    store = new Map();
+    add(target, absolute, ifDir) {
+        const n = (absolute ? 2 : 0) | (ifDir ? 1 : 0);
+        const current = this.store.get(target);
+        this.store.set(target, current === undefined ? n : n & current);
+    }
+    // match, absolute, ifdir
+    entries() {
+        return [...this.store.entries()].map(([path, n]) => [
+            path,
+            !!(n & 2),
+            !!(n & 1),
+        ]);
+    }
+}
+/**
+ * A collection of patterns that must be processed in a subsequent step
+ * for a given path.
+ */
+class SubWalks {
+    store = new Map();
+    add(target, pattern) {
+        if (!target.canReaddir()) {
+            return;
+        }
+        const subs = this.store.get(target);
+        if (subs) {
+            if (!subs.find(p => p.globString() === pattern.globString())) {
+                subs.push(pattern);
+            }
+        }
+        else
+            this.store.set(target, [pattern]);
+    }
+    get(target) {
+        const subs = this.store.get(target);
+        /* c8 ignore start */
+        if (!subs) {
+            throw new Error('attempting to walk unknown path');
+        }
+        /* c8 ignore stop */
+        return subs;
+    }
+    entries() {
+        return this.keys().map(k => [k, this.store.get(k)]);
+    }
+    keys() {
+        return [...this.store.keys()].filter(t => t.canReaddir());
+    }
+}
+/**
+ * The class that processes patterns for a given path.
+ *
+ * Handles child entry filtering, and determining whether a path's
+ * directory contents must be read.
+ */
+class Processor {
+    hasWalkedCache;
+    matches = new MatchRecord();
+    subwalks = new SubWalks();
+    patterns;
+    follow;
+    dot;
+    opts;
+    constructor(opts, hasWalkedCache) {
+        this.opts = opts;
+        this.follow = !!opts.follow;
+        this.dot = !!opts.dot;
+        this.hasWalkedCache = hasWalkedCache
+            ? hasWalkedCache.copy()
+            : new HasWalkedCache();
+    }
+    processPatterns(target, patterns) {
+        this.patterns = patterns;
+        const processingSet = patterns.map(p => [target, p]);
+        // map of paths to the magic-starting subwalks they need to walk
+        // first item in patterns is the filter
+        for (let [t, pattern] of processingSet) {
+            this.hasWalkedCache.storeWalked(t, pattern);
+            const root = pattern.root();
+            const absolute = pattern.isAbsolute() && this.opts.absolute !== false;
+            // start absolute patterns at root
+            if (root) {
+                t = t.resolve(root === '/' && this.opts.root !== undefined
+                    ? this.opts.root
+                    : root);
+                const rest = pattern.rest();
+                if (!rest) {
+                    this.matches.add(t, true, false);
+                    continue;
+                }
+                else {
+                    pattern = rest;
+                }
+            }
+            if (t.isENOENT())
+                continue;
+            let p;
+            let rest;
+            let changed = false;
+            while (typeof (p = pattern.pattern()) === 'string' &&
+                (rest = pattern.rest())) {
+                const c = t.resolve(p);
+                // we can be reasonably sure that .. is a readable dir
+                if (c.isUnknown() && p !== '..')
+                    break;
+                t = c;
+                pattern = rest;
+                changed = true;
+            }
+            p = pattern.pattern();
+            rest = pattern.rest();
+            if (changed) {
+                if (this.hasWalkedCache.hasWalked(t, pattern))
+                    continue;
+                this.hasWalkedCache.storeWalked(t, pattern);
+            }
+            // now we have either a final string for a known entry,
+            // more strings for an unknown entry,
+            // or a pattern starting with magic, mounted on t.
+            if (typeof p === 'string') {
+                // must be final entry
+                if (!rest) {
+                    const ifDir = p === '..' || p === '' || p === '.';
+                    this.matches.add(t.resolve(p), absolute, ifDir);
+                }
+                else {
+                    this.subwalks.add(t, pattern);
+                }
+                continue;
+            }
+            else if (p === GLOBSTAR) {
+                // if no rest, match and subwalk pattern
+                // if rest, process rest and subwalk pattern
+                // if it's a symlink, but we didn't get here by way of a
+                // globstar match (meaning it's the first time THIS globstar
+                // has traversed a symlink), then we follow it. Otherwise, stop.
+                if (!t.isSymbolicLink() ||
+                    this.follow ||
+                    pattern.checkFollowGlobstar()) {
+                    this.subwalks.add(t, pattern);
+                }
+                const rp = rest?.pattern();
+                const rrest = rest?.rest();
+                if (!rest || ((rp === '' || rp === '.') && !rrest)) {
+                    // only HAS to be a dir if it ends in **/ or **/.
+                    // but ending in ** will match files as well.
+                    this.matches.add(t, absolute, rp === '' || rp === '.');
+                }
+                else {
+                    if (rp === '..') {
+                        // this would mean you're matching **/.. at the fs root,
+                        // and no thanks, I'm not gonna test that specific case.
+                        /* c8 ignore start */
+                        const tp = t.parent || t;
+                        /* c8 ignore stop */
+                        if (!rrest)
+                            this.matches.add(tp, absolute, true);
+                        else if (!this.hasWalkedCache.hasWalked(tp, rrest)) {
+                            this.subwalks.add(tp, rrest);
+                        }
+                    }
+                }
+            }
+            else if (p instanceof RegExp) {
+                this.subwalks.add(t, pattern);
+            }
+        }
+        return this;
+    }
+    subwalkTargets() {
+        return this.subwalks.keys();
+    }
+    child() {
+        return new Processor(this.opts, this.hasWalkedCache);
+    }
+    // return a new Processor containing the subwalks for each
+    // child entry, and a set of matches, and
+    // a hasWalkedCache that's a copy of this one
+    // then we're going to call
+    filterEntries(parent, entries) {
+        const patterns = this.subwalks.get(parent);
+        // put matches and entry walks into the results processor
+        const results = this.child();
+        for (const e of entries) {
+            for (const pattern of patterns) {
+                const absolute = pattern.isAbsolute();
+                const p = pattern.pattern();
+                const rest = pattern.rest();
+                if (p === GLOBSTAR) {
+                    results.testGlobstar(e, pattern, rest, absolute);
+                }
+                else if (p instanceof RegExp) {
+                    results.testRegExp(e, p, rest, absolute);
+                }
+                else {
+                    results.testString(e, p, rest, absolute);
+                }
+            }
+        }
+        return results;
+    }
+    testGlobstar(e, pattern, rest, absolute) {
+        if (this.dot || !e.name.startsWith('.')) {
+            if (!pattern.hasMore()) {
+                this.matches.add(e, absolute, false);
+            }
+            if (e.canReaddir()) {
+                // if we're in follow mode or it's not a symlink, just keep
+                // testing the same pattern. If there's more after the globstar,
+                // then this symlink consumes the globstar. If not, then we can
+                // follow at most ONE symlink along the way, so we mark it, which
+                // also checks to ensure that it wasn't already marked.
+                if (this.follow || !e.isSymbolicLink()) {
+                    this.subwalks.add(e, pattern);
+                }
+                else if (e.isSymbolicLink()) {
+                    if (rest && pattern.checkFollowGlobstar()) {
+                        this.subwalks.add(e, rest);
+                    }
+                    else if (pattern.markFollowGlobstar()) {
+                        this.subwalks.add(e, pattern);
+                    }
+                }
+            }
+        }
+        // if the NEXT thing matches this entry, then also add
+        // the rest.
+        if (rest) {
+            const rp = rest.pattern();
+            if (typeof rp === 'string' &&
+                // dots and empty were handled already
+                rp !== '..' &&
+                rp !== '' &&
+                rp !== '.') {
+                this.testString(e, rp, rest.rest(), absolute);
+            }
+            else if (rp === '..') {
+                /* c8 ignore start */
+                const ep = e.parent || e;
+                /* c8 ignore stop */
+                this.subwalks.add(ep, rest);
+            }
+            else if (rp instanceof RegExp) {
+                this.testRegExp(e, rp, rest.rest(), absolute);
+            }
+        }
+    }
+    testRegExp(e, p, rest, absolute) {
+        if (!p.test(e.name))
+            return;
+        if (!rest) {
+            this.matches.add(e, absolute, false);
+        }
+        else {
+            this.subwalks.add(e, rest);
+        }
+    }
+    testString(e, p, rest, absolute) {
+        // should never happen?
+        if (!e.isNamed(p))
+            return;
+        if (!rest) {
+            this.matches.add(e, absolute, false);
+        }
+        else {
+            this.subwalks.add(e, rest);
+        }
+    }
+}
+//# sourceMappingURL=processor.js.map
+;// CONCATENATED MODULE: ../core/node_modules/glob/dist/mjs/walker.js
+/**
+ * Single-use utility classes to provide functionality to the {@link Glob}
+ * methods.
+ *
+ * @module
+ */
+
+
+
+const makeIgnore = (ignore, opts) => typeof ignore === 'string'
+    ? new Ignore([ignore], opts)
+    : Array.isArray(ignore)
+        ? new Ignore(ignore, opts)
+        : ignore;
+/**
+ * basic walking utilities that all the glob walker types use
+ */
+class GlobUtil {
+    path;
+    patterns;
+    opts;
+    seen = new Set();
+    paused = false;
+    aborted = false;
+    #onResume = [];
+    #ignore;
+    #sep;
+    signal;
+    maxDepth;
+    constructor(patterns, path, opts) {
+        this.patterns = patterns;
+        this.path = path;
+        this.opts = opts;
+        this.#sep = !opts.posix && opts.platform === 'win32' ? '\\' : '/';
+        if (opts.ignore) {
+            this.#ignore = makeIgnore(opts.ignore, opts);
+        }
+        // ignore, always set with maxDepth, but it's optional on the
+        // GlobOptions type
+        /* c8 ignore start */
+        this.maxDepth = opts.maxDepth || Infinity;
+        /* c8 ignore stop */
+        if (opts.signal) {
+            this.signal = opts.signal;
+            this.signal.addEventListener('abort', () => {
+                this.#onResume.length = 0;
+            });
+        }
+    }
+    #ignored(path) {
+        return this.seen.has(path) || !!this.#ignore?.ignored?.(path);
+    }
+    #childrenIgnored(path) {
+        return !!this.#ignore?.childrenIgnored?.(path);
+    }
+    // backpressure mechanism
+    pause() {
+        this.paused = true;
+    }
+    resume() {
+        /* c8 ignore start */
+        if (this.signal?.aborted)
+            return;
+        /* c8 ignore stop */
+        this.paused = false;
+        let fn = undefined;
+        while (!this.paused && (fn = this.#onResume.shift())) {
+            fn();
+        }
+    }
+    onResume(fn) {
+        if (this.signal?.aborted)
+            return;
+        /* c8 ignore start */
+        if (!this.paused) {
+            fn();
+        }
+        else {
+            /* c8 ignore stop */
+            this.#onResume.push(fn);
+        }
+    }
+    // do the requisite realpath/stat checking, and return the path
+    // to add or undefined to filter it out.
+    async matchCheck(e, ifDir) {
+        if (ifDir && this.opts.nodir)
+            return undefined;
+        let rpc;
+        if (this.opts.realpath) {
+            rpc = e.realpathCached() || (await e.realpath());
+            if (!rpc)
+                return undefined;
+            e = rpc;
+        }
+        const needStat = e.isUnknown() || this.opts.stat;
+        return this.matchCheckTest(needStat ? await e.lstat() : e, ifDir);
+    }
+    matchCheckTest(e, ifDir) {
+        return e &&
+            (this.maxDepth === Infinity || e.depth() <= this.maxDepth) &&
+            (!ifDir || e.canReaddir()) &&
+            (!this.opts.nodir || !e.isDirectory()) &&
+            !this.#ignored(e)
+            ? e
+            : undefined;
+    }
+    matchCheckSync(e, ifDir) {
+        if (ifDir && this.opts.nodir)
+            return undefined;
+        let rpc;
+        if (this.opts.realpath) {
+            rpc = e.realpathCached() || e.realpathSync();
+            if (!rpc)
+                return undefined;
+            e = rpc;
+        }
+        const needStat = e.isUnknown() || this.opts.stat;
+        return this.matchCheckTest(needStat ? e.lstatSync() : e, ifDir);
+    }
+    matchFinish(e, absolute) {
+        if (this.#ignored(e))
+            return;
+        const abs = this.opts.absolute === undefined ? absolute : this.opts.absolute;
+        this.seen.add(e);
+        const mark = this.opts.mark && e.isDirectory() ? this.#sep : '';
+        // ok, we have what we need!
+        if (this.opts.withFileTypes) {
+            this.matchEmit(e);
+        }
+        else if (abs) {
+            const abs = this.opts.posix ? e.fullpathPosix() : e.fullpath();
+            this.matchEmit(abs + mark);
+        }
+        else {
+            const rel = this.opts.posix ? e.relativePosix() : e.relative();
+            const pre = this.opts.dotRelative && !rel.startsWith('..' + this.#sep)
+                ? '.' + this.#sep
+                : '';
+            this.matchEmit(!rel ? '.' + mark : pre + rel + mark);
+        }
+    }
+    async match(e, absolute, ifDir) {
+        const p = await this.matchCheck(e, ifDir);
+        if (p)
+            this.matchFinish(p, absolute);
+    }
+    matchSync(e, absolute, ifDir) {
+        const p = this.matchCheckSync(e, ifDir);
+        if (p)
+            this.matchFinish(p, absolute);
+    }
+    walkCB(target, patterns, cb) {
+        /* c8 ignore start */
+        if (this.signal?.aborted)
+            cb();
+        /* c8 ignore stop */
+        this.walkCB2(target, patterns, new Processor(this.opts), cb);
+    }
+    walkCB2(target, patterns, processor, cb) {
+        if (this.#childrenIgnored(target))
+            return cb();
+        if (this.signal?.aborted)
+            cb();
+        if (this.paused) {
+            this.onResume(() => this.walkCB2(target, patterns, processor, cb));
+            return;
+        }
+        processor.processPatterns(target, patterns);
+        // done processing.  all of the above is sync, can be abstracted out.
+        // subwalks is a map of paths to the entry filters they need
+        // matches is a map of paths to [absolute, ifDir] tuples.
+        let tasks = 1;
+        const next = () => {
+            if (--tasks === 0)
+                cb();
+        };
+        for (const [m, absolute, ifDir] of processor.matches.entries()) {
+            if (this.#ignored(m))
+                continue;
+            tasks++;
+            this.match(m, absolute, ifDir).then(() => next());
+        }
+        for (const t of processor.subwalkTargets()) {
+            if (this.maxDepth !== Infinity && t.depth() >= this.maxDepth) {
+                continue;
+            }
+            tasks++;
+            const childrenCached = t.readdirCached();
+            if (t.calledReaddir())
+                this.walkCB3(t, childrenCached, processor, next);
+            else {
+                t.readdirCB((_, entries) => this.walkCB3(t, entries, processor, next), true);
+            }
+        }
+        next();
+    }
+    walkCB3(target, entries, processor, cb) {
+        processor = processor.filterEntries(target, entries);
+        let tasks = 1;
+        const next = () => {
+            if (--tasks === 0)
+                cb();
+        };
+        for (const [m, absolute, ifDir] of processor.matches.entries()) {
+            if (this.#ignored(m))
+                continue;
+            tasks++;
+            this.match(m, absolute, ifDir).then(() => next());
+        }
+        for (const [target, patterns] of processor.subwalks.entries()) {
+            tasks++;
+            this.walkCB2(target, patterns, processor.child(), next);
+        }
+        next();
+    }
+    walkCBSync(target, patterns, cb) {
+        /* c8 ignore start */
+        if (this.signal?.aborted)
+            cb();
+        /* c8 ignore stop */
+        this.walkCB2Sync(target, patterns, new Processor(this.opts), cb);
+    }
+    walkCB2Sync(target, patterns, processor, cb) {
+        if (this.#childrenIgnored(target))
+            return cb();
+        if (this.signal?.aborted)
+            cb();
+        if (this.paused) {
+            this.onResume(() => this.walkCB2Sync(target, patterns, processor, cb));
+            return;
+        }
+        processor.processPatterns(target, patterns);
+        // done processing.  all of the above is sync, can be abstracted out.
+        // subwalks is a map of paths to the entry filters they need
+        // matches is a map of paths to [absolute, ifDir] tuples.
+        let tasks = 1;
+        const next = () => {
+            if (--tasks === 0)
+                cb();
+        };
+        for (const [m, absolute, ifDir] of processor.matches.entries()) {
+            if (this.#ignored(m))
+                continue;
+            this.matchSync(m, absolute, ifDir);
+        }
+        for (const t of processor.subwalkTargets()) {
+            if (this.maxDepth !== Infinity && t.depth() >= this.maxDepth) {
+                continue;
+            }
+            tasks++;
+            const children = t.readdirSync();
+            this.walkCB3Sync(t, children, processor, next);
+        }
+        next();
+    }
+    walkCB3Sync(target, entries, processor, cb) {
+        processor = processor.filterEntries(target, entries);
+        let tasks = 1;
+        const next = () => {
+            if (--tasks === 0)
+                cb();
+        };
+        for (const [m, absolute, ifDir] of processor.matches.entries()) {
+            if (this.#ignored(m))
+                continue;
+            this.matchSync(m, absolute, ifDir);
+        }
+        for (const [target, patterns] of processor.subwalks.entries()) {
+            tasks++;
+            this.walkCB2Sync(target, patterns, processor.child(), next);
+        }
+        next();
+    }
+}
+class GlobWalker extends GlobUtil {
+    matches;
+    constructor(patterns, path, opts) {
+        super(patterns, path, opts);
+        this.matches = new Set();
+    }
+    matchEmit(e) {
+        this.matches.add(e);
+    }
+    async walk() {
+        if (this.signal?.aborted)
+            throw this.signal.reason;
+        if (this.path.isUnknown()) {
+            await this.path.lstat();
+        }
+        await new Promise((res, rej) => {
+            this.walkCB(this.path, this.patterns, () => {
+                if (this.signal?.aborted) {
+                    rej(this.signal.reason);
+                }
+                else {
+                    res(this.matches);
+                }
+            });
+        });
+        return this.matches;
+    }
+    walkSync() {
+        if (this.signal?.aborted)
+            throw this.signal.reason;
+        if (this.path.isUnknown()) {
+            this.path.lstatSync();
+        }
+        // nothing for the callback to do, because this never pauses
+        this.walkCBSync(this.path, this.patterns, () => {
+            if (this.signal?.aborted)
+                throw this.signal.reason;
+        });
+        return this.matches;
+    }
+}
+class GlobStream extends GlobUtil {
+    results;
+    constructor(patterns, path, opts) {
+        super(patterns, path, opts);
+        this.results = new minipass_Minipass({
+            signal: this.signal,
+            objectMode: true,
+        });
+        this.results.on('drain', () => this.resume());
+        this.results.on('resume', () => this.resume());
+    }
+    matchEmit(e) {
+        this.results.write(e);
+        if (!this.results.flowing)
+            this.pause();
+    }
+    stream() {
+        const target = this.path;
+        if (target.isUnknown()) {
+            target.lstat().then(() => {
+                this.walkCB(target, this.patterns, () => this.results.end());
+            });
+        }
+        else {
+            this.walkCB(target, this.patterns, () => this.results.end());
+        }
+        return this.results;
+    }
+    streamSync() {
+        if (this.path.isUnknown()) {
+            this.path.lstatSync();
+        }
+        this.walkCBSync(this.path, this.patterns, () => this.results.end());
+        return this.results;
+    }
+}
+//# sourceMappingURL=walker.js.map
+;// CONCATENATED MODULE: ../core/node_modules/glob/dist/mjs/glob.js
+
+
+
+
+
+// if no process global, just call it linux.
+// so we default to case-sensitive, / separators
+const glob_defaultPlatform = typeof process === 'object' &&
+    process &&
+    typeof process.platform === 'string'
+    ? process.platform
+    : 'linux';
+/**
+ * An object that can perform glob pattern traversals.
+ */
+class Glob {
+    absolute;
+    cwd;
+    root;
+    dot;
+    dotRelative;
+    follow;
+    ignore;
+    magicalBraces;
+    mark;
+    matchBase;
+    maxDepth;
+    nobrace;
+    nocase;
+    nodir;
+    noext;
+    noglobstar;
+    pattern;
+    platform;
+    realpath;
+    scurry;
+    stat;
+    signal;
+    windowsPathsNoEscape;
+    withFileTypes;
+    /**
+     * The options provided to the constructor.
+     */
+    opts;
+    /**
+     * An array of parsed immutable {@link Pattern} objects.
+     */
+    patterns;
+    /**
+     * All options are stored as properties on the `Glob` object.
+     *
+     * See {@link GlobOptions} for full options descriptions.
+     *
+     * Note that a previous `Glob` object can be passed as the
+     * `GlobOptions` to another `Glob` instantiation to re-use settings
+     * and caches with a new pattern.
+     *
+     * Traversal functions can be called multiple times to run the walk
+     * again.
+     */
+    constructor(pattern, opts) {
+        this.withFileTypes = !!opts.withFileTypes;
+        this.signal = opts.signal;
+        this.follow = !!opts.follow;
+        this.dot = !!opts.dot;
+        this.dotRelative = !!opts.dotRelative;
+        this.nodir = !!opts.nodir;
+        this.mark = !!opts.mark;
+        if (!opts.cwd) {
+            this.cwd = '';
+        }
+        else if (opts.cwd instanceof URL || opts.cwd.startsWith('file://')) {
+            opts.cwd = (0,external_url_.fileURLToPath)(opts.cwd);
+        }
+        this.cwd = opts.cwd || '';
+        this.root = opts.root;
+        this.magicalBraces = !!opts.magicalBraces;
+        this.nobrace = !!opts.nobrace;
+        this.noext = !!opts.noext;
+        this.realpath = !!opts.realpath;
+        this.absolute = opts.absolute;
+        this.noglobstar = !!opts.noglobstar;
+        this.matchBase = !!opts.matchBase;
+        this.maxDepth =
+            typeof opts.maxDepth === 'number' ? opts.maxDepth : Infinity;
+        this.stat = !!opts.stat;
+        this.ignore = opts.ignore;
+        if (this.withFileTypes && this.absolute !== undefined) {
+            throw new Error('cannot set absolute and withFileTypes:true');
+        }
+        if (typeof pattern === 'string') {
+            pattern = [pattern];
+        }
+        this.windowsPathsNoEscape =
+            !!opts.windowsPathsNoEscape ||
+                opts.allowWindowsEscape === false;
+        if (this.windowsPathsNoEscape) {
+            pattern = pattern.map(p => p.replace(/\\/g, '/'));
+        }
+        if (this.matchBase) {
+            if (opts.noglobstar) {
+                throw new TypeError('base matching requires globstar');
+            }
+            pattern = pattern.map(p => (p.includes('/') ? p : `./**/${p}`));
+        }
+        this.pattern = pattern;
+        this.platform = opts.platform || glob_defaultPlatform;
+        this.opts = { ...opts, platform: this.platform };
+        if (opts.scurry) {
+            this.scurry = opts.scurry;
+            if (opts.nocase !== undefined &&
+                opts.nocase !== opts.scurry.nocase) {
+                throw new Error('nocase option contradicts provided scurry option');
+            }
+        }
+        else {
+            const Scurry = opts.platform === 'win32'
+                ? PathScurryWin32
+                : opts.platform === 'darwin'
+                    ? PathScurryDarwin
+                    : opts.platform
+                        ? PathScurryPosix
+                        : PathScurry;
+            this.scurry = new Scurry(this.cwd, {
+                nocase: opts.nocase,
+                fs: opts.fs,
+            });
+        }
+        this.nocase = this.scurry.nocase;
+        // If you do nocase:true on a case-sensitive file system, then
+        // we need to use regexps instead of strings for non-magic
+        // path portions, because statting `aBc` won't return results
+        // for the file `AbC` for example.
+        const nocaseMagicOnly = this.platform === 'darwin' || this.platform === 'win32';
+        const mmo = {
+            // default nocase based on platform
+            ...opts,
+            dot: this.dot,
+            matchBase: this.matchBase,
+            nobrace: this.nobrace,
+            nocase: this.nocase,
+            nocaseMagicOnly,
+            nocomment: true,
+            noext: this.noext,
+            nonegate: true,
+            optimizationLevel: 2,
+            platform: this.platform,
+            windowsPathsNoEscape: this.windowsPathsNoEscape,
+            debug: !!this.opts.debug,
+        };
+        const mms = this.pattern.map(p => new Minimatch(p, mmo));
+        const [matchSet, globParts] = mms.reduce((set, m) => {
+            set[0].push(...m.set);
+            set[1].push(...m.globParts);
+            return set;
+        }, [[], []]);
+        this.patterns = matchSet.map((set, i) => {
+            return new Pattern(set, globParts[i], 0, this.platform);
+        });
+    }
+    async walk() {
+        // Walkers always return array of Path objects, so we just have to
+        // coerce them into the right shape.  It will have already called
+        // realpath() if the option was set to do so, so we know that's cached.
+        // start out knowing the cwd, at least
+        return [
+            ...(await new GlobWalker(this.patterns, this.scurry.cwd, {
+                ...this.opts,
+                maxDepth: this.maxDepth !== Infinity
+                    ? this.maxDepth + this.scurry.cwd.depth()
+                    : Infinity,
+                platform: this.platform,
+                nocase: this.nocase,
+            }).walk()),
+        ];
+    }
+    walkSync() {
+        return [
+            ...new GlobWalker(this.patterns, this.scurry.cwd, {
+                ...this.opts,
+                maxDepth: this.maxDepth !== Infinity
+                    ? this.maxDepth + this.scurry.cwd.depth()
+                    : Infinity,
+                platform: this.platform,
+                nocase: this.nocase,
+            }).walkSync(),
+        ];
+    }
+    stream() {
+        return new GlobStream(this.patterns, this.scurry.cwd, {
+            ...this.opts,
+            maxDepth: this.maxDepth !== Infinity
+                ? this.maxDepth + this.scurry.cwd.depth()
+                : Infinity,
+            platform: this.platform,
+            nocase: this.nocase,
+        }).stream();
+    }
+    streamSync() {
+        return new GlobStream(this.patterns, this.scurry.cwd, {
+            ...this.opts,
+            maxDepth: this.maxDepth !== Infinity
+                ? this.maxDepth + this.scurry.cwd.depth()
+                : Infinity,
+            platform: this.platform,
+            nocase: this.nocase,
+        }).streamSync();
+    }
+    /**
+     * Default sync iteration function. Returns a Generator that
+     * iterates over the results.
+     */
+    iterateSync() {
+        return this.streamSync()[Symbol.iterator]();
+    }
+    [Symbol.iterator]() {
+        return this.iterateSync();
+    }
+    /**
+     * Default async iteration function. Returns an AsyncGenerator that
+     * iterates over the results.
+     */
+    iterate() {
+        return this.stream()[Symbol.asyncIterator]();
+    }
+    [Symbol.asyncIterator]() {
+        return this.iterate();
+    }
+}
+//# sourceMappingURL=glob.js.map
+;// CONCATENATED MODULE: ../core/node_modules/glob/dist/mjs/has-magic.js
+
+/**
+ * Return true if the patterns provided contain any magic glob characters,
+ * given the options provided.
+ *
+ * Brace expansion is not considered "magic" unless the `magicalBraces` option
+ * is set, as brace expansion just turns one string into an array of strings.
+ * So a pattern like `'x{a,b}y'` would return `false`, because `'xay'` and
+ * `'xby'` both do not contain any magic glob characters, and it's treated the
+ * same as if you had called it on `['xay', 'xby']`. When `magicalBraces:true`
+ * is in the options, brace expansion _is_ treated as a pattern having magic.
+ */
+const hasMagic = (pattern, options = {}) => {
+    if (!Array.isArray(pattern)) {
+        pattern = [pattern];
+    }
+    for (const p of pattern) {
+        if (new Minimatch(p, options).hasMagic())
+            return true;
+    }
+    return false;
+};
+//# sourceMappingURL=has-magic.js.map
+;// CONCATENATED MODULE: ../core/node_modules/glob/dist/mjs/index.js
+
+
+
+function globStreamSync(pattern, options = {}) {
+    return new Glob(pattern, options).streamSync();
+}
+function globStream(pattern, options = {}) {
+    return new Glob(pattern, options).stream();
+}
+function globSync(pattern, options = {}) {
+    return new Glob(pattern, options).walkSync();
+}
+async function glob_(pattern, options = {}) {
+    return new Glob(pattern, options).walk();
+}
+function globIterateSync(pattern, options = {}) {
+    return new Glob(pattern, options).iterateSync();
+}
+function globIterate(pattern, options = {}) {
+    return new Glob(pattern, options).iterate();
+}
+// aliases: glob.sync.stream() glob.stream.sync() glob.sync() etc
+const streamSync = globStreamSync;
+const stream = Object.assign(globStream, { sync: globStreamSync });
+const iterateSync = globIterateSync;
+const iterate = Object.assign(globIterate, {
+    sync: globIterateSync,
+});
+const sync = Object.assign(globSync, {
+    stream: globStreamSync,
+    iterate: globIterateSync,
+});
+/* c8 ignore start */
+
+
+
+/* c8 ignore stop */
+const glob = Object.assign(glob_, {
+    glob: glob_,
+    globSync,
+    sync,
+    globStream,
+    stream,
+    globStreamSync,
+    streamSync,
+    globIterate,
+    iterate,
+    globIterateSync,
+    iterateSync,
+    Glob: Glob,
+    hasMagic: hasMagic,
+    escape: escape_escape,
+    unescape: unescape_unescape,
+});
+glob.glob = glob;
+//# sourceMappingURL=index.js.map
+// EXTERNAL MODULE: ../../node_modules/ignore/index.js
+var ignore = __nccwpck_require__(4134);
+// EXTERNAL MODULE: external "path"
+var external_path_ = __nccwpck_require__(6928);
+;// CONCATENATED MODULE: ../core/dist/indexer/scanner.js
+
+
+
+
+/**
+ * Scan codebase using framework-aware configuration
+ * @param rootDir - Project root directory
+ * @param config - Lien configuration with frameworks
+ * @returns Array of file paths relative to rootDir
+ */
+async function scanCodebaseWithFrameworks(rootDir, config) {
+    const allFiles = [];
+    // Scan each framework
+    for (const framework of config.frameworks) {
+        if (!framework.enabled) {
+            continue;
+        }
+        const frameworkFiles = await scanFramework(rootDir, framework);
+        allFiles.push(...frameworkFiles);
+    }
+    // Deduplicate files across frameworks to prevent double-indexing
+    // This handles overlapping framework paths (e.g., root "." and "packages/cli")
+    return Array.from(new Set(allFiles));
+}
+/**
+ * Scan files for a specific framework instance
+ */
+async function scanFramework(rootDir, framework) {
+    const frameworkPath = external_path_.join(rootDir, framework.path);
+    // Load .gitignore from framework path
+    const gitignorePath = external_path_.join(frameworkPath, '.gitignore');
+    let ig = ignore();
+    try {
+        const gitignoreContent = await promises_namespaceObject.readFile(gitignorePath, 'utf-8');
+        ig = ignore().add(gitignoreContent);
+    }
+    catch (e) {
+        // No .gitignore in framework path, try root
+        const rootGitignorePath = external_path_.join(rootDir, '.gitignore');
+        try {
+            const gitignoreContent = await promises_namespaceObject.readFile(rootGitignorePath, 'utf-8');
+            ig = ignore().add(gitignoreContent);
+        }
+        catch (e) {
+            // No .gitignore at all, that's fine
+        }
+    }
+    // Add framework-specific exclusions
+    ig.add([
+        ...framework.config.exclude,
+        '.lien/**',
+    ]);
+    // Find all files matching framework patterns
+    const allFiles = [];
+    for (const pattern of framework.config.include) {
+        const files = await glob(pattern, {
+            cwd: frameworkPath,
+            absolute: false, // Get paths relative to framework path
+            nodir: true,
+            ignore: framework.config.exclude,
+        });
+        allFiles.push(...files);
+    }
+    // Remove duplicates
+    const uniqueFiles = Array.from(new Set(allFiles));
+    // Filter using ignore patterns and prefix with framework path
+    return uniqueFiles
+        .filter(file => !ig.ignores(file))
+        .map(file => {
+        // Return path relative to root: framework.path/file
+        return framework.path === '.'
+            ? file
+            : external_path_.join(framework.path, file);
+    });
+}
+/**
+ * Legacy scan function for backwards compatibility
+ * @deprecated Use scanCodebaseWithFrameworks instead
+ */
+async function scanCodebase(options) {
+    const { rootDir, includePatterns = [], excludePatterns = [] } = options;
+    // Load .gitignore
+    const gitignorePath = external_path_.join(rootDir, '.gitignore');
+    let ig = ignore();
+    try {
+        const gitignoreContent = await promises_namespaceObject.readFile(gitignorePath, 'utf-8');
+        ig = ignore().add(gitignoreContent);
+    }
+    catch (e) {
+        // No .gitignore, that's fine
+    }
+    // Add default exclusions
+    ig.add([
+        'node_modules/**',
+        '.git/**',
+        'dist/**',
+        'build/**',
+        '*.min.js',
+        '*.min.css',
+        '.lien/**',
+        ...excludePatterns,
+    ]);
+    // Determine patterns to search for
+    const patterns = includePatterns.length > 0
+        ? includePatterns
+        : ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,cpp,c,cs,h,md,mdx}'];
+    // Find all code files
+    const allFiles = [];
+    for (const pattern of patterns) {
+        const files = await glob(pattern, {
+            cwd: rootDir,
+            absolute: true,
+            nodir: true,
+            ignore: ['node_modules/**', '.git/**'],
+        });
+        allFiles.push(...files);
+    }
+    // Remove duplicates
+    const uniqueFiles = Array.from(new Set(allFiles));
+    // Filter using ignore patterns
+    return uniqueFiles.filter(file => {
+        const relativePath = external_path_.relative(rootDir, file);
+        return !ig.ignores(relativePath);
+    });
+}
+function detectLanguage(filepath) {
+    const ext = external_path_.extname(filepath).toLowerCase();
+    const languageMap = {
+        '.ts': 'typescript',
+        '.tsx': 'typescript',
+        '.js': 'javascript',
+        '.jsx': 'javascript',
+        '.mjs': 'javascript',
+        '.cjs': 'javascript',
+        '.vue': 'vue',
+        '.py': 'python',
+        '.go': 'go',
+        '.rs': 'rust',
+        '.java': 'java',
+        '.cpp': 'cpp',
+        '.cc': 'cpp',
+        '.cxx': 'cpp',
+        '.c': 'c',
+        '.h': 'c',
+        '.hpp': 'cpp',
+        '.php': 'php',
+        '.rb': 'ruby',
+        '.swift': 'swift',
+        '.kt': 'kotlin',
+        '.cs': 'csharp',
+        '.scala': 'scala',
+        '.liquid': 'liquid',
+        '.md': 'markdown',
+        '.mdx': 'markdown',
+        '.markdown': 'markdown',
+    };
+    return languageMap[ext] || 'unknown';
+}
+//# sourceMappingURL=scanner.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/symbol-extractor.js
+/**
+ * Symbol extraction utilities for different programming languages.
+ * Extracts function, class, and interface names from code chunks for better indexing.
+ */
+/**
+ * Extract symbols (functions, classes, interfaces) from code content.
+ *
+ * @param content - The code content to extract symbols from
+ * @param language - The programming language of the content
+ * @returns Extracted symbols organized by type
+ */
+function extractSymbols(content, language) {
+    const symbols = {
+        functions: [],
+        classes: [],
+        interfaces: [],
+    };
+    const normalizedLang = language.toLowerCase();
+    switch (normalizedLang) {
+        case 'typescript':
+        case 'tsx':
+            symbols.functions = extractTSFunctions(content);
+            symbols.classes = extractTSClasses(content);
+            symbols.interfaces = extractTSInterfaces(content);
+            break;
+        case 'javascript':
+        case 'jsx':
+            symbols.functions = extractJSFunctions(content);
+            symbols.classes = extractJSClasses(content);
+            break;
+        case 'python':
+        case 'py':
+            symbols.functions = extractPythonFunctions(content);
+            symbols.classes = extractPythonClasses(content);
+            break;
+        case 'php':
+            symbols.functions = extractPHPFunctions(content);
+            symbols.classes = extractPHPClasses(content);
+            symbols.interfaces = extractPHPInterfaces(content);
+            break;
+        case 'vue':
+            // Extract from <script> blocks (handles both Options API and Composition API)
+            symbols.functions = extractVueFunctions(content);
+            symbols.classes = extractVueComponents(content);
+            break;
+        case 'go':
+            symbols.functions = extractGoFunctions(content);
+            symbols.interfaces = extractGoInterfaces(content);
+            break;
+        case 'java':
+            symbols.functions = extractJavaFunctions(content);
+            symbols.classes = extractJavaClasses(content);
+            symbols.interfaces = extractJavaInterfaces(content);
+            break;
+        case 'csharp':
+        case 'cs':
+            symbols.functions = extractCSharpFunctions(content);
+            symbols.classes = extractCSharpClasses(content);
+            symbols.interfaces = extractCSharpInterfaces(content);
+            break;
+        case 'ruby':
+        case 'rb':
+            symbols.functions = extractRubyFunctions(content);
+            symbols.classes = extractRubyClasses(content);
+            break;
+        case 'rust':
+        case 'rs':
+            symbols.functions = extractRustFunctions(content);
+            break;
+    }
+    return symbols;
+}
+// TypeScript / JavaScript Functions
+function extractTSFunctions(content) {
+    const names = new Set();
+    // Regular functions: function name(...) or async function name(...)
+    const functionMatches = content.matchAll(/(?:async\s+)?function\s+(\w+)\s*\(/g);
+    for (const match of functionMatches) {
+        names.add(match[1]);
+    }
+    // Arrow functions: const/let/var name = (...) =>
+    const arrowMatches = content.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/g);
+    for (const match of arrowMatches) {
+        names.add(match[1]);
+    }
+    // Method definitions: name(...) { or async name(...) {
+    const methodMatches = content.matchAll(/(?:async\s+)?(\w+)\s*\([^)]*\)\s*[:{]/g);
+    for (const match of methodMatches) {
+        // Exclude common keywords
+        if (!['if', 'for', 'while', 'switch', 'catch'].includes(match[1])) {
+            names.add(match[1]);
+        }
+    }
+    // Export function
+    const exportMatches = content.matchAll(/export\s+(?:async\s+)?function\s+(\w+)\s*\(/g);
+    for (const match of exportMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+function extractJSFunctions(content) {
+    return extractTSFunctions(content); // Same patterns
+}
+function extractTSClasses(content) {
+    const names = new Set();
+    // Class declarations: class Name or export class Name
+    const classMatches = content.matchAll(/(?:export\s+)?(?:abstract\s+)?class\s+(\w+)/g);
+    for (const match of classMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+function extractJSClasses(content) {
+    return extractTSClasses(content); // Same patterns
+}
+function extractTSInterfaces(content) {
+    const names = new Set();
+    // Interface declarations: interface Name or export interface Name
+    const interfaceMatches = content.matchAll(/(?:export\s+)?interface\s+(\w+)/g);
+    for (const match of interfaceMatches) {
+        names.add(match[1]);
+    }
+    // Type aliases: type Name = or export type Name =
+    const typeMatches = content.matchAll(/(?:export\s+)?type\s+(\w+)\s*=/g);
+    for (const match of typeMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+// Python Functions
+function extractPythonFunctions(content) {
+    const names = new Set();
+    // Function definitions: def name(...):
+    const functionMatches = content.matchAll(/def\s+(\w+)\s*\(/g);
+    for (const match of functionMatches) {
+        names.add(match[1]);
+    }
+    // Async functions: async def name(...):
+    const asyncMatches = content.matchAll(/async\s+def\s+(\w+)\s*\(/g);
+    for (const match of asyncMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+function extractPythonClasses(content) {
+    const names = new Set();
+    // Class definitions: class Name or class Name(Base):
+    const classMatches = content.matchAll(/class\s+(\w+)(?:\s*\(|:)/g);
+    for (const match of classMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+// PHP Functions
+function extractPHPFunctions(content) {
+    const names = new Set();
+    // Function definitions: function name(...) or public function name(...)
+    const functionMatches = content.matchAll(/(?:public|private|protected)?\s*function\s+(\w+)\s*\(/g);
+    for (const match of functionMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+function extractPHPClasses(content) {
+    const names = new Set();
+    // Class definitions: class Name or abstract class Name
+    const classMatches = content.matchAll(/(?:abstract\s+)?class\s+(\w+)/g);
+    for (const match of classMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+function extractPHPInterfaces(content) {
+    const names = new Set();
+    // Interface definitions: interface Name
+    const interfaceMatches = content.matchAll(/interface\s+(\w+)/g);
+    for (const match of interfaceMatches) {
+        names.add(match[1]);
+    }
+    // Trait definitions: trait Name
+    const traitMatches = content.matchAll(/trait\s+(\w+)/g);
+    for (const match of traitMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+// Go Functions
+function extractGoFunctions(content) {
+    const names = new Set();
+    // Function definitions: func Name(...) or func (r *Receiver) Name(...)
+    const functionMatches = content.matchAll(/func\s+(?:\(\w+\s+\*?\w+\)\s+)?(\w+)\s*\(/g);
+    for (const match of functionMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+function extractGoInterfaces(content) {
+    const names = new Set();
+    // Interface definitions: type Name interface {
+    const interfaceMatches = content.matchAll(/type\s+(\w+)\s+interface\s*\{/g);
+    for (const match of interfaceMatches) {
+        names.add(match[1]);
+    }
+    // Struct definitions: type Name struct {
+    const structMatches = content.matchAll(/type\s+(\w+)\s+struct\s*\{/g);
+    for (const match of structMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+// Java Functions
+function extractJavaFunctions(content) {
+    const names = new Set();
+    // Method definitions: public/private/protected return_type name(...)
+    const methodMatches = content.matchAll(/(?:public|private|protected)\s+(?:static\s+)?(?:\w+(?:<[^>]+>)?)\s+(\w+)\s*\(/g);
+    for (const match of methodMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+function extractJavaClasses(content) {
+    const names = new Set();
+    // Class definitions: public class Name or abstract class Name
+    const classMatches = content.matchAll(/(?:public\s+)?(?:abstract\s+)?class\s+(\w+)/g);
+    for (const match of classMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+function extractJavaInterfaces(content) {
+    const names = new Set();
+    // Interface definitions: public interface Name
+    const interfaceMatches = content.matchAll(/(?:public\s+)?interface\s+(\w+)/g);
+    for (const match of interfaceMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+// C# Functions
+function extractCSharpFunctions(content) {
+    const names = new Set();
+    // Method definitions: public/private/protected return_type Name(...)
+    const methodMatches = content.matchAll(/(?:public|private|protected|internal)\s+(?:static\s+)?(?:async\s+)?(?:\w+(?:<[^>]+>)?)\s+(\w+)\s*\(/g);
+    for (const match of methodMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+function extractCSharpClasses(content) {
+    const names = new Set();
+    // Class definitions: public class Name or abstract class Name
+    const classMatches = content.matchAll(/(?:public|internal)?\s*(?:abstract\s+)?class\s+(\w+)/g);
+    for (const match of classMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+function extractCSharpInterfaces(content) {
+    const names = new Set();
+    // Interface definitions: public interface Name
+    const interfaceMatches = content.matchAll(/(?:public|internal)?\s*interface\s+(\w+)/g);
+    for (const match of interfaceMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+// Ruby Functions
+function extractRubyFunctions(content) {
+    const names = new Set();
+    // Method definitions: def name or def self.name
+    const methodMatches = content.matchAll(/def\s+(?:self\.)?(\w+)/g);
+    for (const match of methodMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+function extractRubyClasses(content) {
+    const names = new Set();
+    // Class definitions: class Name or class Name < Base
+    const classMatches = content.matchAll(/class\s+(\w+)/g);
+    for (const match of classMatches) {
+        names.add(match[1]);
+    }
+    // Module definitions: module Name
+    const moduleMatches = content.matchAll(/module\s+(\w+)/g);
+    for (const match of moduleMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+// Rust Functions
+function extractRustFunctions(content) {
+    const names = new Set();
+    // Function definitions: fn name(...) or pub fn name(...)
+    const functionMatches = content.matchAll(/(?:pub\s+)?fn\s+(\w+)\s*\(/g);
+    for (const match of functionMatches) {
+        names.add(match[1]);
+    }
+    // Struct definitions: struct Name {
+    const structMatches = content.matchAll(/(?:pub\s+)?struct\s+(\w+)/g);
+    for (const match of structMatches) {
+        names.add(match[1]);
+    }
+    // Trait definitions: trait Name {
+    const traitMatches = content.matchAll(/(?:pub\s+)?trait\s+(\w+)/g);
+    for (const match of traitMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+// Vue Functions
+function extractVueFunctions(content) {
+    const names = new Set();
+    // Extract script content from Vue SFC
+    const scriptMatch = content.match(/<script[^>]*>([\s\S]*?)<\/script>/);
+    if (!scriptMatch)
+        return [];
+    const scriptContent = scriptMatch[1];
+    // Composition API: const/function name = ...
+    const compositionMatches = scriptContent.matchAll(/(?:const|function)\s+(\w+)\s*=/g);
+    for (const match of compositionMatches) {
+        names.add(match[1]);
+    }
+    // Options API methods
+    const methodMatches = scriptContent.matchAll(/(\w+)\s*\([^)]*\)\s*{/g);
+    for (const match of methodMatches) {
+        names.add(match[1]);
+    }
+    return Array.from(names);
+}
+// Vue Components
+function extractVueComponents(content) {
+    const names = new Set();
+    // Extract component name from filename convention or export
+    const scriptMatch = content.match(/<script[^>]*>([\s\S]*?)<\/script>/);
+    if (!scriptMatch)
+        return [];
+    const scriptContent = scriptMatch[1];
+    // export default { name: 'ComponentName' }
+    const nameMatch = scriptContent.match(/name:\s*['"](\w+)['"]/);
+    if (nameMatch) {
+        names.add(nameMatch[1]);
+    }
+    // defineComponent or <script setup> components
+    const defineComponentMatch = scriptContent.match(/defineComponent\s*\(/);
+    if (defineComponentMatch) {
+        names.add('VueComponent');
+    }
+    return Array.from(names);
+}
+//# sourceMappingURL=symbol-extractor.js.map
+;// CONCATENATED MODULE: external "tree-sitter"
+const external_tree_sitter_namespaceObject = require("tree-sitter");
+;// CONCATENATED MODULE: external "tree-sitter-typescript"
+const external_tree_sitter_typescript_namespaceObject = require("tree-sitter-typescript");
+;// CONCATENATED MODULE: external "tree-sitter-javascript"
+const external_tree_sitter_javascript_namespaceObject = require("tree-sitter-javascript");
+;// CONCATENATED MODULE: external "tree-sitter-php"
+const external_tree_sitter_php_namespaceObject = require("tree-sitter-php");
+;// CONCATENATED MODULE: external "tree-sitter-python"
+const external_tree_sitter_python_namespaceObject = require("tree-sitter-python");
+;// CONCATENATED MODULE: ../core/dist/indexer/ast/parser.js
+
+
+
+
+
+
+/**
+ * Cache for parser instances to avoid recreating them
+ */
+const parserCache = new Map();
+/**
+ * Language configuration mapping
+ */
+const languageConfig = {
+    typescript: external_tree_sitter_typescript_namespaceObject.typescript,
+    javascript: external_tree_sitter_javascript_namespaceObject,
+    php: external_tree_sitter_php_namespaceObject.php, // Note: tree-sitter-php exports both 'php' (mixed HTML/PHP) and 'php_only'
+    python: external_tree_sitter_python_namespaceObject,
+};
+/**
+ * Get or create a cached parser instance for a language
+ */
+function getParser(language) {
+    if (!parserCache.has(language)) {
+        const parser = new external_tree_sitter_namespaceObject();
+        const grammar = languageConfig[language];
+        if (!grammar) {
+            throw new Error(`No grammar available for language: ${language}`);
+        }
+        parser.setLanguage(grammar);
+        parserCache.set(language, parser);
+    }
+    return parserCache.get(language);
+}
+/**
+ * Detect language from file extension
+ * Uses path.extname() to handle edge cases like multiple dots in filenames
+ */
+function parser_detectLanguage(filePath) {
+    // extname returns extension with leading dot (e.g., '.ts')
+    // Remove the dot and convert to lowercase
+    const ext = (0,external_path_.extname)(filePath).slice(1).toLowerCase();
+    switch (ext) {
+        case 'ts':
+        case 'tsx':
+            return 'typescript';
+        case 'js':
+        case 'jsx':
+        case 'mjs':
+        case 'cjs':
+            return 'javascript';
+        case 'php':
+            return 'php';
+        case 'py':
+            return 'python';
+        default:
+            return null;
+    }
+}
+/**
+ * Check if a file is supported for AST parsing
+ */
+function isASTSupported(filePath) {
+    return parser_detectLanguage(filePath) !== null;
+}
+/**
+ * Parse source code into an AST using Tree-sitter
+ *
+ * **Known Limitation:** Tree-sitter may throw "Invalid argument" errors on very large files
+ * (1000+ lines). This is a limitation of Tree-sitter's internal buffer handling. When this
+ * occurs, callers should fall back to line-based chunking (handled automatically by chunker.ts).
+ *
+ * @param content - Source code to parse
+ * @param language - Programming language
+ * @returns Parse result with tree or error
+ */
+function parseAST(content, language) {
+    try {
+        const parser = getParser(language);
+        const tree = parser.parse(content);
+        // Check for parse errors (hasError is a property, not a method)
+        if (tree.rootNode.hasError) {
+            return {
+                tree,
+                error: 'Parse completed with errors',
+            };
+        }
+        return { tree };
+    }
+    catch (error) {
+        return {
+            tree: null,
+            error: error instanceof Error ? error.message : 'Unknown parse error',
+        };
+    }
+}
+/**
+ * Clear parser cache (useful for testing)
+ */
+function clearParserCache() {
+    parserCache.clear();
+}
+//# sourceMappingURL=parser.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/ast/complexity/cyclomatic.js
+/**
+ * Decision point node types for cyclomatic complexity calculation.
+ *
+ * These AST node types represent branch points in code flow.
+ */
+const DECISION_POINTS = [
+    // Common across languages (TypeScript/JavaScript/Python/PHP)
+    'if_statement', // if conditions
+    'while_statement', // while loops
+    'for_statement', // for loops
+    'switch_case', // switch/case statements
+    'catch_clause', // try/catch error handling
+    'ternary_expression', // Ternary operator (a ? b : c)
+    'binary_expression', // For && and || logical operators
+    // TypeScript/JavaScript specific
+    'do_statement', // do...while loops
+    'for_in_statement', // for...in loops
+    'for_of_statement', // for...of loops
+    // PHP specific
+    'foreach_statement', // PHP foreach loops
+    // Python specific
+    'elif_clause', // Python elif (adds decision point)
+    // Note: 'else_clause' is NOT a decision point (it's the default path)
+    'except_clause', // Python except (try/except)
+    'conditional_expression', // Python ternary (x if cond else y)
+];
+/**
+ * Calculate cyclomatic complexity of a function
+ *
+ * Complexity = 1 (base) + number of decision points
+ * Decision points: if, while, do...while, for, for...in, for...of, foreach, case, catch, &&, ||, ?:
+ *
+ * @param node - AST node to analyze (typically a function/method)
+ * @returns Cyclomatic complexity score (minimum 1)
+ */
+function calculateComplexity(node) {
+    let complexity = 1; // Base complexity
+    function traverse(n) {
+        if (DECISION_POINTS.includes(n.type)) {
+            // For binary expressions, only count && and ||
+            if (n.type === 'binary_expression') {
+                const operator = n.childForFieldName('operator');
+                if (operator && (operator.text === '&&' || operator.text === '||')) {
+                    complexity++;
+                }
+            }
+            else {
+                complexity++;
+            }
+        }
+        // Traverse children
+        for (let i = 0; i < n.namedChildCount; i++) {
+            const child = n.namedChild(i);
+            if (child)
+                traverse(child);
+        }
+    }
+    traverse(node);
+    return complexity;
+}
+//# sourceMappingURL=cyclomatic.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/ast/complexity/cognitive.js
+// Node types that increase complexity AND increment nesting for children
+const NESTING_TYPES = new Set([
+    'if_statement', 'for_statement', 'while_statement', 'switch_statement',
+    'catch_clause', 'except_clause', 'do_statement', 'for_in_statement',
+    'for_of_statement', 'foreach_statement', 'match_statement',
+]);
+// Types that add complexity but DON'T nest (hybrid increments)
+const NON_NESTING_TYPES = new Set([
+    'else_clause', 'elif_clause', 'ternary_expression', 'conditional_expression',
+]);
+// Lambda types that add complexity when nested
+const LAMBDA_TYPES = new Set(['arrow_function', 'function_expression', 'lambda']);
+/**
+ * Check if node is a logical operator and return normalized form
+ */
+function getLogicalOperator(node) {
+    if (node.type !== 'binary_expression' && node.type !== 'boolean_operator') {
+        return null;
+    }
+    const operator = node.childForFieldName('operator');
+    const opText = operator?.text;
+    if (opText === '&&' || opText === 'and')
+        return '&&';
+    if (opText === '||' || opText === 'or')
+        return '||';
+    return null;
+}
+/**
+ * Determine nesting level for a child node based on SonarSource spec.
+ */
+function getChildNestingLevel(parent, child, currentLevel) {
+    const isCondition = parent.childForFieldName('condition') === child;
+    const isElseClause = NON_NESTING_TYPES.has(child.type);
+    return (!isCondition && !isElseClause) ? currentLevel + 1 : currentLevel;
+}
+/**
+ * Get complexity increment for nested lambda (only adds if already nested)
+ */
+function getNestedLambdaIncrement(nodeType, nestingLevel) {
+    return (LAMBDA_TYPES.has(nodeType) && nestingLevel > 0) ? 1 : 0;
+}
+/** Traverse logical operator children, passing the operator type */
+function traverseLogicalChildren(n, level, op, ctx) {
+    const operator = n.childForFieldName('operator');
+    for (let i = 0; i < n.namedChildCount; i++) {
+        const child = n.namedChild(i);
+        if (child && child !== operator)
+            ctx.traverse(child, level, op);
+    }
+}
+/** Traverse nesting type children with proper nesting level adjustment */
+function traverseNestingChildren(n, level, ctx) {
+    for (let i = 0; i < n.namedChildCount; i++) {
+        const child = n.namedChild(i);
+        if (child)
+            ctx.traverse(child, getChildNestingLevel(n, child, level), null);
+    }
+}
+/** Traverse all children at specified level */
+function traverseAllChildren(n, level, ctx) {
+    for (let i = 0; i < n.namedChildCount; i++) {
+        const child = n.namedChild(i);
+        if (child)
+            ctx.traverse(child, level, null);
+    }
+}
+/**
+ * Calculate cognitive complexity of a function
+ *
+ * Based on SonarSource's Cognitive Complexity specification:
+ * - +1 for each break from linear flow (if, for, while, catch, etc.)
+ * - +1 for each nesting level when inside a control structure
+ * - +1 for each logical operator sequence break (a && b || c)
+ *
+ * @see https://www.sonarsource.com/docs/CognitiveComplexity.pdf
+ *
+ * @param node - AST node to analyze (typically a function/method)
+ * @returns Cognitive complexity score (minimum 0)
+ */
+function calculateCognitiveComplexity(node) {
+    let complexity = 0;
+    const ctx = { traverse };
+    function traverse(n, nestingLevel, lastLogicalOp) {
+        const logicalOp = getLogicalOperator(n);
+        if (logicalOp) {
+            complexity += (lastLogicalOp !== logicalOp) ? 1 : 0;
+            traverseLogicalChildren(n, nestingLevel, logicalOp, ctx);
+            return;
+        }
+        if (NESTING_TYPES.has(n.type)) {
+            complexity += 1 + nestingLevel;
+            traverseNestingChildren(n, nestingLevel, ctx);
+            return;
+        }
+        if (NON_NESTING_TYPES.has(n.type)) {
+            complexity += 1;
+            traverseAllChildren(n, nestingLevel + 1, ctx);
+            return;
+        }
+        complexity += getNestedLambdaIncrement(n.type, nestingLevel);
+        traverseAllChildren(n, nestingLevel, ctx);
+    }
+    traverse(node, 0, null);
+    return complexity;
+}
+//# sourceMappingURL=cognitive.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/ast/complexity/halstead.js
+/**
+ * Language-specific operator symbols.
+ * These are the actual text values we match against.
+ */
+const OPERATOR_SYMBOLS = {
+    typescript: new Set([
+        // Arithmetic
+        '+', '-', '*', '/', '%', '**',
+        // Comparison
+        '==', '===', '!=', '!==', '<', '>', '<=', '>=',
+        // Logical
+        '&&', '||', '!', '??',
+        // Assignment
+        '=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=',
+        // Bitwise
+        '&', '|', '^', '~', '<<', '>>', '>>>',
+        '&=', '|=', '^=', '<<=', '>>=', '>>>=',
+        // Other
+        '?', ':', '.', '?.', '++', '--', '...', '=>',
+        // Brackets/parens (counted as operators)
+        '(', ')', '[', ']', '{', '}',
+    ]),
+    python: new Set([
+        // Arithmetic
+        '+', '-', '*', '/', '%', '**', '//',
+        // Comparison
+        '==', '!=', '<', '>', '<=', '>=',
+        // Logical (handled via keywords below)
+        // Assignment
+        '=', '+=', '-=', '*=', '/=', '%=', '**=', '//=',
+        '&=', '|=', '^=', '<<=', '>>=',
+        // Bitwise
+        '&', '|', '^', '~', '<<', '>>',
+        // Other
+        '.', ':', '->', '@',
+        '(', ')', '[', ']', '{', '}',
+    ]),
+    php: new Set([
+        // Arithmetic
+        '+', '-', '*', '/', '%', '**',
+        // Comparison
+        '==', '===', '!=', '!==', '<>', '<', '>', '<=', '>=', '<=>',
+        // Logical
+        '&&', '||', '!', 'and', 'or', 'xor',
+        // Assignment
+        '=', '+=', '-=', '*=', '/=', '%=', '**=', '.=',
+        '&=', '|=', '^=', '<<=', '>>=', '??=',
+        // Bitwise
+        '&', '|', '^', '~', '<<', '>>',
+        // String
+        '.',
+        // Other
+        '?', ':', '::', '->', '=>', '??', '@',
+        '(', ')', '[', ']', '{', '}',
+    ]),
+};
+/**
+ * Language-specific operator keywords.
+ * These are keywords that act as operators.
+ */
+const OPERATOR_KEYWORDS = {
+    typescript: new Set([
+        'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'default',
+        'return', 'throw', 'try', 'catch', 'finally',
+        'new', 'delete', 'typeof', 'instanceof', 'in', 'of',
+        'await', 'yield', 'break', 'continue',
+        'const', 'let', 'var', 'function', 'class', 'extends', 'implements',
+        'import', 'export', 'from', 'as',
+    ]),
+    python: new Set([
+        'if', 'elif', 'else', 'for', 'while', 'match', 'case',
+        'return', 'raise', 'try', 'except', 'finally',
+        'and', 'or', 'not', 'is', 'in',
+        'await', 'yield', 'break', 'continue', 'pass',
+        'def', 'class', 'lambda', 'async',
+        'import', 'from', 'as', 'with',
+        'global', 'nonlocal', 'del', 'assert',
+    ]),
+    php: new Set([
+        'if', 'elseif', 'else', 'for', 'foreach', 'while', 'do', 'switch', 'case', 'default', 'match',
+        'return', 'throw', 'try', 'catch', 'finally',
+        'new', 'clone', 'instanceof',
+        'yield', 'break', 'continue',
+        'function', 'class', 'extends', 'implements', 'trait', 'interface',
+        'use', 'namespace', 'as',
+        'echo', 'print', 'include', 'require', 'include_once', 'require_once',
+        'global', 'static', 'const', 'public', 'private', 'protected', 'readonly',
+    ]),
+};
+/**
+ * AST node types that represent operators (language-agnostic).
+ * These are the tree-sitter node types, not the text content.
+ */
+const OPERATOR_NODE_TYPES = new Set([
+    // Expression operators
+    'binary_expression',
+    'unary_expression',
+    'update_expression',
+    'assignment_expression',
+    'augmented_assignment_expression',
+    'ternary_expression',
+    'conditional_expression',
+    // Call/access operators
+    'call_expression',
+    'method_call',
+    'member_expression',
+    'subscript_expression',
+    'attribute',
+    // Object/array literals ([] and {} are operators)
+    'array',
+    'object',
+    'dictionary',
+    'list',
+]);
+/**
+ * AST node types that represent operands.
+ */
+const OPERAND_NODE_TYPES = new Set([
+    // Identifiers
+    'identifier',
+    'property_identifier',
+    'shorthand_property_identifier',
+    'variable_name',
+    'name',
+    // Literals
+    'number',
+    'integer',
+    'float',
+    'string',
+    'string_fragment',
+    'template_string',
+    'true',
+    'false',
+    'null',
+    'undefined',
+    'none',
+    // Special
+    'this',
+    'self',
+    'super',
+]);
+/**
+ * Get the operator set for a language (with fallback to typescript)
+ */
+function getOperatorSymbols(language) {
+    return OPERATOR_SYMBOLS[language] || OPERATOR_SYMBOLS.typescript;
+}
+/**
+ * Get the keyword set for a language (with fallback to typescript)
+ */
+function getOperatorKeywords(language) {
+    return OPERATOR_KEYWORDS[language] || OPERATOR_KEYWORDS.typescript;
+}
+/**
+ * Check if a node represents an operator
+ */
+function isOperator(node, language) {
+    const nodeType = node.type;
+    const nodeText = node.text;
+    // Check if it's an operator node type
+    if (OPERATOR_NODE_TYPES.has(nodeType)) {
+        return true;
+    }
+    // Check if it's an operator symbol or keyword
+    const symbols = getOperatorSymbols(language);
+    const keywords = getOperatorKeywords(language);
+    return symbols.has(nodeText) || keywords.has(nodeText);
+}
+/**
+ * Check if a node represents an operand
+ */
+function isOperand(node) {
+    return OPERAND_NODE_TYPES.has(node.type);
+}
+/**
+ * Get the canonical key for an operator (for counting distinct operators)
+ */
+function getOperatorKey(node) {
+    // For complex expressions, use the operator type
+    if (OPERATOR_NODE_TYPES.has(node.type)) {
+        // For binary/unary expressions, extract the actual operator
+        const operator = node.childForFieldName('operator');
+        if (operator) {
+            return operator.text;
+        }
+        return node.type;
+    }
+    return node.text;
+}
+/**
+ * Get the canonical key for an operand (for counting distinct operands)
+ */
+function getOperandKey(node) {
+    return node.text;
+}
+/**
+ * Sum all values in a map
+ */
+function sumValues(map) {
+    let sum = 0;
+    for (const count of map.values()) {
+        sum += count;
+    }
+    return sum;
+}
+/**
+ * Count operators and operands in an AST node
+ *
+ * @param node - AST node to analyze (typically a function/method)
+ * @param language - Programming language for language-specific handling
+ * @returns HalsteadCounts with raw operator/operand counts
+ */
+function countHalstead(node, language) {
+    const operators = new Map();
+    const operands = new Map();
+    function traverse(n) {
+        // Check if this is an operator
+        if (isOperator(n, language)) {
+            const key = getOperatorKey(n);
+            operators.set(key, (operators.get(key) || 0) + 1);
+        }
+        // Check if this is an operand
+        if (isOperand(n)) {
+            const key = getOperandKey(n);
+            operands.set(key, (operands.get(key) || 0) + 1);
+        }
+        // Recurse into children
+        for (const child of n.children) {
+            traverse(child);
+        }
+    }
+    traverse(node);
+    return {
+        n1: operators.size,
+        n2: operands.size,
+        N1: sumValues(operators),
+        N2: sumValues(operands),
+        operators,
+        operands,
+    };
+}
+/**
+ * Calculate derived Halstead metrics from raw counts
+ *
+ * Formulas based on Maurice Halstead's "Elements of Software Science" (1977):
+ * - Vocabulary (n) = n1 + n2
+ * - Length (N) = N1 + N2
+ * - Volume (V) = N × log₂(n) - size of implementation
+ * - Difficulty (D) = (n1/2) × (N2/n2) - error-proneness
+ * - Effort (E) = D × V - mental effort required
+ * - Time (T) = E / 18 - seconds to understand (Stroud number)
+ * - Bugs (B) = V / 3000 - estimated delivered bugs
+ *
+ * @param counts - Raw Halstead counts from countHalstead()
+ * @returns Calculated HalsteadMetrics
+ */
+function calculateHalsteadMetrics(counts) {
+    const { n1, n2, N1, N2 } = counts;
+    const vocabulary = n1 + n2;
+    const length = N1 + N2;
+    // Avoid log(0) and division by zero
+    const volume = vocabulary > 0 ? length * Math.log2(vocabulary) : 0;
+    const difficulty = n2 > 0 ? (n1 / 2) * (N2 / n2) : 0;
+    const effort = difficulty * volume;
+    const time = effort / 18; // Stroud number (18 mental discriminations per second)
+    const bugs = volume / 3000;
+    return {
+        vocabulary: Math.round(vocabulary),
+        length: Math.round(length),
+        volume: Math.round(volume * 100) / 100,
+        difficulty: Math.round(difficulty * 100) / 100,
+        effort: Math.round(effort),
+        time: Math.round(time),
+        bugs: Math.round(bugs * 1000) / 1000,
+    };
+}
+/**
+ * Calculate Halstead metrics for an AST node in one call
+ *
+ * Convenience function that combines countHalstead and calculateHalsteadMetrics.
+ *
+ * @param node - AST node to analyze
+ * @param language - Programming language
+ * @returns Calculated HalsteadMetrics
+ */
+function calculateHalstead(node, language) {
+    const counts = countHalstead(node, language);
+    return calculateHalsteadMetrics(counts);
+}
+//# sourceMappingURL=halstead.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/ast/complexity/index.js
+/**
+ * Complexity metrics module
+ *
+ * This module provides various code complexity metrics:
+ * - Cyclomatic complexity: Counts decision points (branches) in code
+ * - Cognitive complexity: Measures mental effort to understand code (SonarSource spec)
+ * - Halstead metrics: Measures complexity based on operators/operands
+ */
+
+
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/ast/symbols.js
+
+/**
+ * Extract function declaration info (function_declaration, function)
+ */
+function extractFunctionInfo(node, content, parentClass) {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode)
+        return null;
+    return {
+        name: nameNode.text,
+        type: parentClass ? 'method' : 'function',
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        parentClass,
+        signature: extractSignature(node, content),
+        parameters: extractParameters(node, content),
+        returnType: extractReturnType(node, content),
+        complexity: calculateComplexity(node),
+    };
+}
+/**
+ * Extract arrow function or function expression info
+ */
+function extractArrowFunctionInfo(node, content, parentClass) {
+    // Try to find variable name for arrow functions
+    const parent = node.parent;
+    let name = 'anonymous';
+    if (parent?.type === 'variable_declarator') {
+        const nameNode = parent.childForFieldName('name');
+        name = nameNode?.text || 'anonymous';
+    }
+    return {
+        name,
+        type: parentClass ? 'method' : 'function',
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        parentClass,
+        signature: extractSignature(node, content),
+        parameters: extractParameters(node, content),
+        complexity: calculateComplexity(node),
+    };
+}
+/**
+ * Extract method definition info
+ */
+function extractMethodInfo(node, content, parentClass) {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode)
+        return null;
+    return {
+        name: nameNode.text,
+        type: 'method',
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        parentClass,
+        signature: extractSignature(node, content),
+        parameters: extractParameters(node, content),
+        returnType: extractReturnType(node, content),
+        complexity: calculateComplexity(node),
+    };
+}
+/**
+ * Extract class declaration info
+ */
+function extractClassInfo(node, _content, _parentClass) {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode)
+        return null;
+    return {
+        name: nameNode.text,
+        type: 'class',
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        signature: `class ${nameNode.text}`,
+    };
+}
+/**
+ * Extract interface declaration info (TypeScript)
+ */
+function extractInterfaceInfo(node, _content, _parentClass) {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode)
+        return null;
+    return {
+        name: nameNode.text,
+        type: 'interface',
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        signature: `interface ${nameNode.text}`,
+    };
+}
+/**
+ * Extract Python function info (def and async def)
+ */
+function extractPythonFunctionInfo(node, content, parentClass) {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode)
+        return null;
+    return {
+        name: nameNode.text,
+        type: parentClass ? 'method' : 'function',
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        parentClass,
+        signature: extractSignature(node, content),
+        parameters: extractParameters(node, content),
+        complexity: calculateComplexity(node),
+    };
+}
+/**
+ * Extract Python class info
+ */
+function extractPythonClassInfo(node, _content, _parentClass) {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode)
+        return null;
+    return {
+        name: nameNode.text,
+        type: 'class',
+        startLine: node.startPosition.row + 1,
+        endLine: node.endPosition.row + 1,
+        signature: `class ${nameNode.text}`,
+    };
+}
+/**
+ * Map of AST node types to their specialized extractors
+ *
+ * Note: There is intentional overlap in node type names across languages:
+ * - 'function_definition': Used by both PHP and Python
+ * - 'class_declaration': Used by TypeScript/JavaScript
+ * - 'class_definition': Used by Python
+ *
+ * This is handled correctly because each file is parsed with its specific language parser.
+ */
+const symbolExtractors = {
+    // TypeScript/JavaScript
+    'function_declaration': extractFunctionInfo,
+    'function': extractFunctionInfo,
+    'arrow_function': extractArrowFunctionInfo,
+    'function_expression': extractArrowFunctionInfo,
+    'method_definition': extractMethodInfo,
+    'class_declaration': extractClassInfo,
+    'interface_declaration': extractInterfaceInfo,
+    // PHP
+    'function_definition': extractFunctionInfo, // PHP functions (Python handled via language check in extractSymbolInfo)
+    'method_declaration': extractMethodInfo, // PHP methods
+    // Python
+    'async_function_definition': extractPythonFunctionInfo, // Python async functions
+    'class_definition': extractPythonClassInfo, // Python classes
+    // Note: Python regular functions use 'function_definition' (same as PHP)
+    // They are dispatched to extractPythonFunctionInfo via language check in extractSymbolInfo()
+};
+/**
+ * Extract symbol information from an AST node using specialized extractors
+ *
+ * @param node - AST node to extract info from
+ * @param content - Source code content
+ * @param parentClass - Parent class name if this is a method
+ * @param language - Programming language (for disambiguating shared node types)
+ * @returns Symbol information or null
+ */
+function extractSymbolInfo(node, content, parentClass, language) {
+    // Handle ambiguous node types that are shared between languages
+    // PHP and Python both use 'function_definition', but need different extractors
+    if (node.type === 'function_definition' && language === 'python') {
+        return extractPythonFunctionInfo(node, content, parentClass);
+    }
+    const extractor = symbolExtractors[node.type];
+    return extractor ? extractor(node, content, parentClass) : null;
+}
+/**
+ * Extract function/method signature
+ */
+function extractSignature(node, content) {
+    // Get the first line of the function (up to opening brace or arrow)
+    const startLine = node.startPosition.row;
+    const lines = content.split('\n');
+    let signature = lines[startLine] || '';
+    // If signature spans multiple lines, try to get up to the opening brace
+    let currentLine = startLine;
+    while (currentLine < node.endPosition.row && !signature.includes('{') && !signature.includes('=>')) {
+        currentLine++;
+        signature += ' ' + (lines[currentLine] || '');
+    }
+    // Clean up signature
+    signature = signature.split('{')[0].split('=>')[0].trim();
+    // Limit length
+    if (signature.length > 200) {
+        signature = signature.substring(0, 197) + '...';
+    }
+    return signature;
+}
+/**
+ * Extract parameter list from function node
+ *
+ * Note: The `_content` parameter is unused in this function, but is kept for API consistency
+ * with other extract functions (e.g., extractSignature).
+ */
+function extractParameters(node, _content) {
+    const parameters = [];
+    // Find parameters node
+    const paramsNode = node.childForFieldName('parameters');
+    if (!paramsNode)
+        return parameters;
+    // Traverse parameter nodes
+    for (let i = 0; i < paramsNode.namedChildCount; i++) {
+        const param = paramsNode.namedChild(i);
+        if (param) {
+            parameters.push(param.text);
+        }
+    }
+    return parameters;
+}
+/**
+ * Extract return type from function node (TypeScript)
+ *
+ * Note: The `_content` parameter is unused in this function, but is kept for API consistency
+ * with other extract functions (e.g., extractSignature).
+ */
+function extractReturnType(node, _content) {
+    const returnTypeNode = node.childForFieldName('return_type');
+    if (!returnTypeNode)
+        return undefined;
+    return returnTypeNode.text;
+}
+/**
+ * Extract import statements from a file
+ */
+function extractImports(rootNode) {
+    const imports = [];
+    function traverse(node) {
+        // Handle import statements (shared node type between languages)
+        if (node.type === 'import_statement') {
+            // TypeScript/JavaScript: Extract just the module path from 'source' field
+            const sourceNode = node.childForFieldName('source');
+            if (sourceNode) {
+                // TS/JS import with source field
+                const importPath = sourceNode.text.replace(/['"]/g, '');
+                imports.push(importPath);
+            }
+            else {
+                // Python import without source field (e.g., "import os")
+                const importText = node.text.split('\n')[0];
+                imports.push(importText);
+            }
+        }
+        // Python-specific: from...import statements
+        else if (node.type === 'import_from_statement') {
+            // Python: Get the entire import line (first line only)
+            const importText = node.text.split('\n')[0];
+            imports.push(importText);
+        }
+        // Only traverse top-level nodes for imports
+        if (node === rootNode) {
+            for (let i = 0; i < node.namedChildCount; i++) {
+                const child = node.namedChild(i);
+                if (child)
+                    traverse(child);
+            }
+        }
+    }
+    traverse(rootNode);
+    return imports;
+}
+//# sourceMappingURL=symbols.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/ast/traversers/typescript.js
+/**
+ * TypeScript/JavaScript AST traverser
+ *
+ * Handles TypeScript and JavaScript AST node types and traversal patterns.
+ * Both languages share the same AST structure (via tree-sitter-typescript).
+ */
+class TypeScriptTraverser {
+    targetNodeTypes = [
+        'function_declaration',
+        'function',
+        'interface_declaration',
+        'method_definition',
+        'lexical_declaration', // For const/let with arrow functions
+        'variable_declaration', // For var with functions
+    ];
+    containerTypes = [
+        'class_declaration', // We extract methods, not the class itself
+    ];
+    declarationTypes = [
+        'lexical_declaration', // const/let
+        'variable_declaration', // var
+    ];
+    functionTypes = [
+        'arrow_function',
+        'function_expression',
+        'function',
+    ];
+    shouldExtractChildren(node) {
+        return this.containerTypes.includes(node.type);
+    }
+    isDeclarationWithFunction(node) {
+        return this.declarationTypes.includes(node.type);
+    }
+    getContainerBody(node) {
+        if (node.type === 'class_declaration') {
+            return node.childForFieldName('body');
+        }
+        return null;
+    }
+    shouldTraverseChildren(node) {
+        return node.type === 'program' ||
+            node.type === 'export_statement' ||
+            node.type === 'class_body';
+    }
+    findParentContainerName(node) {
+        let current = node.parent;
+        while (current) {
+            if (current.type === 'class_declaration') {
+                const nameNode = current.childForFieldName('name');
+                return nameNode?.text;
+            }
+            current = current.parent;
+        }
+        return undefined;
+    }
+    /**
+     * Check if a declaration node contains a function (arrow, function expression, etc.)
+     */
+    findFunctionInDeclaration(node) {
+        const search = (n, depth) => {
+            if (depth > 3)
+                return null; // Don't search too deep
+            if (this.functionTypes.includes(n.type)) {
+                return n;
+            }
+            for (let i = 0; i < n.childCount; i++) {
+                const child = n.child(i);
+                if (child) {
+                    const result = search(child, depth + 1);
+                    if (result)
+                        return result;
+                }
+            }
+            return null;
+        };
+        const functionNode = search(node, 0);
+        return {
+            hasFunction: functionNode !== null,
+            functionNode,
+        };
+    }
+}
+/**
+ * JavaScript uses the same traverser as TypeScript
+ */
+class JavaScriptTraverser extends TypeScriptTraverser {
+}
+//# sourceMappingURL=typescript.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/ast/traversers/php.js
+/**
+ * PHP AST traverser
+ *
+ * Handles PHP AST node types and traversal patterns.
+ * PHP uses tree-sitter-php grammar.
+ */
+class PHPTraverser {
+    targetNodeTypes = [
+        'function_definition', // function foo() {}
+        'method_declaration', // public function bar() {}
+    ];
+    containerTypes = [
+        'class_declaration', // We extract methods, not the class itself
+        'trait_declaration', // PHP traits
+        'interface_declaration', // PHP interfaces (for interface methods)
+    ];
+    declarationTypes = [
+    // PHP doesn't have arrow functions or const/let like JS
+    // Functions are always defined with 'function' keyword
+    ];
+    functionTypes = [
+        'function_definition',
+        'method_declaration',
+    ];
+    shouldExtractChildren(node) {
+        return this.containerTypes.includes(node.type);
+    }
+    isDeclarationWithFunction(_node) {
+        // PHP doesn't have variable declarations with functions like JS/TS
+        // Functions are always defined with 'function' keyword
+        return false;
+    }
+    getContainerBody(node) {
+        if (node.type === 'class_declaration' ||
+            node.type === 'trait_declaration' ||
+            node.type === 'interface_declaration') {
+            // In PHP, the body is called 'declaration_list'
+            return node.childForFieldName('body');
+        }
+        return null;
+    }
+    shouldTraverseChildren(node) {
+        return node.type === 'program' || // Top-level PHP file
+            node.type === 'php' || // PHP block
+            node.type === 'declaration_list'; // Body of class/trait/interface
+    }
+    findParentContainerName(node) {
+        let current = node.parent;
+        while (current) {
+            if (current.type === 'class_declaration' ||
+                current.type === 'trait_declaration') {
+                const nameNode = current.childForFieldName('name');
+                return nameNode?.text;
+            }
+            current = current.parent;
+        }
+        return undefined;
+    }
+    findFunctionInDeclaration(_node) {
+        // PHP doesn't have this pattern
+        return {
+            hasFunction: false,
+            functionNode: null,
+        };
+    }
+}
+//# sourceMappingURL=php.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/ast/traversers/python.js
+/**
+ * Python AST traverser
+ *
+ * Handles Python AST node types and traversal patterns.
+ * Python has a simpler structure than TypeScript/JavaScript:
+ * - Functions are defined with 'def' or 'async def'
+ * - No variable declarations with functions (unlike JS const x = () => {})
+ * - Classes contain methods (which are just functions)
+ */
+class PythonTraverser {
+    targetNodeTypes = [
+        'function_definition',
+        'async_function_definition',
+    ];
+    containerTypes = [
+        'class_definition', // We extract methods, not the class itself
+    ];
+    declarationTypes = [
+    // Python doesn't have const/let/var declarations like JS/TS
+    // Functions are always defined with 'def' or 'async def'
+    ];
+    functionTypes = [
+        'function_definition',
+        'async_function_definition',
+    ];
+    shouldExtractChildren(node) {
+        return this.containerTypes.includes(node.type);
+    }
+    isDeclarationWithFunction(_node) {
+        // Python doesn't have variable declarations with functions like JS/TS
+        // Functions are always defined with 'def' or 'async def'
+        return false;
+    }
+    getContainerBody(node) {
+        if (node.type === 'class_definition') {
+            // In Python, the class body is called 'block'
+            return node.childForFieldName('body');
+        }
+        return null;
+    }
+    shouldTraverseChildren(node) {
+        return node.type === 'module' || // Top-level Python file
+            node.type === 'block'; // Body of class/function
+    }
+    findParentContainerName(node) {
+        let current = node.parent;
+        while (current) {
+            if (current.type === 'class_definition') {
+                const nameNode = current.childForFieldName('name');
+                return nameNode?.text;
+            }
+            current = current.parent;
+        }
+        return undefined;
+    }
+    /**
+     * Python doesn't have this pattern (const x = () => {})
+     * Functions are always defined with 'def' or 'async def'
+     */
+    findFunctionInDeclaration(_node) {
+        return {
+            hasFunction: false,
+            functionNode: null,
+        };
+    }
+}
+//# sourceMappingURL=python.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/ast/traversers/index.js
+
+
+
+/**
+ * Registry of language traversers
+ *
+ * Maps each supported language to its traverser implementation.
+ * When adding a new language:
+ * 1. Create a new traverser class implementing LanguageTraverser
+ * 2. Add it to this registry
+ * 3. Update SupportedLanguage type in ../types.ts
+ */
+const traverserRegistry = {
+    typescript: new TypeScriptTraverser(),
+    javascript: new JavaScriptTraverser(),
+    php: new PHPTraverser(),
+    python: new PythonTraverser(),
+};
+/**
+ * Get the traverser for a specific language
+ *
+ * @param language - Programming language
+ * @returns Language-specific traverser
+ * @throws Error if language is not supported
+ */
+function getTraverser(language) {
+    const traverser = traverserRegistry[language];
+    if (!traverser) {
+        throw new Error(`No traverser available for language: ${language}`);
+    }
+    return traverser;
+}
+/**
+ * Check if a language has a traverser implementation
+ *
+ * @param language - Programming language
+ * @returns True if traverser exists
+ */
+function hasTraverser(language) {
+    return language in traverserRegistry;
+}
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/ast/chunker.js
+
+
+
+
+/**
+ * Chunk a file using AST-based semantic boundaries
+ *
+ * Uses Tree-sitter to parse code into an AST and extract semantic chunks
+ * (functions, classes, methods) that respect code structure.
+ *
+ * **Known Limitations:**
+ * - Tree-sitter may fail with "Invalid argument" error on very large files (1000+ lines)
+ * - When this occurs, Lien automatically falls back to line-based chunking
+ * - Configure fallback behavior via `chunking.astFallback` ('line-based' or 'error')
+ *
+ * @param filepath - Path to the file
+ * @param content - File content
+ * @param options - Chunking options
+ * @returns Array of AST-aware chunks
+ * @throws Error if AST parsing fails and astFallback is 'error'
+ */
+function chunkByAST(filepath, content, options = {}) {
+    const { minChunkSize = 5 } = options;
+    // Check if AST is supported for this file
+    const language = parser_detectLanguage(filepath);
+    if (!language) {
+        throw new Error(`Unsupported language for file: ${filepath}`);
+    }
+    // Parse the file
+    const parseResult = parseAST(content, language);
+    // If parsing failed, throw error (caller should fallback to line-based)
+    if (!parseResult.tree) {
+        throw new Error(`Failed to parse ${filepath}: ${parseResult.error}`);
+    }
+    const chunks = [];
+    const lines = content.split('\n');
+    const rootNode = parseResult.tree.rootNode;
+    // Get language-specific traverser
+    const traverser = getTraverser(language);
+    // Extract file-level imports once
+    const fileImports = extractImports(rootNode);
+    // Find all top-level function and class declarations
+    const topLevelNodes = findTopLevelNodes(rootNode, traverser);
+    for (const node of topLevelNodes) {
+        // For variable declarations, try to find the function inside
+        let actualNode = node;
+        if (traverser.isDeclarationWithFunction(node)) {
+            const declInfo = traverser.findFunctionInDeclaration(node);
+            if (declInfo.functionNode) {
+                actualNode = declInfo.functionNode;
+            }
+        }
+        // For methods, find the parent container name (e.g., class name)
+        const parentClassName = traverser.findParentContainerName(actualNode);
+        const symbolInfo = extractSymbolInfo(actualNode, content, parentClassName, language);
+        // Extract the code for this node (use original node for full declaration)
+        const nodeContent = getNodeContent(node, lines);
+        // Create a chunk for this semantic unit
+        // Note: Large functions are kept as single chunks (may exceed maxChunkSize)
+        // This preserves semantic boundaries - better than splitting mid-function
+        chunks.push(createChunk(filepath, node, nodeContent, symbolInfo, fileImports, language));
+    }
+    // Handle remaining code (imports, exports, top-level statements)
+    const coveredRanges = topLevelNodes.map(n => ({
+        start: n.startPosition.row,
+        end: n.endPosition.row,
+    }));
+    const uncoveredChunks = extractUncoveredCode(lines, coveredRanges, filepath, minChunkSize, fileImports, language);
+    chunks.push(...uncoveredChunks);
+    // Sort chunks by line number
+    chunks.sort((a, b) => a.metadata.startLine - b.metadata.startLine);
+    return chunks;
+}
+/** Check if node is a function-containing declaration at top level */
+function isFunctionDeclaration(node, depth, traverser) {
+    if (depth !== 0 || !traverser.isDeclarationWithFunction(node))
+        return false;
+    return traverser.findFunctionInDeclaration(node).hasFunction;
+}
+/** Check if node is a target type at valid depth */
+function isTargetNode(node, depth, traverser) {
+    return depth <= 1 && traverser.targetNodeTypes.includes(node.type);
+}
+/**
+ * Find all top-level nodes that should become chunks
+ *
+ * Uses a language-specific traverser to handle different AST structures.
+ * This function is now language-agnostic - all language-specific logic
+ * is delegated to the traverser.
+ *
+ * @param rootNode - Root AST node
+ * @param traverser - Language-specific traverser
+ * @returns Array of nodes to extract as chunks
+ */
+function findTopLevelNodes(rootNode, traverser) {
+    const nodes = [];
+    function traverse(node, depth) {
+        // Capture function declarations and target nodes
+        if (isFunctionDeclaration(node, depth, traverser) || isTargetNode(node, depth, traverser)) {
+            nodes.push(node);
+            return;
+        }
+        // Handle containers - traverse body at increased depth
+        if (traverser.shouldExtractChildren(node)) {
+            const body = traverser.getContainerBody(node);
+            if (body)
+                traverse(body, depth + 1);
+            return;
+        }
+        // Traverse children of traversable nodes
+        if (!traverser.shouldTraverseChildren(node))
+            return;
+        for (let i = 0; i < node.namedChildCount; i++) {
+            const child = node.namedChild(i);
+            if (child)
+                traverse(child, depth);
+        }
+    }
+    traverse(rootNode, 0);
+    return nodes;
+}
+/**
+ * Extract content for a specific AST node
+ */
+function getNodeContent(node, lines) {
+    const startLine = node.startPosition.row;
+    const endLine = node.endPosition.row;
+    return lines.slice(startLine, endLine + 1).join('\n');
+}
+/** Maps symbol types to legacy symbol array keys */
+const SYMBOL_TYPE_TO_ARRAY = {
+    function: 'functions',
+    method: 'functions',
+    class: 'classes',
+    interface: 'interfaces',
+};
+/** Symbol types that have meaningful complexity metrics */
+const COMPLEXITY_SYMBOL_TYPES = new Set(['function', 'method']);
+/**
+ * Build legacy symbols object for backward compatibility
+ */
+function buildLegacySymbols(symbolInfo) {
+    const symbols = { functions: [], classes: [], interfaces: [] };
+    if (symbolInfo?.name && symbolInfo.type) {
+        const arrayKey = SYMBOL_TYPE_TO_ARRAY[symbolInfo.type];
+        if (arrayKey)
+            symbols[arrayKey].push(symbolInfo.name);
+    }
+    return symbols;
+}
+/**
+ * Determine chunk type from symbol info
+ */
+function getChunkType(symbolInfo) {
+    if (!symbolInfo)
+        return 'block';
+    return symbolInfo.type === 'class' ? 'class' : 'function';
+}
+/**
+ * Create a chunk from an AST node
+ */
+function createChunk(filepath, node, content, symbolInfo, imports, language) {
+    const symbols = buildLegacySymbols(symbolInfo);
+    const shouldCalcComplexity = symbolInfo?.type && COMPLEXITY_SYMBOL_TYPES.has(symbolInfo.type);
+    // Calculate complexity metrics only for functions and methods
+    const cognitiveComplexity = shouldCalcComplexity
+        ? calculateCognitiveComplexity(node)
+        : undefined;
+    // Calculate Halstead metrics only for functions and methods
+    const halstead = shouldCalcComplexity
+        ? calculateHalstead(node, language)
+        : undefined;
+    return {
+        content,
+        metadata: {
+            file: filepath,
+            startLine: node.startPosition.row + 1,
+            endLine: node.endPosition.row + 1,
+            type: getChunkType(symbolInfo),
+            language,
+            symbols,
+            symbolName: symbolInfo?.name,
+            symbolType: symbolInfo?.type,
+            parentClass: symbolInfo?.parentClass,
+            complexity: symbolInfo?.complexity,
+            cognitiveComplexity,
+            parameters: symbolInfo?.parameters,
+            signature: symbolInfo?.signature,
+            imports,
+            // Halstead metrics
+            halsteadVolume: halstead?.volume,
+            halsteadDifficulty: halstead?.difficulty,
+            halsteadEffort: halstead?.effort,
+            halsteadBugs: halstead?.bugs,
+        },
+    };
+}
+/**
+ * Find gaps between covered ranges (uncovered code)
+ */
+function findUncoveredRanges(coveredRanges, totalLines) {
+    const uncoveredRanges = [];
+    let currentStart = 0;
+    // Sort covered ranges
+    const sortedRanges = [...coveredRanges].sort((a, b) => a.start - b.start);
+    for (const range of sortedRanges) {
+        if (currentStart < range.start) {
+            // There's a gap before this range
+            uncoveredRanges.push({
+                start: currentStart,
+                end: range.start - 1,
+            });
+        }
+        currentStart = range.end + 1;
+    }
+    // Handle remaining code after last covered range
+    if (currentStart < totalLines) {
+        uncoveredRanges.push({
+            start: currentStart,
+            end: totalLines - 1,
+        });
+    }
+    return uncoveredRanges;
+}
+/**
+ * Create a chunk from a line range
+ */
+function createChunkFromRange(range, lines, filepath, language, imports) {
+    const uncoveredLines = lines.slice(range.start, range.end + 1);
+    const content = uncoveredLines.join('\n').trim();
+    return {
+        content,
+        metadata: {
+            file: filepath,
+            startLine: range.start + 1,
+            endLine: range.end + 1,
+            type: 'block',
+            language,
+            // Empty symbols for uncovered code (imports, exports, etc.)
+            symbols: { functions: [], classes: [], interfaces: [] },
+            imports,
+        },
+    };
+}
+/**
+ * Validate that a chunk meets the minimum size requirements
+ */
+function isValidChunk(chunk, minChunkSize) {
+    const lineCount = chunk.metadata.endLine - chunk.metadata.startLine + 1;
+    return chunk.content.length > 0 && lineCount >= minChunkSize;
+}
+/**
+ * Extract code that wasn't covered by function/class chunks
+ * (imports, exports, top-level statements)
+ */
+function extractUncoveredCode(lines, coveredRanges, filepath, minChunkSize, imports, language) {
+    const uncoveredRanges = findUncoveredRanges(coveredRanges, lines.length);
+    return uncoveredRanges
+        .map(range => createChunkFromRange(range, lines, filepath, language, imports))
+        .filter(chunk => isValidChunk(chunk, minChunkSize));
+}
+/**
+ * Check if AST chunking should be used for a file
+ */
+function shouldUseAST(filepath) {
+    return isASTSupported(filepath);
+}
+//# sourceMappingURL=chunker.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/liquid-chunker.js
+/**
+ * Extract schema name from JSON content
+ *
+ * Extracts the "name" field from Shopify schema JSON.
+ * Uses JSON.parse to properly handle escaped quotes and other JSON edge cases.
+ *
+ * Example:
+ * {% schema %}
+ * {
+ *   "name": "My \"Special\" Section",
+ *   "settings": []
+ * }
+ * {% endschema %}
+ *
+ * Returns: 'My "Special" Section' (with literal quotes, unescaped)
+ */
+function extractSchemaName(schemaContent) {
+    try {
+        // Remove Liquid tags to isolate JSON content
+        // Replace {% schema %} and {% endschema %} (with optional whitespace control)
+        let jsonContent = schemaContent
+            .replace(/\{%-?\s*schema\s*-?%\}/g, '')
+            .replace(/\{%-?\s*endschema\s*-?%\}/g, '')
+            .trim();
+        // Parse the JSON
+        const schema = JSON.parse(jsonContent);
+        // Ensure name is a string before returning
+        return typeof schema.name === 'string' ? schema.name : undefined;
+    }
+    catch (error) {
+        // Invalid JSON - return undefined
+        // This is acceptable: schema blocks with invalid JSON won't have names extracted
+    }
+    return undefined;
+}
+/**
+ * Remove Liquid comment blocks from content to avoid extracting tags from comments
+ *
+ * Example:
+ * {% comment %}Don't use {% render 'old-snippet' %}{% endcomment %}
+ * → (removed)
+ */
+function removeComments(content) {
+    // Remove {% comment %}...{% endcomment %} blocks (with optional whitespace control)
+    return content.replace(/\{%-?\s*comment\s*-?%\}[\s\S]*?\{%-?\s*endcomment\s*-?%\}/g, '');
+}
+/**
+ * Extract dependencies from {% render %}, {% include %}, and {% section %} tags
+ *
+ * Examples:
+ * - {% render 'product-card' %} → 'product-card'
+ * - {% render "cart-item", product: product %} → 'cart-item'
+ * - {% include 'snippets/header' %} → 'snippets/header'
+ * - {% section 'announcement-bar' %} → 'announcement-bar'
+ *
+ * Limitations:
+ * - Does not handle escaped quotes in snippet names (e.g., {% render 'name\'s' %})
+ * - This is acceptable because Shopify snippet names map to filenames, and
+ *   filesystem restrictions prevent quotes in filenames (snippets/name's.liquid is invalid)
+ * - In practice, Shopify snippet names use only alphanumeric, dash, and underscore
+ *
+ * Note: Expects content with comments already removed for performance
+ *
+ * @param contentWithoutComments - Content with Liquid comments already removed
+ */
+function extractRenderTags(contentWithoutComments) {
+    const dependencies = new Set();
+    // Match {% render 'snippet-name' %} or {% render "snippet-name" %}
+    // Note: Does not handle escaped quotes - see function docs for rationale
+    const renderPattern = /\{%-?\s*render\s+['"]([^'"]+)['"]/g;
+    let match;
+    while ((match = renderPattern.exec(contentWithoutComments)) !== null) {
+        dependencies.add(match[1]);
+    }
+    // Match {% include 'snippet-name' %} or {% include "snippet-name" %}
+    const includePattern = /\{%-?\s*include\s+['"]([^'"]+)['"]/g;
+    while ((match = includePattern.exec(contentWithoutComments)) !== null) {
+        dependencies.add(match[1]);
+    }
+    // Match {% section 'section-name' %} or {% section "section-name" %}
+    const sectionPattern = /\{%-?\s*section\s+['"]([^'"]+)['"]/g;
+    while ((match = sectionPattern.exec(contentWithoutComments)) !== null) {
+        dependencies.add(match[1]);
+    }
+    return Array.from(dependencies);
+}
+/**
+ * Find all special Liquid blocks in the template
+ *
+ * Limitation: Does not support nested blocks of the same type.
+ * - Matches first start tag with first end tag
+ * - This is acceptable because Shopify Liquid does not allow nested blocks
+ * - Example invalid: {% schema %}...{% schema %}...{% endschema %} (Shopify rejects this)
+ * - If malformed input contains nested blocks, only outermost block is extracted
+ */
+function findLiquidBlocks(content) {
+    const lines = content.split('\n');
+    const blocks = [];
+    // Regex patterns for Liquid blocks
+    // Note: Matches first start → first end (no nesting support, which is correct for Shopify)
+    const blockPatterns = [
+        { type: 'schema', start: /\{%-?\s*schema\s*-?%\}/, end: /\{%-?\s*endschema\s*-?%\}/ },
+        { type: 'style', start: /\{%-?\s*style\s*-?%\}/, end: /\{%-?\s*endstyle\s*-?%\}/ },
+        { type: 'javascript', start: /\{%-?\s*javascript\s*-?%\}/, end: /\{%-?\s*endjavascript\s*-?%\}/ },
+    ];
+    for (const pattern of blockPatterns) {
+        let searchStart = 0;
+        while (searchStart < lines.length) {
+            // Find start tag
+            const startIdx = lines.findIndex((line, idx) => idx >= searchStart && pattern.start.test(line));
+            if (startIdx === -1)
+                break;
+            // Find end tag (allow same line for single-line blocks)
+            const endIdx = lines.findIndex((line, idx) => idx >= startIdx && pattern.end.test(line));
+            if (endIdx === -1) {
+                // No end tag found, treat rest as template
+                break;
+            }
+            // Extract block content
+            const blockContent = lines.slice(startIdx, endIdx + 1).join('\n');
+            blocks.push({
+                type: pattern.type,
+                startLine: startIdx,
+                endLine: endIdx,
+                content: blockContent,
+            });
+            searchStart = endIdx + 1;
+        }
+    }
+    return blocks.sort((a, b) => a.startLine - b.startLine);
+}
+/**
+ * Create a CodeChunk with consistent structure
+ */
+function createCodeChunk(content, startLine, endLine, filepath, type, options = {}) {
+    return {
+        content,
+        metadata: {
+            file: filepath,
+            startLine,
+            endLine,
+            language: 'liquid',
+            type,
+            symbolName: options.symbolName,
+            symbolType: options.symbolType,
+            imports: options.imports?.length ? options.imports : undefined,
+        },
+    };
+}
+/**
+ * Split a large block into multiple chunks with overlap
+ */
+function splitLargeBlock(block, ctx, symbolName, imports) {
+    const chunks = [];
+    const blockLines = block.content.split('\n');
+    const { chunkSize, chunkOverlap, filepath } = ctx.params;
+    for (let offset = 0; offset < blockLines.length; offset += chunkSize - chunkOverlap) {
+        const endOffset = Math.min(offset + chunkSize, blockLines.length);
+        const chunkContent = blockLines.slice(offset, endOffset).join('\n');
+        if (chunkContent.trim().length > 0) {
+            chunks.push(createCodeChunk(chunkContent, block.startLine + offset + 1, block.startLine + endOffset, filepath, 'block', { symbolName, symbolType: block.type, imports }));
+        }
+        if (endOffset >= blockLines.length)
+            break;
+    }
+    return chunks;
+}
+/**
+ * Create chunks from a special Liquid block (schema, style, javascript)
+ * Returns the chunks and marks covered lines
+ */
+function processSpecialBlock(block, ctx, coveredLines) {
+    // Mark lines as covered
+    for (let i = block.startLine; i <= block.endLine; i++) {
+        coveredLines.add(i);
+    }
+    // Extract metadata
+    const symbolName = block.type === 'schema' ? extractSchemaName(block.content) : undefined;
+    // Extract imports from cleaned content
+    const blockContentWithoutComments = ctx.linesWithoutComments
+        .slice(block.startLine, block.endLine + 1)
+        .join('\n');
+    const imports = extractRenderTags(blockContentWithoutComments);
+    const blockLineCount = block.endLine - block.startLine + 1;
+    const maxBlockSize = ctx.params.chunkSize * 3;
+    // Keep small blocks as single chunk, split large ones
+    if (blockLineCount <= maxBlockSize) {
+        return [createCodeChunk(block.content, block.startLine + 1, block.endLine + 1, ctx.params.filepath, 'block', { symbolName, symbolType: block.type, imports })];
+    }
+    return splitLargeBlock(block, ctx, symbolName, imports);
+}
+/**
+ * Create a template chunk from accumulated lines
+ */
+function flushTemplateChunk(currentChunk, chunkStartLine, endLine, ctx) {
+    if (currentChunk.length === 0)
+        return null;
+    const chunkContent = currentChunk.join('\n');
+    if (chunkContent.trim().length === 0)
+        return null;
+    const cleanedChunk = ctx.linesWithoutComments.slice(chunkStartLine, endLine).join('\n');
+    const imports = extractRenderTags(cleanedChunk);
+    return createCodeChunk(chunkContent, chunkStartLine + 1, endLine, ctx.params.filepath, 'template', { imports });
+}
+/**
+ * Process uncovered template content into chunks
+ */
+function processTemplateContent(ctx, coveredLines) {
+    const chunks = [];
+    const { lines, params } = ctx;
+    const { chunkSize, chunkOverlap } = params;
+    let currentChunk = [];
+    let chunkStartLine = 0;
+    for (let i = 0; i < lines.length; i++) {
+        // Skip lines covered by special blocks
+        if (coveredLines.has(i)) {
+            const chunk = flushTemplateChunk(currentChunk, chunkStartLine, i, ctx);
+            if (chunk)
+                chunks.push(chunk);
+            currentChunk = [];
+            continue;
+        }
+        // Start new chunk if needed
+        if (currentChunk.length === 0) {
+            chunkStartLine = i;
+        }
+        currentChunk.push(lines[i]);
+        // Flush if chunk is full
+        if (currentChunk.length >= chunkSize) {
+            const chunk = flushTemplateChunk(currentChunk, chunkStartLine, i + 1, ctx);
+            if (chunk)
+                chunks.push(chunk);
+            // Add overlap for next chunk
+            currentChunk = currentChunk.slice(-chunkOverlap);
+            chunkStartLine = Math.max(0, i + 1 - chunkOverlap);
+        }
+    }
+    // Flush remaining chunk
+    const finalChunk = flushTemplateChunk(currentChunk, chunkStartLine, lines.length, ctx);
+    if (finalChunk)
+        chunks.push(finalChunk);
+    return chunks;
+}
+/**
+ * Chunk a Liquid template file
+ *
+ * Special handling for:
+ * - {% schema %} blocks (kept together, extract section name)
+ * - {% style %} blocks (kept together)
+ * - {% javascript %} blocks (kept together)
+ * - {% render %}, {% include %}, and {% section %} tags (tracked as imports)
+ * - Regular template content (chunked by lines)
+ */
+function chunkLiquidFile(filepath, content, chunkSize = 75, chunkOverlap = 10) {
+    // Build context once for reuse across helpers
+    const contentWithoutComments = removeComments(content);
+    const ctx = {
+        lines: content.split('\n'),
+        linesWithoutComments: contentWithoutComments.split('\n'),
+        params: { filepath, chunkSize, chunkOverlap },
+    };
+    // Find special blocks and track covered lines
+    const blocks = findLiquidBlocks(content);
+    const coveredLines = new Set();
+    // Process special blocks
+    const blockChunks = blocks.flatMap(block => processSpecialBlock(block, ctx, coveredLines));
+    // Process uncovered template content
+    const templateChunks = processTemplateContent(ctx, coveredLines);
+    // Combine and sort by line number
+    return [...blockChunks, ...templateChunks].sort((a, b) => a.metadata.startLine - b.metadata.startLine);
+}
+//# sourceMappingURL=liquid-chunker.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/json-template-chunker.js
+/**
+ * Shopify JSON template chunking
+ *
+ * JSON template files define which sections appear on a template page.
+ * We extract section references to track dependencies.
+ *
+ * Example structure:
+ * {
+ *   "sections": {
+ *     "main": { "type": "main-product", "settings": {...} },
+ *     "recommendations": { "type": "product-recommendations", "settings": {...} }
+ *   },
+ *   "order": ["main", "recommendations"]
+ * }
+ */
+/**
+ * Extract section types from a Shopify JSON template
+ *
+ * These are the actual section file names (e.g., "main-product" → sections/main-product.liquid)
+ */
+function extractSectionReferences(jsonContent) {
+    try {
+        const template = JSON.parse(jsonContent);
+        const sectionTypes = new Set();
+        // Extract from sections object
+        if (template.sections && typeof template.sections === 'object') {
+            for (const section of Object.values(template.sections)) {
+                if (typeof section === 'object' &&
+                    section !== null &&
+                    'type' in section &&
+                    typeof section.type === 'string') {
+                    sectionTypes.add(section.type);
+                }
+            }
+        }
+        return Array.from(sectionTypes);
+    }
+    catch (error) {
+        // Invalid JSON - return empty array
+        console.warn(`[Lien] Failed to parse JSON template: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+    }
+}
+/**
+ * Extract the template name from the filepath
+ *
+ * templates/customers/account.json → "customers/account"
+ * templates/product.json → "product"
+ */
+function extractTemplateName(filepath) {
+    // Match everything after templates/ up to .json
+    const match = filepath.match(/templates\/(.+)\.json$/);
+    return match ? match[1] : undefined;
+}
+/**
+ * Chunk a Shopify JSON template file
+ *
+ * JSON templates are typically small (define section layout),
+ * so we keep them as a single chunk and extract section references.
+ */
+function chunkJSONTemplate(filepath, content) {
+    // Skip empty files
+    if (content.trim().length === 0) {
+        return [];
+    }
+    const lines = content.split('\n');
+    const templateName = extractTemplateName(filepath);
+    const sectionReferences = extractSectionReferences(content);
+    return [{
+            content,
+            metadata: {
+                file: filepath,
+                startLine: 1,
+                endLine: lines.length,
+                language: 'json',
+                type: 'template',
+                symbolName: templateName,
+                symbolType: 'template',
+                imports: sectionReferences.length > 0 ? sectionReferences : undefined,
+            },
+        }];
+}
+//# sourceMappingURL=json-template-chunker.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/chunker.js
+
+
+
+
+
+function chunkFile(filepath, content, options = {}) {
+    const { chunkSize = 75, chunkOverlap = 10, useAST = true, astFallback = 'line-based' } = options;
+    // Special handling for Liquid files
+    if (filepath.endsWith('.liquid')) {
+        return chunkLiquidFile(filepath, content, chunkSize, chunkOverlap);
+    }
+    // Special handling for Shopify JSON template files (templates/**/*.json)
+    // Use regex to ensure 'templates/' is a path segment, not part of another name
+    // Matches: templates/product.json OR some-path/templates/customers/account.json
+    // Rejects: my-templates/config.json OR node_modules/pkg/templates/file.json (filtered by scanner)
+    if (filepath.endsWith('.json') && /(?:^|\/)templates\//.test(filepath)) {
+        return chunkJSONTemplate(filepath, content);
+    }
+    // Try AST-based chunking for supported languages
+    if (useAST && shouldUseAST(filepath)) {
+        try {
+            return chunkByAST(filepath, content, {
+                minChunkSize: Math.floor(chunkSize / 10),
+            });
+        }
+        catch (error) {
+            // Handle AST errors based on configuration
+            if (astFallback === 'error') {
+                // Throw error if user wants strict AST-only behavior
+                throw new Error(`AST chunking failed for ${filepath}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            // Otherwise fallback to line-based chunking
+            console.warn(`AST chunking failed for ${filepath}, falling back to line-based:`, error);
+        }
+    }
+    // Line-based chunking (original implementation)
+    return chunkByLines(filepath, content, chunkSize, chunkOverlap);
+}
+/**
+ * Original line-based chunking implementation
+ */
+function chunkByLines(filepath, content, chunkSize, chunkOverlap) {
+    const lines = content.split('\n');
+    const chunks = [];
+    const language = detectLanguage(filepath);
+    // Handle empty files
+    if (lines.length === 0 || (lines.length === 1 && lines[0].trim() === '')) {
+        return chunks;
+    }
+    // Chunk by lines with overlap
+    for (let i = 0; i < lines.length; i += chunkSize - chunkOverlap) {
+        const endLine = Math.min(i + chunkSize, lines.length);
+        const chunkLines = lines.slice(i, endLine);
+        const chunkContent = chunkLines.join('\n');
+        // Skip empty chunks
+        if (chunkContent.trim().length === 0) {
+            continue;
+        }
+        // Extract symbols from the chunk
+        const symbols = extractSymbols(chunkContent, language);
+        chunks.push({
+            content: chunkContent,
+            metadata: {
+                file: filepath,
+                startLine: i + 1,
+                endLine: endLine,
+                type: 'block', // MVP: all chunks are 'block' type
+                language,
+                symbols,
+            },
+        });
+        // If we've reached the end, break
+        if (endLine >= lines.length) {
+            break;
+        }
+    }
+    return chunks;
+}
+function chunkText(text, options = {}) {
+    const { chunkSize = 75, chunkOverlap = 10 } = options;
+    const lines = text.split('\n');
+    const chunks = [];
+    for (let i = 0; i < lines.length; i += chunkSize - chunkOverlap) {
+        const endLine = Math.min(i + chunkSize, lines.length);
+        const chunkLines = lines.slice(i, endLine);
+        const chunkContent = chunkLines.join('\n');
+        if (chunkContent.trim().length > 0) {
+            chunks.push(chunkContent);
+        }
+        if (endLine >= lines.length) {
+            break;
+        }
+    }
+    return chunks;
+}
+//# sourceMappingURL=chunker.js.map
+;// CONCATENATED MODULE: external "@xenova/transformers"
+const transformers_namespaceObject = require("@xenova/transformers");
+;// CONCATENATED MODULE: ../core/dist/errors/codes.js
+/**
+ * Error codes for all Lien-specific errors.
+ * Used to identify error types programmatically.
+ */
+var LienErrorCode;
+(function (LienErrorCode) {
+    // Configuration
+    LienErrorCode["CONFIG_NOT_FOUND"] = "CONFIG_NOT_FOUND";
+    LienErrorCode["CONFIG_INVALID"] = "CONFIG_INVALID";
+    // Index
+    LienErrorCode["INDEX_NOT_FOUND"] = "INDEX_NOT_FOUND";
+    LienErrorCode["INDEX_CORRUPTED"] = "INDEX_CORRUPTED";
+    // Embeddings
+    LienErrorCode["EMBEDDING_MODEL_FAILED"] = "EMBEDDING_MODEL_FAILED";
+    LienErrorCode["EMBEDDING_GENERATION_FAILED"] = "EMBEDDING_GENERATION_FAILED";
+    // File System
+    LienErrorCode["FILE_NOT_FOUND"] = "FILE_NOT_FOUND";
+    LienErrorCode["FILE_NOT_READABLE"] = "FILE_NOT_READABLE";
+    LienErrorCode["INVALID_PATH"] = "INVALID_PATH";
+    // Tool Input
+    LienErrorCode["INVALID_INPUT"] = "INVALID_INPUT";
+    // System
+    LienErrorCode["INTERNAL_ERROR"] = "INTERNAL_ERROR";
+})(LienErrorCode || (LienErrorCode = {}));
+//# sourceMappingURL=codes.js.map
+;// CONCATENATED MODULE: ../core/dist/errors/index.js
+
+// Re-export for consumers
+
+/**
+ * Base error class for all Lien-specific errors
+ */
+class LienError extends Error {
+    code;
+    context;
+    severity;
+    recoverable;
+    retryable;
+    constructor(message, code, context, severity = 'medium', recoverable = true, retryable = false) {
+        super(message);
+        this.code = code;
+        this.context = context;
+        this.severity = severity;
+        this.recoverable = recoverable;
+        this.retryable = retryable;
+        this.name = 'LienError';
+        // Maintains proper stack trace for where our error was thrown (only available on V8)
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, this.constructor);
+        }
+    }
+    /**
+     * Serialize error to JSON for MCP responses
+     */
+    toJSON() {
+        return {
+            error: this.message,
+            code: this.code,
+            severity: this.severity,
+            recoverable: this.recoverable,
+            context: this.context,
+        };
+    }
+    /**
+     * Check if this error is retryable
+     */
+    isRetryable() {
+        return this.retryable;
+    }
+    /**
+     * Check if this error is recoverable
+     */
+    isRecoverable() {
+        return this.recoverable;
+    }
+}
+/**
+ * Configuration-related errors (loading, parsing, migration)
+ */
+class ConfigError extends LienError {
+    constructor(message, context) {
+        super(message, LienErrorCode.CONFIG_INVALID, context, 'medium', true, false);
+        this.name = 'ConfigError';
+    }
+}
+/**
+ * Indexing-related errors (file processing, chunking)
+ */
+class IndexingError extends LienError {
+    file;
+    constructor(message, file, context) {
+        super(message, LienErrorCode.INTERNAL_ERROR, { ...context, file }, 'medium', true, false);
+        this.file = file;
+        this.name = 'IndexingError';
+    }
+}
+/**
+ * Embedding generation errors
+ */
+class EmbeddingError extends LienError {
+    constructor(message, context) {
+        super(message, LienErrorCode.EMBEDDING_GENERATION_FAILED, context, 'high', true, true);
+        this.name = 'EmbeddingError';
+    }
+}
+/**
+ * Vector database errors (connection, query, storage)
+ */
+class DatabaseError extends LienError {
+    constructor(message, context) {
+        super(message, LienErrorCode.INTERNAL_ERROR, context, 'high', true, true);
+        this.name = 'DatabaseError';
+    }
+}
+/**
+ * Helper function to wrap unknown errors with context
+ * @param error - Unknown error object to wrap
+ * @param context - Context message describing what operation failed
+ * @param additionalContext - Optional additional context data
+ * @returns LienError with proper message and context
+ */
+function wrapError(error, context, additionalContext) {
+    const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+    const wrappedError = new LienError(`${context}: ${message}`, LienErrorCode.INTERNAL_ERROR, additionalContext);
+    // Preserve original stack trace if available
+    if (stack) {
+        wrappedError.stack = `${wrappedError.stack}\n\nCaused by:\n${stack}`;
+    }
+    return wrappedError;
+}
+/**
+ * Type guard to check if an error is a LienError
+ */
+function isLienError(error) {
+    return error instanceof LienError;
+}
+/**
+ * Extract error message from unknown error type
+ * @param error - Unknown error object
+ * @returns Error message string
+ */
+function getErrorMessage(error) {
+    if (error instanceof Error) {
+        return error.message;
+    }
+    return String(error);
+}
+/**
+ * Extract stack trace from unknown error type
+ * @param error - Unknown error object
+ * @returns Stack trace string or undefined
+ */
+function getErrorStack(error) {
+    if (error instanceof Error) {
+        return error.stack;
+    }
+    return undefined;
+}
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../core/dist/constants.js
+/**
+ * Centralized constants for @liendev/core.
+ * This file contains all magic numbers and configuration defaults.
+ */
+// Chunking settings
+const DEFAULT_CHUNK_SIZE = 75;
+const DEFAULT_CHUNK_OVERLAP = 10;
+// Concurrency and batching
+const DEFAULT_CONCURRENCY = 4;
+const DEFAULT_EMBEDDING_BATCH_SIZE = 50;
+// Micro-batching for event loop yielding
+// Process N embeddings at a time, then yield to event loop
+// This prevents UI freezing during CPU-intensive embedding generation
+const EMBEDDING_MICRO_BATCH_SIZE = 10;
+// Vector database batch size limits
+// Maximum batch size before splitting (prevents LanceDB errors on very large batches)
+const VECTOR_DB_MAX_BATCH_SIZE = 1000;
+// Minimum batch size for retry logic (stop splitting below this size)
+const VECTOR_DB_MIN_BATCH_SIZE = 10;
+// Embedding model configuration
+const EMBEDDING_DIMENSIONS = 384; // all-MiniLM-L6-v2
+const DEFAULT_EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2';
+// MCP server configuration
+const DEFAULT_PORT = 7133; // LIEN in leetspeak
+const VERSION_CHECK_INTERVAL_MS = 2000;
+// Git detection
+const DEFAULT_GIT_POLL_INTERVAL_MS = 10000; // Check every 10 seconds
+// File watching
+const DEFAULT_DEBOUNCE_MS = 1000;
+// Configuration version - matches the CLI/core release version
+// Core and CLI are always released together with matching versions
+const CURRENT_CONFIG_VERSION = '0.19.5';
+// Index format version - bump on ANY breaking change to indexing
+// Examples that require version bump:
+// - Chunking algorithm changes
+// - Embedding model changes (e.g., switch from all-MiniLM-L6-v2 to another model)
+// - Vector DB schema changes (new metadata fields)
+// - Metadata structure changes
+// v2: AST-based chunking + enhanced metadata (symbolName, complexity, etc.)
+// v3: Added cognitiveComplexity field to schema
+// v4: Added Halstead metrics (volume, difficulty, effort, bugs)
+const INDEX_FORMAT_VERSION = 4;
+//# sourceMappingURL=constants.js.map
+;// CONCATENATED MODULE: ../core/dist/embeddings/local.js
+
+
+
+// Configure transformers.js to cache models locally
+transformers_namespaceObject.env.allowRemoteModels = true;
+transformers_namespaceObject.env.allowLocalModels = true;
+class LocalEmbeddings {
+    extractor = null;
+    modelName = DEFAULT_EMBEDDING_MODEL;
+    initPromise = null;
+    async initialize() {
+        // Prevent multiple simultaneous initializations
+        if (this.initPromise) {
+            return this.initPromise;
+        }
+        if (this.extractor) {
+            return;
+        }
+        this.initPromise = (async () => {
+            try {
+                // This downloads ~100MB on first run, then caches in ~/.cache/huggingface
+                this.extractor = await (0,transformers_namespaceObject.pipeline)('feature-extraction', this.modelName);
+            }
+            catch (error) {
+                this.initPromise = null;
+                throw wrapError(error, 'Failed to initialize embedding model');
+            }
+        })();
+        return this.initPromise;
+    }
+    async embed(text) {
+        await this.initialize();
+        if (!this.extractor) {
+            throw new EmbeddingError('Embedding model not initialized');
+        }
+        try {
+            const output = await this.extractor(text, {
+                pooling: 'mean',
+                normalize: true,
+            });
+            return output.data;
+        }
+        catch (error) {
+            throw wrapError(error, 'Failed to generate embedding', { textLength: text.length });
+        }
+    }
+    async embedBatch(texts) {
+        await this.initialize();
+        if (!this.extractor) {
+            throw new EmbeddingError('Embedding model not initialized');
+        }
+        try {
+            // Process embeddings with Promise.all for concurrent execution
+            // Each call is sequential but Promise.all allows task interleaving
+            const results = await Promise.all(texts.map(text => this.embed(text)));
+            return results;
+        }
+        catch (error) {
+            throw wrapError(error, 'Failed to generate batch embeddings', { batchSize: texts.length });
+        }
+    }
+}
+//# sourceMappingURL=local.js.map
+;// CONCATENATED MODULE: external "@lancedb/lancedb"
+const lancedb_namespaceObject = require("@lancedb/lancedb");
+// EXTERNAL MODULE: external "os"
+var external_os_ = __nccwpck_require__(857);
+// EXTERNAL MODULE: external "crypto"
+var external_crypto_ = __nccwpck_require__(6982);
+;// CONCATENATED MODULE: ../core/dist/embeddings/types.js
+
+const EMBEDDING_DIMENSION = EMBEDDING_DIMENSIONS;
+// Re-export for convenience
+
+//# sourceMappingURL=types.js.map
+;// CONCATENATED MODULE: ../core/dist/vectordb/version.js
+
+
+const VERSION_FILE = '.lien-index-version';
+/**
+ * Writes a version timestamp file to mark when the index was last updated.
+ * This file is used by the MCP server to detect when it needs to reconnect.
+ *
+ * @param indexPath - Path to the index directory
+ */
+async function writeVersionFile(indexPath) {
+    try {
+        const versionFilePath = external_path_.join(indexPath, VERSION_FILE);
+        const timestamp = Date.now().toString();
+        await promises_namespaceObject.writeFile(versionFilePath, timestamp, 'utf-8');
+    }
+    catch (error) {
+        // Don't throw - version file is a convenience feature, not critical
+        console.error(`Warning: Failed to write version file: ${error}`);
+    }
+}
+/**
+ * Reads the version timestamp from the index directory.
+ * Returns 0 if the file doesn't exist (e.g., old index).
+ *
+ * @param indexPath - Path to the index directory
+ * @returns Version timestamp, or 0 if not found
+ */
+async function readVersionFile(indexPath) {
+    try {
+        const versionFilePath = external_path_.join(indexPath, VERSION_FILE);
+        const content = await promises_namespaceObject.readFile(versionFilePath, 'utf-8');
+        const timestamp = parseInt(content.trim(), 10);
+        return isNaN(timestamp) ? 0 : timestamp;
+    }
+    catch (error) {
+        // File doesn't exist or can't be read - treat as version 0
+        return 0;
+    }
+}
+//# sourceMappingURL=version.js.map
+;// CONCATENATED MODULE: ../core/dist/vectordb/relevance.js
+/**
+ * Calculate relevance category from cosine distance score.
+ *
+ * Lower scores indicate higher similarity (closer in vector space).
+ * Thresholds based on observed score distributions from dogfooding.
+ *
+ * @param score - Cosine distance score from vector search
+ * @returns Human-readable relevance category
+ */
+function calculateRelevance(score) {
+    if (score < 1.0)
+        return 'highly_relevant';
+    if (score < 1.3)
+        return 'relevant';
+    if (score < 1.5)
+        return 'loosely_related';
+    return 'not_relevant';
+}
+//# sourceMappingURL=relevance.js.map
+;// CONCATENATED MODULE: ../core/dist/vectordb/intent-classifier.js
+/**
+ * Query Intent Classification
+ *
+ * Classifies user search queries into three categories to apply
+ * appropriate relevance boosting strategies:
+ *
+ * - LOCATION: "Where is X?" - User wants to find specific files/code
+ * - CONCEPTUAL: "How does X work?" - User wants to understand concepts
+ * - IMPLEMENTATION: "How is X implemented?" - User wants implementation details
+ *
+ * Examples:
+ * - "where is the auth handler" → LOCATION
+ * - "how does authentication work" → CONCEPTUAL
+ * - "how is authentication implemented" → IMPLEMENTATION
+ */
+/**
+ * Query intent types for semantic search
+ */
+var QueryIntent;
+(function (QueryIntent) {
+    /** User wants to locate specific files or code (e.g., "where is X") */
+    QueryIntent["LOCATION"] = "location";
+    /** User wants to understand concepts/processes (e.g., "how does X work") */
+    QueryIntent["CONCEPTUAL"] = "conceptual";
+    /** User wants implementation details (e.g., "how is X implemented") */
+    QueryIntent["IMPLEMENTATION"] = "implementation";
+})(QueryIntent || (QueryIntent = {}));
+/**
+ * Intent classification rules.
+ * Rules are checked in priority order (higher priority first).
+ */
+const INTENT_RULES = [
+    // LOCATION intent (highest priority - most specific)
+    {
+        intent: QueryIntent.LOCATION,
+        priority: 3,
+        patterns: [
+            /where\s+(is|are|does|can\s+i\s+find)/,
+            /find\s+the\s+/,
+            /locate\s+/,
+        ],
+    },
+    // CONCEPTUAL intent (medium priority)
+    {
+        intent: QueryIntent.CONCEPTUAL,
+        priority: 2,
+        patterns: [
+            /how\s+does\s+.*\s+work/,
+            /what\s+(is|are|does)/,
+            /explain\s+/,
+            /understand\s+/,
+            /\b(process|workflow|architecture)\b/,
+        ],
+    },
+    // IMPLEMENTATION intent (low priority - catches "how is X implemented")
+    {
+        intent: QueryIntent.IMPLEMENTATION,
+        priority: 1,
+        patterns: [
+            /how\s+(is|are)\s+.*\s+(implemented|built|coded)/,
+            /implementation\s+of/,
+            /source\s+code\s+for/,
+        ],
+    },
+];
+/**
+ * Capture the initial number of built-in rules.
+ * This is used by resetIntentRules() to distinguish built-in rules from custom rules.
+ */
+const INITIAL_RULE_COUNT = INTENT_RULES.length;
+/**
+ * Cached sorted rules to avoid re-sorting on every query.
+ * Invalidated when rules are modified via addIntentRule() or resetIntentRules().
+ */
+let cachedSortedRules = null;
+/**
+ * Get sorted rules (cached).
+ * Lazy-computes and caches the sorted array on first access.
+ */
+function getSortedRules() {
+    if (cachedSortedRules === null) {
+        cachedSortedRules = [...INTENT_RULES].sort((a, b) => b.priority - a.priority);
+    }
+    return cachedSortedRules;
+}
+/**
+ * Invalidate the sorted rules cache.
+ * Called when rules are modified.
+ */
+function invalidateSortedRulesCache() {
+    cachedSortedRules = null;
+}
+/**
+ * Classifies a search query into one of three intent categories.
+ *
+ * Uses data-driven pattern matching to detect query intent.
+ * Rules are checked in priority order, with the first match winning.
+ *
+ * @param query - The search query string
+ * @returns The detected query intent (defaults to IMPLEMENTATION)
+ *
+ * @example
+ * classifyQueryIntent("where is the user controller") // → LOCATION
+ * classifyQueryIntent("how does authentication work") // → CONCEPTUAL
+ * classifyQueryIntent("how is the API implemented") // → IMPLEMENTATION
+ */
+function classifyQueryIntent(query) {
+    const lower = query.toLowerCase().trim();
+    // Use cached sorted rules to avoid re-sorting on every query
+    const sortedRules = getSortedRules();
+    for (const rule of sortedRules) {
+        if (rule.patterns.some(pattern => pattern.test(lower))) {
+            return rule.intent;
+        }
+    }
+    // Default to IMPLEMENTATION for ambiguous queries
+    // This is the most common use case for code search
+    return QueryIntent.IMPLEMENTATION;
+}
+/**
+ * Add a custom intent rule (useful for testing or extensions).
+ *
+ * Returns a cleanup function that removes the added rule.
+ * This prevents test pollution and allows proper cleanup.
+ *
+ * @param rule - The intent rule to add
+ * @returns A cleanup function that removes the added rule
+ *
+ * @example
+ * const cleanup = addIntentRule({
+ *   intent: QueryIntent.LOCATION,
+ *   priority: 4,
+ *   patterns: [/custom pattern/]
+ * });
+ * // ... use the rule ...
+ * cleanup(); // removes the rule
+ */
+function addIntentRule(rule) {
+    INTENT_RULES.push(rule);
+    // Invalidate cache since rules have changed
+    invalidateSortedRulesCache();
+    // Return cleanup function to remove the rule
+    return () => {
+        const idx = INTENT_RULES.indexOf(rule);
+        if (idx !== -1) {
+            INTENT_RULES.splice(idx, 1);
+            // Invalidate cache since rules have changed
+            invalidateSortedRulesCache();
+        }
+    };
+}
+/**
+ * Get all patterns for a specific intent (useful for debugging).
+ *
+ * @param intent - The intent to get patterns for
+ * @returns Array of regex patterns for the intent
+ *
+ * @example
+ * const locationPatterns = getPatternsForIntent(QueryIntent.LOCATION);
+ */
+function getPatternsForIntent(intent) {
+    return INTENT_RULES
+        .filter(rule => rule.intent === intent)
+        .flatMap(rule => rule.patterns);
+}
+/**
+ * Get all intent rules (useful for testing/debugging).
+ *
+ * @returns A copy of the current intent rules
+ */
+function getIntentRules() {
+    return [...INTENT_RULES];
+}
+/**
+ * Reset intent rules to initial state.
+ *
+ * WARNING: This function is intended for testing only.
+ * It removes all custom rules added via addIntentRule().
+ * The original built-in rules are preserved.
+ *
+ * @example
+ * // In test cleanup
+ * afterEach(() => {
+ *   resetIntentRules();
+ * });
+ */
+function resetIntentRules() {
+    // Remove all custom rules, preserving only the original built-in rules
+    INTENT_RULES.splice(INITIAL_RULE_COUNT);
+    // Invalidate cache since rules have changed
+    invalidateSortedRulesCache();
+}
+//# sourceMappingURL=intent-classifier.js.map
+;// CONCATENATED MODULE: ../core/dist/vectordb/boosting/strategies.js
+
+
+/**
+ * File type detection helpers
+ */
+function isDocumentationFile(filepath) {
+    const lower = filepath.toLowerCase();
+    const filename = external_path_.basename(filepath).toLowerCase();
+    if (filename.startsWith('readme'))
+        return true;
+    if (filename.startsWith('changelog'))
+        return true;
+    if (filename.endsWith('.md') || filename.endsWith('.mdx') || filename.endsWith('.markdown')) {
+        return true;
+    }
+    if (lower.includes('/docs/') ||
+        lower.includes('/documentation/') ||
+        lower.includes('/wiki/') ||
+        lower.includes('/.github/')) {
+        return true;
+    }
+    if (lower.includes('architecture') ||
+        lower.includes('workflow') ||
+        lower.includes('/flow/')) {
+        return true;
+    }
+    return false;
+}
+function isTestFile(filepath) {
+    const lower = filepath.toLowerCase();
+    if (lower.includes('/test/') ||
+        lower.includes('/tests/') ||
+        lower.includes('/__tests__/')) {
+        return true;
+    }
+    if (lower.includes('.test.') ||
+        lower.includes('.spec.') ||
+        lower.includes('_test.') ||
+        lower.includes('_spec.')) {
+        return true;
+    }
+    return false;
+}
+function isUtilityFile(filepath) {
+    const lower = filepath.toLowerCase();
+    if (lower.includes('/utils/') ||
+        lower.includes('/utilities/') ||
+        lower.includes('/helpers/') ||
+        lower.includes('/lib/')) {
+        return true;
+    }
+    if (lower.includes('.util.') ||
+        lower.includes('.helper.') ||
+        lower.includes('-util.') ||
+        lower.includes('-helper.')) {
+        return true;
+    }
+    return false;
+}
+/**
+ * Boosting Strategies
+ */
+/**
+ * Boosts relevance based on path segment matching.
+ * Files with query tokens in their path are boosted.
+ */
+class PathBoostingStrategy {
+    name = 'path-matching';
+    apply(query, filepath, baseScore) {
+        const queryTokens = query.toLowerCase().split(/\s+/);
+        const pathSegments = filepath.toLowerCase().split('/');
+        let boostFactor = 1.0;
+        for (const token of queryTokens) {
+            if (token.length <= 2)
+                continue;
+            if (pathSegments.some(seg => seg.includes(token))) {
+                boostFactor *= 0.9; // Reduce distance = increase relevance
+            }
+        }
+        return baseScore * boostFactor;
+    }
+}
+/**
+ * Boosts relevance based on filename matching.
+ * Files with query tokens in their filename are strongly boosted.
+ */
+class FilenameBoostingStrategy {
+    name = 'filename-matching';
+    apply(query, filepath, baseScore) {
+        const filename = external_path_.basename(filepath, external_path_.extname(filepath)).toLowerCase();
+        const queryTokens = query.toLowerCase().split(/\s+/);
+        let boostFactor = 1.0;
+        for (const token of queryTokens) {
+            if (token.length <= 2)
+                continue;
+            if (filename === token) {
+                boostFactor *= 0.70; // Strong boost for exact match
+            }
+            else if (filename.includes(token)) {
+                boostFactor *= 0.80; // Moderate boost for partial match
+            }
+        }
+        return baseScore * boostFactor;
+    }
+}
+/**
+ * Boosts relevance based on file type and query intent.
+ * Different file types are boosted for different query intents.
+ *
+ * Note: This strategy focuses on file-type-specific boosting (test files,
+ * documentation files, utility files, etc.). Path and filename boosting
+ * are handled separately by PathBoostingStrategy and FilenameBoostingStrategy
+ * in the BoostingComposer to avoid double-boosting.
+ */
+class FileTypeBoostingStrategy {
+    intent;
+    name = 'file-type';
+    constructor(intent) {
+        this.intent = intent;
+    }
+    apply(query, filepath, baseScore) {
+        switch (this.intent) {
+            case QueryIntent.LOCATION:
+                return this.applyLocationBoosting(query, filepath, baseScore);
+            case QueryIntent.CONCEPTUAL:
+                return this.applyConceptualBoosting(query, filepath, baseScore);
+            case QueryIntent.IMPLEMENTATION:
+                return this.applyImplementationBoosting(query, filepath, baseScore);
+            default:
+                return baseScore;
+        }
+    }
+    applyLocationBoosting(_query, filepath, score) {
+        // Note: Path and filename boosting are handled by PathBoostingStrategy and
+        // FilenameBoostingStrategy in the composer. This method only handles
+        // file-type-specific boosting for location queries.
+        // Slightly deprioritize test files (users want implementation location, not tests)
+        if (isTestFile(filepath)) {
+            score *= 1.10;
+        }
+        return score;
+    }
+    applyConceptualBoosting(_query, filepath, score) {
+        // Note: Path and filename boosting are handled by PathBoostingStrategy and
+        // FilenameBoostingStrategy in the composer. This method only handles
+        // file-type-specific boosting for conceptual queries.
+        // Strong boost for documentation files
+        if (isDocumentationFile(filepath)) {
+            score *= 0.65;
+            const lower = filepath.toLowerCase();
+            if (lower.includes('architecture') ||
+                lower.includes('workflow') ||
+                lower.includes('flow')) {
+                score *= 0.90; // Extra boost for architectural docs
+            }
+        }
+        // Slight boost for utility files (often contain reusable logic)
+        if (isUtilityFile(filepath)) {
+            score *= 0.95;
+        }
+        return score;
+    }
+    applyImplementationBoosting(_query, filepath, score) {
+        // Note: Path and filename boosting are handled by PathBoostingStrategy and
+        // FilenameBoostingStrategy in the composer. This method only handles
+        // file-type-specific boosting for implementation queries.
+        // Slightly deprioritize test files (user wants implementation, not tests)
+        if (isTestFile(filepath)) {
+            score *= 1.10;
+        }
+        return score;
+    }
+}
+//# sourceMappingURL=strategies.js.map
+;// CONCATENATED MODULE: ../core/dist/vectordb/boosting/composer.js
+/**
+ * Composes multiple boosting strategies into a single pipeline.
+ *
+ * Strategies are applied sequentially, with each strategy
+ * receiving the output of the previous strategy as input.
+ *
+ * @example
+ * ```typescript
+ * const composer = new BoostingComposer()
+ *   .addStrategy(new PathBoostingStrategy())
+ *   .addStrategy(new FilenameBoostingStrategy())
+ *   .addStrategy(new FileTypeBoostingStrategy(intent));
+ *
+ * const boostedScore = composer.apply(query, filepath, baseScore);
+ * ```
+ */
+class BoostingComposer {
+    strategies = [];
+    /**
+     * Add a boosting strategy to the pipeline.
+     * Strategies are applied in the order they are added.
+     *
+     * @param strategy - The strategy to add
+     * @returns This composer for chaining
+     */
+    addStrategy(strategy) {
+        this.strategies.push(strategy);
+        return this;
+    }
+    /**
+     * Apply all strategies to a base score.
+     *
+     * @param query - The search query
+     * @param filepath - The file path being scored
+     * @param baseScore - The initial score from vector similarity
+     * @returns The final boosted score after all strategies
+     */
+    apply(query, filepath, baseScore) {
+        let score = baseScore;
+        for (const strategy of this.strategies) {
+            score = strategy.apply(query, filepath, score);
+        }
+        return score;
+    }
+    /**
+     * Get the names of all strategies in this composer.
+     * Useful for debugging and logging.
+     */
+    getStrategyNames() {
+        return this.strategies.map(s => s.name);
+    }
+    /**
+     * Get the number of strategies in this composer.
+     */
+    getStrategyCount() {
+        return this.strategies.length;
+    }
+    /**
+     * Clear all strategies from this composer.
+     */
+    clear() {
+        this.strategies = [];
+    }
+}
+//# sourceMappingURL=composer.js.map
+;// CONCATENATED MODULE: ../core/dist/vectordb/boosting/index.js
+/**
+ * Composable boosting strategies for semantic search relevance.
+ *
+ * This module provides a strategy pattern implementation for applying
+ * relevance boosting to search results. Strategies can be composed
+ * together to create complex boosting pipelines.
+ *
+ * @example
+ * ```typescript
+ * import { BoostingComposer, PathBoostingStrategy, FilenameBoostingStrategy } from './boosting';
+ *
+ * const composer = new BoostingComposer()
+ *   .addStrategy(new PathBoostingStrategy())
+ *   .addStrategy(new FilenameBoostingStrategy());
+ *
+ * const boostedScore = composer.apply(query, filepath, baseScore);
+ * ```
+ */
+
+
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../core/dist/vectordb/query.js
+
+
+
+
+
+/**
+ * Cached strategy instances to avoid repeated instantiation overhead.
+ * These strategies are stateless and can be safely reused across queries.
+ */
+const PATH_STRATEGY = new PathBoostingStrategy();
+const FILENAME_STRATEGY = new FilenameBoostingStrategy();
+/**
+ * Cached FileTypeBoostingStrategy instances for each intent.
+ * Since there are only three possible intents, we can cache all three.
+ */
+const FILE_TYPE_STRATEGIES = {
+    [QueryIntent.LOCATION]: new FileTypeBoostingStrategy(QueryIntent.LOCATION),
+    [QueryIntent.CONCEPTUAL]: new FileTypeBoostingStrategy(QueryIntent.CONCEPTUAL),
+    [QueryIntent.IMPLEMENTATION]: new FileTypeBoostingStrategy(QueryIntent.IMPLEMENTATION),
+};
+/**
+ * Cached BoostingComposer instances for each intent.
+ * Pre-configured with the appropriate strategy pipeline for each intent type.
+ * This avoids creating a new composer instance on every search result.
+ */
+const BOOSTING_COMPOSERS = {
+    [QueryIntent.LOCATION]: new BoostingComposer()
+        .addStrategy(PATH_STRATEGY)
+        .addStrategy(FILENAME_STRATEGY)
+        .addStrategy(FILE_TYPE_STRATEGIES[QueryIntent.LOCATION]),
+    [QueryIntent.CONCEPTUAL]: new BoostingComposer()
+        .addStrategy(PATH_STRATEGY)
+        .addStrategy(FILENAME_STRATEGY)
+        .addStrategy(FILE_TYPE_STRATEGIES[QueryIntent.CONCEPTUAL]),
+    [QueryIntent.IMPLEMENTATION]: new BoostingComposer()
+        .addStrategy(PATH_STRATEGY)
+        .addStrategy(FILENAME_STRATEGY)
+        .addStrategy(FILE_TYPE_STRATEGIES[QueryIntent.IMPLEMENTATION]),
+};
+/**
+ * Check if a DB record has valid content and file path.
+ * Used to filter out empty/invalid records from query results.
+ */
+function isValidRecord(r) {
+    return Boolean(r.content &&
+        r.content.trim().length > 0 &&
+        r.file &&
+        r.file.length > 0);
+}
+/**
+ * Check if an array field has valid (non-empty) entries.
+ * LanceDB stores empty arrays as [''] which we need to filter out.
+ */
+function hasValidArrayEntries(arr) {
+    return Boolean(arr && arr.length > 0 && arr[0] !== '');
+}
+/**
+ * Get symbols for a specific type from a DB record.
+ * Consolidates the symbol extraction logic used across query functions.
+ */
+function getSymbolsForType(r, symbolType) {
+    if (symbolType === 'function')
+        return r.functionNames || [];
+    if (symbolType === 'class')
+        return r.classNames || [];
+    if (symbolType === 'interface')
+        return r.interfaceNames || [];
+    return [
+        ...(r.functionNames || []),
+        ...(r.classNames || []),
+        ...(r.interfaceNames || []),
+    ];
+}
+/**
+ * Convert a DB record to base SearchResult metadata.
+ * Shared between all query functions to avoid duplication.
+ */
+function buildSearchResultMetadata(r) {
+    return {
+        file: r.file,
+        startLine: r.startLine,
+        endLine: r.endLine,
+        type: r.type,
+        language: r.language,
+        symbolName: r.symbolName || undefined,
+        symbolType: r.symbolType,
+        parentClass: r.parentClass || undefined,
+        complexity: r.complexity || undefined,
+        cognitiveComplexity: r.cognitiveComplexity || undefined,
+        parameters: hasValidArrayEntries(r.parameters) ? r.parameters : undefined,
+        signature: r.signature || undefined,
+        imports: hasValidArrayEntries(r.imports) ? r.imports : undefined,
+        // Halstead metrics (v0.19.0) - use explicit null check to preserve valid 0 values
+        halsteadVolume: r.halsteadVolume != null ? r.halsteadVolume : undefined,
+        halsteadDifficulty: r.halsteadDifficulty != null ? r.halsteadDifficulty : undefined,
+        halsteadEffort: r.halsteadEffort != null ? r.halsteadEffort : undefined,
+        halsteadBugs: r.halsteadBugs != null ? r.halsteadBugs : undefined,
+    };
+}
+/**
+ * Apply relevance boosting strategies to a search score.
+ *
+ * Uses composable boosting strategies based on query intent:
+ * - Path matching: Boost files with query tokens in path
+ * - Filename matching: Boost files with query tokens in filename
+ * - File type boosting: Intent-specific boosting (docs for conceptual, etc.)
+ */
+function applyRelevanceBoosting(query, filepath, baseScore) {
+    if (!query) {
+        return baseScore;
+    }
+    const intent = classifyQueryIntent(query);
+    // Use cached composer instance configured for this intent
+    return BOOSTING_COMPOSERS[intent].apply(query, filepath, baseScore);
+}
+/**
+ * Convert a DBRecord to a SearchResult
+ */
+function dbRecordToSearchResult(r, query) {
+    const baseScore = r._distance ?? 0;
+    const boostedScore = applyRelevanceBoosting(query, r.file, baseScore);
+    return {
+        content: r.content,
+        metadata: buildSearchResultMetadata(r),
+        score: boostedScore,
+        relevance: calculateRelevance(boostedScore),
+    };
+}
+/**
+ * Search the vector database
+ */
+async function search(table, queryVector, limit = 5, query) {
+    if (!table) {
+        throw new DatabaseError('Vector database not initialized');
+    }
+    try {
+        const results = await table
+            .search(Array.from(queryVector))
+            .limit(limit + 20)
+            .toArray();
+        const filtered = results
+            .filter(isValidRecord)
+            .map((r) => dbRecordToSearchResult(r, query))
+            .sort((a, b) => a.score - b.score)
+            .slice(0, limit);
+        return filtered;
+    }
+    catch (error) {
+        const errorMsg = String(error);
+        // Detect corrupted index
+        if (errorMsg.includes('Not found:') || errorMsg.includes('.lance')) {
+            throw new DatabaseError(`Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory.`, { originalError: error });
+        }
+        throw wrapError(error, 'Failed to search vector database');
+    }
+}
+/**
+ * Scan the database with filters
+ */
+async function scanWithFilter(table, options) {
+    if (!table) {
+        throw new DatabaseError('Vector database not initialized');
+    }
+    const { language, pattern, limit = 100 } = options;
+    try {
+        const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
+        const query = table.search(zeroVector)
+            .where('file != ""')
+            .limit(Math.max(limit * 5, 200));
+        const results = await query.toArray();
+        let filtered = results.filter(isValidRecord);
+        if (language) {
+            filtered = filtered.filter((r) => r.language && r.language.toLowerCase() === language.toLowerCase());
+        }
+        if (pattern) {
+            const regex = new RegExp(pattern, 'i');
+            filtered = filtered.filter((r) => regex.test(r.content) || regex.test(r.file));
+        }
+        return filtered.slice(0, limit).map((r) => ({
+            content: r.content,
+            metadata: buildSearchResultMetadata(r),
+            score: 0,
+            relevance: calculateRelevance(0),
+        }));
+    }
+    catch (error) {
+        throw wrapError(error, 'Failed to scan with filter');
+    }
+}
+/**
+ * Helper to check if a record matches the requested symbol type
+ */
+/** Maps query symbolType to acceptable AST symbolType values */
+const SYMBOL_TYPE_MATCHES = {
+    function: new Set(['function', 'method']),
+    class: new Set(['class']),
+    interface: new Set(['interface']),
+};
+function matchesSymbolType(record, symbolType, symbols) {
+    // If AST-based symbolType exists, use lookup table
+    if (record.symbolType) {
+        return SYMBOL_TYPE_MATCHES[symbolType]?.has(record.symbolType) ?? false;
+    }
+    // Fallback: check if pre-AST symbols array has valid entries
+    return symbols.length > 0 && symbols.some((s) => s.length > 0 && s !== '');
+}
+/**
+ * Check if a record matches the symbol query filters.
+ * Extracted to reduce complexity of querySymbols.
+ */
+function matchesSymbolFilter(r, { language, pattern, symbolType }) {
+    // Language filter
+    if (language && (!r.language || r.language.toLowerCase() !== language.toLowerCase())) {
+        return false;
+    }
+    const symbols = getSymbolsForType(r, symbolType);
+    const astSymbolName = r.symbolName || '';
+    // Must have at least one symbol (legacy or AST-based)
+    if (symbols.length === 0 && !astSymbolName) {
+        return false;
+    }
+    // Pattern filter (if provided)
+    if (pattern) {
+        const regex = new RegExp(pattern, 'i');
+        const nameMatches = symbols.some((s) => regex.test(s)) || regex.test(astSymbolName);
+        if (!nameMatches)
+            return false;
+    }
+    // Symbol type filter (if provided)
+    if (symbolType) {
+        return matchesSymbolType(r, symbolType, symbols);
+    }
+    return true;
+}
+/**
+ * Build legacy symbols object for backwards compatibility.
+ */
+function query_buildLegacySymbols(r) {
+    return {
+        functions: hasValidArrayEntries(r.functionNames) ? r.functionNames : [],
+        classes: hasValidArrayEntries(r.classNames) ? r.classNames : [],
+        interfaces: hasValidArrayEntries(r.interfaceNames) ? r.interfaceNames : [],
+    };
+}
+/**
+ * Query symbols (functions, classes, interfaces)
+ */
+async function querySymbols(table, options) {
+    if (!table) {
+        throw new DatabaseError('Vector database not initialized');
+    }
+    const { language, pattern, symbolType, limit = 50 } = options;
+    const filterOpts = { language, pattern, symbolType };
+    try {
+        const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
+        const query = table.search(zeroVector)
+            .where('file != ""')
+            .limit(Math.max(limit * 10, 500));
+        const results = await query.toArray();
+        const filtered = results
+            .filter((r) => isValidRecord(r) && matchesSymbolFilter(r, filterOpts));
+        return filtered.slice(0, limit).map((r) => ({
+            content: r.content,
+            metadata: {
+                ...buildSearchResultMetadata(r),
+                symbols: query_buildLegacySymbols(r),
+            },
+            score: 0,
+            relevance: calculateRelevance(0),
+        }));
+    }
+    catch (error) {
+        throw wrapError(error, 'Failed to query symbols');
+    }
+}
+/**
+ * Scan all chunks in the database
+ * First gets the total count, then fetches all with a single query
+ * This is more efficient than pagination for local/embedded databases like LanceDB
+ */
+async function scanAll(table, options = {}) {
+    if (!table) {
+        throw new DatabaseError('Vector database not initialized');
+    }
+    try {
+        // Get total row count to determine limit
+        const totalRows = await table.countRows();
+        // Fetch all rows in one query (LanceDB is local, this is efficient)
+        // Note: scanWithFilter internally fetches 5x the limit to handle filtering overhead,
+        // then caps output to 'limit'. We pass totalRows so we get all rows back after
+        // filtering. The 5x overfetch is acceptable overhead for local DBs.
+        const MIN_SCAN_LIMIT = 1000;
+        const results = await scanWithFilter(table, {
+            ...options,
+            limit: Math.max(totalRows, MIN_SCAN_LIMIT),
+        });
+        return results;
+    }
+    catch (error) {
+        throw wrapError(error, 'Failed to scan all chunks');
+    }
+}
+//# sourceMappingURL=query.js.map
+;// CONCATENATED MODULE: ../core/dist/vectordb/batch-insert.js
+
+
+/**
+ * Transform a chunk's data into a database record.
+ * Handles missing/empty metadata by providing defaults for Arrow type inference.
+ */
+function transformChunkToRecord(vector, content, metadata) {
+    return {
+        vector: Array.from(vector),
+        content,
+        file: metadata.file,
+        startLine: metadata.startLine,
+        endLine: metadata.endLine,
+        type: metadata.type,
+        language: metadata.language,
+        // Ensure arrays have at least empty string for Arrow type inference
+        functionNames: getNonEmptyArray(metadata.symbols?.functions),
+        classNames: getNonEmptyArray(metadata.symbols?.classes),
+        interfaceNames: getNonEmptyArray(metadata.symbols?.interfaces),
+        // AST-derived metadata (v0.13.0)
+        symbolName: metadata.symbolName || '',
+        symbolType: metadata.symbolType || '',
+        parentClass: metadata.parentClass || '',
+        complexity: metadata.complexity || 0,
+        cognitiveComplexity: metadata.cognitiveComplexity || 0,
+        parameters: getNonEmptyArray(metadata.parameters),
+        signature: metadata.signature || '',
+        imports: getNonEmptyArray(metadata.imports),
+        // Halstead metrics (v0.19.0)
+        halsteadVolume: metadata.halsteadVolume || 0,
+        halsteadDifficulty: metadata.halsteadDifficulty || 0,
+        halsteadEffort: metadata.halsteadEffort || 0,
+        halsteadBugs: metadata.halsteadBugs || 0,
+    };
+}
+/**
+ * Returns the array if non-empty, otherwise returns [''] for Arrow type inference
+ */
+function getNonEmptyArray(arr) {
+    return arr && arr.length > 0 ? arr : [''];
+}
+/**
+ * Split a batch in half for retry logic
+ */
+function splitBatchInHalf(batch) {
+    const half = Math.floor(batch.vectors.length / 2);
+    return [
+        {
+            vectors: batch.vectors.slice(0, half),
+            metadatas: batch.metadatas.slice(0, half),
+            contents: batch.contents.slice(0, half),
+        },
+        {
+            vectors: batch.vectors.slice(half),
+            metadatas: batch.metadatas.slice(half),
+            contents: batch.contents.slice(half),
+        },
+    ];
+}
+/**
+ * Transform all chunks in a batch to database records
+ */
+function transformBatchToRecords(batch) {
+    return batch.vectors.map((vector, i) => transformChunkToRecord(vector, batch.contents[i], batch.metadatas[i]));
+}
+/**
+ * Insert a batch of vectors into the database
+ *
+ * @returns The table instance after insertion, or null only when:
+ *          - vectors.length === 0 AND table === null (no-op case)
+ *          For non-empty batches, always returns a valid table or throws.
+ * @throws {DatabaseError} If database not initialized or insertion fails
+ */
+async function insertBatch(db, table, tableName, vectors, metadatas, contents) {
+    if (!db) {
+        throw new DatabaseError('Vector database not initialized');
+    }
+    if (vectors.length !== metadatas.length || vectors.length !== contents.length) {
+        throw new DatabaseError('Vectors, metadatas, and contents arrays must have the same length', {
+            vectorsLength: vectors.length,
+            metadatasLength: metadatas.length,
+            contentsLength: contents.length,
+        });
+    }
+    // Handle empty batch gracefully - return table as-is (could be null)
+    if (vectors.length === 0) {
+        return table;
+    }
+    // Split large batches into smaller chunks
+    if (vectors.length > VECTOR_DB_MAX_BATCH_SIZE) {
+        let currentTable = table;
+        for (let i = 0; i < vectors.length; i += VECTOR_DB_MAX_BATCH_SIZE) {
+            const batchVectors = vectors.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
+            const batchMetadata = metadatas.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
+            const batchContents = contents.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
+            currentTable = await insertBatchInternal(db, currentTable, tableName, batchVectors, batchMetadata, batchContents);
+        }
+        if (!currentTable) {
+            throw new DatabaseError('Failed to create table during batch insert');
+        }
+        return currentTable;
+    }
+    else {
+        return insertBatchInternal(db, table, tableName, vectors, metadatas, contents);
+    }
+}
+/**
+ * Internal method to insert a single batch with iterative retry logic.
+ * Uses a queue-based approach to handle batch splitting on failure.
+ *
+ * @returns Always returns a valid LanceDBTable or throws DatabaseError
+ */
+async function insertBatchInternal(db, table, tableName, vectors, metadatas, contents) {
+    const queue = [{ vectors, metadatas, contents }];
+    const failedBatches = [];
+    let currentTable = table;
+    let lastError;
+    while (queue.length > 0) {
+        const batch = queue.shift();
+        const insertResult = await tryInsertBatch(db, currentTable, tableName, batch);
+        if (insertResult.success) {
+            currentTable = insertResult.table;
+        }
+        else {
+            lastError = insertResult.error;
+            handleBatchFailure(batch, queue, failedBatches);
+        }
+    }
+    throwIfBatchesFailed(failedBatches, lastError);
+    if (!currentTable) {
+        throw new DatabaseError('Failed to create table during batch insert');
+    }
+    return currentTable;
+}
+/**
+ * Attempt to insert a batch of records into the database.
+ * Errors are captured and returned (not thrown) to support retry logic.
+ */
+async function tryInsertBatch(db, currentTable, tableName, batch) {
+    try {
+        const records = transformBatchToRecords(batch);
+        if (!currentTable) {
+            const newTable = await db.createTable(tableName, records);
+            return { success: true, table: newTable };
+        }
+        else {
+            await currentTable.add(records);
+            return { success: true, table: currentTable };
+        }
+    }
+    catch (error) {
+        // Error is captured for retry logic - will be included in final error if all retries fail
+        return { success: false, table: currentTable, error: error };
+    }
+}
+/**
+ * Handle a failed batch insertion by either splitting and retrying or marking as failed
+ */
+function handleBatchFailure(batch, queue, failedBatches) {
+    if (batch.vectors.length > VECTOR_DB_MIN_BATCH_SIZE) {
+        // Split and retry
+        const [firstHalf, secondHalf] = splitBatchInHalf(batch);
+        queue.push(firstHalf, secondHalf);
+    }
+    else {
+        // Can't split further, mark as failed
+        failedBatches.push(batch);
+    }
+}
+/**
+ * Throw an error if any batches failed after all retry attempts.
+ * Includes the last error encountered for debugging.
+ */
+function throwIfBatchesFailed(failedBatches, lastError) {
+    if (failedBatches.length === 0)
+        return;
+    const totalFailed = failedBatches.reduce((sum, batch) => sum + batch.vectors.length, 0);
+    throw new DatabaseError(`Failed to insert ${totalFailed} record(s) after retry attempts`, {
+        failedBatches: failedBatches.length,
+        totalRecords: totalFailed,
+        sampleFile: failedBatches[0].metadatas[0].file,
+        lastError: lastError?.message,
+    });
+}
+//# sourceMappingURL=batch-insert.js.map
+;// CONCATENATED MODULE: ../core/dist/vectordb/maintenance.js
+
+
+
+
+
+/**
+ * Clear all data from the vector database.
+ * Drops the table AND cleans up the .lance directory to prevent corrupted state.
+ */
+async function clear(db, table, tableName, dbPath) {
+    if (!db) {
+        throw new DatabaseError('Vector database not initialized');
+    }
+    try {
+        // Clean up the .lance directory directly
+        // This is more reliable than dropTable which can have locking issues
+        if (dbPath) {
+            const lanceDir = external_path_.join(dbPath, `${tableName}.lance`);
+            try {
+                await promises_namespaceObject.rm(lanceDir, { recursive: true, force: true });
+            }
+            catch (err) {
+                // If deletion fails, try dropping the table first
+                if (err?.code === 'ENOTEMPTY' || err?.message?.includes('not empty')) {
+                    try {
+                        await db.dropTable(tableName);
+                        // Try deletion again after dropping
+                        await promises_namespaceObject.rm(lanceDir, { recursive: true, force: true });
+                    }
+                    catch {
+                        // Ignore - best effort cleanup
+                    }
+                }
+            }
+        }
+        else {
+            // No dbPath provided, just drop the table
+            if (table) {
+                await db.dropTable(tableName);
+            }
+        }
+    }
+    catch (error) {
+        throw wrapError(error, 'Failed to clear vector database');
+    }
+}
+/**
+ * Delete all chunks from a specific file
+ */
+async function deleteByFile(table, filepath) {
+    if (!table) {
+        throw new DatabaseError('Vector database not initialized');
+    }
+    try {
+        await table.delete(`file = "${filepath}"`);
+    }
+    catch (error) {
+        throw wrapError(error, 'Failed to delete file from vector database');
+    }
+}
+/**
+ * Update a file in the index by atomically deleting old chunks and inserting new ones
+ */
+async function updateFile(db, table, tableName, dbPath, filepath, vectors, metadatas, contents) {
+    if (!table) {
+        throw new DatabaseError('Vector database not initialized');
+    }
+    try {
+        // 1. Delete old chunks from this file
+        await deleteByFile(table, filepath);
+        // 2. Insert new chunks (if any)
+        let updatedTable = table;
+        if (vectors.length > 0) {
+            updatedTable = await insertBatch(db, table, tableName, vectors, metadatas, contents);
+            if (!updatedTable) {
+                throw new DatabaseError('insertBatch unexpectedly returned null');
+            }
+        }
+        // 3. Update version file to trigger MCP reconnection
+        await writeVersionFile(dbPath);
+        return updatedTable;
+    }
+    catch (error) {
+        throw wrapError(error, 'Failed to update file in vector database');
+    }
+}
+//# sourceMappingURL=maintenance.js.map
+;// CONCATENATED MODULE: ../core/dist/vectordb/lancedb.js
+
+
+
+
+
+
+
+
+
+
+class VectorDB {
+    db = null;
+    table = null;
+    dbPath;
+    tableName = 'code_chunks';
+    lastVersionCheck = 0;
+    currentVersion = 0;
+    constructor(projectRoot) {
+        // Store in user's home directory under ~/.lien/indices/{projectName-hash}
+        const projectName = external_path_.basename(projectRoot);
+        // Create unique identifier from full path to prevent collisions
+        const pathHash = external_crypto_.createHash('md5')
+            .update(projectRoot)
+            .digest('hex')
+            .substring(0, 8);
+        this.dbPath = external_path_.join(external_os_.homedir(), '.lien', 'indices', `${projectName}-${pathHash}`);
+    }
+    async initialize() {
+        try {
+            this.db = await lancedb_namespaceObject.connect(this.dbPath);
+            try {
+                this.table = await this.db.openTable(this.tableName);
+            }
+            catch {
+                // Table doesn't exist yet - will be created on first insert
+                this.table = null;
+            }
+            // Read and cache the current version
+            try {
+                this.currentVersion = await readVersionFile(this.dbPath);
+            }
+            catch {
+                // Version file doesn't exist yet, will be created on first index
+                this.currentVersion = 0;
+            }
+        }
+        catch (error) {
+            throw wrapError(error, 'Failed to initialize vector database', { dbPath: this.dbPath });
+        }
+    }
+    async insertBatch(vectors, metadatas, contents) {
+        if (!this.db) {
+            throw new DatabaseError('Vector database not initialized');
+        }
+        // Note: insertBatch may return null for empty batches when table is null
+        // This is correct behavior - empty batches are no-ops and don't create tables
+        this.table = await insertBatch(this.db, this.table, this.tableName, vectors, metadatas, contents);
+    }
+    async search(queryVector, limit = 5, query) {
+        if (!this.table) {
+            throw new DatabaseError('Vector database not initialized');
+        }
+        try {
+            return await search(this.table, queryVector, limit, query);
+        }
+        catch (error) {
+            const errorMsg = String(error);
+            // Detect corrupted index or missing data files
+            if (errorMsg.includes('Not found:') || errorMsg.includes('.lance')) {
+                // Attempt to reconnect - index may have been rebuilt
+                try {
+                    await this.initialize();
+                    if (!this.table) {
+                        throw new DatabaseError('Vector database not initialized after reconnection');
+                    }
+                    return await search(this.table, queryVector, limit, query);
+                }
+                catch (retryError) {
+                    throw new DatabaseError(`Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory.`, { originalError: retryError });
+                }
+            }
+            throw error;
+        }
+    }
+    async scanWithFilter(options) {
+        if (!this.table) {
+            throw new DatabaseError('Vector database not initialized');
+        }
+        return scanWithFilter(this.table, options);
+    }
+    /**
+     * Scan all chunks in the database
+     * Fetches total count first, then retrieves all chunks in a single optimized query
+     * @param options - Filter options (language, pattern)
+     * @returns All matching chunks
+     */
+    async scanAll(options = {}) {
+        if (!this.table) {
+            throw new DatabaseError('Vector database not initialized');
+        }
+        return scanAll(this.table, options);
+    }
+    async querySymbols(options) {
+        if (!this.table) {
+            throw new DatabaseError('Vector database not initialized');
+        }
+        return querySymbols(this.table, options);
+    }
+    async clear() {
+        if (!this.db) {
+            throw new DatabaseError('Vector database not initialized');
+        }
+        // Close connections first to release file handles
+        this.table = null;
+        await clear(this.db, null, this.tableName, this.dbPath);
+    }
+    async deleteByFile(filepath) {
+        if (!this.table) {
+            throw new DatabaseError('Vector database not initialized');
+        }
+        await deleteByFile(this.table, filepath);
+    }
+    async updateFile(filepath, vectors, metadatas, contents) {
+        if (!this.db) {
+            throw new DatabaseError('Vector database connection not initialized');
+        }
+        if (!this.table) {
+            throw new DatabaseError('Vector database table not initialized');
+        }
+        this.table = await updateFile(this.db, this.table, this.tableName, this.dbPath, filepath, vectors, metadatas, contents);
+    }
+    async checkVersion() {
+        const now = Date.now();
+        // Cache version checks for 1 second to minimize I/O
+        if (now - this.lastVersionCheck < 1000) {
+            return false;
+        }
+        this.lastVersionCheck = now;
+        try {
+            const version = await readVersionFile(this.dbPath);
+            if (version > this.currentVersion) {
+                this.currentVersion = version;
+                return true;
+            }
+            return false;
+        }
+        catch (error) {
+            // If we can't read version file, don't reconnect
+            return false;
+        }
+    }
+    async reconnect() {
+        try {
+            // Close existing connections to force reload from disk
+            this.table = null;
+            this.db = null;
+            // Reinitialize with fresh connection
+            await this.initialize();
+        }
+        catch (error) {
+            throw wrapError(error, 'Failed to reconnect to vector database');
+        }
+    }
+    getCurrentVersion() {
+        return this.currentVersion;
+    }
+    getVersionDate() {
+        if (this.currentVersion === 0) {
+            return 'Unknown';
+        }
+        return new Date(this.currentVersion).toLocaleString();
+    }
+    async hasData() {
+        if (!this.table) {
+            return false;
+        }
+        try {
+            const count = await this.table.countRows();
+            if (count === 0) {
+                return false;
+            }
+            // Sample a few rows to verify they contain real data
+            const sample = await this.table
+                .search(Array(EMBEDDING_DIMENSION).fill(0))
+                .limit(Math.min(count, 5))
+                .toArray();
+            const hasRealData = sample.some((r) => r.content &&
+                r.content.trim().length > 0);
+            return hasRealData;
+        }
+        catch {
+            // If any error occurs, assume no data
+            return false;
+        }
+    }
+    static async load(projectRoot) {
+        const db = new VectorDB(projectRoot);
+        await db.initialize();
+        return db;
+    }
+}
+//# sourceMappingURL=lancedb.js.map
+;// CONCATENATED MODULE: ../core/dist/config/schema.js
+
+/**
+ * Type guard to check if a config is the legacy format
+ * @param config - Config object to check
+ * @returns True if config is LegacyLienConfig
+ */
+function isLegacyConfig(config) {
+    return 'indexing' in config && !('frameworks' in config);
+}
+/**
+ * Type guard to check if a config is the modern format
+ * @param config - Config object to check
+ * @returns True if config is LienConfig
+ */
+function isModernConfig(config) {
+    return 'frameworks' in config;
+}
+/**
+ * Default configuration with empty frameworks array
+ * Frameworks should be detected and added via lien init
+ */
+const defaultConfig = {
+    version: CURRENT_CONFIG_VERSION,
+    core: {
+        chunkSize: DEFAULT_CHUNK_SIZE,
+        chunkOverlap: DEFAULT_CHUNK_OVERLAP,
+        concurrency: DEFAULT_CONCURRENCY,
+        embeddingBatchSize: DEFAULT_EMBEDDING_BATCH_SIZE,
+    },
+    chunking: {
+        useAST: true, // AST-based chunking enabled by default (v0.13.0)
+        astFallback: 'line-based', // Fallback to line-based on errors
+    },
+    mcp: {
+        port: DEFAULT_PORT,
+        transport: 'stdio',
+        autoIndexOnFirstRun: true,
+    },
+    gitDetection: {
+        enabled: true,
+        pollIntervalMs: DEFAULT_GIT_POLL_INTERVAL_MS,
+    },
+    fileWatching: {
+        enabled: true, // Enabled by default (fast with incremental indexing!)
+        debounceMs: DEFAULT_DEBOUNCE_MS,
+    },
+    complexity: {
+        enabled: true,
+        thresholds: {
+            testPaths: 15, // 🔀 Max test paths per function
+            mentalLoad: 15, // 🧠 Max mental load score
+            timeToUnderstandMinutes: 60, // ⏱️ Functions taking >1 hour to understand
+            estimatedBugs: 1.5, // 🐛 Functions estimated to have >1.5 bugs
+        },
+    },
+    frameworks: [], // Will be populated by lien init via framework detection
+};
+//# sourceMappingURL=schema.js.map
+;// CONCATENATED MODULE: ../core/dist/config/merge.js
+/**
+ * Deep merges user config with defaults, preserving user customizations.
+ * User values always take precedence over defaults.
+ *
+ * @param defaults - The default configuration
+ * @param user - The user's partial configuration
+ * @returns Complete merged configuration
+ */
+function deepMergeConfig(defaults, user) {
+    return {
+        version: user.version ?? defaults.version,
+        core: {
+            ...defaults.core,
+            ...user.core,
+        },
+        chunking: {
+            ...defaults.chunking,
+            ...user.chunking,
+        },
+        mcp: {
+            ...defaults.mcp,
+            ...user.mcp,
+        },
+        gitDetection: {
+            ...defaults.gitDetection,
+            ...user.gitDetection,
+        },
+        fileWatching: {
+            ...defaults.fileWatching,
+            ...user.fileWatching,
+        },
+        complexity: user.complexity ? {
+            enabled: user.complexity.enabled ?? defaults.complexity?.enabled ?? true,
+            thresholds: {
+                ...defaults.complexity?.thresholds,
+                ...(user.complexity.thresholds || {}),
+            },
+        } : defaults.complexity,
+        frameworks: user.frameworks ?? defaults.frameworks,
+    };
+}
+/**
+ * Detects new fields that exist in the 'after' config but not in the 'before' config.
+ * Returns a list of human-readable field paths.
+ *
+ * @param before - The existing config (potentially missing fields)
+ * @param after - The complete config with all fields
+ * @returns Array of new field paths (e.g., ["mcp.autoIndexOnFirstRun", "gitDetection"])
+ */
+function detectNewFields(before, after) {
+    const newFields = [];
+    // Check top-level sections
+    for (const key of Object.keys(after)) {
+        if (!(key in before)) {
+            newFields.push(key);
+            continue;
+        }
+        // Check nested fields for object sections
+        if (typeof after[key] === 'object' && after[key] !== null && !Array.isArray(after[key])) {
+            const beforeSection = before[key] || {};
+            const afterSection = after[key];
+            for (const nestedKey of Object.keys(afterSection)) {
+                if (!(nestedKey in beforeSection)) {
+                    newFields.push(`${key}.${nestedKey}`);
+                }
+            }
+        }
+    }
+    return newFields;
+}
+//# sourceMappingURL=merge.js.map
+;// CONCATENATED MODULE: ../core/dist/config/migration.js
+
+
+
+
+/**
+ * Checks if a config object needs migration from v0.2.0 to v0.3.0
+ */
+function needsMigration(config) {
+    // Check if config uses old structure:
+    // - Has 'indexing' field instead of 'core' and 'frameworks'
+    // - Or has no 'frameworks' field at all
+    // - Or version is explicitly set to something < 0.3.0
+    // - Or missing 'chunking' field (v0.13.0)
+    if (!config) {
+        return false;
+    }
+    // If missing chunking config, needs migration to v0.13.0
+    if (config.frameworks !== undefined && !config.chunking) {
+        return true;
+    }
+    // If it has frameworks array and chunking, it's already in new format
+    if (config.frameworks !== undefined && config.chunking !== undefined) {
+        return false;
+    }
+    // If it has 'indexing' field, it's the old format
+    if (config.indexing !== undefined) {
+        return true;
+    }
+    // If version is explicitly < 0.3.0
+    if (config.version && config.version.startsWith('0.2')) {
+        return true;
+    }
+    return false;
+}
+/**
+ * Migrates a v0.2.0 config to v0.3.0+ format
+ * @param oldConfig - The old config to migrate
+ * @param targetVersion - The version to set in the migrated config (defaults to CURRENT_CONFIG_VERSION)
+ */
+function migrateConfig(oldConfig, targetVersion) {
+    // Start with default config structure
+    const newConfig = {
+        version: targetVersion ?? CURRENT_CONFIG_VERSION,
+        core: {
+            chunkSize: oldConfig.indexing?.chunkSize ?? oldConfig.core?.chunkSize ?? defaultConfig.core.chunkSize,
+            chunkOverlap: oldConfig.indexing?.chunkOverlap ?? oldConfig.core?.chunkOverlap ?? defaultConfig.core.chunkOverlap,
+            concurrency: oldConfig.indexing?.concurrency ?? oldConfig.core?.concurrency ?? defaultConfig.core.concurrency,
+            embeddingBatchSize: oldConfig.indexing?.embeddingBatchSize ?? oldConfig.core?.embeddingBatchSize ?? defaultConfig.core.embeddingBatchSize,
+        },
+        chunking: {
+            useAST: oldConfig.chunking?.useAST ?? defaultConfig.chunking.useAST,
+            astFallback: oldConfig.chunking?.astFallback ?? defaultConfig.chunking.astFallback,
+        },
+        mcp: {
+            port: oldConfig.mcp?.port ?? defaultConfig.mcp.port,
+            transport: oldConfig.mcp?.transport ?? defaultConfig.mcp.transport,
+            autoIndexOnFirstRun: oldConfig.mcp?.autoIndexOnFirstRun ?? defaultConfig.mcp.autoIndexOnFirstRun,
+        },
+        gitDetection: {
+            enabled: oldConfig.gitDetection?.enabled ?? defaultConfig.gitDetection.enabled,
+            pollIntervalMs: oldConfig.gitDetection?.pollIntervalMs ?? defaultConfig.gitDetection.pollIntervalMs,
+        },
+        fileWatching: {
+            enabled: oldConfig.fileWatching?.enabled ?? defaultConfig.fileWatching.enabled,
+            debounceMs: oldConfig.fileWatching?.debounceMs ?? defaultConfig.fileWatching.debounceMs,
+        },
+        frameworks: oldConfig.frameworks ?? [],
+    };
+    // Convert old indexing config to a single "generic" framework (only for legacy configs)
+    if (oldConfig.indexing && newConfig.frameworks.length === 0) {
+        const genericFramework = {
+            name: 'generic',
+            path: '.',
+            enabled: true,
+            config: {
+                include: oldConfig.indexing.include ?? ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,c,cpp,cs}'],
+                exclude: oldConfig.indexing.exclude ?? [
+                    '**/node_modules/**',
+                    '**/dist/**',
+                    '**/build/**',
+                    '**/.git/**',
+                    '**/coverage/**',
+                    '**/.next/**',
+                    '**/.nuxt/**',
+                    '**/vendor/**',
+                ],
+            },
+        };
+        newConfig.frameworks.push(genericFramework);
+    }
+    else if (newConfig.frameworks.length === 0) {
+        // No indexing config and no frameworks present, use defaults for generic framework
+        const genericFramework = {
+            name: 'generic',
+            path: '.',
+            enabled: true,
+            config: {
+                include: ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,c,cpp,cs}'],
+                exclude: [
+                    '**/node_modules/**',
+                    '**/dist/**',
+                    '**/build/**',
+                    '**/.git/**',
+                    '**/coverage/**',
+                    '**/.next/**',
+                    '**/.nuxt/**',
+                    '**/vendor/**',
+                ],
+            },
+        };
+        newConfig.frameworks.push(genericFramework);
+    }
+    return newConfig;
+}
+/**
+ * Migrates config file and creates backup
+ */
+async function migrateConfigFile(rootDir = process.cwd()) {
+    const configPath = external_path_.join(rootDir, '.lien.config.json');
+    try {
+        // Read existing config
+        const configContent = await promises_namespaceObject.readFile(configPath, 'utf-8');
+        const oldConfig = JSON.parse(configContent);
+        // Check if migration is needed
+        if (!needsMigration(oldConfig)) {
+            return {
+                migrated: false,
+                config: oldConfig,
+            };
+        }
+        // Perform migration
+        const newConfig = migrateConfig(oldConfig);
+        // Create backup
+        const backupPath = `${configPath}.v0.2.0.backup`;
+        await promises_namespaceObject.copyFile(configPath, backupPath);
+        // Write migrated config
+        await promises_namespaceObject.writeFile(configPath, JSON.stringify(newConfig, null, 2) + '\n', 'utf-8');
+        return {
+            migrated: true,
+            backupPath,
+            config: newConfig,
+        };
+    }
+    catch (error) {
+        // If config doesn't exist, return default
+        if (error.code === 'ENOENT') {
+            return {
+                migrated: false,
+                config: defaultConfig,
+            };
+        }
+        throw error;
+    }
+}
+//# sourceMappingURL=migration.js.map
+;// CONCATENATED MODULE: ../core/dist/config/service.js
+
+
+
+
+
+
+/**
+ * ConfigService encapsulates all configuration operations including
+ * loading, saving, migration, and validation.
+ *
+ * This service provides a single point of truth for config management
+ * with comprehensive error handling and validation.
+ */
+class ConfigService {
+    static CONFIG_FILENAME = '.lien.config.json';
+    /**
+     * Load configuration from the specified directory.
+     * Automatically handles migration if needed.
+     *
+     * @param rootDir - Root directory containing the config file
+     * @returns Loaded and validated configuration
+     * @throws {ConfigError} If config is invalid or cannot be loaded
+     */
+    async load(rootDir = process.cwd()) {
+        const configPath = this.getConfigPath(rootDir);
+        try {
+            const configContent = await promises_namespaceObject.readFile(configPath, 'utf-8');
+            const userConfig = JSON.parse(configContent);
+            // Check if migration is needed
+            if (this.needsMigration(userConfig)) {
+                console.log('🔄 Migrating config from v0.2.0 to v0.3.0...');
+                const result = await this.migrate(rootDir);
+                if (result.migrated && result.backupPath) {
+                    const backupFilename = external_path_.basename(result.backupPath);
+                    console.log(`✅ Migration complete! Backup saved as ${backupFilename}`);
+                    console.log('📝 Your config now uses the framework-based structure.');
+                }
+                return result.config;
+            }
+            // Merge with defaults first
+            const mergedConfig = deepMergeConfig(defaultConfig, userConfig);
+            // Then validate the merged config
+            const validation = this.validate(mergedConfig);
+            if (!validation.valid) {
+                throw new ConfigError(`Invalid configuration:\n${validation.errors.join('\n')}`, { errors: validation.errors, warnings: validation.warnings });
+            }
+            // Show warnings if any
+            if (validation.warnings.length > 0) {
+                console.warn('⚠️  Configuration warnings:');
+                validation.warnings.forEach(warning => console.warn(`   ${warning}`));
+            }
+            return mergedConfig;
+        }
+        catch (error) {
+            if (error.code === 'ENOENT') {
+                // Config doesn't exist, return defaults
+                return defaultConfig;
+            }
+            if (error instanceof ConfigError) {
+                throw error;
+            }
+            if (error instanceof SyntaxError) {
+                throw new ConfigError('Failed to parse config file: Invalid JSON syntax', { path: configPath, originalError: error.message });
+            }
+            throw wrapError(error, 'Failed to load configuration', { path: configPath });
+        }
+    }
+    /**
+     * Save configuration to the specified directory.
+     * Validates the config before saving.
+     *
+     * @param rootDir - Root directory to save the config file
+     * @param config - Configuration to save
+     * @throws {ConfigError} If config is invalid or cannot be saved
+     */
+    async save(rootDir, config) {
+        const configPath = this.getConfigPath(rootDir);
+        // Validate before saving
+        const validation = this.validate(config);
+        if (!validation.valid) {
+            throw new ConfigError(`Cannot save invalid configuration:\n${validation.errors.join('\n')}`, { errors: validation.errors });
+        }
+        try {
+            const configJson = JSON.stringify(config, null, 2) + '\n';
+            await promises_namespaceObject.writeFile(configPath, configJson, 'utf-8');
+        }
+        catch (error) {
+            throw wrapError(error, 'Failed to save configuration', { path: configPath });
+        }
+    }
+    /**
+     * Check if a configuration file exists in the specified directory.
+     *
+     * @param rootDir - Root directory to check
+     * @returns True if config file exists
+     */
+    async exists(rootDir = process.cwd()) {
+        const configPath = this.getConfigPath(rootDir);
+        try {
+            await promises_namespaceObject.access(configPath);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    }
+    /**
+     * Migrate configuration from v0.2.0 to v0.3.0 format.
+     * Creates a backup of the original config file.
+     *
+     * @param rootDir - Root directory containing the config file
+     * @returns Migration result with status and new config
+     * @throws {ConfigError} If migration fails
+     */
+    async migrate(rootDir = process.cwd()) {
+        const configPath = this.getConfigPath(rootDir);
+        try {
+            // Read existing config
+            const configContent = await promises_namespaceObject.readFile(configPath, 'utf-8');
+            const oldConfig = JSON.parse(configContent);
+            // Check if migration is needed
+            if (!this.needsMigration(oldConfig)) {
+                return {
+                    migrated: false,
+                    config: oldConfig,
+                };
+            }
+            // Perform migration
+            const newConfig = migrateConfig(oldConfig);
+            // Validate migrated config
+            const validation = this.validate(newConfig);
+            if (!validation.valid) {
+                throw new ConfigError(`Migration produced invalid configuration:\n${validation.errors.join('\n')}`, { errors: validation.errors });
+            }
+            // Create backup
+            const backupPath = `${configPath}.v0.2.0.backup`;
+            await promises_namespaceObject.copyFile(configPath, backupPath);
+            // Write migrated config
+            await this.save(rootDir, newConfig);
+            return {
+                migrated: true,
+                backupPath,
+                config: newConfig,
+            };
+        }
+        catch (error) {
+            if (error.code === 'ENOENT') {
+                return {
+                    migrated: false,
+                    config: defaultConfig,
+                };
+            }
+            if (error instanceof ConfigError) {
+                throw error;
+            }
+            throw wrapError(error, 'Configuration migration failed', { path: configPath });
+        }
+    }
+    /**
+     * Check if a config object needs migration from v0.2.0 to v0.3.0.
+     *
+     * @param config - Config object to check
+     * @returns True if migration is needed
+     */
+    needsMigration(config) {
+        return needsMigration(config);
+    }
+    /**
+     * Validate a configuration object.
+     * Checks all constraints and returns detailed validation results.
+     *
+     * @param config - Configuration to validate
+     * @returns Validation result with errors and warnings
+     */
+    validate(config) {
+        const errors = [];
+        const warnings = [];
+        // Type check
+        if (!config || typeof config !== 'object') {
+            return {
+                valid: false,
+                errors: ['Configuration must be an object'],
+                warnings: [],
+            };
+        }
+        const cfg = config;
+        // Check for required top-level fields
+        if (!cfg.version) {
+            errors.push('Missing required field: version');
+        }
+        // Validate based on config type
+        if (isModernConfig(cfg)) {
+            this.validateModernConfig(cfg, errors, warnings);
+        }
+        else if (isLegacyConfig(cfg)) {
+            this.validateLegacyConfig(cfg, errors, warnings);
+        }
+        else {
+            errors.push('Configuration format not recognized. Must have either "frameworks" or "indexing" field');
+        }
+        return {
+            valid: errors.length === 0,
+            errors,
+            warnings,
+        };
+    }
+    /**
+     * Validate a partial configuration object.
+     * Useful for validating user input before merging with defaults.
+     *
+     * @param config - Partial configuration to validate
+     * @returns Validation result with errors and warnings
+     */
+    validatePartial(config) {
+        const errors = [];
+        const warnings = [];
+        // Validate core settings if present
+        if (config.core) {
+            this.validateCoreConfig(config.core, errors, warnings);
+        }
+        // Validate MCP settings if present
+        if (config.mcp) {
+            this.validateMCPConfig(config.mcp, errors, warnings);
+        }
+        // Validate git detection settings if present
+        if (config.gitDetection) {
+            this.validateGitDetectionConfig(config.gitDetection, errors, warnings);
+        }
+        // Validate file watching settings if present
+        if (config.fileWatching) {
+            this.validateFileWatchingConfig(config.fileWatching, errors, warnings);
+        }
+        // Validate frameworks if present
+        if (config.frameworks) {
+            this.validateFrameworks(config.frameworks, errors, warnings);
+        }
+        return {
+            valid: errors.length === 0,
+            errors,
+            warnings,
+        };
+    }
+    /**
+     * Get the full path to the config file
+     */
+    getConfigPath(rootDir) {
+        return external_path_.join(rootDir, ConfigService.CONFIG_FILENAME);
+    }
+    /**
+     * Validate modern (v0.3.0+) configuration
+     */
+    validateModernConfig(config, errors, warnings) {
+        // Validate core settings
+        if (!config.core) {
+            errors.push('Missing required field: core');
+            return;
+        }
+        this.validateCoreConfig(config.core, errors, warnings);
+        // Validate MCP settings
+        if (!config.mcp) {
+            errors.push('Missing required field: mcp');
+            return;
+        }
+        this.validateMCPConfig(config.mcp, errors, warnings);
+        // Validate git detection settings
+        if (!config.gitDetection) {
+            errors.push('Missing required field: gitDetection');
+            return;
+        }
+        this.validateGitDetectionConfig(config.gitDetection, errors, warnings);
+        // Validate file watching settings
+        if (!config.fileWatching) {
+            errors.push('Missing required field: fileWatching');
+            return;
+        }
+        this.validateFileWatchingConfig(config.fileWatching, errors, warnings);
+        // Validate frameworks
+        if (!config.frameworks) {
+            errors.push('Missing required field: frameworks');
+            return;
+        }
+        this.validateFrameworks(config.frameworks, errors, warnings);
+    }
+    /**
+     * Validate legacy (v0.2.0) configuration
+     */
+    validateLegacyConfig(config, errors, warnings) {
+        warnings.push('Using legacy configuration format. Consider running "lien init" to migrate to v0.3.0');
+        // Validate indexing settings
+        if (!config.indexing) {
+            errors.push('Missing required field: indexing');
+            return;
+        }
+        const { indexing } = config;
+        if (typeof indexing.chunkSize !== 'number' || indexing.chunkSize <= 0) {
+            errors.push('indexing.chunkSize must be a positive number');
+        }
+        if (typeof indexing.chunkOverlap !== 'number' || indexing.chunkOverlap < 0) {
+            errors.push('indexing.chunkOverlap must be a non-negative number');
+        }
+        if (typeof indexing.concurrency !== 'number' || indexing.concurrency < 1 || indexing.concurrency > 16) {
+            errors.push('indexing.concurrency must be between 1 and 16');
+        }
+        if (typeof indexing.embeddingBatchSize !== 'number' || indexing.embeddingBatchSize <= 0) {
+            errors.push('indexing.embeddingBatchSize must be a positive number');
+        }
+        // Validate MCP settings (same for both)
+        if (config.mcp) {
+            this.validateMCPConfig(config.mcp, errors, warnings);
+        }
+    }
+    /**
+     * Validate core configuration settings
+     */
+    validateCoreConfig(core, errors, warnings) {
+        if (core.chunkSize !== undefined) {
+            if (typeof core.chunkSize !== 'number' || core.chunkSize <= 0) {
+                errors.push('core.chunkSize must be a positive number');
+            }
+            else if (core.chunkSize < 50) {
+                warnings.push('core.chunkSize is very small (<50 lines). This may result in poor search quality');
+            }
+            else if (core.chunkSize > 500) {
+                warnings.push('core.chunkSize is very large (>500 lines). This may impact performance');
+            }
+        }
+        if (core.chunkOverlap !== undefined) {
+            if (typeof core.chunkOverlap !== 'number' || core.chunkOverlap < 0) {
+                errors.push('core.chunkOverlap must be a non-negative number');
+            }
+        }
+        if (core.concurrency !== undefined) {
+            if (typeof core.concurrency !== 'number' || core.concurrency < 1 || core.concurrency > 16) {
+                errors.push('core.concurrency must be between 1 and 16');
+            }
+        }
+        if (core.embeddingBatchSize !== undefined) {
+            if (typeof core.embeddingBatchSize !== 'number' || core.embeddingBatchSize <= 0) {
+                errors.push('core.embeddingBatchSize must be a positive number');
+            }
+            else if (core.embeddingBatchSize > 100) {
+                warnings.push('core.embeddingBatchSize is very large (>100). This may cause memory issues');
+            }
+        }
+    }
+    /**
+     * Validate MCP configuration settings
+     */
+    validateMCPConfig(mcp, errors, _warnings) {
+        if (mcp.port !== undefined) {
+            if (typeof mcp.port !== 'number' || mcp.port < 1024 || mcp.port > 65535) {
+                errors.push('mcp.port must be between 1024 and 65535');
+            }
+        }
+        if (mcp.transport !== undefined) {
+            if (mcp.transport !== 'stdio' && mcp.transport !== 'socket') {
+                errors.push('mcp.transport must be either "stdio" or "socket"');
+            }
+        }
+        if (mcp.autoIndexOnFirstRun !== undefined) {
+            if (typeof mcp.autoIndexOnFirstRun !== 'boolean') {
+                errors.push('mcp.autoIndexOnFirstRun must be a boolean');
+            }
+        }
+    }
+    /**
+     * Validate git detection configuration settings
+     */
+    validateGitDetectionConfig(gitDetection, errors, _warnings) {
+        if (gitDetection.enabled !== undefined) {
+            if (typeof gitDetection.enabled !== 'boolean') {
+                errors.push('gitDetection.enabled must be a boolean');
+            }
+        }
+        if (gitDetection.pollIntervalMs !== undefined) {
+            if (typeof gitDetection.pollIntervalMs !== 'number' || gitDetection.pollIntervalMs < 100) {
+                errors.push('gitDetection.pollIntervalMs must be at least 100ms');
+            }
+            else if (gitDetection.pollIntervalMs < 1000) {
+                _warnings.push('gitDetection.pollIntervalMs is very short (<1s). This may impact performance');
+            }
+        }
+    }
+    /**
+     * Validate file watching configuration settings
+     */
+    validateFileWatchingConfig(fileWatching, errors, warnings) {
+        if (fileWatching.enabled !== undefined) {
+            if (typeof fileWatching.enabled !== 'boolean') {
+                errors.push('fileWatching.enabled must be a boolean');
+            }
+        }
+        if (fileWatching.debounceMs !== undefined) {
+            if (typeof fileWatching.debounceMs !== 'number' || fileWatching.debounceMs < 0) {
+                errors.push('fileWatching.debounceMs must be a non-negative number');
+            }
+            else if (fileWatching.debounceMs < 100) {
+                warnings.push('fileWatching.debounceMs is very short (<100ms). This may cause excessive reindexing');
+            }
+        }
+    }
+    /**
+     * Validate frameworks configuration
+     */
+    validateFrameworks(frameworks, errors, warnings) {
+        if (!Array.isArray(frameworks)) {
+            errors.push('frameworks must be an array');
+            return;
+        }
+        frameworks.forEach((framework, index) => {
+            if (!framework || typeof framework !== 'object') {
+                errors.push(`frameworks[${index}] must be an object`);
+                return;
+            }
+            const fw = framework;
+            // Validate required fields
+            if (!fw.name) {
+                errors.push(`frameworks[${index}] missing required field: name`);
+            }
+            if (fw.path === undefined) {
+                errors.push(`frameworks[${index}] missing required field: path`);
+            }
+            else if (typeof fw.path !== 'string') {
+                errors.push(`frameworks[${index}].path must be a string`);
+            }
+            else if (external_path_.isAbsolute(fw.path)) {
+                errors.push(`frameworks[${index}].path must be relative, got: ${fw.path}`);
+            }
+            if (fw.enabled === undefined) {
+                errors.push(`frameworks[${index}] missing required field: enabled`);
+            }
+            else if (typeof fw.enabled !== 'boolean') {
+                errors.push(`frameworks[${index}].enabled must be a boolean`);
+            }
+            if (!fw.config) {
+                errors.push(`frameworks[${index}] missing required field: config`);
+            }
+            else {
+                this.validateFrameworkConfig(fw.config, `frameworks[${index}].config`, errors, warnings);
+            }
+        });
+    }
+    /**
+     * Validate framework-specific configuration
+     */
+    validateFrameworkConfig(config, prefix, errors, _warnings) {
+        if (!config || typeof config !== 'object') {
+            errors.push(`${prefix} must be an object`);
+            return;
+        }
+        // Validate include patterns
+        if (!Array.isArray(config.include)) {
+            errors.push(`${prefix}.include must be an array`);
+        }
+        else {
+            config.include.forEach((pattern, i) => {
+                if (typeof pattern !== 'string') {
+                    errors.push(`${prefix}.include[${i}] must be a string`);
+                }
+            });
+        }
+        // Validate exclude patterns
+        if (!Array.isArray(config.exclude)) {
+            errors.push(`${prefix}.exclude must be an array`);
+        }
+        else {
+            config.exclude.forEach((pattern, i) => {
+                if (typeof pattern !== 'string') {
+                    errors.push(`${prefix}.exclude[${i}] must be a string`);
+                }
+            });
+        }
+    }
+}
+// Export a singleton instance for convenience
+const configService = new ConfigService();
+//# sourceMappingURL=service.js.map
+;// CONCATENATED MODULE: ../core/dist/utils/version.js
+/**
+ * Version utilities for @liendev/core
+ *
+ * Core package has its own version. When CLI uses core,
+ * it can override this with its own package version.
+ */
+// Default version for core
+// In a real build, this would be injected or read from package.json
+let coreVersion = '0.1.0';
+/**
+ * Get the current package version
+ */
+function getPackageVersion() {
+    return coreVersion;
+}
+/**
+ * Set the package version (used by CLI to override with its version)
+ */
+function setPackageVersion(version) {
+    coreVersion = version;
+}
+/**
+ * Get the full package info (for compatibility)
+ */
+function getPackageInfo() {
+    return { version: coreVersion, name: '@liendev/core' };
+}
+//# sourceMappingURL=version.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/manifest.js
+
+
+
+
+const MANIFEST_FILE = 'manifest.json';
+/**
+ * Manages the index manifest file, tracking which files are indexed
+ * and their metadata for incremental indexing support.
+ *
+ * The manifest includes version checking to invalidate indices when
+ * Lien's indexing format changes (e.g., new chunking algorithm,
+ * different embedding model, schema changes).
+ */
+class ManifestManager {
+    manifestPath;
+    indexPath;
+    /**
+     * Promise-based lock to prevent race conditions during concurrent updates.
+     * Ensures read-modify-write operations are atomic.
+     */
+    updateLock = Promise.resolve();
+    /**
+     * Creates a new ManifestManager
+     * @param indexPath - Path to the index directory (same as VectorDB path)
+     */
+    constructor(indexPath) {
+        this.indexPath = indexPath;
+        this.manifestPath = external_path_.join(indexPath, MANIFEST_FILE);
+    }
+    /**
+     * Loads the manifest from disk.
+     * Returns null if:
+     * - Manifest doesn't exist (first run)
+     * - Manifest is corrupt
+     * - Format version is incompatible (triggers full reindex)
+     *
+     * @returns Loaded manifest or null
+     */
+    async load() {
+        try {
+            const content = await promises_namespaceObject.readFile(this.manifestPath, 'utf-8');
+            const manifest = JSON.parse(content);
+            // VERSION CHECK: Invalidate if format version doesn't match
+            if (manifest.formatVersion !== INDEX_FORMAT_VERSION) {
+                console.error(`[Lien] Index format v${manifest.formatVersion} is incompatible with current v${INDEX_FORMAT_VERSION}`);
+                console.error(`[Lien] Full reindex required after Lien upgrade`);
+                // Clear old manifest and return null (triggers full reindex)
+                await this.clear();
+                return null;
+            }
+            return manifest;
+        }
+        catch (error) {
+            // File doesn't exist or is invalid - return null for first run
+            if (error.code === 'ENOENT') {
+                return null;
+            }
+            // Corrupt manifest - log warning and return null
+            console.error(`[Lien] Warning: Failed to load manifest: ${error}`);
+            return null;
+        }
+    }
+    /**
+     * Saves the manifest to disk.
+     * Always saves with current format and package versions.
+     *
+     * @param manifest - Manifest to save
+     */
+    async save(manifest) {
+        try {
+            // Ensure index directory exists
+            await promises_namespaceObject.mkdir(this.indexPath, { recursive: true });
+            // Always save with current versions
+            const manifestToSave = {
+                ...manifest,
+                formatVersion: INDEX_FORMAT_VERSION,
+                lienVersion: getPackageVersion(),
+                lastIndexed: Date.now(),
+            };
+            const content = JSON.stringify(manifestToSave, null, 2);
+            await promises_namespaceObject.writeFile(this.manifestPath, content, 'utf-8');
+        }
+        catch (error) {
+            // Don't throw - manifest is best-effort
+            console.error(`[Lien] Warning: Failed to save manifest: ${error}`);
+        }
+    }
+    /**
+     * Adds or updates a file entry in the manifest.
+     * Protected by lock to prevent race conditions during concurrent updates.
+     *
+     * @param filepath - Path to the file
+     * @param entry - File entry metadata
+     */
+    async updateFile(filepath, entry) {
+        // Chain this operation to the lock to ensure atomicity
+        this.updateLock = this.updateLock.then(async () => {
+            const manifest = await this.load() || this.createEmpty();
+            manifest.files[filepath] = entry;
+            await this.save(manifest);
+        }).catch(error => {
+            console.error(`[Lien] Failed to update manifest for ${filepath}: ${error}`);
+            // Return to reset lock - don't let errors block future operations
+            return undefined;
+        });
+        // Wait for this operation to complete
+        await this.updateLock;
+    }
+    /**
+     * Removes a file entry from the manifest.
+     * Protected by lock to prevent race conditions during concurrent updates.
+     *
+     * Note: If the manifest doesn't exist, this is a no-op (not an error).
+     * This can happen legitimately after clearing the index or on fresh installs.
+     *
+     * @param filepath - Path to the file to remove
+     */
+    async removeFile(filepath) {
+        // Chain this operation to the lock to ensure atomicity
+        this.updateLock = this.updateLock.then(async () => {
+            const manifest = await this.load();
+            if (!manifest) {
+                // No manifest exists - nothing to remove from (expected in some scenarios)
+                return;
+            }
+            delete manifest.files[filepath];
+            await this.save(manifest);
+        }).catch(error => {
+            console.error(`[Lien] Failed to remove manifest entry for ${filepath}: ${error}`);
+            // Return to reset lock - don't let errors block future operations
+            return undefined;
+        });
+        // Wait for this operation to complete
+        await this.updateLock;
+    }
+    /**
+     * Updates multiple files at once (more efficient than individual updates).
+     * Protected by lock to prevent race conditions during concurrent updates.
+     *
+     * @param entries - Array of file entries to update
+     */
+    async updateFiles(entries) {
+        // Chain this operation to the lock to ensure atomicity
+        this.updateLock = this.updateLock.then(async () => {
+            const manifest = await this.load() || this.createEmpty();
+            for (const entry of entries) {
+                manifest.files[entry.filepath] = entry;
+            }
+            await this.save(manifest);
+        }).catch(error => {
+            console.error(`[Lien] Failed to update manifest for ${entries.length} files: ${error}`);
+            // Return to reset lock - don't let errors block future operations
+            return undefined;
+        });
+        // Wait for this operation to complete
+        await this.updateLock;
+    }
+    /**
+     * Updates the git state in the manifest.
+     * Protected by lock to prevent race conditions during concurrent updates.
+     *
+     * @param gitState - Current git state
+     */
+    async updateGitState(gitState) {
+        // Chain this operation to the lock to ensure atomicity
+        this.updateLock = this.updateLock.then(async () => {
+            const manifest = await this.load() || this.createEmpty();
+            manifest.gitState = gitState;
+            await this.save(manifest);
+        }).catch(error => {
+            console.error(`[Lien] Failed to update git state in manifest: ${error}`);
+            // Return to reset lock - don't let errors block future operations
+            return undefined;
+        });
+        // Wait for this operation to complete
+        await this.updateLock;
+    }
+    /**
+     * Gets the list of files currently in the manifest
+     *
+     * @returns Array of filepaths
+     */
+    async getIndexedFiles() {
+        const manifest = await this.load();
+        if (!manifest)
+            return [];
+        return Object.keys(manifest.files);
+    }
+    /**
+     * Detects which files have changed based on mtime comparison
+     *
+     * @param currentFiles - Map of current files with their mtimes
+     * @returns Array of filepaths that have changed
+     */
+    async getChangedFiles(currentFiles) {
+        const manifest = await this.load();
+        if (!manifest) {
+            // No manifest = all files are "changed" (need full index)
+            return Array.from(currentFiles.keys());
+        }
+        const changedFiles = [];
+        for (const [filepath, mtime] of currentFiles) {
+            const entry = manifest.files[filepath];
+            if (!entry) {
+                // New file
+                changedFiles.push(filepath);
+            }
+            else if (entry.lastModified < mtime) {
+                // File modified since last index
+                changedFiles.push(filepath);
+            }
+        }
+        return changedFiles;
+    }
+    /**
+     * Gets files that are in the manifest but not in the current file list
+     * (i.e., deleted files)
+     *
+     * @param currentFiles - Set of current file paths
+     * @returns Array of deleted file paths
+     */
+    async getDeletedFiles(currentFiles) {
+        const manifest = await this.load();
+        if (!manifest)
+            return [];
+        const deletedFiles = [];
+        for (const filepath of Object.keys(manifest.files)) {
+            if (!currentFiles.has(filepath)) {
+                deletedFiles.push(filepath);
+            }
+        }
+        return deletedFiles;
+    }
+    /**
+     * Clears the manifest file
+     */
+    async clear() {
+        try {
+            await promises_namespaceObject.unlink(this.manifestPath);
+        }
+        catch (error) {
+            // Ignore error if file doesn't exist
+            if (error.code !== 'ENOENT') {
+                console.error(`[Lien] Warning: Failed to clear manifest: ${error}`);
+            }
+        }
+    }
+    /**
+     * Creates an empty manifest with current version information
+     *
+     * @returns Empty manifest
+     */
+    createEmpty() {
+        return {
+            formatVersion: INDEX_FORMAT_VERSION,
+            lienVersion: getPackageVersion(),
+            lastIndexed: Date.now(),
+            files: {},
+        };
+    }
+}
+//# sourceMappingURL=manifest.js.map
+// EXTERNAL MODULE: external "child_process"
+var external_child_process_ = __nccwpck_require__(5317);
+// EXTERNAL MODULE: external "util"
+var external_util_ = __nccwpck_require__(9023);
+;// CONCATENATED MODULE: ../core/dist/git/utils.js
+
+
+
+
+const execAsync = (0,external_util_.promisify)(external_child_process_.exec);
+/**
+ * Checks if a directory is a git repository.
+ *
+ * @param rootDir - Directory to check
+ * @returns true if directory is a git repo, false otherwise
+ */
+async function isGitRepo(rootDir) {
+    try {
+        const gitDir = external_path_.join(rootDir, '.git');
+        await promises_namespaceObject.access(gitDir);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Gets the current git branch name.
+ *
+ * @param rootDir - Root directory of the git repository
+ * @returns Branch name (e.g., "main", "feature-branch")
+ * @throws Error if not a git repo or git command fails
+ */
+async function getCurrentBranch(rootDir) {
+    try {
+        const { stdout } = await execAsync('git rev-parse --abbrev-ref HEAD', {
+            cwd: rootDir,
+            timeout: 5000, // 5 second timeout
+        });
+        return stdout.trim();
+    }
+    catch (error) {
+        throw new Error(`Failed to get current branch: ${error}`);
+    }
+}
+/**
+ * Gets the current git commit SHA (HEAD).
+ *
+ * @param rootDir - Root directory of the git repository
+ * @returns Commit SHA (full 40-character hash)
+ * @throws Error if not a git repo or git command fails
+ */
+async function getCurrentCommit(rootDir) {
+    try {
+        const { stdout } = await execAsync('git rev-parse HEAD', {
+            cwd: rootDir,
+            timeout: 5000,
+        });
+        return stdout.trim();
+    }
+    catch (error) {
+        throw new Error(`Failed to get current commit: ${error}`);
+    }
+}
+/**
+ * Gets the list of files that changed between two git references.
+ *
+ * @param rootDir - Root directory of the git repository
+ * @param fromRef - Starting reference (branch name, commit SHA, or tag)
+ * @param toRef - Ending reference (branch name, commit SHA, or tag)
+ * @returns Array of file paths (relative to repo root) that changed
+ * @throws Error if git command fails
+ */
+async function getChangedFiles(rootDir, fromRef, toRef) {
+    try {
+        const { stdout } = await execAsync(`git diff --name-only ${fromRef}...${toRef}`, {
+            cwd: rootDir,
+            timeout: 10000, // 10 second timeout for diffs
+        });
+        const files = stdout
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map(file => external_path_.join(rootDir, file)); // Convert to absolute paths
+        return files;
+    }
+    catch (error) {
+        throw new Error(`Failed to get changed files: ${error}`);
+    }
+}
+/**
+ * Gets the list of files that changed in a specific commit.
+ *
+ * @param rootDir - Root directory of the git repository
+ * @param commitSha - Commit SHA to check
+ * @returns Array of file paths (absolute) that changed in this commit
+ * @throws Error if git command fails
+ */
+async function getChangedFilesInCommit(rootDir, commitSha) {
+    try {
+        const { stdout } = await execAsync(`git diff-tree --no-commit-id --name-only -r ${commitSha}`, {
+            cwd: rootDir,
+            timeout: 10000,
+        });
+        const files = stdout
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map(file => path.join(rootDir, file)); // Convert to absolute paths
+        return files;
+    }
+    catch (error) {
+        throw new Error(`Failed to get changed files in commit: ${error}`);
+    }
+}
+/**
+ * Gets the list of files that changed between two commits.
+ * More efficient than getChangedFiles for commit-to-commit comparisons.
+ *
+ * @param rootDir - Root directory of the git repository
+ * @param fromCommit - Starting commit SHA
+ * @param toCommit - Ending commit SHA
+ * @returns Array of file paths (absolute) that changed between commits
+ * @throws Error if git command fails
+ */
+async function getChangedFilesBetweenCommits(rootDir, fromCommit, toCommit) {
+    try {
+        const { stdout } = await execAsync(`git diff --name-only ${fromCommit} ${toCommit}`, {
+            cwd: rootDir,
+            timeout: 10000,
+        });
+        const files = stdout
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map(file => external_path_.join(rootDir, file)); // Convert to absolute paths
+        return files;
+    }
+    catch (error) {
+        throw new Error(`Failed to get changed files between commits: ${error}`);
+    }
+}
+/**
+ * Checks if git is installed and available.
+ *
+ * @returns true if git is available, false otherwise
+ */
+async function isGitAvailable() {
+    try {
+        await execAsync('git --version', { timeout: 3000 });
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+//# sourceMappingURL=utils.js.map
+;// CONCATENATED MODULE: ../core/dist/git/tracker.js
+
+
+
+/**
+ * Tracks git state (branch and commit) and detects changes.
+ * Persists state to disk to survive server restarts.
+ */
+class GitStateTracker {
+    stateFile;
+    rootDir;
+    currentState = null;
+    constructor(rootDir, indexPath) {
+        this.rootDir = rootDir;
+        this.stateFile = external_path_.join(indexPath, '.git-state.json');
+    }
+    /**
+     * Loads the last known git state from disk.
+     * Returns null if no state file exists (first run).
+     */
+    async loadState() {
+        try {
+            const content = await promises_namespaceObject.readFile(this.stateFile, 'utf-8');
+            return JSON.parse(content);
+        }
+        catch {
+            // File doesn't exist or is invalid - this is fine for first run
+            return null;
+        }
+    }
+    /**
+     * Saves the current git state to disk.
+     */
+    async saveState(state) {
+        try {
+            const content = JSON.stringify(state, null, 2);
+            await promises_namespaceObject.writeFile(this.stateFile, content, 'utf-8');
+        }
+        catch (error) {
+            // Log but don't throw - state persistence is best-effort
+            console.error(`[Lien] Warning: Failed to save git state: ${error}`);
+        }
+    }
+    /**
+     * Gets the current git state from the repository.
+     *
+     * @returns Current git state
+     * @throws Error if git commands fail
+     */
+    async getCurrentGitState() {
+        const branch = await getCurrentBranch(this.rootDir);
+        const commit = await getCurrentCommit(this.rootDir);
+        return {
+            branch,
+            commit,
+            timestamp: Date.now(),
+        };
+    }
+    /**
+     * Initializes the tracker by loading saved state and checking current state.
+     * Should be called once when MCP server starts.
+     *
+     * @returns Array of changed files if state changed, null if no changes or first run
+     */
+    async initialize() {
+        // Check if this is a git repo
+        const isRepo = await isGitRepo(this.rootDir);
+        if (!isRepo) {
+            return null;
+        }
+        try {
+            // Get current state
+            this.currentState = await this.getCurrentGitState();
+            // Load previous state
+            const previousState = await this.loadState();
+            if (!previousState) {
+                // First run - save current state
+                await this.saveState(this.currentState);
+                return null;
+            }
+            // Check if state changed
+            const branchChanged = previousState.branch !== this.currentState.branch;
+            const commitChanged = previousState.commit !== this.currentState.commit;
+            if (!branchChanged && !commitChanged) {
+                // No changes
+                return null;
+            }
+            // State changed - get list of changed files
+            let changedFiles = [];
+            if (branchChanged) {
+                // Branch changed - compare current branch with previous branch
+                try {
+                    changedFiles = await getChangedFiles(this.rootDir, previousState.branch, this.currentState.branch);
+                }
+                catch (error) {
+                    // If branches diverged too much or don't exist, fall back to commit diff
+                    console.error(`[Lien] Branch diff failed, using commit diff: ${error}`);
+                    changedFiles = await getChangedFilesBetweenCommits(this.rootDir, previousState.commit, this.currentState.commit);
+                }
+            }
+            else if (commitChanged) {
+                // Same branch, different commit
+                changedFiles = await getChangedFilesBetweenCommits(this.rootDir, previousState.commit, this.currentState.commit);
+            }
+            // Save new state
+            await this.saveState(this.currentState);
+            return changedFiles;
+        }
+        catch (error) {
+            console.error(`[Lien] Failed to initialize git tracker: ${error}`);
+            return null;
+        }
+    }
+    /**
+     * Checks for git state changes since last check.
+     * This is called periodically by the MCP server.
+     *
+     * @returns Array of changed files if state changed, null if no changes
+     */
+    async detectChanges() {
+        // Check if this is a git repo
+        const isRepo = await isGitRepo(this.rootDir);
+        if (!isRepo) {
+            return null;
+        }
+        try {
+            // Get current state
+            const newState = await this.getCurrentGitState();
+            // If we don't have a previous state, just save current and return
+            if (!this.currentState) {
+                this.currentState = newState;
+                await this.saveState(newState);
+                return null;
+            }
+            // Check if state changed
+            const branchChanged = this.currentState.branch !== newState.branch;
+            const commitChanged = this.currentState.commit !== newState.commit;
+            if (!branchChanged && !commitChanged) {
+                // No changes
+                return null;
+            }
+            // State changed - get list of changed files
+            let changedFiles = [];
+            if (branchChanged) {
+                // Branch changed
+                try {
+                    changedFiles = await getChangedFiles(this.rootDir, this.currentState.branch, newState.branch);
+                }
+                catch (error) {
+                    // Fall back to commit diff
+                    console.error(`[Lien] Branch diff failed, using commit diff: ${error}`);
+                    changedFiles = await getChangedFilesBetweenCommits(this.rootDir, this.currentState.commit, newState.commit);
+                }
+            }
+            else if (commitChanged) {
+                // Same branch, different commit
+                changedFiles = await getChangedFilesBetweenCommits(this.rootDir, this.currentState.commit, newState.commit);
+            }
+            // Update current state
+            this.currentState = newState;
+            await this.saveState(newState);
+            return changedFiles;
+        }
+        catch (error) {
+            console.error(`[Lien] Failed to detect git changes: ${error}`);
+            return null;
+        }
+    }
+    /**
+     * Gets the current git state.
+     * Useful for status display.
+     */
+    getState() {
+        return this.currentState;
+    }
+    /**
+     * Manually updates the saved state.
+     * Useful after manual reindexing to sync state.
+     */
+    async updateState() {
+        try {
+            this.currentState = await this.getCurrentGitState();
+            await this.saveState(this.currentState);
+        }
+        catch (error) {
+            console.error(`[Lien] Failed to update git state: ${error}`);
+        }
+    }
+}
+//# sourceMappingURL=tracker.js.map
+;// CONCATENATED MODULE: ../core/dist/utils/result.js
+/**
+ * Result type for explicit error handling.
+ *
+ * Provides a type-safe alternative to throwing exceptions, making error
+ * handling explicit in function signatures.
+ *
+ * @example
+ * ```typescript
+ * function divide(a: number, b: number): Result<number, string> {
+ *   if (b === 0) {
+ *     return Err('Division by zero');
+ *   }
+ *   return Ok(a / b);
+ * }
+ *
+ * const result = divide(10, 2);
+ * if (isOk(result)) {
+ *   console.log(result.value); // 5
+ * } else {
+ *   console.error(result.error);
+ * }
+ * ```
+ */
+/**
+ * Creates a successful Result containing a value
+ */
+function Ok(value) {
+    return { ok: true, value };
+}
+/**
+ * Creates a failed Result containing an error
+ */
+function Err(error) {
+    return { ok: false, error };
+}
+/**
+ * Type guard to check if a Result is Ok
+ */
+function isOk(result) {
+    return result.ok;
+}
+/**
+ * Type guard to check if a Result is Err
+ */
+function isErr(result) {
+    return !result.ok;
+}
+/**
+ * Unwraps a Result, throwing if it's an error
+ * @throws {E} The error if Result is Err
+ */
+function unwrap(result) {
+    if (isOk(result)) {
+        return result.value;
+    }
+    throw result.error;
+}
+/**
+ * Unwraps a Result or returns a default value if it's an error
+ */
+function unwrapOr(result, defaultValue) {
+    if (isOk(result)) {
+        return result.value;
+    }
+    return defaultValue;
+}
+//# sourceMappingURL=result.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/incremental.js
+
+
+
+
+
+
+
+/**
+ * Normalize a file path to a consistent relative format.
+ * This ensures paths from different sources (git diff, scanner, etc.)
+ * are stored and queried consistently in the index.
+ *
+ * @param filepath - Absolute or relative file path
+ * @param rootDir - Workspace root directory (defaults to cwd)
+ * @returns Relative path from rootDir
+ */
+function normalizeToRelativePath(filepath, rootDir) {
+    // Normalize root and strip trailing slash to ensure consistent comparison
+    const root = (rootDir || process.cwd()).replace(/\\/g, '/').replace(/\/$/, '');
+    const normalized = filepath.replace(/\\/g, '/');
+    // If already relative, return as-is
+    if (!external_path_.isAbsolute(filepath)) {
+        return normalized;
+    }
+    // Convert absolute to relative
+    if (normalized.startsWith(root + '/')) {
+        return normalized.slice(root.length + 1);
+    }
+    if (normalized.startsWith(root)) {
+        return normalized.slice(root.length);
+    }
+    // Fallback: use path.relative
+    return external_path_.relative(root, filepath).replace(/\\/g, '/');
+}
+/**
+ * Shared helper that processes file content into chunks and embeddings.
+ * This is the core logic shared between indexSingleFile and indexMultipleFiles.
+ *
+ * Returns null for empty files (0 chunks), which callers should handle appropriately.
+ *
+ * @param filepath - Path to the file being processed
+ * @param content - File content
+ * @param embeddings - Embeddings service
+ * @param config - Lien configuration
+ * @param verbose - Whether to log verbose output
+ * @returns ProcessFileResult for non-empty files, null for empty files
+ */
+async function processFileContent(filepath, content, embeddings, config, verbose) {
+    // Get chunk settings (support both v0.3.0 and legacy v0.2.0 configs)
+    const chunkSize = isModernConfig(config)
+        ? config.core.chunkSize
+        : (isLegacyConfig(config) ? config.indexing.chunkSize : 75);
+    const chunkOverlap = isModernConfig(config)
+        ? config.core.chunkOverlap
+        : (isLegacyConfig(config) ? config.indexing.chunkOverlap : 10);
+    const useAST = isModernConfig(config)
+        ? config.chunking.useAST
+        : true;
+    const astFallback = isModernConfig(config)
+        ? config.chunking.astFallback
+        : 'line-based';
+    // Chunk the file
+    const chunks = chunkFile(filepath, content, {
+        chunkSize,
+        chunkOverlap,
+        useAST,
+        astFallback,
+    });
+    if (chunks.length === 0) {
+        // Empty file - return null so caller can handle appropriately
+        if (verbose) {
+            console.error(`[Lien] Empty file: ${filepath}`);
+        }
+        return null;
+    }
+    // Generate embeddings for all chunks
+    // Use micro-batching to prevent event loop blocking
+    const texts = chunks.map(c => c.content);
+    const vectors = [];
+    for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
+        const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
+        const microResults = await embeddings.embedBatch(microBatch);
+        vectors.push(...microResults);
+        // Yield to event loop for responsiveness
+        if (texts.length > EMBEDDING_MICRO_BATCH_SIZE) {
+            await new Promise(resolve => setImmediate(resolve));
+        }
+    }
+    return {
+        chunkCount: chunks.length,
+        vectors,
+        chunks,
+        texts,
+    };
+}
+/**
+ * Indexes a single file incrementally by updating its chunks in the vector database.
+ * This is the core function for incremental reindexing - it handles file changes,
+ * deletions, and additions.
+ *
+ * @param filepath - Absolute path to the file to index
+ * @param vectorDB - Initialized VectorDB instance
+ * @param embeddings - Initialized embeddings service
+ * @param config - Lien configuration
+ * @param options - Optional settings
+ */
+async function indexSingleFile(filepath, vectorDB, embeddings, config, options = {}) {
+    const { verbose } = options;
+    // Normalize to relative path for consistent storage and queries
+    // This ensures paths from git diff (absolute) match paths from scanner (relative)
+    const normalizedPath = normalizeToRelativePath(filepath);
+    try {
+        // Check if file exists (use original filepath for filesystem operations)
+        try {
+            await promises_namespaceObject.access(filepath);
+        }
+        catch {
+            // File doesn't exist - delete from index and manifest using normalized path
+            if (verbose) {
+                console.error(`[Lien] File deleted: ${normalizedPath}`);
+            }
+            await vectorDB.deleteByFile(normalizedPath);
+            const manifest = new ManifestManager(vectorDB.dbPath);
+            await manifest.removeFile(normalizedPath);
+            return;
+        }
+        // Read file content
+        const content = await promises_namespaceObject.readFile(filepath, 'utf-8');
+        // Process file content (chunking + embeddings) - use normalized path for storage
+        const result = await processFileContent(normalizedPath, content, embeddings, config, verbose || false);
+        // Get actual file mtime for manifest
+        const stats = await promises_namespaceObject.stat(filepath);
+        const manifest = new ManifestManager(vectorDB.dbPath);
+        if (result === null) {
+            // Empty file - remove from vector DB but keep in manifest with chunkCount: 0
+            await vectorDB.deleteByFile(normalizedPath);
+            await manifest.updateFile(normalizedPath, {
+                filepath: normalizedPath,
+                lastModified: stats.mtimeMs,
+                chunkCount: 0,
+            });
+            return;
+        }
+        // Non-empty file - update in database (atomic: delete old + insert new)
+        await vectorDB.updateFile(normalizedPath, result.vectors, result.chunks.map(c => c.metadata), result.texts);
+        // Update manifest after successful indexing
+        await manifest.updateFile(normalizedPath, {
+            filepath: normalizedPath,
+            lastModified: stats.mtimeMs,
+            chunkCount: result.chunkCount,
+        });
+        if (verbose) {
+            console.error(`[Lien] ✓ Updated ${normalizedPath} (${result.chunkCount} chunks)`);
+        }
+    }
+    catch (error) {
+        // Log error but don't throw - we want to continue with other files
+        console.error(`[Lien] ⚠️  Failed to index ${normalizedPath}: ${error}`);
+    }
+}
+/**
+ * Process a single file, returning a Result type.
+ * This helper makes error handling explicit and testable.
+ *
+ * @param filepath - Original filepath (may be absolute)
+ * @param normalizedPath - Normalized relative path for storage
+ */
+async function processSingleFileForIndexing(filepath, normalizedPath, embeddings, config, verbose) {
+    try {
+        // Read file stats and content using original path (for filesystem access)
+        const stats = await promises_namespaceObject.stat(filepath);
+        const content = await promises_namespaceObject.readFile(filepath, 'utf-8');
+        // Process content using normalized path (for storage)
+        const result = await processFileContent(normalizedPath, content, embeddings, config, verbose);
+        return Ok({
+            filepath: normalizedPath, // Store normalized path
+            result,
+            mtime: stats.mtimeMs,
+        });
+    }
+    catch (error) {
+        return Err(`Failed to process ${normalizedPath}: ${error}`);
+    }
+}
+/**
+ * Indexes multiple files incrementally.
+ * Processes files sequentially for simplicity and reliability.
+ *
+ * Uses Result type for explicit error handling, making it easier to test
+ * and reason about failure modes.
+ *
+ * Note: This function counts both successfully indexed files AND successfully
+ * handled deletions (files that don't exist but were removed from the index).
+ *
+ * @param filepaths - Array of absolute file paths to index
+ * @param vectorDB - Initialized VectorDB instance
+ * @param embeddings - Initialized embeddings service
+ * @param config - Lien configuration
+ * @param options - Optional settings
+ * @returns Number of successfully processed files (indexed or deleted)
+ */
+async function indexMultipleFiles(filepaths, vectorDB, embeddings, config, options = {}) {
+    const { verbose } = options;
+    let processedCount = 0;
+    // Batch manifest updates for performance
+    const manifestEntries = [];
+    // Process each file sequentially (simple and reliable)
+    for (const filepath of filepaths) {
+        // Normalize to relative path for consistent storage and queries
+        // This ensures paths from git diff (absolute) match paths from scanner (relative)
+        const normalizedPath = normalizeToRelativePath(filepath);
+        const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, config, verbose || false);
+        if (isOk(result)) {
+            const { filepath: storedPath, result: processResult, mtime } = result.value;
+            if (processResult === null) {
+                // Empty file - remove from vector DB but keep in manifest with chunkCount: 0
+                try {
+                    await vectorDB.deleteByFile(storedPath);
+                }
+                catch (error) {
+                    // Ignore errors if file wasn't in index
+                }
+                // Update manifest immediately for empty files (not batched)
+                const manifest = new ManifestManager(vectorDB.dbPath);
+                await manifest.updateFile(storedPath, {
+                    filepath: storedPath,
+                    lastModified: mtime,
+                    chunkCount: 0,
+                });
+                processedCount++;
+                continue;
+            }
+            // Non-empty file - delete old chunks if they exist
+            try {
+                await vectorDB.deleteByFile(storedPath);
+            }
+            catch (error) {
+                // Ignore - file might not be in index yet
+            }
+            // Insert new chunks
+            await vectorDB.insertBatch(processResult.vectors, processResult.chunks.map(c => c.metadata), processResult.texts);
+            // Queue manifest update (batch at end)
+            manifestEntries.push({
+                filepath: storedPath,
+                chunkCount: processResult.chunkCount,
+                mtime,
+            });
+            if (verbose) {
+                console.error(`[Lien] ✓ Updated ${storedPath} (${processResult.chunkCount} chunks)`);
+            }
+            processedCount++;
+        }
+        else {
+            // File doesn't exist or couldn't be read - handle deletion
+            if (verbose) {
+                console.error(`[Lien] ${result.error}`);
+            }
+            try {
+                await vectorDB.deleteByFile(normalizedPath);
+                const manifest = new ManifestManager(vectorDB.dbPath);
+                await manifest.removeFile(normalizedPath);
+            }
+            catch (error) {
+                // Ignore errors if file wasn't in index
+                if (verbose) {
+                    console.error(`[Lien] Note: ${normalizedPath} not in index`);
+                }
+            }
+            // Count as processed regardless of deletion success/failure
+            processedCount++;
+        }
+    }
+    // Batch update manifest at the end (much faster than updating after each file)
+    if (manifestEntries.length > 0) {
+        const manifest = new ManifestManager(vectorDB.dbPath);
+        await manifest.updateFiles(manifestEntries.map(entry => ({
+            filepath: entry.filepath,
+            lastModified: entry.mtime, // Use actual file mtime for accurate change detection
+            chunkCount: entry.chunkCount,
+        })));
+    }
+    return processedCount;
+}
+//# sourceMappingURL=incremental.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/change-detector.js
+
+
+
+
+
+
+
+
+/**
+ * Check if git state has changed (branch switch, new commits).
+ */
+async function hasGitStateChanged(rootDir, dbPath, savedGitState) {
+    if (!savedGitState)
+        return { changed: false };
+    const gitAvailable = await isGitAvailable();
+    const isRepo = await isGitRepo(rootDir);
+    if (!gitAvailable || !isRepo)
+        return { changed: false };
+    const gitTracker = new GitStateTracker(rootDir, dbPath);
+    await gitTracker.initialize();
+    const currentState = gitTracker.getState();
+    if (!currentState)
+        return { changed: false };
+    const changed = currentState.branch !== savedGitState.branch ||
+        currentState.commit !== savedGitState.commit;
+    return { changed, currentState };
+}
+/**
+ * Categorize files from git diff into added, modified, deleted.
+ */
+function categorizeChangedFiles(changedFilesPaths, currentFileSet, normalizedManifestFiles, allFiles) {
+    const changedFilesSet = new Set(changedFilesPaths);
+    const added = [];
+    const modified = [];
+    const deleted = [];
+    // Categorize files from git diff
+    for (const filepath of changedFilesPaths) {
+        if (currentFileSet.has(filepath)) {
+            if (normalizedManifestFiles.has(filepath)) {
+                modified.push(filepath);
+            }
+            else {
+                added.push(filepath);
+            }
+        }
+    }
+    // Find truly new files (not in git diff, but not in old manifest)
+    for (const filepath of allFiles) {
+        if (!normalizedManifestFiles.has(filepath) && !changedFilesSet.has(filepath)) {
+            added.push(filepath);
+        }
+    }
+    // Find deleted files (in old manifest but not in current)
+    for (const normalizedPath of normalizedManifestFiles) {
+        if (!currentFileSet.has(normalizedPath)) {
+            deleted.push(normalizedPath);
+        }
+    }
+    return { added, modified, deleted };
+}
+/**
+ * Build normalized set of manifest file paths for comparison.
+ */
+function normalizeManifestPaths(manifestFiles, rootDir) {
+    const normalized = new Set();
+    for (const filepath of Object.keys(manifestFiles)) {
+        normalized.add(normalizeToRelativePath(filepath, rootDir));
+    }
+    return normalized;
+}
+/**
+ * Detect changes using git diff between commits.
+ */
+async function detectGitBasedChanges(rootDir, savedManifest, currentCommit, config) {
+    const changedFilesAbsolute = await getChangedFiles(rootDir, savedManifest.gitState.commit, currentCommit);
+    const changedFilesPaths = changedFilesAbsolute.map(fp => normalizeToRelativePath(fp, rootDir));
+    const allFiles = await getAllFiles(rootDir, config);
+    const currentFileSet = new Set(allFiles);
+    const normalizedManifestFiles = normalizeManifestPaths(savedManifest.files, rootDir);
+    const { added, modified, deleted } = categorizeChangedFiles(changedFilesPaths, currentFileSet, normalizedManifestFiles, allFiles);
+    return { added, modified, deleted, reason: 'git-state-changed' };
+}
+/**
+ * Fall back to full reindex when git diff fails.
+ */
+async function fallbackToFullReindex(rootDir, savedManifest, config) {
+    const allFiles = await getAllFiles(rootDir, config);
+    const currentFileSet = new Set(allFiles);
+    const deleted = [];
+    for (const filepath of Object.keys(savedManifest.files)) {
+        const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+        if (!currentFileSet.has(normalizedPath)) {
+            deleted.push(normalizedPath);
+        }
+    }
+    return { added: allFiles, modified: [], deleted, reason: 'git-state-changed' };
+}
+/**
+ * Detects which files have changed since last indexing.
+ * Uses git state detection to handle branch switches, then falls back to mtime.
+ */
+async function detectChanges(rootDir, vectorDB, config) {
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    const savedManifest = await manifest.load();
+    // No manifest = first run = full index
+    if (!savedManifest) {
+        const allFiles = await getAllFiles(rootDir, config);
+        return { added: allFiles, modified: [], deleted: [], reason: 'full' };
+    }
+    // Check if git state has changed
+    const gitCheck = await hasGitStateChanged(rootDir, vectorDB.dbPath, savedManifest.gitState);
+    if (gitCheck.changed && gitCheck.currentState) {
+        try {
+            return await detectGitBasedChanges(rootDir, savedManifest, gitCheck.currentState.commit, config);
+        }
+        catch (error) {
+            console.warn(`[Lien] Git diff failed, falling back to full reindex: ${error}`);
+            return await fallbackToFullReindex(rootDir, savedManifest, config);
+        }
+    }
+    // Use mtime-based detection for file-level changes
+    return await mtimeBasedDetection(rootDir, savedManifest, config);
+}
+/**
+ * Gets all files in the project based on configuration.
+ * Always returns relative paths for consistent comparison with manifest and git diff.
+ */
+async function getAllFiles(rootDir, config) {
+    let files;
+    if (isModernConfig(config) && config.frameworks.length > 0) {
+        files = await scanCodebaseWithFrameworks(rootDir, config);
+    }
+    else if (isLegacyConfig(config)) {
+        files = await scanCodebase({
+            rootDir,
+            includePatterns: config.indexing.include,
+            excludePatterns: config.indexing.exclude,
+        });
+    }
+    else {
+        files = await scanCodebase({
+            rootDir,
+            includePatterns: [],
+            excludePatterns: [],
+        });
+    }
+    // Normalize all paths to relative for consistent comparison
+    return files.map(fp => normalizeToRelativePath(fp, rootDir));
+}
+/**
+ * Detects changes by comparing file modification times
+ */
+async function mtimeBasedDetection(rootDir, savedManifest, config) {
+    const added = [];
+    const modified = [];
+    const deleted = [];
+    // Get all current files (already normalized to relative paths by getAllFiles)
+    const currentFiles = await getAllFiles(rootDir, config);
+    const currentFileSet = new Set(currentFiles);
+    // Build a normalized map of manifest files for comparison
+    // This handles cases where manifest has absolute paths (from tests or legacy data)
+    const normalizedManifestFiles = new Map();
+    for (const [filepath, entry] of Object.entries(savedManifest.files)) {
+        const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+        normalizedManifestFiles.set(normalizedPath, entry);
+    }
+    // Get mtimes for all current files
+    // Note: need to construct absolute path for fs.stat since currentFiles are relative
+    const fileStats = new Map();
+    for (const filepath of currentFiles) {
+        try {
+            // Construct absolute path for filesystem access (use path.join for cross-platform)
+            const absolutePath = external_path_.isAbsolute(filepath) ? filepath : external_path_.join(rootDir, filepath);
+            const stats = await promises_namespaceObject.stat(absolutePath);
+            fileStats.set(filepath, stats.mtimeMs);
+        }
+        catch {
+            // Ignore files we can't stat
+            continue;
+        }
+    }
+    // Check for new and modified files
+    for (const [filepath, mtime] of fileStats) {
+        const entry = normalizedManifestFiles.get(filepath);
+        if (!entry) {
+            // New file
+            added.push(filepath);
+        }
+        else if (entry.lastModified < mtime) {
+            // File modified since last index
+            modified.push(filepath);
+        }
+    }
+    // Check for deleted files (use normalized manifest paths)
+    for (const normalizedPath of normalizedManifestFiles.keys()) {
+        if (!currentFileSet.has(normalizedPath)) {
+            deleted.push(normalizedPath);
+        }
+    }
+    return {
+        added,
+        modified,
+        deleted,
+        reason: 'mtime',
+    };
+}
+//# sourceMappingURL=change-detector.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/chunk-batch-processor.js
+/**
+ * ChunkBatchProcessor - Handles concurrent chunk accumulation and batch processing.
+ *
+ * Extracted from performFullIndex to:
+ * 1. Encapsulate mutex/lock management complexity
+ * 2. Make the batch processing logic testable
+ * 3. Separate concerns (accumulation vs processing vs coordination)
+ *
+ * Key responsibilities:
+ * - Accumulate chunks from concurrent file processing
+ * - Batch chunks for embedding generation
+ * - Manage concurrent access with mutex pattern
+ * - Process batches through embedding → vectordb pipeline
+ */
+
+/**
+ * Process embeddings in micro-batches to prevent event loop blocking.
+ * Yields to the event loop between batches for UI responsiveness.
+ */
+async function processEmbeddingMicroBatches(texts, embeddings) {
+    const results = [];
+    for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
+        const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
+        const microResults = await embeddings.embedBatch(microBatch);
+        results.push(...microResults);
+        // Yield to event loop for UI responsiveness
+        await new Promise(resolve => setImmediate(resolve));
+    }
+    return results;
+}
+/**
+ * ChunkBatchProcessor handles the complex concurrent chunk accumulation
+ * and batch processing logic for indexing.
+ *
+ * Usage:
+ * ```typescript
+ * const processor = new ChunkBatchProcessor(vectorDB, embeddings, config, tracker);
+ *
+ * // From concurrent file processing tasks:
+ * await processor.addChunks(chunks, filepath, mtime);
+ *
+ * // After all files processed:
+ * await processor.flush();
+ *
+ * // Get results:
+ * const { processedChunks, indexedFiles } = processor.getResults();
+ * ```
+ */
+class ChunkBatchProcessor {
+    vectorDB;
+    embeddings;
+    config;
+    progressTracker;
+    accumulator = [];
+    indexedFiles = [];
+    processedChunkCount = 0;
+    // Mutex state for concurrent access protection
+    addChunksLock = null;
+    processingQueue = null;
+    constructor(vectorDB, embeddings, config, progressTracker) {
+        this.vectorDB = vectorDB;
+        this.embeddings = embeddings;
+        this.config = config;
+        this.progressTracker = progressTracker;
+    }
+    /**
+     * Add chunks from a processed file.
+     * Thread-safe: uses mutex to prevent race conditions with concurrent calls.
+     *
+     * @param chunks - Code chunks to add
+     * @param filepath - Source file path (for manifest)
+     * @param mtime - File modification time in ms (for change detection)
+     */
+    async addChunks(chunks, filepath, mtime) {
+        if (chunks.length === 0) {
+            return;
+        }
+        // Wait for any in-progress add operation (mutex acquire)
+        if (this.addChunksLock) {
+            await this.addChunksLock;
+        }
+        // Create new lock promise
+        let releaseLock;
+        this.addChunksLock = new Promise(resolve => {
+            releaseLock = resolve;
+        });
+        try {
+            // Critical section: modify shared state
+            for (const chunk of chunks) {
+                this.accumulator.push({
+                    chunk,
+                    content: chunk.content,
+                });
+            }
+            // Track file for manifest
+            this.indexedFiles.push({
+                filepath,
+                chunkCount: chunks.length,
+                mtime,
+            });
+            // Process if batch threshold reached
+            if (this.accumulator.length >= this.config.batchThreshold) {
+                await this.triggerProcessing();
+            }
+        }
+        finally {
+            // Release mutex
+            releaseLock();
+            this.addChunksLock = null;
+        }
+    }
+    /**
+     * Flush any remaining accumulated chunks.
+     * Call this after all files have been processed.
+     */
+    async flush() {
+        this.progressTracker.setMessage?.('Processing final chunks...');
+        await this.triggerProcessing();
+    }
+    /**
+     * Get processing results.
+     */
+    getResults() {
+        return {
+            processedChunks: this.processedChunkCount,
+            indexedFiles: [...this.indexedFiles],
+        };
+    }
+    /**
+     * Trigger batch processing. Uses queue-based synchronization
+     * to prevent TOCTOU race conditions.
+     */
+    async triggerProcessing() {
+        // Chain onto existing processing promise to create a queue
+        if (this.processingQueue) {
+            this.processingQueue = this.processingQueue.then(() => this.doProcess());
+        }
+        else {
+            this.processingQueue = this.doProcess();
+        }
+        return this.processingQueue;
+    }
+    /**
+     * The actual batch processing logic.
+     * Processes accumulated chunks through embedding → vectordb pipeline.
+     */
+    async doProcess() {
+        if (this.accumulator.length === 0) {
+            return;
+        }
+        const currentPromise = this.processingQueue;
+        try {
+            // Drain accumulator atomically
+            const toProcess = this.accumulator.splice(0, this.accumulator.length);
+            // Process in batches for memory/API limits
+            for (let i = 0; i < toProcess.length; i += this.config.embeddingBatchSize) {
+                const batch = toProcess.slice(i, Math.min(i + this.config.embeddingBatchSize, toProcess.length));
+                const texts = batch.map(item => item.content);
+                // Generate embeddings
+                this.progressTracker.setMessage?.('Generating embeddings...');
+                const embeddingVectors = await processEmbeddingMicroBatches(texts, this.embeddings);
+                this.processedChunkCount += batch.length;
+                // Insert into vector database
+                this.progressTracker.setMessage?.(`Inserting ${batch.length} chunks...`);
+                await this.vectorDB.insertBatch(embeddingVectors, batch.map(item => item.chunk.metadata), texts);
+                // Yield to event loop
+                await new Promise(resolve => setImmediate(resolve));
+            }
+            this.progressTracker.setMessage?.('Processing files...');
+        }
+        finally {
+            // Clear queue reference if we're the current operation
+            if (this.processingQueue === currentPromise) {
+                this.processingQueue = null;
+            }
+        }
+    }
+}
+//# sourceMappingURL=chunk-batch-processor.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/index.js
+/**
+ * Core indexing module - programmatic API without CLI dependencies.
+ *
+ * This module provides the core indexing functionality that can be used by:
+ * - @liendev/cli (with UI wrapper)
+ * - @liendev/action (directly)
+ * - @liendev/cloud (worker processes)
+ * - Third-party integrations
+ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/** Extract indexing config values with defaults */
+function getIndexingConfig(config) {
+    if (isModernConfig(config)) {
+        return {
+            concurrency: config.core.concurrency,
+            embeddingBatchSize: config.core.embeddingBatchSize,
+            chunkSize: config.core.chunkSize,
+            chunkOverlap: config.core.chunkOverlap,
+            useAST: config.chunking.useAST,
+            astFallback: config.chunking.astFallback,
+        };
+    }
+    // Legacy defaults
+    return {
+        concurrency: 4,
+        embeddingBatchSize: 50,
+        chunkSize: 75,
+        chunkOverlap: 10,
+        useAST: true,
+        astFallback: 'line-based',
+    };
+}
+/** Scan files based on config type */
+async function scanFilesToIndex(rootDir, config) {
+    if (isModernConfig(config) && config.frameworks.length > 0) {
+        return scanCodebaseWithFrameworks(rootDir, config);
+    }
+    if (isLegacyConfig(config)) {
+        return scanCodebase({
+            rootDir,
+            includePatterns: config.indexing.include,
+            excludePatterns: config.indexing.exclude,
+        });
+    }
+    return scanCodebase({ rootDir, includePatterns: [], excludePatterns: [] });
+}
+/**
+ * Update git state after indexing (if in a git repo).
+ */
+async function updateGitState(rootDir, vectorDB, manifest) {
+    const gitAvailable = await isGitAvailable();
+    const isRepo = await isGitRepo(rootDir);
+    if (!gitAvailable || !isRepo) {
+        return;
+    }
+    const gitTracker = new GitStateTracker(rootDir, vectorDB.dbPath);
+    await gitTracker.initialize();
+    const gitState = gitTracker.getState();
+    if (gitState) {
+        await manifest.updateGitState(gitState);
+    }
+}
+/**
+ * Handle file deletions during incremental indexing.
+ */
+async function handleDeletions(deletedFiles, vectorDB, manifest) {
+    if (deletedFiles.length === 0) {
+        return 0;
+    }
+    let removedCount = 0;
+    for (const filepath of deletedFiles) {
+        try {
+            await vectorDB.deleteByFile(filepath);
+            await manifest.removeFile(filepath);
+            removedCount++;
+        }
+        catch {
+            // Continue on error, just count failures
+        }
+    }
+    return removedCount;
+}
+/**
+ * Handle file updates (additions and modifications) during incremental indexing.
+ */
+async function handleUpdates(addedFiles, modifiedFiles, vectorDB, embeddings, config, options) {
+    const filesToIndex = [...addedFiles, ...modifiedFiles];
+    if (filesToIndex.length === 0) {
+        return 0;
+    }
+    const count = await indexMultipleFiles(filesToIndex, vectorDB, embeddings, config, { verbose: options.verbose });
+    await writeVersionFile(vectorDB.dbPath);
+    return count;
+}
+/**
+ * Try incremental indexing if a manifest exists.
+ * Returns result if incremental completed, null if full index needed.
+ */
+async function tryIncrementalIndex(rootDir, vectorDB, config, options, startTime) {
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    const savedManifest = await manifest.load();
+    if (!savedManifest) {
+        return null; // No manifest, need full index
+    }
+    const changes = await detectChanges(rootDir, vectorDB, config);
+    if (changes.reason === 'full') {
+        return null;
+    }
+    const totalChanges = changes.added.length + changes.modified.length;
+    const totalDeleted = changes.deleted.length;
+    if (totalChanges === 0 && totalDeleted === 0) {
+        options.onProgress?.({
+            phase: 'complete',
+            message: 'Index is up to date - no changes detected',
+            filesTotal: 0,
+            filesProcessed: 0,
+        });
+        return {
+            success: true,
+            filesIndexed: 0,
+            chunksCreated: 0,
+            durationMs: Date.now() - startTime,
+            incremental: true,
+        };
+    }
+    options.onProgress?.({
+        phase: 'embedding',
+        message: `Detected ${totalChanges} files to index, ${totalDeleted} to remove`,
+    });
+    // Initialize embeddings for incremental update
+    const embeddings = options.embeddings ?? new LocalEmbeddings();
+    if (!options.embeddings) {
+        await embeddings.initialize();
+    }
+    // Process changes
+    await handleDeletions(changes.deleted, vectorDB, manifest);
+    const indexedCount = await handleUpdates(changes.added, changes.modified, vectorDB, embeddings, config, options);
+    // Update git state
+    await updateGitState(rootDir, vectorDB, manifest);
+    options.onProgress?.({
+        phase: 'complete',
+        message: `Updated ${indexedCount} file${indexedCount !== 1 ? 's' : ''}, removed ${totalDeleted}`,
+        filesTotal: totalChanges + totalDeleted,
+        filesProcessed: indexedCount + totalDeleted,
+    });
+    return {
+        success: true,
+        filesIndexed: indexedCount,
+        chunksCreated: 0, // Not tracked in incremental mode
+        durationMs: Date.now() - startTime,
+        incremental: true,
+    };
+}
+/**
+ * Process a single file for indexing.
+ * Extracts chunks and adds them to the batch processor.
+ *
+ * @returns true if file was processed successfully, false if skipped
+ */
+async function processFileForIndexing(file, batchProcessor, indexConfig, progressTracker, _verbose) {
+    try {
+        // Get file stats to capture actual modification time
+        const stats = await promises_namespaceObject.stat(file);
+        const content = await promises_namespaceObject.readFile(file, 'utf-8');
+        const chunks = chunkFile(file, content, {
+            chunkSize: indexConfig.chunkSize,
+            chunkOverlap: indexConfig.chunkOverlap,
+            useAST: indexConfig.useAST,
+            astFallback: indexConfig.astFallback,
+        });
+        if (chunks.length === 0) {
+            progressTracker.incrementFiles();
+            return false;
+        }
+        // Add chunks to batch processor (handles mutex internally)
+        await batchProcessor.addChunks(chunks, file, stats.mtimeMs);
+        progressTracker.incrementFiles();
+        return true;
+    }
+    catch {
+        progressTracker.incrementFiles();
+        return false;
+    }
+}
+/**
+ * Perform a full index of the codebase.
+ */
+async function performFullIndex(rootDir, vectorDB, config, options, startTime) {
+    // 1. Clear existing index (required for schema changes)
+    options.onProgress?.({ phase: 'initializing', message: 'Clearing existing index...' });
+    await vectorDB.clear();
+    // 2. Scan for files
+    options.onProgress?.({ phase: 'scanning', message: 'Scanning codebase...' });
+    const files = await scanFilesToIndex(rootDir, config);
+    if (files.length === 0) {
+        return {
+            success: false,
+            filesIndexed: 0,
+            chunksCreated: 0,
+            durationMs: Date.now() - startTime,
+            incremental: false,
+            error: 'No files found to index',
+        };
+    }
+    // 3. Initialize embeddings model
+    options.onProgress?.({
+        phase: 'embedding',
+        message: 'Loading embedding model...',
+        filesTotal: files.length,
+    });
+    const embeddings = options.embeddings ?? new LocalEmbeddings();
+    if (!options.embeddings) {
+        await embeddings.initialize();
+    }
+    // 4. Setup processing infrastructure
+    const indexConfig = getIndexingConfig(config);
+    const processedCount = { value: 0 };
+    // Create a simple progress tracker that works with callbacks
+    const progressTracker = {
+        incrementFiles: () => {
+            processedCount.value++;
+            options.onProgress?.({
+                phase: 'indexing',
+                message: `Processing files...`,
+                filesTotal: files.length,
+                filesProcessed: processedCount.value,
+            });
+        },
+        incrementChunks: () => { },
+        getProcessedCount: () => processedCount.value,
+        start: () => { },
+        stop: () => { },
+    };
+    const batchProcessor = new ChunkBatchProcessor(vectorDB, embeddings, {
+        batchThreshold: 100,
+        embeddingBatchSize: indexConfig.embeddingBatchSize,
+    }, progressTracker);
+    options.onProgress?.({
+        phase: 'indexing',
+        message: `Processing ${files.length} files...`,
+        filesTotal: files.length,
+        filesProcessed: 0,
+    });
+    try {
+        // 5. Process files with concurrency limit
+        const limit = pLimit(indexConfig.concurrency);
+        const filePromises = files.map(file => limit(() => processFileForIndexing(file, batchProcessor, indexConfig, progressTracker, options.verbose ?? false)));
+        await Promise.all(filePromises);
+        // 6. Flush remaining chunks
+        await batchProcessor.flush();
+    }
+    catch (error) {
+        return {
+            success: false,
+            filesIndexed: processedCount.value,
+            chunksCreated: 0,
+            durationMs: Date.now() - startTime,
+            incremental: false,
+            error: error instanceof Error ? error.message : String(error),
+        };
+    }
+    // 7. Save results
+    options.onProgress?.({ phase: 'saving', message: 'Saving index manifest...' });
+    const { processedChunks, indexedFiles } = batchProcessor.getResults();
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    await manifest.updateFiles(indexedFiles.map(entry => ({
+        filepath: entry.filepath,
+        lastModified: entry.mtime,
+        chunkCount: entry.chunkCount,
+    })));
+    // Save git state if in a git repo
+    await updateGitState(rootDir, vectorDB, manifest);
+    // Write version file to mark successful completion
+    await writeVersionFile(vectorDB.dbPath);
+    options.onProgress?.({
+        phase: 'complete',
+        message: 'Indexing complete',
+        filesTotal: files.length,
+        filesProcessed: processedCount.value,
+        chunksProcessed: processedChunks,
+    });
+    return {
+        success: true,
+        filesIndexed: processedCount.value,
+        chunksCreated: processedChunks,
+        durationMs: Date.now() - startTime,
+        incremental: false,
+    };
+}
+/**
+ * Index a codebase, creating vector embeddings for semantic search.
+ *
+ * This is the main entry point for indexing. It:
+ * - Tries incremental indexing first (if not forced)
+ * - Falls back to full indexing if needed
+ * - Provides progress callbacks for UI integration
+ *
+ * @param options - Indexing options
+ * @returns Indexing result with stats
+ *
+ * @example
+ * ```typescript
+ * // Basic usage
+ * const result = await indexCodebase({ rootDir: '/path/to/project' });
+ *
+ * // With progress callback
+ * const result = await indexCodebase({
+ *   rootDir: '/path/to/project',
+ *   onProgress: (p) => console.log(`${p.phase}: ${p.message}`)
+ * });
+ *
+ * // With pre-initialized embeddings (warm worker)
+ * const embeddings = new LocalEmbeddings();
+ * await embeddings.initialize();
+ * const result = await indexCodebase({ embeddings });
+ * ```
+ */
+async function indexCodebase(options = {}) {
+    const rootDir = options.rootDir ?? process.cwd();
+    const startTime = Date.now();
+    try {
+        options.onProgress?.({ phase: 'initializing', message: 'Loading configuration...' });
+        // Load configuration
+        const config = options.config ?? await configService.load(rootDir);
+        // Initialize vector database
+        options.onProgress?.({ phase: 'initializing', message: 'Initializing vector database...' });
+        const vectorDB = new VectorDB(rootDir);
+        await vectorDB.initialize();
+        // Try incremental indexing first (unless forced)
+        if (!options.force) {
+            const incrementalResult = await tryIncrementalIndex(rootDir, vectorDB, config, options, startTime);
+            if (incrementalResult) {
+                return incrementalResult;
+            }
+        }
+        // Fall back to full index
+        return await performFullIndex(rootDir, vectorDB, config, options, startTime);
+    }
+    catch (error) {
+        return {
+            success: false,
+            filesIndexed: 0,
+            chunksCreated: 0,
+            durationMs: Date.now() - startTime,
+            incremental: false,
+            error: error instanceof Error ? error.message : String(error),
+        };
+    }
+}
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../core/dist/embeddings/cache.js
+/**
+ * LRU cache for embeddings with configurable max size.
+ * Wraps any EmbeddingService to add caching functionality.
+ *
+ * Benefits:
+ * - Faster repeated searches
+ * - Reduced CPU usage
+ * - Better user experience for common queries
+ */
+class CachedEmbeddings {
+    cache = new Map();
+    maxSize;
+    underlying;
+    /**
+     * Creates a new cached embeddings service
+     * @param underlying - The underlying embedding service to wrap
+     * @param maxSize - Maximum number of embeddings to cache (default: 1000)
+     */
+    constructor(underlying, maxSize = 1000) {
+        this.underlying = underlying;
+        this.maxSize = maxSize;
+    }
+    async initialize() {
+        return this.underlying.initialize();
+    }
+    async embed(text) {
+        // Check cache first
+        const cached = this.cache.get(text);
+        if (cached) {
+            return cached;
+        }
+        // Generate embedding
+        const result = await this.underlying.embed(text);
+        // Add to cache with LRU eviction
+        if (this.cache.size >= this.maxSize) {
+            // Remove oldest entry (first key in Map)
+            const firstKey = this.cache.keys().next().value;
+            if (firstKey !== undefined) {
+                this.cache.delete(firstKey);
+            }
+        }
+        this.cache.set(text, result);
+        return result;
+    }
+    async embedBatch(texts) {
+        const results = [];
+        const uncachedTexts = [];
+        const uncachedIndices = [];
+        // Check cache for each text
+        for (let i = 0; i < texts.length; i++) {
+            const cached = this.cache.get(texts[i]);
+            if (cached) {
+                results[i] = cached;
+            }
+            else {
+                uncachedTexts.push(texts[i]);
+                uncachedIndices.push(i);
+            }
+        }
+        // Generate embeddings for uncached texts
+        if (uncachedTexts.length > 0) {
+            const newEmbeddings = await this.underlying.embedBatch(uncachedTexts);
+            // Store in cache and results
+            for (let i = 0; i < newEmbeddings.length; i++) {
+                const text = uncachedTexts[i];
+                const embedding = newEmbeddings[i];
+                const resultIndex = uncachedIndices[i];
+                // Add to cache with LRU eviction
+                if (this.cache.size >= this.maxSize) {
+                    const firstKey = this.cache.keys().next().value;
+                    if (firstKey !== undefined) {
+                        this.cache.delete(firstKey);
+                    }
+                }
+                this.cache.set(text, embedding);
+                results[resultIndex] = embedding;
+            }
+        }
+        return results;
+    }
+    /**
+     * Gets the current cache size
+     */
+    getCacheSize() {
+        return this.cache.size;
+    }
+    /**
+     * Gets cache statistics
+     */
+    getCacheStats() {
+        return {
+            size: this.cache.size,
+            maxSize: this.maxSize,
+        };
+    }
+    /**
+     * Clears the cache
+     */
+    clearCache() {
+        this.cache.clear();
+    }
+    /**
+     * Checks if a text is in the cache
+     */
+    has(text) {
+        return this.cache.has(text);
+    }
+}
+//# sourceMappingURL=cache.js.map
+;// CONCATENATED MODULE: ../core/dist/insights/types.js
+/**
+ * Complexity analysis types for code quality insights
+ */
+/**
+ * Risk level ordering for comparison operations.
+ * Higher value = higher risk.
+ */
+const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 };
+//# sourceMappingURL=types.js.map
+;// CONCATENATED MODULE: ../core/dist/utils/path-matching.js
+/**
+ * Shared path matching utilities for dependency analysis.
+ *
+ * These functions handle path normalization and matching logic used by
+ * dependency analysis to find reverse dependencies.
+ */
+/**
+ * Normalizes a file path for comparison.
+ *
+ * - Removes quotes and trims whitespace
+ * - Converts backslashes to forward slashes
+ * - Strips file extensions (.ts, .tsx, .js, .jsx)
+ * - Converts absolute paths to relative (if within workspace root)
+ *
+ * @param path - The path to normalize
+ * @param workspaceRoot - The workspace root directory (normalized with forward slashes)
+ * @returns Normalized path
+ */
+function normalizePath(path, workspaceRoot) {
+    let normalized = path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
+    // Normalize extensions: .ts/.tsx/.js/.jsx → all treated as equivalent
+    // This handles TypeScript's ESM requirement of .js imports for .ts files
+    normalized = normalized.replace(/\.(ts|tsx|js|jsx)$/, '');
+    // Normalize to relative path if it starts with workspace root
+    if (normalized.startsWith(workspaceRoot + '/')) {
+        normalized = normalized.substring(workspaceRoot.length + 1);
+    }
+    return normalized;
+}
+/**
+ * Checks if a pattern matches at path component boundaries.
+ *
+ * Ensures matches occur at proper boundaries (/, .) to avoid false positives like:
+ * - "logger" matching "logger-utils" ❌
+ * - "src/logger" matching "src/logger-service" ❌
+ *
+ * @param str - The string to search in
+ * @param pattern - The pattern to search for
+ * @returns True if pattern matches at a boundary
+ */
+function matchesAtBoundary(str, pattern) {
+    const index = str.indexOf(pattern);
+    if (index === -1)
+        return false;
+    // Check character before match (must be start or path separator)
+    const charBefore = index > 0 ? str[index - 1] : '/';
+    if (charBefore !== '/' && index !== 0)
+        return false;
+    // Check character after match (must be end or path separator)
+    // Extensions are already stripped during normalization, so we only need to check for '/' as a valid path separator
+    const endIndex = index + pattern.length;
+    if (endIndex === str.length)
+        return true;
+    const charAfter = str[endIndex];
+    return charAfter === '/';
+}
+/**
+ * Determines if an import path matches a target file path.
+ *
+ * Handles various matching strategies:
+ * 1. Exact match
+ * 2. Target path appears in import (at boundaries)
+ * 3. Import path appears in target (at boundaries)
+ * 4. Relative imports (./logger vs src/utils/logger)
+ *
+ * @param normalizedImport - Normalized import path
+ * @param normalizedTarget - Normalized target file path
+ * @returns True if the import matches the target file
+ */
+function matchesFile(normalizedImport, normalizedTarget) {
+    // Exact match
+    if (normalizedImport === normalizedTarget)
+        return true;
+    // Strategy 1: Check if target path appears in import at path boundaries
+    if (matchesAtBoundary(normalizedImport, normalizedTarget)) {
+        return true;
+    }
+    // Strategy 2: Check if import path appears in target (for longer target paths)
+    if (matchesAtBoundary(normalizedTarget, normalizedImport)) {
+        return true;
+    }
+    // Strategy 3: Handle relative imports (./logger vs src/utils/logger)
+    // Remove leading ./ and ../ from import
+    const cleanedImport = normalizedImport.replace(/^(\.\.?\/)+/, '');
+    if (matchesAtBoundary(cleanedImport, normalizedTarget) ||
+        matchesAtBoundary(normalizedTarget, cleanedImport)) {
+        return true;
+    }
+    return false;
+}
+/**
+ * Gets a canonical path representation (relative to workspace, with extension).
+ *
+ * @param filepath - The file path to canonicalize
+ * @param workspaceRoot - The workspace root directory (normalized with forward slashes)
+ * @returns Canonical path
+ */
+function getCanonicalPath(filepath, workspaceRoot) {
+    let canonical = filepath.replace(/\\/g, '/');
+    if (canonical.startsWith(workspaceRoot + '/')) {
+        canonical = canonical.substring(workspaceRoot.length + 1);
+    }
+    return canonical;
+}
+/**
+ * Determines if a file is a test file based on naming conventions.
+ *
+ * Uses precise regex patterns to avoid false positives:
+ * - Files with .test. or .spec. extensions (e.g., foo.test.ts, bar.spec.js)
+ * - Files in test/, tests/, or __tests__/ directories
+ *
+ * Avoids false positives like:
+ * - contest.ts (contains ".test." but isn't a test)
+ * - latest/config.ts (contains "/test/" but isn't a test)
+ *
+ * @param filepath - The file path to check
+ * @returns True if the file is a test file
+ */
+function path_matching_isTestFile(filepath) {
+    return /\.(test|spec)\.[^/]+$/.test(filepath) ||
+        /(^|[/\\])(test|tests|__tests__)[/\\]/.test(filepath);
+}
+//# sourceMappingURL=path-matching.js.map
+;// CONCATENATED MODULE: ../core/dist/indexer/dependency-analyzer.js
+
+
+/**
+ * Risk level thresholds for dependent count.
+ * Based on impact analysis: more dependents = higher risk of breaking changes.
+ */
+const DEPENDENT_COUNT_THRESHOLDS = {
+    LOW: 5, // Few dependents, safe to change
+    MEDIUM: 15, // Moderate impact, review dependents
+    HIGH: 30, // High impact, careful planning needed
+};
+/**
+ * Complexity thresholds for risk assessment.
+ * Based on cyclomatic complexity: higher complexity = harder to change safely.
+ */
+const COMPLEXITY_THRESHOLDS = {
+    HIGH_COMPLEXITY_DEPENDENT: 10, // Individual file is complex
+    CRITICAL_AVG: 15, // Average complexity indicates systemic complexity
+    CRITICAL_MAX: 25, // Peak complexity indicates hotspot
+    HIGH_AVG: 10, // Moderately complex on average
+    HIGH_MAX: 20, // Some complex functions exist
+    MEDIUM_AVG: 6, // Slightly above simple code
+    MEDIUM_MAX: 15, // Occasional branching
+};
+/**
+ * Creates a cached path normalizer to avoid repeated string operations.
+ *
+ * @param workspaceRoot - The workspace root directory for path normalization
+ * @returns A function that normalizes and caches file paths
+ */
+function createPathNormalizer(workspaceRoot) {
+    const cache = new Map();
+    return (path) => {
+        const cached = cache.get(path);
+        if (cached !== undefined)
+            return cached;
+        const normalized = normalizePath(path, workspaceRoot);
+        cache.set(path, normalized);
+        return normalized;
+    };
+}
+/**
+ * Builds an index mapping normalized import paths to chunks that import them.
+ * Enables O(1) lookup instead of O(n*m) iteration.
+ *
+ * @param chunks - All chunks from the vector database
+ * @param normalizePathCached - Cached path normalization function
+ * @returns Map of normalized import paths to chunks that import them
+ */
+function buildImportIndex(chunks, normalizePathCached) {
+    const importIndex = new Map();
+    for (const chunk of chunks) {
+        const imports = chunk.metadata.imports || [];
+        for (const imp of imports) {
+            const normalizedImport = normalizePathCached(imp);
+            let chunkList = importIndex.get(normalizedImport);
+            if (!chunkList) {
+                chunkList = [];
+                importIndex.set(normalizedImport, chunkList);
+            }
+            chunkList.push(chunk);
+        }
+    }
+    return importIndex;
+}
+/**
+ * Finds all chunks that import the target file using index + fuzzy matching.
+ *
+ * @param normalizedTarget - The normalized path of the target file
+ * @param importIndex - Index mapping import paths to chunks
+ * @returns Array of chunks that import the target file (deduplicated)
+ */
+function findDependentChunks(normalizedTarget, importIndex) {
+    const dependentChunks = [];
+    const seenChunkIds = new Set();
+    const addChunk = (chunk) => {
+        const chunkId = `${chunk.metadata.file}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
+        if (!seenChunkIds.has(chunkId)) {
+            dependentChunks.push(chunk);
+            seenChunkIds.add(chunkId);
+        }
+    };
+    // Direct index lookup (fastest path)
+    const directMatches = importIndex.get(normalizedTarget);
+    if (directMatches) {
+        for (const chunk of directMatches) {
+            addChunk(chunk);
+        }
+    }
+    // Fuzzy match for relative imports and path variations
+    // Note: This is O(M) where M = unique import paths. For large codebases with many
+    // violations, consider caching fuzzy match results at a higher level.
+    for (const [normalizedImport, chunks] of importIndex.entries()) {
+        if (normalizedImport !== normalizedTarget && matchesFile(normalizedImport, normalizedTarget)) {
+            for (const chunk of chunks) {
+                addChunk(chunk);
+            }
+        }
+    }
+    return dependentChunks;
+}
+/**
+ * Groups chunks by their canonical file path.
+ *
+ * @param chunks - Array of chunks to group
+ * @param workspaceRoot - The workspace root directory
+ * @returns Map of canonical file paths to their chunks
+ */
+function groupChunksByFile(chunks, workspaceRoot) {
+    const chunksByFile = new Map();
+    for (const chunk of chunks) {
+        const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+        let existing = chunksByFile.get(canonical);
+        if (!existing) {
+            existing = [];
+            chunksByFile.set(canonical, existing);
+        }
+        existing.push(chunk);
+    }
+    return chunksByFile;
+}
+/**
+ * Calculates complexity metrics for each file based on its chunks.
+ *
+ * @param chunksByFile - Map of file paths to their chunks
+ * @returns Array of complexity info for files with complexity data
+ */
+function calculateFileComplexities(chunksByFile) {
+    const fileComplexities = [];
+    for (const [filepath, chunks] of chunksByFile.entries()) {
+        const complexities = chunks
+            .map(c => c.metadata.complexity)
+            .filter((c) => typeof c === 'number' && c > 0);
+        if (complexities.length > 0) {
+            const sum = complexities.reduce((a, b) => a + b, 0);
+            const avg = sum / complexities.length;
+            const max = Math.max(...complexities);
+            fileComplexities.push({
+                filepath,
+                avgComplexity: Math.round(avg * 10) / 10,
+                maxComplexity: max,
+                complexityScore: sum,
+                chunksWithComplexity: complexities.length,
+            });
+        }
+    }
+    return fileComplexities;
+}
+/**
+ * Calculates overall complexity metrics from per-file data.
+ *
+ * @param fileComplexities - Array of per-file complexity info
+ * @returns Aggregated complexity metrics, or undefined if no data
+ */
+function calculateOverallComplexityMetrics(fileComplexities) {
+    if (fileComplexities.length === 0) {
+        return undefined;
+    }
+    const allAvgs = fileComplexities.map(f => f.avgComplexity);
+    const allMaxes = fileComplexities.map(f => f.maxComplexity);
+    const totalAvg = allAvgs.reduce((a, b) => a + b, 0) / allAvgs.length;
+    const globalMax = Math.max(...allMaxes);
+    // Identify high-complexity dependents (top 5)
+    const highComplexityDependents = fileComplexities
+        .filter(f => f.maxComplexity > COMPLEXITY_THRESHOLDS.HIGH_COMPLEXITY_DEPENDENT)
+        .sort((a, b) => b.maxComplexity - a.maxComplexity)
+        .slice(0, 5)
+        .map(f => ({
+        filepath: f.filepath,
+        maxComplexity: f.maxComplexity,
+        avgComplexity: f.avgComplexity,
+    }));
+    // Calculate complexity-based risk boost
+    const complexityRiskBoost = calculateComplexityRiskBoost(totalAvg, globalMax);
+    return {
+        averageComplexity: Math.round(totalAvg * 10) / 10,
+        maxComplexity: globalMax,
+        filesWithComplexityData: fileComplexities.length,
+        highComplexityDependents,
+        complexityRiskBoost,
+    };
+}
+/**
+ * Determines risk level based on complexity thresholds.
+ *
+ * @param avgComplexity - Average complexity across all files
+ * @param maxComplexity - Maximum complexity found in any file
+ * @returns Risk level based on complexity thresholds
+ */
+function calculateComplexityRiskBoost(avgComplexity, maxComplexity) {
+    if (avgComplexity > COMPLEXITY_THRESHOLDS.CRITICAL_AVG || maxComplexity > COMPLEXITY_THRESHOLDS.CRITICAL_MAX) {
+        return 'critical';
+    }
+    if (avgComplexity > COMPLEXITY_THRESHOLDS.HIGH_AVG || maxComplexity > COMPLEXITY_THRESHOLDS.HIGH_MAX) {
+        return 'high';
+    }
+    if (avgComplexity > COMPLEXITY_THRESHOLDS.MEDIUM_AVG || maxComplexity > COMPLEXITY_THRESHOLDS.MEDIUM_MAX) {
+        return 'medium';
+    }
+    return 'low';
+}
+/**
+ * Calculates risk level based on dependent count.
+ *
+ * @param count - Number of dependent files
+ * @returns Risk level based on dependent count thresholds
+ */
+function calculateRiskLevelFromCount(count) {
+    if (count <= DEPENDENT_COUNT_THRESHOLDS.LOW) {
+        return 'low';
+    }
+    if (count <= DEPENDENT_COUNT_THRESHOLDS.MEDIUM) {
+        return 'medium';
+    }
+    if (count <= DEPENDENT_COUNT_THRESHOLDS.HIGH) {
+        return 'high';
+    }
+    return 'critical';
+}
+/**
+ * Analyzes dependencies for a given file by finding all chunks that import it.
+ *
+ * @param targetFilepath - The file to analyze dependencies for
+ * @param allChunks - All chunks from the vector database
+ * @param workspaceRoot - The workspace root directory
+ * @returns Dependency analysis including dependents, count, and risk level
+ */
+function analyzeDependencies(targetFilepath, allChunks, workspaceRoot) {
+    // Create cached path normalizer
+    const normalizePathCached = createPathNormalizer(workspaceRoot);
+    // Build import index for efficient lookup
+    const importIndex = buildImportIndex(allChunks, normalizePathCached);
+    // Find all dependent chunks
+    const normalizedTarget = normalizePathCached(targetFilepath);
+    const dependentChunks = findDependentChunks(normalizedTarget, importIndex);
+    // Group by file for analysis
+    const chunksByFile = groupChunksByFile(dependentChunks, workspaceRoot);
+    // Calculate complexity metrics
+    const fileComplexities = calculateFileComplexities(chunksByFile);
+    const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
+    // Build dependents list
+    const dependents = Array.from(chunksByFile.keys()).map(filepath => ({
+        filepath,
+        isTestFile: path_matching_isTestFile(filepath),
+    }));
+    // Calculate risk level
+    let riskLevel = calculateRiskLevelFromCount(dependents.length);
+    // Boost risk level if complexity warrants it
+    if (complexityMetrics?.complexityRiskBoost) {
+        if (RISK_ORDER[complexityMetrics.complexityRiskBoost] > RISK_ORDER[riskLevel]) {
+            riskLevel = complexityMetrics.complexityRiskBoost;
+        }
+    }
+    return {
+        dependents,
+        dependentCount: dependents.length,
+        riskLevel,
+        complexityMetrics,
+    };
+}
+//# sourceMappingURL=dependency-analyzer.js.map
+;// CONCATENATED MODULE: ../core/dist/insights/complexity-analyzer.js
+
+
+/**
+ * Hardcoded severity multipliers:
+ * - Warning: triggers at 1x threshold (e.g., testPaths >= 15)
+ * - Error: triggers at 2x threshold (e.g., testPaths >= 30)
+ */
+const SEVERITY = { warning: 1.0, error: 2.0 };
+/**
+ * Analyzer for code complexity based on indexed codebase
+ */
+class ComplexityAnalyzer {
+    vectorDB;
+    config;
+    constructor(vectorDB, config) {
+        this.vectorDB = vectorDB;
+        this.config = config;
+    }
+    /**
+     * Analyze complexity of codebase or specific files
+     * @param files - Optional list of specific files to analyze
+     * @returns Complexity report with violations and summary
+     */
+    async analyze(files) {
+        // 1. Get all chunks from index (uses full scan internally for LanceDB)
+        // Note: We fetch all chunks even with --files filter because dependency analysis
+        // needs the complete dataset to find dependents accurately
+        const allChunks = await this.vectorDB.scanAll();
+        // 2. Filter to specified files if provided
+        const chunks = files
+            ? allChunks.filter(c => this.matchesAnyFile(c.metadata.file, files))
+            : allChunks;
+        // 3. Find violations from filtered chunks
+        const violations = this.findViolations(chunks);
+        // 4. Build report - pass filtered chunks for file list, but keep violations from those files
+        const report = this.buildReport(violations, chunks);
+        // 5. Enrich files with violations with dependency data
+        this.enrichWithDependencies(report, allChunks);
+        return report;
+    }
+    /**
+     * Normalize a file path to a consistent relative format
+     * Converts absolute paths to relative paths from workspace root
+     */
+    normalizeFilePath(filepath) {
+        const workspaceRoot = process.cwd();
+        // Convert to forward slashes first
+        const normalized = filepath.replace(/\\/g, '/');
+        const normalizedRoot = workspaceRoot.replace(/\\/g, '/');
+        // Convert absolute paths to relative
+        if (normalized.startsWith(normalizedRoot + '/')) {
+            return normalized.slice(normalizedRoot.length + 1);
+        }
+        if (normalized.startsWith(normalizedRoot)) {
+            return normalized.slice(normalizedRoot.length);
+        }
+        return normalized;
+    }
+    /**
+     * Check if a chunk's file matches any of the target files
+     * Uses exact match or suffix matching to avoid unintended matches
+     */
+    matchesAnyFile(chunkFile, targetFiles) {
+        // Normalize to forward slashes for cross-platform consistency
+        // Don't use path.normalize() as its behavior is platform-dependent
+        const normalizedChunkFile = chunkFile.replace(/\\/g, '/');
+        return targetFiles.some(target => {
+            const normalizedTarget = target.replace(/\\/g, '/');
+            // Exact match or target is a suffix of the chunk file
+            return normalizedChunkFile === normalizedTarget ||
+                normalizedChunkFile.endsWith('/' + normalizedTarget);
+        });
+    }
+    /**
+     * Create a violation if complexity exceeds threshold
+     */
+    createViolation(metadata, complexity, baseThreshold, metricType) {
+        const warningThreshold = baseThreshold * SEVERITY.warning;
+        const errorThreshold = baseThreshold * SEVERITY.error;
+        if (complexity < warningThreshold)
+            return null;
+        const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
+        const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
+        // Human-friendly messages
+        const message = metricType === 'cyclomatic'
+            ? `Needs ~${complexity} test cases for full coverage (threshold: ${Math.round(effectiveThreshold)})`
+            : `Mental load ${complexity} exceeds threshold ${Math.round(effectiveThreshold)} (hard to follow)`;
+        return {
+            filepath: metadata.file,
+            startLine: metadata.startLine,
+            endLine: metadata.endLine,
+            symbolName: metadata.symbolName || 'unknown',
+            symbolType: metadata.symbolType,
+            language: metadata.language,
+            complexity,
+            threshold: Math.round(effectiveThreshold),
+            severity: violationSeverity,
+            message,
+            metricType,
+        };
+    }
+    /**
+     * Deduplicate and filter chunks to only function/method types.
+     * Handles potential index duplicates by tracking file+line ranges.
+     */
+    getUniqueFunctionChunks(chunks) {
+        const seen = new Set();
+        const result = [];
+        for (const { metadata } of chunks) {
+            if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method')
+                continue;
+            const key = `${metadata.file}:${metadata.startLine}-${metadata.endLine}`;
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            result.push(metadata);
+        }
+        return result;
+    }
+    /**
+     * Convert Halstead effort to time in minutes.
+     * Formula: Time (seconds) = Effort / 18 (Stroud number for mental discrimination)
+     *          Time (minutes) = Effort / (18 * 60) = Effort / 1080
+     */
+    effortToMinutes(effort) {
+        return effort / 1080;
+    }
+    /**
+     * Format minutes as human-readable time (e.g., "2h 30m" or "45m")
+     */
+    formatTime(minutes) {
+        if (minutes >= 60) {
+            const hours = Math.floor(minutes / 60);
+            const mins = Math.round(minutes % 60);
+            return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+        }
+        return `${Math.round(minutes)}m`;
+    }
+    /**
+     * Create a Halstead violation if metrics exceed thresholds
+     */
+    createHalsteadViolation(metadata, metricValue, threshold, metricType) {
+        const warningThreshold = threshold * SEVERITY.warning;
+        const errorThreshold = threshold * SEVERITY.error;
+        if (metricValue < warningThreshold)
+            return null;
+        const violationSeverity = metricValue >= errorThreshold ? 'error' : 'warning';
+        const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
+        // For effort, show time in minutes; for bugs, show decimal with 2 places
+        let message;
+        if (metricType === 'halstead_effort') {
+            const timeMinutes = this.effortToMinutes(metricValue);
+            const thresholdMinutes = this.effortToMinutes(effectiveThreshold);
+            message = `Time to understand ~${this.formatTime(timeMinutes)} exceeds threshold ${this.formatTime(thresholdMinutes)}`;
+        }
+        else {
+            message = `Estimated bugs ${metricValue.toFixed(2)} exceeds threshold ${effectiveThreshold.toFixed(1)}`;
+        }
+        const halsteadDetails = {
+            volume: metadata.halsteadVolume || 0,
+            difficulty: metadata.halsteadDifficulty || 0,
+            effort: metadata.halsteadEffort || 0,
+            bugs: metadata.halsteadBugs || 0,
+        };
+        // Store human-scale values for complexity/threshold:
+        // - halstead_effort: rounded to integer minutes for readability (typical values 60-300)
+        // - halstead_bugs: kept as decimal for precision (typical values < 5, e.g. 1.5, 2.27)
+        let complexity;
+        let displayThreshold;
+        if (metricType === 'halstead_effort') {
+            // Convert raw effort to minutes and round for comparable deltas
+            complexity = Math.round(this.effortToMinutes(metricValue));
+            displayThreshold = Math.round(this.effortToMinutes(effectiveThreshold));
+        }
+        else {
+            // halstead_bugs: store as decimal for precision in small values
+            complexity = metricValue;
+            displayThreshold = effectiveThreshold;
+        }
+        return {
+            filepath: metadata.file,
+            startLine: metadata.startLine,
+            endLine: metadata.endLine,
+            symbolName: metadata.symbolName || 'unknown',
+            symbolType: metadata.symbolType,
+            language: metadata.language,
+            complexity,
+            threshold: displayThreshold,
+            severity: violationSeverity,
+            message,
+            metricType,
+            halsteadDetails,
+        };
+    }
+    /**
+     * Check complexity metrics and create violations for a single chunk.
+     */
+    checkChunkComplexity(metadata, thresholds) {
+        const violations = [];
+        // Check test paths (cyclomatic complexity)
+        if (metadata.complexity) {
+            const v = this.createViolation(metadata, metadata.complexity, thresholds.testPaths, 'cyclomatic');
+            if (v)
+                violations.push(v);
+        }
+        // Check mental load (cognitive complexity)
+        if (metadata.cognitiveComplexity) {
+            const v = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.mentalLoad, 'cognitive');
+            if (v)
+                violations.push(v);
+        }
+        // Check time to understand (Halstead effort)
+        if (thresholds.halsteadEffort && metadata.halsteadEffort) {
+            const v = this.createHalsteadViolation(metadata, metadata.halsteadEffort, thresholds.halsteadEffort, 'halstead_effort');
+            if (v)
+                violations.push(v);
+        }
+        // Check estimated bugs
+        if (thresholds.estimatedBugs && metadata.halsteadBugs) {
+            const v = this.createHalsteadViolation(metadata, metadata.halsteadBugs, thresholds.estimatedBugs, 'halstead_bugs');
+            if (v)
+                violations.push(v);
+        }
+        return violations;
+    }
+    /**
+     * Convert time in minutes to Halstead effort.
+     * This is the inverse of effortToMinutes().
+     * Formula: Time (seconds) = Effort / 18 (Stroud number)
+     *          So: Effort = Time (minutes) * 60 * 18 = Time * 1080
+     */
+    minutesToEffort(minutes) {
+        return minutes * 1080;
+    }
+    /**
+     * Find all complexity violations based on thresholds.
+     * Checks cyclomatic, cognitive, and Halstead complexity.
+     */
+    findViolations(chunks) {
+        const configThresholds = this.config.complexity?.thresholds;
+        // Convert timeToUnderstandMinutes to effort internally
+        const halsteadEffort = configThresholds?.timeToUnderstandMinutes
+            ? this.minutesToEffort(configThresholds.timeToUnderstandMinutes)
+            : this.minutesToEffort(60); // Default: 60 minutes = 64,800 effort
+        const thresholds = {
+            testPaths: configThresholds?.testPaths ?? 15,
+            mentalLoad: configThresholds?.mentalLoad ?? 15,
+            halsteadEffort, // Converted from minutes to effort internally (see above)
+            estimatedBugs: configThresholds?.estimatedBugs ?? 1.5, // Direct decimal value (no conversion needed)
+        };
+        const functionChunks = this.getUniqueFunctionChunks(chunks);
+        return functionChunks.flatMap(metadata => this.checkChunkComplexity(metadata, thresholds));
+    }
+    /**
+     * Build the final report with summary and per-file data
+     */
+    buildReport(violations, allChunks) {
+        // Normalize violation filepaths and group by normalized path
+        const fileViolationsMap = new Map();
+        for (const violation of violations) {
+            const normalizedPath = this.normalizeFilePath(violation.filepath);
+            // Update violation's filepath to normalized form
+            violation.filepath = normalizedPath;
+            const existing = fileViolationsMap.get(normalizedPath) || [];
+            existing.push(violation);
+            fileViolationsMap.set(normalizedPath, existing);
+        }
+        // Get unique files from all analyzed chunks, normalized to relative paths
+        const analyzedFiles = new Set(allChunks.map(c => this.normalizeFilePath(c.metadata.file)));
+        // Build file data
+        const files = {};
+        for (const filepath of analyzedFiles) {
+            const fileViolations = fileViolationsMap.get(filepath) || [];
+            files[filepath] = {
+                violations: fileViolations,
+                dependents: [], // Will be enriched later if needed
+                testAssociations: [], // Will be enriched later if needed
+                riskLevel: this.calculateRiskLevel(fileViolations),
+            };
+        }
+        // Calculate summary statistics
+        const errorCount = violations.filter(v => v.severity === 'error').length;
+        const warningCount = violations.filter(v => v.severity === 'warning').length;
+        // Calculate average and max complexity from all chunks with complexity data
+        const complexityValues = allChunks
+            .filter(c => c.metadata.complexity !== undefined && c.metadata.complexity > 0)
+            .map(c => c.metadata.complexity);
+        const avgComplexity = complexityValues.length > 0
+            ? complexityValues.reduce((sum, val) => sum + val, 0) / complexityValues.length
+            : 0;
+        const maxComplexity = complexityValues.length > 0
+            ? Math.max(...complexityValues)
+            : 0;
+        return {
+            summary: {
+                filesAnalyzed: analyzedFiles.size,
+                totalViolations: violations.length,
+                bySeverity: { error: errorCount, warning: warningCount },
+                avgComplexity: Math.round(avgComplexity * 10) / 10, // Round to 1 decimal
+                maxComplexity,
+            },
+            files,
+        };
+    }
+    /**
+     * Calculate risk level based on violations
+     */
+    calculateRiskLevel(violations) {
+        if (violations.length === 0)
+            return 'low';
+        const hasErrors = violations.some(v => v.severity === 'error');
+        const errorCount = violations.filter(v => v.severity === 'error').length;
+        if (errorCount >= 3)
+            return 'critical';
+        if (hasErrors)
+            return 'high';
+        if (violations.length >= 3)
+            return 'medium';
+        return 'low';
+    }
+    /**
+     * Enrich files with violations with dependency data
+     * This adds:
+     * - List of dependent files (who imports this?)
+     * - Boosted risk level based on dependents + complexity
+     */
+    enrichWithDependencies(report, allChunks) {
+        const workspaceRoot = process.cwd();
+        // Only enrich files that have violations (to save computation)
+        const filesWithViolations = Object.entries(report.files)
+            .filter(([_, data]) => data.violations.length > 0)
+            .map(([filepath, _]) => filepath);
+        for (const filepath of filesWithViolations) {
+            const fileData = report.files[filepath];
+            // Analyze dependencies for this file
+            const depAnalysis = analyzeDependencies(filepath, allChunks, workspaceRoot);
+            // Update file data with dependency information
+            fileData.dependents = depAnalysis.dependents.map(d => d.filepath);
+            fileData.dependentCount = depAnalysis.dependentCount;
+            // Boost risk level based on dependency analysis
+            // Take the higher of the two risk levels
+            if (RISK_ORDER[depAnalysis.riskLevel] > RISK_ORDER[fileData.riskLevel]) {
+                fileData.riskLevel = depAnalysis.riskLevel;
+            }
+            // Add complexity metrics if available
+            if (depAnalysis.complexityMetrics) {
+                fileData.dependentComplexityMetrics = {
+                    averageComplexity: depAnalysis.complexityMetrics.averageComplexity,
+                    maxComplexity: depAnalysis.complexityMetrics.maxComplexity,
+                    filesWithComplexityData: depAnalysis.complexityMetrics.filesWithComplexityData,
+                };
+            }
+        }
+    }
+}
+//# sourceMappingURL=complexity-analyzer.js.map
+;// CONCATENATED MODULE: ../../node_modules/chalk/source/vendor/ansi-styles/index.js
+const ANSI_BACKGROUND_OFFSET = 10;
+
+const wrapAnsi16 = (offset = 0) => code => `\u001B[${code + offset}m`;
+
+const wrapAnsi256 = (offset = 0) => code => `\u001B[${38 + offset};5;${code}m`;
+
+const wrapAnsi16m = (offset = 0) => (red, green, blue) => `\u001B[${38 + offset};2;${red};${green};${blue}m`;
+
+const styles = {
+	modifier: {
+		reset: [0, 0],
+		// 21 isn't widely supported and 22 does the same thing
+		bold: [1, 22],
+		dim: [2, 22],
+		italic: [3, 23],
+		underline: [4, 24],
+		overline: [53, 55],
+		inverse: [7, 27],
+		hidden: [8, 28],
+		strikethrough: [9, 29],
+	},
+	color: {
+		black: [30, 39],
+		red: [31, 39],
+		green: [32, 39],
+		yellow: [33, 39],
+		blue: [34, 39],
+		magenta: [35, 39],
+		cyan: [36, 39],
+		white: [37, 39],
+
+		// Bright color
+		blackBright: [90, 39],
+		gray: [90, 39], // Alias of `blackBright`
+		grey: [90, 39], // Alias of `blackBright`
+		redBright: [91, 39],
+		greenBright: [92, 39],
+		yellowBright: [93, 39],
+		blueBright: [94, 39],
+		magentaBright: [95, 39],
+		cyanBright: [96, 39],
+		whiteBright: [97, 39],
+	},
+	bgColor: {
+		bgBlack: [40, 49],
+		bgRed: [41, 49],
+		bgGreen: [42, 49],
+		bgYellow: [43, 49],
+		bgBlue: [44, 49],
+		bgMagenta: [45, 49],
+		bgCyan: [46, 49],
+		bgWhite: [47, 49],
+
+		// Bright color
+		bgBlackBright: [100, 49],
+		bgGray: [100, 49], // Alias of `bgBlackBright`
+		bgGrey: [100, 49], // Alias of `bgBlackBright`
+		bgRedBright: [101, 49],
+		bgGreenBright: [102, 49],
+		bgYellowBright: [103, 49],
+		bgBlueBright: [104, 49],
+		bgMagentaBright: [105, 49],
+		bgCyanBright: [106, 49],
+		bgWhiteBright: [107, 49],
+	},
+};
+
+const modifierNames = Object.keys(styles.modifier);
+const foregroundColorNames = Object.keys(styles.color);
+const backgroundColorNames = Object.keys(styles.bgColor);
+const colorNames = [...foregroundColorNames, ...backgroundColorNames];
+
+function assembleStyles() {
+	const codes = new Map();
+
+	for (const [groupName, group] of Object.entries(styles)) {
+		for (const [styleName, style] of Object.entries(group)) {
+			styles[styleName] = {
+				open: `\u001B[${style[0]}m`,
+				close: `\u001B[${style[1]}m`,
+			};
+
+			group[styleName] = styles[styleName];
+
+			codes.set(style[0], style[1]);
+		}
+
+		Object.defineProperty(styles, groupName, {
+			value: group,
+			enumerable: false,
+		});
+	}
+
+	Object.defineProperty(styles, 'codes', {
+		value: codes,
+		enumerable: false,
+	});
+
+	styles.color.close = '\u001B[39m';
+	styles.bgColor.close = '\u001B[49m';
+
+	styles.color.ansi = wrapAnsi16();
+	styles.color.ansi256 = wrapAnsi256();
+	styles.color.ansi16m = wrapAnsi16m();
+	styles.bgColor.ansi = wrapAnsi16(ANSI_BACKGROUND_OFFSET);
+	styles.bgColor.ansi256 = wrapAnsi256(ANSI_BACKGROUND_OFFSET);
+	styles.bgColor.ansi16m = wrapAnsi16m(ANSI_BACKGROUND_OFFSET);
+
+	// From https://github.com/Qix-/color-convert/blob/3f0e0d4e92e235796ccb17f6e85c72094a651f49/conversions.js
+	Object.defineProperties(styles, {
+		rgbToAnsi256: {
+			value(red, green, blue) {
+				// We use the extended greyscale palette here, with the exception of
+				// black and white. normal palette only has 4 greyscale shades.
+				if (red === green && green === blue) {
+					if (red < 8) {
+						return 16;
+					}
+
+					if (red > 248) {
+						return 231;
+					}
+
+					return Math.round(((red - 8) / 247) * 24) + 232;
+				}
+
+				return 16
+					+ (36 * Math.round(red / 255 * 5))
+					+ (6 * Math.round(green / 255 * 5))
+					+ Math.round(blue / 255 * 5);
+			},
+			enumerable: false,
+		},
+		hexToRgb: {
+			value(hex) {
+				const matches = /[a-f\d]{6}|[a-f\d]{3}/i.exec(hex.toString(16));
+				if (!matches) {
+					return [0, 0, 0];
+				}
+
+				let [colorString] = matches;
+
+				if (colorString.length === 3) {
+					colorString = [...colorString].map(character => character + character).join('');
+				}
+
+				const integer = Number.parseInt(colorString, 16);
+
+				return [
+					/* eslint-disable no-bitwise */
+					(integer >> 16) & 0xFF,
+					(integer >> 8) & 0xFF,
+					integer & 0xFF,
+					/* eslint-enable no-bitwise */
+				];
+			},
+			enumerable: false,
+		},
+		hexToAnsi256: {
+			value: hex => styles.rgbToAnsi256(...styles.hexToRgb(hex)),
+			enumerable: false,
+		},
+		ansi256ToAnsi: {
+			value(code) {
+				if (code < 8) {
+					return 30 + code;
+				}
+
+				if (code < 16) {
+					return 90 + (code - 8);
+				}
+
+				let red;
+				let green;
+				let blue;
+
+				if (code >= 232) {
+					red = (((code - 232) * 10) + 8) / 255;
+					green = red;
+					blue = red;
+				} else {
+					code -= 16;
+
+					const remainder = code % 36;
+
+					red = Math.floor(code / 36) / 5;
+					green = Math.floor(remainder / 6) / 5;
+					blue = (remainder % 6) / 5;
+				}
+
+				const value = Math.max(red, green, blue) * 2;
+
+				if (value === 0) {
+					return 30;
+				}
+
+				// eslint-disable-next-line no-bitwise
+				let result = 30 + ((Math.round(blue) << 2) | (Math.round(green) << 1) | Math.round(red));
+
+				if (value === 2) {
+					result += 60;
+				}
+
+				return result;
+			},
+			enumerable: false,
+		},
+		rgbToAnsi: {
+			value: (red, green, blue) => styles.ansi256ToAnsi(styles.rgbToAnsi256(red, green, blue)),
+			enumerable: false,
+		},
+		hexToAnsi: {
+			value: hex => styles.ansi256ToAnsi(styles.hexToAnsi256(hex)),
+			enumerable: false,
+		},
+	});
+
+	return styles;
+}
+
+const ansiStyles = assembleStyles();
+
+/* harmony default export */ const ansi_styles = (ansiStyles);
+
+;// CONCATENATED MODULE: external "node:process"
+const external_node_process_namespaceObject = require("node:process");
+;// CONCATENATED MODULE: external "node:os"
+const external_node_os_namespaceObject = require("node:os");
+;// CONCATENATED MODULE: external "node:tty"
+const external_node_tty_namespaceObject = require("node:tty");
+;// CONCATENATED MODULE: ../../node_modules/chalk/source/vendor/supports-color/index.js
+
+
+
+
+// From: https://github.com/sindresorhus/has-flag/blob/main/index.js
+/// function hasFlag(flag, argv = globalThis.Deno?.args ?? process.argv) {
+function hasFlag(flag, argv = globalThis.Deno ? globalThis.Deno.args : external_node_process_namespaceObject.argv) {
+	const prefix = flag.startsWith('-') ? '' : (flag.length === 1 ? '-' : '--');
+	const position = argv.indexOf(prefix + flag);
+	const terminatorPosition = argv.indexOf('--');
+	return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+}
+
+const {env} = external_node_process_namespaceObject;
+
+let flagForceColor;
+if (
+	hasFlag('no-color')
+	|| hasFlag('no-colors')
+	|| hasFlag('color=false')
+	|| hasFlag('color=never')
+) {
+	flagForceColor = 0;
+} else if (
+	hasFlag('color')
+	|| hasFlag('colors')
+	|| hasFlag('color=true')
+	|| hasFlag('color=always')
+) {
+	flagForceColor = 1;
+}
+
+function envForceColor() {
+	if ('FORCE_COLOR' in env) {
+		if (env.FORCE_COLOR === 'true') {
+			return 1;
+		}
+
+		if (env.FORCE_COLOR === 'false') {
+			return 0;
+		}
+
+		return env.FORCE_COLOR.length === 0 ? 1 : Math.min(Number.parseInt(env.FORCE_COLOR, 10), 3);
+	}
+}
+
+function translateLevel(level) {
+	if (level === 0) {
+		return false;
+	}
+
+	return {
+		level,
+		hasBasic: true,
+		has256: level >= 2,
+		has16m: level >= 3,
+	};
+}
+
+function _supportsColor(haveStream, {streamIsTTY, sniffFlags = true} = {}) {
+	const noFlagForceColor = envForceColor();
+	if (noFlagForceColor !== undefined) {
+		flagForceColor = noFlagForceColor;
+	}
+
+	const forceColor = sniffFlags ? flagForceColor : noFlagForceColor;
+
+	if (forceColor === 0) {
+		return 0;
+	}
+
+	if (sniffFlags) {
+		if (hasFlag('color=16m')
+			|| hasFlag('color=full')
+			|| hasFlag('color=truecolor')) {
+			return 3;
+		}
+
+		if (hasFlag('color=256')) {
+			return 2;
+		}
+	}
+
+	// Check for Azure DevOps pipelines.
+	// Has to be above the `!streamIsTTY` check.
+	if ('TF_BUILD' in env && 'AGENT_NAME' in env) {
+		return 1;
+	}
+
+	if (haveStream && !streamIsTTY && forceColor === undefined) {
+		return 0;
+	}
+
+	const min = forceColor || 0;
+
+	if (env.TERM === 'dumb') {
+		return min;
+	}
+
+	if (external_node_process_namespaceObject.platform === 'win32') {
+		// Windows 10 build 10586 is the first Windows release that supports 256 colors.
+		// Windows 10 build 14931 is the first release that supports 16m/TrueColor.
+		const osRelease = external_node_os_namespaceObject.release().split('.');
+		if (
+			Number(osRelease[0]) >= 10
+			&& Number(osRelease[2]) >= 10_586
+		) {
+			return Number(osRelease[2]) >= 14_931 ? 3 : 2;
+		}
+
+		return 1;
+	}
+
+	if ('CI' in env) {
+		if (['GITHUB_ACTIONS', 'GITEA_ACTIONS', 'CIRCLECI'].some(key => key in env)) {
+			return 3;
+		}
+
+		if (['TRAVIS', 'APPVEYOR', 'GITLAB_CI', 'BUILDKITE', 'DRONE'].some(sign => sign in env) || env.CI_NAME === 'codeship') {
+			return 1;
+		}
+
+		return min;
+	}
+
+	if ('TEAMCITY_VERSION' in env) {
+		return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+	}
+
+	if (env.COLORTERM === 'truecolor') {
+		return 3;
+	}
+
+	if (env.TERM === 'xterm-kitty') {
+		return 3;
+	}
+
+	if (env.TERM === 'xterm-ghostty') {
+		return 3;
+	}
+
+	if (env.TERM === 'wezterm') {
+		return 3;
+	}
+
+	if ('TERM_PROGRAM' in env) {
+		const version = Number.parseInt((env.TERM_PROGRAM_VERSION || '').split('.')[0], 10);
+
+		switch (env.TERM_PROGRAM) {
+			case 'iTerm.app': {
+				return version >= 3 ? 3 : 2;
+			}
+
+			case 'Apple_Terminal': {
+				return 2;
+			}
+			// No default
+		}
+	}
+
+	if (/-256(color)?$/i.test(env.TERM)) {
+		return 2;
+	}
+
+	if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
+		return 1;
+	}
+
+	if ('COLORTERM' in env) {
+		return 1;
+	}
+
+	return min;
+}
+
+function createSupportsColor(stream, options = {}) {
+	const level = _supportsColor(stream, {
+		streamIsTTY: stream && stream.isTTY,
+		...options,
+	});
+
+	return translateLevel(level);
+}
+
+const supportsColor = {
+	stdout: createSupportsColor({isTTY: external_node_tty_namespaceObject.isatty(1)}),
+	stderr: createSupportsColor({isTTY: external_node_tty_namespaceObject.isatty(2)}),
+};
+
+/* harmony default export */ const supports_color = (supportsColor);
+
+;// CONCATENATED MODULE: ../../node_modules/chalk/source/utilities.js
+// TODO: When targeting Node.js 16, use `String.prototype.replaceAll`.
+function stringReplaceAll(string, substring, replacer) {
+	let index = string.indexOf(substring);
+	if (index === -1) {
+		return string;
+	}
+
+	const substringLength = substring.length;
+	let endIndex = 0;
+	let returnValue = '';
+	do {
+		returnValue += string.slice(endIndex, index) + substring + replacer;
+		endIndex = index + substringLength;
+		index = string.indexOf(substring, endIndex);
+	} while (index !== -1);
+
+	returnValue += string.slice(endIndex);
+	return returnValue;
+}
+
+function stringEncaseCRLFWithFirstIndex(string, prefix, postfix, index) {
+	let endIndex = 0;
+	let returnValue = '';
+	do {
+		const gotCR = string[index - 1] === '\r';
+		returnValue += string.slice(endIndex, (gotCR ? index - 1 : index)) + prefix + (gotCR ? '\r\n' : '\n') + postfix;
+		endIndex = index + 1;
+		index = string.indexOf('\n', endIndex);
+	} while (index !== -1);
+
+	returnValue += string.slice(endIndex);
+	return returnValue;
+}
+
+;// CONCATENATED MODULE: ../../node_modules/chalk/source/index.js
+
+
+
+
+const {stdout: stdoutColor, stderr: stderrColor} = supports_color;
+
+const GENERATOR = Symbol('GENERATOR');
+const STYLER = Symbol('STYLER');
+const IS_EMPTY = Symbol('IS_EMPTY');
+
+// `supportsColor.level` → `ansiStyles.color[name]` mapping
+const levelMapping = [
+	'ansi',
+	'ansi',
+	'ansi256',
+	'ansi16m',
+];
+
+const source_styles = Object.create(null);
+
+const applyOptions = (object, options = {}) => {
+	if (options.level && !(Number.isInteger(options.level) && options.level >= 0 && options.level <= 3)) {
+		throw new Error('The `level` option should be an integer from 0 to 3');
+	}
+
+	// Detect level if not set manually
+	const colorLevel = stdoutColor ? stdoutColor.level : 0;
+	object.level = options.level === undefined ? colorLevel : options.level;
+};
+
+class Chalk {
+	constructor(options) {
+		// eslint-disable-next-line no-constructor-return
+		return chalkFactory(options);
+	}
+}
+
+const chalkFactory = options => {
+	const chalk = (...strings) => strings.join(' ');
+	applyOptions(chalk, options);
+
+	Object.setPrototypeOf(chalk, createChalk.prototype);
+
+	return chalk;
+};
+
+function createChalk(options) {
+	return chalkFactory(options);
+}
+
+Object.setPrototypeOf(createChalk.prototype, Function.prototype);
+
+for (const [styleName, style] of Object.entries(ansi_styles)) {
+	source_styles[styleName] = {
+		get() {
+			const builder = createBuilder(this, createStyler(style.open, style.close, this[STYLER]), this[IS_EMPTY]);
+			Object.defineProperty(this, styleName, {value: builder});
+			return builder;
+		},
+	};
+}
+
+source_styles.visible = {
+	get() {
+		const builder = createBuilder(this, this[STYLER], true);
+		Object.defineProperty(this, 'visible', {value: builder});
+		return builder;
+	},
+};
+
+const getModelAnsi = (model, level, type, ...arguments_) => {
+	if (model === 'rgb') {
+		if (level === 'ansi16m') {
+			return ansi_styles[type].ansi16m(...arguments_);
+		}
+
+		if (level === 'ansi256') {
+			return ansi_styles[type].ansi256(ansi_styles.rgbToAnsi256(...arguments_));
+		}
+
+		return ansi_styles[type].ansi(ansi_styles.rgbToAnsi(...arguments_));
+	}
+
+	if (model === 'hex') {
+		return getModelAnsi('rgb', level, type, ...ansi_styles.hexToRgb(...arguments_));
+	}
+
+	return ansi_styles[type][model](...arguments_);
+};
+
+const usedModels = ['rgb', 'hex', 'ansi256'];
+
+for (const model of usedModels) {
+	source_styles[model] = {
+		get() {
+			const {level} = this;
+			return function (...arguments_) {
+				const styler = createStyler(getModelAnsi(model, levelMapping[level], 'color', ...arguments_), ansi_styles.color.close, this[STYLER]);
+				return createBuilder(this, styler, this[IS_EMPTY]);
+			};
+		},
+	};
+
+	const bgModel = 'bg' + model[0].toUpperCase() + model.slice(1);
+	source_styles[bgModel] = {
+		get() {
+			const {level} = this;
+			return function (...arguments_) {
+				const styler = createStyler(getModelAnsi(model, levelMapping[level], 'bgColor', ...arguments_), ansi_styles.bgColor.close, this[STYLER]);
+				return createBuilder(this, styler, this[IS_EMPTY]);
+			};
+		},
+	};
+}
+
+const proto = Object.defineProperties(() => {}, {
+	...source_styles,
+	level: {
+		enumerable: true,
+		get() {
+			return this[GENERATOR].level;
+		},
+		set(level) {
+			this[GENERATOR].level = level;
+		},
+	},
+});
+
+const createStyler = (open, close, parent) => {
+	let openAll;
+	let closeAll;
+	if (parent === undefined) {
+		openAll = open;
+		closeAll = close;
+	} else {
+		openAll = parent.openAll + open;
+		closeAll = close + parent.closeAll;
+	}
+
+	return {
+		open,
+		close,
+		openAll,
+		closeAll,
+		parent,
+	};
+};
+
+const createBuilder = (self, _styler, _isEmpty) => {
+	// Single argument is hot path, implicit coercion is faster than anything
+	// eslint-disable-next-line no-implicit-coercion
+	const builder = (...arguments_) => applyStyle(builder, (arguments_.length === 1) ? ('' + arguments_[0]) : arguments_.join(' '));
+
+	// We alter the prototype because we must return a function, but there is
+	// no way to create a function with a different prototype
+	Object.setPrototypeOf(builder, proto);
+
+	builder[GENERATOR] = self;
+	builder[STYLER] = _styler;
+	builder[IS_EMPTY] = _isEmpty;
+
+	return builder;
+};
+
+const applyStyle = (self, string) => {
+	if (self.level <= 0 || !string) {
+		return self[IS_EMPTY] ? '' : string;
+	}
+
+	let styler = self[STYLER];
+
+	if (styler === undefined) {
+		return string;
+	}
+
+	const {openAll, closeAll} = styler;
+	if (string.includes('\u001B')) {
+		while (styler !== undefined) {
+			// Replace any instances already present with a re-opening code
+			// otherwise only the part of the string until said closing code
+			// will be colored, and the rest will simply be 'plain'.
+			string = stringReplaceAll(string, styler.close, styler.open);
+
+			styler = styler.parent;
+		}
+	}
+
+	// We can move both next actions out of loop, because remaining actions in loop won't have
+	// any/visible effect on parts we add here. Close the styling before a linebreak and reopen
+	// after next line to fix a bleed issue on macOS: https://github.com/chalk/chalk/pull/92
+	const lfIndex = string.indexOf('\n');
+	if (lfIndex !== -1) {
+		string = stringEncaseCRLFWithFirstIndex(string, closeAll, openAll, lfIndex);
+	}
+
+	return openAll + string + closeAll;
+};
+
+Object.defineProperties(createChalk.prototype, source_styles);
+
+const chalk = createChalk();
+const chalkStderr = createChalk({level: stderrColor ? stderrColor.level : 0});
+
+
+
+
+
+/* harmony default export */ const source = (chalk);
+
+;// CONCATENATED MODULE: ../core/dist/insights/formatters/text.js
+
+/**
+ * Get the display label for a metric type
+ */
+function getMetricLabel(metricType) {
+    switch (metricType) {
+        case 'cognitive': return '🧠 Mental load';
+        case 'cyclomatic': return '🔀 Test paths';
+        case 'halstead_effort': return '⏱️ Time to understand';
+        case 'halstead_bugs': return '🐛 Estimated bugs';
+        default: return 'Complexity';
+    }
+}
+/**
+ * Convert Halstead effort to time in minutes
+ */
+function effortToMinutes(effort) {
+    return effort / 1080;
+}
+/**
+ * Format minutes as human-readable time
+ */
+function formatTime(minutes) {
+    if (minutes >= 60) {
+        const hours = Math.floor(minutes / 60);
+        const mins = Math.round(minutes % 60);
+        return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    }
+    return `${Math.round(minutes)}m`;
+}
+/**
+ * Format Halstead details as additional lines
+ */
+function formatHalsteadDetails(violation) {
+    if (!violation.halsteadDetails)
+        return [];
+    const { volume, difficulty, effort, bugs } = violation.halsteadDetails;
+    const timeStr = formatTime(effortToMinutes(effort));
+    return [
+        source.dim(`    📊  Volume: ${Math.round(volume).toLocaleString()}, Difficulty: ${difficulty.toFixed(1)}`),
+        source.dim(`    ⏱️  Time: ~${timeStr}, Est. bugs: ${bugs.toFixed(2)}`),
+    ];
+}
+const metricFormatters = {
+    halstead_effort: (val, thresh) => ({
+        // val/thresh are already in minutes (human-scale)
+        complexity: '~' + formatTime(val),
+        threshold: formatTime(thresh),
+    }),
+    halstead_bugs: (val, thresh) => ({
+        complexity: val.toFixed(2),
+        threshold: thresh.toFixed(1),
+    }),
+    cyclomatic: (val, thresh) => ({
+        complexity: `${val} (needs ~${val} tests)`,
+        threshold: thresh.toString(),
+    }),
+};
+const defaultFormatter = (val, thresh) => ({
+    complexity: val.toString(),
+    threshold: thresh.toString(),
+});
+/**
+ * Format symbol name with appropriate suffix
+ */
+function formatSymbolDisplay(violation, isBold) {
+    const display = ['function', 'method'].includes(violation.symbolType)
+        ? `${violation.symbolName}()`
+        : violation.symbolName;
+    return isBold ? source.bold(display) : display;
+}
+/**
+ * Format dependency impact information
+ */
+function formatDependencyInfo(fileData) {
+    const depCount = fileData.dependentCount ?? fileData.dependents.length;
+    if (depCount === 0)
+        return [];
+    const lines = [source.dim(`    📦  Imported by ${depCount} file${depCount !== 1 ? 's' : ''}`)];
+    if (fileData.dependentComplexityMetrics) {
+        const { averageComplexity, maxComplexity } = fileData.dependentComplexityMetrics;
+        lines.push(source.dim(`    - Dependent avg complexity: ${averageComplexity}, max: ${maxComplexity}`));
+    }
+    return lines;
+}
+/**
+ * Format percentage over threshold
+ */
+function formatPercentageOver(complexity, threshold) {
+    if (threshold <= 0)
+        return 'N/A (invalid threshold)';
+    return `${Math.round(((complexity - threshold) / threshold) * 100)}% over threshold`;
+}
+/**
+ * Format a single violation entry with its metadata
+ */
+function formatViolation(violation, fileData, colorFn, isBold) {
+    const symbolText = formatSymbolDisplay(violation, isBold);
+    const metricLabel = getMetricLabel(violation.metricType);
+    const formatter = metricFormatters[violation.metricType] || defaultFormatter;
+    const { complexity: complexityDisplay, threshold: thresholdDisplay } = formatter(violation.complexity, violation.threshold);
+    return [
+        colorFn(`  ${violation.file}:${violation.startLine}`) + source.dim(' - ') + symbolText,
+        source.dim(`    ${metricLabel}: ${complexityDisplay} (threshold: ${thresholdDisplay})`),
+        source.dim(`    ⬆️  ${formatPercentageOver(violation.complexity, violation.threshold)}`),
+        ...formatHalsteadDetails(violation),
+        ...formatDependencyInfo(fileData),
+        source.dim(`    ⚠️  Risk: ${fileData.riskLevel.toUpperCase()}`),
+        '',
+    ];
+}
+/**
+ * Format complexity report as human-readable text with colors
+ */
+function formatTextReport(report) {
+    const lines = [];
+    // Header
+    lines.push(source.bold('🔍 Complexity Analysis\n'));
+    // Summary
+    lines.push(source.bold('Summary:'));
+    lines.push(source.dim('  Files analyzed: ') + report.summary.filesAnalyzed.toString());
+    const errorText = `${report.summary.bySeverity.error} error${report.summary.bySeverity.error !== 1 ? 's' : ''}`;
+    const warningText = `${report.summary.bySeverity.warning} warning${report.summary.bySeverity.warning !== 1 ? 's' : ''}`;
+    lines.push(source.dim('  Violations: ') + `${report.summary.totalViolations} (${errorText}, ${warningText})`);
+    lines.push(source.dim('  Average complexity: ') + report.summary.avgComplexity.toString());
+    lines.push(source.dim('  Max complexity: ') + report.summary.maxComplexity.toString());
+    lines.push('');
+    // Group violations by file
+    const filesWithViolations = Object.entries(report.files)
+        .filter(([_, data]) => data.violations.length > 0)
+        .sort((a, b) => b[1].violations.length - a[1].violations.length);
+    if (filesWithViolations.length === 0) {
+        lines.push(source.green('✓ No violations found!'));
+        return lines.join('\n');
+    }
+    // Errors section
+    const errors = filesWithViolations.flatMap(([file, data]) => data.violations.filter(v => v.severity === 'error').map(v => ({ file, ...v })));
+    if (errors.length > 0) {
+        lines.push(source.red.bold('❌ Errors:\n'));
+        for (const error of errors) {
+            lines.push(...formatViolation(error, report.files[error.file], source.red, true));
+        }
+    }
+    // Warnings section
+    const warnings = filesWithViolations.flatMap(([file, data]) => data.violations.filter(v => v.severity === 'warning').map(v => ({ file, ...v })));
+    if (warnings.length > 0) {
+        lines.push(source.yellow.bold('⚠️  Warnings:\n'));
+        for (const warning of warnings) {
+            lines.push(...formatViolation(warning, report.files[warning.file], source.yellow, false));
+        }
+    }
+    return lines.join('\n');
+}
+//# sourceMappingURL=text.js.map
+;// CONCATENATED MODULE: ../core/dist/insights/formatters/json.js
+/**
+ * Format complexity report as JSON for consumption by GitHub Action.
+ * Only includes files with violations to reduce noise.
+ */
+function formatJsonReport(report) {
+    // Filter to only files with violations - no point showing files with empty arrays
+    const filesWithViolations = Object.fromEntries(Object.entries(report.files).filter(([_, data]) => data.violations.length > 0));
+    const filteredReport = {
+        summary: report.summary,
+        files: filesWithViolations,
+    };
+    return JSON.stringify(filteredReport, null, 2);
+}
+//# sourceMappingURL=json.js.map
+;// CONCATENATED MODULE: ../core/dist/insights/formatters/sarif.js
+/**
+ * Get the SARIF rule ID for a metric type
+ */
+function getRuleId(metricType) {
+    switch (metricType) {
+        case 'cognitive': return 'lien/high-cognitive-complexity';
+        case 'cyclomatic': return 'lien/high-cyclomatic-complexity';
+        case 'halstead_effort': return 'lien/high-halstead-effort';
+        case 'halstead_bugs': return 'lien/high-estimated-bugs';
+        default: return 'lien/high-complexity';
+    }
+}
+/**
+ * Format complexity report as SARIF for GitHub Code Scanning
+ */
+function formatSarifReport(report) {
+    const rules = [
+        {
+            id: 'lien/high-cyclomatic-complexity',
+            shortDescription: {
+                text: 'Too many test paths',
+            },
+            fullDescription: {
+                text: 'Function or method requires too many test cases to achieve full branch coverage. Each decision point (if, switch, loop) adds a path that needs testing.',
+            },
+            help: {
+                text: 'Consider refactoring by extracting methods, using early returns, or simplifying conditional logic to reduce the number of test paths.',
+            },
+        },
+        {
+            id: 'lien/high-cognitive-complexity',
+            shortDescription: {
+                text: 'High mental load',
+            },
+            fullDescription: {
+                text: 'Function or method has high mental load (deeply nested or hard to follow), requiring too much mental effort to understand and maintain.',
+            },
+            help: {
+                text: 'Consider flattening nested conditionals, extracting helper functions, or using guard clauses to reduce mental load.',
+            },
+        },
+        {
+            id: 'lien/high-halstead-effort',
+            shortDescription: {
+                text: 'Long time to understand',
+            },
+            fullDescription: {
+                text: 'Function or method takes too long to understand, based on Halstead metrics (operators and operands count).',
+            },
+            help: {
+                text: 'Consider simplifying expressions, reducing variable count, or breaking into smaller functions.',
+            },
+        },
+        {
+            id: 'lien/high-estimated-bugs',
+            shortDescription: {
+                text: 'High estimated bug count',
+            },
+            fullDescription: {
+                text: 'Function or method is likely to contain bugs based on Halstead metrics (Volume / 3000), which estimates bug count from code complexity.',
+            },
+            help: {
+                text: 'Consider simplifying the function, breaking into smaller units, or adding thorough test coverage.',
+            },
+        },
+    ];
+    const results = [];
+    // Convert violations to SARIF results
+    for (const [filepath, fileData] of Object.entries(report.files)) {
+        for (const violation of fileData.violations) {
+            const ruleId = getRuleId(violation.metricType);
+            results.push({
+                ruleId,
+                level: violation.severity,
+                message: {
+                    text: `${violation.symbolName}: ${violation.message}`,
+                },
+                locations: [
+                    {
+                        physicalLocation: {
+                            artifactLocation: {
+                                uri: filepath,
+                            },
+                            region: {
+                                startLine: violation.startLine,
+                                endLine: violation.endLine,
+                            },
+                        },
+                    },
+                ],
+            });
+        }
+    }
+    const sarifReport = {
+        $schema: 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json',
+        version: '2.1.0',
+        runs: [
+            {
+                tool: {
+                    driver: {
+                        name: 'Lien Complexity Analyzer',
+                        version: '1.0.0',
+                        informationUri: 'https://github.com/liendev/lien',
+                        rules,
+                    },
+                },
+                results,
+            },
+        ],
+    };
+    return JSON.stringify(sarifReport, null, 2);
+}
+//# sourceMappingURL=sarif.js.map
+;// CONCATENATED MODULE: ../core/dist/insights/formatters/index.js
+
+
+
+/**
+ * Format complexity report in the specified format
+ */
+function formatReport(report, format) {
+    switch (format) {
+        case 'json':
+            return formatJsonReport(report);
+        case 'sarif':
+            return formatSarifReport(report);
+        case 'text':
+        default:
+            return formatTextReport(report);
+    }
+}
+// Export individual formatters
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../core/dist/config/migration-manager.js
+
+
+
+
+
+
+
+/**
+ * Centralized migration orchestration service
+ *
+ * Handles all config migration scenarios:
+ * - Auto-migration during config loading
+ * - Interactive upgrade via CLI
+ * - Migration status checking
+ */
+class MigrationManager {
+    rootDir;
+    targetVersion;
+    constructor(rootDir = process.cwd(), targetVersion = CURRENT_CONFIG_VERSION) {
+        this.rootDir = rootDir;
+        this.targetVersion = targetVersion;
+    }
+    /**
+     * Get the config file path
+     */
+    getConfigPath() {
+        return external_path_.join(this.rootDir, '.lien.config.json');
+    }
+    /**
+     * Check if the current config needs migration
+     */
+    async needsMigration() {
+        try {
+            const configPath = this.getConfigPath();
+            const content = await promises_namespaceObject.readFile(configPath, 'utf-8');
+            const config = JSON.parse(content);
+            return needsMigration(config);
+        }
+        catch (error) {
+            // If config doesn't exist or can't be read, no migration needed
+            return false;
+        }
+    }
+    /**
+     * Perform silent migration (for auto-migration during load)
+     * Returns the migrated config without user interaction
+     */
+    async autoMigrate() {
+        const result = await migrateConfigFile(this.rootDir);
+        if (result.migrated && result.backupPath) {
+            const backupFilename = external_path_.basename(result.backupPath);
+            console.log(`✅ Migration complete! Backup saved as ${backupFilename}`);
+            console.log('📝 Your config now uses the framework-based structure.');
+        }
+        return result.config;
+    }
+    /**
+     * Perform interactive upgrade (for CLI upgrade command)
+     * Provides detailed feedback and handles edge cases
+     */
+    async upgradeInteractive() {
+        const configPath = this.getConfigPath();
+        try {
+            // 1. Read existing config
+            const existingContent = await promises_namespaceObject.readFile(configPath, 'utf-8');
+            const existingConfig = JSON.parse(existingContent);
+            // 2. Check if any changes are needed
+            const migrationNeeded = needsMigration(existingConfig);
+            const newFields = migrationNeeded ? [] : detectNewFields(existingConfig, defaultConfig);
+            const hasChanges = migrationNeeded || newFields.length > 0;
+            if (!hasChanges) {
+                console.log(source.green('✓ Config is already up to date'));
+                console.log(source.dim('No changes needed'));
+                return;
+            }
+            // 3. Backup existing config (only if changes are needed)
+            const backupPath = `${configPath}.backup`;
+            await promises_namespaceObject.copyFile(configPath, backupPath);
+            // 4. Perform upgrade
+            let upgradedConfig;
+            let migrated = false;
+            if (migrationNeeded) {
+                console.log(source.blue(`🔄 Migrating config from v0.2.0 to v${this.targetVersion}...`));
+                upgradedConfig = migrateConfig(existingConfig, this.targetVersion);
+                migrated = true;
+            }
+            else {
+                // Just merge with defaults for current version configs
+                upgradedConfig = deepMergeConfig(defaultConfig, existingConfig);
+                console.log(source.dim('\nNew options added:'));
+                newFields.forEach(field => console.log(source.dim('  •'), source.bold(field)));
+            }
+            // 5. Write upgraded config
+            await promises_namespaceObject.writeFile(configPath, JSON.stringify(upgradedConfig, null, 2) + '\n', 'utf-8');
+            // 6. Show results
+            console.log(source.green('✓ Config upgraded successfully'));
+            console.log(source.dim('Backup saved to:'), backupPath);
+            if (migrated) {
+                console.log(source.dim('\n📝 Your config now uses the framework-based structure.'));
+            }
+        }
+        catch (error) {
+            if (error.code === 'ENOENT') {
+                console.log(source.red('Error: No config file found'));
+                console.log(source.dim('Run'), source.bold('lien init'), source.dim('to create a config file'));
+                return;
+            }
+            throw error;
+        }
+    }
+    /**
+     * Perform migration and return result
+     * Used when programmatic access to migration result is needed
+     */
+    async migrate() {
+        return migrateConfigFile(this.rootDir);
+    }
+}
+//# sourceMappingURL=migration-manager.js.map
+;// CONCATENATED MODULE: ../core/dist/frameworks/types.js
+/**
+ * Default detection options
+ */
+const defaultDetectionOptions = {
+    maxDepth: 3,
+    skipDirs: [
+        'node_modules',
+        'vendor',
+        'dist',
+        'build',
+        '.next',
+        '.nuxt',
+        'coverage',
+        '.git',
+        '.idea',
+        '.vscode',
+        'tmp',
+        'temp',
+    ],
+};
+//# sourceMappingURL=types.js.map
+;// CONCATENATED MODULE: ../core/dist/frameworks/nodejs/config.js
+/**
+ * Generate Node.js framework configuration
+ */
+async function generateNodeJsConfig(_rootDir, _relativePath) {
+    return {
+        include: [
+            // Broader patterns to catch all common project structures
+            // (frontend/, src/, lib/, app/, components/, etc.)
+            '**/*.ts',
+            '**/*.tsx',
+            '**/*.js',
+            '**/*.jsx',
+            '**/*.vue',
+            '**/*.mjs',
+            '**/*.cjs',
+            '**/*.md',
+            '**/*.mdx',
+        ],
+        exclude: [
+            // Node.js dependencies (with ** prefix for nested projects)
+            '**/node_modules/**',
+            'node_modules/**',
+            // PHP/Composer dependencies (for monorepos with PHP)
+            '**/vendor/**',
+            'vendor/**',
+            // Build outputs
+            '**/dist/**',
+            'dist/**',
+            '**/build/**',
+            'build/**',
+            '**/public/build/**',
+            'public/build/**',
+            'out/**',
+            // Framework build caches
+            '.next/**',
+            '.nuxt/**',
+            '.vite/**',
+            '.lien/**',
+            // Test artifacts
+            'coverage/**',
+            'playwright-report/**',
+            'test-results/**',
+            // Build/generated artifacts
+            '__generated__/**',
+            // Common build/cache directories
+            '.cache/**',
+            '.turbo/**',
+            '.vercel/**',
+            '.netlify/**',
+            // Minified/bundled files
+            '**/*.min.js',
+            '**/*.min.css',
+            '**/*.bundle.js',
+        ],
+    };
+}
+//# sourceMappingURL=config.js.map
+;// CONCATENATED MODULE: ../core/dist/frameworks/nodejs/detector.js
+
+
+
+/**
+ * Node.js/TypeScript/JavaScript framework detector
+ */
+const nodejsDetector = {
+    name: 'nodejs',
+    priority: 50, // Generic, yields to specific frameworks like Laravel
+    async detect(rootDir, relativePath) {
+        const fullPath = external_path_.join(rootDir, relativePath);
+        const result = {
+            detected: false,
+            name: 'nodejs',
+            path: relativePath,
+            confidence: 'low',
+            evidence: [],
+        };
+        // Check for package.json
+        const packageJsonPath = external_path_.join(fullPath, 'package.json');
+        let packageJson = null;
+        try {
+            const content = await promises_namespaceObject.readFile(packageJsonPath, 'utf-8');
+            packageJson = JSON.parse(content);
+            result.evidence.push('Found package.json');
+        }
+        catch {
+            // No package.json, not a Node.js project
+            return result;
+        }
+        // At this point, we know it's a Node.js project
+        result.detected = true;
+        result.confidence = 'high';
+        // Check for TypeScript
+        if (packageJson.devDependencies?.typescript || packageJson.dependencies?.typescript) {
+            result.evidence.push('TypeScript detected');
+        }
+        // Check for testing frameworks
+        const testFrameworks = [
+            { name: 'jest', display: 'Jest' },
+            { name: 'vitest', display: 'Vitest' },
+            { name: 'mocha', display: 'Mocha' },
+            { name: 'ava', display: 'AVA' },
+            { name: '@playwright/test', display: 'Playwright' },
+        ];
+        for (const framework of testFrameworks) {
+            if (packageJson.devDependencies?.[framework.name] ||
+                packageJson.dependencies?.[framework.name]) {
+                result.evidence.push(`${framework.display} test framework detected`);
+                break; // Only mention first test framework found
+            }
+        }
+        // Check for common frameworks/libraries
+        const frameworks = [
+            { name: 'next', display: 'Next.js' },
+            { name: 'react', display: 'React' },
+            { name: 'vue', display: 'Vue' },
+            { name: 'express', display: 'Express' },
+            { name: '@nestjs/core', display: 'NestJS' },
+        ];
+        for (const fw of frameworks) {
+            if (packageJson.dependencies?.[fw.name]) {
+                result.evidence.push(`${fw.display} detected`);
+                break; // Only mention first framework found
+            }
+        }
+        // Try to detect version from package.json engines or node version
+        if (packageJson.engines?.node) {
+            result.version = packageJson.engines.node;
+        }
+        return result;
+    },
+    async generateConfig(rootDir, relativePath) {
+        return generateNodeJsConfig(rootDir, relativePath);
+    },
+};
+//# sourceMappingURL=detector.js.map
+;// CONCATENATED MODULE: ../core/dist/frameworks/php/config.js
+/**
+ * Generate generic PHP framework configuration
+ */
+async function generatePhpConfig(_rootDir, _relativePath) {
+    return {
+        include: [
+            // PHP source code
+            'src/**/*.php',
+            'lib/**/*.php',
+            'app/**/*.php',
+            'tests/**/*.php',
+            '*.php',
+            // Common PHP project files
+            'config/**/*.php',
+            'public/**/*.php',
+            // Documentation
+            '**/*.md',
+            '**/*.mdx',
+            'docs/**/*.md',
+            'README.md',
+            'CHANGELOG.md',
+        ],
+        exclude: [
+            // Composer dependencies (CRITICAL)
+            '**/vendor/**',
+            'vendor/**',
+            // Node.js dependencies
+            '**/node_modules/**',
+            'node_modules/**',
+            // Build outputs
+            '**/dist/**',
+            'dist/**',
+            '**/build/**',
+            'build/**',
+            '**/public/build/**',
+            'public/build/**',
+            // Laravel/PHP system directories
+            'storage/**',
+            'cache/**',
+            'bootstrap/cache/**',
+            // Test artifacts
+            'coverage/**',
+            'test-results/**',
+            '.phpunit.cache/**',
+            // Build outputs
+            '__generated__/**',
+            // Minified files
+            '**/*.min.js',
+            '**/*.min.css',
+        ],
+    };
+}
+//# sourceMappingURL=config.js.map
+;// CONCATENATED MODULE: ../core/dist/frameworks/php/detector.js
+
+
+
+/**
+ * Generic PHP framework detector
+ * Detects any PHP project with composer.json
+ */
+const phpDetector = {
+    name: 'php',
+    priority: 50, // Generic, yields to specific frameworks like Laravel
+    async detect(rootDir, relativePath) {
+        const fullPath = external_path_.join(rootDir, relativePath);
+        const result = {
+            detected: false,
+            name: 'php',
+            path: relativePath,
+            confidence: 'low',
+            evidence: [],
+        };
+        // Check for composer.json
+        const composerJsonPath = external_path_.join(fullPath, 'composer.json');
+        let composerJson = null;
+        try {
+            const content = await promises_namespaceObject.readFile(composerJsonPath, 'utf-8');
+            composerJson = JSON.parse(content);
+            result.evidence.push('Found composer.json');
+        }
+        catch {
+            // No composer.json, not a PHP project
+            return result;
+        }
+        // Check if this is a Laravel project (Laravel detector should handle it)
+        const hasLaravel = composerJson.require?.['laravel/framework'] ||
+            composerJson['require-dev']?.['laravel/framework'];
+        if (hasLaravel) {
+            // This is a Laravel project - let the Laravel detector handle it
+            // Return not detected to avoid redundant "php" + "laravel" detection
+            return result;
+        }
+        // At this point, we know it's a generic PHP project (not Laravel)
+        result.detected = true;
+        result.confidence = 'high';
+        // Check for common PHP directories
+        const phpDirs = ['src', 'lib', 'app', 'tests'];
+        let foundDirs = 0;
+        for (const dir of phpDirs) {
+            try {
+                const dirPath = external_path_.join(fullPath, dir);
+                const stats = await promises_namespaceObject.stat(dirPath);
+                if (stats.isDirectory()) {
+                    foundDirs++;
+                }
+            }
+            catch {
+                // Directory doesn't exist
+            }
+        }
+        if (foundDirs > 0) {
+            result.evidence.push(`Found PHP project structure (${foundDirs} directories)`);
+        }
+        // Check for PHP version
+        if (composerJson.require?.php) {
+            result.version = composerJson.require.php;
+            result.evidence.push(`PHP ${composerJson.require.php}`);
+        }
+        // Check for testing frameworks
+        const testFrameworks = [
+            { name: 'phpunit/phpunit', display: 'PHPUnit' },
+            { name: 'pestphp/pest', display: 'Pest' },
+            { name: 'codeception/codeception', display: 'Codeception' },
+            { name: 'behat/behat', display: 'Behat' },
+        ];
+        for (const framework of testFrameworks) {
+            if (composerJson.require?.[framework.name] ||
+                composerJson['require-dev']?.[framework.name]) {
+                result.evidence.push(`${framework.display} test framework detected`);
+                break; // Only mention first test framework found
+            }
+        }
+        // Check for common PHP tools/frameworks
+        const tools = [
+            { name: 'symfony/framework-bundle', display: 'Symfony' },
+            { name: 'symfony/http-kernel', display: 'Symfony' },
+            { name: 'symfony/symfony', display: 'Symfony (monolithic)' },
+            { name: 'doctrine/orm', display: 'Doctrine ORM' },
+            { name: 'guzzlehttp/guzzle', display: 'Guzzle HTTP' },
+            { name: 'monolog/monolog', display: 'Monolog' },
+        ];
+        for (const tool of tools) {
+            if (composerJson.require?.[tool.name]) {
+                result.evidence.push(`${tool.display} detected`);
+                break; // Only mention first tool found
+            }
+        }
+        return result;
+    },
+    async generateConfig(rootDir, relativePath) {
+        return generatePhpConfig(rootDir, relativePath);
+    },
+};
+//# sourceMappingURL=detector.js.map
+;// CONCATENATED MODULE: ../core/dist/frameworks/laravel/config.js
+/**
+ * Generate Laravel framework configuration
+ */
+async function generateLaravelConfig(_rootDir, _relativePath) {
+    return {
+        include: [
+            // PHP backend
+            'app/**/*.php',
+            'routes/**/*.php',
+            'config/**/*.php',
+            'database/**/*.php',
+            'resources/**/*.php',
+            'tests/**/*.php',
+            '*.php',
+            // Frontend assets (Vue/React/Inertia) - Scoped to resources/ to avoid build output
+            'resources/**/*.js',
+            'resources/**/*.ts',
+            'resources/**/*.jsx',
+            'resources/**/*.tsx',
+            'resources/**/*.vue',
+            // Blade templates
+            'resources/views/**/*.blade.php',
+            // Documentation
+            'docs/**/*.md',
+            'README.md',
+            'CHANGELOG.md',
+        ],
+        exclude: [
+            // Composer dependencies (CRITICAL: exclude before any include patterns)
+            '**/vendor/**',
+            'vendor/**',
+            // Build outputs (Vite/Mix compiled assets)
+            '**/public/build/**',
+            'public/build/**',
+            'public/hot',
+            '**/dist/**',
+            'dist/**',
+            '**/build/**',
+            'build/**',
+            // Laravel system directories
+            'storage/**',
+            'bootstrap/cache/**',
+            'public/**/*.js', // Compiled JS in public
+            'public/**/*.css', // Compiled CSS in public
+            // Database boilerplate (not useful for semantic search)
+            'database/migrations/**',
+            'database/seeders/**',
+            'database/factories/**',
+            // Node.js dependencies
+            '**/node_modules/**',
+            'node_modules/**',
+            // Test artifacts
+            'playwright-report/**',
+            'test-results/**',
+            'coverage/**',
+            // Build/generated artifacts
+            '__generated__/**',
+            // Frontend build outputs
+            '.vite/**',
+            '.nuxt/**',
+            '.next/**',
+            // Minified files
+            '**/*.min.js',
+            '**/*.min.css',
+        ],
+    };
+}
+//# sourceMappingURL=config.js.map
+;// CONCATENATED MODULE: ../core/dist/frameworks/laravel/detector.js
+
+
+
+/**
+ * Laravel/PHP framework detector
+ */
+const laravelDetector = {
+    name: 'laravel',
+    priority: 100, // Laravel takes precedence over Node.js
+    async detect(rootDir, relativePath) {
+        const fullPath = external_path_.join(rootDir, relativePath);
+        const result = {
+            detected: false,
+            name: 'laravel',
+            path: relativePath,
+            confidence: 'low',
+            evidence: [],
+        };
+        // Check for composer.json with Laravel
+        const composerJsonPath = external_path_.join(fullPath, 'composer.json');
+        let composerJson = null;
+        try {
+            const content = await promises_namespaceObject.readFile(composerJsonPath, 'utf-8');
+            composerJson = JSON.parse(content);
+            result.evidence.push('Found composer.json');
+        }
+        catch {
+            // No composer.json, not a Laravel project
+            return result;
+        }
+        // Check if Laravel framework is in dependencies
+        const hasLaravel = composerJson.require?.['laravel/framework'] ||
+            composerJson['require-dev']?.['laravel/framework'];
+        if (!hasLaravel) {
+            // Has composer.json but not Laravel
+            return result;
+        }
+        result.evidence.push('Laravel framework detected in composer.json');
+        // Check for artisan file (strong indicator of Laravel)
+        const artisanPath = external_path_.join(fullPath, 'artisan');
+        try {
+            await promises_namespaceObject.access(artisanPath);
+            result.evidence.push('Found artisan file');
+            result.confidence = 'high';
+        }
+        catch {
+            result.confidence = 'medium';
+        }
+        // Check for typical Laravel directory structure
+        const laravelDirs = ['app', 'routes', 'config', 'database'];
+        let foundDirs = 0;
+        for (const dir of laravelDirs) {
+            try {
+                const dirPath = external_path_.join(fullPath, dir);
+                const stats = await promises_namespaceObject.stat(dirPath);
+                if (stats.isDirectory()) {
+                    foundDirs++;
+                }
+            }
+            catch {
+                // Directory doesn't exist
+            }
+        }
+        if (foundDirs >= 2) {
+            result.evidence.push(`Laravel directory structure detected (${foundDirs}/${laravelDirs.length} dirs)`);
+            result.confidence = 'high';
+        }
+        // Check for test directories
+        const testDirsToCheck = [
+            external_path_.join(fullPath, 'tests', 'Feature'),
+            external_path_.join(fullPath, 'tests', 'Unit'),
+        ];
+        for (const testDir of testDirsToCheck) {
+            try {
+                const stats = await promises_namespaceObject.stat(testDir);
+                if (stats.isDirectory()) {
+                    const dirName = external_path_.basename(external_path_.dirname(testDir)) + '/' + external_path_.basename(testDir);
+                    result.evidence.push(`Found ${dirName} test directory`);
+                }
+            }
+            catch {
+                // Test directory doesn't exist
+            }
+        }
+        // Extract Laravel version if available
+        if (composerJson.require?.['laravel/framework']) {
+            result.version = composerJson.require['laravel/framework'];
+        }
+        result.detected = true;
+        return result;
+    },
+    async generateConfig(rootDir, relativePath) {
+        return generateLaravelConfig(rootDir, relativePath);
+    },
+};
+//# sourceMappingURL=detector.js.map
+;// CONCATENATED MODULE: ../core/dist/frameworks/shopify/config.js
+/**
+ * Generate Shopify theme framework configuration
+ */
+async function generateShopifyConfig(_rootDir, _relativePath) {
+    return {
+        include: [
+            // Core Liquid templates
+            'layout/**/*.liquid',
+            'sections/**/*.liquid',
+            'snippets/**/*.liquid',
+            'templates/**/*.liquid', // Matches any nesting level (e.g., templates/customers/account.liquid)
+            'templates/**/*.json', // JSON template definitions (Shopify 2.0+)
+            // Theme editor blocks (Online Store 2.0)
+            'blocks/**/*.liquid',
+            // Assets (CSS, JS with optional Liquid templating)
+            'assets/**/*.js',
+            'assets/**/*.js.liquid',
+            'assets/**/*.css',
+            'assets/**/*.css.liquid',
+            'assets/**/*.scss',
+            'assets/**/*.scss.liquid',
+            // Configuration files
+            'config/*.json',
+            // Locales (i18n)
+            'locales/*.json',
+            // Documentation
+            '*.md',
+            'docs/**/*.md',
+            // Shopify-specific config files
+            'shopify.theme.toml',
+            '.shopifyignore',
+        ],
+        exclude: [
+            'node_modules/**',
+            'dist/**',
+            'build/**',
+            '.git/**',
+            // Playwright/testing artifacts
+            'playwright-report/**',
+            'test-results/**',
+            // Build/generated artifacts
+            '__generated__/**',
+            // Common frontend build outputs
+            '.vite/**',
+            '.nuxt/**',
+            '.next/**',
+        ],
+    };
+}
+//# sourceMappingURL=config.js.map
+;// CONCATENATED MODULE: ../core/dist/frameworks/shopify/detector.js
+
+
+
+/**
+ * Shopify Liquid theme framework detector
+ */
+const shopifyDetector = {
+    name: 'shopify',
+    priority: 100, // High priority (same as Laravel)
+    async detect(rootDir, relativePath) {
+        const fullPath = external_path_.join(rootDir, relativePath);
+        const result = {
+            detected: false,
+            name: 'shopify',
+            path: relativePath,
+            confidence: 'low',
+            evidence: [],
+        };
+        // 1. Check for config/settings_schema.json (STRONGEST signal)
+        const settingsSchemaPath = external_path_.join(fullPath, 'config', 'settings_schema.json');
+        let hasSettingsSchema = false;
+        try {
+            await promises_namespaceObject.access(settingsSchemaPath);
+            hasSettingsSchema = true;
+            result.evidence.push('Found config/settings_schema.json');
+        }
+        catch {
+            // Not present, continue checking other markers
+        }
+        // 2. Check for layout/theme.liquid
+        const themeLayoutPath = external_path_.join(fullPath, 'layout', 'theme.liquid');
+        let hasThemeLayout = false;
+        try {
+            await promises_namespaceObject.access(themeLayoutPath);
+            hasThemeLayout = true;
+            result.evidence.push('Found layout/theme.liquid');
+        }
+        catch {
+            // Not present
+        }
+        // 3. Check for typical Shopify directories
+        const shopifyDirs = ['sections', 'snippets', 'templates', 'locales'];
+        let foundDirs = 0;
+        for (const dir of shopifyDirs) {
+            try {
+                const dirPath = external_path_.join(fullPath, dir);
+                const stats = await promises_namespaceObject.stat(dirPath);
+                if (stats.isDirectory()) {
+                    foundDirs++;
+                }
+            }
+            catch {
+                // Directory doesn't exist
+            }
+        }
+        if (foundDirs >= 2) {
+            result.evidence.push(`Shopify directory structure detected (${foundDirs}/${shopifyDirs.length} dirs)`);
+        }
+        // 4. Check for shopify.theme.toml (Shopify CLI)
+        try {
+            const tomlPath = external_path_.join(fullPath, 'shopify.theme.toml');
+            await promises_namespaceObject.access(tomlPath);
+            result.evidence.push('Found shopify.theme.toml');
+        }
+        catch {
+            // Optional file
+        }
+        // 5. Check for .shopifyignore
+        try {
+            const ignorePath = external_path_.join(fullPath, '.shopifyignore');
+            await promises_namespaceObject.access(ignorePath);
+            result.evidence.push('Found .shopifyignore');
+        }
+        catch {
+            // Optional file
+        }
+        // Determine detection confidence with early returns
+        // High: Has settings_schema.json + 2+ directories
+        if (hasSettingsSchema && foundDirs >= 2) {
+            result.detected = true;
+            result.confidence = 'high';
+            return result;
+        }
+        // Medium: Has settings_schema alone, OR has theme.liquid + 1+ directory
+        if (hasSettingsSchema || (hasThemeLayout && foundDirs >= 1)) {
+            result.detected = true;
+            result.confidence = 'medium';
+            return result;
+        }
+        // Medium: Has 3+ typical directories but no strong markers
+        if (foundDirs >= 3) {
+            result.detected = true;
+            result.confidence = 'medium';
+            return result;
+        }
+        // Not detected
+        return result;
+    },
+    async generateConfig(rootDir, relativePath) {
+        return generateShopifyConfig(rootDir, relativePath);
+    },
+};
+//# sourceMappingURL=detector.js.map
+;// CONCATENATED MODULE: ../core/dist/frameworks/registry.js
+
+
+
+
+/**
+ * Registry of all available framework detectors
+ * Frameworks will be added as they are implemented
+ *
+ * Order doesn't matter for detection as priority system handles conflicts,
+ * but listed here in order from generic to specific for clarity:
+ * - Generic language detectors (Node.js, PHP)
+ * - Specific framework detectors (Laravel, Shopify)
+ */
+const frameworkDetectors = [
+    nodejsDetector,
+    phpDetector,
+    laravelDetector,
+    shopifyDetector,
+];
+/**
+ * Register a framework detector
+ */
+function registerFramework(detector) {
+    // Check if already registered
+    const existing = frameworkDetectors.find(d => d.name === detector.name);
+    if (existing) {
+        console.warn(`Framework detector '${detector.name}' is already registered, skipping`);
+        return;
+    }
+    frameworkDetectors.push(detector);
+}
+/**
+ * Get a framework detector by name
+ */
+function getFrameworkDetector(name) {
+    return frameworkDetectors.find(d => d.name === name);
+}
+//# sourceMappingURL=registry.js.map
+;// CONCATENATED MODULE: ../core/dist/frameworks/detector-service.js
+
+
+
+
+/**
+ * Strip the internal priority property from a detection result.
+ */
+function stripPriority(detection) {
+    const { priority, ...result } = detection;
+    return result;
+}
+/**
+ * Log skipped frameworks when lower confidence detections are ignored.
+ */
+function logSkippedFrameworks(skipped, context) {
+    if (skipped.length === 0)
+        return;
+    const names = skipped.map(d => d.name).join(', ');
+    if (context) {
+        console.log(`  → Skipping ${names} at ${context.relativePath} (${context.winnerName} takes precedence)`);
+    }
+    else {
+        console.log(`  → Skipping lower confidence detections: ${names}`);
+    }
+}
+/**
+ * Group detections by confidence level.
+ */
+function groupByConfidence(detections) {
+    return {
+        high: detections.filter(d => d.confidence === 'high'),
+        medium: detections.filter(d => d.confidence === 'medium'),
+        low: detections.filter(d => d.confidence === 'low'),
+    };
+}
+/**
+ * Select the winner from a list using priority (highest priority wins).
+ * Returns the winner and the remaining (skipped) detections.
+ *
+ * @throws Error if detections array is empty
+ */
+function selectByPriority(detections) {
+    if (detections.length === 0) {
+        throw new Error('selectByPriority requires at least one detection');
+    }
+    const sorted = [...detections].sort((a, b) => b.priority - a.priority);
+    return {
+        winner: sorted[0],
+        skipped: sorted.slice(1),
+    };
+}
+/**
+ * Resolve conflicts when multiple frameworks are detected at the same path.
+ *
+ * Resolution rules (applied in order):
+ * 1. Multiple HIGH confidence → keep ALL (hybrid project support)
+ * 2. Single HIGH confidence → keep it, skip lower confidence
+ * 3. No HIGH but have MEDIUM → use priority to select winner
+ * 4. Only LOW confidence → use priority to select winner
+ *
+ * @param detections - All detected frameworks with their priorities
+ * @param relativePath - Path being analyzed (for logging)
+ * @returns Array of resolved detection results
+ */
+function resolveFrameworkConflicts(detections, relativePath) {
+    // No detections
+    if (detections.length === 0) {
+        return [];
+    }
+    // Single detection - no conflict
+    if (detections.length === 1) {
+        return [stripPriority(detections[0])];
+    }
+    // Multiple detections - apply resolution rules
+    const grouped = groupByConfidence(detections);
+    // Rule 1: Multiple HIGH confidence → hybrid project (keep all)
+    if (grouped.high.length > 1) {
+        const names = grouped.high.map(d => d.name).join(' + ');
+        console.log(`  → Detected hybrid project: ${names}`);
+        logSkippedFrameworks([...grouped.medium, ...grouped.low]);
+        return grouped.high.map(stripPriority);
+    }
+    // Rule 2: Single HIGH confidence → keep it
+    if (grouped.high.length === 1) {
+        logSkippedFrameworks([...grouped.medium, ...grouped.low]);
+        return [stripPriority(grouped.high[0])];
+    }
+    // Rule 3: No HIGH but have MEDIUM → use priority
+    if (grouped.medium.length > 0) {
+        const { winner, skipped } = selectByPriority(grouped.medium);
+        logSkippedFrameworks([...skipped, ...grouped.low], {
+            relativePath,
+            winnerName: winner.name,
+        });
+        return [stripPriority(winner)];
+    }
+    // Rule 4: Only LOW confidence → use priority
+    const { winner, skipped } = selectByPriority(grouped.low);
+    if (skipped.length > 0) {
+        logSkippedFrameworks(skipped, { relativePath, winnerName: winner.name });
+    }
+    return [stripPriority(winner)];
+}
+/**
+ * Run all framework detectors at a path and collect results.
+ *
+ * @param rootDir - Project root directory
+ * @param relativePath - Path relative to root being scanned
+ * @returns Array of detection results with priorities
+ */
+async function runAllDetectors(rootDir, relativePath) {
+    const results = [];
+    for (const detector of frameworkDetectors) {
+        try {
+            const result = await detector.detect(rootDir, relativePath);
+            if (result.detected) {
+                results.push({
+                    ...result,
+                    priority: detector.priority ?? 0,
+                });
+            }
+        }
+        catch (error) {
+            console.error(`Error running detector '${detector.name}' at ${relativePath}:`, error);
+        }
+    }
+    return results;
+}
+/**
+ * Detect all frameworks in a monorepo by recursively scanning subdirectories
+ * @param rootDir - Absolute path to project root
+ * @param options - Detection options (max depth, skip dirs)
+ * @returns Array of detected frameworks with their paths
+ */
+async function detectAllFrameworks(rootDir, options = {}) {
+    const opts = { ...defaultDetectionOptions, ...options };
+    const results = [];
+    const visited = new Set();
+    // Detect at root first
+    await detectAtPath(rootDir, '.', results, visited);
+    // Recursively scan subdirectories
+    await scanSubdirectories(rootDir, '.', results, visited, 0, opts);
+    return results;
+}
+/**
+ * Detect frameworks at a specific path.
+ *
+ * Runs all detectors and resolves conflicts using confidence-based rules.
+ * Now delegates to focused helper functions for better testability.
+ */
+async function detectAtPath(rootDir, relativePath, results, visited) {
+    // Guard: already visited
+    const fullPath = external_path_.join(rootDir, relativePath);
+    if (visited.has(fullPath)) {
+        return;
+    }
+    visited.add(fullPath);
+    // Run detectors
+    const detections = await runAllDetectors(rootDir, relativePath);
+    // Resolve conflicts and add to results
+    const resolved = resolveFrameworkConflicts(detections, relativePath);
+    results.push(...resolved);
+}
+/**
+ * Recursively scan subdirectories for frameworks
+ */
+async function scanSubdirectories(rootDir, relativePath, results, visited, depth, options) {
+    // Check depth limit
+    if (depth >= options.maxDepth) {
+        return;
+    }
+    const fullPath = external_path_.join(rootDir, relativePath);
+    try {
+        const entries = await promises_namespaceObject.readdir(fullPath, { withFileTypes: true });
+        // Process only directories
+        const dirs = entries.filter(e => e.isDirectory());
+        for (const dir of dirs) {
+            // Skip directories in the skip list
+            if (options.skipDirs.includes(dir.name)) {
+                continue;
+            }
+            // Skip hidden directories (except .git, .github which are already in skipDirs)
+            if (dir.name.startsWith('.')) {
+                continue;
+            }
+            const subPath = relativePath === '.'
+                ? dir.name
+                : external_path_.join(relativePath, dir.name);
+            // Detect at this subdirectory
+            await detectAtPath(rootDir, subPath, results, visited);
+            // Recurse deeper
+            await scanSubdirectories(rootDir, subPath, results, visited, depth + 1, options);
+        }
+    }
+    catch (error) {
+        // Silently skip directories we can't read (permission errors, etc.)
+        return;
+    }
+}
+/**
+ * Get a human-readable summary of detected frameworks
+ */
+function getDetectionSummary(results) {
+    if (results.length === 0) {
+        return 'No frameworks detected';
+    }
+    const lines = [];
+    for (const result of results) {
+        const pathDisplay = result.path === '.' ? 'root' : result.path;
+        lines.push(`${result.name} at ${pathDisplay} (${result.confidence} confidence)`);
+        if (result.evidence.length > 0) {
+            result.evidence.forEach(e => {
+                lines.push(`  - ${e}`);
+            });
+        }
+    }
+    return lines.join('\n');
+}
+//# sourceMappingURL=detector-service.js.map
+;// CONCATENATED MODULE: ../core/dist/types/index.js
+/**
+ * @liendev/core types
+ *
+ * All shared types for Lien - single source of truth
+ */
+// Re-export risk order constant
+
+//# sourceMappingURL=index.js.map
+;// CONCATENATED MODULE: ../core/dist/index.js
+/**
+ * @liendev/core - Lien's indexing and analysis engine
+ *
+ * This is the public API for:
+ * - @liendev/cli (CLI commands)
+ * - @liendev/action (GitHub Action)
+ * - @liendev/cloud (Cloud workers)
+ * - Third-party integrations
+ *
+ * @example
+ * ```typescript
+ * import {
+ *   indexCodebase,
+ *   VectorDB,
+ *   ComplexityAnalyzer,
+ *   loadConfig,
+ * } from '@liendev/core';
+ *
+ * // Index a codebase
+ * const result = await indexCodebase({ rootDir: '/path/to/project' });
+ *
+ * // Run complexity analysis
+ * const db = await VectorDB.load('/path/to/project');
+ * const config = await loadConfig('/path/to/project');
+ * const analyzer = new ComplexityAnalyzer(db, config);
+ * const report = await analyzer.analyze();
+ * ```
+ */
+// =============================================================================
+// INDEXING
+// =============================================================================
+
+
+
+
+
+
+// =============================================================================
+// EMBEDDINGS
+// =============================================================================
+
+
+
+// =============================================================================
+// VECTOR DATABASE
+// =============================================================================
+
+
+
+// =============================================================================
+// COMPLEXITY ANALYSIS
+// =============================================================================
+
+
+// =============================================================================
+// CONFIGURATION
+// =============================================================================
+
+
+
+
+
+
+// Convenience re-exports
+const loadConfig = (rootDir) => configService.load(rootDir);
+const saveConfig = (rootDir, config) => configService.save(rootDir, config);
+const createDefaultConfig = () => defaultConfig;
+// =============================================================================
+// GIT UTILITIES
+// =============================================================================
+
+
+// =============================================================================
+// FRAMEWORK DETECTION
+// =============================================================================
+
+
+
+
+
+
+// =============================================================================
+// ERRORS
+// =============================================================================
+
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+// =============================================================================
+// UTILITIES
+// =============================================================================
+
+//# sourceMappingURL=index.js.map
+
 /***/ })
 
 /******/ 	});
@@ -37768,6 +56696,64 @@ module.exports = parseParams
 /******/ 	}
 /******/ 	
 /************************************************************************/
+/******/ 	/* webpack/runtime/create fake namespace object */
+/******/ 	(() => {
+/******/ 		var getProto = Object.getPrototypeOf ? (obj) => (Object.getPrototypeOf(obj)) : (obj) => (obj.__proto__);
+/******/ 		var leafPrototypes;
+/******/ 		// create a fake namespace object
+/******/ 		// mode & 1: value is a module id, require it
+/******/ 		// mode & 2: merge all properties of value into the ns
+/******/ 		// mode & 4: return value when already ns object
+/******/ 		// mode & 16: return value when it's Promise-like
+/******/ 		// mode & 8|1: behave like require
+/******/ 		__nccwpck_require__.t = function(value, mode) {
+/******/ 			if(mode & 1) value = this(value);
+/******/ 			if(mode & 8) return value;
+/******/ 			if(typeof value === 'object' && value) {
+/******/ 				if((mode & 4) && value.__esModule) return value;
+/******/ 				if((mode & 16) && typeof value.then === 'function') return value;
+/******/ 			}
+/******/ 			var ns = Object.create(null);
+/******/ 			__nccwpck_require__.r(ns);
+/******/ 			var def = {};
+/******/ 			leafPrototypes = leafPrototypes || [null, getProto({}), getProto([]), getProto(getProto)];
+/******/ 			for(var current = mode & 2 && value; typeof current == 'object' && !~leafPrototypes.indexOf(current); current = getProto(current)) {
+/******/ 				Object.getOwnPropertyNames(current).forEach((key) => (def[key] = () => (value[key])));
+/******/ 			}
+/******/ 			def['default'] = () => (value);
+/******/ 			__nccwpck_require__.d(ns, def);
+/******/ 			return ns;
+/******/ 		};
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/define property getters */
+/******/ 	(() => {
+/******/ 		// define getter functions for harmony exports
+/******/ 		__nccwpck_require__.d = (exports, definition) => {
+/******/ 			for(var key in definition) {
+/******/ 				if(__nccwpck_require__.o(definition, key) && !__nccwpck_require__.o(exports, key)) {
+/******/ 					Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
+/******/ 				}
+/******/ 			}
+/******/ 		};
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/hasOwnProperty shorthand */
+/******/ 	(() => {
+/******/ 		__nccwpck_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/make namespace object */
+/******/ 	(() => {
+/******/ 		// define __esModule on exports
+/******/ 		__nccwpck_require__.r = (exports) => {
+/******/ 			if(typeof Symbol !== 'undefined' && Symbol.toStringTag) {
+/******/ 				Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
+/******/ 			}
+/******/ 			Object.defineProperty(exports, '__esModule', { value: true });
+/******/ 		};
+/******/ 	})();
+/******/ 	
 /******/ 	/* webpack/runtime/compat */
 /******/ 	
 /******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";
