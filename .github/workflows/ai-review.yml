@@ -31,76 +31,26 @@ jobs:
           node-version: '22'
           cache: 'npm'
       
-      # Cache the built packages to avoid rebuilding every run
-      - name: Cache Lien build
+      # Cache the built action to avoid rebuilding every run
+      - name: Cache Action build
         id: cache-build
         uses: actions/cache@v4
         with:
           path: |
-            packages/cli/dist
             packages/action/dist
             node_modules
             packages/*/node_modules
-          key: lien-build-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/cli/src/**/*', 'packages/action/src/**/*') }}
+          key: lien-action-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/core/src/**/*', 'packages/action/src/**/*') }}
           restore-keys: |
-            lien-build-${{ runner.os }}-
+            lien-action-${{ runner.os }}-
       
       - name: Install dependencies
         if: steps.cache-build.outputs.cache-hit != 'true'
         run: npm ci
       
-      - name: Build Lien CLI
-        if: steps.cache-build.outputs.cache-hit != 'true'
-        run: npm run build
-      
-      - name: Build Lien Action
+      - name: Build Action
         if: steps.cache-build.outputs.cache-hit != 'true'
         run: npm run build -w packages/action
-      
-      - name: Install Lien globally
-        run: npm install -g ./packages/cli
-      
-      - name: Initialize Lien (auto-detect frameworks)
-        run: lien init --yes
-      
-      # Restore base branch index cache (if exists)
-      - name: Restore base branch Lien index
-        id: cache-base
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.lien
-          key: lien-base-index-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
-      
-      # Generate baseline complexity from base branch
-      # NOTE: Must use same threshold as action for accurate delta
-      - name: Get base branch complexity
-        run: |
-          echo "Checking out base branch: ${{ github.event.pull_request.base.sha }}"
-          # Use --force because action dist files may differ between branches
-          git checkout --force ${{ github.event.pull_request.base.sha }}
-          if [ "${{ steps.cache-base.outputs.cache-hit }}" != "true" ]; then
-            echo "Cache miss - indexing base branch"
-            lien index
-          else
-            echo "Cache hit - skipping index"
-          fi
-          lien complexity --format json --threshold 15 > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
-          echo "Base complexity saved"
-      
-      # Save base cache BEFORE switching to head (prevents head from overwriting)
-      - name: Save base branch cache
-        if: steps.cache-base.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.lien
-          key: lien-base-index-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
-      
-      # Switch to head branch - Lien will do incremental index from base
-      - name: Checkout head branch
-        run: git checkout --force ${{ github.sha }}
-      
-      - name: Index head branch (incremental from base)
-        run: lien index
       
       - name: Run AI Code Review
         uses: ./packages/action
@@ -109,5 +59,4 @@ jobs:
           model: 'anthropic/claude-sonnet-4'
           threshold: '15'
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          baseline_complexity: '/tmp/base-complexity.json'
 

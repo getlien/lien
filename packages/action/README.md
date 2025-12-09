@@ -35,55 +35,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      
-      - name: Install Lien
-        run: npm install -g @liendev/lien
-      
-      - name: Initialize Lien
-        run: lien init --yes
-
-      # Restore base branch index cache (shared across PRs targeting same base)
-      - name: Restore base branch Lien index
-        id: cache-base
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.lien
-          key: lien-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
-      
-      # Generate baseline complexity from base branch (for delta tracking)
-      # NOTE: Use same threshold as the action for accurate delta calculation
-      - name: Get base complexity
-        run: |
-          git checkout ${{ github.event.pull_request.base.sha }}
-          if [ "${{ steps.cache-base.outputs.cache-hit }}" != "true" ]; then
-            lien index
-          fi
-          lien complexity --format json --threshold 10 > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
-      
-      # Save base cache BEFORE switching to head
-      - name: Save base branch cache
-        if: steps.cache-base.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.lien
-          key: lien-base-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
-      
-      # Switch to head branch - Lien does incremental indexing
-      - name: Checkout head branch
-        run: git checkout ${{ github.sha }}
-      
-      - name: Index head branch (incremental)
-        run: lien index
-      
       - name: AI Code Review
-        uses: getlien/lien/packages/action@main
+        uses: getlien/lien-action@v1
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          baseline_complexity: '/tmp/base-complexity.json'
 ```
+
+That's it! The action now bundles all dependencies and handles indexing automatically.
+
+### Advanced: Delta Tracking (Optional)
+
+To track complexity changes vs the base branch, you can generate a baseline complexity report:
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+    with:
+      fetch-depth: 0  # Need full history for base branch checkout
+  
+  # Optional: Generate baseline from base branch for delta tracking
+  - name: Get base complexity
+    run: |
+      git checkout ${{ github.event.pull_request.base.sha }}
+      npm install -g @liendev/lien
+      lien init --yes
+      lien index
+      lien complexity --format json --threshold 15 > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
+      git checkout ${{ github.sha }}
+  
+  - name: AI Code Review
+    uses: getlien/lien-action@v1
+    with:
+      openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+      baseline_complexity: '/tmp/base-complexity.json'  # Enable delta tracking
+```
+
+With delta tracking enabled, the action shows:
+- ⬆️ Functions that got more complex
+- ⬇️ Functions that got simpler
+- 🆕 New functions with violations
+- ✅ Unchanged pre-existing violations (not re-commented to reduce noise)
 
 ## Inputs
 
@@ -135,10 +126,11 @@ The `threshold` input sets the cyclomatic complexity limit. Functions exceeding 
 ## How It Works
 
 1. **Trigger**: Action runs on PR open/update
-2. **Scan**: Gets list of changed files from GitHub API
-3. **Analyze**: Runs `lien complexity` on changed code files
-4. **Review**: Sends violations + code snippets to OpenRouter
-5. **Comment**: Posts AI-generated review as PR comment
+2. **Index**: Automatically indexes your codebase using bundled @liendev/core
+3. **Scan**: Gets list of changed files from GitHub API
+4. **Analyze**: Runs complexity analysis on changed code files
+5. **Review**: Sends violations + code snippets to OpenRouter
+6. **Comment**: Posts AI-generated review as PR comment
 
 ## Example Output
 
@@ -168,8 +160,17 @@ The action posts a comment like this:
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 20+ (automatically provided by GitHub Actions)
 - Repository must be indexable by Lien (supports TypeScript, JavaScript, Python, PHP)
+
+## Changes in v1.0
+
+**Breaking Change**: The action now bundles @liendev/core directly. You no longer need to:
+- ❌ Install Lien globally (`npm install -g @liendev/lien`)
+- ❌ Run `lien init`
+- ❌ Run `lien index` manually
+
+The action handles all of this automatically! This simplifies your workflow from ~80 lines to just 2 steps.
 
 ## Features
 
