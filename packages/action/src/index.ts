@@ -9,28 +9,30 @@
  */
 
 // Debug: Write to stderr so it always appears
-process.stderr.write('🔍 [DEBUG] Action file loaded\n');
-process.stderr.write(`🔍 [DEBUG] Node: ${process.version}, CWD: ${process.cwd()}\n`);
-process.stderr.write('🔍 [DEBUG] Loading imports...\n');
+console.error('🔍 [DEBUG] Action file loaded');
+console.error(`🔍 [DEBUG] Node: ${process.version}, CWD: ${process.cwd()}`);
 
-process.stderr.write('  → @actions/core...\n');
+// Try to resolve @liendev/core and catch any errors
+console.error('🔍 [DEBUG] Resolving @liendev/core...');
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const corePath = require.resolve('@liendev/core');
+  console.error(`🔍 [DEBUG] Core path: ${corePath}`);
+} catch (err) {
+  console.error('❌ [DEBUG] Failed to resolve @liendev/core!');
+  console.error(`   Error: ${err instanceof Error ? err.message : String(err)}`);
+  if (err instanceof Error && err.stack) {
+    console.error(`   Stack: ${err.stack}`);
+  }
+  process.exit(1);
+}
+
+console.error('🔍 [DEBUG] Loading imports...');
+
 import * as core from '@actions/core';
-process.stderr.write('  ✓ @actions/core\n');
-
-process.stderr.write('  → fs, child_process...\n');
 import * as fs from 'fs';
 import { execSync } from 'child_process';
-process.stderr.write('  ✓ fs, child_process\n');
-
-process.stderr.write('  → collect.js...\n');
 import collect from 'collect.js';
-process.stderr.write('  ✓ collect.js\n');
-
-process.stderr.write('  → @liendev/core...\n');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const coreModulePath = require.resolve('@liendev/core');
-process.stderr.write(`    [core path: ${coreModulePath}]\n`);
-
 import {
   indexCodebase,
   VectorDB,
@@ -41,9 +43,8 @@ import {
   type ComplexityViolation,
   type LienConfig,
 } from '@liendev/core';
-process.stderr.write('  ✓ @liendev/core\n');
+console.error('✅ [DEBUG] Core loaded');
 
-process.stderr.write('  → ./github.js...\n');
 import {
   getPRContext,
   getPRChangedFiles,
@@ -56,13 +57,7 @@ import {
   type LineComment,
   type PRContext,
 } from './github.js';
-process.stderr.write('  ✓ ./github.js\n');
-
-process.stderr.write('  → ./openrouter.js...\n');
 import { generateReview, generateLineComments, resetTokenUsage, getTokenUsage } from './openrouter.js';
-process.stderr.write('  ✓ ./openrouter.js\n');
-
-process.stderr.write('  → ./prompt.js...\n');
 import {
   buildReviewPrompt,
   buildNoViolationsMessage,
@@ -73,13 +68,7 @@ import {
   formatComplexityValue,
   formatThresholdValue,
 } from './prompt.js';
-process.stderr.write('  ✓ ./prompt.js\n');
-
-process.stderr.write('  → ./format.js...\n');
 import { formatDeltaValue } from './format.js';
-process.stderr.write('  ✓ ./format.js\n');
-
-process.stderr.write('  → ./delta.js...\n');
 import {
   calculateDeltas,
   calculateDeltaSummary,
@@ -88,9 +77,8 @@ import {
   logDeltaSummary,
   type ComplexityDelta,
 } from './delta.js';
-process.stderr.write('  ✓ ./delta.js\n');
 
-process.stderr.write('✅ [DEBUG] All imports loaded\n');
+console.error('✅ [DEBUG] All imports loaded');
 
 type ReviewStyle = 'line' | 'summary';
 
