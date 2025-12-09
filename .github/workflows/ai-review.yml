@@ -62,13 +62,11 @@ jobs:
           echo '{"type":"commonjs"}' > packages/action/dist/package.json
           cat packages/action/dist/package.json
       
-      - name: Link core package for action
+      - name: Setup action dependencies
         run: |
-          # Link core globally
-          cd packages/core && npm link
-          # Link it in the root (where action runs from)
-          npm link @liendev/core
-          # Verify resolution
+          # Install action's dependencies (including workspace link to @liendev/core)
+          cd packages/action && npm install
+          # Verify core is accessible
           node -e "console.log('Core resolves to:', require.resolve('@liendev/core'))"
       
       - name: Run AI Code Review
