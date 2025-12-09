@@ -70,6 +70,11 @@ export async function indexCommand(options: { watch?: boolean; verbose?: boolean
       }
       
       spinner.text = text;
+      
+      // Force immediate update on next tick to avoid event loop blocking
+      setImmediate(() => {
+        spinner.render();
+      });
     };
     
     // Rotate witty messages every 8 seconds

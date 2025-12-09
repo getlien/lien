@@ -292,7 +292,7 @@ async function processFileForIndexing(
   file: string,
   batchProcessor: ChunkBatchProcessor,
   indexConfig: IndexingConfig,
-  processedCount: { value: number },
+  progressTracker: { incrementFiles: () => void },
   _verbose: boolean
 ): Promise<boolean> {
   try {
@@ -308,17 +308,17 @@ async function processFileForIndexing(
     });
 
     if (chunks.length === 0) {
-      processedCount.value++;
+      progressTracker.incrementFiles();
       return false;
     }
 
     // Add chunks to batch processor (handles mutex internally)
     await batchProcessor.addChunks(chunks, file, stats.mtimeMs);
-    processedCount.value++;
+    progressTracker.incrementFiles();
 
     return true;
   } catch {
-    processedCount.value++;
+    progressTracker.incrementFiles();
     return false;
   }
 }
@@ -405,7 +405,7 @@ async function performFullIndex(
         file,
         batchProcessor,
         indexConfig,
-        processedCount,
+        progressTracker,
         options.verbose ?? false
       ))
     );
