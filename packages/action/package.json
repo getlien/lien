@@ -4,7 +4,6 @@
   "private": true,
   "description": "GitHub Action for AI-assisted code review using Lien complexity analysis",
   "main": "dist/index.js",
-  "type": "module",
   "scripts": {
     "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
     "typecheck": "tsc --noEmit",
