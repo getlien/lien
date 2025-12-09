@@ -57,6 +57,11 @@ jobs:
         if: steps.cache-build.outputs.cache-hit != 'true'
         run: npm run build -w @liendev/action
       
+      - name: Ensure dist/package.json is CommonJS
+        run: |
+          echo '{"type":"commonjs"}' > packages/action/dist/package.json
+          cat packages/action/dist/package.json
+      
       - name: Run AI Code Review
         uses: ./packages/action
         with:
