@@ -7,5 +7,6 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
-  noExternal: ['@liendev/core'],  // Bundle core into the output
+  // Don't bundle @liendev/core - let it resolve at runtime like CLI does
+  // This avoids bundling native modules (tree-sitter, lancedb)
 });
