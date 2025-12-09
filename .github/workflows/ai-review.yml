@@ -31,7 +31,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
       
-      # Cache the built packages to avoid rebuilding every run
+      # Cache node_modules and built packages
       - name: Cache builds
         id: cache-build
         uses: actions/cache@v4
@@ -41,10 +41,10 @@ jobs:
             packages/action/dist
             node_modules
             packages/*/node_modules
-          key: lien-build-v2-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/*/package.json', 'packages/*/tsconfig.json', 'packages/core/src/**/*', 'packages/action/src/**/*') }}
-          restore-keys: |
-            lien-build-${{ runner.os }}-
+          # v3 cache key - includes all relevant files, no partial restore
+          key: lien-build-v3-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/*/package.json', 'packages/*/tsconfig.json', 'packages/core/src/**/*', 'packages/action/src/**/*') }}
       
+      # Always install deps if not cached - native modules need to be present
       - name: Install dependencies
         if: steps.cache-build.outputs.cache-hit != 'true'
         run: npm ci

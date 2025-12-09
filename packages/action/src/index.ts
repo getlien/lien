@@ -8,27 +8,6 @@
  * 4. Posting comment to PR (line-specific or summary)
  */
 
-// Debug: Write to stderr so it always appears
-console.error('🔍 [DEBUG] Action file loaded');
-console.error(`🔍 [DEBUG] Node: ${process.version}, CWD: ${process.cwd()}`);
-
-// Try to resolve @liendev/core and catch any errors
-console.error('🔍 [DEBUG] Resolving @liendev/core...');
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const corePath = require.resolve('@liendev/core');
-  console.error(`🔍 [DEBUG] Core path: ${corePath}`);
-} catch (err) {
-  console.error('❌ [DEBUG] Failed to resolve @liendev/core!');
-  console.error(`   Error: ${err instanceof Error ? err.message : String(err)}`);
-  if (err instanceof Error && err.stack) {
-    console.error(`   Stack: ${err.stack}`);
-  }
-  process.exit(1);
-}
-
-console.error('🔍 [DEBUG] Loading imports...');
-
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import { execSync } from 'child_process';
@@ -43,7 +22,6 @@ import {
   type ComplexityViolation,
   type LienConfig,
 } from '@liendev/core';
-console.error('✅ [DEBUG] Core loaded');
 
 import {
   getPRContext,
@@ -77,8 +55,6 @@ import {
   logDeltaSummary,
   type ComplexityDelta,
 } from './delta.js';
-
-console.error('✅ [DEBUG] All imports loaded');
 
 type ReviewStyle = 'line' | 'summary';
 
@@ -813,12 +789,7 @@ async function postSummaryReview(
 }
 
 // Run the action
-process.stderr.write('🎬 [DEBUG] Calling run()...\n');
 run().catch((error) => {
-  process.stderr.write(`❌ [DEBUG] Uncaught error: ${error}\n`);
-  if (error instanceof Error && error.stack) {
-    process.stderr.write(`Stack: ${error.stack}\n`);
-  }
   core.setFailed(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

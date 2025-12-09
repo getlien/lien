@@ -912,23 +912,6 @@ async function generateLineComments(violations, codeSnippets, apiKey, model) {
 }
 
 // src/index.ts
-console.error("\u{1F50D} [DEBUG] Action file loaded");
-console.error(`\u{1F50D} [DEBUG] Node: ${process.version}, CWD: ${process.cwd()}`);
-console.error("\u{1F50D} [DEBUG] Resolving @liendev/core...");
-try {
-  const corePath = require.resolve("@liendev/core");
-  console.error(`\u{1F50D} [DEBUG] Core path: ${corePath}`);
-} catch (err) {
-  console.error("\u274C [DEBUG] Failed to resolve @liendev/core!");
-  console.error(`   Error: ${err instanceof Error ? err.message : String(err)}`);
-  if (err instanceof Error && err.stack) {
-    console.error(`   Stack: ${err.stack}`);
-  }
-  process.exit(1);
-}
-console.error("\u{1F50D} [DEBUG] Loading imports...");
-console.error("\u2705 [DEBUG] Core loaded");
-console.error("\u2705 [DEBUG] All imports loaded");
 function getConfig() {
   const reviewStyle = core4.getInput("review_style") || "line";
   const enableDeltaTracking = core4.getInput("enable_delta_tracking") === "true";
@@ -1394,14 +1377,7 @@ async function postSummaryReview(octokit, prContext, report, codeSnippets, confi
   await postPRComment(octokit, prContext, comment);
   core4.info("Successfully posted AI review summary comment");
 }
-process.stderr.write("\u{1F3AC} [DEBUG] Calling run()...\n");
 run().catch((error2) => {
-  process.stderr.write(`\u274C [DEBUG] Uncaught error: ${error2}
-`);
-  if (error2 instanceof Error && error2.stack) {
-    process.stderr.write(`Stack: ${error2.stack}
-`);
-  }
   core4.setFailed(error2 instanceof Error ? error2.message : String(error2));
   process.exit(1);
 });

@@ -27,14 +27,10 @@
  * ```
  */
 
-// Debug: trace core module loading
-process.stderr.write('    [core] Loading @liendev/core...\n');
-
 // =============================================================================
 // INDEXING
 // =============================================================================
 
-process.stderr.write('    [core] → indexer...\n');
 export { indexCodebase } from './indexer/index.js';
 export type { IndexingOptions, IndexingProgress, IndexingResult } from './indexer/index.js';
 export { ManifestManager } from './indexer/manifest.js';
@@ -43,24 +39,20 @@ export { chunkFile } from './indexer/chunker.js';
 export { scanCodebase, scanCodebaseWithFrameworks, detectLanguage } from './indexer/scanner.js';
 export { indexSingleFile, indexMultipleFiles, normalizeToRelativePath } from './indexer/incremental.js';
 export { extractSymbols } from './indexer/symbol-extractor.js';
-process.stderr.write('    [core] ✓ indexer\n');
 
 // =============================================================================
 // EMBEDDINGS
 // =============================================================================
 
-process.stderr.write('    [core] → embeddings...\n');
 export { LocalEmbeddings } from './embeddings/local.js';
 export { CachedEmbeddings } from './embeddings/cache.js';
 export type { EmbeddingService } from './embeddings/types.js';
 export { EMBEDDING_DIMENSION, EMBEDDING_DIMENSIONS } from './embeddings/types.js';
-process.stderr.write('    [core] ✓ embeddings\n');
 
 // =============================================================================
 // VECTOR DATABASE
 // =============================================================================
 
-process.stderr.write('    [core] → vectordb (lancedb)...\n');
 export { VectorDB } from './vectordb/lancedb.js';
 export type { VectorDBInterface, SearchResult } from './vectordb/types.js';
 export { calculateRelevance } from './vectordb/relevance.js';
