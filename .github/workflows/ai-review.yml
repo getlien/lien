@@ -64,8 +64,11 @@ jobs:
       
       - name: Link core package for action
         run: |
+          # Link core globally
           cd packages/core && npm link
-          cd ../action && npm link @liendev/core
+          # Link it in the root (where action runs from)
+          npm link @liendev/core
+          # Verify resolution
           node -e "console.log('Core resolves to:', require.resolve('@liendev/core'))"
       
       - name: Run AI Code Review
