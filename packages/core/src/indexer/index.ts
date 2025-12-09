@@ -18,6 +18,8 @@ import { configService } from '../config/service.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { isLegacyConfig, isModernConfig, type LienConfig, type LegacyLienConfig } from '../config/schema.js';
 import { ManifestManager } from './manifest.js';
+import { isGitAvailable, isGitRepo } from '../git/utils.js';
+import { GitStateTracker } from '../git/tracker.js';
 import { detectChanges } from './change-detector.js';
 import { indexMultipleFiles } from './incremental.js';
 import type { EmbeddingService } from '../embeddings/types.js';
@@ -123,9 +125,6 @@ async function updateGitState(
   vectorDB: VectorDB,
   manifest: ManifestManager
 ): Promise<void> {
-  const { isGitAvailable, isGitRepo } = await import('../git/utils.js');
-  const { GitStateTracker } = await import('../git/tracker.js');
-  
   const gitAvailable = await isGitAvailable();
   const isRepo = await isGitRepo(rootDir);
   
