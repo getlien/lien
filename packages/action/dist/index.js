@@ -1,50 +1,19 @@
-
-process.stdout.write('🔍 [STARTUP] Action bundle loading...\n');
-process.stdout.write('🔍 [STARTUP] Node: ' + process.version + '\n');
-process.stdout.write('🔍 [STARTUP] CWD: ' + process.cwd() + '\n');
-try {
-  const corePath = require.resolve('@liendev/core');
-  process.stdout.write('🔍 [STARTUP] Core path: ' + corePath + '\n');
-  process.stdout.write('🔍 [STARTUP] About to require @liendev/core...\n');
-} catch (e) {
-  process.stdout.write('❌ [STARTUP] Core not found: ' + e.message + '\n');
-  process.exit(1);
-}
-
-"use strict";
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-
 // src/index.ts
-var core4 = __toESM(require("@actions/core"));
-var fs = __toESM(require("fs"));
-var import_child_process = require("child_process");
-var import_collect3 = __toESM(require("collect.js"));
-var import_core = require("@liendev/core");
+import * as core4 from "@actions/core";
+import * as fs from "fs";
+import { execSync } from "child_process";
+import collect3 from "collect.js";
+import {
+  indexCodebase,
+  VectorDB,
+  ComplexityAnalyzer,
+  loadConfig,
+  createDefaultConfig
+} from "@liendev/core";
 
 // src/github.ts
-var core = __toESM(require("@actions/core"));
-var github = __toESM(require("@actions/github"));
+import * as core from "@actions/core";
+import * as github from "@actions/github";
 function getPRContext() {
   const { context } = github;
   if (!context.payload.pull_request) {
@@ -244,20 +213,20 @@ async function getPRDiffLines(octokit, prContext) {
 }
 
 // src/openrouter.ts
-var core3 = __toESM(require("@actions/core"));
+import * as core3 from "@actions/core";
 
 // src/prompt.ts
-var import_collect2 = __toESM(require("collect.js"));
+import collect2 from "collect.js";
 
 // src/delta.ts
-var core2 = __toESM(require("@actions/core"));
-var import_collect = __toESM(require("collect.js"));
+import * as core2 from "@actions/core";
+import collect from "collect.js";
 function getFunctionKey(filepath, symbolName, metricType) {
   return `${filepath}::${symbolName}::${metricType}`;
 }
 function buildComplexityMap(report, files) {
   if (!report) return /* @__PURE__ */ new Map();
-  const entries = (0, import_collect.default)(files).map((filepath) => ({ filepath, fileData: report.files[filepath] })).filter(({ fileData }) => !!fileData).flatMap(
+  const entries = collect(files).map((filepath) => ({ filepath, fileData: report.files[filepath] })).filter(({ fileData }) => !!fileData).flatMap(
     ({ filepath, fileData }) => fileData.violations.map((violation) => [
       getFunctionKey(filepath, violation.symbolName, violation.metricType),
       { complexity: violation.complexity, violation }
@@ -289,7 +258,7 @@ function calculateDeltas(baseReport, headReport, changedFiles) {
   const baseMap = buildComplexityMap(baseReport, changedFiles);
   const headMap = buildComplexityMap(headReport, changedFiles);
   const seenBaseKeys = /* @__PURE__ */ new Set();
-  const headDeltas = (0, import_collect.default)(Array.from(headMap.entries())).map(([key, headData]) => {
+  const headDeltas = collect(Array.from(headMap.entries())).map(([key, headData]) => {
     const baseData = baseMap.get(key);
     if (baseData) seenBaseKeys.add(key);
     const baseComplexity = baseData?.complexity ?? null;
@@ -298,7 +267,7 @@ function calculateDeltas(baseReport, headReport, changedFiles) {
     const severity = determineSeverity(baseComplexity, headComplexity, delta, headData.violation.threshold);
     return createDelta(headData.violation, baseComplexity, headComplexity, severity);
   }).all();
-  const deletedDeltas = (0, import_collect.default)(Array.from(baseMap.entries())).filter(([key]) => !seenBaseKeys.has(key)).map(([_, baseData]) => createDelta(baseData.violation, baseData.complexity, null, "deleted")).all();
+  const deletedDeltas = collect(Array.from(baseMap.entries())).filter(([key]) => !seenBaseKeys.has(key)).map(([_, baseData]) => createDelta(baseData.violation, baseData.complexity, null, "deleted")).all();
   const deltas = [...headDeltas, ...deletedDeltas];
   deltas.sort((a, b) => {
     const severityOrder = { error: 0, warning: 1, new: 2, improved: 3, deleted: 4 };
@@ -310,7 +279,7 @@ function calculateDeltas(baseReport, headReport, changedFiles) {
   return deltas;
 }
 function calculateDeltaSummary(deltas) {
-  const collection = (0, import_collect.default)(deltas);
+  const collection = collect(deltas);
   const categorized = collection.map((d) => {
     if (d.severity === "improved") return "improved";
     if (d.severity === "new") return "new";
@@ -383,7 +352,7 @@ function createDeltaKey(v) {
 function buildDeltaMap(deltas) {
   if (!deltas) return /* @__PURE__ */ new Map();
   return new Map(
-    (0, import_collect2.default)(deltas).map((d) => [createDeltaKey(d), d]).all()
+    collect2(deltas).map((d) => [createDeltaKey(d), d]).all()
   );
 }
 function getMetricLabel(metricType) {
@@ -516,7 +485,7 @@ Format your response as a PR review comment with:
 Be concise but actionable. Focus on the highest-impact improvements.`;
 }
 function groupDeltasByMetric(deltas) {
-  return (0, import_collect2.default)(deltas).groupBy("metricType").map((group) => group.sum("delta")).all();
+  return collect2(deltas).groupBy("metricType").map((group) => group.sum("delta")).all();
 }
 function buildMetricBreakdownForDisplay(deltaByMetric) {
   const metricOrder = ["cyclomatic", "cognitive", "halstead_effort", "halstead_bugs"];
@@ -526,7 +495,7 @@ function buildMetricBreakdownForDisplay(deltaByMetric) {
     halstead_effort: "\u23F1\uFE0F",
     halstead_bugs: "\u{1F41B}"
   };
-  return (0, import_collect2.default)(metricOrder).map((metricType) => {
+  return collect2(metricOrder).map((metricType) => {
     const metricDelta = deltaByMetric[metricType] || 0;
     const emoji = emojiMap[metricType] || "\u{1F4CA}";
     const sign = metricDelta >= 0 ? "+" : "";
@@ -657,10 +626,10 @@ function buildDescriptionBadge(report, deltaSummary, deltas) {
   const status = determineStatus(report, deltaSummary);
   let metricTable = "";
   if (report && report.summary.totalViolations > 0) {
-    const byMetric = (0, import_collect2.default)(Object.values(report.files)).flatMap((f) => f.violations).countBy("metricType").all();
-    const deltaByMetric = deltas ? (0, import_collect2.default)(deltas).groupBy("metricType").map((group) => group.sum("delta")).all() : {};
+    const byMetric = collect2(Object.values(report.files)).flatMap((f) => f.violations).countBy("metricType").all();
+    const deltaByMetric = deltas ? collect2(deltas).groupBy("metricType").map((group) => group.sum("delta")).all() : {};
     const metricOrder = ["cyclomatic", "cognitive", "halstead_effort", "halstead_bugs"];
-    const rows = (0, import_collect2.default)(metricOrder).filter((metricType) => byMetric[metricType] > 0).map((metricType) => {
+    const rows = collect2(metricOrder).filter((metricType) => byMetric[metricType] > 0).map((metricType) => {
       const emoji = getMetricEmoji(metricType);
       const label = getMetricLabel(metricType);
       const count = byMetric[metricType];
@@ -1027,11 +996,11 @@ async function runComplexityAnalysis(files, threshold) {
     const rootDir = process.cwd();
     let config;
     try {
-      config = await (0, import_core.loadConfig)(rootDir);
+      config = await loadConfig(rootDir);
       core4.info("Loaded lien config");
     } catch {
       core4.info("No lien config found, using defaults");
-      config = (0, import_core.createDefaultConfig)();
+      config = createDefaultConfig();
     }
     const thresholdNum = parseInt(threshold, 10);
     config.complexity = {
@@ -1046,14 +1015,14 @@ async function runComplexityAnalysis(files, threshold) {
       }
     };
     core4.info("\u{1F4C1} Indexing codebase...");
-    await (0, import_core.indexCodebase)({
+    await indexCodebase({
       rootDir,
       config
     });
     core4.info("\u2713 Indexing complete");
-    const vectorDB = await import_core.VectorDB.load(rootDir);
+    const vectorDB = await VectorDB.load(rootDir);
     core4.info("\u{1F50D} Analyzing complexity...");
-    const analyzer = new import_core.ComplexityAnalyzer(vectorDB, config);
+    const analyzer = new ComplexityAnalyzer(vectorDB, config);
     const report = await analyzer.analyze(files);
     core4.info(`\u2713 Found ${report.summary.totalViolations} violations`);
     return report;
@@ -1086,12 +1055,12 @@ async function prepareViolationsForReview(report, octokit, prContext) {
 async function analyzeBaseBranch(baseSha, filesToAnalyze, threshold) {
   try {
     core4.info(`Checking out base branch at ${baseSha.substring(0, 7)}...`);
-    const currentHead = (0, import_child_process.execSync)("git rev-parse HEAD", { encoding: "utf-8" }).trim();
-    (0, import_child_process.execSync)(`git checkout --force ${baseSha}`, { stdio: "pipe" });
+    const currentHead = execSync("git rev-parse HEAD", { encoding: "utf-8" }).trim();
+    execSync(`git checkout --force ${baseSha}`, { stdio: "pipe" });
     core4.info("\u2713 Base branch checked out");
     core4.info("Analyzing base branch complexity...");
     const baseReport = await runComplexityAnalysis(filesToAnalyze, threshold);
-    (0, import_child_process.execSync)(`git checkout --force ${currentHead}`, { stdio: "pipe" });
+    execSync(`git checkout --force ${currentHead}`, { stdio: "pipe" });
     core4.info("\u2713 Restored to HEAD");
     if (baseReport) {
       core4.info(`Base branch: ${baseReport.summary.totalViolations} violations`);
@@ -1100,8 +1069,8 @@ async function analyzeBaseBranch(baseSha, filesToAnalyze, threshold) {
   } catch (error2) {
     core4.warning(`Failed to analyze base branch: ${error2}`);
     try {
-      const currentHead = (0, import_child_process.execSync)("git rev-parse HEAD", { encoding: "utf-8" }).trim();
-      (0, import_child_process.execSync)(`git checkout --force ${currentHead}`, { stdio: "pipe" });
+      const currentHead = execSync("git rev-parse HEAD", { encoding: "utf-8" }).trim();
+      execSync(`git checkout --force ${currentHead}`, { stdio: "pipe" });
     } catch (restoreError) {
       core4.warning(`Failed to restore HEAD: ${restoreError}`);
     }
@@ -1192,11 +1161,11 @@ function createDeltaKey2(v) {
 function buildDeltaMap2(deltas) {
   if (!deltas) return /* @__PURE__ */ new Map();
   return new Map(
-    (0, import_collect3.default)(deltas).map((d) => [createDeltaKey2(d), d]).all()
+    collect3(deltas).map((d) => [createDeltaKey2(d), d]).all()
   );
 }
 function buildLineComments(violationsWithLines, aiComments, deltaMap) {
-  return (0, import_collect3.default)(violationsWithLines).filter(({ violation }) => aiComments.has(violation)).map(({ violation, commentLine }) => {
+  return collect3(violationsWithLines).filter(({ violation }) => aiComments.has(violation)).map(({ violation, commentLine }) => {
     const comment = aiComments.get(violation);
     const delta = deltaMap.get(createDeltaKey2(violation));
     const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : "";
@@ -1269,11 +1238,11 @@ function formatCostDisplay(usage) {
 - Tokens: ${usage.totalTokens.toLocaleString()} ($${usage.cost.toFixed(4)})` : "";
 }
 function groupDeltasByMetric2(deltas) {
-  return (0, import_collect3.default)(deltas).groupBy("metricType").map((group) => group.sum("delta")).all();
+  return collect3(deltas).groupBy("metricType").map((group) => group.sum("delta")).all();
 }
 function buildMetricBreakdown(deltaByMetric) {
   const metricOrder = ["cyclomatic", "cognitive", "halstead_effort", "halstead_bugs"];
-  return (0, import_collect3.default)(metricOrder).map((metricType) => {
+  return collect3(metricOrder).map((metricType) => {
     const metricDelta = deltaByMetric[metricType] || 0;
     const emoji = getMetricEmoji2(metricType);
     const sign = metricDelta >= 0 ? "+" : "";

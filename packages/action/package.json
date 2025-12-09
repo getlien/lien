@@ -2,6 +2,7 @@
   "name": "@liendev/action",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "GitHub Action for AI-assisted code review using Lien complexity analysis",
   "main": "dist/index.js",
   "scripts": {
