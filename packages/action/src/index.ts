@@ -13,10 +13,20 @@ process.stderr.write('🔍 [DEBUG] Action file loaded\n');
 process.stderr.write(`🔍 [DEBUG] Node: ${process.version}, CWD: ${process.cwd()}\n`);
 process.stderr.write('🔍 [DEBUG] Loading imports...\n');
 
+process.stderr.write('  → @actions/core...\n');
 import * as core from '@actions/core';
+process.stderr.write('  ✓ @actions/core\n');
+
+process.stderr.write('  → fs, child_process...\n');
 import * as fs from 'fs';
 import { execSync } from 'child_process';
+process.stderr.write('  ✓ fs, child_process\n');
+
+process.stderr.write('  → collect.js...\n');
 import collect from 'collect.js';
+process.stderr.write('  ✓ collect.js\n');
+
+process.stderr.write('  → @liendev/core...\n');
 import {
   indexCodebase,
   VectorDB,
@@ -27,6 +37,9 @@ import {
   type ComplexityViolation,
   type LienConfig,
 } from '@liendev/core';
+process.stderr.write('  ✓ @liendev/core\n');
+
+process.stderr.write('  → ./github.js...\n');
 import {
   getPRContext,
   getPRChangedFiles,
@@ -39,7 +52,13 @@ import {
   type LineComment,
   type PRContext,
 } from './github.js';
+process.stderr.write('  ✓ ./github.js\n');
+
+process.stderr.write('  → ./openrouter.js...\n');
 import { generateReview, generateLineComments, resetTokenUsage, getTokenUsage } from './openrouter.js';
+process.stderr.write('  ✓ ./openrouter.js\n');
+
+process.stderr.write('  → ./prompt.js...\n');
 import {
   buildReviewPrompt,
   buildNoViolationsMessage,
@@ -50,7 +69,13 @@ import {
   formatComplexityValue,
   formatThresholdValue,
 } from './prompt.js';
+process.stderr.write('  ✓ ./prompt.js\n');
+
+process.stderr.write('  → ./format.js...\n');
 import { formatDeltaValue } from './format.js';
+process.stderr.write('  ✓ ./format.js\n');
+
+process.stderr.write('  → ./delta.js...\n');
 import {
   calculateDeltas,
   calculateDeltaSummary,
@@ -59,6 +84,7 @@ import {
   logDeltaSummary,
   type ComplexityDelta,
 } from './delta.js';
+process.stderr.write('  ✓ ./delta.js\n');
 
 process.stderr.write('✅ [DEBUG] All imports loaded\n');
 
