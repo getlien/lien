@@ -24,7 +24,10 @@ export interface MigrationResult {
  * - Migration status checking
  */
 export class MigrationManager {
-  constructor(private readonly rootDir: string = process.cwd()) {}
+  constructor(
+    private readonly rootDir: string = process.cwd(),
+    private readonly targetVersion: string = CURRENT_CONFIG_VERSION
+  ) {}
   
   /**
    * Get the config file path
@@ -96,8 +99,8 @@ export class MigrationManager {
       let migrated = false;
       
       if (migrationNeeded) {
-        console.log(chalk.blue(`🔄 Migrating config from v0.2.0 to v${CURRENT_CONFIG_VERSION}...`));
-        upgradedConfig = migrateConfig(existingConfig);
+        console.log(chalk.blue(`🔄 Migrating config from v0.2.0 to v${this.targetVersion}...`));
+        upgradedConfig = migrateConfig(existingConfig, this.targetVersion);
         migrated = true;
       } else {
         // Just merge with defaults for current version configs

@@ -50,13 +50,13 @@ To track complexity changes vs the base branch (⬆️ worse, ⬇️ better, �
 ```yaml
 steps:
   - uses: actions/checkout@v4
-    with:
+        with:
       fetch-depth: 0  # Need full git history
-  
-  - name: AI Code Review
+      
+      - name: AI Code Review
     uses: getlien/lien-action@v1
-    with:
-      openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
       enable_delta_tracking: true  # Automatically compare with base branch
 ```
 

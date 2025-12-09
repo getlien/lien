@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { 
@@ -18,6 +19,10 @@ import { showCompactBanner } from '../utils/banner.js';
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Get CLI package version for config version
+const require = createRequire(import.meta.url);
+const { version: CLI_VERSION } = require('../../package.json');
 
 export interface InitOptions {
   upgrade?: boolean;
@@ -41,7 +46,7 @@ export async function initCommand(options: InitOptions = {}) {
     
     // Handle upgrade scenario
     if (configExists && options.upgrade) {
-      const migrationManager = new MigrationManager(rootDir);
+      const migrationManager = new MigrationManager(rootDir, CLI_VERSION);
       await migrationManager.upgradeInteractive();
       return;
     }
@@ -410,7 +415,7 @@ async function promptAndInstallCursorRules(rootDir: string, options: InitOptions
 
 /** Write config file and show success message */
 async function writeConfigAndShowSuccess(rootDir: string, frameworks: FrameworkInstance[]) {
-  const config: LienConfig = { ...defaultConfig, frameworks };
+  const config: LienConfig = { ...defaultConfig, version: CLI_VERSION, frameworks };
   const configPath = path.join(rootDir, '.lien.config.json');
   await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
   
