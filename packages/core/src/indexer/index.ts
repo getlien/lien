@@ -226,6 +226,12 @@ async function tryIncrementalIndex(
   const totalDeleted = changes.deleted.length;
   
   if (totalChanges === 0 && totalDeleted === 0) {
+    options.onProgress?.({
+      phase: 'complete',
+      message: 'Index is up to date - no changes detected',
+      filesTotal: 0,
+      filesProcessed: 0,
+    });
     return {
       success: true,
       filesIndexed: 0,
@@ -259,6 +265,13 @@ async function tryIncrementalIndex(
   
   // Update git state
   await updateGitState(rootDir, vectorDB, manifest);
+  
+  options.onProgress?.({
+    phase: 'complete',
+    message: `Updated ${indexedCount} file${indexedCount !== 1 ? 's' : ''}, removed ${totalDeleted}`,
+    filesTotal: totalChanges + totalDeleted,
+    filesProcessed: indexedCount + totalDeleted,
+  });
   
   return {
     success: true,
