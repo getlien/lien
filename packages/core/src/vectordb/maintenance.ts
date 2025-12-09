@@ -26,19 +26,28 @@ export async function clear(
   }
   
   try {
-    // Drop table if it exists
-    if (table) {
-      await db.dropTable(tableName);
-    }
-    
-    // Clean up the .lance directory if dbPath provided
-    // This prevents corrupted state after dropTable
+    // Clean up the .lance directory directly
+    // This is more reliable than dropTable which can have locking issues
     if (dbPath) {
       const lanceDir = path.join(dbPath, `${tableName}.lance`);
       try {
         await fs.rm(lanceDir, { recursive: true, force: true });
-      } catch {
-        // Ignore errors - directory may not exist
+      } catch (err: any) {
+        // If deletion fails, try dropping the table first
+        if (err?.code === 'ENOTEMPTY' || err?.message?.includes('not empty')) {
+          try {
+            await db.dropTable(tableName);
+            // Try deletion again after dropping
+            await fs.rm(lanceDir, { recursive: true, force: true });
+          } catch {
+            // Ignore - best effort cleanup
+          }
+        }
+      }
+    } else {
+      // No dbPath provided, just drop the table
+      if (table) {
+        await db.dropTable(tableName);
       }
     }
   } catch (error) {
