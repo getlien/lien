@@ -1,7 +1,28 @@
 /**
  * OpenRouter API client for LLM access
  */
-import type { ComplexityViolation } from './types.js';
+import type { ComplexityViolation } from '@liendev/core';
+/**
+ * OpenRouter API response structure
+ * Cost is returned in usage.cost when usage accounting is enabled
+ * See: https://openrouter.ai/docs/guides/guides/usage-accounting
+ */
+export interface OpenRouterResponse {
+    id: string;
+    choices: Array<{
+        message: {
+            role: string;
+            content: string;
+        };
+        finish_reason: string;
+    }>;
+    usage?: {
+        prompt_tokens: number;
+        completion_tokens: number;
+        total_tokens: number;
+        cost?: number;
+    };
+}
 /**
  * Token usage tracking
  */

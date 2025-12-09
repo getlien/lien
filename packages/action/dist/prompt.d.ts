@@ -1,7 +1,9 @@
 /**
  * Prompt builder for AI code review
  */
-import type { ComplexityReport, ComplexityViolation, PRContext, ComplexityDelta, DeltaSummary } from './types.js';
+import type { ComplexityReport, ComplexityViolation } from '@liendev/core';
+import type { PRContext } from './github.js';
+import type { ComplexityDelta, DeltaSummary } from './delta.js';
 /**
  * Get human-readable label for a metric type
  */
@@ -32,7 +34,7 @@ export interface TokenUsageInfo {
 /**
  * Format the AI review as a GitHub comment
  */
-export declare function formatReviewComment(aiReview: string, report: ComplexityReport, isFallback?: boolean, tokenUsage?: TokenUsageInfo, deltaSummary?: DeltaSummary | null): string;
+export declare function formatReviewComment(aiReview: string, report: ComplexityReport, isFallback?: boolean, tokenUsage?: TokenUsageInfo, deltas?: ComplexityDelta[] | null): string;
 /**
  * Get the key for a violation (for code snippet mapping)
  */

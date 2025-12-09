@@ -2,7 +2,33 @@
  * Complexity delta calculation
  * Compares base branch complexity to head branch complexity
  */
-import type { ComplexityReport, ComplexityDelta, DeltaSummary } from './types.js';
+import type { ComplexityReport } from '@liendev/core';
+/**
+ * Complexity delta for a single function/method
+ */
+export interface ComplexityDelta {
+    filepath: string;
+    symbolName: string;
+    symbolType: string;
+    startLine: number;
+    metricType: string;
+    baseComplexity: number | null;
+    headComplexity: number | null;
+    delta: number;
+    threshold: number;
+    severity: 'warning' | 'error' | 'improved' | 'new' | 'deleted';
+}
+/**
+ * Summary of complexity changes in a PR
+ */
+export interface DeltaSummary {
+    totalDelta: number;
+    improved: number;
+    degraded: number;
+    newFunctions: number;
+    deletedFunctions: number;
+    unchanged: number;
+}
 /**
  * Calculate complexity deltas between base and head
  */
