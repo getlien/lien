@@ -48,9 +48,13 @@ jobs:
         if: steps.cache-build.outputs.cache-hit != 'true'
         run: npm ci
       
+      - name: Build Core (required by Action)
+        if: steps.cache-build.outputs.cache-hit != 'true'
+        run: npm run build -w @liendev/core
+      
       - name: Build Action
         if: steps.cache-build.outputs.cache-hit != 'true'
-        run: npm run build -w packages/action
+        run: npm run build -w @liendev/action
       
       - name: Run AI Code Review
         uses: ./packages/action
