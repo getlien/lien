@@ -21,7 +21,7 @@
     "build": "npm run build -w @liendev/core && npm run build -w packages/cli",
     "build:core": "npm run build -w @liendev/core",
     "dev": "npm run dev -w packages/cli",
-    "typecheck": "npm run typecheck -w packages/cli",
+    "typecheck": "npm run build -w @liendev/core && npm run typecheck -w packages/cli",
     "clean": "rm -rf packages/*/dist",
     "release": "./scripts/release.sh",
     "docs:dev": "npm run docs:dev -w packages/site",
