@@ -8,10 +8,10 @@
  * 4. Posting comment to PR (line-specific or summary)
  */
 
-// Debug: Log immediately when file loads
-console.log('🔍 Action file loaded, Node version:', process.version);
-console.log('🔍 Current directory:', process.cwd());
-console.log('🔍 Loading imports...');
+// Debug: Write to stderr so it always appears
+process.stderr.write('🔍 [DEBUG] Action file loaded\n');
+process.stderr.write(`🔍 [DEBUG] Node: ${process.version}, CWD: ${process.cwd()}\n`);
+process.stderr.write('🔍 [DEBUG] Loading imports...\n');
 
 import * as core from '@actions/core';
 import * as fs from 'fs';
@@ -60,7 +60,7 @@ import {
   type ComplexityDelta,
 } from './delta.js';
 
-console.log('✅ All imports loaded successfully');
+process.stderr.write('✅ [DEBUG] All imports loaded\n');
 
 type ReviewStyle = 'line' | 'summary';
 
@@ -795,8 +795,12 @@ async function postSummaryReview(
 }
 
 // Run the action
-console.log('🎬 Calling run() function...');
+process.stderr.write('🎬 [DEBUG] Calling run()...\n');
 run().catch((error) => {
-  console.error('❌ Uncaught error in run():', error);
+  process.stderr.write(`❌ [DEBUG] Uncaught error: ${error}\n`);
+  if (error instanceof Error && error.stack) {
+    process.stderr.write(`Stack: ${error.stack}\n`);
+  }
+  core.setFailed(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });
