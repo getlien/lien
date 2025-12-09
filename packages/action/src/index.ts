@@ -8,6 +8,11 @@
  * 4. Posting comment to PR (line-specific or summary)
  */
 
+// Debug: Log immediately when file loads
+console.log('🔍 Action file loaded, Node version:', process.version);
+console.log('🔍 Current directory:', process.cwd());
+console.log('🔍 Loading imports...');
+
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import { execSync } from 'child_process';
@@ -54,6 +59,8 @@ import {
   logDeltaSummary,
   type ComplexityDelta,
 } from './delta.js';
+
+console.log('✅ All imports loaded successfully');
 
 type ReviewStyle = 'line' | 'summary';
 
@@ -788,4 +795,8 @@ async function postSummaryReview(
 }
 
 // Run the action
-run();
+console.log('🎬 Calling run() function...');
+run().catch((error) => {
+  console.error('❌ Uncaught error in run():', error);
+  process.exit(1);
+});

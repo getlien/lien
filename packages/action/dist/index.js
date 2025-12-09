@@ -34395,6 +34395,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+// Debug: Log immediately when file loads
+console.log('🔍 Action file loaded, Node version:', process.version);
+console.log('🔍 Current directory:', process.cwd());
+console.log('🔍 Loading imports...');
 const core = __importStar(__nccwpck_require__(7184));
 const fs = __importStar(__nccwpck_require__(9896));
 const child_process_1 = __nccwpck_require__(5317);
@@ -34405,6 +34409,7 @@ const openrouter_js_1 = __nccwpck_require__(7729);
 const prompt_js_1 = __nccwpck_require__(5274);
 const format_js_1 = __nccwpck_require__(6627);
 const delta_js_1 = __nccwpck_require__(816);
+console.log('✅ All imports loaded successfully');
 /**
  * Get action configuration from inputs
  */
@@ -34981,7 +34986,11 @@ async function postSummaryReview(octokit, prContext, report, codeSnippets, confi
     core.info('Successfully posted AI review summary comment');
 }
 // Run the action
-run();
+console.log('🎬 Calling run() function...');
+run().catch((error) => {
+    console.error('❌ Uncaught error in run():', error);
+    process.exit(1);
+});
 
 
 /***/ }),
