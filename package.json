@@ -12,10 +12,14 @@
     "url": "https://github.com/getlien/lien/issues"
   },
   "workspaces": [
-    "packages/*"
+    "packages/core",
+    "packages/cli",
+    "packages/action",
+    "packages/site"
   ],
   "scripts": {
-    "build": "npm run build -w packages/cli",
+    "build": "npm run build -w @liendev/core && npm run build -w packages/cli",
+    "build:core": "npm run build -w @liendev/core",
     "dev": "npm run dev -w packages/cli",
     "typecheck": "npm run typecheck -w packages/cli",
     "clean": "rm -rf packages/*/dist",

@@ -1,0 +1,65 @@
+{
+  "name": "@liendev/core",
+  "version": "0.1.0",
+  "description": "Core indexing and analysis engine for Lien",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lancedb/lancedb": "^0.17.0",
+    "@xenova/transformers": "2.17.0",
+    "collect.js": "^4.36.1",
+    "glob": "10.3.0",
+    "ignore": "5.3.0",
+    "p-limit": "5.0.0",
+    "tree-sitter": "^0.25.0",
+    "tree-sitter-javascript": "0.23.1",
+    "tree-sitter-php": "^0.24.2",
+    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-typescript": "0.23.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^4.0.8"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getlien/lien.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://lien.dev",
+  "bugs": {
+    "url": "https://github.com/getlien/lien/issues"
+  },
+  "keywords": [
+    "semantic-search",
+    "code-analysis",
+    "embeddings",
+    "vector-search",
+    "complexity-analysis"
+  ],
+  "author": "Alf Henderson",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=22.21.0"
+  }
+}
