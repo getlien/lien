@@ -67,10 +67,18 @@ jobs:
           # Create symlink in root node_modules for @liendev/core (action runs from root)
           mkdir -p node_modules/@liendev
           ln -sf ../../packages/core node_modules/@liendev/core
-          # Verify core is accessible from root
-          node -e "console.log('Core resolves to:', require.resolve('@liendev/core'))"
-          # Also verify from action directory
-          cd packages/action && node -e "console.log('From action dir:', require.resolve('@liendev/core'))"
+          
+          # Verify core can be LOADED (not just resolved) - this tests require(esm)
+          echo "Testing require('@liendev/core')..."
+          node -e "
+            console.log('Node version:', process.version);
+            console.log('Resolving @liendev/core...');
+            const path = require.resolve('@liendev/core');
+            console.log('Path:', path);
+            console.log('Loading @liendev/core...');
+            const core = require('@liendev/core');
+            console.log('Loaded! Exports:', Object.keys(core).slice(0, 5).join(', '), '...');
+          " || echo "❌ Failed to load @liendev/core"
       
       - name: Run AI Code Review
         env:
