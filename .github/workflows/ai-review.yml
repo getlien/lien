@@ -64,11 +64,13 @@ jobs:
       
       - name: Link core package for action
         run: |
-          mkdir -p packages/action/node_modules/@liendev
-          ln -sf ../../../core packages/action/node_modules/@liendev/core
-          ls -la packages/action/node_modules/@liendev/
+          cd packages/core && npm link
+          cd ../action && npm link @liendev/core
+          node -e "console.log('Core resolves to:', require.resolve('@liendev/core'))"
       
       - name: Run AI Code Review
+        env:
+          ACTIONS_STEP_DEBUG: true
         uses: ./packages/action
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}

@@ -351,8 +351,15 @@ async function analyzeBaseBranch(
  */
 async function run(): Promise<void> {
   try {
+    core.info('🚀 Starting Lien AI Code Review...');
+    core.info(`Node version: ${process.version}`);
+    core.info(`Working directory: ${process.cwd()}`);
+    
     const setup = setupPRAnalysis();
-    if (!setup) return;
+    if (!setup) {
+      core.info('⚠️ Setup returned null, exiting gracefully');
+      return;
+    }
     const { config, prContext, octokit } = setup;
 
     const filesToAnalyze = await getFilesToAnalyze(octokit, prContext);
@@ -417,7 +424,15 @@ async function run(): Promise<void> {
     core.setOutput('errors', report.summary.bySeverity.error);
     core.setOutput('warnings', report.summary.bySeverity.warning);
   } catch (error) {
-    core.setFailed(error instanceof Error ? error.message : 'An unexpected error occurred');
+    const message = error instanceof Error ? error.message : 'An unexpected error occurred';
+    const stack = error instanceof Error ? error.stack : '';
+    
+    core.error(`Action failed: ${message}`);
+    if (stack) {
+      core.error(`Stack trace:\n${stack}`);
+    }
+    
+    core.setFailed(message);
   }
 }
 

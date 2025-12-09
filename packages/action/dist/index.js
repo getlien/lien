@@ -34635,9 +34635,14 @@ async function analyzeBaseBranch(baseSha, filesToAnalyze, threshold) {
  */
 async function run() {
     try {
+        core.info('🚀 Starting Lien AI Code Review...');
+        core.info(`Node version: ${process.version}`);
+        core.info(`Working directory: ${process.cwd()}`);
         const setup = setupPRAnalysis();
-        if (!setup)
+        if (!setup) {
+            core.info('⚠️ Setup returned null, exiting gracefully');
             return;
+        }
         const { config, prContext, octokit } = setup;
         const filesToAnalyze = await getFilesToAnalyze(octokit, prContext);
         if (filesToAnalyze.length === 0) {
@@ -34693,7 +34698,13 @@ async function run() {
         core.setOutput('warnings', report.summary.bySeverity.warning);
     }
     catch (error) {
-        core.setFailed(error instanceof Error ? error.message : 'An unexpected error occurred');
+        const message = error instanceof Error ? error.message : 'An unexpected error occurred';
+        const stack = error instanceof Error ? error.stack : '';
+        core.error(`Action failed: ${message}`);
+        if (stack) {
+            core.error(`Stack trace:\n${stack}`);
+        }
+        core.setFailed(message);
     }
 }
 /**
