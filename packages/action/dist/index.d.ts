@@ -8,3 +8,4 @@
  * 4. Posting comment to PR (line-specific or summary)
  */
 export {};
+//# sourceMappingURL=index.d.ts.map

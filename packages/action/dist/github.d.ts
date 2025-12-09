@@ -62,3 +62,4 @@ export declare function parsePatchLines(patch: string): Set<number>;
  */
 export declare function getPRDiffLines(octokit: Octokit, prContext: PRContext): Promise<Map<string, Set<number>>>;
 export {};
+//# sourceMappingURL=github.d.ts.map

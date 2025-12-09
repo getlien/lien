@@ -64,3 +64,4 @@ export declare function mapCommentsToViolations(commentsMap: Record<string, stri
  * - Single API call = faster execution
  */
 export declare function generateLineComments(violations: ComplexityViolation[], codeSnippets: Map<string, string>, apiKey: string, model: string): Promise<Map<ComplexityViolation, string>>;
+//# sourceMappingURL=openrouter.d.ts.map

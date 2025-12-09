@@ -49,3 +49,4 @@ export declare function formatSeverityEmoji(severity: ComplexityDelta['severity'
  * Log delta summary
  */
 export declare function logDeltaSummary(summary: DeltaSummary): void;
+//# sourceMappingURL=delta.d.ts.map

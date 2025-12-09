@@ -60,3 +60,4 @@ export declare function buildLineSummaryComment(report: ComplexityReport, prCont
  * - Fewer API calls = faster + cheaper
  */
 export declare function buildBatchedCommentsPrompt(violations: ComplexityViolation[], codeSnippets: Map<string, string>): string;
+//# sourceMappingURL=prompt.d.ts.map

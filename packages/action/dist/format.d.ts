@@ -11,3 +11,4 @@ export declare function formatTime(minutes: number): string;
  * - others: rounded integer
  */
 export declare function formatDeltaValue(metricType: string, delta: number): string;
+//# sourceMappingURL=format.d.ts.map
