@@ -1,15 +1,15 @@
 
-console.log('🔍 [STARTUP] Action bundle loading...');
-console.log('🔍 [STARTUP] Node:', process.version);
-console.log('🔍 [STARTUP] CWD:', process.cwd());
+process.stdout.write('🔍 [STARTUP] Action bundle loading...\n');
+process.stdout.write('🔍 [STARTUP] Node: ' + process.version + '\n');
+process.stdout.write('🔍 [STARTUP] CWD: ' + process.cwd() + '\n');
 try {
   const corePath = require.resolve('@liendev/core');
-  console.log('🔍 [STARTUP] Core path:', corePath);
+  process.stdout.write('🔍 [STARTUP] Core path: ' + corePath + '\n');
+  process.stdout.write('🔍 [STARTUP] About to require @liendev/core...\n');
 } catch (e) {
-  console.log('❌ [STARTUP] Core not found:', e.message);
+  process.stdout.write('❌ [STARTUP] Core not found: ' + e.message + '\n');
   process.exit(1);
 }
-console.log('🔍 [STARTUP] Loading modules...');
 
 "use strict";
 var __create = Object.create;
