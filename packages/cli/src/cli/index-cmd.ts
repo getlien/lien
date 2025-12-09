@@ -27,11 +27,16 @@ export async function indexCommand(options: { watch?: boolean; verbose?: boolean
     }
     
     // Create spinner for progress with witty messages
-    const spinner = ora('Starting indexing...').start();
+    // Use faster interval (30ms) for smoother progress updates
+    const spinner = ora({
+      text: 'Starting indexing...',
+      interval: 30, // Faster refresh rate for smoother progress
+    }).start();
     let completedViaProgress = false;
     let wittyMessage = getIndexingMessage();
     let messageRotationInterval: NodeJS.Timeout | undefined;
-    let spinnerUpdateInterval: NodeJS.Timeout | undefined;
+    let lastUpdateTime = 0;
+    let updateCount = 0;
     
     // Track progress state
     let currentProgress: IndexingProgress = {
@@ -41,8 +46,21 @@ export async function indexCommand(options: { watch?: boolean; verbose?: boolean
       filesProcessed: 0,
     };
     
-    // Update spinner every 200ms with witty messages
-    const updateSpinner = () => {
+    // Update spinner with adaptive throttling
+    const updateSpinner = (forceUpdate = false) => {
+      const now = Date.now();
+      updateCount++;
+      
+      // First 20 updates: always show (no throttle) for initial feedback
+      // After that: throttle to 20 updates/sec (50ms) to prevent flickering
+      const shouldThrottle = updateCount > 20;
+      const throttleMs = 50;
+      
+      if (!forceUpdate && shouldThrottle && now - lastUpdateTime < throttleMs) {
+        return;
+      }
+      lastUpdateTime = now;
+      
       let text = '';
       
       if (currentProgress.filesTotal && currentProgress.filesProcessed !== undefined) {
@@ -61,11 +79,8 @@ export async function indexCommand(options: { watch?: boolean; verbose?: boolean
       } else if (currentProgress.phase === 'initializing') {
         wittyMessage = getModelLoadingMessage();
       }
-      updateSpinner();
+      updateSpinner(true);
     }, 8000);
-    
-    // Update spinner display every 200ms
-    spinnerUpdateInterval = setInterval(updateSpinner, 200);
     
     const result = await indexCodebase({
       rootDir: process.cwd(),
@@ -87,7 +102,6 @@ export async function indexCommand(options: { watch?: boolean; verbose?: boolean
           completedViaProgress = true;
           // Stop intervals
           if (messageRotationInterval) clearInterval(messageRotationInterval);
-          if (spinnerUpdateInterval) clearInterval(spinnerUpdateInterval);
           
           let message = progress.message;
           if (progress.filesTotal && progress.filesProcessed !== undefined) {
@@ -95,6 +109,7 @@ export async function indexCommand(options: { watch?: boolean; verbose?: boolean
           }
           spinner.succeed(chalk.green(message));
         } else {
+          // Update on every progress callback (with throttling to prevent flickering)
           updateSpinner();
         }
       },
@@ -102,7 +117,6 @@ export async function indexCommand(options: { watch?: boolean; verbose?: boolean
     
     // Clean up intervals
     if (messageRotationInterval) clearInterval(messageRotationInterval);
-    if (spinnerUpdateInterval) clearInterval(spinnerUpdateInterval);
     
     // Ensure spinner is stopped if onProgress didn't mark it complete
     if (!completedViaProgress) {
