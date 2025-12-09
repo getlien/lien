@@ -41,7 +41,7 @@ jobs:
             packages/action/dist
             node_modules
             packages/*/node_modules
-          key: lien-build-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/core/src/**/*', 'packages/action/src/**/*') }}
+          key: lien-build-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/*/package.json', 'packages/core/src/**/*', 'packages/action/src/**/*') }}
           restore-keys: |
             lien-build-${{ runner.os }}-
       
