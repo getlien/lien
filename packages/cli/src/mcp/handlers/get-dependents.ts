@@ -2,7 +2,7 @@ import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetDependentsSchema } from '../schemas/index.js';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
-import type { SearchResult } from '../../vectordb/types.js';
+import type { SearchResult } from '@liendev/core';
 
 /**
  * Complexity metrics for a single dependent file.

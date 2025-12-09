@@ -3,11 +3,15 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import { configService } from '../config/service.js';
-import { isGitRepo, getCurrentBranch, getCurrentCommit } from '../git/utils.js';
-import { readVersionFile } from '../vectordb/version.js';
+import {
+  configService,
+  isGitRepo,
+  getCurrentBranch,
+  getCurrentCommit,
+  readVersionFile,
+  isModernConfig,
+} from '@liendev/core';
 import { showCompactBanner } from '../utils/banner.js';
-import { isModernConfig } from '../config/schema.js';
 
 export async function statusCommand() {
   const rootDir = process.cwd();

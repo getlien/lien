@@ -57,6 +57,7 @@ export { VectorDB } from './vectordb/lancedb.js';
 export type { VectorDBInterface, SearchResult } from './vectordb/types.js';
 export { calculateRelevance } from './vectordb/relevance.js';
 export type { RelevanceCategory } from './vectordb/relevance.js';
+export { readVersionFile, writeVersionFile } from './vectordb/version.js';
 
 // =============================================================================
 // COMPLEXITY ANALYSIS
@@ -76,6 +77,7 @@ import type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance }
 
 export { ConfigService, _configService as configService };
 export type { ValidationResult, MigrationResult } from './config/service.js';
+export { MigrationManager } from './config/migration-manager.js';
 export { _defaultConfig as defaultConfig, isLegacyConfig, isModernConfig };
 export type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance };
 
@@ -109,6 +111,8 @@ export {
   groupByConfidence,
   selectByPriority,
   resolveFrameworkConflicts,
+  runAllDetectors,
+  detectAllFrameworks,
   getDetectionSummary,
 } from './frameworks/detector-service.js';
 export type { DetectionWithPriority, GroupedDetections } from './frameworks/detector-service.js';

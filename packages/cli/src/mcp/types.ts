@@ -1,7 +1,4 @@
-import { SearchResult } from '../vectordb/types.js';
-import type { VectorDB } from '../vectordb/lancedb.js';
-import type { LocalEmbeddings } from '../embeddings/local.js';
-import type { LienConfig } from '../config/schema.js';
+import type { SearchResult, VectorDB, LocalEmbeddings, LienConfig } from '@liendev/core';
 
 /**
  * MCP log levels matching the protocol specification.

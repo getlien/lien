@@ -3,12 +3,17 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-import { defaultConfig, LienConfig, FrameworkInstance, FrameworkConfig } from '../config/schema.js';
+import { 
+  defaultConfig, 
+  LienConfig, 
+  FrameworkInstance, 
+  FrameworkConfig,
+  MigrationManager,
+  detectAllFrameworks,
+  getFrameworkDetector,
+} from '@liendev/core';
+import type { DetectionResult } from '@liendev/core';
 import { showCompactBanner } from '../utils/banner.js';
-import { MigrationManager } from '../config/migration-manager.js';
-import { detectAllFrameworks } from '../frameworks/detector-service.js';
-import { getFrameworkDetector } from '../frameworks/registry.js';
-import { DetectionResult } from '../frameworks/types.js';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);

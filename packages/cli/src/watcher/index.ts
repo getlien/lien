@@ -1,6 +1,7 @@
 import chokidar from 'chokidar';
 import path from 'path';
-import { LienConfig, LegacyLienConfig, isLegacyConfig, isModernConfig } from '../config/schema.js';
+import type { LienConfig, LegacyLienConfig } from '@liendev/core';
+import { isLegacyConfig, isModernConfig } from '@liendev/core';
 
 export interface FileChangeEvent {
   type: 'add' | 'change' | 'unlink';

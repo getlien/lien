@@ -9,16 +9,21 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { tools } from './tools.js';
 import { toolHandlers } from './handlers/index.js';
-import { VectorDB } from '../vectordb/lancedb.js';
-import { LocalEmbeddings } from '../embeddings/local.js';
-import { GitStateTracker } from '../git/tracker.js';
-import { indexMultipleFiles, indexSingleFile } from '../indexer/incremental.js';
-import { configService } from '../config/service.js';
-import { ManifestManager } from '../indexer/manifest.js';
-import { isGitAvailable, isGitRepo } from '../git/utils.js';
+import {
+  VectorDB,
+  LocalEmbeddings,
+  GitStateTracker,
+  indexMultipleFiles,
+  indexSingleFile,
+  configService,
+  ManifestManager,
+  isGitAvailable,
+  isGitRepo,
+  VERSION_CHECK_INTERVAL_MS,
+  LienError,
+  LienErrorCode,
+} from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
-import { VERSION_CHECK_INTERVAL_MS } from '../constants.js';
-import { LienError, LienErrorCode } from '../errors/index.js';
 import type { ToolContext, LogFn, LogLevel } from './types.js';
 
 // Get version from package.json dynamically
@@ -75,7 +80,7 @@ async function handleAutoIndexing(
     log('⏱️  This may take 5-20 minutes depending on project size');
 
     try {
-      const { indexCodebase } = await import('../indexer/index.js');
+      const { indexCodebase } = await import('@liendev/core');
       await indexCodebase({ rootDir, verbose: true });
       log('✅ Initial indexing complete!');
     } catch (error) {
