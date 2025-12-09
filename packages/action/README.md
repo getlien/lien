@@ -43,38 +43,33 @@ jobs:
 
 That's it! The action now bundles all dependencies and handles indexing automatically.
 
-### Advanced: Delta Tracking (Optional)
+### Delta Tracking
 
-To track complexity changes vs the base branch, you can generate a baseline complexity report:
+To track complexity changes vs the base branch (⬆️ worse, ⬇️ better, 🆕 new), enable delta tracking:
 
 ```yaml
 steps:
   - uses: actions/checkout@v4
     with:
-      fetch-depth: 0  # Need full history for base branch checkout
-  
-  # Optional: Generate baseline from base branch for delta tracking
-  - name: Get base complexity
-    run: |
-      git checkout ${{ github.event.pull_request.base.sha }}
-      npm install -g @liendev/lien
-      lien init --yes
-      lien index
-      lien complexity --format json --threshold 15 > /tmp/base-complexity.json || echo '{}' > /tmp/base-complexity.json
-      git checkout ${{ github.sha }}
+      fetch-depth: 0  # Need full git history
   
   - name: AI Code Review
     uses: getlien/lien-action@v1
     with:
       openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-      baseline_complexity: '/tmp/base-complexity.json'  # Enable delta tracking
+      enable_delta_tracking: true  # Automatically compare with base branch
 ```
 
-With delta tracking enabled, the action shows:
-- ⬆️ Functions that got more complex
-- ⬇️ Functions that got simpler
-- 🆕 New functions with violations
-- ✅ Unchanged pre-existing violations (not re-commented to reduce noise)
+The action will:
+1. Analyze complexity at base branch SHA
+2. Analyze complexity at PR head SHA
+3. Calculate and display deltas automatically
+
+With delta tracking enabled:
+- ⬆️ Functions that got more complex are highlighted
+- ⬇️ Functions that got simpler are celebrated
+- 🆕 New functions with violations are flagged
+- ✅ Unchanged pre-existing violations are summarized (not re-commented to reduce noise)
 
 ## Inputs
 

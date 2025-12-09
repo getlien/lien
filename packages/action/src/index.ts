@@ -10,6 +10,7 @@
 
 import * as core from '@actions/core';
 import * as fs from 'fs';
+import { execSync } from 'child_process';
 import collect from 'collect.js';
 import {
   indexCodebase,
@@ -65,7 +66,8 @@ interface ActionConfig {
   threshold: string;
   githubToken: string;
   reviewStyle: ReviewStyle;
-  baselineComplexityPath: string;
+  enableDeltaTracking: boolean;
+  baselineComplexityPath: string; // deprecated, kept for backwards compat
 }
 
 /**
@@ -73,6 +75,7 @@ interface ActionConfig {
  */
 function getConfig(): ActionConfig {
   const reviewStyle = core.getInput('review_style') || 'line';
+  const enableDeltaTracking = core.getInput('enable_delta_tracking') === 'true';
   
   return {
     openrouterApiKey: core.getInput('openrouter_api_key', { required: true }),
@@ -80,6 +83,7 @@ function getConfig(): ActionConfig {
     threshold: core.getInput('threshold') || '15',
     githubToken: core.getInput('github_token') || process.env.GITHUB_TOKEN || '',
     reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
+    enableDeltaTracking,
     baselineComplexityPath: core.getInput('baseline_complexity') || '',
   };
 }
@@ -299,6 +303,50 @@ async function prepareViolationsForReview(
 }
 
 /**
+ * Analyze base branch complexity for delta tracking
+ */
+async function analyzeBaseBranch(
+  baseSha: string,
+  filesToAnalyze: string[],
+  threshold: string
+): Promise<ComplexityReport | null> {
+  try {
+    core.info(`Checking out base branch at ${baseSha.substring(0, 7)}...`);
+    
+    // Save current HEAD
+    const currentHead = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
+    
+    // Checkout base branch
+    execSync(`git checkout --force ${baseSha}`, { stdio: 'pipe' });
+    core.info('✓ Base branch checked out');
+    
+    // Analyze base
+    core.info('Analyzing base branch complexity...');
+    const baseReport = await runComplexityAnalysis(filesToAnalyze, threshold);
+    
+    // Restore HEAD
+    execSync(`git checkout --force ${currentHead}`, { stdio: 'pipe' });
+    core.info('✓ Restored to HEAD');
+    
+    if (baseReport) {
+      core.info(`Base branch: ${baseReport.summary.totalViolations} violations`);
+    }
+    
+    return baseReport;
+  } catch (error) {
+    core.warning(`Failed to analyze base branch: ${error}`);
+    // Attempt to restore HEAD even if analysis failed
+    try {
+      const currentHead = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
+      execSync(`git checkout --force ${currentHead}`, { stdio: 'pipe' });
+    } catch (restoreError) {
+      core.warning(`Failed to restore HEAD: ${restoreError}`);
+    }
+    return null;
+  }
+}
+
+/**
  * Main action logic - orchestrates the review flow
  */
 async function run(): Promise<void> {
@@ -313,8 +361,17 @@ async function run(): Promise<void> {
       return;
     }
 
-    // Load baseline complexity for delta calculation
-    const baselineReport = loadBaselineComplexity(config.baselineComplexityPath);
+    // Get baseline complexity for delta calculation
+    let baselineReport: ComplexityReport | null = null;
+    
+    if (config.enableDeltaTracking) {
+      core.info('🔄 Delta tracking enabled - analyzing base branch...');
+      baselineReport = await analyzeBaseBranch(prContext.baseSha, filesToAnalyze, config.threshold);
+    } else if (config.baselineComplexityPath) {
+      // Backwards compatibility: support old baseline_complexity input
+      core.warning('baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.');
+      baselineReport = loadBaselineComplexity(config.baselineComplexityPath);
+    }
 
     const report = await runComplexityAnalysis(filesToAnalyze, config.threshold);
     if (!report) {
