@@ -5,7 +5,7 @@
   "description": "GitHub Action for AI-assisted code review using Lien complexity analysis",
   "main": "dist/index.js",
   "scripts": {
-    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
+    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt && echo '{\"type\":\"commonjs\"}' > dist/package.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
