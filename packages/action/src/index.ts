@@ -27,6 +27,10 @@ import collect from 'collect.js';
 process.stderr.write('  ✓ collect.js\n');
 
 process.stderr.write('  → @liendev/core...\n');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const coreModulePath = require.resolve('@liendev/core');
+process.stderr.write(`    [core path: ${coreModulePath}]\n`);
+
 import {
   indexCodebase,
   VectorDB,

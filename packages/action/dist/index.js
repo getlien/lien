@@ -60,6 +60,9 @@ process.stderr.write('  → collect.js...\n');
 const collect_js_1 = __importDefault(require("collect.js"));
 process.stderr.write('  ✓ collect.js\n');
 process.stderr.write('  → @liendev/core...\n');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const coreModulePath = require.resolve('@liendev/core');
+process.stderr.write(`    [core path: ${coreModulePath}]\n`);
 const core_1 = require("@liendev/core");
 process.stderr.write('  ✓ @liendev/core\n');
 process.stderr.write('  → ./github.js...\n');
