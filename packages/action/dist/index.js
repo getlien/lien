@@ -1,4 +1,20 @@
-console.log('🔍 [STARTUP] Action loading, Node:', process.version);
+
+console.log('🔍 [STARTUP] Action file starting...');
+console.log('🔍 [STARTUP] Node:', process.version);
+console.log('🔍 [STARTUP] CWD:', process.cwd());
+console.log('🔍 [STARTUP] About to load imports...');
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ [UNCAUGHT]', err.message);
+  console.error(err.stack);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ [UNHANDLED]', reason);
+  process.exit(1);
+});
+
 
 // src/index.ts
 import * as core4 from "@actions/core";
