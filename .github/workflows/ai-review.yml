@@ -31,7 +31,8 @@ jobs:
           node-version: '22'
           cache: 'npm'
       
-      # Cache node_modules and built packages
+      # Cache ONLY built packages, NOT node_modules
+      # Native modules must be rebuilt for Linux on each run
       - name: Cache builds
         id: cache-build
         uses: actions/cache@v4
@@ -39,14 +40,10 @@ jobs:
           path: |
             packages/core/dist
             packages/action/dist
-            node_modules
-            packages/*/node_modules
-          # v4 cache key - force clean build after node24 change
-          key: lien-build-v4-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/*/package.json', 'packages/*/tsconfig.json', 'packages/core/src/**/*', 'packages/action/src/**/*') }}
+          key: lien-dist-v1-${{ runner.os }}-${{ hashFiles('packages/core/src/**/*', 'packages/action/src/**/*') }}
       
-      # Always install deps if not cached - native modules need to be present
+      # ALWAYS run npm ci to get Linux-native modules
       - name: Install dependencies
-        if: steps.cache-build.outputs.cache-hit != 'true'
         run: npm ci
       
       - name: Build Core (required by Action)
