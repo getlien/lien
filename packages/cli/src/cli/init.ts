@@ -21,9 +21,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Get CLI package version for config version
-// Path is relative to bundled output at dist/index.js
+// Try bundled path first (dist/index.js → ../package.json), fallback to source path (src/cli/init.ts → ../../package.json)
 const require = createRequire(import.meta.url);
-const { version: CLI_VERSION } = require('../package.json');
+let CLI_VERSION: string;
+try {
+  CLI_VERSION = require('../package.json').version;
+} catch {
+  CLI_VERSION = require('../../package.json').version;
+}
 
 export interface InitOptions {
   upgrade?: boolean;
