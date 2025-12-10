@@ -62,6 +62,14 @@ jobs:
           echo '{"type":"module"}' > packages/action/dist/package.json
           cat packages/action/dist/package.json
       
+      # Install @liendev/core into node_modules so action can import it
+      # This is how CLI works - core is a dependency installed via npm
+      - name: Install @liendev/core for action
+        run: |
+          npm install ./packages/core
+          # Verify it's installed
+          node -e "const c = require('@liendev/core'); console.log('Core installed! Exports:', Object.keys(c).slice(0,5).join(', '), '...')"
+      
       - name: Run AI Code Review
         env:
           ACTIONS_STEP_DEBUG: true

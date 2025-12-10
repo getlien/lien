@@ -7,17 +7,6 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
-  // Bundle @liendev/core INTO the action (like we tried before)
-  // But keep native modules external - they'll be found via workflow's npm ci
-  noExternal: ['@liendev/core'],
-  external: [
-    // Native modules with .node binaries - must be loaded from node_modules
-    '@lancedb/lancedb',
-    'tree-sitter',
-    'tree-sitter-javascript',
-    'tree-sitter-typescript', 
-    'tree-sitter-python',
-    'tree-sitter-php',
-    '@xenova/transformers',
-  ],
+  // Don't bundle @liendev/core - it will be npm installed before action runs
+  // This matches how CLI works: core is a dependency installed via npm
 });
