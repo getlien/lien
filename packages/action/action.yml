@@ -43,6 +43,6 @@ outputs:
     description: 'Number of functions that got more complex'
 
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'
 
