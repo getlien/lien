@@ -1,3 +1,5 @@
+console.log('🔍 [STARTUP] Action loading, Node:', process.version);
+
 // src/index.ts
 import * as core4 from "@actions/core";
 import * as fs from "fs";

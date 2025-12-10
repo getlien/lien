@@ -9,4 +9,7 @@ export default defineConfig({
   clean: true,
   // Don't bundle @liendev/core - it will be npm installed before action runs
   // This matches how CLI works: core is a dependency installed via npm
+  banner: {
+    js: `console.log('🔍 [STARTUP] Action loading, Node:', process.version);`,
+  },
 });
