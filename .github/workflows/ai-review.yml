@@ -67,8 +67,8 @@ jobs:
       - name: Install @liendev/core for action
         run: |
           npm install ./packages/core
-          # Verify it's installed
-          node -e "const c = require('@liendev/core'); console.log('Core installed! Exports:', Object.keys(c).slice(0,5).join(', '), '...')"
+          # Verify it works with ESM import (not just require)
+          node --input-type=module -e "import * as c from '@liendev/core'; console.log('Core ESM import works! Exports:', Object.keys(c).slice(0,5).join(', '), '...')"
       
       - name: Run AI Code Review
         env:
