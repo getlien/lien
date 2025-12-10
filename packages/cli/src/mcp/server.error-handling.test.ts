@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { LienError, LienErrorCode } from '../errors/index.js';
+import { LienError, LienErrorCode } from '@liendev/core';
 
 describe('MCP Server Error Handling', () => {
   describe('Unknown tool error', () => {

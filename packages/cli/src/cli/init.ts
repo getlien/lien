@@ -1,18 +1,34 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-import { defaultConfig, LienConfig, FrameworkInstance, FrameworkConfig } from '../config/schema.js';
+import { 
+  defaultConfig, 
+  LienConfig, 
+  FrameworkInstance, 
+  FrameworkConfig,
+  MigrationManager,
+  detectAllFrameworks,
+  getFrameworkDetector,
+} from '@liendev/core';
+import type { DetectionResult } from '@liendev/core';
 import { showCompactBanner } from '../utils/banner.js';
-import { MigrationManager } from '../config/migration-manager.js';
-import { detectAllFrameworks } from '../frameworks/detector-service.js';
-import { getFrameworkDetector } from '../frameworks/registry.js';
-import { DetectionResult } from '../frameworks/types.js';
 
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Get CLI package version for config version
+// Try bundled path first (dist/index.js → ../package.json), fallback to source path (src/cli/init.ts → ../../package.json)
+const require = createRequire(import.meta.url);
+let CLI_VERSION: string;
+try {
+  CLI_VERSION = require('../package.json').version;
+} catch {
+  CLI_VERSION = require('../../package.json').version;
+}
 
 export interface InitOptions {
   upgrade?: boolean;
@@ -36,7 +52,7 @@ export async function initCommand(options: InitOptions = {}) {
     
     // Handle upgrade scenario
     if (configExists && options.upgrade) {
-      const migrationManager = new MigrationManager(rootDir);
+      const migrationManager = new MigrationManager(rootDir, CLI_VERSION);
       await migrationManager.upgradeInteractive();
       return;
     }
@@ -405,7 +421,7 @@ async function promptAndInstallCursorRules(rootDir: string, options: InitOptions
 
 /** Write config file and show success message */
 async function writeConfigAndShowSuccess(rootDir: string, frameworks: FrameworkInstance[]) {
-  const config: LienConfig = { ...defaultConfig, frameworks };
+  const config: LienConfig = { ...defaultConfig, version: CLI_VERSION, frameworks };
   const configPath = path.join(rootDir, '.lien.config.json');
   await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
   

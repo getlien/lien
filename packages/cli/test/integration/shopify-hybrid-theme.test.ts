@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
-import { detectAllFrameworks } from '../../src/frameworks/detector-service.js';
+import { detectAllFrameworks } from '@liendev/core';
 
 describe('Shopify + Node.js Hybrid Theme', () => {
   let testDir: string;

@@ -1,5 +1,5 @@
-import type { EmbeddingService } from '../../src/embeddings/types.js';
-import { EMBEDDING_DIMENSION } from '../../src/embeddings/types.js';
+import type { EmbeddingService } from '@liendev/core';
+import { EMBEDDING_DIMENSION } from '@liendev/core';
 
 /**
  * Mock embeddings service for testing.

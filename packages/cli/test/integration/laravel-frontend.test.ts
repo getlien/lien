@@ -3,10 +3,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { mkdtemp } from 'fs/promises';
 import os from 'os';
-import { laravelDetector } from '../../src/frameworks/laravel/detector.js';
-import { scanCodebaseWithFrameworks } from '../../src/indexer/scanner.js';
-import { detectLanguage } from '../../src/indexer/scanner.js';
-import type { LienConfig } from '../../src/config/schema.js';
+import { laravelDetector, scanCodebaseWithFrameworks, detectLanguage } from '@liendev/core';
+import type { LienConfig } from '@liendev/core';
 
 describe('Laravel Frontend Integration', () => {
   let testDir: string;

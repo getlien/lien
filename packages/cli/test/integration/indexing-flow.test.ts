@@ -1,9 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDir, cleanupTestDir, createTestFile } from '../helpers/test-db.js';
 import { MockEmbeddings } from '../helpers/mock-embeddings.js';
-import { VectorDB } from '../../src/vectordb/lancedb.js';
-import { scanCodebase } from '../../src/indexer/scanner.js';
-import { chunkFile } from '../../src/indexer/chunker.js';
+import { VectorDB, scanCodebase, chunkFile } from '@liendev/core';
 import fs from 'fs/promises';
 
 describe('Indexing Flow Integration', () => {

@@ -1,6 +1,6 @@
 import ora, { type Ora } from 'ora';
 import chalk from 'chalk';
-import { isLienError, getErrorMessage, getErrorStack } from '../errors/index.js';
+import { isLienError, getErrorMessage, getErrorStack } from '@liendev/core';
 
 /**
  * Options for setting up a CLI command

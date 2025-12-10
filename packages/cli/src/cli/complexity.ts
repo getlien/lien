@@ -1,11 +1,11 @@
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
-import { VectorDB } from '../vectordb/lancedb.js';
-import { configService } from '../config/service.js';
-import { ComplexityAnalyzer } from '../insights/complexity-analyzer.js';
-import { formatReport, OutputFormat } from '../insights/formatters/index.js';
-import type { LienConfig, LegacyLienConfig } from '../config/schema.js';
+import { VectorDB } from '@liendev/core';
+import { configService } from '@liendev/core';
+import { ComplexityAnalyzer } from '@liendev/core';
+import { formatReport } from '@liendev/core';
+import type { OutputFormat, LienConfig, LegacyLienConfig } from '@liendev/core';
 
 interface ComplexityOptions {
   files?: string[];

@@ -1,12 +1,19 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { complexityCommand } from './complexity.js';
-import * as lancedbModule from '../vectordb/lancedb.js';
-import { configService } from '../config/service.js';
-import { ChunkMetadata } from '../indexer/types.js';
+import * as coreModule from '@liendev/core';
+import type { ChunkMetadata } from '@liendev/core';
 
 // Mock dependencies
-vi.mock('../vectordb/lancedb.js');
-vi.mock('../config/service.js');
+vi.mock('@liendev/core', async () => {
+  const actual = await vi.importActual<typeof import('@liendev/core')>('@liendev/core');
+  return {
+    ...actual,
+    VectorDB: vi.fn(),
+    configService: {
+      load: vi.fn(),
+    },
+  };
+});
 
 describe('complexityCommand', () => {
   let mockVectorDB: any;
@@ -24,7 +31,7 @@ describe('complexityCommand', () => {
     };
     
     // Mock the VectorDB constructor to return our mock instance
-    vi.mocked(lancedbModule.VectorDB).mockImplementation(function(this: any) {
+    vi.mocked(coreModule.VectorDB).mockImplementation(function(this: any) {
       return mockVectorDB;
     } as any);
 
@@ -39,7 +46,7 @@ describe('complexityCommand', () => {
         },
       },
     };
-    vi.mocked(configService.load).mockResolvedValue(mockConfig);
+    vi.mocked(coreModule.configService.load).mockResolvedValue(mockConfig);
 
     // Spy on console
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

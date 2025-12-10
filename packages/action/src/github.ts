@@ -4,9 +4,20 @@
 
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import type { PRContext } from './types.js';
 
 type Octokit = ReturnType<typeof github.getOctokit>;
+
+/**
+ * PR context for review
+ */
+export interface PRContext {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  title: string;
+  baseSha: string;
+  headSha: string;
+}
 
 /**
  * Get PR context from the GitHub event

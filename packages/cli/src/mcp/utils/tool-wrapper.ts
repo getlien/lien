@@ -1,5 +1,5 @@
 import { ZodSchema, ZodError } from 'zod';
-import { LienError, LienErrorCode } from '../../errors/index.js';
+import { LienError, LienErrorCode } from '@liendev/core';
 
 /**
  * Wrap a tool handler with Zod validation and error handling.

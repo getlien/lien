@@ -3,7 +3,9 @@
  */
 
 import collect from 'collect.js';
-import type { ComplexityReport, ComplexityViolation, PRContext, ComplexityDelta, DeltaSummary } from './types.js';
+import type { ComplexityReport, ComplexityViolation } from '@liendev/core';
+import type { PRContext } from './github.js';
+import type { ComplexityDelta, DeltaSummary } from './delta.js';
 import { formatDelta } from './delta.js';
 import { formatTime, formatDeltaValue } from './format.js';
 

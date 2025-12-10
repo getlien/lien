@@ -1,9 +1,9 @@
 import collect from 'collect.js';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetComplexitySchema } from '../schemas/index.js';
-import { ComplexityAnalyzer } from '../../insights/complexity-analyzer.js';
+import { ComplexityAnalyzer } from '@liendev/core';
+import type { ComplexityViolation, FileComplexityData } from '@liendev/core';
 import type { ToolContext, MCPToolResult } from '../types.js';
-import type { ComplexityViolation, FileComplexityData } from '../../insights/types.js';
 
 /**
  * Transform a violation with file-level metadata for API response

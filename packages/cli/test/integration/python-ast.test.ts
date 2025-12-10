@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chunkFile } from '../../src/indexer/chunker.js';
+import { chunkFile } from '@liendev/core';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';

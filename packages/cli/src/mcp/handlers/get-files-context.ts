@@ -2,9 +2,7 @@ import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetFilesContextSchema } from '../schemas/index.js';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
-import type { SearchResult } from '../../vectordb/types.js';
-import type { LocalEmbeddings } from '../../embeddings/local.js';
-import type { VectorDB } from '../../vectordb/lancedb.js';
+import type { SearchResult, LocalEmbeddings, VectorDB } from '@liendev/core';
 
 /**
  * Maximum number of chunks to scan for test association analysis.
