@@ -41,8 +41,8 @@ jobs:
             packages/action/dist
             node_modules
             packages/*/node_modules
-          # v3 cache key - includes all relevant files, no partial restore
-          key: lien-build-v3-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/*/package.json', 'packages/*/tsconfig.json', 'packages/core/src/**/*', 'packages/action/src/**/*') }}
+          # v4 cache key - force clean build after node24 change
+          key: lien-build-v4-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/*/package.json', 'packages/*/tsconfig.json', 'packages/core/src/**/*', 'packages/action/src/**/*') }}
       
       # Always install deps if not cached - native modules need to be present
       - name: Install dependencies
