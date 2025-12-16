@@ -83,5 +83,9 @@
   },
   "engines": {
     "node": ">=22.21.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }
