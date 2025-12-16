@@ -21,8 +21,11 @@ inputs:
   review_style:
     description: 'Review style: "line" (default) for inline comments on all violations, "summary" for single comment only'
     default: 'line'
+  enable_delta_tracking:
+    description: 'Automatically track complexity changes vs base branch (requires fetch-depth: 0)'
+    default: 'false'
   baseline_complexity:
-    description: 'Path to baseline complexity JSON from base branch (for delta calculation)'
+    description: '[DEPRECATED] Path to baseline complexity JSON from base branch (use enable_delta_tracking instead)'
     default: ''
 
 outputs:
@@ -40,6 +43,6 @@ outputs:
     description: 'Number of functions that got more complex'
 
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'
 

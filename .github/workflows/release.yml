@@ -2,56 +2,37 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   release:
+    name: Release
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     permissions:
-      contents: write
-      id-token: write
-    
+      contents: write       # Create releases
+      pull-requests: write  # Create "Version Packages" PR
+      id-token: write       # OIDC for npm provenance
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: 22
           cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
       
-      - name: Update npm to support OIDC
-        run: npm install -g npm@latest
+      - run: npm ci
+      - run: npm run build
       
-      - name: Install dependencies
-        run: npm ci
-      
-      - name: Type check
-        run: npm run typecheck
-      
-      - name: Build
-        run: npm run build
-      
-      - name: Run unit and integration tests
-        run: npm test --workspace=packages/cli
-      
-      - name: Publish to npm (with OIDC trusted publishing)
-        run: |
-          VERSION=$(node -p "require('./packages/cli/package.json').version")
-          if npm view @liendev/lien@$VERSION version 2>/dev/null; then
-            echo "Version $VERSION already published, skipping..."
-          else
-            npm publish --workspace=packages/cli --access public
-          fi
-      
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: Create Release PR or Publish
+        uses: changesets/action@v1
         with:
-          generate_release_notes: true
+          publish: npm run release
+          version: npm run version
+          title: "chore: version packages"
+          commit: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+          # No NPM_TOKEN needed - uses OIDC provenance

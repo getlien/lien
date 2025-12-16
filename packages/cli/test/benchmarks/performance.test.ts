@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { VectorDB } from '../../src/vectordb/lancedb.js';
-import { LocalEmbeddings } from '../../src/embeddings/local.js';
-import { CachedEmbeddings } from '../../src/embeddings/cache.js';
-import { chunkFile } from '../../src/indexer/chunker.js';
-import { extractSymbols } from '../../src/indexer/symbol-extractor.js';
+import { VectorDB, LocalEmbeddings, CachedEmbeddings, chunkFile, extractSymbols } from '@liendev/core';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';

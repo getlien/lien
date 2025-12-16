@@ -1,4 +1,4 @@
-import { VectorDB } from '../../src/vectordb/lancedb.js';
+import { VectorDB } from '@liendev/core';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';

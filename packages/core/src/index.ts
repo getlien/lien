@@ -1,0 +1,189 @@
+/**
+ * @liendev/core - Lien's indexing and analysis engine
+ * 
+ * This is the public API for:
+ * - @liendev/cli (CLI commands)
+ * - @liendev/action (GitHub Action)
+ * - @liendev/cloud (Cloud workers)
+ * - Third-party integrations
+ * 
+ * @example
+ * ```typescript
+ * import {
+ *   indexCodebase,
+ *   VectorDB,
+ *   ComplexityAnalyzer,
+ *   loadConfig,
+ * } from '@liendev/core';
+ * 
+ * // Index a codebase
+ * const result = await indexCodebase({ rootDir: '/path/to/project' });
+ * 
+ * // Run complexity analysis
+ * const db = await VectorDB.load('/path/to/project');
+ * const config = await loadConfig('/path/to/project');
+ * const analyzer = new ComplexityAnalyzer(db, config);
+ * const report = await analyzer.analyze();
+ * ```
+ */
+
+// =============================================================================
+// INDEXING
+// =============================================================================
+
+export { indexCodebase } from './indexer/index.js';
+export type { IndexingOptions, IndexingProgress, IndexingResult } from './indexer/index.js';
+export { ManifestManager } from './indexer/manifest.js';
+export type { IndexManifest, FileEntry } from './indexer/manifest.js';
+export { chunkFile } from './indexer/chunker.js';
+export { scanCodebase, scanCodebaseWithFrameworks, detectLanguage } from './indexer/scanner.js';
+export { indexSingleFile, indexMultipleFiles, normalizeToRelativePath } from './indexer/incremental.js';
+export { extractSymbols } from './indexer/symbol-extractor.js';
+
+// =============================================================================
+// EMBEDDINGS
+// =============================================================================
+
+export { LocalEmbeddings } from './embeddings/local.js';
+export { CachedEmbeddings } from './embeddings/cache.js';
+export type { EmbeddingService } from './embeddings/types.js';
+export { EMBEDDING_DIMENSION, EMBEDDING_DIMENSIONS } from './embeddings/types.js';
+
+// =============================================================================
+// VECTOR DATABASE
+// =============================================================================
+
+export { VectorDB } from './vectordb/lancedb.js';
+export type { VectorDBInterface, SearchResult } from './vectordb/types.js';
+export { calculateRelevance } from './vectordb/relevance.js';
+export type { RelevanceCategory } from './vectordb/relevance.js';
+export { readVersionFile, writeVersionFile } from './vectordb/version.js';
+
+// =============================================================================
+// COMPLEXITY ANALYSIS
+// =============================================================================
+
+export { ComplexityAnalyzer } from './insights/complexity-analyzer.js';
+export { formatReport, formatTextReport, formatJsonReport, formatSarifReport } from './insights/formatters/index.js';
+export type { OutputFormat } from './insights/formatters/index.js';
+
+// =============================================================================
+// CONFIGURATION
+// =============================================================================
+
+import { ConfigService, configService as _configService } from './config/service.js';
+import { defaultConfig as _defaultConfig, isLegacyConfig, isModernConfig } from './config/schema.js';
+import type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance } from './config/schema.js';
+
+export { ConfigService, _configService as configService };
+export type { ValidationResult, MigrationResult } from './config/service.js';
+export { MigrationManager } from './config/migration-manager.js';
+export { migrateConfig, migrateConfigFile } from './config/migration.js';
+export { _defaultConfig as defaultConfig, isLegacyConfig, isModernConfig };
+export type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance };
+
+// Convenience re-exports
+export const loadConfig = (rootDir?: string) => _configService.load(rootDir);
+export const saveConfig = (rootDir: string, config: LienConfig) => 
+  _configService.save(rootDir, config);
+export const createDefaultConfig = () => _defaultConfig;
+
+// =============================================================================
+// GIT UTILITIES
+// =============================================================================
+
+export {
+  isGitRepo,
+  isGitAvailable,
+  getCurrentBranch,
+  getCurrentCommit,
+  getChangedFiles,
+  getChangedFilesBetweenCommits,
+} from './git/utils.js';
+
+export { GitStateTracker } from './git/tracker.js';
+export type { GitState } from './git/tracker.js';
+
+// =============================================================================
+// FRAMEWORK DETECTION
+// =============================================================================
+
+export {
+  groupByConfidence,
+  selectByPriority,
+  resolveFrameworkConflicts,
+  runAllDetectors,
+  detectAllFrameworks,
+  getDetectionSummary,
+} from './frameworks/detector-service.js';
+export type { DetectionWithPriority, GroupedDetections } from './frameworks/detector-service.js';
+export { frameworkDetectors, registerFramework, getFrameworkDetector } from './frameworks/registry.js';
+export type { FrameworkDetector, DetectionResult, DetectionOptions } from './frameworks/types.js';
+export { laravelDetector } from './frameworks/laravel/detector.js';
+export { nodejsDetector } from './frameworks/nodejs/detector.js';
+export { phpDetector } from './frameworks/php/detector.js';
+export { shopifyDetector } from './frameworks/shopify/detector.js';
+
+// =============================================================================
+// ERRORS
+// =============================================================================
+
+export {
+  LienError,
+  LienErrorCode,
+  ConfigError,
+  IndexingError,
+  EmbeddingError,
+  DatabaseError,
+  wrapError,
+  isLienError,
+  getErrorMessage,
+  getErrorStack,
+} from './errors/index.js';
+
+// =============================================================================
+// TYPES
+// =============================================================================
+
+export type {
+  // Chunks
+  ChunkMetadata,
+  CodeChunk,
+  ScanOptions,
+  
+  // Complexity
+  RiskLevel,
+  ComplexityMetricType,
+  HalsteadDetails,
+  ComplexityViolation,
+  FileComplexityData,
+  ComplexityReport,
+} from './types/index.js';
+
+export { RISK_ORDER } from './types/index.js';
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+export {
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_CONCURRENCY,
+  DEFAULT_EMBEDDING_BATCH_SIZE,
+  EMBEDDING_MICRO_BATCH_SIZE,
+  VECTOR_DB_MAX_BATCH_SIZE,
+  VECTOR_DB_MIN_BATCH_SIZE,
+  DEFAULT_EMBEDDING_MODEL,
+  DEFAULT_PORT,
+  VERSION_CHECK_INTERVAL_MS,
+  DEFAULT_GIT_POLL_INTERVAL_MS,
+  DEFAULT_DEBOUNCE_MS,
+  INDEX_FORMAT_VERSION,
+} from './constants.js';
+
+// =============================================================================
+// UTILITIES
+// =============================================================================
+
+export { Result, Ok, Err, isOk, isErr, unwrap, unwrapOr } from './utils/result.js';

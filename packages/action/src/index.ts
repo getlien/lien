@@ -10,7 +10,19 @@
 
 import * as core from '@actions/core';
 import * as fs from 'fs';
+import { execSync } from 'child_process';
 import collect from 'collect.js';
+import {
+  indexCodebase,
+  VectorDB,
+  ComplexityAnalyzer,
+  loadConfig,
+  createDefaultConfig,
+  type ComplexityReport,
+  type ComplexityViolation,
+  type LienConfig,
+} from '@liendev/core';
+
 import {
   getPRContext,
   getPRChangedFiles,
@@ -21,8 +33,8 @@ import {
   createOctokit,
   updatePRDescription,
   type LineComment,
+  type PRContext,
 } from './github.js';
-import { runComplexityAnalysis, filterAnalyzableFiles } from './complexity.js';
 import { generateReview, generateLineComments, resetTokenUsage, getTokenUsage } from './openrouter.js';
 import {
   buildReviewPrompt,
@@ -41,16 +53,30 @@ import {
   formatDelta,
   formatSeverityEmoji,
   logDeltaSummary,
+  type ComplexityDelta,
 } from './delta.js';
-import type { ActionConfig, ComplexityViolation, ComplexityReport, ComplexityDelta } from './types.js';
 
 type ReviewStyle = 'line' | 'summary';
 
 /**
+ * Action configuration
+ */
+interface ActionConfig {
+  openrouterApiKey: string;
+  model: string;
+  threshold: string;
+  githubToken: string;
+  reviewStyle: ReviewStyle;
+  enableDeltaTracking: boolean;
+  baselineComplexityPath: string; // deprecated, kept for backwards compat
+}
+
+/**
  * Get action configuration from inputs
  */
-function getConfig(): ActionConfig & { reviewStyle: ReviewStyle; baselineComplexityPath: string } {
+function getConfig(): ActionConfig {
   const reviewStyle = core.getInput('review_style') || 'line';
+  const enableDeltaTracking = core.getInput('enable_delta_tracking') === 'true';
   
   return {
     openrouterApiKey: core.getInput('openrouter_api_key', { required: true }),
@@ -58,6 +84,7 @@ function getConfig(): ActionConfig & { reviewStyle: ReviewStyle; baselineComplex
     threshold: core.getInput('threshold') || '15',
     githubToken: core.getInput('github_token') || process.env.GITHUB_TOKEN || '',
     reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
+    enableDeltaTracking,
     baselineComplexityPath: core.getInput('baseline_complexity') || '',
   };
 }
@@ -93,9 +120,8 @@ function loadBaselineComplexity(path: string): ComplexityReport | null {
   }
 }
 
-type PRContext = NonNullable<ReturnType<typeof getPRContext>>;
 type Octokit = ReturnType<typeof createOctokit>;
-type Config = ReturnType<typeof getConfig>;
+type Config = ActionConfig;
 
 /**
  * Setup and validate PR analysis prerequisites
@@ -121,6 +147,51 @@ function setupPRAnalysis(): { config: Config; prContext: PRContext; octokit: Oct
 }
 
 /**
+ * Filter files to only include those that can be analyzed
+ * (excludes non-code files, vendor, node_modules, etc.)
+ */
+function filterAnalyzableFiles(files: string[]): string[] {
+  const codeExtensions = new Set([
+    '.ts',
+    '.tsx',
+    '.js',
+    '.jsx',
+    '.py',
+    '.php',
+  ]);
+
+  const excludePatterns = [
+    /node_modules\//,
+    /vendor\//,
+    /dist\//,
+    /build\//,
+    /\.min\./,
+    /\.bundle\./,
+    /\.generated\./,
+    /package-lock\.json/,
+    /yarn\.lock/,
+    /pnpm-lock\.yaml/,
+  ];
+
+  return files.filter((file) => {
+    // Check extension
+    const ext = file.slice(file.lastIndexOf('.'));
+    if (!codeExtensions.has(ext)) {
+      return false;
+    }
+
+    // Check exclude patterns
+    for (const pattern of excludePatterns) {
+      if (pattern.test(file)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+/**
  * Get and filter files eligible for complexity analysis
  */
 async function getFilesToAnalyze(octokit: Octokit, prContext: PRContext): Promise<string[]> {
@@ -134,10 +205,73 @@ async function getFilesToAnalyze(octokit: Octokit, prContext: PRContext): Promis
 }
 
 /**
+ * Run complexity analysis using @liendev/core
+ */
+async function runComplexityAnalysis(
+  files: string[],
+  threshold: string
+): Promise<ComplexityReport | null> {
+  if (files.length === 0) {
+    core.info('No files to analyze');
+    return null;
+  }
+
+  try {
+    const rootDir = process.cwd();
+    
+    // Load or create config
+    let config: LienConfig;
+    try {
+      config = await loadConfig(rootDir);
+      core.info('Loaded lien config');
+    } catch {
+      core.info('No lien config found, using defaults');
+      config = createDefaultConfig();
+    }
+    
+    // Override threshold from action input
+    const thresholdNum = parseInt(threshold, 10);
+    config.complexity = {
+      ...config.complexity,
+      enabled: true,
+      thresholds: {
+        testPaths: thresholdNum,
+        mentalLoad: thresholdNum,
+        timeToUnderstandMinutes: 60,
+        estimatedBugs: 1.5,
+        ...config.complexity?.thresholds,
+      },
+    };
+
+    // Index the codebase
+    core.info('📁 Indexing codebase...');
+    await indexCodebase({
+      rootDir,
+      config,
+    });
+    core.info('✓ Indexing complete');
+
+    // Load the vector database
+    const vectorDB = await VectorDB.load(rootDir);
+
+    // Run complexity analysis
+    core.info('🔍 Analyzing complexity...');
+    const analyzer = new ComplexityAnalyzer(vectorDB, config);
+    const report = await analyzer.analyze(files);
+    core.info(`✓ Found ${report.summary.totalViolations} violations`);
+
+    return report;
+  } catch (error) {
+    core.error(`Failed to run complexity analysis: ${error}`);
+    return null;
+  }
+}
+
+/**
  * Sort violations by severity and collect code snippets
  */
 async function prepareViolationsForReview(
-  report: NonNullable<Awaited<ReturnType<typeof runComplexityAnalysis>>>,
+  report: ComplexityReport,
   octokit: Octokit,
   prContext: PRContext
 ): Promise<{ violations: ComplexityViolation[]; codeSnippets: Map<string, string> }> {
@@ -170,12 +304,63 @@ async function prepareViolationsForReview(
 }
 
 /**
+ * Analyze base branch complexity for delta tracking
+ */
+async function analyzeBaseBranch(
+  baseSha: string,
+  filesToAnalyze: string[],
+  threshold: string
+): Promise<ComplexityReport | null> {
+  try {
+    core.info(`Checking out base branch at ${baseSha.substring(0, 7)}...`);
+    
+    // Save current HEAD
+    const currentHead = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
+    
+    // Checkout base branch
+    execSync(`git checkout --force ${baseSha}`, { stdio: 'pipe' });
+    core.info('✓ Base branch checked out');
+    
+    // Analyze base
+    core.info('Analyzing base branch complexity...');
+    const baseReport = await runComplexityAnalysis(filesToAnalyze, threshold);
+    
+    // Restore HEAD
+    execSync(`git checkout --force ${currentHead}`, { stdio: 'pipe' });
+    core.info('✓ Restored to HEAD');
+    
+    if (baseReport) {
+      core.info(`Base branch: ${baseReport.summary.totalViolations} violations`);
+    }
+    
+    return baseReport;
+  } catch (error) {
+    core.warning(`Failed to analyze base branch: ${error}`);
+    // Attempt to restore HEAD even if analysis failed
+    try {
+      const currentHead = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
+      execSync(`git checkout --force ${currentHead}`, { stdio: 'pipe' });
+    } catch (restoreError) {
+      core.warning(`Failed to restore HEAD: ${restoreError}`);
+    }
+    return null;
+  }
+}
+
+/**
  * Main action logic - orchestrates the review flow
  */
 async function run(): Promise<void> {
   try {
+    core.info('🚀 Starting Lien AI Code Review...');
+    core.info(`Node version: ${process.version}`);
+    core.info(`Working directory: ${process.cwd()}`);
+    
     const setup = setupPRAnalysis();
-    if (!setup) return;
+    if (!setup) {
+      core.info('⚠️ Setup returned null, exiting gracefully');
+      return;
+    }
     const { config, prContext, octokit } = setup;
 
     const filesToAnalyze = await getFilesToAnalyze(octokit, prContext);
@@ -184,8 +369,17 @@ async function run(): Promise<void> {
       return;
     }
 
-    // Load baseline complexity for delta calculation
-    const baselineReport = loadBaselineComplexity(config.baselineComplexityPath);
+    // Get baseline complexity for delta calculation
+    let baselineReport: ComplexityReport | null = null;
+    
+    if (config.enableDeltaTracking) {
+      core.info('🔄 Delta tracking enabled - analyzing base branch...');
+      baselineReport = await analyzeBaseBranch(prContext.baseSha, filesToAnalyze, config.threshold);
+    } else if (config.baselineComplexityPath) {
+      // Backwards compatibility: support old baseline_complexity input
+      core.warning('baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.');
+      baselineReport = loadBaselineComplexity(config.baselineComplexityPath);
+    }
 
     const report = await runComplexityAnalysis(filesToAnalyze, config.threshold);
     if (!report) {
@@ -231,7 +425,15 @@ async function run(): Promise<void> {
     core.setOutput('errors', report.summary.bySeverity.error);
     core.setOutput('warnings', report.summary.bySeverity.warning);
   } catch (error) {
-    core.setFailed(error instanceof Error ? error.message : 'An unexpected error occurred');
+    const message = error instanceof Error ? error.message : 'An unexpected error occurred';
+    const stack = error instanceof Error ? error.stack : '';
+    
+    core.error(`Action failed: ${message}`);
+    if (stack) {
+      core.error(`Stack trace:\n${stack}`);
+    }
+    
+    core.setFailed(message);
   }
 }
 
@@ -428,7 +630,7 @@ function formatDeltaDisplay(deltas: ComplexityDelta[] | null): string {
  * Build review summary body for line comments mode
  */
 function buildReviewSummary(
-  report: NonNullable<Awaited<ReturnType<typeof runComplexityAnalysis>>>,
+  report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
   uncoveredNote: string
 ): string {
@@ -460,11 +662,11 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
  */
 async function postLineReview(
   octokit: ReturnType<typeof createOctokit>,
-  prContext: ReturnType<typeof getPRContext> & object,
-  report: Awaited<ReturnType<typeof runComplexityAnalysis>> & object,
+  prContext: PRContext,
+  report: ComplexityReport,
   violations: ComplexityViolation[],
   codeSnippets: Map<string, string>,
-  config: ReturnType<typeof getConfig>,
+  config: ActionConfig,
   deltas: ComplexityDelta[] | null = null
 ): Promise<void> {
   const diffLines = await getPRDiffLines(octokit, prContext);
@@ -564,10 +766,10 @@ async function postLineReview(
  */
 async function postSummaryReview(
   octokit: ReturnType<typeof createOctokit>,
-  prContext: ReturnType<typeof getPRContext> & object,
-  report: Awaited<ReturnType<typeof runComplexityAnalysis>> & object,
+  prContext: PRContext,
+  report: ComplexityReport,
   codeSnippets: Map<string, string>,
-  config: ReturnType<typeof getConfig>,
+  config: ActionConfig,
   isFallback = false,
   deltas: ComplexityDelta[] | null = null
 ): Promise<void> {
@@ -587,4 +789,7 @@ async function postSummaryReview(
 }
 
 // Run the action
-run();
+run().catch((error) => {
+  core.setFailed(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});

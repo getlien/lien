@@ -3,8 +3,30 @@
  */
 
 import * as core from '@actions/core';
-import type { OpenRouterResponse, ComplexityViolation } from './types.js';
+import type { ComplexityViolation } from '@liendev/core';
 import { buildBatchedCommentsPrompt } from './prompt.js';
+
+/**
+ * OpenRouter API response structure
+ * Cost is returned in usage.cost when usage accounting is enabled
+ * See: https://openrouter.ai/docs/guides/guides/usage-accounting
+ */
+export interface OpenRouterResponse {
+  id: string;
+  choices: Array<{
+    message: {
+      role: string;
+      content: string;
+    };
+    finish_reason: string;
+  }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cost?: number; // Returned when usage: { include: true } is set in request
+  };
+}
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
