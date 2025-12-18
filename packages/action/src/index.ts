@@ -682,6 +682,62 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
 }
 
 /**
+ * Partition violations into those with comment lines and those without
+ */
+function partitionViolationsByDiff(
+  violations: ComplexityViolation[],
+  diffLines: Map<string, Set<number>>
+): {
+  withLines: Array<{ violation: ComplexityViolation; commentLine: number }>;
+  uncovered: ComplexityViolation[];
+} {
+  const withLines: Array<{ violation: ComplexityViolation; commentLine: number }> = [];
+  const uncovered: ComplexityViolation[] = [];
+
+  for (const v of violations) {
+    const commentLine = findCommentLine(v, diffLines);
+    if (commentLine !== null) {
+      withLines.push({ violation: v, commentLine });
+    } else {
+      uncovered.push(v);
+    }
+  }
+
+  return { withLines, uncovered };
+}
+
+/**
+ * Filter violations to only new or degraded ones (skip unchanged pre-existing)
+ */
+function filterNewOrDegraded(
+  violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  deltaMap: Map<string, ComplexityDelta>
+): Array<{ violation: ComplexityViolation; commentLine: number }> {
+  return violationsWithLines.filter(({ violation }) => {
+    const key = createDeltaKey(violation);
+    const delta = deltaMap.get(key);
+    // Comment if: no baseline data, or new violation, or got worse
+    return !delta || delta.severity === 'new' || delta.delta > 0;
+  });
+}
+
+/**
+ * Get list of skipped (unchanged) violations
+ */
+function getSkippedViolations(
+  violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  deltaMap: Map<string, ComplexityDelta>
+): ComplexityViolation[] {
+  return violationsWithLines
+    .filter(({ violation }) => {
+      const key = createDeltaKey(violation);
+      const delta = deltaMap.get(key);
+      return delta && delta.severity !== 'new' && delta.delta === 0;
+    })
+    .map(v => v.violation);
+}
+
+/**
  * Post review with line-specific comments for all violations
  */
 async function postLineReview(
@@ -696,18 +752,8 @@ async function postLineReview(
   const diffLines = await getPRDiffLines(octokit, prContext);
   core.info(`Diff covers ${diffLines.size} files`);
 
-  // Partition violations into those we can comment on and those we can't
-  const violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }> = [];
-  const uncoveredViolations: ComplexityViolation[] = [];
-
-  for (const v of violations) {
-    const commentLine = findCommentLine(v, diffLines);
-    if (commentLine !== null) {
-      violationsWithLines.push({ violation: v, commentLine });
-    } else {
-      uncoveredViolations.push(v);
-    }
-  }
+  const { withLines: violationsWithLines, uncovered: uncoveredViolations } = 
+    partitionViolationsByDiff(violations, diffLines);
 
   core.info(
     `${violationsWithLines.length}/${violations.length} violations can have inline comments ` +
@@ -715,15 +761,7 @@ async function postLineReview(
   );
 
   const deltaMap = buildDeltaMap(deltas);
-
-  // Filter to only new or degraded violations (skip unchanged pre-existing ones)
-  // This saves LLM costs and prevents duplicate comments on each push
-  const newOrDegradedViolations = violationsWithLines.filter(({ violation }) => {
-    const key = createDeltaKey(violation);
-    const delta = deltaMap.get(key);
-    // Comment if: no baseline data, or new violation, or got worse
-    return !delta || delta.severity === 'new' || delta.delta > 0;
-  });
+  const newOrDegradedViolations = filterNewOrDegraded(violationsWithLines, deltaMap);
 
   const skippedCount = violationsWithLines.length - newOrDegradedViolations.length;
   if (skippedCount > 0) {
@@ -732,18 +770,9 @@ async function postLineReview(
 
   if (newOrDegradedViolations.length === 0) {
     core.info('No new or degraded violations to comment on');
-    // Still post a summary if there are violations, just no inline comments needed
     if (violationsWithLines.length > 0) {
-      // Only include actual uncovered violations (outside diff)
+      const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
       const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
-      // Build skipped note for unchanged violations in the diff (not "outside diff")
-      const skippedInDiff = violationsWithLines
-        .filter(({ violation }) => {
-          const key = createDeltaKey(violation);
-          const delta = deltaMap.get(key);
-          return delta && delta.severity !== 'new' && delta.delta === 0;
-        })
-        .map(v => v.violation);
       const skippedNote = buildSkippedNote(skippedInDiff);
       const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
       await postPRComment(octokit, prContext, summaryBody);
@@ -751,7 +780,6 @@ async function postLineReview(
     return;
   }
 
-  // Generate AI comments only for new/degraded violations
   const commentableViolations = newOrDegradedViolations.map(v => v.violation);
   core.info(`Generating AI comments for ${commentableViolations.length} new/degraded violations...`);
   const aiComments = await generateLineComments(
@@ -762,20 +790,10 @@ async function postLineReview(
     report
   );
 
-  // Build and post review (only for new/degraded)
   const lineComments = buildLineComments(newOrDegradedViolations, aiComments, deltaMap);
   core.info(`Built ${lineComments.length} line comments for new/degraded violations`);
 
-  // Include skipped (pre-existing unchanged) violations in skipped note
-  // Note: delta === 0 means truly unchanged; delta < 0 means improved (not "unchanged")
-  const skippedViolations = violationsWithLines
-    .filter(({ violation }) => {
-      const key = createDeltaKey(violation);
-      const delta = deltaMap.get(key);
-      return delta && delta.severity !== 'new' && delta.delta === 0;
-    })
-    .map(v => v.violation);
-
+  const skippedViolations = getSkippedViolations(violationsWithLines, deltaMap);
   const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
   const skippedNote = buildSkippedNote(skippedViolations);
   const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);

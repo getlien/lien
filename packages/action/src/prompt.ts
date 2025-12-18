@@ -141,6 +141,15 @@ function buildViolationsSummary(
 }
 
 /**
+ * Format a single delta change for display
+ */
+function formatDeltaChange(d: ComplexityDelta): string {
+  const from = d.baseComplexity ?? 'new';
+  const to = d.headComplexity ?? 'removed';
+  return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
+}
+
+/**
  * Build delta context section showing complexity changes
  */
 function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
@@ -151,12 +160,6 @@ function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
   const newFuncs = deltas.filter(d => d.severity === 'new');
   const deleted = deltas.filter(d => d.severity === 'deleted');
   
-  const formatChange = (d: ComplexityDelta): string => {
-    const from = d.baseComplexity ?? 'new';
-    const to = d.headComplexity ?? 'removed';
-    return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
-  };
-  
   const sections = [
     `\n## Complexity Changes (vs base branch)`,
     `- **Degraded**: ${degraded.length} function(s) got more complex`,
@@ -165,9 +168,15 @@ function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
     `- **Removed**: ${deleted.length} complex function(s) deleted`,
   ];
   
-  if (degraded.length > 0) sections.push(`\nFunctions that got worse:\n${degraded.map(formatChange).join('\n')}`);
-  if (improved.length > 0) sections.push(`\nFunctions that improved:\n${improved.map(formatChange).join('\n')}`);
-  if (newFuncs.length > 0) sections.push(`\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}`);
+  if (degraded.length > 0) {
+    sections.push(`\nFunctions that got worse:\n${degraded.map(formatDeltaChange).join('\n')}`);
+  }
+  if (improved.length > 0) {
+    sections.push(`\nFunctions that improved:\n${improved.map(formatDeltaChange).join('\n')}`);
+  }
+  if (newFuncs.length > 0) {
+    sections.push(`\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}`);
+  }
   
   return sections.join('\n');
 }
@@ -476,6 +485,71 @@ function getMetricEmoji(metricType: string): string {
 }
 
 /**
+ * Build metric breakdown table for violations
+ */
+function buildMetricTable(
+  report: ComplexityReport | null,
+  deltas: ComplexityDelta[] | null
+): string {
+  if (!report || report.summary.totalViolations === 0) return '';
+
+  const byMetric = collect(Object.values(report.files))
+    .flatMap(f => f.violations)
+    .countBy('metricType')
+    .all() as unknown as Record<string, number>;
+
+  const deltaByMetric: Record<string, number> = deltas
+    ? collect(deltas)
+        .groupBy('metricType')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((group: any) => group.sum('delta'))
+        .all() as unknown as Record<string, number>
+    : {};
+
+  const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
+  const rows = collect(metricOrder)
+    .filter(metricType => byMetric[metricType] > 0)
+    .map(metricType => {
+      const emoji = getMetricEmoji(metricType);
+      const label = getMetricLabel(metricType);
+      const count = byMetric[metricType];
+      const delta = deltaByMetric[metricType] || 0;
+      const deltaStr = deltas ? (delta >= 0 ? `+${delta}` : `${delta}`) : '—';
+      return `| ${emoji} ${label} | ${count} | ${deltaStr} |`;
+    })
+    .all() as string[];
+
+  if (rows.length === 0) return '';
+
+  return `
+| Metric | Violations | Change |
+|--------|:----------:|:------:|
+${rows.join('\n')}
+`;
+}
+
+/**
+ * Build dependency impact summary
+ */
+function buildImpactSummary(report: ComplexityReport | null): string {
+  if (!report) return '';
+
+  const filesWithDependents = Object.values(report.files)
+    .filter(f => f.dependentCount && f.dependentCount > 0);
+  
+  if (filesWithDependents.length === 0) return '';
+
+  const totalDependents = filesWithDependents.reduce((sum, f) => sum + (f.dependentCount || 0), 0);
+  const highRiskFiles = filesWithDependents.filter(f => 
+    ['high', 'critical'].includes(f.riskLevel)
+  ).length;
+  
+  if (highRiskFiles === 0) return '';
+
+  return `\n🔗 **Impact**: ${highRiskFiles} high-risk file(s) with ${totalDependents} total dependents`;
+}
+
+/**
  * Build the PR description stats badge
  * Human-friendly summary with metrics table
  */
@@ -485,66 +559,8 @@ export function buildDescriptionBadge(
   deltas: ComplexityDelta[] | null
 ): string {
   const status = determineStatus(report, deltaSummary);
-
-  // Build metric breakdown table with violations and deltas
-  let metricTable = '';
-  if (report && report.summary.totalViolations > 0) {
-    // Count violations by metric type using collect.js
-    const byMetric = collect(Object.values(report.files))
-      .flatMap(f => f.violations)
-      .countBy('metricType')
-      .all() as unknown as Record<string, number>;
-
-    // Calculate delta by metric type using collect.js
-    // Note: collect.js groupBy returns groups needing sum() - types are limited
-    const deltaByMetric: Record<string, number> = deltas
-      ? collect(deltas)
-          .groupBy('metricType')
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .map((group: any) => group.sum('delta'))
-          .all() as unknown as Record<string, number>
-      : {};
-
-    // Build table rows (only show metrics with violations)
-    const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
-    const rows = collect(metricOrder)
-      .filter(metricType => byMetric[metricType] > 0)
-      .map(metricType => {
-        const emoji = getMetricEmoji(metricType);
-        const label = getMetricLabel(metricType);
-        const count = byMetric[metricType];
-        const delta = deltaByMetric[metricType] || 0;
-        const deltaStr = deltas ? (delta >= 0 ? `+${delta}` : `${delta}`) : '—';
-        return `| ${emoji} ${label} | ${count} | ${deltaStr} |`;
-      })
-      .all() as string[];
-
-    if (rows.length > 0) {
-      metricTable = `
-| Metric | Violations | Change |
-|--------|:----------:|:------:|
-${rows.join('\n')}
-`;
-    }
-  }
-
-  // Add dependency summary
-  let impactSummary = '';
-  if (report) {
-    const filesWithDependents = Object.values(report.files)
-      .filter(f => f.dependentCount && f.dependentCount > 0);
-    
-    if (filesWithDependents.length > 0) {
-      const totalDependents = filesWithDependents.reduce((sum, f) => sum + (f.dependentCount || 0), 0);
-      const highRiskFiles = filesWithDependents.filter(f => 
-        ['high', 'critical'].includes(f.riskLevel)
-      ).length;
-      
-      if (highRiskFiles > 0) {
-        impactSummary = `\n🔗 **Impact**: ${highRiskFiles} high-risk file(s) with ${totalDependents} total dependents`;
-      }
-    }
-  }
+  const metricTable = buildMetricTable(report, deltas);
+  const impactSummary = buildImpactSummary(report);
 
   return `### 👁️ Veille
 
