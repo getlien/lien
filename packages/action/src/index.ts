@@ -758,7 +758,8 @@ async function postLineReview(
     commentableViolations,
     codeSnippets,
     config.openrouterApiKey,
-    config.model
+    config.model,
+    report
   );
 
   // Build and post review (only for new/degraded)

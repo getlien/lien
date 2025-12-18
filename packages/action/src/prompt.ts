@@ -640,7 +640,8 @@ See inline comments below for specific suggestions.
  */
 export function buildBatchedCommentsPrompt(
   violations: ComplexityViolation[],
-  codeSnippets: Map<string, string>
+  codeSnippets: Map<string, string>,
+  report: ComplexityReport
 ): string {
   const violationsText = violations
     .map((v, i) => {
@@ -656,10 +657,14 @@ export function buildBatchedCommentsPrompt(
       const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
       const halsteadContext = formatHalsteadContext(v);
 
+      // Add dependency context for this violation's file
+      const fileData = report.files[v.filepath];
+      const dependencyContext = fileData ? buildDependencyContext(fileData) : '';
+
       return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
 - **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
-- **Severity**: ${v.severity}${snippetSection}`;
+- **Severity**: ${v.severity}${dependencyContext}${snippetSection}`;
     })
     .join('\n\n');
 

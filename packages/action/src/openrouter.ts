@@ -3,7 +3,7 @@
  */
 
 import * as core from '@actions/core';
-import type { ComplexityViolation } from '@liendev/core';
+import type { ComplexityViolation, ComplexityReport } from '@liendev/core';
 import { buildBatchedCommentsPrompt } from './prompt.js';
 
 /**
@@ -280,7 +280,8 @@ export async function generateLineComments(
   violations: ComplexityViolation[],
   codeSnippets: Map<string, string>,
   apiKey: string,
-  model: string
+  model: string,
+  report: ComplexityReport
 ): Promise<Map<ComplexityViolation, string>> {
   if (violations.length === 0) {
     return new Map();
@@ -288,7 +289,7 @@ export async function generateLineComments(
 
   core.info(`Generating comments for ${violations.length} violations in single batch`);
 
-  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets);
+  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets, report);
   const data = await callBatchedCommentsAPI(prompt, apiKey, model);
 
   if (data.usage) {

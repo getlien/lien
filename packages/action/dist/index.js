@@ -697,7 +697,7 @@ function formatHalsteadContext(violation) {
   return `
 **Halstead Metrics**: Volume: ${details.volume?.toLocaleString()}, Difficulty: ${details.difficulty?.toFixed(1)}, Effort: ${details.effort?.toLocaleString()}, Est. bugs: ${details.bugs?.toFixed(3)}`;
 }
-function buildBatchedCommentsPrompt(violations, codeSnippets) {
+function buildBatchedCommentsPrompt(violations, codeSnippets, report) {
   const violationsText = violations.map((v, i) => {
     const key = `${v.filepath}::${v.symbolName}`;
     const snippet = codeSnippets.get(key);
@@ -711,10 +711,12 @@ ${snippet}
     const valueDisplay = formatComplexityValue(metricType, v.complexity);
     const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
     const halsteadContext = formatHalsteadContext(v);
+    const fileData = report.files[v.filepath];
+    const dependencyContext = fileData ? buildDependencyContext(fileData) : "";
     return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
 - **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
-- **Severity**: ${v.severity}${snippetSection}`;
+- **Severity**: ${v.severity}${dependencyContext}${snippetSection}`;
   }).join("\n\n");
   const jsonKeys = violations.map((v) => `  "${v.filepath}::${v.symbolName}": "your comment here"`).join(",\n");
   return `You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.
@@ -916,12 +918,12 @@ function mapCommentsToViolations(commentsMap, violations) {
   }
   return results;
 }
-async function generateLineComments(violations, codeSnippets, apiKey, model) {
+async function generateLineComments(violations, codeSnippets, apiKey, model, report) {
   if (violations.length === 0) {
     return /* @__PURE__ */ new Map();
   }
   core3.info(`Generating comments for ${violations.length} violations in single batch`);
-  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets);
+  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets, report);
   const data = await callBatchedCommentsAPI(prompt, apiKey, model);
   if (data.usage) {
     trackUsage(data.usage);
@@ -1379,7 +1381,8 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     commentableViolations,
     codeSnippets,
     config.openrouterApiKey,
-    config.model
+    config.model,
+    report
   );
   const lineComments = buildLineComments(newOrDegradedViolations, aiComments, deltaMap);
   core4.info(`Built ${lineComments.length} line comments for new/degraded violations`);
