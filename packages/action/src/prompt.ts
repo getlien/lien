@@ -367,7 +367,8 @@ export function formatReviewComment(
   report: ComplexityReport,
   isFallback = false,
   tokenUsage?: TokenUsageInfo,
-  deltas?: ComplexityDelta[] | null
+  deltas?: ComplexityDelta[] | null,
+  uncoveredNote: string = ''
 ): string {
   const { summary } = report;
   const deltaDisplay = formatDeltaDisplay(deltas);
@@ -383,7 +384,7 @@ ${summary.totalViolations} issue${summary.totalViolations === 1 ? '' : 's'} spot
 
 ${aiReview}
 
----
+---${uncoveredNote}
 
 <details>
 <summary>📊 Analysis Details</summary>

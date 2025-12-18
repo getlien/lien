@@ -588,7 +588,7 @@ function formatFallbackNote(isFallback) {
 > \u{1F4A1} *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*
 `;
 }
-function formatReviewComment(aiReview, report, isFallback = false, tokenUsage, deltas) {
+function formatReviewComment(aiReview, report, isFallback = false, tokenUsage, deltas, uncoveredNote = "") {
   const { summary } = report;
   const deltaDisplay = formatDeltaDisplay(deltas);
   const fallbackNote = formatFallbackNote(isFallback);
@@ -602,7 +602,7 @@ ${summary.totalViolations} issue${summary.totalViolations === 1 ? "" : "s"} spot
 
 ${aiReview}
 
----
+---${uncoveredNote}
 
 <details>
 <summary>\u{1F4CA} Analysis Details</summary>
@@ -1214,6 +1214,10 @@ async function postReviewIfNeeded(result, setup) {
   );
   resetTokenUsage();
   if (setup.config.reviewStyle === "summary") {
+    const diffLines = await getPRDiffLines(setup.octokit, setup.prContext);
+    const deltaMap = buildDeltaMap2(result.deltas);
+    const { uncovered } = partitionViolationsByDiff(violations, diffLines);
+    const uncoveredNote = buildUncoveredNote(uncovered, deltaMap);
     await postSummaryReview(
       setup.octokit,
       setup.prContext,
@@ -1221,7 +1225,8 @@ async function postReviewIfNeeded(result, setup) {
       codeSnippets,
       setup.config,
       false,
-      result.deltas
+      result.deltas,
+      uncoveredNote
     );
   } else {
     await postLineReview(
@@ -1504,7 +1509,7 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     deltas
   );
 }
-async function postSummaryReview(octokit, prContext, report, codeSnippets, config, isFallback = false, deltas = null) {
+async function postSummaryReview(octokit, prContext, report, codeSnippets, config, isFallback = false, deltas = null, uncoveredNote = "") {
   const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas);
   core4.debug(`Prompt length: ${prompt.length} characters`);
   const aiReview = await generateReview(
@@ -1513,7 +1518,7 @@ async function postSummaryReview(octokit, prContext, report, codeSnippets, confi
     config.model
   );
   const usage = getTokenUsage();
-  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas);
+  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas, uncoveredNote);
   await postPRComment(octokit, prContext, comment);
   core4.info("Successfully posted AI review summary comment");
 }

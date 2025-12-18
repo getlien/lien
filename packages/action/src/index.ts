@@ -505,6 +505,12 @@ async function postReviewIfNeeded(
 
   resetTokenUsage();
   if (setup.config.reviewStyle === 'summary') {
+    // Get diff lines to identify uncovered violations
+    const diffLines = await getPRDiffLines(setup.octokit, setup.prContext);
+    const deltaMap = buildDeltaMap(result.deltas);
+    const { uncovered } = partitionViolationsByDiff(violations, diffLines);
+    const uncoveredNote = buildUncoveredNote(uncovered, deltaMap);
+    
     await postSummaryReview(
       setup.octokit,
       setup.prContext,
@@ -512,7 +518,8 @@ async function postReviewIfNeeded(
       codeSnippets,
       setup.config,
       false,
-      result.deltas
+      result.deltas,
+      uncoveredNote
     );
   } else {
     await postLineReview(
@@ -986,6 +993,7 @@ async function postLineReview(
  * Post review as a single summary comment
  * @param isFallback - true if this is a fallback because violations aren't on diff lines
  * @param deltas - complexity deltas for delta display
+ * @param uncoveredNote - note about violations outside diff (optional)
  */
 async function postSummaryReview(
   octokit: ReturnType<typeof createOctokit>,
@@ -994,7 +1002,8 @@ async function postSummaryReview(
   codeSnippets: Map<string, string>,
   config: ActionConfig,
   isFallback = false,
-  deltas: ComplexityDelta[] | null = null
+  deltas: ComplexityDelta[] | null = null,
+  uncoveredNote: string = ''
 ): Promise<void> {
   const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas);
   core.debug(`Prompt length: ${prompt.length} characters`);
@@ -1006,7 +1015,7 @@ async function postSummaryReview(
   );
 
   const usage = getTokenUsage();
-  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas);
+  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas, uncoveredNote);
   await postPRComment(octokit, prContext, comment);
   core.info('Successfully posted AI review summary comment');
 }
