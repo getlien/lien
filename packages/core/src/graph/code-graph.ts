@@ -538,15 +538,18 @@ export class CodeGraphGenerator {
     const normalizePathCached = createPathNormalizer(this.workspaceRoot);
     
     // If moduleLevel is true or if any root is a directory, expand directories to files
-    // For module-level view, we expand directories to show module-to-module dependencies
-    // For regular view with directory, we expand to show file-level dependencies
-    if (moduleLevel || roots.some(r => isDirectoryPath(r))) {
+    // For module-level view with directories: expand to files, then group by module
+    // For regular view with directory: expand to files, then traverse normally
+    // For module-level view, we can skip file-level traversal and go straight to module grouping
+    const hasDirectoryRoot = roots.some(r => isDirectoryPath(r));
+    
+    if (hasDirectoryRoot && !moduleLevel) {
+      // Regular view with directory: expand to files (with safety limit)
       const expandedRoots: string[] = [];
-      const MAX_FILES_PER_DIRECTORY = 50; // Safety limit to prevent stack overflow
+      const MAX_FILES_PER_DIRECTORY = 50;
       
       for (const root of roots) {
         if (isDirectoryPath(root)) {
-          // Find all files in this directory (with safety limit)
           const dirFiles = findFilesInDirectory(
             root, 
             this.allChunks, 
@@ -554,15 +557,9 @@ export class CodeGraphGenerator {
             normalizePathCached,
             MAX_FILES_PER_DIRECTORY
           );
-          
           if (dirFiles.length > 0) {
-            if (dirFiles.length >= MAX_FILES_PER_DIRECTORY) {
-              // Warn if we hit the limit (but this would require logging, so just continue)
-              // In practice, if moduleLevel is true, we'll group by module anyway
-            }
             expandedRoots.push(...dirFiles);
           } else {
-            // If no files found, keep the directory as-is (will be handled by module grouping)
             expandedRoots.push(root);
           }
         } else {
@@ -570,11 +567,39 @@ export class CodeGraphGenerator {
         }
       }
       
-      // Safety check: if we expanded to too many files, limit the traversal
       if (expandedRoots.length > 100) {
-        // For very large directories, only use first 100 files to prevent stack overflow
-        // This is a reasonable limit for module-level views
         expandedRoots.splice(100);
+      }
+      
+      roots = expandedRoots;
+    } else if (hasDirectoryRoot && moduleLevel) {
+      // Module-level view with directory: for very large directories, use a simpler approach
+      // Aggressively limit to prevent stack overflow
+      const expandedRoots: string[] = [];
+      const MAX_FILES_FOR_MODULE_VIEW = 50; // Reduced limit to prevent stack overflow
+      
+      for (const root of roots) {
+        if (isDirectoryPath(root)) {
+          const dirFiles = findFilesInDirectory(
+            root, 
+            this.allChunks, 
+            this.workspaceRoot, 
+            normalizePathCached,
+            MAX_FILES_FOR_MODULE_VIEW
+          );
+          if (dirFiles.length > 0) {
+            expandedRoots.push(...dirFiles);
+          } else {
+            expandedRoots.push(root);
+          }
+        } else {
+          expandedRoots.push(root);
+        }
+      }
+      
+      // Hard limit for module-level to prevent stack overflow
+      if (expandedRoots.length > MAX_FILES_FOR_MODULE_VIEW) {
+        expandedRoots.splice(MAX_FILES_FOR_MODULE_VIEW);
       }
       
       roots = expandedRoots;
@@ -588,39 +613,135 @@ export class CodeGraphGenerator {
     const allEdges: GraphEdge[] = [];
     const visited = new Set<string>();
     
-    for (const root of roots) {
-      if (direction === 'forward' || direction === 'both') {
-        const { nodes, edges } = traverseDependencies(
-          root,
-          depth,
-          new Set(visited), // Share visited set across roots
-          importIndex,
-          this.allChunks,
-          this.workspaceRoot,
-          includeTests,
-          includeComplexity,
-          normalizePathCached
-        );
-        allNodes.push(...nodes);
-        allEdges.push(...edges);
-        visited.add(normalizePathCached(root));
+    // For module-level views with many files, use a non-recursive approach to prevent stack overflow
+    // Instead of recursive traversal, we'll:
+    // 1. Create nodes for all files (flat, no recursion)
+    // 2. Build direct import edges only (no transitive traversal)
+    // 3. Group by module
+    // Use this approach for any module-level view with more than 20 files
+    if (moduleLevel && roots.length > 20) {
+      // Large directory with module-level: create flat graph (no recursive traversal)
+      const fileNodes = new Map<string, GraphNode>();
+      const fileEdges: GraphEdge[] = [];
+      const filePathToNodeId = new Map<string, string>();
+      
+      // Create nodes for all root files (non-recursive)
+      for (const root of roots) {
+        const normalizedRoot = normalizePathCached(root);
+        const rootChunks = this.allChunks.filter(chunk => {
+          const canonical = getCanonicalPath(chunk.metadata.file, this.workspaceRoot);
+          return normalizePathCached(canonical) === normalizedRoot;
+        });
+        
+        if (rootChunks.length > 0) {
+          const node = createNode(root, rootChunks, includeComplexity);
+          fileNodes.set(node.id, node);
+          filePathToNodeId.set(normalizePathCached(root), node.id);
+        }
       }
       
-      if (direction === 'reverse' || direction === 'both') {
-        const { nodes, edges } = traverseReverseDependencies(
-          root,
-          depth,
-          new Set(visited), // Share visited set across roots
-          importIndex,
-          this.allChunks,
-          this.workspaceRoot,
-          includeTests,
-          includeComplexity,
-          normalizePathCached
-        );
-        allNodes.push(...nodes);
-        allEdges.push(...edges);
-        visited.add(normalizePathCached(root));
+      // Build direct import edges only (no recursive traversal)
+      // This is much safer for large directories
+      for (const [nodeId, node] of fileNodes.entries()) {
+        const nodeChunks = this.allChunks.filter(chunk => {
+          const canonical = getCanonicalPath(chunk.metadata.file, this.workspaceRoot);
+          return normalizePathCached(canonical) === normalizePathCached(node.filePath);
+        });
+        
+        // Get imports from this file
+        const imports = new Set<string>();
+        for (const chunk of nodeChunks) {
+          const chunkImports = toArray(chunk.metadata.imports);
+          for (const imp of chunkImports) {
+            if (typeof imp !== 'string' || !imp.trim()) continue;
+            const sourceFile = getCanonicalPath(chunk.metadata.file, this.workspaceRoot);
+            const resolved = resolveRelativeImport(imp, sourceFile, this.workspaceRoot);
+            if (resolved) {
+              imports.add(resolved);
+            }
+          }
+        }
+        
+        // Find matching nodes in our file set and create edges (direct imports only)
+        // Limit to prevent too many edges
+        const importsArray = Array.from(imports).slice(0, 20);
+        let edgeCount = 0;
+        for (const resolvedImport of importsArray) {
+          if (edgeCount >= 15) break; // Limit edges per node
+          const normalizedImport = normalizePathCached(resolvedImport);
+          
+          // Check if this import matches any of our root files
+          const targetNodeId = filePathToNodeId.get(normalizedImport);
+          if (targetNodeId && targetNodeId !== nodeId) {
+            fileEdges.push({
+              from: nodeId,
+              to: targetNodeId,
+              type: 'imports',
+            });
+            edgeCount++;
+          } else {
+            // Try fuzzy match
+            for (const [otherNodeId, otherNode] of fileNodes.entries()) {
+              if (otherNodeId === nodeId || edgeCount >= 15) break;
+              const otherNormalized = normalizePathCached(otherNode.filePath);
+              if (matchesFile(normalizedImport, otherNormalized)) {
+                fileEdges.push({
+                  from: nodeId,
+                  to: otherNodeId,
+                  type: 'imports',
+                });
+                edgeCount++;
+                break;
+              }
+            }
+          }
+        }
+      }
+      
+      allNodes.push(...Array.from(fileNodes.values()));
+      allEdges.push(...fileEdges);
+    } else {
+      // Normal traversal for smaller graphs or non-module-level
+      // For module-level views with many files, limit traversal depth
+      const effectiveDepth = moduleLevel && roots.length > 30 ? (depth || 2) : depth;
+      
+      // Limit number of roots to traverse if too many (safety check)
+      const rootsToTraverse = roots.length > 50 ? roots.slice(0, 50) : roots;
+      
+      for (const root of rootsToTraverse) {
+        if (direction === 'forward' || direction === 'both') {
+          const { nodes, edges } = traverseDependencies(
+            root,
+            effectiveDepth,
+            new Set(visited), // Share visited set across roots
+            importIndex,
+            this.allChunks,
+            this.workspaceRoot,
+            includeTests,
+            includeComplexity,
+            normalizePathCached
+          );
+          allNodes.push(...nodes);
+          allEdges.push(...edges);
+          visited.add(normalizePathCached(root));
+        }
+        
+        if (direction === 'reverse' || direction === 'both') {
+          const { nodes, edges } = traverseReverseDependencies(
+            root,
+            effectiveDepth,
+            new Set(visited), // Share visited set across roots
+            importIndex,
+            this.allChunks,
+            this.workspaceRoot,
+            includeTests,
+            includeComplexity,
+            normalizePathCached
+          );
+          allNodes.push(...nodes);
+          allEdges.push(...edges);
+          visited.add(normalizePathCached(root));
+        }
       }
     }
     
@@ -649,7 +770,11 @@ export class CodeGraphGenerator {
     
     // Apply module-level grouping if requested
     if (moduleLevel) {
-      const { moduleNodes, moduleEdges: modEdges } = groupByModule(finalNodes, finalEdges);
+      // Limit nodes/edges before grouping to prevent stack overflow in groupByModule
+      const nodesToGroup = finalNodes.length > 200 ? finalNodes.slice(0, 200) : finalNodes;
+      const edgesToGroup = finalEdges.length > 500 ? finalEdges.slice(0, 500) : finalEdges;
+      
+      const { moduleNodes, moduleEdges: modEdges } = groupByModule(nodesToGroup, edgesToGroup);
       finalNodes = moduleNodes;
       finalEdges = modEdges;
     }
