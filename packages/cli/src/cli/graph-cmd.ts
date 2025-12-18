@@ -54,7 +54,6 @@ export async function graphCommand(options: GraphOptions): Promise<void> {
     const directionLabel = direction === 'reverse' ? 'reverse dependencies (impact analysis)' 
       : direction === 'both' ? 'forward and reverse dependencies'
       : 'dependencies';
-    console.log(chalk.blue(`Generating ${directionLabel} graph for: ${rootLabel}`));
     
     const generator = new CodeGraphGenerator(allChunks, rootDir);
     const graph = await generator.generateGraph({
@@ -68,6 +67,9 @@ export async function graphCommand(options: GraphOptions): Promise<void> {
     });
 
     // Render and display
+    const viewType = graph.moduleLevel ? 'module-level' : 'file-level';
+    console.log(chalk.blue(`Generating ${directionLabel} graph (${viewType}) for: ${rootLabel}`));
+    
     const renderer = new AsciiGraphRenderer();
     const output = renderer.render(graph);
     

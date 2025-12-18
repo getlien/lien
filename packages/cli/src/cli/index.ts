@@ -76,7 +76,7 @@ program
   .option('-f, --files <files...>', 'Multiple root files (for PR review)')
   .option('-d, --depth <n>', 'Limit traversal depth (default: unlimited - shows full dependency chain)')
   .option('--direction <dir>', 'Direction: forward, reverse, or both (default: forward)', 'forward')
-  .option('--module', 'Group by module/directory instead of files', false)
+  .option('--module', 'Force module-level view (auto-detected for directories)', false)
   .action((rootFile, options) => {
     const rootFiles = options.files ? options.files : undefined;
     graphCommand({

@@ -562,13 +562,14 @@ export class CodeGraphGenerator {
     // Create cached path normalizer
     const normalizePathCached = createPathNormalizer(this.workspaceRoot);
     
-    // If moduleLevel is true or if any root is a directory, expand directories to files
-    // For module-level view with directories: expand to files, then group by module
-    // For regular view with directory: expand to files, then traverse normally
-    // For module-level view, we can skip file-level traversal and go straight to module grouping
+    // Auto-detect if we should use module-level view:
+    // - If any root is a directory, automatically use module-level view
+    // - If --module flag is explicitly set, use module-level view
+    // - Otherwise, use file-level view
     const hasDirectoryRoot = roots.some(r => isDirectoryPath(r, this.allChunks, this.workspaceRoot, normalizePathCached));
+    const shouldUseModuleLevel = moduleLevel || hasDirectoryRoot;
     
-    if (hasDirectoryRoot && !moduleLevel) {
+    if (hasDirectoryRoot && !shouldUseModuleLevel) {
       // Regular view with directory: expand to files (with safety limit)
       const expandedRoots: string[] = [];
       const MAX_FILES_PER_DIRECTORY = 50;
@@ -597,7 +598,7 @@ export class CodeGraphGenerator {
       }
       
       roots = expandedRoots;
-    } else if (hasDirectoryRoot && moduleLevel) {
+    } else if (hasDirectoryRoot && shouldUseModuleLevel) {
       // Module-level view with directory: for very large directories, use a simpler approach
       // Aggressively limit to prevent stack overflow
       const expandedRoots: string[] = [];
@@ -644,7 +645,7 @@ export class CodeGraphGenerator {
     // 2. Build direct import edges only (no transitive traversal)
     // 3. Group by module
     // Use this approach for any module-level view with more than 20 files
-    if (moduleLevel && roots.length > 20) {
+    if (shouldUseModuleLevel && roots.length > 20) {
       // Large directory with module-level: create flat graph (no recursive traversal)
       const fileNodes = new Map<string, GraphNode>();
       const fileEdges: GraphEdge[] = [];
@@ -726,9 +727,9 @@ export class CodeGraphGenerator {
       allNodes.push(...Array.from(fileNodes.values()));
       allEdges.push(...fileEdges);
     } else {
-      // Normal traversal for smaller graphs or non-module-level
-      // For module-level views with many files, limit traversal depth
-      const effectiveDepth = moduleLevel && roots.length > 30 ? (depth || 2) : depth;
+    // Normal traversal for smaller graphs or non-module-level
+    // For module-level views with many files, limit traversal depth
+    const effectiveDepth = shouldUseModuleLevel && roots.length > 30 ? (depth || 2) : depth;
       
       // Limit number of roots to traverse if too many (safety check)
       const rootsToTraverse = roots.length > 50 ? roots.slice(0, 50) : roots;
@@ -793,8 +794,8 @@ export class CodeGraphGenerator {
     let finalNodes = Array.from(nodeMap.values());
     let finalEdges = uniqueEdges;
     
-    // Apply module-level grouping if requested
-    if (moduleLevel) {
+    // Apply module-level grouping if requested (auto-detected or explicitly set)
+    if (shouldUseModuleLevel) {
       // Limit nodes/edges before grouping to prevent stack overflow in groupByModule
       const nodesToGroup = finalNodes.length > 200 ? finalNodes.slice(0, 200) : finalNodes;
       const edgesToGroup = finalEdges.length > 500 ? finalEdges.slice(0, 500) : finalEdges;
@@ -811,7 +812,7 @@ export class CodeGraphGenerator {
       rootFiles: roots.length > 1 ? roots : undefined,
       depth,
       direction,
-      moduleLevel,
+      moduleLevel: shouldUseModuleLevel,
     };
   }
 }
