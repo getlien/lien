@@ -461,13 +461,38 @@ function groupByModule(nodes: GraphNode[], edges: GraphEdge[]): { moduleNodes: G
 }
 
 /**
- * Checks if a path is a directory (no file extension or ends with /).
+ * Checks if a path is a directory (not a file).
+ * 
+ * Language-agnostic: checks if the path exists as a file in the chunks.
+ * If no matching file is found, assumes it's a directory.
  */
-function isDirectoryPath(path: string): boolean {
+function isDirectoryPath(
+  path: string,
+  allChunks: SearchResult[],
+  workspaceRoot: string,
+  normalizePathCached: (path: string) => string
+): boolean {
   // Remove trailing slash if present
   const cleanPath = path.replace(/\/$/, '');
-  // Check if it has a file extension
-  return !/\.(ts|tsx|js|jsx|py|json|md|txt|yml|yaml|xml|html|css|scss|sass|less|vue|svelte|jsx|tsx)$/i.test(cleanPath);
+  const normalizedPath = normalizePathCached(cleanPath);
+  
+  // Check if this path exists as a file in the indexed chunks
+  // If we find an exact match, it's a file, not a directory
+  for (const chunk of allChunks) {
+    const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+    const normalizedFile = normalizePathCached(canonical);
+    
+    // Exact match means it's a file
+    if (normalizedFile === normalizedPath) {
+      return false;
+    }
+  }
+  
+  // No exact file match found - assume it's a directory
+  // Also check if it has a common file extension pattern (fallback)
+  // This handles edge cases where file might not be indexed yet
+  const hasCommonExtension = /\.([a-z0-9]+)$/i.test(cleanPath);
+  return !hasCommonExtension;
 }
 
 /**
@@ -541,7 +566,7 @@ export class CodeGraphGenerator {
     // For module-level view with directories: expand to files, then group by module
     // For regular view with directory: expand to files, then traverse normally
     // For module-level view, we can skip file-level traversal and go straight to module grouping
-    const hasDirectoryRoot = roots.some(r => isDirectoryPath(r));
+    const hasDirectoryRoot = roots.some(r => isDirectoryPath(r, this.allChunks, this.workspaceRoot, normalizePathCached));
     
     if (hasDirectoryRoot && !moduleLevel) {
       // Regular view with directory: expand to files (with safety limit)
@@ -549,7 +574,7 @@ export class CodeGraphGenerator {
       const MAX_FILES_PER_DIRECTORY = 50;
       
       for (const root of roots) {
-        if (isDirectoryPath(root)) {
+        if (isDirectoryPath(root, this.allChunks, this.workspaceRoot, normalizePathCached)) {
           const dirFiles = findFilesInDirectory(
             root, 
             this.allChunks, 
@@ -579,7 +604,7 @@ export class CodeGraphGenerator {
       const MAX_FILES_FOR_MODULE_VIEW = 50; // Reduced limit to prevent stack overflow
       
       for (const root of roots) {
-        if (isDirectoryPath(root)) {
+        if (isDirectoryPath(root, this.allChunks, this.workspaceRoot, normalizePathCached)) {
           const dirFiles = findFilesInDirectory(
             root, 
             this.allChunks, 
