@@ -411,10 +411,11 @@ function buildDependencyContext(fileData) {
     critical: "\u{1F534}"
   };
   const emoji = riskEmoji[fileData.riskLevel] || "\u26AA";
-  const dependentsList = fileData.dependents?.slice(0, 10).map((f) => `  - ${f}`).join("\n") || "";
+  const hasDependentsList = fileData.dependents && fileData.dependents.length > 0;
+  const dependentsList = hasDependentsList ? fileData.dependents.slice(0, 10).map((f) => `  - ${f}`).join("\n") : "";
   const complexityNote = fileData.dependentComplexityMetrics ? `
 - **Dependent complexity**: Avg ${fileData.dependentComplexityMetrics.averageComplexity.toFixed(1)}, Max ${fileData.dependentComplexityMetrics.maxComplexity}` : "";
-  const moreNote = fileData.dependents && fileData.dependents.length > 10 ? "\n  ... (and more)" : "";
+  const moreNote = hasDependentsList && fileData.dependents.length > 10 ? "\n  ... (and more)" : "";
   return `
 **Dependency Impact**: ${emoji} ${fileData.riskLevel.toUpperCase()} risk
 - **Dependents**: ${fileData.dependentCount} file(s) import this
@@ -423,11 +424,39 @@ ${dependentsList ? `
 ${dependentsList}${moreNote}` : ""}${complexityNote}
 - **Review focus**: Changes here affect ${fileData.dependentCount} other file(s). Extra scrutiny recommended.`;
 }
+function buildFileContext(filepath, fileData) {
+  const parts = [];
+  const ext = filepath.split(".").pop()?.toLowerCase();
+  const languageHints = {
+    "ts": "TypeScript",
+    "tsx": "TypeScript React",
+    "js": "JavaScript",
+    "jsx": "JavaScript React",
+    "php": "PHP",
+    "py": "Python"
+  };
+  if (ext && languageHints[ext]) {
+    parts.push(`Language: ${languageHints[ext]}`);
+  }
+  const pathLower = filepath.toLowerCase();
+  if (pathLower.includes("controller")) parts.push("Type: Controller");
+  if (pathLower.includes("service")) parts.push("Type: Service");
+  if (pathLower.includes("component")) parts.push("Type: Component");
+  if (pathLower.includes("middleware")) parts.push("Type: Middleware");
+  if (pathLower.includes("handler")) parts.push("Type: Handler");
+  if (pathLower.includes("util") || pathLower.includes("helper")) parts.push("Type: Utility");
+  if (fileData.violations.length > 1) {
+    parts.push(`${fileData.violations.length} total violations in this file`);
+  }
+  return parts.length > 0 ? `
+*Context: ${parts.join(", ")}*` : "";
+}
 function buildViolationsSummary(files, deltaMap) {
   return Object.entries(files).filter(([_, data]) => data.violations.length > 0).map(([filepath, data]) => {
     const violationList = data.violations.map((v) => formatViolationLine(v, deltaMap)).join("\n");
     const dependencyContext = buildDependencyContext(data);
-    return `**${filepath}** (risk: ${data.riskLevel})
+    const fileContext = buildFileContext(filepath, data);
+    return `**${filepath}** (risk: ${data.riskLevel})${fileContext}
 ${violationList}${dependencyContext}`;
   }).join("\n\n");
 }
@@ -503,9 +532,15 @@ ${snippetsSection || "_No code snippets available_"}
 
 For each violation:
 1. **Explain** why this complexity is problematic in this specific context
+   - Consider the file type (controller, service, component, etc.) and language
+   - Note if this is the only violation in the file or one of many
+   - Consider dependency impact - high-risk files need extra scrutiny
 2. **Suggest** concrete refactoring steps (not generic advice like "break into smaller functions")
+   - Be specific to the language and framework patterns
+   - Consider file type conventions (e.g., controllers often delegate to services)
 3. **Prioritize** which violations are most important to address - focus on functions that got WORSE (higher delta)
 4. If the complexity seems justified for the use case, say so
+   - Some patterns (orchestration, state machines) may legitimately be complex
 5. Celebrate improvements! If a function got simpler, acknowledge it.
 
 Format your response as a PR review comment with:
@@ -735,10 +770,11 @@ ${snippet}
     const halsteadContext = formatHalsteadContext(v);
     const fileData = report.files[v.filepath];
     const dependencyContext = fileData ? buildDependencyContext(fileData) : "";
+    const fileContext = fileData ? buildFileContext(v.filepath, fileData) : "";
     return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
 - **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
-- **Severity**: ${v.severity}${dependencyContext}${snippetSection}`;
+- **Severity**: ${v.severity}${fileContext}${dependencyContext}${snippetSection}`;
   }).join("\n\n");
   const jsonKeys = violations.map((v) => `  "${v.filepath}::${v.symbolName}": "your comment here"`).join(",\n");
   return `You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.

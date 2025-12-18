@@ -393,6 +393,7 @@ interface SetupResult {
 
 /**
  * Get baseline complexity report for delta calculation
+ * Handles both delta tracking (analyzes base branch) and legacy baseline file
  */
 async function getBaselineReport(
   config: ActionConfig,
@@ -415,6 +416,7 @@ async function getBaselineReport(
 
 /**
  * Orchestrate complexity analysis (file discovery, baseline, current analysis)
+ * Returns null if no files to analyze or analysis fails
  */
 async function orchestrateAnalysis(setup: SetupResult): Promise<AnalysisResult | null> {
   const filesToAnalyze = await getFilesToAnalyze(setup.octokit, setup.prContext);
@@ -447,6 +449,7 @@ async function orchestrateAnalysis(setup: SetupResult): Promise<AnalysisResult |
 
 /**
  * Set GitHub Action outputs from analysis results
+ * Sets outputs for violations count, errors, warnings, and delta metrics
  */
 function setAnalysisOutputs(
   report: ComplexityReport,
@@ -465,6 +468,7 @@ function setAnalysisOutputs(
 
 /**
  * Handle analysis outputs (badge, logging, GitHub outputs)
+ * Updates PR description badge and sets GitHub Action outputs
  */
 async function handleAnalysisOutputs(
   result: AnalysisResult,
@@ -484,6 +488,7 @@ async function handleAnalysisOutputs(
 
 /**
  * Post review if violations are found, or success message if none
+ * Handles both summary and line-by-line review modes
  */
 async function postReviewIfNeeded(
   result: AnalysisResult,
