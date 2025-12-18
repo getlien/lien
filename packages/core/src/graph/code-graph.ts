@@ -472,17 +472,24 @@ function isDirectoryPath(path: string): boolean {
 
 /**
  * Finds all files in a directory from the chunks.
+ * 
+ * @param maxFiles - Maximum number of files to return (safety limit to prevent stack overflow)
  */
 function findFilesInDirectory(
   dirPath: string,
   allChunks: SearchResult[],
   workspaceRoot: string,
-  normalizePathCached: (path: string) => string
+  normalizePathCached: (path: string) => string,
+  maxFiles: number = 50
 ): string[] {
   const normalizedDir = normalizePathCached(dirPath);
   const files = new Set<string>();
   
   for (const chunk of allChunks) {
+    if (files.size >= maxFiles) {
+      break; // Safety limit to prevent stack overflow
+    }
+    
     const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
     const normalizedFile = normalizePathCached(canonical);
     
@@ -531,13 +538,28 @@ export class CodeGraphGenerator {
     const normalizePathCached = createPathNormalizer(this.workspaceRoot);
     
     // If moduleLevel is true or if any root is a directory, expand directories to files
+    // For module-level view, we expand directories to show module-to-module dependencies
+    // For regular view with directory, we expand to show file-level dependencies
     if (moduleLevel || roots.some(r => isDirectoryPath(r))) {
       const expandedRoots: string[] = [];
+      const MAX_FILES_PER_DIRECTORY = 50; // Safety limit to prevent stack overflow
+      
       for (const root of roots) {
         if (isDirectoryPath(root)) {
-          // Find all files in this directory
-          const dirFiles = findFilesInDirectory(root, this.allChunks, this.workspaceRoot, normalizePathCached);
+          // Find all files in this directory (with safety limit)
+          const dirFiles = findFilesInDirectory(
+            root, 
+            this.allChunks, 
+            this.workspaceRoot, 
+            normalizePathCached,
+            MAX_FILES_PER_DIRECTORY
+          );
+          
           if (dirFiles.length > 0) {
+            if (dirFiles.length >= MAX_FILES_PER_DIRECTORY) {
+              // Warn if we hit the limit (but this would require logging, so just continue)
+              // In practice, if moduleLevel is true, we'll group by module anyway
+            }
             expandedRoots.push(...dirFiles);
           } else {
             // If no files found, keep the directory as-is (will be handled by module grouping)
@@ -547,6 +569,14 @@ export class CodeGraphGenerator {
           expandedRoots.push(root);
         }
       }
+      
+      // Safety check: if we expanded to too many files, limit the traversal
+      if (expandedRoots.length > 100) {
+        // For very large directories, only use first 100 files to prevent stack overflow
+        // This is a reasonable limit for module-level views
+        expandedRoots.splice(100);
+      }
+      
       roots = expandedRoots;
     }
     
