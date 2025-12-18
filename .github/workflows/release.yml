@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -21,8 +22,14 @@ jobs:
         with:
           node-version: 22
           cache: 'npm'
-          registry-url: 'https://registry.npmjs.org'
-          scope: '@liendev'
+          # Don't set registry-url - npm will use OIDC automatically with publishConfig.provenance
+      
+      - name: Ensure npm version supports OIDC
+        run: npm install -g npm@latest
+      
+      - name: Configure npm scope
+        run: |
+          echo "@liendev:registry=https://registry.npmjs.org/" >> ~/.npmrc
       
       - run: npm ci
       - run: npm run build
