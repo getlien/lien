@@ -843,6 +843,89 @@ function getSkippedViolations(
 }
 
 /**
+ * Violation processing result
+ */
+interface ViolationProcessingResult {
+  withLines: Array<{ violation: ComplexityViolation; commentLine: number }>;
+  uncovered: ComplexityViolation[];
+  newOrDegraded: Array<{ violation: ComplexityViolation; commentLine: number }>;
+  skipped: ComplexityViolation[];
+}
+
+/**
+ * Process violations for review (partition, filter, categorize)
+ */
+function processViolationsForReview(
+  violations: ComplexityViolation[],
+  diffLines: Map<string, Set<number>>,
+  deltaMap: Map<string, ComplexityDelta>
+): ViolationProcessingResult {
+  const { withLines, uncovered } = partitionViolationsByDiff(violations, diffLines);
+  const newOrDegraded = filterNewOrDegraded(withLines, deltaMap);
+  const skipped = getSkippedViolations(withLines, deltaMap);
+
+  return { withLines, uncovered, newOrDegraded, skipped };
+}
+
+/**
+ * Handle case when there are no new/degraded violations to comment on
+ */
+async function handleNoNewViolations(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  uncoveredViolations: ComplexityViolation[],
+  deltaMap: Map<string, ComplexityDelta>,
+  report: ComplexityReport,
+  deltas: ComplexityDelta[] | null
+): Promise<void> {
+  if (violationsWithLines.length === 0) {
+    return;
+  }
+
+  const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
+  const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
+  const skippedNote = buildSkippedNote(skippedInDiff);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+  await postPRComment(octokit, prContext, summaryBody);
+}
+
+/**
+ * Generate AI comments and post review
+ */
+async function generateAndPostReview(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  processed: ViolationProcessingResult,
+  deltaMap: Map<string, ComplexityDelta>,
+  codeSnippets: Map<string, string>,
+  config: ActionConfig,
+  report: ComplexityReport,
+  deltas: ComplexityDelta[] | null
+): Promise<void> {
+  const commentableViolations = processed.newOrDegraded.map(v => v.violation);
+  core.info(`Generating AI comments for ${commentableViolations.length} new/degraded violations...`);
+  
+  const aiComments = await generateLineComments(
+    commentableViolations,
+    codeSnippets,
+    config.openrouterApiKey,
+    config.model,
+    report
+  );
+
+  const lineComments = buildLineComments(processed.newOrDegraded, aiComments, deltaMap);
+  core.info(`Built ${lineComments.length} line comments for new/degraded violations`);
+
+  const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
+  const skippedNote = buildSkippedNote(processed.skipped);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+
+  await postPRReview(octokit, prContext, lineComments, summaryBody);
+  core.info(`Posted review with ${lineComments.length} line comments`);
+}
+
+/**
  * Post review with line-specific comments for all violations
  */
 async function postLineReview(
@@ -857,54 +940,43 @@ async function postLineReview(
   const diffLines = await getPRDiffLines(octokit, prContext);
   core.info(`Diff covers ${diffLines.size} files`);
 
-  const { withLines: violationsWithLines, uncovered: uncoveredViolations } = 
-    partitionViolationsByDiff(violations, diffLines);
+  const deltaMap = buildDeltaMap(deltas);
+  const processed = processViolationsForReview(violations, diffLines, deltaMap);
 
   core.info(
-    `${violationsWithLines.length}/${violations.length} violations can have inline comments ` +
-    `(${uncoveredViolations.length} outside diff)`
+    `${processed.withLines.length}/${violations.length} violations can have inline comments ` +
+    `(${processed.uncovered.length} outside diff)`
   );
 
-  const deltaMap = buildDeltaMap(deltas);
-  const newOrDegradedViolations = filterNewOrDegraded(violationsWithLines, deltaMap);
-
-  const skippedCount = violationsWithLines.length - newOrDegradedViolations.length;
+  const skippedCount = processed.withLines.length - processed.newOrDegraded.length;
   if (skippedCount > 0) {
     core.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
   }
 
-  if (newOrDegradedViolations.length === 0) {
+  if (processed.newOrDegraded.length === 0) {
     core.info('No new or degraded violations to comment on');
-    if (violationsWithLines.length > 0) {
-      const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
-      const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
-      const skippedNote = buildSkippedNote(skippedInDiff);
-      const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
-      await postPRComment(octokit, prContext, summaryBody);
-    }
+    await handleNoNewViolations(
+      octokit,
+      prContext,
+      processed.withLines,
+      processed.uncovered,
+      deltaMap,
+      report,
+      deltas
+    );
     return;
   }
 
-  const commentableViolations = newOrDegradedViolations.map(v => v.violation);
-  core.info(`Generating AI comments for ${commentableViolations.length} new/degraded violations...`);
-  const aiComments = await generateLineComments(
-    commentableViolations,
+  await generateAndPostReview(
+    octokit,
+    prContext,
+    processed,
+    deltaMap,
     codeSnippets,
-    config.openrouterApiKey,
-    config.model,
-    report
+    config,
+    report,
+    deltas
   );
-
-  const lineComments = buildLineComments(newOrDegradedViolations, aiComments, deltaMap);
-  core.info(`Built ${lineComments.length} line comments for new/degraded violations`);
-
-  const skippedViolations = getSkippedViolations(violationsWithLines, deltaMap);
-  const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
-  const skippedNote = buildSkippedNote(skippedViolations);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
-
-  await postPRReview(octokit, prContext, lineComments, summaryBody);
-  core.info(`Posted review with ${lineComments.length} line comments`);
 }
 
 /**

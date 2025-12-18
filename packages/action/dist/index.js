@@ -1415,31 +1415,24 @@ function getSkippedViolations(violationsWithLines, deltaMap) {
     return delta && delta.severity !== "new" && delta.delta === 0;
   }).map((v) => v.violation);
 }
-async function postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas = null) {
-  const diffLines = await getPRDiffLines(octokit, prContext);
-  core4.info(`Diff covers ${diffLines.size} files`);
-  const { withLines: violationsWithLines, uncovered: uncoveredViolations } = partitionViolationsByDiff(violations, diffLines);
-  core4.info(
-    `${violationsWithLines.length}/${violations.length} violations can have inline comments (${uncoveredViolations.length} outside diff)`
-  );
-  const deltaMap = buildDeltaMap2(deltas);
-  const newOrDegradedViolations = filterNewOrDegraded(violationsWithLines, deltaMap);
-  const skippedCount = violationsWithLines.length - newOrDegradedViolations.length;
-  if (skippedCount > 0) {
-    core4.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
-  }
-  if (newOrDegradedViolations.length === 0) {
-    core4.info("No new or degraded violations to comment on");
-    if (violationsWithLines.length > 0) {
-      const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
-      const uncoveredNote2 = buildUncoveredNote(uncoveredViolations, deltaMap);
-      const skippedNote2 = buildSkippedNote(skippedInDiff);
-      const summaryBody2 = buildReviewSummary(report, deltas, uncoveredNote2 + skippedNote2);
-      await postPRComment(octokit, prContext, summaryBody2);
-    }
+function processViolationsForReview(violations, diffLines, deltaMap) {
+  const { withLines, uncovered } = partitionViolationsByDiff(violations, diffLines);
+  const newOrDegraded = filterNewOrDegraded(withLines, deltaMap);
+  const skipped = getSkippedViolations(withLines, deltaMap);
+  return { withLines, uncovered, newOrDegraded, skipped };
+}
+async function handleNoNewViolations(octokit, prContext, violationsWithLines, uncoveredViolations, deltaMap, report, deltas) {
+  if (violationsWithLines.length === 0) {
     return;
   }
-  const commentableViolations = newOrDegradedViolations.map((v) => v.violation);
+  const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
+  const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
+  const skippedNote = buildSkippedNote(skippedInDiff);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+  await postPRComment(octokit, prContext, summaryBody);
+}
+async function generateAndPostReview(octokit, prContext, processed, deltaMap, codeSnippets, config, report, deltas) {
+  const commentableViolations = processed.newOrDegraded.map((v) => v.violation);
   core4.info(`Generating AI comments for ${commentableViolations.length} new/degraded violations...`);
   const aiComments = await generateLineComments(
     commentableViolations,
@@ -1448,14 +1441,49 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     config.model,
     report
   );
-  const lineComments = buildLineComments(newOrDegradedViolations, aiComments, deltaMap);
+  const lineComments = buildLineComments(processed.newOrDegraded, aiComments, deltaMap);
   core4.info(`Built ${lineComments.length} line comments for new/degraded violations`);
-  const skippedViolations = getSkippedViolations(violationsWithLines, deltaMap);
-  const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
-  const skippedNote = buildSkippedNote(skippedViolations);
+  const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
+  const skippedNote = buildSkippedNote(processed.skipped);
   const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
   await postPRReview(octokit, prContext, lineComments, summaryBody);
   core4.info(`Posted review with ${lineComments.length} line comments`);
+}
+async function postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas = null) {
+  const diffLines = await getPRDiffLines(octokit, prContext);
+  core4.info(`Diff covers ${diffLines.size} files`);
+  const deltaMap = buildDeltaMap2(deltas);
+  const processed = processViolationsForReview(violations, diffLines, deltaMap);
+  core4.info(
+    `${processed.withLines.length}/${violations.length} violations can have inline comments (${processed.uncovered.length} outside diff)`
+  );
+  const skippedCount = processed.withLines.length - processed.newOrDegraded.length;
+  if (skippedCount > 0) {
+    core4.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
+  }
+  if (processed.newOrDegraded.length === 0) {
+    core4.info("No new or degraded violations to comment on");
+    await handleNoNewViolations(
+      octokit,
+      prContext,
+      processed.withLines,
+      processed.uncovered,
+      deltaMap,
+      report,
+      deltas
+    );
+    return;
+  }
+  await generateAndPostReview(
+    octokit,
+    prContext,
+    processed,
+    deltaMap,
+    codeSnippets,
+    config,
+    report,
+    deltas
+  );
 }
 async function postSummaryReview(octokit, prContext, report, codeSnippets, config, isFallback = false, deltas = null) {
   const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas);
