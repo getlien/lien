@@ -483,7 +483,7 @@ async function handleAnalysisOutputs(
 }
 
 /**
- * Post review if violations are found
+ * Post review if violations are found, or success message if none
  */
 async function postReviewIfNeeded(
   result: AnalysisResult,
@@ -491,6 +491,9 @@ async function postReviewIfNeeded(
 ): Promise<void> {
   if (result.currentReport.summary.totalViolations === 0) {
     core.info('No complexity violations found');
+    // Post success message (will update existing comment if present)
+    const successMessage = buildNoViolationsMessage(setup.prContext, result.deltas);
+    await postPRComment(setup.octokit, setup.prContext, successMessage);
     return;
   }
 

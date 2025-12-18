@@ -515,6 +515,23 @@ Format your response as a PR review comment with:
 
 Be concise but actionable. Focus on the highest-impact improvements.`;
 }
+function buildNoViolationsMessage(prContext, deltas = null) {
+  let deltaMessage = "";
+  if (deltas && deltas.length > 0) {
+    const improved = deltas.filter((d) => d.severity === "improved" || d.severity === "deleted");
+    if (improved.length > 0) {
+      deltaMessage = `
+
+\u{1F389} **Great job!** This PR improved complexity in ${improved.length} function(s).`;
+    }
+  }
+  return `<!-- lien-ai-review -->
+## \u2705 Lien Complexity Analysis
+
+No complexity violations found in PR #${prContext.pullNumber}.
+
+All analyzed functions are within the configured complexity threshold.${deltaMessage}`;
+}
 function groupDeltasByMetric(deltas) {
   return collect2(deltas).groupBy("metricType").map((group) => group.sum("delta")).all();
 }
@@ -1186,6 +1203,8 @@ async function handleAnalysisOutputs(result, setup) {
 async function postReviewIfNeeded(result, setup) {
   if (result.currentReport.summary.totalViolations === 0) {
     core4.info("No complexity violations found");
+    const successMessage = buildNoViolationsMessage(setup.prContext, result.deltas);
+    await postPRComment(setup.octokit, setup.prContext, successMessage);
     return;
   }
   const { violations, codeSnippets } = await prepareViolationsForReview(
