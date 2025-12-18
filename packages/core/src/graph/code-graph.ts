@@ -99,6 +99,146 @@ function createNode(
 }
 
 /**
+ * Finds all chunks that import the target file (reverse dependencies).
+ * Reuses pattern from dependency-analyzer.ts
+ */
+function findDependentChunks(
+  normalizedTarget: string,
+  importIndex: Map<string, SearchResult[]>
+): SearchResult[] {
+  const dependentChunks: SearchResult[] = [];
+  const seenChunkIds = new Set<string>();
+  
+  const addChunk = (chunk: SearchResult): void => {
+    const chunkId = `${chunk.metadata.file}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
+    if (!seenChunkIds.has(chunkId)) {
+      dependentChunks.push(chunk);
+      seenChunkIds.add(chunkId);
+    }
+  };
+  
+  // Direct index lookup (fastest path)
+  const directMatches = importIndex.get(normalizedTarget);
+  if (directMatches) {
+    for (const chunk of directMatches) {
+      addChunk(chunk);
+    }
+  }
+  
+  // Fuzzy match for relative imports and path variations
+  for (const [normalizedImport, chunks] of importIndex.entries()) {
+    if (normalizedImport !== normalizedTarget && matchesFile(normalizedImport, normalizedTarget)) {
+      for (const chunk of chunks) {
+        addChunk(chunk);
+      }
+    }
+  }
+  
+  return dependentChunks;
+}
+
+/**
+ * Traverses reverse dependencies (what depends on this file), up to a specified depth.
+ */
+function traverseReverseDependencies(
+  rootFile: string,
+  depth: number,
+  visited: Set<string>,
+  importIndex: Map<string, SearchResult[]>,
+  allChunks: SearchResult[],
+  workspaceRoot: string,
+  includeTests: boolean,
+  includeComplexity: boolean,
+  normalizePathCached: (path: string) => string
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  
+  if (depth <= 0) {
+    return { nodes, edges };
+  }
+  
+  const normalizedRoot = normalizePathCached(rootFile);
+  
+  // Prevent infinite loops from circular dependencies
+  if (visited.has(normalizedRoot)) {
+    return { nodes, edges };
+  }
+  visited.add(normalizedRoot);
+  
+  // Find chunks for the root file
+  const rootChunks = allChunks.filter(chunk => {
+    const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+    return normalizePathCached(canonical) === normalizedRoot;
+  });
+  
+  if (rootChunks.length === 0) {
+    // File not found in index - create a placeholder node
+    const rootId = nodeIdFromPath(rootFile);
+    nodes.push({
+      id: rootId,
+      label: rootFile,
+      type: 'file',
+      filePath: rootFile,
+    });
+    return { nodes, edges };
+  }
+  
+  // Create root node
+  const rootNode = createNode(rootFile, rootChunks, includeComplexity);
+  nodes.push(rootNode);
+  
+  // Find dependents (files that import this file)
+  const dependentChunks = findDependentChunks(normalizedRoot, importIndex);
+  
+  // Group dependents by file
+  const dependentsByFile = new Map<string, SearchResult[]>();
+  for (const chunk of dependentChunks) {
+    const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+    const existing = dependentsByFile.get(canonical) || [];
+    existing.push(chunk);
+    dependentsByFile.set(canonical, existing);
+  }
+  
+  // Traverse each dependent
+  for (const [dependentFilePath] of dependentsByFile.entries()) {
+    // Skip if is a test file (unless includeTests is true)
+    if (!includeTests && isTestFile(dependentFilePath)) {
+      continue;
+    }
+    
+    // Recursively traverse reverse dependencies
+    const { nodes: depNodes, edges: depEdges } = traverseReverseDependencies(
+      dependentFilePath,
+      depth - 1,
+      visited,
+      importIndex,
+      allChunks,
+      workspaceRoot,
+      includeTests,
+      includeComplexity,
+      normalizePathCached
+    );
+    
+    // Add dependent nodes and edges
+    nodes.push(...depNodes);
+    edges.push(...depEdges);
+    
+    // Create edge from dependent to root (reverse direction)
+    const depNode = depNodes.find(n => normalizePathCached(n.filePath) === normalizePathCached(dependentFilePath));
+    if (depNode) {
+      edges.push({
+        from: depNode.id,
+        to: rootNode.id,
+        type: 'imports',
+      });
+    }
+  }
+  
+  return { nodes, edges };
+}
+
+/**
  * Traverses dependencies starting from a root file, up to a specified depth.
  */
 function traverseDependencies(
@@ -228,6 +368,60 @@ function traverseDependencies(
 }
 
 /**
+ * Groups nodes by module (directory) for module-level visualization.
+ */
+function groupByModule(nodes: GraphNode[], edges: GraphEdge[]): { moduleNodes: GraphNode[]; moduleEdges: GraphEdge[] } {
+  const moduleMap = new Map<string, GraphNode>();
+  const fileToModule = new Map<string, string>();
+  
+  // Group files by their directory (module)
+  for (const node of nodes) {
+    const dir = node.filePath.split('/').slice(0, -1).join('/') || '.';
+    fileToModule.set(node.id, dir);
+    
+    if (!moduleMap.has(dir)) {
+      moduleMap.set(dir, {
+        id: nodeIdFromPath(dir),
+        label: dir || 'root',
+        type: 'module',
+        filePath: dir,
+      });
+    }
+  }
+  
+  // Create module-level edges from file-level edges
+  const moduleEdges: GraphEdge[] = [];
+  const moduleEdgeSet = new Set<string>();
+  
+  for (const edge of edges) {
+    const fromModule = fileToModule.get(edge.from);
+    const toModule = fileToModule.get(edge.to);
+    
+    if (fromModule && toModule && fromModule !== toModule) {
+      const fromModuleNode = moduleMap.get(fromModule);
+      const toModuleNode = moduleMap.get(toModule);
+      
+      if (fromModuleNode && toModuleNode) {
+        const edgeKey = `${fromModuleNode.id}->${toModuleNode.id}`;
+        if (!moduleEdgeSet.has(edgeKey)) {
+          moduleEdgeSet.add(edgeKey);
+          moduleEdges.push({
+            from: fromModuleNode.id,
+            to: toModuleNode.id,
+            type: edge.type,
+          });
+        }
+      }
+    }
+  }
+  
+  return {
+    moduleNodes: Array.from(moduleMap.values()),
+    moduleEdges,
+  };
+}
+
+/**
  * Generates code dependency graphs from indexed codebase.
  */
 export class CodeGraphGenerator {
@@ -237,15 +431,24 @@ export class CodeGraphGenerator {
   ) {}
 
   /**
-   * Generate a dependency graph starting from a root file.
+   * Generate a dependency graph starting from root file(s).
    */
   async generateGraph(options: GraphOptions): Promise<CodeGraph> {
     const {
       rootFile,
+      rootFiles,
       depth,
+      direction = 'forward',
       includeTests = false,
       includeComplexity = false,
+      moduleLevel = false,
     } = options;
+    
+    // Determine root files
+    const roots = rootFiles || (rootFile ? [rootFile] : []);
+    if (roots.length === 0) {
+      throw new Error('Either rootFile or rootFiles must be provided');
+    }
     
     // Create cached path normalizer
     const normalizePathCached = createPathNormalizer(this.workspaceRoot);
@@ -253,23 +456,50 @@ export class CodeGraphGenerator {
     // Build import index for efficient lookup
     const importIndex = buildImportIndex(this.allChunks, normalizePathCached);
     
-    // Traverse dependencies
+    // Collect all nodes and edges from all roots
+    const allNodes: GraphNode[] = [];
+    const allEdges: GraphEdge[] = [];
     const visited = new Set<string>();
-    const { nodes, edges } = traverseDependencies(
-      rootFile,
-      depth,
-      visited,
-      importIndex,
-      this.allChunks,
-      this.workspaceRoot,
-      includeTests,
-      includeComplexity,
-      normalizePathCached
-    );
+    
+    for (const root of roots) {
+      if (direction === 'forward' || direction === 'both') {
+        const { nodes, edges } = traverseDependencies(
+          root,
+          depth,
+          new Set(visited), // Share visited set across roots
+          importIndex,
+          this.allChunks,
+          this.workspaceRoot,
+          includeTests,
+          includeComplexity,
+          normalizePathCached
+        );
+        allNodes.push(...nodes);
+        allEdges.push(...edges);
+        visited.add(normalizePathCached(root));
+      }
+      
+      if (direction === 'reverse' || direction === 'both') {
+        const { nodes, edges } = traverseReverseDependencies(
+          root,
+          depth,
+          new Set(visited), // Share visited set across roots
+          importIndex,
+          this.allChunks,
+          this.workspaceRoot,
+          includeTests,
+          includeComplexity,
+          normalizePathCached
+        );
+        allNodes.push(...nodes);
+        allEdges.push(...edges);
+        visited.add(normalizePathCached(root));
+      }
+    }
     
     // Deduplicate nodes (same file might appear multiple times in traversal)
     const nodeMap = new Map<string, GraphNode>();
-    for (const node of nodes) {
+    for (const node of allNodes) {
       const existing = nodeMap.get(node.id);
       if (!existing || (node.complexity && !existing.complexity)) {
         nodeMap.set(node.id, node);
@@ -279,7 +509,7 @@ export class CodeGraphGenerator {
     // Deduplicate edges
     const edgeSet = new Set<string>();
     const uniqueEdges: GraphEdge[] = [];
-    for (const edge of edges) {
+    for (const edge of allEdges) {
       const edgeKey = `${edge.from}->${edge.to}`;
       if (!edgeSet.has(edgeKey)) {
         edgeSet.add(edgeKey);
@@ -287,11 +517,24 @@ export class CodeGraphGenerator {
       }
     }
     
+    let finalNodes = Array.from(nodeMap.values());
+    let finalEdges = uniqueEdges;
+    
+    // Apply module-level grouping if requested
+    if (moduleLevel) {
+      const { moduleNodes, moduleEdges: modEdges } = groupByModule(finalNodes, finalEdges);
+      finalNodes = moduleNodes;
+      finalEdges = modEdges;
+    }
+    
     return {
-      nodes: Array.from(nodeMap.values()),
-      edges: uniqueEdges,
-      rootFile,
+      nodes: finalNodes,
+      edges: finalEdges,
+      rootFile: roots.length === 1 ? roots[0] : undefined,
+      rootFiles: roots.length > 1 ? roots : undefined,
       depth,
+      direction,
+      moduleLevel,
     };
   }
 }

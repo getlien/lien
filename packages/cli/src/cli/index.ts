@@ -72,12 +72,19 @@ program
 program
   .command('graph')
   .description('Generate code dependency graph')
-  .argument('<rootFile>', 'Root file to generate graph from')
+  .argument('[rootFile]', 'Root file to generate graph from (or use --files)')
+  .option('-f, --files <files...>', 'Multiple root files (for PR review)')
   .option('-d, --depth <n>', 'Traversal depth (default: 1)', '1')
+  .option('--direction <dir>', 'Direction: forward, reverse, or both (default: forward)', 'forward')
+  .option('--module', 'Group by module/directory instead of files', false)
   .action((rootFile, options) => {
+    const rootFiles = options.files ? options.files : undefined;
     graphCommand({
-      rootFile,
+      rootFile: rootFile || undefined,
+      rootFiles,
       depth: parseInt(options.depth, 10),
+      direction: options.direction as 'forward' | 'reverse' | 'both',
+      moduleLevel: options.module === true,
     });
   });
 

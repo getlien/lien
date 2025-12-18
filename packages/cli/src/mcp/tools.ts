@@ -138,11 +138,19 @@ Human-readable output: "23 (needs ~23 tests)", "🧠 45", "~2h 30m", "2.27 bugs"
     'code_graph',
     `Generate and visualize code dependency graphs.
 
-Creates an ASCII tree showing dependencies starting from a root file.
+Creates an ASCII tree showing dependencies starting from root file(s).
+
+**Most useful for code review:**
+- Reverse dependencies (impact analysis): code_graph({ rootFile: "src/auth.ts", direction: "reverse" })
+- Multiple files (PR review): code_graph({ rootFiles: ["file1.ts", "file2.ts"], direction: "reverse" })
+- Module-level view: code_graph({ rootFile: "src/api", moduleLevel: true })
 
 Examples:
-- code_graph({ rootFile: "src/components/Button.tsx", depth: 1 })
-- code_graph({ rootFile: "src/api/user.ts", depth: 2 })
+- Forward: code_graph({ rootFile: "src/components/Button.tsx", depth: 1 })
+- Reverse (impact): code_graph({ rootFile: "src/auth.ts", direction: "reverse" })
+- Both directions: code_graph({ rootFile: "src/api/user.ts", direction: "both", depth: 2 })
+- PR review: code_graph({ rootFiles: ["src/auth.ts", "src/user.ts"], direction: "reverse" })
+- Module view: code_graph({ rootFile: "src/api", moduleLevel: true })
 
 Returns:
 - ASCII visualization of dependency tree

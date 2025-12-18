@@ -27,17 +27,23 @@ export interface GraphEdge {
 export interface CodeGraph {
   nodes: GraphNode[];
   edges: GraphEdge[];
-  rootFile: string;
+  rootFile?: string;
+  rootFiles?: string[];
   depth: number;
+  direction: 'forward' | 'reverse' | 'both';
+  moduleLevel?: boolean;
 }
 
 /**
  * Options for graph generation
  */
 export interface GraphOptions {
-  rootFile: string;
+  rootFile?: string;
+  rootFiles?: string[];
   depth: number;
+  direction?: 'forward' | 'reverse' | 'both';
   includeTests?: boolean;
   includeComplexity?: boolean;
+  moduleLevel?: boolean;
 }
 

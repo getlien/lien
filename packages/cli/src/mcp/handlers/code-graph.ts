@@ -27,7 +27,10 @@ export async function handleCodeGraph(
       const generator = new CodeGraphGenerator(allChunks, rootDir);
       const graph = await generator.generateGraph({
         rootFile: validatedArgs.rootFile,
+        rootFiles: validatedArgs.rootFiles,
         depth: validatedArgs.depth ?? 1,
+        direction: validatedArgs.direction ?? 'forward',
+        moduleLevel: validatedArgs.moduleLevel ?? false,
         includeTests: false,
         includeComplexity: true,
       });
@@ -40,8 +43,11 @@ export async function handleCodeGraph(
 
       return {
         indexInfo: getIndexMetadata(),
-        rootFile: validatedArgs.rootFile,
-        depth: validatedArgs.depth,
+        rootFile: graph.rootFile,
+        rootFiles: graph.rootFiles,
+        depth: graph.depth,
+        direction: graph.direction,
+        moduleLevel: graph.moduleLevel,
         nodeCount: graph.nodes.length,
         edgeCount: graph.edges.length,
         graph: asciiOutput,
