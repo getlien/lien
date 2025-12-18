@@ -1,5 +1,5 @@
 import type { SearchResult } from '../vectordb/types.js';
-import { normalizePath, getCanonicalPath, matchesFile, isTestFile } from '../utils/path-matching.js';
+import { normalizePath, getCanonicalPath, matchesFile, isTestFile, resolveRelativeImport } from '../utils/path-matching.js';
 import type { GraphNode, GraphEdge, CodeGraph, GraphOptions } from './types.js';
 
 /**
@@ -316,23 +316,34 @@ function traverseDependencies(
   }
   
   // Find dependencies (files that this file imports)
+  // Get the source file path for resolving relative imports
+  const sourceFile = rootChunks[0] ? getCanonicalPath(rootChunks[0].metadata.file, workspaceRoot) : rootFile;
+  
   const rootImports = new Set<string>();
   for (const chunk of rootChunks) {
     const imports = toArray(chunk.metadata.imports);
     for (const imp of imports) {
       if (typeof imp !== 'string' || !imp.trim()) continue;
-      const normalizedImport = normalizePathCached(imp);
-      rootImports.add(normalizedImport);
+      rootImports.add(imp); // Keep original import for resolution
     }
   }
   
   // Traverse each dependency
-  for (const normalizedImport of rootImports) {
+  for (const originalImport of rootImports) {
+    // Resolve relative import to absolute path
+    const resolvedImport = resolveRelativeImport(originalImport, sourceFile, workspaceRoot);
+    if (!resolvedImport) {
+      // Skip if import couldn't be resolved (e.g., external package)
+      continue;
+    }
+    
+    const normalizedImport = normalizePathCached(resolvedImport);
+    
     // Find the actual file path for this import
     // Try to find a matching file in allChunks
     let dependencyFilePath: string | null = null;
     
-    // First, try exact match
+    // First, try exact match with resolved path
     for (const chunk of allChunks) {
       const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
       const normalizedCanonical = normalizePathCached(canonical);
@@ -450,6 +461,44 @@ function groupByModule(nodes: GraphNode[], edges: GraphEdge[]): { moduleNodes: G
 }
 
 /**
+ * Checks if a path is a directory (no file extension or ends with /).
+ */
+function isDirectoryPath(path: string): boolean {
+  // Remove trailing slash if present
+  const cleanPath = path.replace(/\/$/, '');
+  // Check if it has a file extension
+  return !/\.(ts|tsx|js|jsx|py|json|md|txt|yml|yaml|xml|html|css|scss|sass|less|vue|svelte|jsx|tsx)$/i.test(cleanPath);
+}
+
+/**
+ * Finds all files in a directory from the chunks.
+ */
+function findFilesInDirectory(
+  dirPath: string,
+  allChunks: SearchResult[],
+  workspaceRoot: string,
+  normalizePathCached: (path: string) => string
+): string[] {
+  const normalizedDir = normalizePathCached(dirPath);
+  const files = new Set<string>();
+  
+  for (const chunk of allChunks) {
+    const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+    const normalizedFile = normalizePathCached(canonical);
+    
+    // Get the directory of this file
+    const fileDir = normalizedFile.split('/').slice(0, -1).join('/') || '.';
+    
+    // Check if file is in the target directory (exact match or subdirectory)
+    if (fileDir === normalizedDir || normalizedFile.startsWith(normalizedDir + '/')) {
+      files.add(canonical);
+    }
+  }
+  
+  return Array.from(files);
+}
+
+/**
  * Generates code dependency graphs from indexed codebase.
  */
 export class CodeGraphGenerator {
@@ -473,13 +522,33 @@ export class CodeGraphGenerator {
     } = options;
     
     // Determine root files
-    const roots = rootFiles || (rootFile ? [rootFile] : []);
+    let roots = rootFiles || (rootFile ? [rootFile] : []);
     if (roots.length === 0) {
       throw new Error('Either rootFile or rootFiles must be provided');
     }
     
     // Create cached path normalizer
     const normalizePathCached = createPathNormalizer(this.workspaceRoot);
+    
+    // If moduleLevel is true or if any root is a directory, expand directories to files
+    if (moduleLevel || roots.some(r => isDirectoryPath(r))) {
+      const expandedRoots: string[] = [];
+      for (const root of roots) {
+        if (isDirectoryPath(root)) {
+          // Find all files in this directory
+          const dirFiles = findFilesInDirectory(root, this.allChunks, this.workspaceRoot, normalizePathCached);
+          if (dirFiles.length > 0) {
+            expandedRoots.push(...dirFiles);
+          } else {
+            // If no files found, keep the directory as-is (will be handled by module grouping)
+            expandedRoots.push(root);
+          }
+        } else {
+          expandedRoots.push(root);
+        }
+      }
+      roots = expandedRoots;
+    }
     
     // Build import index for efficient lookup
     const importIndex = buildImportIndex(this.allChunks, normalizePathCached);

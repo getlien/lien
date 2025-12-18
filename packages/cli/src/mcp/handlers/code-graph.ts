@@ -11,7 +11,7 @@ export async function handleCodeGraph(
   args: unknown,
   ctx: ToolContext
 ): Promise<MCPToolResult> {
-  const { vectorDB, log, checkAndReconnect, getIndexMetadata, rootDir } = ctx;
+  const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
   return await wrapToolHandler(
     CodeGraphSchema,
@@ -23,8 +23,12 @@ export async function handleCodeGraph(
       const allChunks = await vectorDB.scanWithFilter({ limit: 10000 });
       log(`Scanning ${allChunks.length} chunks for dependencies...`);
 
+      // Normalize workspace root (use process.cwd() to match get_dependents behavior)
+      // This ensures path normalization is consistent across tools
+      const workspaceRoot = process.cwd().replace(/\\/g, '/');
+
       // Generate graph
-      const generator = new CodeGraphGenerator(allChunks, rootDir);
+      const generator = new CodeGraphGenerator(allChunks, workspaceRoot);
       const graph = await generator.generateGraph({
         rootFile: validatedArgs.rootFile,
         rootFiles: validatedArgs.rootFiles,

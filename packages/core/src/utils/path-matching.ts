@@ -113,6 +113,71 @@ export function getCanonicalPath(filepath: string, workspaceRoot: string): strin
 }
 
 /**
+ * Resolves a relative import path to an absolute path based on the source file's location.
+ * 
+ * Handles:
+ * - Relative imports: `./utils` or `../utils/path-matching`
+ * - Absolute imports: `packages/core/src/utils` (already absolute)
+ * 
+ * @param importPath - The import path (may be relative or absolute)
+ * @param sourceFile - The file that contains this import (relative to workspace root)
+ * @param workspaceRoot - The workspace root directory (normalized with forward slashes)
+ * @returns Resolved absolute path (relative to workspace root), or null if invalid
+ */
+export function resolveRelativeImport(
+  importPath: string,
+  sourceFile: string,
+  workspaceRoot: string
+): string | null {
+  // Clean the import path
+  let cleanImport = importPath.replace(/['"]/g, '').trim().replace(/\\/g, '/');
+  
+  // Remove file extension for matching
+  cleanImport = cleanImport.replace(/\.(ts|tsx|js|jsx)$/, '');
+  
+  // If already absolute (starts with workspace root or is absolute path), return as-is
+  if (cleanImport.startsWith(workspaceRoot + '/')) {
+    return cleanImport.substring(workspaceRoot.length + 1);
+  }
+  
+  // If it's an absolute path (starts with /), it's outside workspace - skip
+  if (cleanImport.startsWith('/')) {
+    return null;
+  }
+  
+  // Get source file directory
+  const sourceDir = sourceFile.replace(/\\/g, '/');
+  const sourceDirPath = sourceDir.split('/').slice(0, -1).join('/') || '';
+  
+  // Handle relative imports
+  if (cleanImport.startsWith('./')) {
+    // Relative to current directory: ./utils → sourceDir/utils
+    const resolved = sourceDirPath ? `${sourceDirPath}/${cleanImport.substring(2)}` : cleanImport.substring(2);
+    return resolved;
+  } else if (cleanImport.startsWith('../')) {
+    // Go up directories: ../utils → go up one level from sourceDir
+    let currentDir = sourceDirPath;
+    let remaining = cleanImport;
+    
+    while (remaining.startsWith('../')) {
+      if (!currentDir) {
+        // Can't go up beyond workspace root
+        return null;
+      }
+      currentDir = currentDir.split('/').slice(0, -1).join('/');
+      remaining = remaining.substring(3);
+    }
+    
+    const resolved = currentDir ? `${currentDir}/${remaining}` : remaining;
+    return resolved;
+  } else {
+    // Assume it's relative to current directory (no ./ prefix)
+    const resolved = sourceDirPath ? `${sourceDirPath}/${cleanImport}` : cleanImport;
+    return resolved;
+  }
+}
+
+/**
  * Determines if a file is a test file based on naming conventions.
  * 
  * Uses precise regex patterns to avoid false positives:
