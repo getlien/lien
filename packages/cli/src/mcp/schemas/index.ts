@@ -14,4 +14,5 @@ export * from './file.schema.js';
 export * from './symbols.schema.js';
 export * from './dependents.schema.js';
 export * from './complexity.schema.js';
+export * from './code-graph.schema.js';
 

@@ -11,6 +11,7 @@ import { handleGetFilesContext } from './get-files-context.js';
 import { handleListFunctions } from './list-functions.js';
 import { handleGetDependents } from './get-dependents.js';
 import { handleGetComplexity } from './get-complexity.js';
+import { handleCodeGraph } from './code-graph.js';
 import type { ToolHandler } from '../types.js';
 
 // Re-export individual handlers for direct use if needed
@@ -21,6 +22,7 @@ export {
   handleListFunctions,
   handleGetDependents,
   handleGetComplexity,
+  handleCodeGraph,
 };
 
 /**
@@ -34,4 +36,5 @@ export const toolHandlers: Record<string, ToolHandler> = {
   'list_functions': handleListFunctions,
   'get_dependents': handleGetDependents,
   'get_complexity': handleGetComplexity,
+  'code_graph': handleCodeGraph,
 };

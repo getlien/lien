@@ -6,6 +6,7 @@ import {
   ListFunctionsSchema,
   GetDependentsSchema,
   GetComplexitySchema,
+  CodeGraphSchema,
 } from './schemas/index.js';
 
 /**
@@ -131,5 +132,23 @@ Examples:
 Returns violations with metricType ('cyclomatic', 'cognitive', 'halstead_effort',
 or 'halstead_bugs'), risk levels, and dependent counts.
 Human-readable output: "23 (needs ~23 tests)", "🧠 45", "~2h 30m", "2.27 bugs".`
+  ),
+  toMCPToolSchema(
+    CodeGraphSchema,
+    'code_graph',
+    `Generate and visualize code dependency graphs.
+
+Creates an ASCII tree showing dependencies starting from a root file.
+
+Examples:
+- code_graph({ rootFile: "src/components/Button.tsx", depth: 1 })
+- code_graph({ rootFile: "src/api/user.ts", depth: 2 })
+
+Returns:
+- ASCII visualization of dependency tree
+- Node and edge counts
+- Graph metadata
+
+Use for understanding code relationships and impact analysis.`
   ),
 ];
