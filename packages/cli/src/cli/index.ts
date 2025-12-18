@@ -7,6 +7,7 @@ import { statusCommand } from './status.js';
 import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
 import { complexityCommand } from './complexity.js';
+import { graphCommand } from './graph-cmd.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -67,4 +68,16 @@ program
   .option('--cognitive-threshold <n>', 'Override cognitive complexity threshold only')
   .option('--fail-on <severity>', 'Exit 1 if violations: error, warning')
   .action(complexityCommand);
+
+program
+  .command('graph')
+  .description('Generate code dependency graph')
+  .argument('<rootFile>', 'Root file to generate graph from')
+  .option('-d, --depth <n>', 'Traversal depth (default: 1)', '1')
+  .action((rootFile, options) => {
+    graphCommand({
+      rootFile,
+      depth: parseInt(options.depth, 10),
+    });
+  });
 
