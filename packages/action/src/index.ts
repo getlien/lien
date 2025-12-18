@@ -18,6 +18,7 @@ import {
   ComplexityAnalyzer,
   loadConfig,
   createDefaultConfig,
+  RISK_ORDER,
   type ComplexityReport,
   type ComplexityViolation,
   type LienConfig,
@@ -268,6 +269,30 @@ async function runComplexityAnalysis(
 }
 
 /**
+ * Prioritize violations by impact (dependents + severity)
+ * High dependents + High severity = Highest priority
+ */
+function prioritizeViolations(
+  violations: ComplexityViolation[],
+  report: ComplexityReport
+): ComplexityViolation[] {
+  return violations.sort((a, b) => {
+    const fileA = report.files[a.filepath];
+    const fileB = report.files[b.filepath];
+    
+    // Priority: High dependents + High severity = Highest priority
+    const impactA = (fileA?.dependentCount || 0) * 10 + RISK_ORDER[fileA?.riskLevel || 'low'];
+    const impactB = (fileB?.dependentCount || 0) * 10 + RISK_ORDER[fileB?.riskLevel || 'low'];
+    
+    if (impactB !== impactA) return impactB - impactA;
+    
+    // Fallback: severity
+    const severityOrder = { error: 2, warning: 1 };
+    return severityOrder[b.severity] - severityOrder[a.severity];
+  });
+}
+
+/**
  * Sort violations by severity and collect code snippets
  */
 async function prepareViolationsForReview(
@@ -275,13 +300,12 @@ async function prepareViolationsForReview(
   octokit: Octokit,
   prContext: PRContext
 ): Promise<{ violations: ComplexityViolation[]; codeSnippets: Map<string, string> }> {
-  // Collect and sort violations
-  const violations = Object.values(report.files)
-    .flatMap((fileData) => fileData.violations)
-    .sort((a, b) => {
-      if (a.severity !== b.severity) return a.severity === 'error' ? -1 : 1;
-      return b.complexity - a.complexity;
-    })
+  // Collect violations
+  const allViolations = Object.values(report.files)
+    .flatMap((fileData) => fileData.violations);
+  
+  // Prioritize by impact (dependents + severity)
+  const violations = prioritizeViolations(allViolations, report)
     .slice(0, 10);
 
   // Collect code snippets

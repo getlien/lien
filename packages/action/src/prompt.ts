@@ -86,6 +86,42 @@ function formatViolationLine(v: ComplexityViolation, deltaMap: Map<string, Compl
 }
 
 /**
+ * Build dependency context string for a file
+ */
+function buildDependencyContext(fileData: ComplexityReport['files'][string]): string {
+  if (!fileData.dependentCount || fileData.dependentCount === 0) {
+    return '';
+  }
+  
+  const riskEmoji: Record<string, string> = {
+    low: '🟢',
+    medium: '🟡',
+    high: '🟠',
+    critical: '🔴',
+  };
+  
+  const emoji = riskEmoji[fileData.riskLevel] || '⚪';
+  
+  const dependentsList = fileData.dependents
+    ?.slice(0, 10) // Top 10 to avoid prompt bloat
+    .map(f => `  - ${f}`)
+    .join('\n') || '';
+  
+  const complexityNote = fileData.dependentComplexityMetrics
+    ? `\n- **Dependent complexity**: Avg ${fileData.dependentComplexityMetrics.averageComplexity.toFixed(1)}, Max ${fileData.dependentComplexityMetrics.maxComplexity}`
+    : '';
+  
+  const moreNote = fileData.dependents && fileData.dependents.length > 10
+    ? '\n  ... (and more)'
+    : '';
+  
+  return `\n**Dependency Impact**: ${emoji} ${fileData.riskLevel.toUpperCase()} risk
+- **Dependents**: ${fileData.dependentCount} file(s) import this
+${dependentsList ? `\n**Key dependents:**\n${dependentsList}${moreNote}` : ''}${complexityNote}
+- **Review focus**: Changes here affect ${fileData.dependentCount} other file(s). Extra scrutiny recommended.`;
+}
+
+/**
  * Build violations summary grouped by file
  */
 function buildViolationsSummary(
@@ -98,7 +134,8 @@ function buildViolationsSummary(
       const violationList = data.violations
         .map(v => formatViolationLine(v, deltaMap))
         .join('\n');
-      return `**${filepath}** (risk: ${data.riskLevel})\n${violationList}`;
+      const dependencyContext = buildDependencyContext(data);
+      return `**${filepath}** (risk: ${data.riskLevel})\n${violationList}${dependencyContext}`;
     })
     .join('\n\n');
 }
@@ -491,9 +528,27 @@ ${rows.join('\n')}
     }
   }
 
+  // Add dependency summary
+  let impactSummary = '';
+  if (report) {
+    const filesWithDependents = Object.values(report.files)
+      .filter(f => f.dependentCount && f.dependentCount > 0);
+    
+    if (filesWithDependents.length > 0) {
+      const totalDependents = filesWithDependents.reduce((sum, f) => sum + (f.dependentCount || 0), 0);
+      const highRiskFiles = filesWithDependents.filter(f => 
+        ['high', 'critical'].includes(f.riskLevel)
+      ).length;
+      
+      if (highRiskFiles > 0) {
+        impactSummary = `\n🔗 **Impact**: ${highRiskFiles} high-risk file(s) with ${totalDependents} total dependents`;
+      }
+    }
+  }
+
   return `### 👁️ Veille
 
-${status.emoji} ${status.message}
+${status.emoji} ${status.message}${impactSummary}
 ${metricTable}
 *[Veille](https://lien.dev) by Lien*`;
 }

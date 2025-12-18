@@ -8,7 +8,8 @@ import {
   VectorDB,
   ComplexityAnalyzer,
   loadConfig,
-  createDefaultConfig
+  createDefaultConfig,
+  RISK_ORDER
 } from "@liendev/core";
 
 // src/github.ts
@@ -399,11 +400,35 @@ function formatViolationLine(v, deltaMap) {
   const thresholdDisplay = formatThresholdValue(v.metricType, v.threshold);
   return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} ${valueDisplay}${deltaStr} (threshold: ${thresholdDisplay}) [${v.severity}]`;
 }
+function buildDependencyContext(fileData) {
+  if (!fileData.dependentCount || fileData.dependentCount === 0) {
+    return "";
+  }
+  const riskEmoji = {
+    low: "\u{1F7E2}",
+    medium: "\u{1F7E1}",
+    high: "\u{1F7E0}",
+    critical: "\u{1F534}"
+  };
+  const emoji = riskEmoji[fileData.riskLevel] || "\u26AA";
+  const dependentsList = fileData.dependents?.slice(0, 10).map((f) => `  - ${f}`).join("\n") || "";
+  const complexityNote = fileData.dependentComplexityMetrics ? `
+- **Dependent complexity**: Avg ${fileData.dependentComplexityMetrics.averageComplexity.toFixed(1)}, Max ${fileData.dependentComplexityMetrics.maxComplexity}` : "";
+  const moreNote = fileData.dependents && fileData.dependents.length > 10 ? "\n  ... (and more)" : "";
+  return `
+**Dependency Impact**: ${emoji} ${fileData.riskLevel.toUpperCase()} risk
+- **Dependents**: ${fileData.dependentCount} file(s) import this
+${dependentsList ? `
+**Key dependents:**
+${dependentsList}${moreNote}` : ""}${complexityNote}
+- **Review focus**: Changes here affect ${fileData.dependentCount} other file(s). Extra scrutiny recommended.`;
+}
 function buildViolationsSummary(files, deltaMap) {
   return Object.entries(files).filter(([_, data]) => data.violations.length > 0).map(([filepath, data]) => {
     const violationList = data.violations.map((v) => formatViolationLine(v, deltaMap)).join("\n");
+    const dependencyContext = buildDependencyContext(data);
     return `**${filepath}** (risk: ${data.riskLevel})
-${violationList}`;
+${violationList}${dependencyContext}`;
   }).join("\n\n");
 }
 function buildDeltaContext(deltas) {
@@ -645,9 +670,23 @@ ${rows.join("\n")}
 `;
     }
   }
+  let impactSummary = "";
+  if (report) {
+    const filesWithDependents = Object.values(report.files).filter((f) => f.dependentCount && f.dependentCount > 0);
+    if (filesWithDependents.length > 0) {
+      const totalDependents = filesWithDependents.reduce((sum, f) => sum + (f.dependentCount || 0), 0);
+      const highRiskFiles = filesWithDependents.filter(
+        (f) => ["high", "critical"].includes(f.riskLevel)
+      ).length;
+      if (highRiskFiles > 0) {
+        impactSummary = `
+\u{1F517} **Impact**: ${highRiskFiles} high-risk file(s) with ${totalDependents} total dependents`;
+      }
+    }
+  }
   return `### \u{1F441}\uFE0F Veille
 
-${status.emoji} ${status.message}
+${status.emoji} ${status.message}${impactSummary}
 ${metricTable}
 *[Veille](https://lien.dev) by Lien*`;
 }
@@ -1031,11 +1070,20 @@ async function runComplexityAnalysis(files, threshold) {
     return null;
   }
 }
+function prioritizeViolations(violations, report) {
+  return violations.sort((a, b) => {
+    const fileA = report.files[a.filepath];
+    const fileB = report.files[b.filepath];
+    const impactA = (fileA?.dependentCount || 0) * 10 + RISK_ORDER[fileA?.riskLevel || "low"];
+    const impactB = (fileB?.dependentCount || 0) * 10 + RISK_ORDER[fileB?.riskLevel || "low"];
+    if (impactB !== impactA) return impactB - impactA;
+    const severityOrder = { error: 2, warning: 1 };
+    return severityOrder[b.severity] - severityOrder[a.severity];
+  });
+}
 async function prepareViolationsForReview(report, octokit, prContext) {
-  const violations = Object.values(report.files).flatMap((fileData) => fileData.violations).sort((a, b) => {
-    if (a.severity !== b.severity) return a.severity === "error" ? -1 : 1;
-    return b.complexity - a.complexity;
-  }).slice(0, 10);
+  const allViolations = Object.values(report.files).flatMap((fileData) => fileData.violations);
+  const violations = prioritizeViolations(allViolations, report).slice(0, 10);
   const codeSnippets = /* @__PURE__ */ new Map();
   for (const violation of violations) {
     const snippet = await getFileContent(
