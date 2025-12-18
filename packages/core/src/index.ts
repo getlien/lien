@@ -163,6 +163,19 @@ export type {
 export { RISK_ORDER } from './types/index.js';
 
 // =============================================================================
+// CODE GRAPH
+// =============================================================================
+
+export type {
+  GraphNode,
+  GraphEdge,
+  CodeGraph,
+  GraphOptions,
+} from './graph/index.js';
+
+export { CodeGraphGenerator, AsciiGraphRenderer } from './graph/index.js';
+
+// =============================================================================
 // CONSTANTS
 // =============================================================================
 
