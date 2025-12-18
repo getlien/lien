@@ -27,6 +27,15 @@ inputs:
   baseline_complexity:
     description: '[DEPRECATED] Path to baseline complexity JSON from base branch (use enable_delta_tracking instead)'
     default: ''
+  enable_impact_analysis:
+    description: 'Include dependency impact analysis in reviews (default: true)'
+    default: 'true'
+  impact_analysis_depth:
+    description: 'Maximum depth for dependency traversal (default: unlimited)'
+    default: ''
+  module_level_analysis:
+    description: 'Use module-level view for directory changes: "auto" (default), "always", or "never"'
+    default: 'auto'
 
 outputs:
   violations:

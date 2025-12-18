@@ -21,6 +21,7 @@ import {
   type ComplexityReport,
   type ComplexityViolation,
   type LienConfig,
+  type SearchResult,
 } from '@liendev/core';
 
 import {
@@ -55,6 +56,11 @@ import {
   logDeltaSummary,
   type ComplexityDelta,
 } from './delta.js';
+import {
+  analyzeImpact,
+  formatImpactAnalysisForComment,
+  type ImpactAnalysis,
+} from './impact-analysis.js';
 
 type ReviewStyle = 'line' | 'summary';
 
@@ -69,6 +75,9 @@ interface ActionConfig {
   reviewStyle: ReviewStyle;
   enableDeltaTracking: boolean;
   baselineComplexityPath: string; // deprecated, kept for backwards compat
+  enableImpactAnalysis: boolean;
+  impactAnalysisDepth?: number;
+  moduleLevelAnalysis: 'auto' | 'always' | 'never';
 }
 
 /**
@@ -77,6 +86,10 @@ interface ActionConfig {
 function getConfig(): ActionConfig {
   const reviewStyle = core.getInput('review_style') || 'line';
   const enableDeltaTracking = core.getInput('enable_delta_tracking') === 'true';
+  const enableImpactAnalysis = core.getInput('enable_impact_analysis') !== 'false'; // default: true
+  const impactAnalysisDepthInput = core.getInput('impact_analysis_depth');
+  const impactAnalysisDepth = impactAnalysisDepthInput ? parseInt(impactAnalysisDepthInput, 10) : undefined;
+  const moduleLevelAnalysis = (core.getInput('module_level_analysis') || 'auto') as 'auto' | 'always' | 'never';
   
   return {
     openrouterApiKey: core.getInput('openrouter_api_key', { required: true }),
@@ -86,6 +99,9 @@ function getConfig(): ActionConfig {
     reviewStyle: reviewStyle === 'summary' ? 'summary' : 'line',
     enableDeltaTracking,
     baselineComplexityPath: core.getInput('baseline_complexity') || '',
+    enableImpactAnalysis,
+    impactAnalysisDepth,
+    moduleLevelAnalysis,
   };
 }
 
@@ -395,6 +411,35 @@ async function run(): Promise<void> {
 
     const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
 
+    // Generate impact analysis (what depends on changed files)
+    let impactAnalyses: ImpactAnalysis[] = [];
+    if (config.enableImpactAnalysis) {
+      try {
+        core.info('🔗 Generating impact analysis...');
+        const rootDir = process.cwd();
+        const vectorDB = await VectorDB.load(rootDir);
+        const allChunks = await vectorDB.scanAll();
+        core.info(`Loaded ${allChunks.length} chunks for impact analysis`);
+        
+        impactAnalyses = await analyzeImpact(
+          filesToAnalyze,
+          allChunks,
+          rootDir,
+          {
+            enableImpactAnalysis: config.enableImpactAnalysis,
+            impactAnalysisDepth: config.impactAnalysisDepth,
+            moduleLevelAnalysis: config.moduleLevelAnalysis,
+          }
+        );
+        
+        const highImpactCount = impactAnalyses.filter(a => ['high', 'critical'].includes(a.impactLevel)).length;
+        core.info(`Impact analysis complete: ${impactAnalyses.length} files analyzed, ${highImpactCount} high/critical impact`);
+      } catch (error) {
+        core.warning(`Failed to generate impact analysis: ${error}`);
+        // Continue without impact analysis - it's not critical
+      }
+    }
+
     if (deltaSummary) {
       logDeltaSummary(deltaSummary);
       core.setOutput('total_delta', deltaSummary.totalDelta);
@@ -403,11 +448,29 @@ async function run(): Promise<void> {
     }
 
     // Always update PR description with stats badge
-    const badge = buildDescriptionBadge(report, deltaSummary, deltas);
+    const badge = buildDescriptionBadge(report, deltaSummary, deltas, impactAnalyses);
     await updatePRDescription(octokit, prContext, badge);
 
     if (report.summary.totalViolations === 0) {
       core.info('No complexity violations found');
+      
+      // If impact analysis is enabled and shows high impact, still post a comment
+      const highImpactCount = impactAnalyses.filter(a => ['high', 'critical'].includes(a.impactLevel)).length;
+      if (highImpactCount > 0 && config.enableImpactAnalysis) {
+        const impactNote = formatImpactAnalysisForComment(impactAnalyses);
+        const comment = `<!-- lien-ai-review -->
+## ✅ Lien Complexity Analysis
+
+No complexity violations found in PR #${prContext.pullNumber}.
+
+All analyzed functions are within the configured complexity threshold.
+
+${impactNote}
+
+*[Veille](https://lien.dev) by Lien*`;
+        await postPRComment(octokit, prContext, comment);
+        core.info('Posted impact analysis comment (no violations but high impact detected)');
+      }
       // Skip the regular comment - the description badge is sufficient
       return;
     }
@@ -416,9 +479,9 @@ async function run(): Promise<void> {
 
     resetTokenUsage();
     if (config.reviewStyle === 'summary') {
-      await postSummaryReview(octokit, prContext, report, codeSnippets, config, false, deltas);
+      await postSummaryReview(octokit, prContext, report, codeSnippets, config, false, deltas, impactAnalyses);
     } else {
-      await postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas);
+      await postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas, impactAnalyses);
     }
 
     core.setOutput('violations', report.summary.totalViolations);
@@ -632,18 +695,20 @@ function formatDeltaDisplay(deltas: ComplexityDelta[] | null): string {
 function buildReviewSummary(
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
-  uncoveredNote: string
+  uncoveredNote: string,
+  impactNote: string = ''
 ): string {
   const { summary } = report;
   const costDisplay = formatCostDisplay(getTokenUsage());
   const deltaDisplay = formatDeltaDisplay(deltas);
+  const impactSection = impactNote ? `\n\n${impactNote}` : '';
 
   return `<!-- lien-ai-review -->
 ## 👁️ Veille
 
 ${summary.totalViolations} issue${summary.totalViolations === 1 ? '' : 's'} spotted in this PR.${deltaDisplay}
 
-See inline comments on the diff for specific suggestions.${uncoveredNote}
+See inline comments on the diff for specific suggestions.${impactSection}${uncoveredNote}
 
 <details>
 <summary>📊 Analysis Details</summary>
@@ -667,7 +732,8 @@ async function postLineReview(
   violations: ComplexityViolation[],
   codeSnippets: Map<string, string>,
   config: ActionConfig,
-  deltas: ComplexityDelta[] | null = null
+  deltas: ComplexityDelta[] | null = null,
+  impactAnalyses: ImpactAnalysis[] = []
 ): Promise<void> {
   const diffLines = await getPRDiffLines(octokit, prContext);
   core.info(`Diff covers ${diffLines.size} files`);
@@ -753,7 +819,8 @@ async function postLineReview(
 
   const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
   const skippedNote = buildSkippedNote(skippedViolations);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+  const impactNote = formatImpactAnalysisForComment(impactAnalyses);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote, impactNote);
 
   await postPRReview(octokit, prContext, lineComments, summaryBody);
   core.info(`Posted review with ${lineComments.length} line comments`);
@@ -771,9 +838,10 @@ async function postSummaryReview(
   codeSnippets: Map<string, string>,
   config: ActionConfig,
   isFallback = false,
-  deltas: ComplexityDelta[] | null = null
+  deltas: ComplexityDelta[] | null = null,
+  impactAnalyses: ImpactAnalysis[] = []
 ): Promise<void> {
-  const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas);
+  const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas, impactAnalyses);
   core.debug(`Prompt length: ${prompt.length} characters`);
 
   const aiReview = await generateReview(
@@ -783,7 +851,7 @@ async function postSummaryReview(
   );
 
   const usage = getTokenUsage();
-  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas);
+  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas, impactAnalyses);
   await postPRComment(octokit, prContext, comment);
   core.info('Successfully posted AI review summary comment');
 }

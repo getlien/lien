@@ -8,6 +8,8 @@ import type { PRContext } from './github.js';
 import type { ComplexityDelta, DeltaSummary } from './delta.js';
 import { formatDelta } from './delta.js';
 import { formatTime, formatDeltaValue } from './format.js';
+import type { ImpactAnalysis } from './impact-analysis.js';
+import { formatImpactAnalysisForPrompt } from './impact-analysis.js';
 
 /**
  * Create a unique key for delta lookups
@@ -154,7 +156,8 @@ export function buildReviewPrompt(
   report: ComplexityReport,
   prContext: PRContext,
   codeSnippets: Map<string, string>,
-  deltas: ComplexityDelta[] | null = null
+  deltas: ComplexityDelta[] | null = null,
+  impactAnalyses: ImpactAnalysis[] = []
 ): string {
   const { summary, files } = report;
   const deltaMap = buildDeltaMap(deltas);
@@ -162,6 +165,7 @@ export function buildReviewPrompt(
   const violationsSummary = buildViolationsSummary(files, deltaMap);
   const snippetsSection = buildSnippetsSection(codeSnippets);
   const deltaContext = buildDeltaContext(deltas);
+  const impactSection = formatImpactAnalysisForPrompt(impactAnalyses);
 
   return `# Code Complexity Review Request
 
@@ -170,7 +174,7 @@ export function buildReviewPrompt(
 - **PR**: #${prContext.pullNumber} - ${prContext.title}
 - **Files with violations**: ${violationsByFile.length}
 - **Total violations**: ${summary.totalViolations} (${summary.bySeverity.error} errors, ${summary.bySeverity.warning} warnings)
-${deltaContext}
+${deltaContext}${impactSection ? `\n${impactSection}` : ''}
 ## Complexity Violations Found
 
 ${violationsSummary}
@@ -184,9 +188,10 @@ ${snippetsSection || '_No code snippets available_'}
 For each violation:
 1. **Explain** why this complexity is problematic in this specific context
 2. **Suggest** concrete refactoring steps (not generic advice like "break into smaller functions")
-3. **Prioritize** which violations are most important to address - focus on functions that got WORSE (higher delta)
+3. **Prioritize** which violations are most important to address - focus on functions that got WORSE (higher delta) or are in HIGH-IMPACT files (many dependents)
 4. If the complexity seems justified for the use case, say so
 5. Celebrate improvements! If a function got simpler, acknowledge it.
+6. **Consider impact**: Pay extra attention to violations in files with many dependents - changes there affect more of the codebase.
 
 Format your response as a PR review comment with:
 - A brief summary at the top (2-3 sentences)
@@ -321,17 +326,20 @@ export function formatReviewComment(
   report: ComplexityReport,
   isFallback = false,
   tokenUsage?: TokenUsageInfo,
-  deltas?: ComplexityDelta[] | null
+  deltas?: ComplexityDelta[] | null,
+  impactAnalyses: ImpactAnalysis[] = []
 ): string {
   const { summary } = report;
   const deltaDisplay = formatDeltaDisplay(deltas);
   const fallbackNote = formatFallbackNote(isFallback);
   const tokenStats = formatTokenStats(tokenUsage);
+  const impactNote = formatImpactAnalysisForComment(impactAnalyses);
+  const impactSection = impactNote ? `\n\n${impactNote}` : '';
 
   return `<!-- lien-ai-review -->
 ## 👁️ Veille
 
-${summary.totalViolations} issue${summary.totalViolations === 1 ? '' : 's'} spotted in this PR.${deltaDisplay}${fallbackNote}
+${summary.totalViolations} issue${summary.totalViolations === 1 ? '' : 's'} spotted in this PR.${deltaDisplay}${impactSection}${fallbackNote}
 
 ---
 
@@ -445,7 +453,8 @@ function getMetricEmoji(metricType: string): string {
 export function buildDescriptionBadge(
   report: ComplexityReport | null,
   deltaSummary: DeltaSummary | null,
-  deltas: ComplexityDelta[] | null
+  deltas: ComplexityDelta[] | null,
+  impactAnalyses: ImpactAnalysis[] = []
 ): string {
   const status = determineStatus(report, deltaSummary);
 
@@ -491,9 +500,22 @@ ${rows.join('\n')}
     }
   }
 
+  // Add impact analysis summary if available
+  let impactSummary = '';
+  if (impactAnalyses.length > 0) {
+    const highImpactCount = impactAnalyses.filter(a => ['high', 'critical'].includes(a.impactLevel)).length;
+    const totalAffected = impactAnalyses.reduce((sum, a) => sum + a.totalDependents, 0);
+    
+    if (highImpactCount > 0) {
+      impactSummary = `\n🔗 **Impact**: ${highImpactCount} high/critical impact file${highImpactCount === 1 ? '' : 's'} (${totalAffected} total affected)`;
+    } else if (totalAffected > 0) {
+      impactSummary = `\n🔗 **Impact**: ${totalAffected} file${totalAffected === 1 ? '' : 's'} affected (low impact)`;
+    }
+  }
+
   return `### 👁️ Veille
 
-${status.emoji} ${status.message}
+${status.emoji} ${status.message}${impactSummary}
 ${metricTable}
 *[Veille](https://lien.dev) by Lien*`;
 }
