@@ -55,6 +55,7 @@ import {
   formatSeverityEmoji,
   logDeltaSummary,
   type ComplexityDelta,
+  type DeltaSummary,
 } from './delta.js';
 
 type ReviewStyle = 'line' | 'summary';
@@ -372,6 +373,173 @@ async function analyzeBaseBranch(
 }
 
 /**
+ * Result of analysis orchestration
+ */
+interface AnalysisResult {
+  currentReport: ComplexityReport;
+  baselineReport: ComplexityReport | null;
+  deltas: ComplexityDelta[] | null;
+  filesToAnalyze: string[];
+}
+
+/**
+ * Setup result from PR analysis
+ */
+interface SetupResult {
+  config: ActionConfig;
+  prContext: PRContext;
+  octokit: ReturnType<typeof createOctokit>;
+}
+
+/**
+ * Get baseline complexity report for delta calculation
+ */
+async function getBaselineReport(
+  config: ActionConfig,
+  prContext: PRContext,
+  filesToAnalyze: string[]
+): Promise<ComplexityReport | null> {
+  if (config.enableDeltaTracking) {
+    core.info('🔄 Delta tracking enabled - analyzing base branch...');
+    return await analyzeBaseBranch(prContext.baseSha, filesToAnalyze, config.threshold);
+  }
+  
+  if (config.baselineComplexityPath) {
+    // Backwards compatibility: support old baseline_complexity input
+    core.warning('baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.');
+    return loadBaselineComplexity(config.baselineComplexityPath);
+  }
+  
+  return null;
+}
+
+/**
+ * Orchestrate complexity analysis (file discovery, baseline, current analysis)
+ */
+async function orchestrateAnalysis(setup: SetupResult): Promise<AnalysisResult | null> {
+  const filesToAnalyze = await getFilesToAnalyze(setup.octokit, setup.prContext);
+  if (filesToAnalyze.length === 0) {
+    core.info('No analyzable files found, skipping review');
+    return null;
+  }
+
+  const baselineReport = await getBaselineReport(setup.config, setup.prContext, filesToAnalyze);
+  const currentReport = await runComplexityAnalysis(filesToAnalyze, setup.config.threshold);
+  
+  if (!currentReport) {
+    core.warning('Failed to get complexity report');
+    return null;
+  }
+  
+  core.info(`Analysis complete: ${currentReport.summary.totalViolations} violations found`);
+
+  const deltas = baselineReport
+    ? calculateDeltas(baselineReport, currentReport, filesToAnalyze)
+    : null;
+
+  return {
+    currentReport,
+    baselineReport,
+    deltas,
+    filesToAnalyze,
+  };
+}
+
+/**
+ * Set GitHub Action outputs from analysis results
+ */
+function setAnalysisOutputs(
+  report: ComplexityReport,
+  deltaSummary: DeltaSummary | null
+): void {
+  if (deltaSummary) {
+    core.setOutput('total_delta', deltaSummary.totalDelta);
+    core.setOutput('improved', deltaSummary.improved);
+    core.setOutput('degraded', deltaSummary.degraded);
+  }
+  
+  core.setOutput('violations', report.summary.totalViolations);
+  core.setOutput('errors', report.summary.bySeverity.error);
+  core.setOutput('warnings', report.summary.bySeverity.warning);
+}
+
+/**
+ * Handle analysis outputs (badge, logging, GitHub outputs)
+ */
+async function handleAnalysisOutputs(
+  result: AnalysisResult,
+  setup: SetupResult
+): Promise<void> {
+  const deltaSummary = result.deltas ? calculateDeltaSummary(result.deltas) : null;
+
+  if (deltaSummary) {
+    logDeltaSummary(deltaSummary);
+  }
+
+  setAnalysisOutputs(result.currentReport, deltaSummary);
+
+  const badge = buildDescriptionBadge(result.currentReport, deltaSummary, result.deltas);
+  await updatePRDescription(setup.octokit, setup.prContext, badge);
+}
+
+/**
+ * Post review if violations are found
+ */
+async function postReviewIfNeeded(
+  result: AnalysisResult,
+  setup: SetupResult
+): Promise<void> {
+  if (result.currentReport.summary.totalViolations === 0) {
+    core.info('No complexity violations found');
+    return;
+  }
+
+  const { violations, codeSnippets } = await prepareViolationsForReview(
+    result.currentReport,
+    setup.octokit,
+    setup.prContext
+  );
+
+  resetTokenUsage();
+  if (setup.config.reviewStyle === 'summary') {
+    await postSummaryReview(
+      setup.octokit,
+      setup.prContext,
+      result.currentReport,
+      codeSnippets,
+      setup.config,
+      false,
+      result.deltas
+    );
+  } else {
+    await postLineReview(
+      setup.octokit,
+      setup.prContext,
+      result.currentReport,
+      violations,
+      codeSnippets,
+      setup.config,
+      result.deltas
+    );
+  }
+}
+
+/**
+ * Handle errors with proper logging and failure reporting
+ */
+function handleError(error: unknown): void {
+  const message = error instanceof Error ? error.message : 'An unexpected error occurred';
+  const stack = error instanceof Error ? error.stack : '';
+  
+  core.error(`Action failed: ${message}`);
+  if (stack) {
+    core.error(`Stack trace:\n${stack}`);
+  }
+  
+  core.setFailed(message);
+}
+
+/**
  * Main action logic - orchestrates the review flow
  */
 async function run(): Promise<void> {
@@ -385,79 +553,16 @@ async function run(): Promise<void> {
       core.info('⚠️ Setup returned null, exiting gracefully');
       return;
     }
-    const { config, prContext, octokit } = setup;
 
-    const filesToAnalyze = await getFilesToAnalyze(octokit, prContext);
-    if (filesToAnalyze.length === 0) {
-      core.info('No analyzable files found, skipping review');
+    const analysisResult = await orchestrateAnalysis(setup);
+    if (!analysisResult) {
       return;
     }
 
-    // Get baseline complexity for delta calculation
-    let baselineReport: ComplexityReport | null = null;
-    
-    if (config.enableDeltaTracking) {
-      core.info('🔄 Delta tracking enabled - analyzing base branch...');
-      baselineReport = await analyzeBaseBranch(prContext.baseSha, filesToAnalyze, config.threshold);
-    } else if (config.baselineComplexityPath) {
-      // Backwards compatibility: support old baseline_complexity input
-      core.warning('baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.');
-      baselineReport = loadBaselineComplexity(config.baselineComplexityPath);
-    }
-
-    const report = await runComplexityAnalysis(filesToAnalyze, config.threshold);
-    if (!report) {
-      core.warning('Failed to get complexity report');
-      return;
-    }
-    core.info(`Analysis complete: ${report.summary.totalViolations} violations found`);
-
-    // Calculate deltas if we have a baseline
-    const deltas = baselineReport
-      ? calculateDeltas(baselineReport, report, filesToAnalyze)
-      : null;
-
-    const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
-
-    if (deltaSummary) {
-      logDeltaSummary(deltaSummary);
-      core.setOutput('total_delta', deltaSummary.totalDelta);
-      core.setOutput('improved', deltaSummary.improved);
-      core.setOutput('degraded', deltaSummary.degraded);
-    }
-
-    // Always update PR description with stats badge
-    const badge = buildDescriptionBadge(report, deltaSummary, deltas);
-    await updatePRDescription(octokit, prContext, badge);
-
-    if (report.summary.totalViolations === 0) {
-      core.info('No complexity violations found');
-      // Skip the regular comment - the description badge is sufficient
-      return;
-    }
-
-    const { violations, codeSnippets } = await prepareViolationsForReview(report, octokit, prContext);
-
-    resetTokenUsage();
-    if (config.reviewStyle === 'summary') {
-      await postSummaryReview(octokit, prContext, report, codeSnippets, config, false, deltas);
-    } else {
-      await postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas);
-    }
-
-    core.setOutput('violations', report.summary.totalViolations);
-    core.setOutput('errors', report.summary.bySeverity.error);
-    core.setOutput('warnings', report.summary.bySeverity.warning);
+    await handleAnalysisOutputs(analysisResult, setup);
+    await postReviewIfNeeded(analysisResult, setup);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'An unexpected error occurred';
-    const stack = error instanceof Error ? error.stack : '';
-    
-    core.error(`Action failed: ${message}`);
-    if (stack) {
-      core.error(`Stack trace:\n${stack}`);
-    }
-    
-    core.setFailed(message);
+    handleError(error);
   }
 }
 

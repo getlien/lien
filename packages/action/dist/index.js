@@ -1132,6 +1132,100 @@ async function analyzeBaseBranch(baseSha, filesToAnalyze, threshold) {
     return null;
   }
 }
+async function getBaselineReport(config, prContext, filesToAnalyze) {
+  if (config.enableDeltaTracking) {
+    core4.info("\u{1F504} Delta tracking enabled - analyzing base branch...");
+    return await analyzeBaseBranch(prContext.baseSha, filesToAnalyze, config.threshold);
+  }
+  if (config.baselineComplexityPath) {
+    core4.warning("baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.");
+    return loadBaselineComplexity(config.baselineComplexityPath);
+  }
+  return null;
+}
+async function orchestrateAnalysis(setup) {
+  const filesToAnalyze = await getFilesToAnalyze(setup.octokit, setup.prContext);
+  if (filesToAnalyze.length === 0) {
+    core4.info("No analyzable files found, skipping review");
+    return null;
+  }
+  const baselineReport = await getBaselineReport(setup.config, setup.prContext, filesToAnalyze);
+  const currentReport = await runComplexityAnalysis(filesToAnalyze, setup.config.threshold);
+  if (!currentReport) {
+    core4.warning("Failed to get complexity report");
+    return null;
+  }
+  core4.info(`Analysis complete: ${currentReport.summary.totalViolations} violations found`);
+  const deltas = baselineReport ? calculateDeltas(baselineReport, currentReport, filesToAnalyze) : null;
+  return {
+    currentReport,
+    baselineReport,
+    deltas,
+    filesToAnalyze
+  };
+}
+function setAnalysisOutputs(report, deltaSummary) {
+  if (deltaSummary) {
+    core4.setOutput("total_delta", deltaSummary.totalDelta);
+    core4.setOutput("improved", deltaSummary.improved);
+    core4.setOutput("degraded", deltaSummary.degraded);
+  }
+  core4.setOutput("violations", report.summary.totalViolations);
+  core4.setOutput("errors", report.summary.bySeverity.error);
+  core4.setOutput("warnings", report.summary.bySeverity.warning);
+}
+async function handleAnalysisOutputs(result, setup) {
+  const deltaSummary = result.deltas ? calculateDeltaSummary(result.deltas) : null;
+  if (deltaSummary) {
+    logDeltaSummary(deltaSummary);
+  }
+  setAnalysisOutputs(result.currentReport, deltaSummary);
+  const badge = buildDescriptionBadge(result.currentReport, deltaSummary, result.deltas);
+  await updatePRDescription(setup.octokit, setup.prContext, badge);
+}
+async function postReviewIfNeeded(result, setup) {
+  if (result.currentReport.summary.totalViolations === 0) {
+    core4.info("No complexity violations found");
+    return;
+  }
+  const { violations, codeSnippets } = await prepareViolationsForReview(
+    result.currentReport,
+    setup.octokit,
+    setup.prContext
+  );
+  resetTokenUsage();
+  if (setup.config.reviewStyle === "summary") {
+    await postSummaryReview(
+      setup.octokit,
+      setup.prContext,
+      result.currentReport,
+      codeSnippets,
+      setup.config,
+      false,
+      result.deltas
+    );
+  } else {
+    await postLineReview(
+      setup.octokit,
+      setup.prContext,
+      result.currentReport,
+      violations,
+      codeSnippets,
+      setup.config,
+      result.deltas
+    );
+  }
+}
+function handleError(error2) {
+  const message = error2 instanceof Error ? error2.message : "An unexpected error occurred";
+  const stack = error2 instanceof Error ? error2.stack : "";
+  core4.error(`Action failed: ${message}`);
+  if (stack) {
+    core4.error(`Stack trace:
+${stack}`);
+  }
+  core4.setFailed(message);
+}
 async function run() {
   try {
     core4.info("\u{1F680} Starting Lien AI Code Review...");
@@ -1142,59 +1236,14 @@ async function run() {
       core4.info("\u26A0\uFE0F Setup returned null, exiting gracefully");
       return;
     }
-    const { config, prContext, octokit } = setup;
-    const filesToAnalyze = await getFilesToAnalyze(octokit, prContext);
-    if (filesToAnalyze.length === 0) {
-      core4.info("No analyzable files found, skipping review");
+    const analysisResult = await orchestrateAnalysis(setup);
+    if (!analysisResult) {
       return;
     }
-    let baselineReport = null;
-    if (config.enableDeltaTracking) {
-      core4.info("\u{1F504} Delta tracking enabled - analyzing base branch...");
-      baselineReport = await analyzeBaseBranch(prContext.baseSha, filesToAnalyze, config.threshold);
-    } else if (config.baselineComplexityPath) {
-      core4.warning("baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.");
-      baselineReport = loadBaselineComplexity(config.baselineComplexityPath);
-    }
-    const report = await runComplexityAnalysis(filesToAnalyze, config.threshold);
-    if (!report) {
-      core4.warning("Failed to get complexity report");
-      return;
-    }
-    core4.info(`Analysis complete: ${report.summary.totalViolations} violations found`);
-    const deltas = baselineReport ? calculateDeltas(baselineReport, report, filesToAnalyze) : null;
-    const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
-    if (deltaSummary) {
-      logDeltaSummary(deltaSummary);
-      core4.setOutput("total_delta", deltaSummary.totalDelta);
-      core4.setOutput("improved", deltaSummary.improved);
-      core4.setOutput("degraded", deltaSummary.degraded);
-    }
-    const badge = buildDescriptionBadge(report, deltaSummary, deltas);
-    await updatePRDescription(octokit, prContext, badge);
-    if (report.summary.totalViolations === 0) {
-      core4.info("No complexity violations found");
-      return;
-    }
-    const { violations, codeSnippets } = await prepareViolationsForReview(report, octokit, prContext);
-    resetTokenUsage();
-    if (config.reviewStyle === "summary") {
-      await postSummaryReview(octokit, prContext, report, codeSnippets, config, false, deltas);
-    } else {
-      await postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas);
-    }
-    core4.setOutput("violations", report.summary.totalViolations);
-    core4.setOutput("errors", report.summary.bySeverity.error);
-    core4.setOutput("warnings", report.summary.bySeverity.warning);
+    await handleAnalysisOutputs(analysisResult, setup);
+    await postReviewIfNeeded(analysisResult, setup);
   } catch (error2) {
-    const message = error2 instanceof Error ? error2.message : "An unexpected error occurred";
-    const stack = error2 instanceof Error ? error2.stack : "";
-    core4.error(`Action failed: ${message}`);
-    if (stack) {
-      core4.error(`Stack trace:
-${stack}`);
-    }
-    core4.setFailed(message);
+    handleError(error2);
   }
 }
 function findCommentLine(violation, diffLines) {
