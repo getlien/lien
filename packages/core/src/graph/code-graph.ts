@@ -3,6 +3,24 @@ import { normalizePath, getCanonicalPath, matchesFile, isTestFile } from '../uti
 import type { GraphNode, GraphEdge, CodeGraph, GraphOptions } from './types.js';
 
 /**
+ * Converts Arrow vectors or arrays to plain arrays.
+ * LanceDB returns Arrow vectors which need to be converted.
+ */
+function toArray<T>(value: T[] | any): T[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  // Handle Arrow vectors - they have a toArray() method or can be iterated
+  if (typeof value.toArray === 'function') {
+    return value.toArray();
+  }
+  // Fallback: try to convert if it's array-like
+  if (value.length !== undefined) {
+    return Array.from(value);
+  }
+  return [];
+}
+
+/**
  * Creates a cached path normalizer to avoid repeated string operations.
  */
 function createPathNormalizer(workspaceRoot: string): (path: string) => string {
@@ -27,8 +45,9 @@ function buildImportIndex(
   const importIndex = new Map<string, SearchResult[]>();
   
   for (const chunk of chunks) {
-    const imports = chunk.metadata.imports || [];
+    const imports = toArray(chunk.metadata.imports);
     for (const imp of imports) {
+      if (typeof imp !== 'string' || !imp.trim()) continue;
       const normalizedImport = normalizePathCached(imp);
       let chunkList = importIndex.get(normalizedImport);
       if (!chunkList) {
@@ -292,8 +311,9 @@ function traverseDependencies(
   // Find dependencies (files that this file imports)
   const rootImports = new Set<string>();
   for (const chunk of rootChunks) {
-    const imports = chunk.metadata.imports || [];
+    const imports = toArray(chunk.metadata.imports);
     for (const imp of imports) {
+      if (typeof imp !== 'string' || !imp.trim()) continue;
       const normalizedImport = normalizePathCached(imp);
       rootImports.add(normalizedImport);
     }
