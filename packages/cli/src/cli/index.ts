@@ -71,10 +71,10 @@ program
 
 program
   .command('graph')
-  .description('Generate code dependency graph')
+  .description('Generate code dependency graph (shows full depth by default)')
   .argument('[rootFile]', 'Root file to generate graph from (or use --files)')
   .option('-f, --files <files...>', 'Multiple root files (for PR review)')
-  .option('-d, --depth <n>', 'Traversal depth (default: 1)', '1')
+  .option('-d, --depth <n>', 'Limit traversal depth (default: unlimited - shows full dependency chain)')
   .option('--direction <dir>', 'Direction: forward, reverse, or both (default: forward)', 'forward')
   .option('--module', 'Group by module/directory instead of files', false)
   .action((rootFile, options) => {
@@ -82,7 +82,7 @@ program
     graphCommand({
       rootFile: rootFile || undefined,
       rootFiles,
-      depth: parseInt(options.depth, 10),
+      depth: options.depth ? parseInt(options.depth, 10) : undefined,
       direction: options.direction as 'forward' | 'reverse' | 'both',
       moduleLevel: options.module === true,
     });

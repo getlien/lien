@@ -161,7 +161,7 @@ function findDependentChunks(
  */
 function traverseReverseDependencies(
   rootFile: string,
-  depth: number,
+  depth: number | undefined,
   visited: Set<string>,
   importIndex: Map<string, SearchResult[]>,
   allChunks: SearchResult[],
@@ -172,10 +172,6 @@ function traverseReverseDependencies(
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
-  
-  if (depth <= 0) {
-    return { nodes, edges };
-  }
   
   const normalizedRoot = normalizePathCached(rootFile);
   
@@ -207,6 +203,13 @@ function traverseReverseDependencies(
   const rootNode = createNode(rootFile, rootChunks, includeComplexity);
   nodes.push(rootNode);
   
+  // Check if we should traverse deeper (depth undefined = unlimited, depth > 0 = continue)
+  const shouldTraverse = depth === undefined || depth > 0;
+  
+  if (!shouldTraverse) {
+    return { nodes, edges };
+  }
+  
   // Find dependents (files that import this file)
   const dependentChunks = findDependentChunks(normalizedRoot, importIndex);
   
@@ -227,9 +230,10 @@ function traverseReverseDependencies(
     }
     
     // Recursively traverse reverse dependencies
+    const nextDepth = depth === undefined ? undefined : depth - 1;
     const { nodes: depNodes, edges: depEdges } = traverseReverseDependencies(
       dependentFilePath,
-      depth - 1,
+      nextDepth,
       visited,
       importIndex,
       allChunks,
@@ -262,7 +266,7 @@ function traverseReverseDependencies(
  */
 function traverseDependencies(
   rootFile: string,
-  depth: number,
+  depth: number | undefined,
   visited: Set<string>,
   importIndex: Map<string, SearchResult[]>,
   allChunks: SearchResult[],
@@ -273,10 +277,6 @@ function traverseDependencies(
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
-  
-  if (depth <= 0) {
-    return { nodes, edges };
-  }
   
   const normalizedRoot = normalizePathCached(rootFile);
   
@@ -307,6 +307,13 @@ function traverseDependencies(
   // Create root node
   const rootNode = createNode(rootFile, rootChunks, includeComplexity);
   nodes.push(rootNode);
+  
+  // Check if we should traverse deeper (depth undefined = unlimited, depth > 0 = continue)
+  const shouldTraverse = depth === undefined || depth > 0;
+  
+  if (!shouldTraverse) {
+    return { nodes, edges };
+  }
   
   // Find dependencies (files that this file imports)
   const rootImports = new Set<string>();
@@ -357,9 +364,10 @@ function traverseDependencies(
     }
     
     // Recursively traverse dependencies
+    const nextDepth = depth === undefined ? undefined : depth - 1;
     const { nodes: depNodes, edges: depEdges } = traverseDependencies(
       dependencyFilePath,
-      depth - 1,
+      nextDepth,
       visited,
       importIndex,
       allChunks,

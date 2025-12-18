@@ -29,7 +29,7 @@ export interface CodeGraph {
   edges: GraphEdge[];
   rootFile?: string;
   rootFiles?: string[];
-  depth: number;
+  depth?: number; // undefined = unlimited depth
   direction: 'forward' | 'reverse' | 'both';
   moduleLevel?: boolean;
 }
@@ -40,7 +40,7 @@ export interface CodeGraph {
 export interface GraphOptions {
   rootFile?: string;
   rootFiles?: string[];
-  depth: number;
+  depth?: number; // undefined = unlimited depth
   direction?: 'forward' | 'reverse' | 'both';
   includeTests?: boolean;
   includeComplexity?: boolean;

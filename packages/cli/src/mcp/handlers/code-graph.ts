@@ -28,7 +28,7 @@ export async function handleCodeGraph(
       const graph = await generator.generateGraph({
         rootFile: validatedArgs.rootFile,
         rootFiles: validatedArgs.rootFiles,
-        depth: validatedArgs.depth ?? 1,
+        depth: validatedArgs.depth, // undefined = unlimited (full depth)
         direction: validatedArgs.direction ?? 'forward',
         moduleLevel: validatedArgs.moduleLevel ?? false,
         includeTests: false,

@@ -27,7 +27,7 @@ async function ensureIndexExists(vectorDB: VectorDB): Promise<void> {
  */
 export async function graphCommand(options: GraphOptions): Promise<void> {
   const rootDir = process.cwd();
-  const depth = options.depth || 1;
+  const depth = options.depth; // undefined = unlimited (full depth)
   const direction = options.direction || 'forward';
   const moduleLevel = options.moduleLevel || false;
 

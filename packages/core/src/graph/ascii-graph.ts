@@ -39,10 +39,23 @@ export class AsciiGraphRenderer {
     }
     
     // Build adjacency list (children of each node)
+    // For reverse mode, edges go FROM dependents TO root, so we flip them for rendering
     const children = new Map<string, GraphNode[]>();
     for (const edge of graph.edges) {
-      const parent = graph.nodes.find(n => n.id === edge.from);
-      const child = graph.nodes.find(n => n.id === edge.to);
+      let parent: GraphNode | undefined;
+      let child: GraphNode | undefined;
+      
+      if (graph.direction === 'reverse') {
+        // In reverse mode: edge.from = dependent, edge.to = root
+        // For rendering: root should have dependents as children
+        parent = graph.nodes.find(n => n.id === edge.to);
+        child = graph.nodes.find(n => n.id === edge.from);
+      } else {
+        // In forward mode: edge.from = parent, edge.to = child (normal)
+        parent = graph.nodes.find(n => n.id === edge.from);
+        child = graph.nodes.find(n => n.id === edge.to);
+      }
+      
       if (parent && child) {
         const existing = children.get(parent.id) || [];
         existing.push(child);

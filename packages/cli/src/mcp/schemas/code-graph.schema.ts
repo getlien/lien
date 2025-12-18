@@ -25,13 +25,13 @@ export const CodeGraphSchema = z.object({
   depth: z.number()
     .int()
     .min(1)
-    .max(5)
-    .default(1)
+    .optional()
     .describe(
-      "How deep to traverse dependencies (default: 1).\n\n" +
+      "How deep to traverse dependencies. If not specified, shows full depth (unlimited).\n\n" +
       "1 = Direct dependencies only\n" +
       "2 = Dependencies and their dependencies\n" +
-      "Higher values show deeper dependency chains"
+      "Omit for full depth (recommended for code review - shows complete dependency chain)\n\n" +
+      "Note: Full depth is safe - circular dependencies are automatically detected and prevented."
     ),
   direction: z.enum(['forward', 'reverse', 'both'])
     .default('forward')
