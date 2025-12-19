@@ -3,7 +3,7 @@ import { GetDependentsSchema } from '../schemas/index.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import { QdrantDB } from '@liendev/core';
 import {
-  DependencyAnalyzer,
+  findDependents,
   calculateRiskLevel,
   groupDependentsByRepo,
 } from './dependency-analyzer.js';
@@ -26,9 +26,8 @@ export async function handleGetDependents(
       log(`Finding dependents of: ${filepath}${crossRepo ? ' (cross-repo)' : ''}`);
       await checkAndReconnect();
 
-      // Use dependency analyzer to find dependents
-      const analyzer = new DependencyAnalyzer(vectorDB, log);
-      const analysis = await analyzer.findDependents(filepath, crossRepo ?? false);
+      // Find dependents using dependency analysis functions
+      const analysis = await findDependents(vectorDB, filepath, crossRepo ?? false, log);
 
       const riskLevel = calculateRiskLevel(
         analysis.dependents.length,

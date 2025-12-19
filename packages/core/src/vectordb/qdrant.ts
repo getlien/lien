@@ -8,6 +8,7 @@ import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { calculateRelevance } from './relevance.js';
 import { DatabaseError } from '../errors/index.js';
 import { readVersionFile } from './version.js';
+import { QdrantPayloadMapper } from './qdrant-payload-mapper.js';
 
 /**
  * QdrantDB implements VectorDBInterface using Qdrant vector database.
@@ -27,6 +28,7 @@ export class QdrantDB implements VectorDBInterface {
   public readonly dbPath: string; // For compatibility with manifest/version file operations
   private lastVersionCheck: number = 0;
   private currentVersion: number = 0;
+  private payloadMapper: QdrantPayloadMapper;
 
   constructor(
     url: string,
@@ -42,6 +44,9 @@ export class QdrantDB implements VectorDBInterface {
     this.repoId = this.extractRepoId(projectRoot);
     // Collection naming: one per org
     this.collectionName = `lien_org_${orgId}`;
+    
+    // Initialize payload mapper
+    this.payloadMapper = new QdrantPayloadMapper(this.orgId, this.repoId);
     
     // dbPath is used for manifest and version files (stored locally even with Qdrant)
     // Use same path structure as LanceDB for consistency
@@ -82,72 +87,6 @@ export class QdrantDB implements VectorDBInterface {
     return crypto.createHash('md5').update(idString).digest('hex');
   }
 
-  /**
-   * Transform chunk metadata to Qdrant payload format.
-   */
-  private metadataToPayload(metadata: ChunkMetadata): Record<string, any> {
-    return {
-      content: '', // Will be set separately
-      file: metadata.file,
-      startLine: metadata.startLine,
-      endLine: metadata.endLine,
-      type: metadata.type,
-      language: metadata.language,
-      // Symbols
-      functionNames: metadata.symbols?.functions || [],
-      classNames: metadata.symbols?.classes || [],
-      interfaceNames: metadata.symbols?.interfaces || [],
-      // AST-derived metadata
-      symbolName: metadata.symbolName || '',
-      symbolType: metadata.symbolType || '',
-      parentClass: metadata.parentClass || '',
-      complexity: metadata.complexity || 0,
-      cognitiveComplexity: metadata.cognitiveComplexity || 0,
-      parameters: metadata.parameters || [],
-      signature: metadata.signature || '',
-      imports: metadata.imports || [],
-      // Halstead metrics
-      halsteadVolume: metadata.halsteadVolume || 0,
-      halsteadDifficulty: metadata.halsteadDifficulty || 0,
-      halsteadEffort: metadata.halsteadEffort || 0,
-      halsteadBugs: metadata.halsteadBugs || 0,
-      // Multi-tenant fields
-      orgId: this.orgId,
-      repoId: this.repoId,
-    };
-  }
-
-  /**
-   * Transform Qdrant payload back to ChunkMetadata.
-   */
-  private payloadToMetadata(payload: Record<string, any>): ChunkMetadata {
-    return {
-      file: payload.file,
-      startLine: payload.startLine,
-      endLine: payload.endLine,
-      type: payload.type,
-      language: payload.language,
-      symbols: {
-        functions: payload.functionNames || [],
-        classes: payload.classNames || [],
-        interfaces: payload.interfaceNames || [],
-      },
-      symbolName: payload.symbolName || undefined,
-      symbolType: payload.symbolType || undefined,
-      parentClass: payload.parentClass || undefined,
-      complexity: payload.complexity || undefined,
-      cognitiveComplexity: payload.cognitiveComplexity || undefined,
-      parameters: payload.parameters || undefined,
-      signature: payload.signature || undefined,
-      imports: payload.imports || undefined,
-      halsteadVolume: payload.halsteadVolume || undefined,
-      halsteadDifficulty: payload.halsteadDifficulty || undefined,
-      halsteadEffort: payload.halsteadEffort || undefined,
-      halsteadBugs: payload.halsteadBugs || undefined,
-      repoId: payload.repoId || undefined,
-      orgId: payload.orgId || undefined,
-    };
-  }
 
   async initialize(): Promise<void> {
     try {
@@ -206,8 +145,7 @@ export class QdrantDB implements VectorDBInterface {
       // Prepare points for upsert
       const points = vectors.map((vector, i) => {
         const metadata = metadatas[i];
-        const payload = this.metadataToPayload(metadata);
-        payload.content = contents[i]; // Add content to payload
+        const payload = this.payloadMapper.toPayload(metadata, contents[i]) as Record<string, any>;
         
         return {
           id: this.generatePointId(metadata),
@@ -257,7 +195,7 @@ export class QdrantDB implements VectorDBInterface {
 
       return results.map(result => ({
         content: (result.payload?.content as string) || '',
-        metadata: this.payloadToMetadata(result.payload || {}),
+        metadata: this.payloadMapper.fromPayload(result.payload || {}),
         score: result.score || 0,
         relevance: calculateRelevance(result.score || 0),
       }));
@@ -305,7 +243,7 @@ export class QdrantDB implements VectorDBInterface {
 
       return results.map(result => ({
         content: (result.payload?.content as string) || '',
-        metadata: this.payloadToMetadata(result.payload || {}),
+        metadata: this.payloadMapper.fromPayload(result.payload || {}),
         score: result.score || 0,
         relevance: calculateRelevance(result.score || 0),
       }));
@@ -353,7 +291,7 @@ export class QdrantDB implements VectorDBInterface {
 
       return (results.points || []).map(point => ({
         content: (point.payload?.content as string) || '',
-        metadata: this.payloadToMetadata(point.payload || {}),
+        metadata: this.payloadMapper.fromPayload(point.payload || {}),
         score: 0, // No relevance score for filtered scans
         relevance: 'not_relevant' as const,
       }));
@@ -423,7 +361,7 @@ export class QdrantDB implements VectorDBInterface {
 
       return (results.points || []).map(point => ({
         content: (point.payload?.content as string) || '',
-        metadata: this.payloadToMetadata(point.payload || {}),
+        metadata: this.payloadMapper.fromPayload(point.payload || {}),
         score: 0,
         relevance: 'not_relevant' as const,
       }));
@@ -475,7 +413,7 @@ export class QdrantDB implements VectorDBInterface {
 
       return (results.points || []).map(point => ({
         content: (point.payload?.content as string) || '',
-        metadata: this.payloadToMetadata(point.payload || {}),
+        metadata: this.payloadMapper.fromPayload(point.payload || {}),
         score: 0,
         relevance: 'not_relevant' as const,
       }));
