@@ -4,7 +4,10 @@ import crypto from 'crypto';
 import { chunkFile } from './chunker.js';
 import { EmbeddingService } from '../embeddings/types.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
-import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
+import {
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+} from '../constants.js';
 import { ManifestManager } from './manifest.js';
 import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
 import { CodeChunk } from './types.js';
@@ -96,30 +99,19 @@ async function processFileContent(
   filepath: string,
   content: string,
   embeddings: EmbeddingService,
-  config: LienConfig | LegacyLienConfig,
   verbose: boolean,
   rootDir?: string
 ): Promise<ProcessFileResult | null> {
-  // Get chunk settings (support both v0.3.0 and legacy v0.2.0 configs)
-  const chunkSize = isModernConfig(config)
-    ? config.core.chunkSize
-    : (isLegacyConfig(config) ? config.indexing.chunkSize : 75);
-  const chunkOverlap = isModernConfig(config)
-    ? config.core.chunkOverlap
-    : (isLegacyConfig(config) ? config.indexing.chunkOverlap : 10);
-  const useAST = isModernConfig(config)
-    ? config.chunking.useAST
-    : true;
-  const astFallback = isModernConfig(config)
-    ? config.chunking.astFallback
-    : 'line-based';
+  // Use defaults for all chunk settings
+  const chunkSize = DEFAULT_CHUNK_SIZE;
+  const chunkOverlap = DEFAULT_CHUNK_OVERLAP;
+  const useAST = true; // Always use AST-based chunking
+  const astFallback = 'line-based' as const;
   
   // Extract tenant context for multi-tenant scenarios
-  // Note: storage config will be added in Phase 3, so we check safely
+  // orgId is now handled in createVectorDB() via global config and git remote detection
   const repoId = rootDir ? extractRepoId(rootDir) : undefined;
-  const orgId = isModernConfig(config) && (config as any).storage?.qdrant?.orgId
-    ? (config as any).storage.qdrant.orgId
-    : undefined;
+  const orgId = undefined; // Not needed here - handled in VectorDB factory
   
   // Chunk the file
   const chunks = chunkFile(filepath, content, {
@@ -178,7 +170,6 @@ export async function indexSingleFile(
   filepath: string,
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
-  config: LienConfig | LegacyLienConfig,
   options: IncrementalIndexOptions = {}
 ): Promise<void> {
   const { verbose, rootDir } = options;
@@ -207,7 +198,7 @@ export async function indexSingleFile(
     const content = await fs.readFile(filepath, 'utf-8');
     
     // Process file content (chunking + embeddings) - use normalized path for storage
-    const result = await processFileContent(normalizedPath, content, embeddings, config, verbose || false, rootDir);
+    const result = await processFileContent(normalizedPath, content, embeddings, verbose || false, rootDir);
     
     // Get actual file mtime for manifest
     const stats = await fs.stat(filepath);
@@ -259,7 +250,6 @@ async function processSingleFileForIndexing(
   filepath: string,
   normalizedPath: string,
   embeddings: EmbeddingService,
-  config: LienConfig | LegacyLienConfig,
   verbose: boolean,
   rootDir?: string
 ): Promise<Result<FileProcessResult, string>> {
@@ -269,7 +259,7 @@ async function processSingleFileForIndexing(
     const content = await fs.readFile(filepath, 'utf-8');
     
     // Process content using normalized path (for storage)
-    const result = await processFileContent(normalizedPath, content, embeddings, config, verbose, rootDir);
+    const result = await processFileContent(normalizedPath, content, embeddings, verbose, rootDir);
     
     return Ok({
       filepath: normalizedPath,  // Store normalized path
@@ -302,7 +292,6 @@ export async function indexMultipleFiles(
   filepaths: string[],
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
-  config: LienConfig | LegacyLienConfig,
   options: IncrementalIndexOptions = {}
 ): Promise<number> {
   const { verbose, rootDir } = options;
@@ -317,7 +306,7 @@ export async function indexMultipleFiles(
     // This ensures paths from git diff (absolute) match paths from scanner (relative)
     const normalizedPath = normalizeToRelativePath(filepath);
     
-    const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, config, verbose || false, rootDir);
+    const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir);
     
     if (isOk(result)) {
       const { filepath: storedPath, result: processResult, mtime } = result.value;

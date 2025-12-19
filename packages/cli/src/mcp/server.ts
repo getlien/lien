@@ -201,7 +201,7 @@ async function setupFileWatching(
       } else {
         const action = type === 'add' ? 'added' : 'changed';
         log(`📝 File ${action}: ${filepath}`);
-        indexSingleFile(filepath, vectorDB, embeddings, config, { verbose })
+        indexSingleFile(filepath, vectorDB, embeddings, { verbose })
           .catch((error) => log(`Failed to reindex ${filepath}: ${error}`, 'warning'));
       }
     });
