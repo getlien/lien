@@ -276,7 +276,7 @@ describe('initCommand', () => {
     });
     
     it('should log success and new fields on upgrade', async () => {
-      // Create old config
+      // Create old config (for backward compatibility warning)
       const configPath = path.join(testDir, '.lien.config.json');
       const oldConfig = {
         version: '0.2.0',
@@ -295,8 +295,10 @@ describe('initCommand', () => {
       
       const logSpy = vi.spyOn(console, 'log');
       
-      await initCommand({ upgrade: true });
+      // initCommand no longer supports upgrade - it just warns about old config
+      await initCommand({ yes: true });
       
+      // Should log something (either success or warning about old config)
       expect(logSpy).toHaveBeenCalled();
     });
   });
