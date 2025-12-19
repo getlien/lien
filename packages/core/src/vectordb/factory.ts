@@ -1,56 +1,57 @@
 import { VectorDBInterface } from './types.js';
 import { VectorDB } from './lancedb.js';
 import { QdrantDB } from './qdrant.js';
-import { LienConfig, LegacyLienConfig, isModernConfig } from '../config/schema.js';
+import { loadGlobalConfig, extractOrgIdFromGit } from '../config/global-config.js';
 
 /**
- * Factory function to create a VectorDB instance based on configuration.
+ * Factory function to create a VectorDB instance based on global configuration.
  * 
- * Selects the backend (LanceDB or Qdrant) based on config.storage.backend.
- * Defaults to LanceDB for backward compatibility.
+ * Selects the backend (LanceDB or Qdrant) based on global config.
+ * Defaults to LanceDB if no config is provided.
+ * 
+ * For Qdrant backend, automatically detects orgId from git remote URL.
  * 
  * @param projectRoot - Root directory of the project
- * @param config - Lien configuration
  * @returns VectorDBInterface instance (LanceDB or QdrantDB)
- * @throws Error if Qdrant config is invalid or missing required fields
+ * @throws Error if Qdrant config is invalid or orgId cannot be detected
  */
-export function createVectorDB(
-  projectRoot: string,
-  config: LienConfig | LegacyLienConfig
-): VectorDBInterface {
-  // Legacy configs always use LanceDB
-  if (!isModernConfig(config)) {
-    return new VectorDB(projectRoot);
-  }
-
-  // Check storage config
-  const storageConfig = config.storage;
+export async function createVectorDB(
+  projectRoot: string
+): Promise<VectorDBInterface> {
+  const globalConfig = await loadGlobalConfig();
   
-  // Default to LanceDB if no storage config or backend not specified
-  if (!storageConfig || !storageConfig.backend || storageConfig.backend === 'lancedb') {
+  // Default to LanceDB if no backend specified or backend is lancedb
+  if (!globalConfig.backend || globalConfig.backend === 'lancedb') {
     return new VectorDB(projectRoot);
   }
 
   // Create QdrantDB instance
-  if (storageConfig.backend === 'qdrant') {
-    if (!storageConfig.qdrant) {
-      throw new Error('Qdrant backend requires storage.qdrant configuration');
+  if (globalConfig.backend === 'qdrant') {
+    if (!globalConfig.qdrant) {
+      throw new Error('Qdrant backend requires qdrant configuration in global config');
     }
 
-    const { url, apiKey, orgId } = storageConfig.qdrant;
+    const { url, apiKey } = globalConfig.qdrant;
 
     if (!url) {
-      throw new Error('Qdrant backend requires storage.qdrant.url');
+      throw new Error('Qdrant backend requires qdrant.url in global config');
     }
 
+    // Auto-detect orgId from git remote
+    const orgId = await extractOrgIdFromGit(projectRoot);
+    
     if (!orgId) {
-      throw new Error('Qdrant backend requires storage.qdrant.orgId');
+      throw new Error(
+        'Qdrant backend requires a git repository with a remote URL. ' +
+        'Could not extract organization ID from git remote. ' +
+        'Make sure your project is a git repo with a remote configured (e.g., origin).'
+      );
     }
 
     return new QdrantDB(url, apiKey, orgId, projectRoot);
   }
 
   // Unknown backend - fallback to LanceDB
-  throw new Error(`Unknown storage backend: ${storageConfig.backend}. Supported backends: 'lancedb', 'qdrant'`);
+  throw new Error(`Unknown storage backend: ${globalConfig.backend}. Supported backends: 'lancedb', 'qdrant'`);
 }
 

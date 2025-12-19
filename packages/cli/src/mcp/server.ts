@@ -55,9 +55,8 @@ async function initializeDatabase(
 ): Promise<{ embeddings: LocalEmbeddings; vectorDB: VectorDBInterface }> {
   const embeddings = new LocalEmbeddings();
   
-  // Load config to determine which backend to use
-  const config = await configService.load(rootDir);
-  const vectorDB = createVectorDB(rootDir, config);
+  // Create vector DB using global config (auto-detects backend and orgId)
+  const vectorDB = await createVectorDB(rootDir);
 
   log('Loading embedding model...');
   await embeddings.initialize();

@@ -533,12 +533,12 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<Inde
   try {
     options.onProgress?.({ phase: 'initializing', message: 'Loading configuration...' });
     
-    // Load configuration
+    // Load configuration (if provided, otherwise use defaults)
     const config = options.config ?? await configService.load(rootDir);
     
-    // Initialize vector database (use factory to select backend)
+    // Initialize vector database (use factory to select backend from global config)
     options.onProgress?.({ phase: 'initializing', message: 'Initializing vector database...' });
-    const vectorDB = createVectorDB(rootDir, config);
+    const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
     
     // Try incremental indexing first (unless forced)
