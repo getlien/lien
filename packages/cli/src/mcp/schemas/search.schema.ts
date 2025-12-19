@@ -32,6 +32,22 @@ export const SemanticSearchSchema = z.object({
       "Default: 5\n" +
       "Increase to 10-15 for broad exploration."
     ),
+  
+  crossRepo: z.boolean()
+    .default(false)
+    .describe(
+      "If true, search across all repos in the organization (requires Qdrant backend).\n\n" +
+      "Default: false (single-repo search)\n" +
+      "When enabled, results are grouped by repository."
+    ),
+  
+  repoIds: z.array(z.string())
+    .optional()
+    .describe(
+      "Optional: Filter to specific repos when crossRepo=true.\n\n" +
+      "If provided, only searches within the specified repositories.\n" +
+      "If omitted and crossRepo=true, searches all repos in the organization."
+    ),
 });
 
 /**

@@ -54,6 +54,8 @@ export { EMBEDDING_DIMENSION, EMBEDDING_DIMENSIONS } from './embeddings/types.js
 // =============================================================================
 
 export { VectorDB } from './vectordb/lancedb.js';
+export { QdrantDB } from './vectordb/qdrant.js';
+export { createVectorDB } from './vectordb/factory.js';
 export type { VectorDBInterface, SearchResult } from './vectordb/types.js';
 export { calculateRelevance } from './vectordb/relevance.js';
 export type { RelevanceCategory } from './vectordb/relevance.js';

@@ -3,6 +3,7 @@ import { GetDependentsSchema } from '../schemas/index.js';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import type { SearchResult } from '@liendev/core';
+import { QdrantDB } from '@liendev/core';
 
 /**
  * Complexity metrics for a single dependent file.
@@ -228,6 +229,46 @@ function calculateRiskLevel(dependentCount: number, complexityRiskBoost: RiskLev
  * Handle get_dependents tool calls.
  * Finds all code that depends on a file (reverse dependency lookup).
  */
+/**
+ * Group dependents by repository ID.
+ */
+function groupDependentsByRepo(
+  dependents: Array<{ filepath: string; isTestFile: boolean }>,
+  chunks: SearchResult[]
+): Record<string, Array<{ filepath: string; isTestFile: boolean }>> {
+  const repoMap = new Map<string, Set<string>>();
+  
+  // Build map of filepath -> repoId
+  for (const chunk of chunks) {
+    const repoId = chunk.metadata.repoId || 'unknown';
+    const filepath = chunk.metadata.file;
+    if (!repoMap.has(repoId)) {
+      repoMap.set(repoId, new Set());
+    }
+    repoMap.get(repoId)!.add(filepath);
+  }
+  
+  // Group dependents by repo
+  const grouped: Record<string, Array<{ filepath: string; isTestFile: boolean }>> = {};
+  for (const dependent of dependents) {
+    // Find which repo this file belongs to
+    let foundRepo = 'unknown';
+    for (const [repoId, files] of repoMap.entries()) {
+      if (files.has(dependent.filepath)) {
+        foundRepo = repoId;
+        break;
+      }
+    }
+    
+    if (!grouped[foundRepo]) {
+      grouped[foundRepo] = [];
+    }
+    grouped[foundRepo].push(dependent);
+  }
+  
+  return grouped;
+}
+
 export async function handleGetDependents(
   args: unknown,
   ctx: ToolContext
@@ -237,10 +278,21 @@ export async function handleGetDependents(
   return await wrapToolHandler(
     GetDependentsSchema,
     async (validatedArgs) => {
-      log(`Finding dependents of: ${validatedArgs.filepath}`);
+      const { crossRepo, filepath } = validatedArgs;
+      log(`Finding dependents of: ${filepath}${crossRepo ? ' (cross-repo)' : ''}`);
       await checkAndReconnect();
 
-      const allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
+      // Use cross-repo scan if enabled and backend supports it
+      let allChunks: SearchResult[];
+      if (crossRepo && vectorDB instanceof QdrantDB) {
+        allChunks = await vectorDB.scanCrossRepo({ limit: SCAN_LIMIT });
+      } else {
+        if (crossRepo) {
+          log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.', 'warning');
+        }
+        allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
+      }
+      
       const hitLimit = allChunks.length === SCAN_LIMIT;
       if (hitLimit) {
         log(`Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete.`, 'warning');
@@ -280,7 +332,7 @@ export async function handleGetDependents(
       const riskLevel = calculateRiskLevel(uniqueFiles.length, complexityMetrics.complexityRiskBoost);
       log(`Found ${uniqueFiles.length} dependent files (risk: ${riskLevel}${complexityMetrics.filesWithComplexityData > 0 ? ', complexity-boosted' : ''})`);
 
-      return {
+      const response: any = {
         indexInfo: getIndexMetadata(),
         filepath: validatedArgs.filepath,
         dependentCount: uniqueFiles.length,
@@ -289,6 +341,13 @@ export async function handleGetDependents(
         complexityMetrics,
         note: hitLimit ? `Warning: Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete.` : undefined,
       };
+
+      // Group by repo if cross-repo search
+      if (crossRepo && vectorDB instanceof QdrantDB) {
+        response.groupedByRepo = groupDependentsByRepo(uniqueFiles, allChunks);
+      }
+
+      return response;
     }
   )(args);
 }

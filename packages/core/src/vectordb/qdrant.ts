@@ -354,6 +354,76 @@ export class QdrantDB implements VectorDBInterface {
     }
   }
 
+  async scanAll(options: {
+    language?: string;
+    pattern?: string;
+  } = {}): Promise<SearchResult[]> {
+    // Use scanWithFilter with a high limit to get all chunks
+    return this.scanWithFilter({
+      ...options,
+      limit: 100000, // High limit for "all" chunks
+    });
+  }
+
+  /**
+   * Scan with filter across all repos in the organization (cross-repo).
+   * Omits repoId filter to enable cross-repo queries.
+   */
+  async scanCrossRepo(options: {
+    language?: string;
+    pattern?: string;
+    limit?: number;
+    repoIds?: string[];
+  }): Promise<SearchResult[]> {
+    if (!this.initialized) {
+      throw new DatabaseError('Qdrant database not initialized');
+    }
+
+    try {
+      const filter: any = {
+        must: [
+          { key: 'orgId', match: { value: this.orgId } },
+        ],
+      };
+
+      // Optionally filter to specific repos
+      if (options.repoIds && options.repoIds.length > 0) {
+        filter.must.push({
+          key: 'repoId',
+          match: { any: options.repoIds },
+        });
+      }
+
+      if (options.language) {
+        filter.must.push({ key: 'language', match: { value: options.language } });
+      }
+
+      if (options.pattern) {
+        filter.must.push({ key: 'file', match: { text: options.pattern } });
+      }
+
+      const limit = options.limit || 10000; // Higher default for cross-repo
+      const results = await this.client.scroll(this.collectionName, {
+        filter,
+        limit,
+        with_payload: true,
+        with_vector: false,
+      });
+
+      return (results.points || []).map(point => ({
+        content: (point.payload?.content as string) || '',
+        metadata: this.payloadToMetadata(point.payload || {}),
+        score: 0,
+        relevance: 'not_relevant' as const,
+      }));
+    } catch (error) {
+      throw new DatabaseError(
+        `Failed to scan Qdrant (cross-repo): ${error instanceof Error ? error.message : String(error)}`,
+        { collectionName: this.collectionName }
+      );
+    }
+  }
+
   async querySymbols(options: {
     language?: string;
     pattern?: string;

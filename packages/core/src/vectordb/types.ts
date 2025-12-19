@@ -19,6 +19,10 @@ export interface VectorDBInterface {
     pattern?: string;
     limit?: number;
   }): Promise<SearchResult[]>;
+  scanAll(options?: {
+    language?: string;
+    pattern?: string;
+  }): Promise<SearchResult[]>;
   querySymbols(options: {
     language?: string;
     pattern?: string;
