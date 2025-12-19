@@ -101,8 +101,8 @@ export async function handleGetComplexity(
         .all() as unknown as TransformedViolation[];
 
       // Apply custom threshold filter if provided
-      const violations = validatedArgs.threshold !== undefined
-        ? allViolations.filter(v => v.complexity >= validatedArgs.threshold!)
+      const violations = threshold !== undefined
+        ? allViolations.filter(v => v.complexity >= threshold)
         : allViolations;
 
       const topViolations = violations.slice(0, top);

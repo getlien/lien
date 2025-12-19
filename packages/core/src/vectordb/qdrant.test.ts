@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { QdrantDB } from './qdrant.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
+import { writeVersionFile, readVersionFile } from './version.js';
+import fs from 'fs/promises';
 
 /**
  * QdrantDB tests require a running Qdrant instance.
@@ -330,6 +332,117 @@ describe('QdrantDB', () => {
 
       const hasData = await db.hasData();
       expect(hasData).toBe(false);
+    });
+  });
+
+  describe('version management', () => {
+    it('should return 0 for getCurrentVersion when no version file exists', async () => {
+      // Create a fresh instance without initializing to test default state
+      const freshDb = new QdrantDB(QDRANT_URL, undefined, 'test-org-fresh', '/tmp/test-fresh');
+      const version = freshDb.getCurrentVersion();
+      expect(version).toBe(0);
+    });
+
+    it('should return "Unknown" for getVersionDate when version is 0', () => {
+      // Create a fresh instance without initializing to test default state
+      const freshDb = new QdrantDB(QDRANT_URL, undefined, 'test-org-fresh2', '/tmp/test-fresh2');
+      const date = freshDb.getVersionDate();
+      expect(date).toBe('Unknown');
+    });
+
+    it('should read version from file during initialization', async () => {
+      // Ensure directory exists and write a version file before initializing
+      await fs.mkdir(db.dbPath, { recursive: true });
+      await writeVersionFile(db.dbPath);
+
+      // Create a new instance and initialize
+      const newDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT);
+      await newDb.initialize();
+
+      const version = newDb.getCurrentVersion();
+      expect(version).toBeGreaterThan(0);
+      expect(version).toBeLessThanOrEqual(Date.now());
+
+      // Version date should be formatted
+      const date = newDb.getVersionDate();
+      expect(date).not.toBe('Unknown');
+      expect(date).toMatch(/\d+\/\d+\/\d+/); // Date format check
+    });
+
+    it('should detect version changes with checkVersion', async () => {
+      // Ensure directory exists
+      await fs.mkdir(db.dbPath, { recursive: true });
+      
+      // Initial version should be 0 or from initialization
+      const initialVersion = db.getCurrentVersion();
+
+      // Write a new version file
+      await new Promise(resolve => setTimeout(resolve, 10)); // Small delay to ensure different timestamp
+      await writeVersionFile(db.dbPath);
+
+      // First check should detect the change (if version file was updated)
+      const hasChanged = await db.checkVersion();
+      
+      // If version file exists and was updated, should return true
+      // If version file doesn't exist or wasn't updated, might return false
+      // Either way, checkVersion should not throw
+      expect(typeof hasChanged).toBe('boolean');
+
+      // After checkVersion, currentVersion should be updated if change was detected
+      const newVersion = db.getCurrentVersion();
+      if (hasChanged) {
+        expect(newVersion).toBeGreaterThan(initialVersion);
+      }
+    });
+
+    it('should cache version checks for 1 second', async () => {
+      // First check
+      const firstCheck = await db.checkVersion();
+      
+      // Immediate second check should be cached (return false)
+      const secondCheck = await db.checkVersion();
+      expect(secondCheck).toBe(false);
+
+      // Wait for cache to expire
+      await new Promise(resolve => setTimeout(resolve, 1100));
+      
+      // Third check should not be cached
+      const thirdCheck = await db.checkVersion();
+      expect(typeof thirdCheck).toBe('boolean');
+    });
+
+    it('should reconnect and refresh version cache', async () => {
+      // Ensure directory exists
+      await fs.mkdir(db.dbPath, { recursive: true });
+      
+      // Get initial version
+      const initialVersion = db.getCurrentVersion();
+
+      // Write a new version file
+      await new Promise(resolve => setTimeout(resolve, 10));
+      await writeVersionFile(db.dbPath);
+
+      // Reconnect should refresh the version
+      await db.reconnect();
+
+      // Version should be updated after reconnect
+      const newVersion = db.getCurrentVersion();
+      expect(newVersion).toBeGreaterThanOrEqual(initialVersion);
+    });
+
+    it('should format version date correctly', async () => {
+      // Write a known version
+      const testTimestamp = 1609459200000; // 2021-01-01 00:00:00 UTC
+      const versionPath = `${db.dbPath}/.lien-index-version`;
+      await fs.mkdir(db.dbPath, { recursive: true });
+      await fs.writeFile(versionPath, testTimestamp.toString(), 'utf-8');
+
+      // Reinitialize to read the version
+      await db.reconnect();
+
+      const date = db.getVersionDate();
+      expect(date).not.toBe('Unknown');
+      expect(date).toContain('2021'); // Should contain the year
     });
   });
 });

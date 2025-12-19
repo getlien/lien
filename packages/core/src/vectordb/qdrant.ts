@@ -7,6 +7,7 @@ import { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { calculateRelevance } from './relevance.js';
 import { DatabaseError } from '../errors/index.js';
+import { readVersionFile } from './version.js';
 
 /**
  * QdrantDB implements VectorDBInterface using Qdrant vector database.
@@ -24,6 +25,8 @@ export class QdrantDB implements VectorDBInterface {
   private repoId: string;
   private initialized: boolean = false;
   public readonly dbPath: string; // For compatibility with manifest/version file operations
+  private lastVersionCheck: number = 0;
+  private currentVersion: number = 0;
 
   constructor(
     url: string,
@@ -148,10 +151,10 @@ export class QdrantDB implements VectorDBInterface {
 
   async initialize(): Promise<void> {
     try {
-      // Check if collection exists
-      const collectionExists = await this.client.collectionExists(this.collectionName);
+      // Check if collection exists (returns { exists: boolean })
+      const collectionCheck = await this.client.collectionExists(this.collectionName);
       
-      if (!collectionExists) {
+      if (!collectionCheck.exists) {
         // Create collection with proper vector configuration
         await this.client.createCollection(this.collectionName, {
           vectors: {
@@ -159,6 +162,14 @@ export class QdrantDB implements VectorDBInterface {
             distance: 'Cosine',
           },
         });
+      }
+      
+      // Read and cache the current version
+      try {
+        this.currentVersion = await readVersionFile(this.dbPath);
+      } catch {
+        // Version file doesn't exist yet, will be created on first index
+        this.currentVersion = 0;
       }
       
       this.initialized = true;
@@ -482,11 +493,20 @@ export class QdrantDB implements VectorDBInterface {
     }
 
     try {
-      // Delete all points in the collection
+      // Check if collection exists before trying to clear it (returns { exists: boolean })
+      const collectionCheck = await this.client.collectionExists(this.collectionName);
+      if (!collectionCheck.exists) {
+        // Collection doesn't exist yet, nothing to clear
+        return;
+      }
+
+      // Delete all points for this repository only (filter by both orgId and repoId)
+      // This ensures we only clear the current repo's data, not all repos in the org
       await this.client.delete(this.collectionName, {
         filter: {
           must: [
             { key: 'orgId', match: { value: this.orgId } },
+            { key: 'repoId', match: { value: this.repoId } },
           ],
         },
       });
@@ -583,6 +603,55 @@ export class QdrantDB implements VectorDBInterface {
    */
   getRepoId(): string {
     return this.repoId;
+  }
+
+  async checkVersion(): Promise<boolean> {
+    const now = Date.now();
+    
+    // Cache version checks for 1 second to minimize I/O
+    if (now - this.lastVersionCheck < 1000) {
+      return false;
+    }
+    
+    this.lastVersionCheck = now;
+    
+    try {
+      const version = await readVersionFile(this.dbPath);
+      
+      if (version > this.currentVersion) {
+        this.currentVersion = version;
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      // If we can't read version file, don't reconnect
+      return false;
+    }
+  }
+
+  async reconnect(): Promise<void> {
+    try {
+      // For Qdrant, reconnection just means re-reading the version
+      // The client connection is stateless, so we just need to refresh version cache
+      await this.initialize();
+    } catch (error) {
+      throw new DatabaseError(
+        `Failed to reconnect to Qdrant database: ${error instanceof Error ? error.message : String(error)}`,
+        { collectionName: this.collectionName }
+      );
+    }
+  }
+
+  getCurrentVersion(): number {
+    return this.currentVersion;
+  }
+
+  getVersionDate(): string {
+    if (this.currentVersion === 0) {
+      return 'Unknown';
+    }
+    return new Date(this.currentVersion).toLocaleString();
   }
 }
 

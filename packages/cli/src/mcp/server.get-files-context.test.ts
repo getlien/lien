@@ -117,6 +117,39 @@ describe('get_files_context - Helper Functions', () => {
   });
 
   describe('searchFileChunks', () => {
+    it('should work with VectorDBInterface (not just concrete VectorDB)', async () => {
+      // This test verifies that HandlerContext accepts VectorDBInterface
+      // which allows both VectorDB (LanceDB) and QdrantDB implementations
+      const mockEmbeddings = {
+        embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+      };
+      
+      // Mock VectorDBInterface with all required methods
+      const mockVectorDB = {
+        search: vi.fn().mockResolvedValue([
+          { content: 'chunk1', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0.9 },
+        ]),
+        scanWithFilter: vi.fn(),
+        getCurrentVersion: vi.fn(() => 0),
+        getVersionDate: vi.fn(() => 'Unknown'),
+        checkVersion: vi.fn(),
+        reconnect: vi.fn(),
+      };
+      
+      const ctx = {
+        vectorDB: mockVectorDB as any, // VectorDBInterface
+        embeddings: mockEmbeddings as any,
+        log: vi.fn(),
+        workspaceRoot,
+      };
+      
+      const result = await searchFileChunks(['src/auth.ts'], ctx);
+      
+      // Should work with VectorDBInterface
+      expect(result[0]).toHaveLength(1);
+      expect(mockVectorDB.search).toHaveBeenCalled();
+    });
+
     it('should filter chunks to only matching files', async () => {
       const mockEmbeddings = {
         embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),

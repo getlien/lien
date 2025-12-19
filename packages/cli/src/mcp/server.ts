@@ -10,7 +10,6 @@ import { dirname, join } from 'path';
 import { tools } from './tools.js';
 import { toolHandlers } from './handlers/index.js';
 import {
-  VectorDB,
   LocalEmbeddings,
   GitStateTracker,
   indexMultipleFiles,
@@ -22,6 +21,8 @@ import {
   VERSION_CHECK_INTERVAL_MS,
   LienError,
   LienErrorCode,
+  createVectorDB,
+  VectorDBInterface,
 } from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
 import type { ToolContext, LogFn, LogLevel } from './types.js';
@@ -46,13 +47,17 @@ export interface MCPServerOptions {
 
 /**
  * Initialize embeddings and vector database.
+ * Uses factory to select backend (LanceDB or Qdrant) based on config.
  */
 async function initializeDatabase(
   rootDir: string,
   log: LogFn
-): Promise<{ embeddings: LocalEmbeddings; vectorDB: VectorDB }> {
+): Promise<{ embeddings: LocalEmbeddings; vectorDB: VectorDBInterface }> {
   const embeddings = new LocalEmbeddings();
-  const vectorDB = new VectorDB(rootDir);
+  
+  // Load config to determine which backend to use
+  const config = await configService.load(rootDir);
+  const vectorDB = createVectorDB(rootDir, config);
 
   log('Loading embedding model...');
   await embeddings.initialize();
@@ -68,7 +73,7 @@ async function initializeDatabase(
  * Run auto-indexing if needed (first run with no index).
  */
 async function handleAutoIndexing(
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   config: Awaited<ReturnType<typeof configService.load>>,
   rootDir: string,
   log: LogFn
@@ -99,7 +104,7 @@ async function handleAutoIndexing(
 async function setupGitDetection(
   config: Awaited<ReturnType<typeof configService.load>>,
   rootDir: string,
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
   log: LogFn
@@ -167,13 +172,15 @@ async function setupFileWatching(
   watch: boolean | undefined,
   config: Awaited<ReturnType<typeof configService.load>>,
   rootDir: string,
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
   log: LogFn
 ): Promise<FileWatcher | null> {
   const fileWatchingEnabled = watch !== undefined ? watch : config.fileWatching.enabled;
-  if (!fileWatchingEnabled) return null;
+  if (!fileWatchingEnabled) {
+    return null;
+  }
 
   log('👀 Starting file watcher...');
   const fileWatcher = new FileWatcher(rootDir, config);
@@ -266,7 +273,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     console.error(`Failed to initialize: ${error}`);
     process.exit(1);
   });
-
+  
   // Create MCP server with logging capability
   const server = new Server(
     { name: 'lien', version: packageJson.version },
@@ -289,7 +296,9 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     }
   };
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    return { tools };
+  });
 
   // Version check helpers
   const checkAndReconnect = async () => {
@@ -313,7 +322,7 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   // Load config and create tool context
   const config = await configService.load(rootDir);
   const toolContext: ToolContext = { vectorDB, embeddings, config, rootDir, log, checkAndReconnect, getIndexMetadata };
-
+  
   // Register handlers and setup features
   registerToolCallHandler(server, toolContext, log);
   await handleAutoIndexing(vectorDB, config, rootDir, log);
@@ -334,9 +343,20 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
 
   // Connect transport
   const transport = new StdioServerTransport();
-  transport.onclose = () => { log('Transport closed'); cleanup().catch(() => process.exit(0)); };
-  transport.onerror = (error) => log(`Transport error: ${error}`);
+  
+  transport.onclose = () => { 
+    log('Transport closed'); 
+    cleanup().catch(() => process.exit(0)); 
+  };
+  transport.onerror = (error) => {
+    log(`Transport error: ${error}`);
+  };
 
-  await server.connect(transport);
-  log('MCP server started and listening on stdio');
+  try {
+    await server.connect(transport);
+    log('MCP server started and listening on stdio');
+  } catch (error) {
+    console.error(`Failed to connect MCP transport: ${error}`);
+    process.exit(1);
+  }
 }

@@ -13,7 +13,7 @@ export interface VectorDBInterface {
   readonly dbPath: string;
   initialize(): Promise<void>;
   insertBatch(vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
-  search(queryVector: Float32Array, limit?: number): Promise<SearchResult[]>;
+  search(queryVector: Float32Array, limit?: number, query?: string): Promise<SearchResult[]>;
   scanWithFilter(options: {
     language?: string;
     pattern?: string;
@@ -33,5 +33,9 @@ export interface VectorDBInterface {
   deleteByFile(filepath: string): Promise<void>;
   updateFile(filepath: string, vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
   hasData(): Promise<boolean>;
+  checkVersion(): Promise<boolean>;
+  reconnect(): Promise<void>;
+  getCurrentVersion(): number;
+  getVersionDate(): string;
 }
 
