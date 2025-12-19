@@ -10,6 +10,9 @@ export interface ChunkOptions {
   chunkOverlap?: number;
   useAST?: boolean; // Flag to enable AST-based chunking
   astFallback?: 'line-based' | 'error'; // How to handle AST parsing errors
+  // Multi-tenant fields (optional for backward compatibility)
+  repoId?: string; // Repository identifier for multi-tenant scenarios
+  orgId?: string;  // Organization identifier for multi-tenant scenarios
 }
 
 export function chunkFile(
@@ -17,11 +20,11 @@ export function chunkFile(
   content: string,
   options: ChunkOptions = {}
 ): CodeChunk[] {
-  const { chunkSize = 75, chunkOverlap = 10, useAST = true, astFallback = 'line-based' } = options;
+  const { chunkSize = 75, chunkOverlap = 10, useAST = true, astFallback = 'line-based', repoId, orgId } = options;
   
   // Special handling for Liquid files
   if (filepath.endsWith('.liquid')) {
-    return chunkLiquidFile(filepath, content, chunkSize, chunkOverlap);
+    return chunkLiquidFile(filepath, content, chunkSize, chunkOverlap, { repoId, orgId });
   }
   
   // Special handling for Shopify JSON template files (templates/**/*.json)
@@ -29,7 +32,7 @@ export function chunkFile(
   // Matches: templates/product.json OR some-path/templates/customers/account.json
   // Rejects: my-templates/config.json OR node_modules/pkg/templates/file.json (filtered by scanner)
   if (filepath.endsWith('.json') && /(?:^|\/)templates\//.test(filepath)) {
-    return chunkJSONTemplate(filepath, content);
+    return chunkJSONTemplate(filepath, content, { repoId, orgId });
   }
   
   // Try AST-based chunking for supported languages
@@ -37,6 +40,8 @@ export function chunkFile(
     try {
       return chunkByAST(filepath, content, {
         minChunkSize: Math.floor(chunkSize / 10),
+        repoId,
+        orgId,
       });
     } catch (error) {
       // Handle AST errors based on configuration
@@ -50,7 +55,7 @@ export function chunkFile(
   }
   
   // Line-based chunking (original implementation)
-  return chunkByLines(filepath, content, chunkSize, chunkOverlap);
+  return chunkByLines(filepath, content, chunkSize, chunkOverlap, { repoId, orgId });
 }
 
 /**
@@ -60,7 +65,8 @@ function chunkByLines(
   filepath: string,
   content: string,
   chunkSize: number,
-  chunkOverlap: number
+  chunkOverlap: number,
+  tenantContext?: { repoId?: string; orgId?: string }
 ): CodeChunk[] {
   const lines = content.split('\n');
   const chunks: CodeChunk[] = [];
@@ -94,6 +100,8 @@ function chunkByLines(
         type: 'block', // MVP: all chunks are 'block' type
         language,
         symbols,
+        ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
+        ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
       },
     });
     

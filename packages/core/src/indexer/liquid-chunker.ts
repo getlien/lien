@@ -196,6 +196,8 @@ function createCodeChunk(
     symbolName?: string;
     symbolType?: LiquidBlock['type'];
     imports?: string[];
+    repoId?: string;
+    orgId?: string;
   } = {}
 ): CodeChunk {
   return {
@@ -209,6 +211,8 @@ function createCodeChunk(
       symbolName: options.symbolName,
       symbolType: options.symbolType,
       imports: options.imports?.length ? options.imports : undefined,
+      ...(options.repoId && { repoId: options.repoId }),
+      ...(options.orgId && { orgId: options.orgId }),
     },
   };
 }
@@ -220,7 +224,8 @@ function splitLargeBlock(
   block: LiquidBlock,
   ctx: ChunkContext,
   symbolName: string | undefined,
-  imports: string[]
+  imports: string[],
+  tenantContext?: { repoId?: string; orgId?: string }
 ): CodeChunk[] {
   const chunks: CodeChunk[] = [];
   const blockLines = block.content.split('\n');
@@ -237,7 +242,7 @@ function splitLargeBlock(
         block.startLine + endOffset,
         filepath,
         'block',
-        { symbolName, symbolType: block.type, imports }
+        { symbolName, symbolType: block.type, imports, ...tenantContext }
       ));
     }
 
@@ -254,7 +259,8 @@ function splitLargeBlock(
 function processSpecialBlock(
   block: LiquidBlock,
   ctx: ChunkContext,
-  coveredLines: Set<number>
+  coveredLines: Set<number>,
+  tenantContext?: { repoId?: string; orgId?: string }
 ): CodeChunk[] {
   // Mark lines as covered
   for (let i = block.startLine; i <= block.endLine; i++) {
@@ -281,11 +287,11 @@ function processSpecialBlock(
       block.endLine + 1,
       ctx.params.filepath,
       'block',
-      { symbolName, symbolType: block.type, imports }
+      { symbolName, symbolType: block.type, imports, ...tenantContext }
     )];
   }
 
-  return splitLargeBlock(block, ctx, symbolName, imports);
+  return splitLargeBlock(block, ctx, symbolName, imports, tenantContext);
 }
 
 /**
@@ -295,7 +301,8 @@ function flushTemplateChunk(
   currentChunk: string[],
   chunkStartLine: number,
   endLine: number,
-  ctx: ChunkContext
+  ctx: ChunkContext,
+  tenantContext?: { repoId?: string; orgId?: string }
 ): CodeChunk | null {
   if (currentChunk.length === 0) return null;
 
@@ -311,7 +318,7 @@ function flushTemplateChunk(
     endLine,
     ctx.params.filepath,
     'template',
-    { imports }
+    { imports, ...tenantContext }
   );
 }
 
@@ -320,7 +327,8 @@ function flushTemplateChunk(
  */
 function processTemplateContent(
   ctx: ChunkContext,
-  coveredLines: Set<number>
+  coveredLines: Set<number>,
+  tenantContext?: { repoId?: string; orgId?: string }
 ): CodeChunk[] {
   const chunks: CodeChunk[] = [];
   const { lines, params } = ctx;
@@ -332,7 +340,7 @@ function processTemplateContent(
   for (let i = 0; i < lines.length; i++) {
     // Skip lines covered by special blocks
     if (coveredLines.has(i)) {
-      const chunk = flushTemplateChunk(currentChunk, chunkStartLine, i, ctx);
+      const chunk = flushTemplateChunk(currentChunk, chunkStartLine, i, ctx, tenantContext);
       if (chunk) chunks.push(chunk);
       currentChunk = [];
       continue;
@@ -347,7 +355,7 @@ function processTemplateContent(
 
     // Flush if chunk is full
     if (currentChunk.length >= chunkSize) {
-      const chunk = flushTemplateChunk(currentChunk, chunkStartLine, i + 1, ctx);
+      const chunk = flushTemplateChunk(currentChunk, chunkStartLine, i + 1, ctx, tenantContext);
       if (chunk) chunks.push(chunk);
 
       // Add overlap for next chunk
@@ -357,7 +365,7 @@ function processTemplateContent(
   }
 
   // Flush remaining chunk
-  const finalChunk = flushTemplateChunk(currentChunk, chunkStartLine, lines.length, ctx);
+  const finalChunk = flushTemplateChunk(currentChunk, chunkStartLine, lines.length, ctx, tenantContext);
   if (finalChunk) chunks.push(finalChunk);
 
   return chunks;
@@ -377,7 +385,8 @@ export function chunkLiquidFile(
   filepath: string,
   content: string,
   chunkSize: number = 75,
-  chunkOverlap: number = 10
+  chunkOverlap: number = 10,
+  tenantContext?: { repoId?: string; orgId?: string }
 ): CodeChunk[] {
   // Build context once for reuse across helpers
   const contentWithoutComments = removeComments(content);
@@ -392,10 +401,10 @@ export function chunkLiquidFile(
   const coveredLines = new Set<number>();
 
   // Process special blocks
-  const blockChunks = blocks.flatMap(block => processSpecialBlock(block, ctx, coveredLines));
+  const blockChunks = blocks.flatMap(block => processSpecialBlock(block, ctx, coveredLines, tenantContext));
 
   // Process uncovered template content
-  const templateChunks = processTemplateContent(ctx, coveredLines);
+  const templateChunks = processTemplateContent(ctx, coveredLines, tenantContext);
 
   // Combine and sort by line number
   return [...blockChunks, ...templateChunks].sort((a, b) => a.metadata.startLine - b.metadata.startLine);

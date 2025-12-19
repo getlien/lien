@@ -10,6 +10,8 @@
 
 import fs from 'fs/promises';
 import pLimit from 'p-limit';
+import path from 'path';
+import crypto from 'crypto';
 import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
 import { chunkFile } from './chunker.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
@@ -74,28 +76,59 @@ interface IndexingConfig {
   chunkOverlap: number;
   useAST: boolean;
   astFallback: 'line-based' | 'error';
+  repoId?: string;
+  orgId?: string;
+}
+
+/**
+ * Extract repository identifier from project root.
+ * Uses project name + path hash for stable, unique identification.
+ */
+function extractRepoId(projectRoot: string): string {
+  const projectName = path.basename(projectRoot);
+  const pathHash = crypto
+    .createHash('md5')
+    .update(projectRoot)
+    .digest('hex')
+    .substring(0, 8);
+  return `${projectName}-${pathHash}`;
 }
 
 /** Extract indexing config values with defaults */
-function getIndexingConfig(config: LienConfig | LegacyLienConfig): IndexingConfig {
-  if (isModernConfig(config)) {
-    return {
-      concurrency: config.core.concurrency,
-      embeddingBatchSize: config.core.embeddingBatchSize,
-      chunkSize: config.core.chunkSize,
-      chunkOverlap: config.core.chunkOverlap,
-      useAST: config.chunking.useAST,
-      astFallback: config.chunking.astFallback,
-    };
-  }
-  // Legacy defaults
+function getIndexingConfig(
+  config: LienConfig | LegacyLienConfig,
+  rootDir: string
+): IndexingConfig {
+  const baseConfig = isModernConfig(config)
+    ? {
+        concurrency: config.core.concurrency,
+        embeddingBatchSize: config.core.embeddingBatchSize,
+        chunkSize: config.core.chunkSize,
+        chunkOverlap: config.core.chunkOverlap,
+        useAST: config.chunking.useAST,
+        astFallback: config.chunking.astFallback,
+      }
+    : {
+        // Legacy defaults
+        concurrency: 4,
+        embeddingBatchSize: 50,
+        chunkSize: 75,
+        chunkOverlap: 10,
+        useAST: true,
+        astFallback: 'line-based' as const,
+      };
+
+  // Extract tenant context for multi-tenant scenarios
+  // Note: storage config will be added in Phase 3, so we check safely
+  const repoId = extractRepoId(rootDir);
+  const orgId = isModernConfig(config) && (config as any).storage?.qdrant?.orgId
+    ? (config as any).storage.qdrant.orgId
+    : undefined;
+
   return {
-    concurrency: 4,
-    embeddingBatchSize: 50,
-    chunkSize: 75,
-    chunkOverlap: 10,
-    useAST: true,
-    astFallback: 'line-based',
+    ...baseConfig,
+    repoId,
+    orgId,
   };
 }
 
@@ -177,7 +210,8 @@ async function handleUpdates(
   vectorDB: VectorDB,
   embeddings: EmbeddingService,
   config: LienConfig | LegacyLienConfig,
-  options: IndexingOptions
+  options: IndexingOptions,
+  rootDir: string
 ): Promise<number> {
   const filesToIndex = [...addedFiles, ...modifiedFiles];
   
@@ -190,7 +224,7 @@ async function handleUpdates(
     vectorDB,
     embeddings,
     config,
-    { verbose: options.verbose }
+    { verbose: options.verbose, rootDir }
   );
   
   await writeVersionFile(vectorDB.dbPath);
@@ -259,7 +293,8 @@ async function tryIncrementalIndex(
     vectorDB,
     embeddings,
     config,
-    options
+    options,
+    rootDir
   );
   
   // Update git state
@@ -304,6 +339,8 @@ async function processFileForIndexing(
       chunkOverlap: indexConfig.chunkOverlap,
       useAST: indexConfig.useAST,
       astFallback: indexConfig.astFallback,
+      repoId: indexConfig.repoId,
+      orgId: indexConfig.orgId,
     });
 
     if (chunks.length === 0) {
@@ -364,7 +401,7 @@ async function performFullIndex(
   }
 
   // 4. Setup processing infrastructure
-  const indexConfig = getIndexingConfig(config);
+  const indexConfig = getIndexingConfig(config, rootDir);
   const processedCount = { value: 0 };
   
   // Create a simple progress tracker that works with callbacks
