@@ -45,10 +45,23 @@ export class FileWatcher {
     if (isLegacyConfig(this.config)) {
       includePatterns = this.config.indexing.include;
       excludePatterns = this.config.indexing.exclude;
+      
+      // Fallback: if no include patterns, use default
+      if (includePatterns.length === 0) {
+        includePatterns = ['**/*'];
+        excludePatterns = excludePatterns.length > 0 ? excludePatterns : [];
+      }
     } else if (isModernConfig(this.config)) {
-      // For modern configs, aggregate patterns from all frameworks
-      includePatterns = this.config.frameworks.flatMap(f => f.config.include);
-      excludePatterns = this.config.frameworks.flatMap(f => f.config.exclude);
+      // For modern configs, aggregate patterns from all enabled frameworks
+      const enabledFrameworks = this.config.frameworks.filter(f => f.enabled);
+      includePatterns = enabledFrameworks.flatMap(f => f.config.include);
+      excludePatterns = enabledFrameworks.flatMap(f => f.config.exclude);
+      
+      // Fallback: if no frameworks or all disabled, use default patterns
+      if (includePatterns.length === 0) {
+        includePatterns = ['**/*'];
+        excludePatterns = [];
+      }
     } else {
       includePatterns = ['**/*'];
       excludePatterns = [];
@@ -86,11 +99,25 @@ export class FileWatcher {
       });
     
     // Wait for watcher to be ready
-    await new Promise<void>((resolve) => {
-      this.watcher!.on('ready', () => {
-        resolve();
-      });
-    });
+    // Fix: Add timeout fallback in case 'ready' event never fires (race condition)
+    let readyFired = false;
+    await Promise.race([
+      new Promise<void>((resolve) => {
+        const readyHandler = () => {
+          readyFired = true;
+          resolve();
+        };
+        this.watcher!.once('ready', readyHandler);
+      }),
+      new Promise<void>((resolve) => {
+        // Timeout fallback: if ready doesn't fire within 5 seconds, resolve anyway
+        setTimeout(() => {
+          if (!readyFired) {
+            resolve();
+          }
+        }, 5000);
+      }),
+    ]);
   }
   
   /**

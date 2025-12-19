@@ -31,6 +31,7 @@ export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>)
       ...defaults.fileWatching,
       ...user.fileWatching,
     },
+    storage: user.storage ?? defaults.storage,
     complexity: user.complexity ? {
       enabled: user.complexity.enabled ?? defaults.complexity?.enabled ?? true,
       thresholds: {
