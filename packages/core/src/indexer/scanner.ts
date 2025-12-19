@@ -6,6 +6,19 @@ import { ScanOptions } from './types.js';
 import { LienConfig, FrameworkInstance } from '../config/schema.js';
 
 /**
+ * Patterns that should ALWAYS be ignored, regardless of user configuration.
+ * These are fundamental exclusions that should never be indexed.
+ */
+const ALWAYS_IGNORE_PATTERNS = [
+  '**/node_modules/**',
+  'node_modules/**',
+  '**/vendor/**',
+  'vendor/**',
+  '.git/**',
+  '**/.git/**',
+];
+
+/**
  * Scan codebase using framework-aware configuration
  * @param rootDir - Project root directory
  * @param config - Lien configuration with frameworks
@@ -59,11 +72,18 @@ async function scanFramework(
     }
   }
   
-  // Add framework-specific exclusions
+  // Add framework-specific exclusions and always-ignored patterns
   ig.add([
+    ...ALWAYS_IGNORE_PATTERNS,
     ...framework.config.exclude,
     '.lien/**',
   ]);
+  
+  // Combine always-ignored patterns with framework exclusions for glob
+  const globIgnorePatterns = [
+    ...ALWAYS_IGNORE_PATTERNS,
+    ...framework.config.exclude,
+  ];
   
   // Find all files matching framework patterns
   const allFiles: string[] = [];
@@ -73,7 +93,7 @@ async function scanFramework(
       cwd: frameworkPath,
       absolute: false, // Get paths relative to framework path
       nodir: true,
-      ignore: framework.config.exclude,
+      ignore: globIgnorePatterns,
     });
     allFiles.push(...files);
   }
@@ -110,10 +130,9 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
     // No .gitignore, that's fine
   }
   
-  // Add default exclusions
+  // Add default exclusions (including always-ignored patterns)
   ig.add([
-    'node_modules/**',
-    '.git/**',
+    ...ALWAYS_IGNORE_PATTERNS,
     'dist/**',
     'build/**',
     '*.min.js',
@@ -127,6 +146,12 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
     ? includePatterns 
     : ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,cpp,c,cs,h,md,mdx}'];
   
+  // Combine always-ignored patterns with exclude patterns for glob
+  const globIgnorePatterns = [
+    ...ALWAYS_IGNORE_PATTERNS,
+    ...excludePatterns,
+  ];
+  
   // Find all code files
   const allFiles: string[] = [];
   
@@ -135,7 +160,7 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
       cwd: rootDir,
       absolute: true,
       nodir: true,
-      ignore: ['node_modules/**', '.git/**'],
+      ignore: globIgnorePatterns,
     });
     allFiles.push(...files);
   }
