@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { chunkFile } from './chunker.js';
 import { EmbeddingService } from '../embeddings/types.js';
-import { VectorDB } from '../vectordb/lancedb.js';
+import type { VectorDBInterface } from '../vectordb/types.js';
 import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
 import { ManifestManager } from './manifest.js';
 import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
@@ -176,7 +176,7 @@ async function processFileContent(
  */
 export async function indexSingleFile(
   filepath: string,
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
   config: LienConfig | LegacyLienConfig,
   options: IncrementalIndexOptions = {}
@@ -300,7 +300,7 @@ async function processSingleFileForIndexing(
  */
 export async function indexMultipleFiles(
   filepaths: string[],
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
   config: LienConfig | LegacyLienConfig,
   options: IncrementalIndexOptions = {}

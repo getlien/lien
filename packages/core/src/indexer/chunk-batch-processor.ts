@@ -13,7 +13,7 @@
  * - Process batches through embedding → vectordb pipeline
  */
 
-import type { VectorDB } from '../vectordb/lancedb.js';
+import type { VectorDBInterface } from '../vectordb/types.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import type { ProgressTracker } from './progress-tracker.js';
 import type { CodeChunk } from './types.js';
@@ -90,7 +90,7 @@ export class ChunkBatchProcessor {
   private processingQueue: Promise<void> | null = null;
 
   constructor(
-    private readonly vectorDB: VectorDB,
+    private readonly vectorDB: VectorDBInterface,
     private readonly embeddings: EmbeddingService,
     private readonly config: BatchProcessorConfig,
     private readonly progressTracker: ProgressTracker

@@ -1,6 +1,7 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
 import crypto from 'crypto';
 import path from 'path';
+import os from 'os';
 import { SearchResult, VectorDBInterface } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
@@ -22,6 +23,7 @@ export class QdrantDB implements VectorDBInterface {
   private orgId: string;
   private repoId: string;
   private initialized: boolean = false;
+  public readonly dbPath: string; // For compatibility with manifest/version file operations
 
   constructor(
     url: string,
@@ -37,6 +39,21 @@ export class QdrantDB implements VectorDBInterface {
     this.repoId = this.extractRepoId(projectRoot);
     // Collection naming: one per org
     this.collectionName = `lien_org_${orgId}`;
+    
+    // dbPath is used for manifest and version files (stored locally even with Qdrant)
+    // Use same path structure as LanceDB for consistency
+    const projectName = path.basename(projectRoot);
+    const pathHash = crypto
+      .createHash('md5')
+      .update(projectRoot)
+      .digest('hex')
+      .substring(0, 8);
+    this.dbPath = path.join(
+      os.homedir(),
+      '.lien',
+      'indices',
+      `${projectName}-${pathHash}`
+    );
   }
 
   /**

@@ -65,6 +65,14 @@ export interface LienConfig {
     };
     // Severity multipliers are hardcoded: warning = 1x threshold, error = 2x threshold
   };
+  storage?: {
+    backend?: 'lancedb' | 'qdrant';
+    qdrant?: {
+      url: string;        // e.g., "http://localhost:6333"
+      apiKey?: string;    // Optional, required for Qdrant Cloud
+      orgId: string;      // Organization identifier for multi-tenant isolation
+    };
+  };
   frameworks: FrameworkInstance[];
 }
 
@@ -157,6 +165,7 @@ export const defaultConfig: LienConfig = {
       estimatedBugs: 1.5,           // 🐛 Functions estimated to have >1.5 bugs
     },
   },
+  storage: undefined, // Defaults to LanceDB (backward compatible)
   frameworks: [], // Will be populated by lien init via framework detection
 };
 

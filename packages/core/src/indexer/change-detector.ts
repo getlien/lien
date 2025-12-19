@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { VectorDB } from '../vectordb/lancedb.js';
+import type { VectorDBInterface } from '../vectordb/types.js';
 import { ManifestManager, IndexManifest } from './manifest.js';
 import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
 import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
@@ -158,7 +158,7 @@ async function fallbackToFullReindex(
  */
 export async function detectChanges(
   rootDir: string,
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   config: LienConfig | LegacyLienConfig
 ): Promise<ChangeDetectionResult> {
   const manifest = new ManifestManager(vectorDB.dbPath);

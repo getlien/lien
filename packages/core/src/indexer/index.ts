@@ -15,7 +15,7 @@ import crypto from 'crypto';
 import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
 import { chunkFile } from './chunker.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
-import { VectorDB } from '../vectordb/lancedb.js';
+import { createVectorDB } from '../vectordb/factory.js';
 import { configService } from '../config/service.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { isLegacyConfig, isModernConfig, type LienConfig, type LegacyLienConfig } from '../config/schema.js';
@@ -26,6 +26,7 @@ import { detectChanges } from './change-detector.js';
 import { indexMultipleFiles } from './incremental.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import { ChunkBatchProcessor } from './chunk-batch-processor.js';
+import type { VectorDBInterface } from '../vectordb/types.js';
 
 /**
  * Options for indexing a codebase
@@ -155,7 +156,7 @@ async function scanFilesToIndex(
  */
 async function updateGitState(
   rootDir: string,
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   manifest: ManifestManager
 ): Promise<void> {
   const gitAvailable = await isGitAvailable();
@@ -179,7 +180,7 @@ async function updateGitState(
  */
 async function handleDeletions(
   deletedFiles: string[],
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   manifest: ManifestManager
 ): Promise<number> {
   if (deletedFiles.length === 0) {
@@ -207,7 +208,7 @@ async function handleDeletions(
 async function handleUpdates(
   addedFiles: string[],
   modifiedFiles: string[],
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
   config: LienConfig | LegacyLienConfig,
   options: IndexingOptions,
@@ -237,7 +238,7 @@ async function handleUpdates(
  */
 async function tryIncrementalIndex(
   rootDir: string,
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   config: LienConfig | LegacyLienConfig,
   options: IndexingOptions,
   startTime: number
@@ -364,7 +365,7 @@ async function processFileForIndexing(
  */
 async function performFullIndex(
   rootDir: string,
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   config: LienConfig | LegacyLienConfig,
   options: IndexingOptions,
   startTime: number
@@ -535,9 +536,9 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<Inde
     // Load configuration
     const config = options.config ?? await configService.load(rootDir);
     
-    // Initialize vector database
+    // Initialize vector database (use factory to select backend)
     options.onProgress?.({ phase: 'initializing', message: 'Initializing vector database...' });
-    const vectorDB = new VectorDB(rootDir);
+    const vectorDB = createVectorDB(rootDir, config);
     await vectorDB.initialize();
     
     // Try incremental indexing first (unless forced)

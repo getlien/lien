@@ -9,6 +9,8 @@ export interface SearchResult {
 }
 
 export interface VectorDBInterface {
+  /** Path to local storage (used for manifest and version files, even with remote backends like Qdrant) */
+  readonly dbPath: string;
   initialize(): Promise<void>;
   insertBatch(vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
   search(queryVector: Float32Array, limit?: number): Promise<SearchResult[]>;
