@@ -63,7 +63,7 @@ export async function handleGetComplexity(
   args: unknown,
   ctx: ToolContext
 ): Promise<MCPToolResult> {
-  const { vectorDB, config, log, checkAndReconnect, getIndexMetadata } = ctx;
+  const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
   return await wrapToolHandler(
     GetComplexitySchema,
@@ -85,7 +85,7 @@ export async function handleGetComplexity(
         log(`Scanned ${allChunks.length} chunks across repos`);
       }
 
-      const analyzer = new ComplexityAnalyzer(vectorDB, config);
+      const analyzer = new ComplexityAnalyzer(vectorDB);
       
       // Pass cross-repo parameters to analyzer
       const report = await analyzer.analyze(files, crossRepo && vectorDB instanceof QdrantDB ? crossRepo : false, repoIds);

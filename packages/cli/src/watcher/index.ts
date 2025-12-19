@@ -1,7 +1,7 @@
 import chokidar from 'chokidar';
 import path from 'path';
-import type { LienConfig, LegacyLienConfig } from '@liendev/core';
-import { isLegacyConfig, isModernConfig } from '@liendev/core';
+import { detectAllFrameworks, getFrameworkDetector, DEFAULT_DEBOUNCE_MS } from '@liendev/core';
+import type { FrameworkConfig } from '@liendev/core';
 
 export interface FileChangeEvent {
   type: 'add' | 'change' | 'unlink';
@@ -17,13 +17,11 @@ export type FileChangeHandler = (event: FileChangeEvent) => void | Promise<void>
 export class FileWatcher {
   private watcher: chokidar.FSWatcher | null = null;
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
-  private config: LienConfig | LegacyLienConfig;
   private rootDir: string;
   private onChangeHandler: FileChangeHandler | null = null;
   
-  constructor(rootDir: string, config: LienConfig | LegacyLienConfig) {
+  constructor(rootDir: string) {
     this.rootDir = rootDir;
-    this.config = config;
   }
   
   /**
@@ -38,33 +36,61 @@ export class FileWatcher {
     
     this.onChangeHandler = handler;
     
-    // Get watch patterns based on config type
+    // Auto-detect frameworks to get watch patterns
     let includePatterns: string[];
     let excludePatterns: string[];
     
-    if (isLegacyConfig(this.config)) {
-      includePatterns = this.config.indexing.include;
-      excludePatterns = this.config.indexing.exclude;
+    try {
+      const detectedFrameworks = await detectAllFrameworks(this.rootDir);
       
-      // Fallback: if no include patterns, use default
-      if (includePatterns.length === 0) {
+      if (detectedFrameworks.length > 0) {
+        // Convert detected frameworks to get their config
+        const frameworks = await Promise.all(
+          detectedFrameworks.map(async (detection) => {
+            const detector = getFrameworkDetector(detection.name);
+            if (!detector) {
+              return null;
+            }
+            const config = await detector.generateConfig(this.rootDir, detection.path);
+            return {
+              name: detection.name,
+              path: detection.path,
+              enabled: true,
+              config: config as FrameworkConfig,
+            };
+          })
+        );
+        
+        const validFrameworks = frameworks.filter(f => f !== null);
+        includePatterns = validFrameworks.flatMap(f => f!.config.include);
+        excludePatterns = validFrameworks.flatMap(f => f!.config.exclude);
+        
+        // Fallback: if no patterns, use defaults
+        if (includePatterns.length === 0) {
+          includePatterns = ['**/*'];
+          excludePatterns = [];
+        }
+      } else {
+        // No frameworks detected - use default patterns
         includePatterns = ['**/*'];
-        excludePatterns = excludePatterns.length > 0 ? excludePatterns : [];
+        excludePatterns = [
+          '**/node_modules/**',
+          '**/vendor/**',
+          '**/dist/**',
+          '**/build/**',
+          '**/.git/**',
+        ];
       }
-    } else if (isModernConfig(this.config)) {
-      // For modern configs, aggregate patterns from all enabled frameworks
-      const enabledFrameworks = this.config.frameworks.filter(f => f.enabled);
-      includePatterns = enabledFrameworks.flatMap(f => f.config.include);
-      excludePatterns = enabledFrameworks.flatMap(f => f.config.exclude);
-      
-      // Fallback: if no frameworks or all disabled, use default patterns
-      if (includePatterns.length === 0) {
-        includePatterns = ['**/*'];
-        excludePatterns = [];
-      }
-    } else {
+    } catch (error) {
+      // Fallback to defaults if detection fails
       includePatterns = ['**/*'];
-      excludePatterns = [];
+      excludePatterns = [
+        '**/node_modules/**',
+        '**/vendor/**',
+        '**/dist/**',
+        '**/build/**',
+        '**/.git/**',
+      ];
     }
     
     // Configure chokidar
@@ -158,7 +184,7 @@ export class FileWatcher {
           console.error(`[Lien] Error handling file change: ${error}`);
         }
       }
-    }, this.config.fileWatching.debounceMs);
+    }, DEFAULT_DEBOUNCE_MS);
     
     this.debounceTimers.set(filepath, timer);
   }

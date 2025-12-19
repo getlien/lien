@@ -14,11 +14,11 @@ import {
   GitStateTracker,
   indexMultipleFiles,
   indexSingleFile,
-  configService,
   ManifestManager,
   isGitAvailable,
   isGitRepo,
   VERSION_CHECK_INTERVAL_MS,
+  DEFAULT_GIT_POLL_INTERVAL_MS,
   LienError,
   LienErrorCode,
   createVectorDB,
@@ -70,16 +70,16 @@ async function initializeDatabase(
 
 /**
  * Run auto-indexing if needed (first run with no index).
+ * Always enabled by default - no config needed.
  */
 async function handleAutoIndexing(
   vectorDB: VectorDBInterface,
-  config: Awaited<ReturnType<typeof configService.load>>,
   rootDir: string,
   log: LogFn
 ): Promise<void> {
   const hasIndex = await vectorDB.hasData();
 
-  if (!hasIndex && config.mcp.autoIndexOnFirstRun) {
+  if (!hasIndex) {
     log('📦 No index found - running initial indexing...');
     log('⏱️  This may take 5-20 minutes depending on project size');
 
@@ -91,28 +91,20 @@ async function handleAutoIndexing(
       log(`⚠️  Initial indexing failed: ${error}`, 'warning');
       log('You can manually run: lien index', 'warning');
     }
-  } else if (!hasIndex) {
-    log('⚠️  No index found. Auto-indexing is disabled in config.', 'warning');
-    log('Run "lien index" to index your codebase.', 'warning');
   }
 }
 
 /**
  * Setup git detection and background polling.
+ * Always enabled by default if git is available.
  */
 async function setupGitDetection(
-  config: Awaited<ReturnType<typeof configService.load>>,
   rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
   log: LogFn
 ): Promise<{ gitTracker: GitStateTracker | null; gitPollInterval: NodeJS.Timeout | null }> {
-  if (!config.gitDetection.enabled) {
-    log('Git detection disabled by configuration');
-    return { gitTracker: null, gitPollInterval: null };
-  }
-
   const gitAvailable = await isGitAvailable();
   const isRepo = await isGitRepo(rootDir);
 
@@ -135,7 +127,7 @@ async function setupGitDetection(
 
     if (changedFiles && changedFiles.length > 0) {
       log(`🌿 Git changes detected: ${changedFiles.length} files changed`);
-      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, config, { verbose });
+      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
       log(`✓ Reindexed ${count} files`);
     } else {
       log('✓ Index is up to date with git state');
@@ -144,45 +136,47 @@ async function setupGitDetection(
     log(`Failed to check git state on startup: ${error}`, 'warning');
   }
 
-  // Start background polling
-  log(`✓ Git detection enabled (checking every ${config.gitDetection.pollIntervalMs / 1000}s)`);
+  // Start background polling (use default interval)
+  const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
+  log(`✓ Git detection enabled (checking every ${pollIntervalSeconds}s)`);
 
   const gitPollInterval = setInterval(async () => {
     try {
       const changedFiles = await gitTracker.detectChanges();
       if (changedFiles && changedFiles.length > 0) {
         log(`🌿 Git change detected: ${changedFiles.length} files changed`);
-        indexMultipleFiles(changedFiles, vectorDB, embeddings, config, { verbose })
+        indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose })
           .then(count => log(`✓ Background reindex complete: ${count} files`))
           .catch(error => log(`Background reindex failed: ${error}`, 'warning'));
       }
     } catch (error) {
       log(`Git detection check failed: ${error}`, 'warning');
     }
-  }, config.gitDetection.pollIntervalMs);
+  }, DEFAULT_GIT_POLL_INTERVAL_MS);
 
   return { gitTracker, gitPollInterval };
 }
 
 /**
  * Setup file watching for real-time updates.
+ * Enabled by default (or via --watch flag).
  */
 async function setupFileWatching(
   watch: boolean | undefined,
-  config: Awaited<ReturnType<typeof configService.load>>,
   rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
   log: LogFn
 ): Promise<FileWatcher | null> {
-  const fileWatchingEnabled = watch !== undefined ? watch : config.fileWatching.enabled;
+  // Enable by default, or use --watch flag
+  const fileWatchingEnabled = watch !== undefined ? watch : true;
   if (!fileWatchingEnabled) {
     return null;
   }
 
   log('👀 Starting file watcher...');
-  const fileWatcher = new FileWatcher(rootDir, config);
+  const fileWatcher = new FileWatcher(rootDir);
 
   try {
     await fileWatcher.start(async (event) => {
@@ -318,15 +312,14 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
 
   const versionCheckInterval = setInterval(checkAndReconnect, VERSION_CHECK_INTERVAL_MS);
 
-  // Load config and create tool context
-  const config = await configService.load(rootDir);
-  const toolContext: ToolContext = { vectorDB, embeddings, config, rootDir, log, checkAndReconnect, getIndexMetadata };
+  // Create tool context (no config needed - everything uses defaults or auto-detection)
+  const toolContext: ToolContext = { vectorDB, embeddings, rootDir, log, checkAndReconnect, getIndexMetadata };
   
   // Register handlers and setup features
   registerToolCallHandler(server, toolContext, log);
-  await handleAutoIndexing(vectorDB, config, rootDir, log);
-  const { gitPollInterval } = await setupGitDetection(config, rootDir, vectorDB, embeddings, verbose, log);
-  const fileWatcher = await setupFileWatching(watch, config, rootDir, vectorDB, embeddings, verbose, log);
+  await handleAutoIndexing(vectorDB, rootDir, log);
+  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log);
+  const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log);
 
   // Cleanup handler
   const cleanup = async () => {

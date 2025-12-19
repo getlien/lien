@@ -33,15 +33,7 @@ describe('handleGetComplexity', () => {
     getVersionDate: vi.fn(() => '2025-12-19'),
   };
 
-  const mockConfig = {
-    complexity: {
-      enabled: true,
-      thresholds: {
-        testPaths: 15,
-        mentalLoad: 15,
-      },
-    },
-  };
+  // Config no longer needed - ComplexityAnalyzer uses defaults
 
   const mockLog = vi.fn();
   const mockCheckAndReconnect = vi.fn().mockResolvedValue(undefined);
@@ -56,7 +48,6 @@ describe('handleGetComplexity', () => {
 
   const mockCtx: ToolContext = {
     vectorDB: mockVectorDB as any,
-    config: mockConfig as any,
     embeddings: mockEmbeddings as any,
     log: mockLog,
     checkAndReconnect: mockCheckAndReconnect,

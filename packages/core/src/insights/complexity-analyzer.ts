@@ -1,5 +1,4 @@
 import type { VectorDBInterface } from '../vectordb/types.js';
-import { LienConfig } from '../config/schema.js';
 import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER, RiskLevel, HalsteadDetails } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
@@ -16,9 +15,16 @@ const SEVERITY = { warning: 1.0, error: 2.0 } as const;
  * Analyzer for code complexity based on indexed codebase
  */
 export class ComplexityAnalyzer {
+  // Default complexity thresholds (no config needed)
+  private readonly thresholds = {
+    testPaths: 15,
+    mentalLoad: 15,
+    timeToUnderstandMinutes: 60,
+    estimatedBugs: 1.5,
+  };
+
   constructor(
-    private vectorDB: VectorDBInterface,
-    private config: LienConfig
+    private vectorDB: VectorDBInterface
   ) {}
 
   /**
@@ -301,18 +307,14 @@ export class ComplexityAnalyzer {
    * Checks cyclomatic, cognitive, and Halstead complexity.
    */
   private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
-    const configThresholds = this.config.complexity?.thresholds;
-    
     // Convert timeToUnderstandMinutes to effort internally
-    const halsteadEffort = configThresholds?.timeToUnderstandMinutes 
-      ? this.minutesToEffort(configThresholds.timeToUnderstandMinutes)
-      : this.minutesToEffort(60); // Default: 60 minutes = 64,800 effort
+    const halsteadEffort = this.minutesToEffort(this.thresholds.timeToUnderstandMinutes);
     
     const thresholds = { 
-      testPaths: configThresholds?.testPaths ?? 15, 
-      mentalLoad: configThresholds?.mentalLoad ?? 15, 
-      halsteadEffort, // Converted from minutes to effort internally (see above)
-      estimatedBugs: configThresholds?.estimatedBugs ?? 1.5, // Direct decimal value (no conversion needed)
+      testPaths: this.thresholds.testPaths, 
+      mentalLoad: this.thresholds.mentalLoad, 
+      halsteadEffort, // Converted from minutes to effort internally
+      estimatedBugs: this.thresholds.estimatedBugs,
     };
     const functionChunks = this.getUniqueFunctionChunks(chunks);
     

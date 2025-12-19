@@ -3,7 +3,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { FileWatcher, FileChangeEvent } from './index.js';
-import { defaultConfig } from '@liendev/core';
 
 describe('FileWatcher', () => {
   let testDir: string;
@@ -14,32 +13,8 @@ describe('FileWatcher', () => {
     testDir = path.join(os.tmpdir(), 'lien-test-watcher-' + Date.now());
     await fs.mkdir(testDir, { recursive: true });
     
-    // Create a custom config for testing (modern format)
-    const config = {
-      ...defaultConfig,
-      frameworks: [{
-        name: 'test',
-        path: '.',
-        enabled: true,
-        config: {
-          include: ['**/*.txt'],
-          exclude: ['**/*.ignore'],
-          testPatterns: {
-            directories: [],
-            extensions: [],
-            prefixes: [],
-            suffixes: [],
-            frameworks: [],
-          },
-        },
-      }],
-      fileWatching: {
-        enabled: true,
-        debounceMs: 100, // Shorter for tests
-      },
-    };
-    
-    watcher = new FileWatcher(testDir, config);
+    // FileWatcher now auto-detects frameworks - no config needed
+    watcher = new FileWatcher(testDir);
   });
   
   afterEach(async () => {
