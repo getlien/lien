@@ -321,6 +321,7 @@ For each violation:
 2. **Suggest** concrete refactoring steps (not generic advice like "break into smaller functions")
    - Be specific to the language and framework patterns
    - Consider file type conventions (e.g., controllers often delegate to services)
+   - Respect the existing codebase's architectural patterns and style
 3. **Prioritize** which violations are most important to address - focus on functions that got WORSE (higher delta)
 4. If the complexity seems justified for the use case, say so
    - Some patterns (orchestration, state machines) may legitimately be complex
@@ -705,6 +706,7 @@ Write a code review comment that includes:
    - Suggest specific patterns (strategy, lookup table, early returns)
    - For Halstead metrics: suggest introducing named constants, reducing operator variety, or extracting complex expressions
    - If applicable, show a brief code sketch
+   - Respect the existing codebase's architectural patterns and style
 
 3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
 
@@ -805,6 +807,7 @@ For each violation, write a code review comment that:
    - For Halstead: named constants, reducing operator variety, extracting complex expressions
    - Name specific functions: "Extract \`handleAdminCase()\`" not "extract a function"
    - Choose the SIMPLEST fix that addresses the issue (KISS principle)
+   - Respect the existing codebase's architectural patterns and style
 
 3. **Acknowledges context** when relevant
    - If this is an orchestration function, complexity may be acceptable
