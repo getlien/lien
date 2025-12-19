@@ -313,6 +313,12 @@ ${snippetsSection || '_No code snippets available_'}
 
 ## Your Task
 
+**IMPORTANT**: Before suggesting refactorings, analyze the code snippets below to identify the codebase's patterns:
+- Are utilities implemented as functions or classes?
+- How are similar refactorings done elsewhere in the codebase?
+- What naming conventions are used?
+- How is code organized (modules, files, exports)?
+
 For each violation:
 1. **Explain** why this complexity is problematic in this specific context
    - Consider the file type (controller, service, component, etc.) and language
@@ -321,7 +327,7 @@ For each violation:
 2. **Suggest** concrete refactoring steps (not generic advice like "break into smaller functions")
    - Be specific to the language and framework patterns
    - Consider file type conventions (e.g., controllers often delegate to services)
-   - Respect the existing codebase's architectural patterns and style
+   - **Match the existing codebase patterns** - if utilities are functions, suggest functions; if they're classes, suggest classes
 3. **Prioritize** which violations are most important to address - focus on functions that got WORSE (higher delta)
 4. If the complexity seems justified for the use case, say so
    - Some patterns (orchestration, state machines) may legitimately be complex
@@ -697,6 +703,8 @@ export function buildLineCommentPrompt(
 **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
 ${snippetSection}
 
+**IMPORTANT**: Before suggesting refactorings, analyze the code snippet above to identify the codebase's patterns (functions vs classes, naming conventions, module organization). Match your suggestions to those patterns.
+
 Write a code review comment that includes:
 
 1. **Problem** (1 sentence): What specific pattern makes this complex (e.g., "5 levels of nested conditionals", "switch with embedded if-chains", "many unique operators")
@@ -706,7 +714,7 @@ Write a code review comment that includes:
    - Suggest specific patterns (strategy, lookup table, early returns)
    - For Halstead metrics: suggest introducing named constants, reducing operator variety, or extracting complex expressions
    - If applicable, show a brief code sketch
-   - Respect the existing codebase's architectural patterns and style
+   - **Match the existing codebase patterns** - if utilities are functions, suggest functions; if they're classes, suggest classes
 
 3. **Benefit** (1 sentence): What improves (testability, readability, etc.)
 
@@ -795,6 +803,11 @@ ${violationsText}
 
 ## Instructions
 
+**IMPORTANT**: Before suggesting refactorings, analyze the code snippets provided to identify the codebase's patterns:
+- Are utilities implemented as functions or classes?
+- How are similar refactorings done elsewhere in the codebase?
+- What naming conventions are used?
+
 For each violation, write a code review comment that:
 
 1. **Identifies the specific pattern** causing complexity (not just "too complex")
@@ -807,7 +820,7 @@ For each violation, write a code review comment that:
    - For Halstead: named constants, reducing operator variety, extracting complex expressions
    - Name specific functions: "Extract \`handleAdminCase()\`" not "extract a function"
    - Choose the SIMPLEST fix that addresses the issue (KISS principle)
-   - Respect the existing codebase's architectural patterns and style
+   - **Match the existing codebase patterns** - if utilities are functions, suggest functions; if they're classes, suggest classes
 
 3. **Acknowledges context** when relevant
    - If this is an orchestration function, complexity may be acceptable
