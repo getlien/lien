@@ -5,8 +5,9 @@ import { deepMergeConfig } from './merge.js';
 import { MigrationManager } from './migration-manager.js';
 
 /**
- * @deprecated Use ConfigService.load() instead. This function is kept for backward compatibility.
- * @see ConfigService
+ * @deprecated Per-project config is no longer required. Lien now uses global config, environment variables, and auto-detection.
+ * This function is kept for backward compatibility only.
+ * @see loadGlobalConfig in config/global-config.ts
  */
 export async function loadConfig(rootDir: string = process.cwd()): Promise<LienConfig> {
   const configPath = path.join(rootDir, '.lien.config.json');

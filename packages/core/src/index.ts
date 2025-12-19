@@ -70,24 +70,48 @@ export { formatReport, formatTextReport, formatJsonReport, formatSarifReport } f
 export type { OutputFormat } from './insights/formatters/index.js';
 
 // =============================================================================
-// CONFIGURATION
+// CONFIGURATION (DEPRECATED - kept for backward compatibility)
 // =============================================================================
+// Note: Per-project config is no longer required. Lien now uses:
+// - Global config at ~/.lien/config.json (optional, for backend selection)
+// - Environment variables (LIEN_BACKEND, LIEN_QDRANT_URL, etc.)
+// - Auto-detected frameworks
+// - Sensible defaults for all settings
 
 import { ConfigService, configService as _configService } from './config/service.js';
 import { defaultConfig as _defaultConfig, isLegacyConfig, isModernConfig } from './config/schema.js';
 import type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance } from './config/schema.js';
 
+/**
+ * @deprecated Per-project config is no longer required. Use global config or environment variables instead.
+ * @see loadGlobalConfig in config/global-config.ts
+ */
 export { ConfigService, _configService as configService };
 export type { ValidationResult, MigrationResult } from './config/service.js';
+/**
+ * @deprecated Migration is no longer needed - per-project config is deprecated
+ */
 export { MigrationManager } from './config/migration-manager.js';
+/**
+ * @deprecated Migration is no longer needed - per-project config is deprecated
+ */
 export { migrateConfig, migrateConfigFile } from './config/migration.js';
+/**
+ * @deprecated Default config is no longer used - Lien uses sensible defaults automatically
+ */
 export { _defaultConfig as defaultConfig, isLegacyConfig, isModernConfig };
+/**
+ * @deprecated Config types are kept for backward compatibility only
+ */
 export type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance };
 
 // Convenience re-exports
 export const loadConfig = (rootDir?: string) => _configService.load(rootDir);
 export const saveConfig = (rootDir: string, config: LienConfig) => 
   _configService.save(rootDir, config);
+/**
+ * @deprecated Per-project config is no longer required. Lien uses defaults automatically.
+ */
 export const createDefaultConfig = () => _defaultConfig;
 
 // =============================================================================

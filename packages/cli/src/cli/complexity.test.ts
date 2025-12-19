@@ -8,16 +8,12 @@ vi.mock('@liendev/core', async () => {
   const actual = await vi.importActual<typeof import('@liendev/core')>('@liendev/core');
   return {
     ...actual,
-    VectorDB: vi.fn(),
-    configService: {
-      load: vi.fn(),
-    },
+    createVectorDB: vi.fn(),
   };
 });
 
 describe('complexityCommand', () => {
   let mockVectorDB: any;
-  let mockConfig: any;
   let consoleLogSpy: any;
   let consoleErrorSpy: any;
   let processExitSpy: any;
@@ -30,23 +26,8 @@ describe('complexityCommand', () => {
       scanAll: vi.fn(),         // Used for actual analysis
     };
     
-    // Mock the VectorDB constructor to return our mock instance
-    vi.mocked(coreModule.VectorDB).mockImplementation(function(this: any) {
-      return mockVectorDB;
-    } as any);
-
-    // Mock config
-    mockConfig = {
-      version: '1.0',
-      complexity: {
-        enabled: true,
-        thresholds: {
-          testPaths: 15,
-          mentalLoad: 15,
-        },
-      },
-    };
-    vi.mocked(coreModule.configService.load).mockResolvedValue(mockConfig);
+    // Mock createVectorDB to return our mock instance
+    vi.mocked(coreModule.createVectorDB).mockResolvedValue(mockVectorDB);
 
     // Spy on console
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

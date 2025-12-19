@@ -14,14 +14,11 @@ import { execSync } from 'child_process';
 import collect from 'collect.js';
 import {
   indexCodebase,
-  VectorDB,
+  createVectorDB,
   ComplexityAnalyzer,
-  loadConfig,
-  createDefaultConfig,
   RISK_ORDER,
   type ComplexityReport,
   type ComplexityViolation,
-  type LienConfig,
 } from '@liendev/core';
 
 import {
@@ -220,45 +217,23 @@ async function runComplexityAnalysis(
 
   try {
     const rootDir = process.cwd();
-    
-    // Load or create config
-    let config: LienConfig;
-    try {
-      config = await loadConfig(rootDir);
-      core.info('Loaded lien config');
-    } catch {
-      core.info('No lien config found, using defaults');
-      config = createDefaultConfig();
-    }
-    
-    // Override threshold from action input
-    const thresholdNum = parseInt(threshold, 10);
-    config.complexity = {
-      ...config.complexity,
-      enabled: true,
-      thresholds: {
-        testPaths: thresholdNum,
-        mentalLoad: thresholdNum,
-        timeToUnderstandMinutes: 60,
-        estimatedBugs: 1.5,
-        ...config.complexity?.thresholds,
-      },
-    };
 
-    // Index the codebase
+    // Index the codebase (no config needed - uses defaults)
     core.info('📁 Indexing codebase...');
     await indexCodebase({
       rootDir,
-      config,
     });
     core.info('✓ Indexing complete');
 
-    // Load the vector database
-    const vectorDB = await VectorDB.load(rootDir);
+    // Load the vector database (uses global config or defaults to LanceDB)
+    const vectorDB = await createVectorDB(rootDir);
+    await vectorDB.initialize();
 
-    // Run complexity analysis
+    // Run complexity analysis (uses default thresholds)
+    // Note: Threshold parameter from action input is not yet supported without config
+    // ComplexityAnalyzer now uses hardcoded defaults (testPaths: 15, mentalLoad: 15)
     core.info('🔍 Analyzing complexity...');
-    const analyzer = new ComplexityAnalyzer(vectorDB, config);
+    const analyzer = new ComplexityAnalyzer(vectorDB);
     const report = await analyzer.analyze(files);
     core.info(`✓ Found ${report.summary.totalViolations} violations`);
 
