@@ -46,11 +46,11 @@ export async function initCommand(options: InitOptions = {}) {
   // Check if old config exists and warn
   const rootDir = options.path || process.cwd();
   const configPath = path.join(rootDir, '.lien.config.json');
-  try {
-    await fs.access(configPath);
+    try {
+      await fs.access(configPath);
     console.log(chalk.yellow('\n⚠️  Note: .lien.config.json found but no longer used'));
     console.log(chalk.dim('  You can safely delete it.'));
-  } catch {
+    } catch {
     // Config doesn't exist - that's fine
   }
   

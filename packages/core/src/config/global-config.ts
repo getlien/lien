@@ -75,6 +75,78 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
 }
 
 /**
+ * Parse HTTPS/HTTP git URLs (e.g., https://github.com/org/repo.git).
+ */
+function parseHttpsGitUrl(url: string): string | null {
+  const match = url.match(/https?:\/\/(?:[\w\.-]+@)?[\w\.-]+\/([\w\.-]+)\/([\w\.-]+)(?:\.git)?/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Parse SSH git URLs (e.g., git@github.com:org/repo.git).
+ */
+function parseSshGitUrl(url: string): string | null {
+  const match = url.match(/git@[\w\.-]+:([\w\.-]+)\/([\w\.-]+)(?:\.git)?/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Parse SSH protocol URLs (e.g., ssh://git@host.com/org/repo.git).
+ */
+function parseSshProtocolUrl(url: string): string | null {
+  const match = url.match(/ssh:\/\/(?:[\w\.-]+@)?[\w\.-]+\/([\w\.-]+)\/([\w\.-]+)(?:\.git)?/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Parse generic git URLs (fallback: org/repo at the end).
+ */
+function parseGenericGitUrl(url: string): string | null {
+  const match = url.match(/([\w\.-]+)\/([\w\.-]+)(?:\.git)?$/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Get git remote URL from repository.
+ */
+async function getGitRemoteUrl(rootDir: string): Promise<string | null> {
+  // Check if it's a git repo first
+  const gitDir = path.join(rootDir, '.git');
+  try {
+    await fs.access(gitDir);
+  } catch {
+    return null; // Not a git repo
+  }
+  
+  // Get remote URL (prefer 'origin', fallback to first remote)
+  try {
+    const { stdout } = await execAsync('git remote get-url origin', {
+      cwd: rootDir,
+      timeout: 5000,
+    });
+    return stdout.trim();
+  } catch {
+    // If origin doesn't exist, get first remote
+    try {
+      const { stdout: remoteList } = await execAsync('git remote', {
+        cwd: rootDir,
+        timeout: 5000,
+      });
+      const remoteName = remoteList.trim().split('\n')[0];
+      if (!remoteName) return null;
+      
+      const { stdout } = await execAsync(`git remote get-url ${remoteName}`, {
+        cwd: rootDir,
+        timeout: 5000,
+      });
+      return stdout.trim();
+    } catch {
+      return null; // No remotes configured
+    }
+  }
+}
+
+/**
  * Extract organization ID from git remote URL.
  * Supports GitHub, GitLab, Bitbucket, and other common formats.
  * 
@@ -89,71 +161,20 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
  */
 export async function extractOrgIdFromGit(rootDir: string): Promise<string | null> {
   try {
-    // Check if it's a git repo first
-    const gitDir = path.join(rootDir, '.git');
-    try {
-      await fs.access(gitDir);
-    } catch {
-      return null; // Not a git repo
-    }
-    
-    // Get remote URL (prefer 'origin', fallback to first remote)
-    let remoteUrl: string;
-    
-    try {
-      const { stdout } = await execAsync('git remote get-url origin', {
-        cwd: rootDir,
-        timeout: 5000,
-      });
-      remoteUrl = stdout.trim();
-    } catch {
-      // If origin doesn't exist, get first remote
-      try {
-        const { stdout: remoteList } = await execAsync('git remote', {
-          cwd: rootDir,
-          timeout: 5000,
-        });
-        const remoteName = remoteList.trim().split('\n')[0];
-        if (!remoteName) return null;
-        
-        const { stdout } = await execAsync(`git remote get-url ${remoteName}`, {
-          cwd: rootDir,
-          timeout: 5000,
-        });
-        remoteUrl = stdout.trim();
-      } catch {
-        return null; // No remotes configured
-      }
-    }
-    
+    const remoteUrl = await getGitRemoteUrl(rootDir);
     if (!remoteUrl) return null;
     
-    // Parse URL to extract org
-    // Match patterns like:
-    // - https://github.com/org/repo.git
-    // - git@github.com:org/repo.git
-    // - https://gitlab.com/org/repo.git
-    // - https://bitbucket.org/org/repo.git
-    // - ssh://git@host.com/org/repo.git
-    const patterns = [
-      // Standard HTTPS/SSH: https://github.com/org/repo or git@github.com:org/repo
-      /(?:https?:\/\/|git@)(?:[\w\.-]+@)?([\w\.-]+)[\/:]([\w\.-]+)\/([\w\.-]+)(?:\.git)?/,
-      // SSH with protocol: ssh://git@host.com/org/repo
-      /ssh:\/\/(?:[\w\.-]+@)?([\w\.-]+)\/([\w\.-]+)\/([\w\.-]+)(?:\.git)?/,
-      // Fallback: just org/repo at the end
-      /([\w\.-]+)\/([\w\.-]+)(?:\.git)?$/,
+    // Try parsers in order of specificity
+    const parsers = [
+      parseHttpsGitUrl,
+      parseSshGitUrl,
+      parseSshProtocolUrl,
+      parseGenericGitUrl,
     ];
     
-    for (const pattern of patterns) {
-      const match = remoteUrl.match(pattern);
-      if (match) {
-        // Pattern 1 & 2: match[2] is org, match[3] is repo
-        // Pattern 3: match[1] is org, match[2] is repo
-        const orgIndex = match.length === 4 ? 2 : 1;
-        if (match[orgIndex]) {
-          return match[orgIndex];
-        }
-      }
+    for (const parser of parsers) {
+      const orgId = parser(remoteUrl);
+      if (orgId) return orgId;
     }
     
     return null;

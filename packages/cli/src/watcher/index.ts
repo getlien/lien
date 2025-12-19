@@ -14,6 +14,11 @@ export type FileChangeHandler = (event: FileChangeEvent) => void | Promise<void>
  * File watcher service that monitors code files for changes.
  * Uses chokidar for robust file watching with debouncing support.
  */
+interface WatchPatterns {
+  include: string[];
+  exclude: string[];
+}
+
 export class FileWatcher {
   private watcher: chokidar.FSWatcher | null = null;
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -25,21 +30,9 @@ export class FileWatcher {
   }
   
   /**
-   * Starts watching files for changes.
-   * 
-   * @param handler - Callback function called when files change
+   * Detect watch patterns from frameworks or use defaults.
    */
-  async start(handler: FileChangeHandler): Promise<void> {
-    if (this.watcher) {
-      throw new Error('File watcher is already running');
-    }
-    
-    this.onChangeHandler = handler;
-    
-    // Auto-detect frameworks to get watch patterns
-    let includePatterns: string[];
-    let excludePatterns: string[];
-    
+  private async getWatchPatterns(): Promise<WatchPatterns> {
     try {
       const detectedFrameworks = await detectAllFrameworks(this.rootDir);
       
@@ -62,41 +55,48 @@ export class FileWatcher {
         );
         
         const validFrameworks = frameworks.filter(f => f !== null);
-        includePatterns = validFrameworks.flatMap(f => f!.config.include);
-        excludePatterns = validFrameworks.flatMap(f => f!.config.exclude);
+        const includePatterns = validFrameworks.flatMap(f => f!.config.include);
+        const excludePatterns = validFrameworks.flatMap(f => f!.config.exclude);
         
         // Fallback: if no patterns, use defaults
         if (includePatterns.length === 0) {
-          includePatterns = ['**/*'];
-          excludePatterns = [];
+          return this.getDefaultPatterns();
         }
+        
+        return { include: includePatterns, exclude: excludePatterns };
       } else {
         // No frameworks detected - use default patterns
-        includePatterns = ['**/*'];
-        excludePatterns = [
-          '**/node_modules/**',
-          '**/vendor/**',
-          '**/dist/**',
-          '**/build/**',
-          '**/.git/**',
-        ];
+        return this.getDefaultPatterns();
       }
     } catch (error) {
       // Fallback to defaults if detection fails
-      includePatterns = ['**/*'];
-      excludePatterns = [
+      return this.getDefaultPatterns();
+    }
+  }
+  
+  /**
+   * Get default watch patterns.
+   */
+  private getDefaultPatterns(): WatchPatterns {
+    return {
+      include: ['**/*'],
+      exclude: [
         '**/node_modules/**',
         '**/vendor/**',
         '**/dist/**',
         '**/build/**',
         '**/.git/**',
-      ];
-    }
-    
-    // Configure chokidar
-    this.watcher = chokidar.watch(includePatterns, {
+      ],
+    };
+  }
+  
+  /**
+   * Create chokidar watcher configuration.
+   */
+  private createWatcherConfig(patterns: WatchPatterns): chokidar.WatchOptions {
+    return {
       cwd: this.rootDir,
-      ignored: excludePatterns,
+      ignored: patterns.exclude,
       persistent: true,
       ignoreInitial: true, // Don't trigger for existing files
       
@@ -113,9 +113,17 @@ export class FileWatcher {
       usePolling: false,
       interval: 100,
       binaryInterval: 300,
-    });
+    };
+  }
+  
+  /**
+   * Register event handlers on the watcher.
+   */
+  private registerEventHandlers(): void {
+    if (!this.watcher) {
+      return;
+    }
     
-    // Register event handlers with debouncing
     this.watcher
       .on('add', (filepath) => this.handleChange('add', filepath))
       .on('change', (filepath) => this.handleChange('change', filepath))
@@ -123,8 +131,16 @@ export class FileWatcher {
       .on('error', (error) => {
         console.error(`[Lien] File watcher error: ${error}`);
       });
+  }
+  
+  /**
+   * Wait for watcher to be ready with timeout fallback.
+   */
+  private async waitForReady(): Promise<void> {
+    if (!this.watcher) {
+      return;
+    }
     
-    // Wait for watcher to be ready
     // Fix: Add timeout fallback in case 'ready' event never fires (race condition)
     let readyFired = false;
     await Promise.race([
@@ -144,6 +160,35 @@ export class FileWatcher {
         }, 5000);
       }),
     ]);
+  }
+  
+  /**
+   * Starts watching files for changes.
+   * 
+   * @param handler - Callback function called when files change
+   */
+  async start(handler: FileChangeHandler): Promise<void> {
+    if (this.watcher) {
+      throw new Error('File watcher is already running');
+    }
+    
+    if (this.watcher) {
+      throw new Error('File watcher is already running');
+    }
+    
+    this.onChangeHandler = handler;
+    
+    // Get watch patterns (from frameworks or defaults)
+    const patterns = await this.getWatchPatterns();
+    
+    // Create and start watcher
+    this.watcher = chokidar.watch(patterns.include, this.createWatcherConfig(patterns));
+    
+    // Register event handlers
+    this.registerEventHandlers();
+    
+    // Wait for watcher to be ready
+    await this.waitForReady();
   }
   
   /**

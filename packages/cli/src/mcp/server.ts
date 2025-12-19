@@ -211,6 +211,67 @@ async function setupFileWatching(
   }
 }
 
+/**
+ * Setup transport for MCP server.
+ */
+function setupTransport(log: LogFn): StdioServerTransport {
+  const transport = new StdioServerTransport();
+  
+  transport.onclose = () => { 
+    log('Transport closed'); 
+  };
+  transport.onerror = (error) => {
+    log(`Transport error: ${error}`);
+  };
+  
+  return transport;
+}
+
+/**
+ * Setup cleanup handlers for graceful shutdown.
+ */
+function setupCleanupHandlers(
+  versionCheckInterval: NodeJS.Timeout,
+  gitPollInterval: NodeJS.Timeout | null,
+  fileWatcher: FileWatcher | null,
+  log: LogFn
+): () => Promise<void> {
+  return async () => {
+    log('Shutting down MCP server...');
+    clearInterval(versionCheckInterval);
+    if (gitPollInterval) clearInterval(gitPollInterval);
+    if (fileWatcher) await fileWatcher.stop();
+    process.exit(0);
+  };
+}
+
+/**
+ * Setup version checking and reconnection logic.
+ */
+function setupVersionChecking(
+  vectorDB: VectorDBInterface,
+  log: LogFn
+): { interval: NodeJS.Timeout; checkAndReconnect: () => Promise<void>; getIndexMetadata: () => { indexVersion: number; indexDate: string } } {
+  const checkAndReconnect = async () => {
+    try {
+      if (await vectorDB.checkVersion()) {
+        log('Index version changed, reconnecting...');
+        await vectorDB.reconnect();
+      }
+    } catch (error) {
+      log(`Version check failed: ${error}`, 'warning');
+    }
+  };
+
+  const getIndexMetadata = () => ({
+    indexVersion: vectorDB.getCurrentVersion(),
+    indexDate: vectorDB.getVersionDate(),
+  });
+
+  const interval = setInterval(checkAndReconnect, VERSION_CHECK_INTERVAL_MS);
+
+  return { interval, checkAndReconnect, getIndexMetadata };
+}
 
 export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   const { rootDir, verbose, watch } = options;
@@ -268,24 +329,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     }
   };
 
-  // Version check helpers
-  const checkAndReconnect = async () => {
-    try {
-      if (await vectorDB.checkVersion()) {
-        log('Index version changed, reconnecting...');
-        await vectorDB.reconnect();
-      }
-    } catch (error) {
-      log(`Version check failed: ${error}`, 'warning');
-    }
-  };
-
-  const getIndexMetadata = () => ({
-    indexVersion: vectorDB.getCurrentVersion(),
-    indexDate: vectorDB.getVersionDate(),
-  });
-
-  const versionCheckInterval = setInterval(checkAndReconnect, VERSION_CHECK_INTERVAL_MS);
+  // Setup version checking
+  const { interval: versionCheckInterval, checkAndReconnect, getIndexMetadata } = setupVersionChecking(vectorDB, log);
 
   // Create tool context (no config needed - everything uses defaults or auto-detection)
   const toolContext: ToolContext = { vectorDB, embeddings, rootDir, log, checkAndReconnect, getIndexMetadata };
@@ -296,27 +341,15 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log);
   const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log);
 
-  // Cleanup handler
-  const cleanup = async () => {
-    log('Shutting down MCP server...');
-    clearInterval(versionCheckInterval);
-    if (gitPollInterval) clearInterval(gitPollInterval);
-    if (fileWatcher) await fileWatcher.stop();
-    process.exit(0);
-  };
-
+  // Setup cleanup handlers
+  const cleanup = setupCleanupHandlers(versionCheckInterval, gitPollInterval, fileWatcher, log);
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
 
-  // Connect transport
-  const transport = new StdioServerTransport();
-  
-  transport.onclose = () => { 
-    log('Transport closed'); 
-    cleanup().catch(() => process.exit(0)); 
-  };
-  transport.onerror = (error) => {
-    log(`Transport error: ${error}`);
+  // Setup and connect transport
+  const transport = setupTransport(log);
+  transport.onclose = () => {
+    cleanup().catch(() => process.exit(0));
   };
 
   try {
