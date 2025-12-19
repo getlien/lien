@@ -125,32 +125,78 @@ ${dependentsList ? `\n**Key dependents:**\n${dependentsList}${moreNote}` : ''}${
 
 /**
  * Build file-level context (other violations, file purpose hints)
+ * Uses language from violations when available, falls back to file extension
  */
 function buildFileContext(filepath: string, fileData: ComplexityReport['files'][string]): string {
   const parts: string[] = [];
   
-  // Language/framework hint from file extension
-  const ext = filepath.split('.').pop()?.toLowerCase();
-  const languageHints: Record<string, string> = {
-    'ts': 'TypeScript',
-    'tsx': 'TypeScript React',
-    'js': 'JavaScript',
-    'jsx': 'JavaScript React',
-    'php': 'PHP',
-    'py': 'Python',
-  };
-  if (ext && languageHints[ext]) {
-    parts.push(`Language: ${languageHints[ext]}`);
+  // Try to get language from violations first (more accurate)
+  const languageFromViolation = fileData.violations[0]?.language;
+  
+  // Language/framework hint - use violation language or detect from extension
+  if (languageFromViolation) {
+    const languageMap: Record<string, string> = {
+      'typescript': 'TypeScript',
+      'javascript': 'JavaScript',
+      'php': 'PHP',
+      'python': 'Python',
+      'go': 'Go',
+      'rust': 'Rust',
+      'java': 'Java',
+      'ruby': 'Ruby',
+      'swift': 'Swift',
+      'kotlin': 'Kotlin',
+      'csharp': 'C#',
+      'scala': 'Scala',
+      'cpp': 'C++',
+      'c': 'C',
+    };
+    const displayName = languageMap[languageFromViolation.toLowerCase()] || languageFromViolation;
+    parts.push(`Language: ${displayName}`);
+  } else {
+    // Fallback to file extension detection
+    const ext = filepath.split('.').pop()?.toLowerCase();
+    const languageHints: Record<string, string> = {
+      'ts': 'TypeScript',
+      'tsx': 'TypeScript React',
+      'js': 'JavaScript',
+      'jsx': 'JavaScript React',
+      'mjs': 'JavaScript',
+      'cjs': 'JavaScript',
+      'php': 'PHP',
+      'py': 'Python',
+      'go': 'Go',
+      'rs': 'Rust',
+      'java': 'Java',
+      'rb': 'Ruby',
+      'swift': 'Swift',
+      'kt': 'Kotlin',
+      'cs': 'C#',
+      'scala': 'Scala',
+      'cpp': 'C++',
+      'cc': 'C++',
+      'cxx': 'C++',
+      'c': 'C',
+    };
+    if (ext && languageHints[ext]) {
+      parts.push(`Language: ${languageHints[ext]}`);
+    }
   }
   
-  // File purpose hint from path
+  // File purpose hint from path (language-agnostic patterns)
   const pathLower = filepath.toLowerCase();
+  // Common patterns across languages
   if (pathLower.includes('controller')) parts.push('Type: Controller');
   if (pathLower.includes('service')) parts.push('Type: Service');
   if (pathLower.includes('component')) parts.push('Type: Component');
   if (pathLower.includes('middleware')) parts.push('Type: Middleware');
   if (pathLower.includes('handler')) parts.push('Type: Handler');
   if (pathLower.includes('util') || pathLower.includes('helper')) parts.push('Type: Utility');
+  // Go-specific patterns
+  if (pathLower.includes('_test.') || pathLower.endsWith('_test.go')) parts.push('Type: Test');
+  // Java patterns
+  if (pathLower.includes('/model/') || pathLower.includes('/models/')) parts.push('Type: Model');
+  if (pathLower.includes('/repository/') || pathLower.includes('/repositories/')) parts.push('Type: Repository');
   
   // Other violations in same file
   if (fileData.violations.length > 1) {

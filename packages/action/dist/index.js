@@ -426,17 +426,53 @@ ${dependentsList}${moreNote}` : ""}${complexityNote}
 }
 function buildFileContext(filepath, fileData) {
   const parts = [];
-  const ext = filepath.split(".").pop()?.toLowerCase();
-  const languageHints = {
-    "ts": "TypeScript",
-    "tsx": "TypeScript React",
-    "js": "JavaScript",
-    "jsx": "JavaScript React",
-    "php": "PHP",
-    "py": "Python"
-  };
-  if (ext && languageHints[ext]) {
-    parts.push(`Language: ${languageHints[ext]}`);
+  const languageFromViolation = fileData.violations[0]?.language;
+  if (languageFromViolation) {
+    const languageMap = {
+      "typescript": "TypeScript",
+      "javascript": "JavaScript",
+      "php": "PHP",
+      "python": "Python",
+      "go": "Go",
+      "rust": "Rust",
+      "java": "Java",
+      "ruby": "Ruby",
+      "swift": "Swift",
+      "kotlin": "Kotlin",
+      "csharp": "C#",
+      "scala": "Scala",
+      "cpp": "C++",
+      "c": "C"
+    };
+    const displayName = languageMap[languageFromViolation.toLowerCase()] || languageFromViolation;
+    parts.push(`Language: ${displayName}`);
+  } else {
+    const ext = filepath.split(".").pop()?.toLowerCase();
+    const languageHints = {
+      "ts": "TypeScript",
+      "tsx": "TypeScript React",
+      "js": "JavaScript",
+      "jsx": "JavaScript React",
+      "mjs": "JavaScript",
+      "cjs": "JavaScript",
+      "php": "PHP",
+      "py": "Python",
+      "go": "Go",
+      "rs": "Rust",
+      "java": "Java",
+      "rb": "Ruby",
+      "swift": "Swift",
+      "kt": "Kotlin",
+      "cs": "C#",
+      "scala": "Scala",
+      "cpp": "C++",
+      "cc": "C++",
+      "cxx": "C++",
+      "c": "C"
+    };
+    if (ext && languageHints[ext]) {
+      parts.push(`Language: ${languageHints[ext]}`);
+    }
   }
   const pathLower = filepath.toLowerCase();
   if (pathLower.includes("controller")) parts.push("Type: Controller");
@@ -445,6 +481,9 @@ function buildFileContext(filepath, fileData) {
   if (pathLower.includes("middleware")) parts.push("Type: Middleware");
   if (pathLower.includes("handler")) parts.push("Type: Handler");
   if (pathLower.includes("util") || pathLower.includes("helper")) parts.push("Type: Utility");
+  if (pathLower.includes("_test.") || pathLower.endsWith("_test.go")) parts.push("Type: Test");
+  if (pathLower.includes("/model/") || pathLower.includes("/models/")) parts.push("Type: Model");
+  if (pathLower.includes("/repository/") || pathLower.includes("/repositories/")) parts.push("Type: Repository");
   if (fileData.violations.length > 1) {
     parts.push(`${fileData.violations.length} total violations in this file`);
   }
