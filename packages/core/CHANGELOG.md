@@ -1,5 +1,11 @@
 # @liendev/core
 
+## 0.20.1
+
+### Patch Changes
+
+- 62b3f8c: Always ignore node_modules, vendor, and .git directories regardless of configuration
+
 ## 0.20.0
 
 ### Minor Changes
