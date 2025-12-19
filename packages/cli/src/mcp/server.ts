@@ -1,14 +1,8 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { tools } from './tools.js';
-import { toolHandlers } from './handlers/index.js';
 import {
   LocalEmbeddings,
   GitStateTracker,
@@ -19,12 +13,11 @@ import {
   isGitRepo,
   VERSION_CHECK_INTERVAL_MS,
   DEFAULT_GIT_POLL_INTERVAL_MS,
-  LienError,
-  LienErrorCode,
   createVectorDB,
   VectorDBInterface,
 } from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
+import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import type { ToolContext, LogFn, LogLevel } from './types.js';
 
 // Get version from package.json dynamically
@@ -218,46 +211,6 @@ async function setupFileWatching(
   }
 }
 
-/**
- * Register tool call handler on the MCP server.
- */
-function registerToolCallHandler(
-  server: Server,
-  toolContext: ToolContext,
-  log: LogFn
-): void {
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-    log(`Handling tool call: ${name}`);
-
-    const handler = toolHandlers[name];
-    if (!handler) {
-      const error = new LienError(
-        `Unknown tool: ${name}`,
-        LienErrorCode.INVALID_INPUT,
-        { requestedTool: name, availableTools: tools.map(t => t.name) },
-        'medium', false, false
-      );
-      return { isError: true, content: [{ type: 'text' as const, text: JSON.stringify(error.toJSON(), null, 2) }] };
-    }
-
-    try {
-      return await handler(args, toolContext);
-    } catch (error) {
-      if (error instanceof LienError) {
-        return { isError: true, content: [{ type: 'text' as const, text: JSON.stringify(error.toJSON(), null, 2) }] };
-      }
-      console.error(`Unexpected error handling tool call ${name}:`, error);
-      return {
-        isError: true,
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error', code: LienErrorCode.INTERNAL_ERROR, tool: name }, null, 2),
-        }],
-      };
-    }
-  });
-}
 
 export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   const { rootDir, verbose, watch } = options;
@@ -292,10 +245,11 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     process.exit(1);
   }
   
-  // Create MCP server with logging capability
+  // Create MCP server with configuration
+  const serverConfig = createMCPServerConfig('lien', packageJson.version);
   const server = new Server(
-    { name: 'lien', version: packageJson.version },
-    { capabilities: { tools: {}, logging: {} } }
+    { name: serverConfig.name, version: serverConfig.version },
+    { capabilities: serverConfig.capabilities }
   );
 
   // Create proper log function that uses MCP logging notifications
@@ -313,10 +267,6 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
       });
     }
   };
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools };
-  });
 
   // Version check helpers
   const checkAndReconnect = async () => {
@@ -340,8 +290,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   // Create tool context (no config needed - everything uses defaults or auto-detection)
   const toolContext: ToolContext = { vectorDB, embeddings, rootDir, log, checkAndReconnect, getIndexMetadata };
   
-  // Register handlers and setup features
-  registerToolCallHandler(server, toolContext, log);
+  // Register all MCP handlers
+  registerMCPHandlers(server, toolContext, log);
   await handleAutoIndexing(vectorDB, rootDir, log);
   const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log);
   const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log);
