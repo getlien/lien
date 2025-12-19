@@ -18,6 +18,7 @@ import {
   ComplexityAnalyzer,
   loadConfig,
   createDefaultConfig,
+  RISK_ORDER,
   type ComplexityReport,
   type ComplexityViolation,
   type LienConfig,
@@ -54,6 +55,7 @@ import {
   formatSeverityEmoji,
   logDeltaSummary,
   type ComplexityDelta,
+  type DeltaSummary,
 } from './delta.js';
 
 type ReviewStyle = 'line' | 'summary';
@@ -268,6 +270,30 @@ async function runComplexityAnalysis(
 }
 
 /**
+ * Prioritize violations by impact (dependents + severity)
+ * High dependents + High severity = Highest priority
+ */
+function prioritizeViolations(
+  violations: ComplexityViolation[],
+  report: ComplexityReport
+): ComplexityViolation[] {
+  return violations.sort((a, b) => {
+    const fileA = report.files[a.filepath];
+    const fileB = report.files[b.filepath];
+    
+    // Priority: High dependents + High severity = Highest priority
+    const impactA = (fileA?.dependentCount || 0) * 10 + RISK_ORDER[fileA?.riskLevel || 'low'];
+    const impactB = (fileB?.dependentCount || 0) * 10 + RISK_ORDER[fileB?.riskLevel || 'low'];
+    
+    if (impactB !== impactA) return impactB - impactA;
+    
+    // Fallback: severity
+    const severityOrder = { error: 2, warning: 1 };
+    return severityOrder[b.severity] - severityOrder[a.severity];
+  });
+}
+
+/**
  * Sort violations by severity and collect code snippets
  */
 async function prepareViolationsForReview(
@@ -275,13 +301,12 @@ async function prepareViolationsForReview(
   octokit: Octokit,
   prContext: PRContext
 ): Promise<{ violations: ComplexityViolation[]; codeSnippets: Map<string, string> }> {
-  // Collect and sort violations
-  const violations = Object.values(report.files)
-    .flatMap((fileData) => fileData.violations)
-    .sort((a, b) => {
-      if (a.severity !== b.severity) return a.severity === 'error' ? -1 : 1;
-      return b.complexity - a.complexity;
-    })
+  // Collect violations
+  const allViolations = Object.values(report.files)
+    .flatMap((fileData) => fileData.violations);
+  
+  // Prioritize by impact (dependents + severity)
+  const violations = prioritizeViolations(allViolations, report)
     .slice(0, 10);
 
   // Collect code snippets
@@ -348,6 +373,188 @@ async function analyzeBaseBranch(
 }
 
 /**
+ * Result of analysis orchestration
+ */
+interface AnalysisResult {
+  currentReport: ComplexityReport;
+  baselineReport: ComplexityReport | null;
+  deltas: ComplexityDelta[] | null;
+  filesToAnalyze: string[];
+}
+
+/**
+ * Setup result from PR analysis
+ */
+interface SetupResult {
+  config: ActionConfig;
+  prContext: PRContext;
+  octokit: ReturnType<typeof createOctokit>;
+}
+
+/**
+ * Get baseline complexity report for delta calculation
+ * Handles both delta tracking (analyzes base branch) and legacy baseline file
+ */
+async function getBaselineReport(
+  config: ActionConfig,
+  prContext: PRContext,
+  filesToAnalyze: string[]
+): Promise<ComplexityReport | null> {
+  if (config.enableDeltaTracking) {
+    core.info('🔄 Delta tracking enabled - analyzing base branch...');
+    return await analyzeBaseBranch(prContext.baseSha, filesToAnalyze, config.threshold);
+  }
+  
+  if (config.baselineComplexityPath) {
+    // Backwards compatibility: support old baseline_complexity input
+    core.warning('baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.');
+    return loadBaselineComplexity(config.baselineComplexityPath);
+  }
+  
+  return null;
+}
+
+/**
+ * Orchestrate complexity analysis (file discovery, baseline, current analysis)
+ * Returns null if no files to analyze or analysis fails
+ */
+async function orchestrateAnalysis(setup: SetupResult): Promise<AnalysisResult | null> {
+  const filesToAnalyze = await getFilesToAnalyze(setup.octokit, setup.prContext);
+  if (filesToAnalyze.length === 0) {
+    core.info('No analyzable files found, skipping review');
+    return null;
+  }
+
+  const baselineReport = await getBaselineReport(setup.config, setup.prContext, filesToAnalyze);
+  const currentReport = await runComplexityAnalysis(filesToAnalyze, setup.config.threshold);
+  
+  if (!currentReport) {
+    core.warning('Failed to get complexity report');
+    return null;
+  }
+  
+  core.info(`Analysis complete: ${currentReport.summary.totalViolations} violations found`);
+
+  const deltas = baselineReport
+    ? calculateDeltas(baselineReport, currentReport, filesToAnalyze)
+    : null;
+
+  return {
+    currentReport,
+    baselineReport,
+    deltas,
+    filesToAnalyze,
+  };
+}
+
+/**
+ * Set GitHub Action outputs from analysis results
+ * Sets outputs for violations count, errors, warnings, and delta metrics
+ */
+function setAnalysisOutputs(
+  report: ComplexityReport,
+  deltaSummary: DeltaSummary | null
+): void {
+  if (deltaSummary) {
+    core.setOutput('total_delta', deltaSummary.totalDelta);
+    core.setOutput('improved', deltaSummary.improved);
+    core.setOutput('degraded', deltaSummary.degraded);
+  }
+  
+  core.setOutput('violations', report.summary.totalViolations);
+  core.setOutput('errors', report.summary.bySeverity.error);
+  core.setOutput('warnings', report.summary.bySeverity.warning);
+}
+
+/**
+ * Handle analysis outputs (badge, logging, GitHub outputs)
+ * Updates PR description badge and sets GitHub Action outputs
+ */
+async function handleAnalysisOutputs(
+  result: AnalysisResult,
+  setup: SetupResult
+): Promise<void> {
+  const deltaSummary = result.deltas ? calculateDeltaSummary(result.deltas) : null;
+
+  if (deltaSummary) {
+    logDeltaSummary(deltaSummary);
+  }
+
+  setAnalysisOutputs(result.currentReport, deltaSummary);
+
+  const badge = buildDescriptionBadge(result.currentReport, deltaSummary, result.deltas);
+  await updatePRDescription(setup.octokit, setup.prContext, badge);
+}
+
+/**
+ * Post review if violations are found, or success message if none
+ * Handles both summary and line-by-line review modes
+ */
+async function postReviewIfNeeded(
+  result: AnalysisResult,
+  setup: SetupResult
+): Promise<void> {
+  if (result.currentReport.summary.totalViolations === 0) {
+    core.info('No complexity violations found');
+    // Post success message (will update existing comment if present)
+    const successMessage = buildNoViolationsMessage(setup.prContext, result.deltas);
+    await postPRComment(setup.octokit, setup.prContext, successMessage);
+    return;
+  }
+
+  const { violations, codeSnippets } = await prepareViolationsForReview(
+    result.currentReport,
+    setup.octokit,
+    setup.prContext
+  );
+
+  resetTokenUsage();
+  if (setup.config.reviewStyle === 'summary') {
+    // Get diff lines to identify uncovered violations
+    const diffLines = await getPRDiffLines(setup.octokit, setup.prContext);
+    const deltaMap = buildDeltaMap(result.deltas);
+    const { uncovered } = partitionViolationsByDiff(violations, diffLines);
+    const uncoveredNote = buildUncoveredNote(uncovered, deltaMap);
+    
+    await postSummaryReview(
+      setup.octokit,
+      setup.prContext,
+      result.currentReport,
+      codeSnippets,
+      setup.config,
+      false,
+      result.deltas,
+      uncoveredNote
+    );
+  } else {
+    await postLineReview(
+      setup.octokit,
+      setup.prContext,
+      result.currentReport,
+      violations,
+      codeSnippets,
+      setup.config,
+      result.deltas
+    );
+  }
+}
+
+/**
+ * Handle errors with proper logging and failure reporting
+ */
+function handleError(error: unknown): void {
+  const message = error instanceof Error ? error.message : 'An unexpected error occurred';
+  const stack = error instanceof Error ? error.stack : '';
+  
+  core.error(`Action failed: ${message}`);
+  if (stack) {
+    core.error(`Stack trace:\n${stack}`);
+  }
+  
+  core.setFailed(message);
+}
+
+/**
  * Main action logic - orchestrates the review flow
  */
 async function run(): Promise<void> {
@@ -361,79 +568,16 @@ async function run(): Promise<void> {
       core.info('⚠️ Setup returned null, exiting gracefully');
       return;
     }
-    const { config, prContext, octokit } = setup;
 
-    const filesToAnalyze = await getFilesToAnalyze(octokit, prContext);
-    if (filesToAnalyze.length === 0) {
-      core.info('No analyzable files found, skipping review');
+    const analysisResult = await orchestrateAnalysis(setup);
+    if (!analysisResult) {
       return;
     }
 
-    // Get baseline complexity for delta calculation
-    let baselineReport: ComplexityReport | null = null;
-    
-    if (config.enableDeltaTracking) {
-      core.info('🔄 Delta tracking enabled - analyzing base branch...');
-      baselineReport = await analyzeBaseBranch(prContext.baseSha, filesToAnalyze, config.threshold);
-    } else if (config.baselineComplexityPath) {
-      // Backwards compatibility: support old baseline_complexity input
-      core.warning('baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.');
-      baselineReport = loadBaselineComplexity(config.baselineComplexityPath);
-    }
-
-    const report = await runComplexityAnalysis(filesToAnalyze, config.threshold);
-    if (!report) {
-      core.warning('Failed to get complexity report');
-      return;
-    }
-    core.info(`Analysis complete: ${report.summary.totalViolations} violations found`);
-
-    // Calculate deltas if we have a baseline
-    const deltas = baselineReport
-      ? calculateDeltas(baselineReport, report, filesToAnalyze)
-      : null;
-
-    const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
-
-    if (deltaSummary) {
-      logDeltaSummary(deltaSummary);
-      core.setOutput('total_delta', deltaSummary.totalDelta);
-      core.setOutput('improved', deltaSummary.improved);
-      core.setOutput('degraded', deltaSummary.degraded);
-    }
-
-    // Always update PR description with stats badge
-    const badge = buildDescriptionBadge(report, deltaSummary, deltas);
-    await updatePRDescription(octokit, prContext, badge);
-
-    if (report.summary.totalViolations === 0) {
-      core.info('No complexity violations found');
-      // Skip the regular comment - the description badge is sufficient
-      return;
-    }
-
-    const { violations, codeSnippets } = await prepareViolationsForReview(report, octokit, prContext);
-
-    resetTokenUsage();
-    if (config.reviewStyle === 'summary') {
-      await postSummaryReview(octokit, prContext, report, codeSnippets, config, false, deltas);
-    } else {
-      await postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas);
-    }
-
-    core.setOutput('violations', report.summary.totalViolations);
-    core.setOutput('errors', report.summary.bySeverity.error);
-    core.setOutput('warnings', report.summary.bySeverity.warning);
+    await handleAnalysisOutputs(analysisResult, setup);
+    await postReviewIfNeeded(analysisResult, setup);
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'An unexpected error occurred';
-    const stack = error instanceof Error ? error.stack : '';
-    
-    core.error(`Action failed: ${message}`);
-    if (stack) {
-      core.error(`Stack trace:\n${stack}`);
-    }
-    
-    core.setFailed(message);
+    handleError(error);
   }
 }
 
@@ -658,6 +802,145 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
 }
 
 /**
+ * Partition violations into those with comment lines and those without
+ */
+function partitionViolationsByDiff(
+  violations: ComplexityViolation[],
+  diffLines: Map<string, Set<number>>
+): {
+  withLines: Array<{ violation: ComplexityViolation; commentLine: number }>;
+  uncovered: ComplexityViolation[];
+} {
+  const withLines: Array<{ violation: ComplexityViolation; commentLine: number }> = [];
+  const uncovered: ComplexityViolation[] = [];
+
+  for (const v of violations) {
+    const commentLine = findCommentLine(v, diffLines);
+    if (commentLine !== null) {
+      withLines.push({ violation: v, commentLine });
+    } else {
+      uncovered.push(v);
+    }
+  }
+
+  return { withLines, uncovered };
+}
+
+/**
+ * Filter violations to only new or degraded ones (skip unchanged pre-existing)
+ */
+function filterNewOrDegraded(
+  violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  deltaMap: Map<string, ComplexityDelta>
+): Array<{ violation: ComplexityViolation; commentLine: number }> {
+  return violationsWithLines.filter(({ violation }) => {
+    const key = createDeltaKey(violation);
+    const delta = deltaMap.get(key);
+    // Comment if: no baseline data, or new violation, or got worse
+    return !delta || delta.severity === 'new' || delta.delta > 0;
+  });
+}
+
+/**
+ * Get list of skipped (unchanged) violations
+ */
+function getSkippedViolations(
+  violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  deltaMap: Map<string, ComplexityDelta>
+): ComplexityViolation[] {
+  return violationsWithLines
+    .filter(({ violation }) => {
+      const key = createDeltaKey(violation);
+      const delta = deltaMap.get(key);
+      return delta && delta.severity !== 'new' && delta.delta === 0;
+    })
+    .map(v => v.violation);
+}
+
+/**
+ * Violation processing result
+ */
+interface ViolationProcessingResult {
+  withLines: Array<{ violation: ComplexityViolation; commentLine: number }>;
+  uncovered: ComplexityViolation[];
+  newOrDegraded: Array<{ violation: ComplexityViolation; commentLine: number }>;
+  skipped: ComplexityViolation[];
+}
+
+/**
+ * Process violations for review (partition, filter, categorize)
+ */
+function processViolationsForReview(
+  violations: ComplexityViolation[],
+  diffLines: Map<string, Set<number>>,
+  deltaMap: Map<string, ComplexityDelta>
+): ViolationProcessingResult {
+  const { withLines, uncovered } = partitionViolationsByDiff(violations, diffLines);
+  const newOrDegraded = filterNewOrDegraded(withLines, deltaMap);
+  const skipped = getSkippedViolations(withLines, deltaMap);
+
+  return { withLines, uncovered, newOrDegraded, skipped };
+}
+
+/**
+ * Handle case when there are no new/degraded violations to comment on
+ */
+async function handleNoNewViolations(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  uncoveredViolations: ComplexityViolation[],
+  deltaMap: Map<string, ComplexityDelta>,
+  report: ComplexityReport,
+  deltas: ComplexityDelta[] | null
+): Promise<void> {
+  if (violationsWithLines.length === 0) {
+    return;
+  }
+
+  const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
+  const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
+  const skippedNote = buildSkippedNote(skippedInDiff);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+  await postPRComment(octokit, prContext, summaryBody);
+}
+
+/**
+ * Generate AI comments and post review
+ */
+async function generateAndPostReview(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  processed: ViolationProcessingResult,
+  deltaMap: Map<string, ComplexityDelta>,
+  codeSnippets: Map<string, string>,
+  config: ActionConfig,
+  report: ComplexityReport,
+  deltas: ComplexityDelta[] | null
+): Promise<void> {
+  const commentableViolations = processed.newOrDegraded.map(v => v.violation);
+  core.info(`Generating AI comments for ${commentableViolations.length} new/degraded violations...`);
+  
+  const aiComments = await generateLineComments(
+    commentableViolations,
+    codeSnippets,
+    config.openrouterApiKey,
+    config.model,
+    report
+  );
+
+  const lineComments = buildLineComments(processed.newOrDegraded, aiComments, deltaMap);
+  core.info(`Built ${lineComments.length} line comments for new/degraded violations`);
+
+  const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
+  const skippedNote = buildSkippedNote(processed.skipped);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+
+  await postPRReview(octokit, prContext, lineComments, summaryBody);
+  core.info(`Posted review with ${lineComments.length} line comments`);
+}
+
+/**
  * Post review with line-specific comments for all violations
  */
 async function postLineReview(
@@ -672,97 +955,50 @@ async function postLineReview(
   const diffLines = await getPRDiffLines(octokit, prContext);
   core.info(`Diff covers ${diffLines.size} files`);
 
-  // Partition violations into those we can comment on and those we can't
-  const violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }> = [];
-  const uncoveredViolations: ComplexityViolation[] = [];
-
-  for (const v of violations) {
-    const commentLine = findCommentLine(v, diffLines);
-    if (commentLine !== null) {
-      violationsWithLines.push({ violation: v, commentLine });
-    } else {
-      uncoveredViolations.push(v);
-    }
-  }
+  const deltaMap = buildDeltaMap(deltas);
+  const processed = processViolationsForReview(violations, diffLines, deltaMap);
 
   core.info(
-    `${violationsWithLines.length}/${violations.length} violations can have inline comments ` +
-    `(${uncoveredViolations.length} outside diff)`
+    `${processed.withLines.length}/${violations.length} violations can have inline comments ` +
+    `(${processed.uncovered.length} outside diff)`
   );
 
-  const deltaMap = buildDeltaMap(deltas);
-
-  // Filter to only new or degraded violations (skip unchanged pre-existing ones)
-  // This saves LLM costs and prevents duplicate comments on each push
-  const newOrDegradedViolations = violationsWithLines.filter(({ violation }) => {
-    const key = createDeltaKey(violation);
-    const delta = deltaMap.get(key);
-    // Comment if: no baseline data, or new violation, or got worse
-    return !delta || delta.severity === 'new' || delta.delta > 0;
-  });
-
-  const skippedCount = violationsWithLines.length - newOrDegradedViolations.length;
+  const skippedCount = processed.withLines.length - processed.newOrDegraded.length;
   if (skippedCount > 0) {
     core.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
   }
 
-  if (newOrDegradedViolations.length === 0) {
+  if (processed.newOrDegraded.length === 0) {
     core.info('No new or degraded violations to comment on');
-    // Still post a summary if there are violations, just no inline comments needed
-    if (violationsWithLines.length > 0) {
-      // Only include actual uncovered violations (outside diff)
-      const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
-      // Build skipped note for unchanged violations in the diff (not "outside diff")
-      const skippedInDiff = violationsWithLines
-        .filter(({ violation }) => {
-          const key = createDeltaKey(violation);
-          const delta = deltaMap.get(key);
-          return delta && delta.severity !== 'new' && delta.delta === 0;
-        })
-        .map(v => v.violation);
-      const skippedNote = buildSkippedNote(skippedInDiff);
-      const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
-      await postPRComment(octokit, prContext, summaryBody);
-    }
+    await handleNoNewViolations(
+      octokit,
+      prContext,
+      processed.withLines,
+      processed.uncovered,
+      deltaMap,
+      report,
+      deltas
+    );
     return;
   }
 
-  // Generate AI comments only for new/degraded violations
-  const commentableViolations = newOrDegradedViolations.map(v => v.violation);
-  core.info(`Generating AI comments for ${commentableViolations.length} new/degraded violations...`);
-  const aiComments = await generateLineComments(
-    commentableViolations,
+  await generateAndPostReview(
+    octokit,
+    prContext,
+    processed,
+    deltaMap,
     codeSnippets,
-    config.openrouterApiKey,
-    config.model
+    config,
+    report,
+    deltas
   );
-
-  // Build and post review (only for new/degraded)
-  const lineComments = buildLineComments(newOrDegradedViolations, aiComments, deltaMap);
-  core.info(`Built ${lineComments.length} line comments for new/degraded violations`);
-
-  // Include skipped (pre-existing unchanged) violations in skipped note
-  // Note: delta === 0 means truly unchanged; delta < 0 means improved (not "unchanged")
-  const skippedViolations = violationsWithLines
-    .filter(({ violation }) => {
-      const key = createDeltaKey(violation);
-      const delta = deltaMap.get(key);
-      return delta && delta.severity !== 'new' && delta.delta === 0;
-    })
-    .map(v => v.violation);
-
-  const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
-  const skippedNote = buildSkippedNote(skippedViolations);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
-
-  await postPRReview(octokit, prContext, lineComments, summaryBody);
-  core.info(`Posted review with ${lineComments.length} line comments`);
 }
 
 /**
  * Post review as a single summary comment
  * @param isFallback - true if this is a fallback because violations aren't on diff lines
  * @param deltas - complexity deltas for delta display
+ * @param uncoveredNote - note about violations outside diff (optional)
  */
 async function postSummaryReview(
   octokit: ReturnType<typeof createOctokit>,
@@ -771,7 +1007,8 @@ async function postSummaryReview(
   codeSnippets: Map<string, string>,
   config: ActionConfig,
   isFallback = false,
-  deltas: ComplexityDelta[] | null = null
+  deltas: ComplexityDelta[] | null = null,
+  uncoveredNote: string = ''
 ): Promise<void> {
   const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas);
   core.debug(`Prompt length: ${prompt.length} characters`);
@@ -783,7 +1020,7 @@ async function postSummaryReview(
   );
 
   const usage = getTokenUsage();
-  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas);
+  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas, uncoveredNote);
   await postPRComment(octokit, prContext, comment);
   core.info('Successfully posted AI review summary comment');
 }

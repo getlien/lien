@@ -187,7 +187,7 @@ describe('prompt', () => {
       ];
       const codeSnippets = new Map<string, string>();
 
-      const prompt = buildBatchedCommentsPrompt(violations, codeSnippets);
+      const prompt = buildBatchedCommentsPrompt(violations, codeSnippets, mockReport);
 
       expect(prompt).toContain('processData');
       expect(prompt).toContain('handleRequest');
@@ -200,7 +200,7 @@ describe('prompt', () => {
       const codeSnippets = new Map<string, string>();
       codeSnippets.set('src/utils.ts::processData', 'function processData() {}');
 
-      const prompt = buildBatchedCommentsPrompt(violations, codeSnippets);
+      const prompt = buildBatchedCommentsPrompt(violations, codeSnippets, mockReport);
 
       expect(prompt).toContain('function processData() {}');
     });
@@ -211,11 +211,59 @@ describe('prompt', () => {
         mockReport.files['src/handler.ts'].violations[0],
       ];
 
-      const prompt = buildBatchedCommentsPrompt(violations, new Map());
+      const prompt = buildBatchedCommentsPrompt(violations, new Map(), mockReport);
 
       expect(prompt).toContain('"src/utils.ts::processData"');
       expect(prompt).toContain('"src/handler.ts::handleRequest"');
       expect(prompt).toContain('Respond with ONLY valid JSON');
+    });
+
+    it('should include dependency context when file has dependents', () => {
+      const reportWithDependents: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 1,
+          totalViolations: 1,
+          bySeverity: { error: 1, warning: 0 },
+          avgComplexity: 20.0,
+          maxComplexity: 20,
+        },
+        files: {
+          'src/auth.ts': {
+            violations: [
+              {
+                filepath: 'src/auth.ts',
+                startLine: 10,
+                endLine: 50,
+                symbolName: 'validateToken',
+                symbolType: 'function',
+                language: 'typescript',
+                complexity: 20,
+                threshold: 15,
+                severity: 'error',
+                message: 'Complexity exceeds threshold',
+                metricType: 'cyclomatic',
+              },
+            ],
+            dependents: ['src/api/login.ts', 'src/middleware/auth.ts'],
+            dependentCount: 12,
+            testAssociations: [],
+            riskLevel: 'high',
+            dependentComplexityMetrics: {
+              averageComplexity: 8.5,
+              maxComplexity: 15,
+              filesWithComplexityData: 10,
+            },
+          },
+        },
+      };
+
+      const violations = [reportWithDependents.files['src/auth.ts'].violations[0]];
+      const prompt = buildBatchedCommentsPrompt(violations, new Map(), reportWithDependents);
+
+      expect(prompt).toContain('**Dependency Impact**:');
+      expect(prompt).toContain('12 file(s) import this');
+      expect(prompt).toContain('src/api/login.ts');
+      expect(prompt).toContain('Dependent complexity');
     });
   });
 
@@ -406,6 +454,261 @@ describe('prompt', () => {
       expect(badge).toContain('|--------|:----------:|:------:|');
       expect(badge).toContain('🔀'); // cyclomatic emoji
       expect(badge).toContain('🧠'); // cognitive emoji
+    });
+
+    it('should include dependency impact summary when files have dependents', () => {
+      const reportWithDependents: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 2,
+          totalViolations: 2,
+          bySeverity: { error: 1, warning: 1 },
+          avgComplexity: 15.0,
+          maxComplexity: 20,
+        },
+        files: {
+          'src/auth.ts': {
+            violations: [
+              {
+                filepath: 'src/auth.ts',
+                startLine: 10,
+                endLine: 50,
+                symbolName: 'validateToken',
+                symbolType: 'function',
+                language: 'typescript',
+                complexity: 20,
+                threshold: 15,
+                severity: 'error',
+                message: 'Complexity exceeds threshold',
+                metricType: 'cyclomatic',
+              },
+            ],
+            dependents: ['src/api/login.ts', 'src/middleware/auth.ts'],
+            dependentCount: 12,
+            testAssociations: [],
+            riskLevel: 'high',
+            dependentComplexityMetrics: {
+              averageComplexity: 8.5,
+              maxComplexity: 15,
+              filesWithComplexityData: 10,
+            },
+          },
+          'src/utils.ts': {
+            violations: [
+              {
+                filepath: 'src/utils.ts',
+                startLine: 5,
+                endLine: 25,
+                symbolName: 'helper',
+                symbolType: 'function',
+                language: 'typescript',
+                complexity: 18,
+                threshold: 15,
+                severity: 'warning',
+                message: 'Complexity exceeds threshold',
+                metricType: 'cognitive',
+              },
+            ],
+            dependents: ['src/api/handler.ts'],
+            dependentCount: 3,
+            testAssociations: [],
+            riskLevel: 'critical',
+          },
+        },
+      };
+
+      const badge = buildDescriptionBadge(reportWithDependents, null, null);
+
+      // Should show impact summary for high-risk files with dependents
+      expect(badge).toContain('🔗 **Impact**:');
+      expect(badge).toContain('high-risk file(s)');
+      expect(badge).toContain('total dependents');
+      // Should count both files (high and critical are both high-risk)
+      expect(badge).toContain('2 high-risk file(s)');
+      // Total dependents: 12 + 3 = 15
+      expect(badge).toContain('15 total dependents');
+    });
+
+    it('should not show dependency impact when no high-risk files have dependents', () => {
+      const reportWithoutHighRisk: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 1,
+          totalViolations: 1,
+          bySeverity: { error: 0, warning: 1 },
+          avgComplexity: 12.0,
+          maxComplexity: 14,
+        },
+        files: {
+          'src/utils.ts': {
+            violations: [
+              {
+                filepath: 'src/utils.ts',
+                startLine: 5,
+                endLine: 25,
+                symbolName: 'helper',
+                symbolType: 'function',
+                language: 'typescript',
+                complexity: 14,
+                threshold: 15,
+                severity: 'warning',
+                message: 'Complexity exceeds threshold',
+                metricType: 'cognitive',
+              },
+            ],
+            dependents: ['src/api/handler.ts'],
+            dependentCount: 1,
+            testAssociations: [],
+            riskLevel: 'low', // Low risk, so no impact summary
+          },
+        },
+      };
+
+      const badge = buildDescriptionBadge(reportWithoutHighRisk, null, null);
+
+      // Should not show impact summary for low-risk files
+      expect(badge).not.toContain('🔗 **Impact**:');
+    });
+  });
+
+  describe('buildReviewPrompt with dependency context', () => {
+    it('should include dependency context in violations summary', () => {
+      const reportWithDependents: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 1,
+          totalViolations: 1,
+          bySeverity: { error: 1, warning: 0 },
+          avgComplexity: 20.0,
+          maxComplexity: 20,
+        },
+        files: {
+          'src/auth.ts': {
+            violations: [
+              {
+                filepath: 'src/auth.ts',
+                startLine: 10,
+                endLine: 50,
+                symbolName: 'validateToken',
+                symbolType: 'function',
+                language: 'typescript',
+                complexity: 20,
+                threshold: 15,
+                severity: 'error',
+                message: 'Complexity exceeds threshold',
+                metricType: 'cyclomatic',
+              },
+            ],
+            dependents: ['src/api/login.ts', 'src/middleware/auth.ts', 'src/components/UserProfile.tsx'],
+            dependentCount: 12,
+            testAssociations: [],
+            riskLevel: 'high',
+            dependentComplexityMetrics: {
+              averageComplexity: 8.5,
+              maxComplexity: 15,
+              filesWithComplexityData: 10,
+            },
+          },
+        },
+      };
+
+      const prompt = buildReviewPrompt(reportWithDependents, mockPRContext, new Map());
+
+      // Should include dependency impact section
+      expect(prompt).toContain('**Dependency Impact**:');
+      expect(prompt).toContain('HIGH risk');
+      expect(prompt).toContain('12 file(s) import this');
+      expect(prompt).toContain('**Key dependents:**');
+      expect(prompt).toContain('src/api/login.ts');
+      expect(prompt).toContain('src/middleware/auth.ts');
+      expect(prompt).toContain('Dependent complexity');
+      expect(prompt).toContain('Avg 8.5');
+      expect(prompt).toContain('Max 15');
+      expect(prompt).toContain('Review focus');
+    });
+
+    it('should not include dependency context when file has no dependents', () => {
+      const reportWithoutDependents: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 1,
+          totalViolations: 1,
+          bySeverity: { error: 1, warning: 0 },
+          avgComplexity: 20.0,
+          maxComplexity: 20,
+        },
+        files: {
+          'src/utils.ts': {
+            violations: [
+              {
+                filepath: 'src/utils.ts',
+                startLine: 10,
+                endLine: 50,
+                symbolName: 'processData',
+                symbolType: 'function',
+                language: 'typescript',
+                complexity: 20,
+                threshold: 15,
+                severity: 'error',
+                message: 'Complexity exceeds threshold',
+                metricType: 'cyclomatic',
+              },
+            ],
+            dependents: [],
+            dependentCount: 0,
+            testAssociations: [],
+            riskLevel: 'high',
+          },
+        },
+      };
+
+      const prompt = buildReviewPrompt(reportWithoutDependents, mockPRContext, new Map());
+
+      // Should not include dependency impact section
+      expect(prompt).not.toContain('**Dependency Impact**:');
+      expect(prompt).not.toContain('file(s) import this');
+    });
+
+    it('should limit dependents list to 10 in dependency context', () => {
+      const manyDependents = Array.from({ length: 15 }, (_, i) => `src/dep${i}.ts`);
+      const reportWithManyDependents: ComplexityReport = {
+        summary: {
+          filesAnalyzed: 1,
+          totalViolations: 1,
+          bySeverity: { error: 1, warning: 0 },
+          avgComplexity: 20.0,
+          maxComplexity: 20,
+        },
+        files: {
+          'src/auth.ts': {
+            violations: [
+              {
+                filepath: 'src/auth.ts',
+                startLine: 10,
+                endLine: 50,
+                symbolName: 'validateToken',
+                symbolType: 'function',
+                language: 'typescript',
+                complexity: 20,
+                threshold: 15,
+                severity: 'error',
+                message: 'Complexity exceeds threshold',
+                metricType: 'cyclomatic',
+              },
+            ],
+            dependents: manyDependents,
+            dependentCount: 15,
+            testAssociations: [],
+            riskLevel: 'high',
+          },
+        },
+      };
+
+      const prompt = buildReviewPrompt(reportWithManyDependents, mockPRContext, new Map());
+
+      // Should show first 10 dependents
+      expect(prompt).toContain('src/dep0.ts');
+      expect(prompt).toContain('src/dep9.ts');
+      // Should not show dep10 or later
+      expect(prompt).not.toContain('src/dep10.ts');
+      // Should show "... (and more)" note
+      expect(prompt).toContain('... (and more)');
     });
   });
 });

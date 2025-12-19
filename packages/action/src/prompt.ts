@@ -86,6 +86,127 @@ function formatViolationLine(v: ComplexityViolation, deltaMap: Map<string, Compl
 }
 
 /**
+ * Build dependency context string for a file
+ * Shows dependents count, key dependents list, and complexity metrics
+ */
+function buildDependencyContext(fileData: ComplexityReport['files'][string]): string {
+  if (!fileData.dependentCount || fileData.dependentCount === 0) {
+    return '';
+  }
+  
+  const riskEmoji: Record<string, string> = {
+    low: '🟢',
+    medium: '🟡',
+    high: '🟠',
+    critical: '🔴',
+  };
+  
+  const emoji = riskEmoji[fileData.riskLevel] || '⚪';
+  
+  // Build dependents list (only if we have the array and it's not empty)
+  const hasDependentsList = fileData.dependents && fileData.dependents.length > 0;
+  const dependentsList = hasDependentsList
+    ? fileData.dependents.slice(0, 10).map(f => `  - ${f}`).join('\n')
+    : '';
+  
+  const complexityNote = fileData.dependentComplexityMetrics
+    ? `\n- **Dependent complexity**: Avg ${fileData.dependentComplexityMetrics.averageComplexity.toFixed(1)}, Max ${fileData.dependentComplexityMetrics.maxComplexity}`
+    : '';
+  
+  const moreNote = hasDependentsList && fileData.dependents.length > 10
+    ? '\n  ... (and more)'
+    : '';
+  
+  return `\n**Dependency Impact**: ${emoji} ${fileData.riskLevel.toUpperCase()} risk
+- **Dependents**: ${fileData.dependentCount} file(s) import this
+${dependentsList ? `\n**Key dependents:**\n${dependentsList}${moreNote}` : ''}${complexityNote}
+- **Review focus**: Changes here affect ${fileData.dependentCount} other file(s). Extra scrutiny recommended.`;
+}
+
+/**
+ * Build file-level context (other violations, file purpose hints)
+ * Uses language from violations when available, falls back to file extension
+ */
+function buildFileContext(filepath: string, fileData: ComplexityReport['files'][string]): string {
+  const parts: string[] = [];
+  
+  // Try to get language from violations first (more accurate)
+  const languageFromViolation = fileData.violations[0]?.language;
+  
+  // Language/framework hint - use violation language or detect from extension
+  if (languageFromViolation) {
+    const languageMap: Record<string, string> = {
+      'typescript': 'TypeScript',
+      'javascript': 'JavaScript',
+      'php': 'PHP',
+      'python': 'Python',
+      'go': 'Go',
+      'rust': 'Rust',
+      'java': 'Java',
+      'ruby': 'Ruby',
+      'swift': 'Swift',
+      'kotlin': 'Kotlin',
+      'csharp': 'C#',
+      'scala': 'Scala',
+      'cpp': 'C++',
+      'c': 'C',
+    };
+    const displayName = languageMap[languageFromViolation.toLowerCase()] || languageFromViolation;
+    parts.push(`Language: ${displayName}`);
+  } else {
+    // Fallback to file extension detection
+    const ext = filepath.split('.').pop()?.toLowerCase();
+    const languageHints: Record<string, string> = {
+      'ts': 'TypeScript',
+      'tsx': 'TypeScript React',
+      'js': 'JavaScript',
+      'jsx': 'JavaScript React',
+      'mjs': 'JavaScript',
+      'cjs': 'JavaScript',
+      'php': 'PHP',
+      'py': 'Python',
+      'go': 'Go',
+      'rs': 'Rust',
+      'java': 'Java',
+      'rb': 'Ruby',
+      'swift': 'Swift',
+      'kt': 'Kotlin',
+      'cs': 'C#',
+      'scala': 'Scala',
+      'cpp': 'C++',
+      'cc': 'C++',
+      'cxx': 'C++',
+      'c': 'C',
+    };
+    if (ext && languageHints[ext]) {
+      parts.push(`Language: ${languageHints[ext]}`);
+    }
+  }
+  
+  // File purpose hint from path (language-agnostic patterns)
+  const pathLower = filepath.toLowerCase();
+  // Common patterns across languages
+  if (pathLower.includes('controller')) parts.push('Type: Controller');
+  if (pathLower.includes('service')) parts.push('Type: Service');
+  if (pathLower.includes('component')) parts.push('Type: Component');
+  if (pathLower.includes('middleware')) parts.push('Type: Middleware');
+  if (pathLower.includes('handler')) parts.push('Type: Handler');
+  if (pathLower.includes('util') || pathLower.includes('helper')) parts.push('Type: Utility');
+  // Go-specific patterns
+  if (pathLower.includes('_test.') || pathLower.endsWith('_test.go')) parts.push('Type: Test');
+  // Java patterns
+  if (pathLower.includes('/model/') || pathLower.includes('/models/')) parts.push('Type: Model');
+  if (pathLower.includes('/repository/') || pathLower.includes('/repositories/')) parts.push('Type: Repository');
+  
+  // Other violations in same file
+  if (fileData.violations.length > 1) {
+    parts.push(`${fileData.violations.length} total violations in this file`);
+  }
+  
+  return parts.length > 0 ? `\n*Context: ${parts.join(', ')}*` : '';
+}
+
+/**
  * Build violations summary grouped by file
  */
 function buildViolationsSummary(
@@ -98,9 +219,20 @@ function buildViolationsSummary(
       const violationList = data.violations
         .map(v => formatViolationLine(v, deltaMap))
         .join('\n');
-      return `**${filepath}** (risk: ${data.riskLevel})\n${violationList}`;
+      const dependencyContext = buildDependencyContext(data);
+      const fileContext = buildFileContext(filepath, data);
+      return `**${filepath}** (risk: ${data.riskLevel})${fileContext}\n${violationList}${dependencyContext}`;
     })
     .join('\n\n');
+}
+
+/**
+ * Format a single delta change for display
+ */
+function formatDeltaChange(d: ComplexityDelta): string {
+  const from = d.baseComplexity ?? 'new';
+  const to = d.headComplexity ?? 'removed';
+  return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
 }
 
 /**
@@ -114,12 +246,6 @@ function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
   const newFuncs = deltas.filter(d => d.severity === 'new');
   const deleted = deltas.filter(d => d.severity === 'deleted');
   
-  const formatChange = (d: ComplexityDelta): string => {
-    const from = d.baseComplexity ?? 'new';
-    const to = d.headComplexity ?? 'removed';
-    return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
-  };
-  
   const sections = [
     `\n## Complexity Changes (vs base branch)`,
     `- **Degraded**: ${degraded.length} function(s) got more complex`,
@@ -128,9 +254,15 @@ function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
     `- **Removed**: ${deleted.length} complex function(s) deleted`,
   ];
   
-  if (degraded.length > 0) sections.push(`\nFunctions that got worse:\n${degraded.map(formatChange).join('\n')}`);
-  if (improved.length > 0) sections.push(`\nFunctions that improved:\n${improved.map(formatChange).join('\n')}`);
-  if (newFuncs.length > 0) sections.push(`\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}`);
+  if (degraded.length > 0) {
+    sections.push(`\nFunctions that got worse:\n${degraded.map(formatDeltaChange).join('\n')}`);
+  }
+  if (improved.length > 0) {
+    sections.push(`\nFunctions that improved:\n${improved.map(formatDeltaChange).join('\n')}`);
+  }
+  if (newFuncs.length > 0) {
+    sections.push(`\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}`);
+  }
   
   return sections.join('\n');
 }
@@ -183,9 +315,15 @@ ${snippetsSection || '_No code snippets available_'}
 
 For each violation:
 1. **Explain** why this complexity is problematic in this specific context
+   - Consider the file type (controller, service, component, etc.) and language
+   - Note if this is the only violation in the file or one of many
+   - Consider dependency impact - high-risk files need extra scrutiny
 2. **Suggest** concrete refactoring steps (not generic advice like "break into smaller functions")
+   - Be specific to the language and framework patterns
+   - Consider file type conventions (e.g., controllers often delegate to services)
 3. **Prioritize** which violations are most important to address - focus on functions that got WORSE (higher delta)
 4. If the complexity seems justified for the use case, say so
+   - Some patterns (orchestration, state machines) may legitimately be complex
 5. Celebrate improvements! If a function got simpler, acknowledge it.
 
 Format your response as a PR review comment with:
@@ -321,7 +459,8 @@ export function formatReviewComment(
   report: ComplexityReport,
   isFallback = false,
   tokenUsage?: TokenUsageInfo,
-  deltas?: ComplexityDelta[] | null
+  deltas?: ComplexityDelta[] | null,
+  uncoveredNote: string = ''
 ): string {
   const { summary } = report;
   const deltaDisplay = formatDeltaDisplay(deltas);
@@ -337,7 +476,7 @@ ${summary.totalViolations} issue${summary.totalViolations === 1 ? '' : 's'} spot
 
 ${aiReview}
 
----
+---${uncoveredNote}
 
 <details>
 <summary>📊 Analysis Details</summary>
@@ -439,6 +578,71 @@ function getMetricEmoji(metricType: string): string {
 }
 
 /**
+ * Build metric breakdown table for violations
+ */
+function buildMetricTable(
+  report: ComplexityReport | null,
+  deltas: ComplexityDelta[] | null
+): string {
+  if (!report || report.summary.totalViolations === 0) return '';
+
+  const byMetric = collect(Object.values(report.files))
+    .flatMap(f => f.violations)
+    .countBy('metricType')
+    .all() as unknown as Record<string, number>;
+
+  const deltaByMetric: Record<string, number> = deltas
+    ? collect(deltas)
+        .groupBy('metricType')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((group: any) => group.sum('delta'))
+        .all() as unknown as Record<string, number>
+    : {};
+
+  const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
+  const rows = collect(metricOrder)
+    .filter(metricType => byMetric[metricType] > 0)
+    .map(metricType => {
+      const emoji = getMetricEmoji(metricType);
+      const label = getMetricLabel(metricType);
+      const count = byMetric[metricType];
+      const delta = deltaByMetric[metricType] || 0;
+      const deltaStr = deltas ? (delta >= 0 ? `+${delta}` : `${delta}`) : '—';
+      return `| ${emoji} ${label} | ${count} | ${deltaStr} |`;
+    })
+    .all() as string[];
+
+  if (rows.length === 0) return '';
+
+  return `
+| Metric | Violations | Change |
+|--------|:----------:|:------:|
+${rows.join('\n')}
+`;
+}
+
+/**
+ * Build dependency impact summary
+ */
+function buildImpactSummary(report: ComplexityReport | null): string {
+  if (!report) return '';
+
+  const filesWithDependents = Object.values(report.files)
+    .filter(f => f.dependentCount && f.dependentCount > 0);
+  
+  if (filesWithDependents.length === 0) return '';
+
+  const totalDependents = filesWithDependents.reduce((sum, f) => sum + (f.dependentCount || 0), 0);
+  const highRiskFiles = filesWithDependents.filter(f => 
+    ['high', 'critical'].includes(f.riskLevel)
+  ).length;
+  
+  if (highRiskFiles === 0) return '';
+
+  return `\n🔗 **Impact**: ${highRiskFiles} high-risk file(s) with ${totalDependents} total dependents`;
+}
+
+/**
  * Build the PR description stats badge
  * Human-friendly summary with metrics table
  */
@@ -448,52 +652,12 @@ export function buildDescriptionBadge(
   deltas: ComplexityDelta[] | null
 ): string {
   const status = determineStatus(report, deltaSummary);
-
-  // Build metric breakdown table with violations and deltas
-  let metricTable = '';
-  if (report && report.summary.totalViolations > 0) {
-    // Count violations by metric type using collect.js
-    const byMetric = collect(Object.values(report.files))
-      .flatMap(f => f.violations)
-      .countBy('metricType')
-      .all() as unknown as Record<string, number>;
-
-    // Calculate delta by metric type using collect.js
-    // Note: collect.js groupBy returns groups needing sum() - types are limited
-    const deltaByMetric: Record<string, number> = deltas
-      ? collect(deltas)
-          .groupBy('metricType')
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .map((group: any) => group.sum('delta'))
-          .all() as unknown as Record<string, number>
-      : {};
-
-    // Build table rows (only show metrics with violations)
-    const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
-    const rows = collect(metricOrder)
-      .filter(metricType => byMetric[metricType] > 0)
-      .map(metricType => {
-        const emoji = getMetricEmoji(metricType);
-        const label = getMetricLabel(metricType);
-        const count = byMetric[metricType];
-        const delta = deltaByMetric[metricType] || 0;
-        const deltaStr = deltas ? (delta >= 0 ? `+${delta}` : `${delta}`) : '—';
-        return `| ${emoji} ${label} | ${count} | ${deltaStr} |`;
-      })
-      .all() as string[];
-
-    if (rows.length > 0) {
-      metricTable = `
-| Metric | Violations | Change |
-|--------|:----------:|:------:|
-${rows.join('\n')}
-`;
-    }
-  }
+  const metricTable = buildMetricTable(report, deltas);
+  const impactSummary = buildImpactSummary(report);
 
   return `### 👁️ Veille
 
-${status.emoji} ${status.message}
+${status.emoji} ${status.message}${impactSummary}
 ${metricTable}
 *[Veille](https://lien.dev) by Lien*`;
 }
@@ -585,7 +749,8 @@ See inline comments below for specific suggestions.
  */
 export function buildBatchedCommentsPrompt(
   violations: ComplexityViolation[],
-  codeSnippets: Map<string, string>
+  codeSnippets: Map<string, string>,
+  report: ComplexityReport
 ): string {
   const violationsText = violations
     .map((v, i) => {
@@ -601,10 +766,17 @@ export function buildBatchedCommentsPrompt(
       const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
       const halsteadContext = formatHalsteadContext(v);
 
+      // Add dependency context for this violation's file
+      const fileData = report.files[v.filepath];
+      const dependencyContext = fileData ? buildDependencyContext(fileData) : '';
+      
+      // Add file-level context (language, type, other violations)
+      const fileContext = fileData ? buildFileContext(v.filepath, fileData) : '';
+
       return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
 - **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
-- **Severity**: ${v.severity}${snippetSection}`;
+- **Severity**: ${v.severity}${fileContext}${dependencyContext}${snippetSection}`;
     })
     .join('\n\n');
 

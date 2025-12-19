@@ -8,7 +8,8 @@ import {
   VectorDB,
   ComplexityAnalyzer,
   loadConfig,
-  createDefaultConfig
+  createDefaultConfig,
+  RISK_ORDER
 } from "@liendev/core";
 
 // src/github.ts
@@ -399,12 +400,109 @@ function formatViolationLine(v, deltaMap) {
   const thresholdDisplay = formatThresholdValue(v.metricType, v.threshold);
   return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} ${valueDisplay}${deltaStr} (threshold: ${thresholdDisplay}) [${v.severity}]`;
 }
+function buildDependencyContext(fileData) {
+  if (!fileData.dependentCount || fileData.dependentCount === 0) {
+    return "";
+  }
+  const riskEmoji = {
+    low: "\u{1F7E2}",
+    medium: "\u{1F7E1}",
+    high: "\u{1F7E0}",
+    critical: "\u{1F534}"
+  };
+  const emoji = riskEmoji[fileData.riskLevel] || "\u26AA";
+  const hasDependentsList = fileData.dependents && fileData.dependents.length > 0;
+  const dependentsList = hasDependentsList ? fileData.dependents.slice(0, 10).map((f) => `  - ${f}`).join("\n") : "";
+  const complexityNote = fileData.dependentComplexityMetrics ? `
+- **Dependent complexity**: Avg ${fileData.dependentComplexityMetrics.averageComplexity.toFixed(1)}, Max ${fileData.dependentComplexityMetrics.maxComplexity}` : "";
+  const moreNote = hasDependentsList && fileData.dependents.length > 10 ? "\n  ... (and more)" : "";
+  return `
+**Dependency Impact**: ${emoji} ${fileData.riskLevel.toUpperCase()} risk
+- **Dependents**: ${fileData.dependentCount} file(s) import this
+${dependentsList ? `
+**Key dependents:**
+${dependentsList}${moreNote}` : ""}${complexityNote}
+- **Review focus**: Changes here affect ${fileData.dependentCount} other file(s). Extra scrutiny recommended.`;
+}
+function buildFileContext(filepath, fileData) {
+  const parts = [];
+  const languageFromViolation = fileData.violations[0]?.language;
+  if (languageFromViolation) {
+    const languageMap = {
+      "typescript": "TypeScript",
+      "javascript": "JavaScript",
+      "php": "PHP",
+      "python": "Python",
+      "go": "Go",
+      "rust": "Rust",
+      "java": "Java",
+      "ruby": "Ruby",
+      "swift": "Swift",
+      "kotlin": "Kotlin",
+      "csharp": "C#",
+      "scala": "Scala",
+      "cpp": "C++",
+      "c": "C"
+    };
+    const displayName = languageMap[languageFromViolation.toLowerCase()] || languageFromViolation;
+    parts.push(`Language: ${displayName}`);
+  } else {
+    const ext = filepath.split(".").pop()?.toLowerCase();
+    const languageHints = {
+      "ts": "TypeScript",
+      "tsx": "TypeScript React",
+      "js": "JavaScript",
+      "jsx": "JavaScript React",
+      "mjs": "JavaScript",
+      "cjs": "JavaScript",
+      "php": "PHP",
+      "py": "Python",
+      "go": "Go",
+      "rs": "Rust",
+      "java": "Java",
+      "rb": "Ruby",
+      "swift": "Swift",
+      "kt": "Kotlin",
+      "cs": "C#",
+      "scala": "Scala",
+      "cpp": "C++",
+      "cc": "C++",
+      "cxx": "C++",
+      "c": "C"
+    };
+    if (ext && languageHints[ext]) {
+      parts.push(`Language: ${languageHints[ext]}`);
+    }
+  }
+  const pathLower = filepath.toLowerCase();
+  if (pathLower.includes("controller")) parts.push("Type: Controller");
+  if (pathLower.includes("service")) parts.push("Type: Service");
+  if (pathLower.includes("component")) parts.push("Type: Component");
+  if (pathLower.includes("middleware")) parts.push("Type: Middleware");
+  if (pathLower.includes("handler")) parts.push("Type: Handler");
+  if (pathLower.includes("util") || pathLower.includes("helper")) parts.push("Type: Utility");
+  if (pathLower.includes("_test.") || pathLower.endsWith("_test.go")) parts.push("Type: Test");
+  if (pathLower.includes("/model/") || pathLower.includes("/models/")) parts.push("Type: Model");
+  if (pathLower.includes("/repository/") || pathLower.includes("/repositories/")) parts.push("Type: Repository");
+  if (fileData.violations.length > 1) {
+    parts.push(`${fileData.violations.length} total violations in this file`);
+  }
+  return parts.length > 0 ? `
+*Context: ${parts.join(", ")}*` : "";
+}
 function buildViolationsSummary(files, deltaMap) {
   return Object.entries(files).filter(([_, data]) => data.violations.length > 0).map(([filepath, data]) => {
     const violationList = data.violations.map((v) => formatViolationLine(v, deltaMap)).join("\n");
-    return `**${filepath}** (risk: ${data.riskLevel})
-${violationList}`;
+    const dependencyContext = buildDependencyContext(data);
+    const fileContext = buildFileContext(filepath, data);
+    return `**${filepath}** (risk: ${data.riskLevel})${fileContext}
+${violationList}${dependencyContext}`;
   }).join("\n\n");
+}
+function formatDeltaChange(d) {
+  const from = d.baseComplexity ?? "new";
+  const to = d.headComplexity ?? "removed";
+  return `  - ${d.symbolName}: ${from} \u2192 ${to} (${formatDelta(d.delta)})`;
 }
 function buildDeltaContext(deltas) {
   if (!deltas || deltas.length === 0) return "";
@@ -412,11 +510,6 @@ function buildDeltaContext(deltas) {
   const degraded = deltas.filter((d) => (d.severity === "error" || d.severity === "warning") && d.delta > 0);
   const newFuncs = deltas.filter((d) => d.severity === "new");
   const deleted = deltas.filter((d) => d.severity === "deleted");
-  const formatChange = (d) => {
-    const from = d.baseComplexity ?? "new";
-    const to = d.headComplexity ?? "removed";
-    return `  - ${d.symbolName}: ${from} \u2192 ${to} (${formatDelta(d.delta)})`;
-  };
   const sections = [
     `
 ## Complexity Changes (vs base branch)`,
@@ -425,15 +518,21 @@ function buildDeltaContext(deltas) {
     `- **New**: ${newFuncs.length} new complex function(s)`,
     `- **Removed**: ${deleted.length} complex function(s) deleted`
   ];
-  if (degraded.length > 0) sections.push(`
+  if (degraded.length > 0) {
+    sections.push(`
 Functions that got worse:
-${degraded.map(formatChange).join("\n")}`);
-  if (improved.length > 0) sections.push(`
+${degraded.map(formatDeltaChange).join("\n")}`);
+  }
+  if (improved.length > 0) {
+    sections.push(`
 Functions that improved:
-${improved.map(formatChange).join("\n")}`);
-  if (newFuncs.length > 0) sections.push(`
+${improved.map(formatDeltaChange).join("\n")}`);
+  }
+  if (newFuncs.length > 0) {
+    sections.push(`
 New complex functions:
 ${newFuncs.map((d) => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join("\n")}`);
+  }
   return sections.join("\n");
 }
 function buildSnippetsSection(codeSnippets) {
@@ -472,9 +571,15 @@ ${snippetsSection || "_No code snippets available_"}
 
 For each violation:
 1. **Explain** why this complexity is problematic in this specific context
+   - Consider the file type (controller, service, component, etc.) and language
+   - Note if this is the only violation in the file or one of many
+   - Consider dependency impact - high-risk files need extra scrutiny
 2. **Suggest** concrete refactoring steps (not generic advice like "break into smaller functions")
+   - Be specific to the language and framework patterns
+   - Consider file type conventions (e.g., controllers often delegate to services)
 3. **Prioritize** which violations are most important to address - focus on functions that got WORSE (higher delta)
 4. If the complexity seems justified for the use case, say so
+   - Some patterns (orchestration, state machines) may legitimately be complex
 5. Celebrate improvements! If a function got simpler, acknowledge it.
 
 Format your response as a PR review comment with:
@@ -483,6 +588,23 @@ Format your response as a PR review comment with:
 - Prioritized list of recommended changes
 
 Be concise but actionable. Focus on the highest-impact improvements.`;
+}
+function buildNoViolationsMessage(prContext, deltas = null) {
+  let deltaMessage = "";
+  if (deltas && deltas.length > 0) {
+    const improved = deltas.filter((d) => d.severity === "improved" || d.severity === "deleted");
+    if (improved.length > 0) {
+      deltaMessage = `
+
+\u{1F389} **Great job!** This PR improved complexity in ${improved.length} function(s).`;
+    }
+  }
+  return `<!-- lien-ai-review -->
+## \u2705 Lien Complexity Analysis
+
+No complexity violations found in PR #${prContext.pullNumber}.
+
+All analyzed functions are within the configured complexity threshold.${deltaMessage}`;
 }
 function groupDeltasByMetric(deltas) {
   return collect2(deltas).groupBy("metricType").map((group) => group.sum("delta")).all();
@@ -540,7 +662,7 @@ function formatFallbackNote(isFallback) {
 > \u{1F4A1} *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*
 `;
 }
-function formatReviewComment(aiReview, report, isFallback = false, tokenUsage, deltas) {
+function formatReviewComment(aiReview, report, isFallback = false, tokenUsage, deltas, uncoveredNote = "") {
   const { summary } = report;
   const deltaDisplay = formatDeltaDisplay(deltas);
   const fallbackNote = formatFallbackNote(isFallback);
@@ -554,7 +676,7 @@ ${summary.totalViolations} issue${summary.totalViolations === 1 ? "" : "s"} spot
 
 ${aiReview}
 
----
+---${uncoveredNote}
 
 <details>
 <summary>\u{1F4CA} Analysis Details</summary>
@@ -622,32 +744,45 @@ function getMetricEmoji(metricType) {
       return "\u{1F4CA}";
   }
 }
-function buildDescriptionBadge(report, deltaSummary, deltas) {
-  const status = determineStatus(report, deltaSummary);
-  let metricTable = "";
-  if (report && report.summary.totalViolations > 0) {
-    const byMetric = collect2(Object.values(report.files)).flatMap((f) => f.violations).countBy("metricType").all();
-    const deltaByMetric = deltas ? collect2(deltas).groupBy("metricType").map((group) => group.sum("delta")).all() : {};
-    const metricOrder = ["cyclomatic", "cognitive", "halstead_effort", "halstead_bugs"];
-    const rows = collect2(metricOrder).filter((metricType) => byMetric[metricType] > 0).map((metricType) => {
-      const emoji = getMetricEmoji(metricType);
-      const label = getMetricLabel(metricType);
-      const count = byMetric[metricType];
-      const delta = deltaByMetric[metricType] || 0;
-      const deltaStr = deltas ? delta >= 0 ? `+${delta}` : `${delta}` : "\u2014";
-      return `| ${emoji} ${label} | ${count} | ${deltaStr} |`;
-    }).all();
-    if (rows.length > 0) {
-      metricTable = `
+function buildMetricTable(report, deltas) {
+  if (!report || report.summary.totalViolations === 0) return "";
+  const byMetric = collect2(Object.values(report.files)).flatMap((f) => f.violations).countBy("metricType").all();
+  const deltaByMetric = deltas ? collect2(deltas).groupBy("metricType").map((group) => group.sum("delta")).all() : {};
+  const metricOrder = ["cyclomatic", "cognitive", "halstead_effort", "halstead_bugs"];
+  const rows = collect2(metricOrder).filter((metricType) => byMetric[metricType] > 0).map((metricType) => {
+    const emoji = getMetricEmoji(metricType);
+    const label = getMetricLabel(metricType);
+    const count = byMetric[metricType];
+    const delta = deltaByMetric[metricType] || 0;
+    const deltaStr = deltas ? delta >= 0 ? `+${delta}` : `${delta}` : "\u2014";
+    return `| ${emoji} ${label} | ${count} | ${deltaStr} |`;
+  }).all();
+  if (rows.length === 0) return "";
+  return `
 | Metric | Violations | Change |
 |--------|:----------:|:------:|
 ${rows.join("\n")}
 `;
-    }
-  }
+}
+function buildImpactSummary(report) {
+  if (!report) return "";
+  const filesWithDependents = Object.values(report.files).filter((f) => f.dependentCount && f.dependentCount > 0);
+  if (filesWithDependents.length === 0) return "";
+  const totalDependents = filesWithDependents.reduce((sum, f) => sum + (f.dependentCount || 0), 0);
+  const highRiskFiles = filesWithDependents.filter(
+    (f) => ["high", "critical"].includes(f.riskLevel)
+  ).length;
+  if (highRiskFiles === 0) return "";
+  return `
+\u{1F517} **Impact**: ${highRiskFiles} high-risk file(s) with ${totalDependents} total dependents`;
+}
+function buildDescriptionBadge(report, deltaSummary, deltas) {
+  const status = determineStatus(report, deltaSummary);
+  const metricTable = buildMetricTable(report, deltas);
+  const impactSummary = buildImpactSummary(report);
   return `### \u{1F441}\uFE0F Veille
 
-${status.emoji} ${status.message}
+${status.emoji} ${status.message}${impactSummary}
 ${metricTable}
 *[Veille](https://lien.dev) by Lien*`;
 }
@@ -658,7 +793,7 @@ function formatHalsteadContext(violation) {
   return `
 **Halstead Metrics**: Volume: ${details.volume?.toLocaleString()}, Difficulty: ${details.difficulty?.toFixed(1)}, Effort: ${details.effort?.toLocaleString()}, Est. bugs: ${details.bugs?.toFixed(3)}`;
 }
-function buildBatchedCommentsPrompt(violations, codeSnippets) {
+function buildBatchedCommentsPrompt(violations, codeSnippets, report) {
   const violationsText = violations.map((v, i) => {
     const key = `${v.filepath}::${v.symbolName}`;
     const snippet = codeSnippets.get(key);
@@ -672,10 +807,13 @@ ${snippet}
     const valueDisplay = formatComplexityValue(metricType, v.complexity);
     const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
     const halsteadContext = formatHalsteadContext(v);
+    const fileData = report.files[v.filepath];
+    const dependencyContext = fileData ? buildDependencyContext(fileData) : "";
+    const fileContext = fileData ? buildFileContext(v.filepath, fileData) : "";
     return `### ${i + 1}. ${v.filepath}::${v.symbolName}
 - **Function**: \`${v.symbolName}\` (${v.symbolType})
 - **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
-- **Severity**: ${v.severity}${snippetSection}`;
+- **Severity**: ${v.severity}${fileContext}${dependencyContext}${snippetSection}`;
   }).join("\n\n");
   const jsonKeys = violations.map((v) => `  "${v.filepath}::${v.symbolName}": "your comment here"`).join(",\n");
   return `You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.
@@ -877,12 +1015,12 @@ function mapCommentsToViolations(commentsMap, violations) {
   }
   return results;
 }
-async function generateLineComments(violations, codeSnippets, apiKey, model) {
+async function generateLineComments(violations, codeSnippets, apiKey, model, report) {
   if (violations.length === 0) {
     return /* @__PURE__ */ new Map();
   }
   core3.info(`Generating comments for ${violations.length} violations in single batch`);
-  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets);
+  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets, report);
   const data = await callBatchedCommentsAPI(prompt, apiKey, model);
   if (data.usage) {
     trackUsage(data.usage);
@@ -1031,11 +1169,20 @@ async function runComplexityAnalysis(files, threshold) {
     return null;
   }
 }
+function prioritizeViolations(violations, report) {
+  return violations.sort((a, b) => {
+    const fileA = report.files[a.filepath];
+    const fileB = report.files[b.filepath];
+    const impactA = (fileA?.dependentCount || 0) * 10 + RISK_ORDER[fileA?.riskLevel || "low"];
+    const impactB = (fileB?.dependentCount || 0) * 10 + RISK_ORDER[fileB?.riskLevel || "low"];
+    if (impactB !== impactA) return impactB - impactA;
+    const severityOrder = { error: 2, warning: 1 };
+    return severityOrder[b.severity] - severityOrder[a.severity];
+  });
+}
 async function prepareViolationsForReview(report, octokit, prContext) {
-  const violations = Object.values(report.files).flatMap((fileData) => fileData.violations).sort((a, b) => {
-    if (a.severity !== b.severity) return a.severity === "error" ? -1 : 1;
-    return b.complexity - a.complexity;
-  }).slice(0, 10);
+  const allViolations = Object.values(report.files).flatMap((fileData) => fileData.violations);
+  const violations = prioritizeViolations(allViolations, report).slice(0, 10);
   const codeSnippets = /* @__PURE__ */ new Map();
   for (const violation of violations) {
     const snippet = await getFileContent(
@@ -1077,6 +1224,107 @@ async function analyzeBaseBranch(baseSha, filesToAnalyze, threshold) {
     return null;
   }
 }
+async function getBaselineReport(config, prContext, filesToAnalyze) {
+  if (config.enableDeltaTracking) {
+    core4.info("\u{1F504} Delta tracking enabled - analyzing base branch...");
+    return await analyzeBaseBranch(prContext.baseSha, filesToAnalyze, config.threshold);
+  }
+  if (config.baselineComplexityPath) {
+    core4.warning("baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.");
+    return loadBaselineComplexity(config.baselineComplexityPath);
+  }
+  return null;
+}
+async function orchestrateAnalysis(setup) {
+  const filesToAnalyze = await getFilesToAnalyze(setup.octokit, setup.prContext);
+  if (filesToAnalyze.length === 0) {
+    core4.info("No analyzable files found, skipping review");
+    return null;
+  }
+  const baselineReport = await getBaselineReport(setup.config, setup.prContext, filesToAnalyze);
+  const currentReport = await runComplexityAnalysis(filesToAnalyze, setup.config.threshold);
+  if (!currentReport) {
+    core4.warning("Failed to get complexity report");
+    return null;
+  }
+  core4.info(`Analysis complete: ${currentReport.summary.totalViolations} violations found`);
+  const deltas = baselineReport ? calculateDeltas(baselineReport, currentReport, filesToAnalyze) : null;
+  return {
+    currentReport,
+    baselineReport,
+    deltas,
+    filesToAnalyze
+  };
+}
+function setAnalysisOutputs(report, deltaSummary) {
+  if (deltaSummary) {
+    core4.setOutput("total_delta", deltaSummary.totalDelta);
+    core4.setOutput("improved", deltaSummary.improved);
+    core4.setOutput("degraded", deltaSummary.degraded);
+  }
+  core4.setOutput("violations", report.summary.totalViolations);
+  core4.setOutput("errors", report.summary.bySeverity.error);
+  core4.setOutput("warnings", report.summary.bySeverity.warning);
+}
+async function handleAnalysisOutputs(result, setup) {
+  const deltaSummary = result.deltas ? calculateDeltaSummary(result.deltas) : null;
+  if (deltaSummary) {
+    logDeltaSummary(deltaSummary);
+  }
+  setAnalysisOutputs(result.currentReport, deltaSummary);
+  const badge = buildDescriptionBadge(result.currentReport, deltaSummary, result.deltas);
+  await updatePRDescription(setup.octokit, setup.prContext, badge);
+}
+async function postReviewIfNeeded(result, setup) {
+  if (result.currentReport.summary.totalViolations === 0) {
+    core4.info("No complexity violations found");
+    const successMessage = buildNoViolationsMessage(setup.prContext, result.deltas);
+    await postPRComment(setup.octokit, setup.prContext, successMessage);
+    return;
+  }
+  const { violations, codeSnippets } = await prepareViolationsForReview(
+    result.currentReport,
+    setup.octokit,
+    setup.prContext
+  );
+  resetTokenUsage();
+  if (setup.config.reviewStyle === "summary") {
+    const diffLines = await getPRDiffLines(setup.octokit, setup.prContext);
+    const deltaMap = buildDeltaMap2(result.deltas);
+    const { uncovered } = partitionViolationsByDiff(violations, diffLines);
+    const uncoveredNote = buildUncoveredNote(uncovered, deltaMap);
+    await postSummaryReview(
+      setup.octokit,
+      setup.prContext,
+      result.currentReport,
+      codeSnippets,
+      setup.config,
+      false,
+      result.deltas,
+      uncoveredNote
+    );
+  } else {
+    await postLineReview(
+      setup.octokit,
+      setup.prContext,
+      result.currentReport,
+      violations,
+      codeSnippets,
+      setup.config,
+      result.deltas
+    );
+  }
+}
+function handleError(error2) {
+  const message = error2 instanceof Error ? error2.message : "An unexpected error occurred";
+  const stack = error2 instanceof Error ? error2.stack : "";
+  core4.error(`Action failed: ${message}`);
+  if (stack) {
+    core4.error(`Stack trace:
+${stack}`);
+  }
+  core4.setFailed(message);
+}
 async function run() {
   try {
     core4.info("\u{1F680} Starting Lien AI Code Review...");
@@ -1087,59 +1335,14 @@ async function run() {
       core4.info("\u26A0\uFE0F Setup returned null, exiting gracefully");
       return;
     }
-    const { config, prContext, octokit } = setup;
-    const filesToAnalyze = await getFilesToAnalyze(octokit, prContext);
-    if (filesToAnalyze.length === 0) {
-      core4.info("No analyzable files found, skipping review");
+    const analysisResult = await orchestrateAnalysis(setup);
+    if (!analysisResult) {
       return;
     }
-    let baselineReport = null;
-    if (config.enableDeltaTracking) {
-      core4.info("\u{1F504} Delta tracking enabled - analyzing base branch...");
-      baselineReport = await analyzeBaseBranch(prContext.baseSha, filesToAnalyze, config.threshold);
-    } else if (config.baselineComplexityPath) {
-      core4.warning("baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.");
-      baselineReport = loadBaselineComplexity(config.baselineComplexityPath);
-    }
-    const report = await runComplexityAnalysis(filesToAnalyze, config.threshold);
-    if (!report) {
-      core4.warning("Failed to get complexity report");
-      return;
-    }
-    core4.info(`Analysis complete: ${report.summary.totalViolations} violations found`);
-    const deltas = baselineReport ? calculateDeltas(baselineReport, report, filesToAnalyze) : null;
-    const deltaSummary = deltas ? calculateDeltaSummary(deltas) : null;
-    if (deltaSummary) {
-      logDeltaSummary(deltaSummary);
-      core4.setOutput("total_delta", deltaSummary.totalDelta);
-      core4.setOutput("improved", deltaSummary.improved);
-      core4.setOutput("degraded", deltaSummary.degraded);
-    }
-    const badge = buildDescriptionBadge(report, deltaSummary, deltas);
-    await updatePRDescription(octokit, prContext, badge);
-    if (report.summary.totalViolations === 0) {
-      core4.info("No complexity violations found");
-      return;
-    }
-    const { violations, codeSnippets } = await prepareViolationsForReview(report, octokit, prContext);
-    resetTokenUsage();
-    if (config.reviewStyle === "summary") {
-      await postSummaryReview(octokit, prContext, report, codeSnippets, config, false, deltas);
-    } else {
-      await postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas);
-    }
-    core4.setOutput("violations", report.summary.totalViolations);
-    core4.setOutput("errors", report.summary.bySeverity.error);
-    core4.setOutput("warnings", report.summary.bySeverity.warning);
+    await handleAnalysisOutputs(analysisResult, setup);
+    await postReviewIfNeeded(analysisResult, setup);
   } catch (error2) {
-    const message = error2 instanceof Error ? error2.message : "An unexpected error occurred";
-    const stack = error2 instanceof Error ? error2.stack : "";
-    core4.error(`Action failed: ${message}`);
-    if (stack) {
-      core4.error(`Stack trace:
-${stack}`);
-    }
-    core4.setFailed(message);
+    handleError(error2);
   }
 }
 function findCommentLine(violation, diffLines) {
@@ -1284,69 +1487,104 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
 
 *[Veille](https://lien.dev) by Lien*`;
 }
-async function postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas = null) {
-  const diffLines = await getPRDiffLines(octokit, prContext);
-  core4.info(`Diff covers ${diffLines.size} files`);
-  const violationsWithLines = [];
-  const uncoveredViolations = [];
+function partitionViolationsByDiff(violations, diffLines) {
+  const withLines = [];
+  const uncovered = [];
   for (const v of violations) {
     const commentLine = findCommentLine(v, diffLines);
     if (commentLine !== null) {
-      violationsWithLines.push({ violation: v, commentLine });
+      withLines.push({ violation: v, commentLine });
     } else {
-      uncoveredViolations.push(v);
+      uncovered.push(v);
     }
   }
-  core4.info(
-    `${violationsWithLines.length}/${violations.length} violations can have inline comments (${uncoveredViolations.length} outside diff)`
-  );
-  const deltaMap = buildDeltaMap2(deltas);
-  const newOrDegradedViolations = violationsWithLines.filter(({ violation }) => {
+  return { withLines, uncovered };
+}
+function filterNewOrDegraded(violationsWithLines, deltaMap) {
+  return violationsWithLines.filter(({ violation }) => {
     const key = createDeltaKey2(violation);
     const delta = deltaMap.get(key);
     return !delta || delta.severity === "new" || delta.delta > 0;
   });
-  const skippedCount = violationsWithLines.length - newOrDegradedViolations.length;
-  if (skippedCount > 0) {
-    core4.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
-  }
-  if (newOrDegradedViolations.length === 0) {
-    core4.info("No new or degraded violations to comment on");
-    if (violationsWithLines.length > 0) {
-      const uncoveredNote2 = buildUncoveredNote(uncoveredViolations, deltaMap);
-      const skippedInDiff = violationsWithLines.filter(({ violation }) => {
-        const key = createDeltaKey2(violation);
-        const delta = deltaMap.get(key);
-        return delta && delta.severity !== "new" && delta.delta === 0;
-      }).map((v) => v.violation);
-      const skippedNote2 = buildSkippedNote(skippedInDiff);
-      const summaryBody2 = buildReviewSummary(report, deltas, uncoveredNote2 + skippedNote2);
-      await postPRComment(octokit, prContext, summaryBody2);
-    }
+}
+function getSkippedViolations(violationsWithLines, deltaMap) {
+  return violationsWithLines.filter(({ violation }) => {
+    const key = createDeltaKey2(violation);
+    const delta = deltaMap.get(key);
+    return delta && delta.severity !== "new" && delta.delta === 0;
+  }).map((v) => v.violation);
+}
+function processViolationsForReview(violations, diffLines, deltaMap) {
+  const { withLines, uncovered } = partitionViolationsByDiff(violations, diffLines);
+  const newOrDegraded = filterNewOrDegraded(withLines, deltaMap);
+  const skipped = getSkippedViolations(withLines, deltaMap);
+  return { withLines, uncovered, newOrDegraded, skipped };
+}
+async function handleNoNewViolations(octokit, prContext, violationsWithLines, uncoveredViolations, deltaMap, report, deltas) {
+  if (violationsWithLines.length === 0) {
     return;
   }
-  const commentableViolations = newOrDegradedViolations.map((v) => v.violation);
+  const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
+  const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
+  const skippedNote = buildSkippedNote(skippedInDiff);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+  await postPRComment(octokit, prContext, summaryBody);
+}
+async function generateAndPostReview(octokit, prContext, processed, deltaMap, codeSnippets, config, report, deltas) {
+  const commentableViolations = processed.newOrDegraded.map((v) => v.violation);
   core4.info(`Generating AI comments for ${commentableViolations.length} new/degraded violations...`);
   const aiComments = await generateLineComments(
     commentableViolations,
     codeSnippets,
     config.openrouterApiKey,
-    config.model
+    config.model,
+    report
   );
-  const lineComments = buildLineComments(newOrDegradedViolations, aiComments, deltaMap);
+  const lineComments = buildLineComments(processed.newOrDegraded, aiComments, deltaMap);
   core4.info(`Built ${lineComments.length} line comments for new/degraded violations`);
-  const skippedViolations = violationsWithLines.filter(({ violation }) => {
-    const key = createDeltaKey2(violation);
-    const delta = deltaMap.get(key);
-    return delta && delta.severity !== "new" && delta.delta === 0;
-  }).map((v) => v.violation);
-  const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
-  const skippedNote = buildSkippedNote(skippedViolations);
+  const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
+  const skippedNote = buildSkippedNote(processed.skipped);
   const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
   await postPRReview(octokit, prContext, lineComments, summaryBody);
   core4.info(`Posted review with ${lineComments.length} line comments`);
 }
-async function postSummaryReview(octokit, prContext, report, codeSnippets, config, isFallback = false, deltas = null) {
+async function postLineReview(octokit, prContext, report, violations, codeSnippets, config, deltas = null) {
+  const diffLines = await getPRDiffLines(octokit, prContext);
+  core4.info(`Diff covers ${diffLines.size} files`);
+  const deltaMap = buildDeltaMap2(deltas);
+  const processed = processViolationsForReview(violations, diffLines, deltaMap);
+  core4.info(
+    `${processed.withLines.length}/${violations.length} violations can have inline comments (${processed.uncovered.length} outside diff)`
+  );
+  const skippedCount = processed.withLines.length - processed.newOrDegraded.length;
+  if (skippedCount > 0) {
+    core4.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
+  }
+  if (processed.newOrDegraded.length === 0) {
+    core4.info("No new or degraded violations to comment on");
+    await handleNoNewViolations(
+      octokit,
+      prContext,
+      processed.withLines,
+      processed.uncovered,
+      deltaMap,
+      report,
+      deltas
+    );
+    return;
+  }
+  await generateAndPostReview(
+    octokit,
+    prContext,
+    processed,
+    deltaMap,
+    codeSnippets,
+    config,
+    report,
+    deltas
+  );
+}
+async function postSummaryReview(octokit, prContext, report, codeSnippets, config, isFallback = false, deltas = null, uncoveredNote = "") {
   const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas);
   core4.debug(`Prompt length: ${prompt.length} characters`);
   const aiReview = await generateReview(
@@ -1355,7 +1593,7 @@ async function postSummaryReview(octokit, prContext, report, codeSnippets, confi
     config.model
   );
   const usage = getTokenUsage();
-  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas);
+  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas, uncoveredNote);
   await postPRComment(octokit, prContext, comment);
   core4.info("Successfully posted AI review summary comment");
 }
