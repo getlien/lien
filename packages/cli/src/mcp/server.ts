@@ -56,7 +56,17 @@ async function initializeDatabase(
   const embeddings = new LocalEmbeddings();
   
   // Create vector DB using global config (auto-detects backend and orgId)
+  log('Creating vector database...');
   const vectorDB = await createVectorDB(rootDir);
+  
+  // Verify we got a valid instance
+  if (!vectorDB) {
+    throw new Error('createVectorDB returned undefined or null');
+  }
+  
+  if (typeof vectorDB.initialize !== 'function') {
+    throw new Error(`Invalid vectorDB instance: ${vectorDB.constructor?.name || 'unknown'}. Expected VectorDBInterface but got: ${JSON.stringify(Object.keys(vectorDB))}`);
+  }
 
   log('Loading embedding model...');
   await embeddings.initialize();
@@ -262,10 +272,25 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   earlyLog('Initializing MCP server...');
 
   // Initialize core components
-  const { embeddings, vectorDB } = await initializeDatabase(rootDir, earlyLog).catch(error => {
+  let embeddings: LocalEmbeddings;
+  let vectorDB: VectorDBInterface;
+  
+  try {
+    const result = await initializeDatabase(rootDir, earlyLog);
+    embeddings = result.embeddings;
+    vectorDB = result.vectorDB;
+    
+    // Verify vectorDB has required methods
+    if (!vectorDB || typeof vectorDB.initialize !== 'function') {
+      throw new Error(`Invalid vectorDB instance: ${vectorDB?.constructor?.name || 'undefined'}. Missing initialize method.`);
+    }
+  } catch (error) {
     console.error(`Failed to initialize: ${error}`);
+    if (error instanceof Error && error.stack) {
+      console.error(error.stack);
+    }
     process.exit(1);
-  });
+  }
   
   // Create MCP server with logging capability
   const server = new Server(
