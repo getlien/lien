@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import { initCommand } from './init.js';
-import { fileURLToPath } from 'url';
 
 describe('initCommand', () => {
   let testDir: string;
