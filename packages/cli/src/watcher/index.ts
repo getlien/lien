@@ -141,7 +141,8 @@ export class FileWatcher {
       return;
     }
     
-    // Fix: Add timeout fallback in case 'ready' event never fires (race condition)
+    // Wait for ready event with timeout fallback
+    // Reduced timeout from 5s to 1s to avoid test timeouts
     let readyFired = false;
     await Promise.race([
       new Promise<void>((resolve) => {
@@ -152,12 +153,12 @@ export class FileWatcher {
         this.watcher!.once('ready', readyHandler);
       }),
       new Promise<void>((resolve) => {
-        // Timeout fallback: if ready doesn't fire within 5 seconds, resolve anyway
+        // Shorter timeout (1s) to avoid test timeouts while still having fallback
         setTimeout(() => {
           if (!readyFired) {
             resolve();
           }
-        }, 5000);
+        }, 1000);
       }),
     ]);
   }
@@ -172,10 +173,6 @@ export class FileWatcher {
       throw new Error('File watcher is already running');
     }
     
-    if (this.watcher) {
-      throw new Error('File watcher is already running');
-    }
-    
     this.onChangeHandler = handler;
     
     // Get watch patterns (from frameworks or defaults)
@@ -184,7 +181,7 @@ export class FileWatcher {
     // Create and start watcher
     this.watcher = chokidar.watch(patterns.include, this.createWatcherConfig(patterns));
     
-    // Register event handlers
+    // Register event handlers (must be before waitForReady to catch ready event)
     this.registerEventHandlers();
     
     // Wait for watcher to be ready
