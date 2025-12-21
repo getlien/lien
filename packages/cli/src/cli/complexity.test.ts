@@ -372,28 +372,23 @@ describe('complexityCommand', () => {
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
 
-  it('should reject negative threshold values', async () => {
+  it('should warn about threshold flags (not supported)', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    
+    // Mock index check and actual scan
+    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]);
+    mockVectorDB.scanAll.mockResolvedValue([]);
+
     await complexityCommand({
       format: 'text',
       threshold: '-5',
     });
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Invalid --threshold value "-5"')
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Threshold overrides via CLI flags are not supported')
     );
-    expect(processExitSpy).toHaveBeenCalledWith(1);
-  });
-
-  it('should reject zero threshold value', async () => {
-    await complexityCommand({
-      format: 'text',
-      threshold: '0',
-    });
-
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Invalid --threshold value "0"')
-    );
-    expect(processExitSpy).toHaveBeenCalledWith(1);
+    
+    consoleWarnSpy.mockRestore();
   });
 
   it('should handle missing index gracefully', async () => {
