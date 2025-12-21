@@ -105,13 +105,7 @@ export { _defaultConfig as defaultConfig, isLegacyConfig, isModernConfig };
  */
 export type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance };
 
-// Convenience re-exports
-export const loadConfig = (rootDir?: string) => _configService.load(rootDir);
-export const saveConfig = (rootDir: string, config: LienConfig) => 
-  _configService.save(rootDir, config);
-/**
- * @deprecated Per-project config is no longer required. Lien uses defaults automatically.
- */
+// Per-project config removed - no longer needed
 export const createDefaultConfig = () => _defaultConfig;
 
 // =============================================================================
