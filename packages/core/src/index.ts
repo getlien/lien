@@ -13,7 +13,6 @@
  *   indexCodebase,
  *   VectorDB,
  *   ComplexityAnalyzer,
- *   loadConfig,
  * } from '@liendev/core';
  * 
  * // Index a codebase
@@ -21,8 +20,7 @@
  * 
  * // Run complexity analysis
  * const db = await VectorDB.load('/path/to/project');
- * const config = await loadConfig('/path/to/project');
- * const analyzer = new ComplexityAnalyzer(db, config);
+ * const analyzer = new ComplexityAnalyzer(db);
  * const report = await analyzer.analyze();
  * ```
  */
