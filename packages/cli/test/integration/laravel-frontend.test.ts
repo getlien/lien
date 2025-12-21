@@ -113,7 +113,6 @@ const app = createApp({});`
 
     // Build full config
     const fullConfig: LienConfig = {
-      version: '0.3.0',
       core: {
         chunkSize: 75,
         chunkOverlap: 10,

@@ -1,7 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { LienConfig, LegacyLienConfig, FrameworkInstance, defaultConfig } from './schema.js';
-import { CURRENT_CONFIG_VERSION } from '../constants.js';
 
 /**
  * Checks if a config object needs migration from v0.2.0 to v0.3.0
@@ -31,10 +30,7 @@ export function needsMigration(config: any): boolean {
     return true;
   }
 
-  // If version is explicitly < 0.3.0
-  if (config.version && config.version.startsWith('0.2')) {
-    return true;
-  }
+  // Version field removed - check structure instead
 
   return false;
 }
@@ -42,12 +38,10 @@ export function needsMigration(config: any): boolean {
 /**
  * Migrates a v0.2.0 config to v0.3.0+ format
  * @param oldConfig - The old config to migrate
- * @param targetVersion - The version to set in the migrated config (defaults to CURRENT_CONFIG_VERSION)
  */
-export function migrateConfig(oldConfig: Partial<LegacyLienConfig | LienConfig>, targetVersion?: string): LienConfig {
+export function migrateConfig(oldConfig: Partial<LegacyLienConfig | LienConfig>): LienConfig {
   // Start with default config structure
   const newConfig: LienConfig = {
-    version: targetVersion ?? CURRENT_CONFIG_VERSION,
     core: {
       chunkSize: (oldConfig as any).indexing?.chunkSize ?? (oldConfig as any).core?.chunkSize ?? defaultConfig.core.chunkSize,
       chunkOverlap: (oldConfig as any).indexing?.chunkOverlap ?? (oldConfig as any).core?.chunkOverlap ?? defaultConfig.core.chunkOverlap,

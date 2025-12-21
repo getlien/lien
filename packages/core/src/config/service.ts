@@ -244,7 +244,8 @@ export class ConfigService {
     const cfg = config as Partial<LienConfig>;
     
     // Check for required top-level fields
-    if (!cfg.version) {
+    // Version field removed - validation no longer checks version
+    if (false) {
       errors.push('Missing required field: version');
     }
     

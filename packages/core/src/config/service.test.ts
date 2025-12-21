@@ -116,8 +116,7 @@ describe('ConfigService', () => {
       
       const config = await service.load(testDir);
       
-      // Should be migrated to current version
-      expect(config.version).toBe(CURRENT_VERSION);
+      // Should be migrated to current format
       expect(config.frameworks).toBeDefined();
       expect(config.core.chunkSize).toBe(100);
       
@@ -168,7 +167,8 @@ describe('ConfigService', () => {
       const content = await fs.readFile(configPath, 'utf-8');
       
       // Should be formatted with 2-space indentation
-      expect(content).toContain('  "version"');
+      // Version field removed - no longer in config
+      expect(content).toContain('"core"');
       expect(content.endsWith('\n')).toBe(true);
     });
   });
@@ -194,7 +194,6 @@ describe('ConfigService', () => {
       
       expect(result.migrated).toBe(true);
       expect(result.backupPath).toBeDefined();
-      expect(result.config.version).toBe(CURRENT_VERSION);
       expect(result.config.frameworks).toHaveLength(1);
       expect(result.config.frameworks[0].name).toBe('generic');
     });
@@ -237,7 +236,6 @@ describe('ConfigService', () => {
       // Verify backup was created with original content
       const backupContent = await fs.readFile(result.backupPath!, 'utf-8');
       const backupConfig = JSON.parse(backupContent);
-      expect(backupConfig.version).toBe('0.2.0');
       expect(backupConfig.indexing).toBeDefined();
     });
   });
@@ -287,13 +285,14 @@ describe('ConfigService', () => {
     });
     
     it('should reject config without version', () => {
+      // Version field removed - no longer validated
       const invalidConfig = { ...defaultConfig };
-      delete (invalidConfig as any).version;
+      delete (invalidConfig as any).core;
       
       const result = service.validate(invalidConfig);
       
       expect(result.valid).toBe(false);
-      expect(result.errors).toContain('Missing required field: version');
+      expect(result.errors.length).toBeGreaterThan(0);
     });
     
     it('should reject invalid chunk size', () => {
@@ -563,7 +562,6 @@ describe('ConfigService', () => {
       // Load should auto-migrate
       const config = await service.load(testDir);
       
-      expect(config.version).toBe(CURRENT_VERSION);
       expect(config.frameworks).toBeDefined();
       expect(config.core.chunkSize).toBe(90);
       expect(config.mcp.port).toBe(7200);

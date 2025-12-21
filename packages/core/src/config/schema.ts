@@ -6,7 +6,6 @@ import {
   DEFAULT_PORT,
   DEFAULT_GIT_POLL_INTERVAL_MS,
   DEFAULT_DEBOUNCE_MS,
-  CURRENT_CONFIG_VERSION,
 } from '../constants.js';
 
 /**
@@ -31,7 +30,6 @@ export interface FrameworkInstance {
  * Main Lien configuration supporting monorepo setups
  */
 export interface LienConfig {
-  version: string;
   core: {
     chunkSize: number;
     chunkOverlap: number;
@@ -132,7 +130,6 @@ export function isModernConfig(
  * Frameworks should be detected and added via lien init
  */
 export const defaultConfig: LienConfig = {
-  version: CURRENT_CONFIG_VERSION,
   core: {
     chunkSize: DEFAULT_CHUNK_SIZE,
     chunkOverlap: DEFAULT_CHUNK_OVERLAP,

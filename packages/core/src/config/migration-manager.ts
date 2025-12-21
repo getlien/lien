@@ -4,7 +4,6 @@ import chalk from 'chalk';
 import { LienConfig, defaultConfig } from './schema.js';
 import { needsMigration, migrateConfig, migrateConfigFile } from './migration.js';
 import { deepMergeConfig, detectNewFields } from './merge.js';
-import { CURRENT_CONFIG_VERSION } from '../constants.js';
 
 /**
  * Result of a migration operation
@@ -25,8 +24,7 @@ export interface MigrationResult {
  */
 export class MigrationManager {
   constructor(
-    private readonly rootDir: string = process.cwd(),
-    private readonly targetVersion: string = CURRENT_CONFIG_VERSION
+    private readonly rootDir: string = process.cwd()
   ) {}
   
   /**
@@ -99,8 +97,8 @@ export class MigrationManager {
       let migrated = false;
       
       if (migrationNeeded) {
-        console.log(chalk.blue(`🔄 Migrating config from v0.2.0 to v${this.targetVersion}...`));
-        upgradedConfig = migrateConfig(existingConfig, this.targetVersion);
+        console.log(chalk.blue('🔄 Migrating config from v0.2.0 to current format...'));
+        upgradedConfig = migrateConfig(existingConfig);
         migrated = true;
       } else {
         // Just merge with defaults for current version configs

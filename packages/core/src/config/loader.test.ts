@@ -106,7 +106,6 @@ describe('Config Loader', () => {
       
       const config = await loadConfig(testDir);
       // Empty config just merges with defaults - no migration needed
-      expect(config.version).toBe(CURRENT_VERSION);
       expect(config.frameworks).toEqual(defaultConfig.frameworks);
       expect(config.core).toEqual(defaultConfig.core);
     });
@@ -159,8 +158,7 @@ describe('Config Loader', () => {
       
       const config = await loadConfig(testDir);
       
-      // Should be migrated to current version
-      expect(config.version).toBe(CURRENT_VERSION);
+      // Should be migrated to current format
       expect(config.core.chunkSize).toBe(100);
       expect(config.core.chunkOverlap).toBe(20);
       expect(config.mcp.port).toBe(8080);

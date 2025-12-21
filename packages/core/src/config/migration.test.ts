@@ -122,9 +122,6 @@ describe('Config Migration', () => {
 
       const newConfig = migrateConfig(oldConfig);
 
-      // Check version updated
-      expect(newConfig.version).toBe(CURRENT_VERSION);
-
       // Check core settings migrated
       expect(newConfig.core.chunkSize).toBe(100);
       expect(newConfig.core.chunkOverlap).toBe(20);
@@ -172,7 +169,6 @@ describe('Config Migration', () => {
 
       const newConfig = migrateConfig(oldConfig);
 
-      expect(newConfig.version).toBe(CURRENT_VERSION);
       expect(newConfig.core.chunkSize).toBe(50);
       expect(newConfig.frameworks).toHaveLength(1);
       expect(newConfig.frameworks[0].config.include).toEqual(['**/*.py']);
@@ -183,7 +179,6 @@ describe('Config Migration', () => {
 
       const newConfig = migrateConfig(oldConfig);
 
-      expect(newConfig.version).toBe(CURRENT_VERSION);
       expect(newConfig.frameworks).toHaveLength(1);
       expect(newConfig.frameworks[0].name).toBe('generic');
       
@@ -277,7 +272,6 @@ describe('Config Migration', () => {
       // Verify new config is migrated
       const newConfigContent = await fs.readFile(configPath, 'utf-8');
       const newConfig = JSON.parse(newConfigContent);
-      expect(newConfig.version).toBe(CURRENT_VERSION);
       expect(newConfig.frameworks).toHaveLength(1);
     });
 
@@ -330,7 +324,6 @@ describe('Config Migration', () => {
       const result = await migrateConfigFile(tempDir);
 
       expect(result.migrated).toBe(false);
-      expect(result.config.version).toBe(CURRENT_VERSION);
       expect(result.config.frameworks).toEqual([]);
     });
 

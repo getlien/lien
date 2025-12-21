@@ -149,7 +149,6 @@ export async function scanFilesToIndex(rootDir: string): Promise<string[]> {
     
     // Create a minimal config object for scanCodebaseWithFrameworks
     const tempConfig: LienConfig = {
-      version: '0.20.0',
       core: {
         chunkSize: DEFAULT_CHUNK_SIZE,
         chunkOverlap: DEFAULT_CHUNK_OVERLAP,

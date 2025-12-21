@@ -3,7 +3,6 @@ import { mkdtemp } from 'fs/promises';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { fileURLToPath } from 'url';
 import {
   detectAllFrameworks,
   getFrameworkDetector,
@@ -13,12 +12,7 @@ import {
 } from '@liendev/core';
 import type { LienConfig, FrameworkInstance } from '@liendev/core';
 
-// Get current version from package.json dynamically
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const packageJson = JSON.parse(
-  await fs.readFile(path.join(__dirname, '../../package.json'), 'utf-8')
-);
-const CURRENT_VERSION = packageJson.version;
+// Version field removed from config - no longer needed
 
 describe('E2E Workflow', () => {
   let testDir: string;
@@ -126,7 +120,6 @@ test('calculator addition', () => {
 
     // Write v0.2.0 config
     const v020Config = {
-      version: '0.2.0',
       indexing: {
         exclude: ['node_modules/**', 'dist/**'],
         include: ['src/**/*.ts', 'lib/**/*.ts'],
@@ -161,7 +154,6 @@ test('calculator addition', () => {
     const migratedConfig = await loadConfig(testDir);
 
     // Step 3: Verify migration
-    expect(migratedConfig.version).toBe(CURRENT_VERSION);
     expect(migratedConfig.frameworks).toHaveLength(1);
     expect(migratedConfig.frameworks[0].name).toBe('generic');
     expect(migratedConfig.frameworks[0].path).toBe('.');
@@ -179,7 +171,7 @@ test('calculator addition', () => {
     // Step 5: Verify backup contains original config
     const backupContent = await fs.readFile(backupPath, 'utf-8');
     const backup = JSON.parse(backupContent);
-    expect(backup.version).toBe('0.2.0');
+    expect(backup.indexing).toBeDefined();
   }, 10000);
 
   it('adds new framework to existing project', async () => {
@@ -293,7 +285,6 @@ test('calculator addition', () => {
     );
 
     const oldConfig: LienConfig = {
-      version: '0.13.0',
       core: {
         chunkSize: 50, // Custom value
         chunkOverlap: 5,
@@ -337,7 +328,6 @@ test('calculator addition', () => {
     // Step 4: Merge with new default values
     // (In real usage, this would be done by `lien init --upgrade`)
     // Here we just verify the config structure is valid
-    expect(loaded.version).toBe('0.13.0');
     expect(loaded.core).toBeDefined();
     expect(loaded.frameworks).toBeDefined();
   });
@@ -345,7 +335,6 @@ test('calculator addition', () => {
   it('preserves user customizations during migration', async () => {
     // Create v0.2.0 config with customizations
     const customV020Config = {
-      version: '0.2.0',
       indexing: {
         exclude: ['node_modules/**', 'dist/**', 'custom-ignore/**'],
         include: ['custom-src/**/*.ts', 'lib/**/*.js'],
@@ -380,7 +369,6 @@ test('calculator addition', () => {
     const migratedConfig = migrateConfig(customV020Config);
 
     // Verify all customizations are preserved
-    expect(migratedConfig.version).toBe(CURRENT_VERSION);
     expect(migratedConfig.core.chunkSize).toBe(100);
     expect(migratedConfig.core.chunkOverlap).toBe(15);
     expect(migratedConfig.core.concurrency).toBe(8);

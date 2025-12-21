@@ -136,7 +136,6 @@ describe('Monorepo Framework Integration', () => {
     }
 
     const config: LienConfig = {
-      version: '0.3.0',
       core: {
         chunkSize: 75,
         chunkOverlap: 10,
@@ -196,7 +195,6 @@ describe('Monorepo Framework Integration', () => {
     }
 
     const config: LienConfig = {
-      version: '0.3.0',
       core: {
         chunkSize: 75,
         chunkOverlap: 10,
@@ -298,7 +296,6 @@ describe('Monorepo Framework Integration', () => {
     }
 
     const config: LienConfig = {
-      version: '0.3.0',
       core: {
         chunkSize: 75,
         chunkOverlap: 10,
@@ -350,7 +347,6 @@ describe('Monorepo Framework Integration', () => {
     }
 
     const config: LienConfig = {
-      version: '0.3.0',
       core: {
         chunkSize: 75,
         chunkOverlap: 10,
