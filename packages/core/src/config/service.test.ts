@@ -10,7 +10,7 @@ import { ConfigError } from '../errors/index.js';
 // Get current version from package.json dynamically
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(
-  await fs.readFile(path.join(__dirname, '../package.json'), 'utf-8')
+  await fs.readFile(path.join(__dirname, '../../package.json'), 'utf-8')
 );
 const CURRENT_VERSION = packageJson.version;
 

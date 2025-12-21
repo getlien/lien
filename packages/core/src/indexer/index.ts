@@ -180,8 +180,8 @@ export async function scanFilesToIndex(rootDir: string): Promise<string[]> {
   }
   
   // Fallback: scan common code files if no frameworks detected
-  return scanCodebase({
-    rootDir,
+    return scanCodebase({
+      rootDir,
     includePatterns: [
       '**/*.{ts,tsx,js,jsx,py,php,go,rs,java,kt,swift,rb,cs}',
       '**/*.md',

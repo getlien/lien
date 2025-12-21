@@ -273,50 +273,24 @@ function setupVersionChecking(
   return { interval, checkAndReconnect, getIndexMetadata };
 }
 
-export async function startMCPServer(options: MCPServerOptions): Promise<void> {
-  const { rootDir, verbose, watch } = options;
-  
-  // Early log function before server is ready (falls back to stderr)
-  const earlyLog: LogFn = (message, level = 'info') => { 
+/**
+ * Create early log function before server is ready (falls back to stderr).
+ */
+function createEarlyLog(verbose: boolean | undefined): LogFn {
+  return (message, level = 'info') => {
     if (verbose || level === 'warning' || level === 'error') {
-      console.error(`[Lien MCP] [${level}] ${message}`); 
+      console.error(`[Lien MCP] [${level}] ${message}`);
     }
   };
+}
 
-  earlyLog('Initializing MCP server...');
-
-  // Initialize core components
-  let embeddings: LocalEmbeddings;
-  let vectorDB: VectorDBInterface;
-  
-  try {
-    const result = await initializeDatabase(rootDir, earlyLog);
-    embeddings = result.embeddings;
-    vectorDB = result.vectorDB;
-    
-    // Verify vectorDB has required methods
-    if (!vectorDB || typeof vectorDB.initialize !== 'function') {
-      throw new Error(`Invalid vectorDB instance: ${vectorDB?.constructor?.name || 'undefined'}. Missing initialize method.`);
-    }
-  } catch (error) {
-    console.error(`Failed to initialize: ${error}`);
-    if (error instanceof Error && error.stack) {
-      console.error(error.stack);
-    }
-    process.exit(1);
-  }
-  
-  // Create MCP server with configuration
-  const serverConfig = createMCPServerConfig('lien', packageJson.version);
-  const server = new Server(
-    { name: serverConfig.name, version: serverConfig.version },
-    { capabilities: serverConfig.capabilities }
-  );
-
-  // Create proper log function that uses MCP logging notifications
-  // - In verbose mode: all levels (debug, info, notice, warning, error)
-  // - In non-verbose mode: only warnings and errors
-  const log: LogFn = (message, level: LogLevel = 'info') => {
+/**
+ * Create MCP log function that uses server logging notifications.
+ * - In verbose mode: all levels (debug, info, notice, warning, error)
+ * - In non-verbose mode: only warnings and errors
+ */
+function createMCPLog(server: Server, verbose: boolean | undefined): LogFn {
+  return (message, level: LogLevel = 'info') => {
     if (verbose || level === 'warning' || level === 'error') {
       server.sendLoggingMessage({
         level,
@@ -328,15 +302,61 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
       });
     }
   };
+}
 
-  // Setup version checking
-  const { interval: versionCheckInterval, checkAndReconnect, getIndexMetadata } = setupVersionChecking(vectorDB, log);
+/**
+ * Initialize core components (embeddings and vector database) with error handling.
+ */
+async function initializeComponents(
+  rootDir: string,
+  earlyLog: LogFn
+): Promise<{ embeddings: LocalEmbeddings; vectorDB: VectorDBInterface }> {
+  try {
+    const result = await initializeDatabase(rootDir, earlyLog);
+    
+    // Verify vectorDB has required methods
+    if (!result.vectorDB || typeof result.vectorDB.initialize !== 'function') {
+      throw new Error(`Invalid vectorDB instance: ${result.vectorDB?.constructor?.name || 'undefined'}. Missing initialize method.`);
+    }
+    
+    return result;
+  } catch (error) {
+    console.error(`Failed to initialize: ${error}`);
+    if (error instanceof Error && error.stack) {
+      console.error(error.stack);
+    }
+    process.exit(1);
+  }
+}
 
-  // Create tool context (no config needed - everything uses defaults or auto-detection)
-  const toolContext: ToolContext = { vectorDB, embeddings, rootDir, log, checkAndReconnect, getIndexMetadata };
-  
+/**
+ * Create and configure MCP server instance.
+ */
+function createMCPServer(): Server {
+  const serverConfig = createMCPServerConfig('lien', packageJson.version);
+  return new Server(
+    { name: serverConfig.name, version: serverConfig.version },
+    { capabilities: serverConfig.capabilities }
+  );
+}
+
+/**
+ * Setup server features and connect transport.
+ */
+async function setupAndConnectServer(
+  server: Server,
+  toolContext: ToolContext,
+  log: LogFn,
+  versionCheckInterval: NodeJS.Timeout,
+  options: { rootDir: string; verbose: boolean | undefined; watch: boolean | undefined }
+): Promise<void> {
+  const { rootDir, verbose, watch } = options;
+  const { vectorDB, embeddings } = toolContext;
+
   // Register all MCP handlers
   registerMCPHandlers(server, toolContext, log);
+  
+  // Setup features
   await handleAutoIndexing(vectorDB, rootDir, log);
   const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log);
   const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log);
@@ -359,4 +379,20 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     console.error(`Failed to connect MCP transport: ${error}`);
     process.exit(1);
   }
+}
+
+export async function startMCPServer(options: MCPServerOptions): Promise<void> {
+  const { rootDir, verbose, watch } = options;
+  
+  const earlyLog = createEarlyLog(verbose);
+  earlyLog('Initializing MCP server...');
+
+  const { embeddings, vectorDB } = await initializeComponents(rootDir, earlyLog);
+  const server = createMCPServer();
+  const log = createMCPLog(server, verbose);
+
+  const { interval: versionCheckInterval, checkAndReconnect, getIndexMetadata } = setupVersionChecking(vectorDB, log);
+  const toolContext: ToolContext = { vectorDB, embeddings, rootDir, log, checkAndReconnect, getIndexMetadata };
+
+  await setupAndConnectServer(server, toolContext, log, versionCheckInterval, { rootDir, verbose, watch });
 }

@@ -38,7 +38,9 @@ export const DEFAULT_DEBOUNCE_MS = 1000;
 
 // Configuration version - matches the CLI/core release version
 // Core and CLI are always released together with matching versions
-export const CURRENT_CONFIG_VERSION = '0.20.0';
+// @deprecated Only used for backward compatibility with deprecated per-project config system
+// Per-project configs are no longer required - Lien uses global config and auto-detection
+export const CURRENT_CONFIG_VERSION = '0.20.1';
 
 // Index format version - bump on ANY breaking change to indexing
 // Examples that require version bump:

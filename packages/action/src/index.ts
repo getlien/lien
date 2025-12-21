@@ -217,7 +217,7 @@ async function runComplexityAnalysis(
 
   try {
     const rootDir = process.cwd();
-
+    
     // Index the codebase (no config needed - uses defaults)
     core.info('📁 Indexing codebase...');
     await indexCodebase({
