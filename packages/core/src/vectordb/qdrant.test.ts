@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { QdrantDB } from './qdrant.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
-import { writeVersionFile, readVersionFile } from './version.js';
+import { writeVersionFile } from './version.js';
 import fs from 'fs/promises';
 
 /**
@@ -397,7 +397,7 @@ describe('QdrantDB', () => {
 
     it('should cache version checks for 1 second', async () => {
       // First check
-      const firstCheck = await db.checkVersion();
+      await db.checkVersion();
       
       // Immediate second check should be cached (return false)
       const secondCheck = await db.checkVersion();
