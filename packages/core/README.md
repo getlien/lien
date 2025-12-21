@@ -103,13 +103,12 @@ const results = await db.search('error handling', {
 
 ### Complexity Analysis
 
-#### `new ComplexityAnalyzer(db: VectorDB, config: LienConfig)`
+#### `new ComplexityAnalyzer(db: VectorDBInterface)`
 
-Create a complexity analyzer.
+Create a complexity analyzer. Uses default thresholds (no config needed).
 
 ```typescript
-const config = await loadConfig('./my-project');
-const analyzer = new ComplexityAnalyzer(db, config);
+const analyzer = new ComplexityAnalyzer(db);
 ```
 
 #### `analyzer.analyze(files?: string[]): Promise<ComplexityReport>`
