@@ -2,7 +2,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import { LienConfig, defaultConfig } from './schema.js';
 import { deepMergeConfig } from './merge.js';
-import { MigrationManager } from './migration-manager.js';
 
 /**
  * @deprecated Per-project config is no longer required. Lien now uses global config, environment variables, and auto-detection.
@@ -16,14 +15,7 @@ export async function loadConfig(rootDir: string = process.cwd()): Promise<LienC
     const configContent = await fs.readFile(configPath, 'utf-8');
     const userConfig = JSON.parse(configContent);
     
-    // Check if migration is needed
-    const migrationManager = new MigrationManager(rootDir);
-    if (await migrationManager.needsMigration()) {
-      console.log('🔄 Migrating config from v0.2.0 to v0.3.0...');
-      return await migrationManager.autoMigrate();
-    }
-    
-    // Use the shared merge function for consistency
+    // Just merge with defaults - no migration needed
     return deepMergeConfig(defaultConfig, userConfig as Partial<LienConfig>);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {

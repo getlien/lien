@@ -8,7 +8,6 @@ import {
   getFrameworkDetector,
   defaultConfig,
   loadConfig,
-  migrateConfig,
 } from '@liendev/core';
 import type { LienConfig, FrameworkInstance } from '@liendev/core';
 
@@ -365,30 +364,20 @@ test('calculator addition', () => {
       JSON.stringify(customV020Config, null, 2)
     );
 
-    // Migrate using migrateConfig function (not migrateConfigFile)
-    const migratedConfig = migrateConfig(customV020Config);
+    // Load config - migration removed, just merges with defaults
+    const loadedConfig = await loadConfig(testDir);
 
-    // Verify all customizations are preserved
-    expect(migratedConfig.core.chunkSize).toBe(100);
-    expect(migratedConfig.core.chunkOverlap).toBe(15);
-    expect(migratedConfig.core.concurrency).toBe(8);
-    expect(migratedConfig.core.embeddingBatchSize).toBe(100);
-    expect(migratedConfig.mcp.port).toBe(9999);
-    expect(migratedConfig.mcp.autoIndexOnFirstRun).toBe(false);
-    expect(migratedConfig.gitDetection.enabled).toBe(false);
-    expect(migratedConfig.gitDetection.pollIntervalMs).toBe(5000);
-    expect(migratedConfig.fileWatching.enabled).toBe(true);
-    expect(migratedConfig.fileWatching.debounceMs).toBe(500);
-
-    // Verify framework conversion
-    expect(migratedConfig.frameworks).toHaveLength(1);
-    expect(migratedConfig.frameworks[0].name).toBe('generic');
-    expect(migratedConfig.frameworks[0].config.include).toEqual(
-      customV020Config.indexing.include
-    );
-    expect(migratedConfig.frameworks[0].config.exclude).toEqual(
-      customV020Config.indexing.exclude
-    );
+    // Verify customizations are preserved (merged with defaults)
+    expect(loadedConfig.core.chunkSize).toBe(100);
+    expect(loadedConfig.core.chunkOverlap).toBe(15);
+    expect(loadedConfig.core.concurrency).toBe(8);
+    expect(loadedConfig.core.embeddingBatchSize).toBe(100);
+    expect(loadedConfig.mcp.port).toBe(9999);
+    expect(loadedConfig.mcp.autoIndexOnFirstRun).toBe(false);
+    expect(loadedConfig.gitDetection.enabled).toBe(false);
+    expect(loadedConfig.gitDetection.pollIntervalMs).toBe(5000);
+    expect(loadedConfig.fileWatching.enabled).toBe(true);
+    expect(loadedConfig.fileWatching.debounceMs).toBe(500);
   });
 });
 

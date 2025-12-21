@@ -87,15 +87,15 @@ import type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance }
  * @see loadGlobalConfig in config/global-config.ts
  */
 export { ConfigService, _configService as configService };
-export type { ValidationResult, MigrationResult } from './config/service.js';
+export type { ValidationResult } from './config/service.js';
 /**
  * @deprecated Migration is no longer needed - per-project config is deprecated
  */
-export { MigrationManager } from './config/migration-manager.js';
+// Migration removed - no longer needed
 /**
  * @deprecated Migration is no longer needed - per-project config is deprecated
  */
-export { migrateConfig, migrateConfigFile } from './config/migration.js';
+// Migration removed - no longer needed
 /**
  * @deprecated Default config is no longer used - Lien uses sensible defaults automatically
  */

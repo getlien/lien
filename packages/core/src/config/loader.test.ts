@@ -158,18 +158,13 @@ describe('Config Loader', () => {
       
       const config = await loadConfig(testDir);
       
-      // Should be migrated to current format
-      expect(config.core.chunkSize).toBe(100);
-      expect(config.core.chunkOverlap).toBe(20);
-      expect(config.mcp.port).toBe(8080);
-      expect(config.frameworks).toHaveLength(1);
-      expect(config.frameworks[0].name).toBe('generic');
-      expect(config.frameworks[0].config.include).toEqual(['**/*.ts']);
-      
-      // Verify backup was created
-      const backupPath = `${configPath}.v0.2.0.backup`;
-      const backupExists = await fs.access(backupPath).then(() => true).catch(() => false);
-      expect(backupExists).toBe(true);
+      // Migration removed - just merges with defaults
+      // Old indexing field is ignored, uses defaults
+      expect(config.core.chunkSize).toBe(defaultConfig.core.chunkSize);
+      expect(config.core.chunkOverlap).toBe(defaultConfig.core.chunkOverlap);
+      expect(config.mcp.port).toBe(8080); // This is preserved from old config
+      expect(config.frameworks).toEqual(defaultConfig.frameworks);
+      // Migration removed - no backup created
     });
   });
   
