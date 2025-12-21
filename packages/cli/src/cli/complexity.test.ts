@@ -8,16 +8,17 @@ vi.mock('@liendev/core', async () => {
   const actual = await vi.importActual<typeof import('@liendev/core')>('@liendev/core');
   return {
     ...actual,
-    VectorDB: vi.fn(),
-    configService: {
-      load: vi.fn(),
+    VectorDB: class MockVectorDB {
+      constructor() {}
+      async initialize() {}
+      async scanWithFilter() {}
+      async scanAll() {}
     },
   };
 });
 
 describe('complexityCommand', () => {
   let mockVectorDB: any;
-  let mockConfig: any;
   let consoleLogSpy: any;
   let consoleErrorSpy: any;
   let processExitSpy: any;
@@ -30,23 +31,12 @@ describe('complexityCommand', () => {
       scanAll: vi.fn(),         // Used for actual analysis
     };
     
-    // Mock the VectorDB constructor to return our mock instance
-    vi.mocked(coreModule.VectorDB).mockImplementation(function(this: any) {
-      return mockVectorDB;
-    } as any);
-
-    // Mock config
-    mockConfig = {
-      version: '1.0',
-      complexity: {
-        enabled: true,
-        thresholds: {
-          testPaths: 15,
-          mentalLoad: 15,
-        },
-      },
+    // Mock VectorDB constructor to return our mock instance
+    (coreModule.VectorDB as any) = class {
+      constructor() {
+        return mockVectorDB;
+      }
     };
-    vi.mocked(coreModule.configService.load).mockResolvedValue(mockConfig);
 
     // Spy on console
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -82,7 +72,7 @@ describe('complexityCommand', () => {
     ];
 
     // Mock index check and actual scan
-    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]); // Check if index exists
     mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
@@ -114,7 +104,7 @@ describe('complexityCommand', () => {
     ];
 
     // Mock index check and actual scan
-    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]); // Check if index exists
     mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
@@ -151,7 +141,7 @@ describe('complexityCommand', () => {
     ];
 
     // Mock index check and actual scan
-    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]); // Check if index exists
     mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
@@ -203,7 +193,7 @@ describe('complexityCommand', () => {
     ];
 
     // Mock index check and actual scan
-    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]); // Check if index exists
     mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
@@ -239,7 +229,7 @@ describe('complexityCommand', () => {
     ];
 
     // Mock index check and actual scan
-    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]); // Check if index exists
     mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
@@ -270,7 +260,7 @@ describe('complexityCommand', () => {
     ];
 
     // Mock index check and actual scan
-    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]); // Check if index exists
     mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
@@ -301,7 +291,7 @@ describe('complexityCommand', () => {
     ];
 
     // Mock index check and actual scan
-    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]); // Check if index exists
     mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     await complexityCommand({
@@ -332,7 +322,7 @@ describe('complexityCommand', () => {
     ];
 
     // Mock index check and actual scan
-    mockVectorDB.scanWithFilter.mockResolvedValue([]); // Check if index exists
+    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]); // Check if index exists
     mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
 
     // With default threshold of 15, this would be a violation
@@ -382,28 +372,23 @@ describe('complexityCommand', () => {
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
 
-  it('should reject negative threshold values', async () => {
+  it('should warn about threshold flags (not supported)', async () => {
+    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    
+    // Mock index check and actual scan
+    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]);
+    mockVectorDB.scanAll.mockResolvedValue([]);
+
     await complexityCommand({
       format: 'text',
       threshold: '-5',
     });
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Invalid --threshold value "-5"')
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Threshold overrides via CLI flags are not supported')
     );
-    expect(processExitSpy).toHaveBeenCalledWith(1);
-  });
-
-  it('should reject zero threshold value', async () => {
-    await complexityCommand({
-      format: 'text',
-      threshold: '0',
-    });
-
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Invalid --threshold value "0"')
-    );
-    expect(processExitSpy).toHaveBeenCalledWith(1);
+    
+    consoleWarnSpy.mockRestore();
   });
 
   it('should handle missing index gracefully', async () => {

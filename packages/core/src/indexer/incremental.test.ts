@@ -3,8 +3,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { indexSingleFile, indexMultipleFiles } from './incremental.js';
 import { VectorDB } from '../vectordb/lancedb.js';
-import { MockEmbeddings } from '../../test/helpers/mock-embeddings.js';
-import { createTestDir, cleanupTestDir } from '../../test/helpers/test-db.js';
+import { MockEmbeddings } from '../test/helpers/mock-embeddings.js';
+import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 import { defaultConfig } from '../config/schema.js';
 
 describe('Incremental Indexing', () => {

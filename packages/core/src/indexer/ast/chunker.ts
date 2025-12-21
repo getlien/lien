@@ -8,6 +8,9 @@ import { getTraverser } from './traversers/index.js';
 export interface ASTChunkOptions {
   maxChunkSize?: number; // Reserved for future use (smart splitting of large functions)
   minChunkSize?: number;
+  // Multi-tenant fields (optional for backward compatibility)
+  repoId?: string; // Repository identifier for multi-tenant scenarios
+  orgId?: string;  // Organization identifier for multi-tenant scenarios
 }
 
 /**
@@ -32,7 +35,7 @@ export function chunkByAST(
   content: string,
   options: ASTChunkOptions = {}
 ): ASTChunk[] {
-  const { minChunkSize = 5 } = options;
+  const { minChunkSize = 5, repoId, orgId } = options;
   
   // Check if AST is supported for this file
   const language = detectLanguage(filepath);
@@ -82,7 +85,7 @@ export function chunkByAST(
     // Create a chunk for this semantic unit
     // Note: Large functions are kept as single chunks (may exceed maxChunkSize)
     // This preserves semantic boundaries - better than splitting mid-function
-    chunks.push(createChunk(filepath, node, nodeContent, symbolInfo, fileImports, language));
+    chunks.push(createChunk(filepath, node, nodeContent, symbolInfo, fileImports, language, { repoId, orgId }));
   }
   
   // Handle remaining code (imports, exports, top-level statements)
@@ -97,7 +100,8 @@ export function chunkByAST(
     filepath,
     minChunkSize,
     fileImports,
-    language
+    language,
+    { repoId, orgId }
   );
   
   chunks.push(...uncoveredChunks);
@@ -226,7 +230,8 @@ function createChunk(
   content: string,
   symbolInfo: ReturnType<typeof extractSymbolInfo>,
   imports: string[],
-  language: string
+  language: string,
+  tenantContext?: { repoId?: string; orgId?: string }
 ): ASTChunk {
   const symbols = buildLegacySymbols(symbolInfo);
   const shouldCalcComplexity = symbolInfo?.type && COMPLEXITY_SYMBOL_TYPES.has(symbolInfo.type);
@@ -263,6 +268,9 @@ function createChunk(
       halsteadDifficulty: halstead?.difficulty,
       halsteadEffort: halstead?.effort,
       halsteadBugs: halstead?.bugs,
+      // Multi-tenant fields
+      ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
+      ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
     },
   };
 }
@@ -318,7 +326,8 @@ function createChunkFromRange(
   lines: string[],
   filepath: string,
   language: string,
-  imports: string[]
+  imports: string[],
+  tenantContext?: { repoId?: string; orgId?: string }
 ): ASTChunk {
   const uncoveredLines = lines.slice(range.start, range.end + 1);
   const content = uncoveredLines.join('\n').trim();
@@ -334,6 +343,9 @@ function createChunkFromRange(
       // Empty symbols for uncovered code (imports, exports, etc.)
       symbols: { functions: [], classes: [], interfaces: [] },
       imports,
+      // Multi-tenant fields
+      ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
+      ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
     },
   };
 }
@@ -356,12 +368,13 @@ function extractUncoveredCode(
   filepath: string,
   minChunkSize: number,
   imports: string[],
-  language: string
+  language: string,
+  tenantContext?: { repoId?: string; orgId?: string }
 ): ASTChunk[] {
   const uncoveredRanges = findUncoveredRanges(coveredRanges, lines.length);
   
   return uncoveredRanges
-    .map(range => createChunkFromRange(range, lines, filepath, language, imports))
+    .map(range => createChunkFromRange(range, lines, filepath, language, imports, tenantContext))
     .filter(chunk => isValidChunk(chunk, minChunkSize));
 }
 

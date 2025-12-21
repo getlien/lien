@@ -5,10 +5,8 @@ import { execSync } from "child_process";
 import collect3 from "collect.js";
 import {
   indexCodebase,
-  VectorDB,
+  createVectorDB,
   ComplexityAnalyzer,
-  loadConfig,
-  createDefaultConfig,
   RISK_ORDER
 } from "@liendev/core";
 
@@ -1132,35 +1130,15 @@ async function runComplexityAnalysis(files, threshold) {
   }
   try {
     const rootDir = process.cwd();
-    let config;
-    try {
-      config = await loadConfig(rootDir);
-      core4.info("Loaded lien config");
-    } catch {
-      core4.info("No lien config found, using defaults");
-      config = createDefaultConfig();
-    }
-    const thresholdNum = parseInt(threshold, 10);
-    config.complexity = {
-      ...config.complexity,
-      enabled: true,
-      thresholds: {
-        testPaths: thresholdNum,
-        mentalLoad: thresholdNum,
-        timeToUnderstandMinutes: 60,
-        estimatedBugs: 1.5,
-        ...config.complexity?.thresholds
-      }
-    };
     core4.info("\u{1F4C1} Indexing codebase...");
     await indexCodebase({
-      rootDir,
-      config
+      rootDir
     });
     core4.info("\u2713 Indexing complete");
-    const vectorDB = await VectorDB.load(rootDir);
+    const vectorDB = await createVectorDB(rootDir);
+    await vectorDB.initialize();
     core4.info("\u{1F50D} Analyzing complexity...");
-    const analyzer = new ComplexityAnalyzer(vectorDB, config);
+    const analyzer = new ComplexityAnalyzer(vectorDB);
     const report = await analyzer.analyze(files);
     core4.info(`\u2713 Found ${report.summary.totalViolations} violations`);
     return report;

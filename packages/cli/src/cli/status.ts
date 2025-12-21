@@ -4,12 +4,16 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import {
-  configService,
   isGitRepo,
   getCurrentBranch,
   getCurrentCommit,
   readVersionFile,
-  isModernConfig,
+  DEFAULT_CONCURRENCY,
+  DEFAULT_EMBEDDING_BATCH_SIZE,
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_GIT_POLL_INTERVAL_MS,
+  DEFAULT_DEBOUNCE_MS,
 } from '@liendev/core';
 import { showCompactBanner } from '../utils/banner.js';
 
@@ -29,14 +33,8 @@ export async function statusCommand() {
   showCompactBanner();
   console.log(chalk.bold('Status\n'));
   
-  // Check if config exists
-  const hasConfig = await configService.exists(rootDir);
-  console.log(chalk.dim('Configuration:'), hasConfig ? chalk.green('✓ Found') : chalk.red('✗ Not initialized'));
-  
-  if (!hasConfig) {
-    console.log(chalk.yellow('\nRun'), chalk.bold('lien init'), chalk.yellow('to initialize'));
-    return;
-  }
+  // Config is no longer required - everything uses defaults or global config
+  console.log(chalk.dim('Configuration:'), chalk.green('✓ Using defaults (no per-project config needed)'));
   
   // Check if index exists
   try {
@@ -69,65 +67,50 @@ export async function statusCommand() {
     console.log(chalk.yellow('\nRun'), chalk.bold('lien index'), chalk.yellow('to index your codebase'));
   }
   
-  // Load and show configuration settings
-  try {
-    const config = await configService.load(rootDir);
+  // Show features (all enabled by default)
+  console.log(chalk.bold('\nFeatures:'));
+  
+  // Git detection status
+  const isRepo = await isGitRepo(rootDir);
+  if (isRepo) {
+    console.log(chalk.dim('Git detection:'), chalk.green('✓ Enabled'));
+    console.log(chalk.dim('  Poll interval:'), `${DEFAULT_GIT_POLL_INTERVAL_MS / 1000}s`);
     
-    console.log(chalk.bold('\nFeatures:'));
-    
-    // Git detection status
-    const isRepo = await isGitRepo(rootDir);
-    if (config.gitDetection.enabled && isRepo) {
-      console.log(chalk.dim('Git detection:'), chalk.green('✓ Enabled'));
-      console.log(chalk.dim('  Poll interval:'), `${config.gitDetection.pollIntervalMs / 1000}s`);
+    // Show current git state
+    try {
+      const branch = await getCurrentBranch(rootDir);
+      const commit = await getCurrentCommit(rootDir);
+      console.log(chalk.dim('  Current branch:'), branch);
+      console.log(chalk.dim('  Current commit:'), commit.substring(0, 8));
       
-      // Show current git state
+      // Check if git state file exists
+      const gitStateFile = path.join(indexPath, '.git-state.json');
       try {
-        const branch = await getCurrentBranch(rootDir);
-        const commit = await getCurrentCommit(rootDir);
-        console.log(chalk.dim('  Current branch:'), branch);
-        console.log(chalk.dim('  Current commit:'), commit.substring(0, 8));
-        
-        // Check if git state file exists
-        const gitStateFile = path.join(indexPath, '.git-state.json');
-        try {
-          const gitStateContent = await fs.readFile(gitStateFile, 'utf-8');
-          const gitState = JSON.parse(gitStateContent);
-          if (gitState.branch !== branch || gitState.commit !== commit) {
-            console.log(chalk.yellow('  ⚠️  Git state changed - will reindex on next serve'));
-          }
-        } catch {
-          // Git state file doesn't exist yet
+        const gitStateContent = await fs.readFile(gitStateFile, 'utf-8');
+        const gitState = JSON.parse(gitStateContent);
+        if (gitState.branch !== branch || gitState.commit !== commit) {
+          console.log(chalk.yellow('  ⚠️  Git state changed - will reindex on next serve'));
         }
       } catch {
-        // Ignore git command errors
+        // Git state file doesn't exist yet
       }
-    } else if (config.gitDetection.enabled && !isRepo) {
-      console.log(chalk.dim('Git detection:'), chalk.yellow('Enabled (not a git repo)'));
-    } else {
-      console.log(chalk.dim('Git detection:'), chalk.gray('Disabled'));
+    } catch {
+      // Ignore git command errors
     }
-    
-    // File watching status
-    if (config.fileWatching.enabled) {
-      console.log(chalk.dim('File watching:'), chalk.green('✓ Enabled'));
-      console.log(chalk.dim('  Debounce:'), `${config.fileWatching.debounceMs}ms`);
-    } else {
-      console.log(chalk.dim('File watching:'), chalk.gray('Disabled'));
-      console.log(chalk.dim('  Enable with:'), chalk.bold('lien serve --watch'));
-    }
-    
-    // Indexing settings
-    console.log(chalk.bold('\nIndexing Settings:'));
-    if (isModernConfig(config)) {
-      console.log(chalk.dim('Concurrency:'), config.core.concurrency);
-      console.log(chalk.dim('Batch size:'), config.core.embeddingBatchSize);
-      console.log(chalk.dim('Chunk size:'), config.core.chunkSize);
-      console.log(chalk.dim('Chunk overlap:'), config.core.chunkOverlap);
-    }
-    
-  } catch (error) {
-    console.log(chalk.yellow('\nWarning: Could not load configuration'));
+  } else {
+    console.log(chalk.dim('Git detection:'), chalk.yellow('Not a git repo'));
   }
+  
+  // File watching status (enabled by default)
+  console.log(chalk.dim('File watching:'), chalk.green('✓ Enabled (default)'));
+  console.log(chalk.dim('  Debounce:'), `${DEFAULT_DEBOUNCE_MS}ms`);
+  console.log(chalk.dim('  Disable with:'), chalk.bold('lien serve --no-watch'));
+  
+  // Indexing settings (defaults)
+  console.log(chalk.bold('\nIndexing Settings (defaults):'));
+  console.log(chalk.dim('Concurrency:'), DEFAULT_CONCURRENCY);
+  console.log(chalk.dim('Batch size:'), DEFAULT_EMBEDDING_BATCH_SIZE);
+  console.log(chalk.dim('Chunk size:'), DEFAULT_CHUNK_SIZE);
+  console.log(chalk.dim('Chunk overlap:'), DEFAULT_CHUNK_OVERLAP);
 }
 

@@ -68,7 +68,8 @@ function extractTemplateName(filepath: string): string | undefined {
  */
 export function chunkJSONTemplate(
   filepath: string,
-  content: string
+  content: string,
+  tenantContext?: { repoId?: string; orgId?: string }
 ): CodeChunk[] {
   // Skip empty files
   if (content.trim().length === 0) {
@@ -90,6 +91,8 @@ export function chunkJSONTemplate(
       symbolName: templateName,
       symbolType: 'template',
       imports: sectionReferences.length > 0 ? sectionReferences : undefined,
+      ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
+      ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
     },
   }];
 }

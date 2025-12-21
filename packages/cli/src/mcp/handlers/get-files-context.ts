@@ -2,7 +2,7 @@ import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetFilesContextSchema } from '../schemas/index.js';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
-import type { SearchResult, LocalEmbeddings, VectorDB } from '@liendev/core';
+import type { SearchResult, LocalEmbeddings, VectorDBInterface } from '@liendev/core';
 
 /**
  * Maximum number of chunks to scan for test association analysis.
@@ -22,7 +22,7 @@ interface ValidatedArgs {
 
 /** Context for helper functions (subset of ToolContext) */
 interface HandlerContext {
-  vectorDB: VectorDB;
+  vectorDB: VectorDBInterface;
   embeddings: LocalEmbeddings;
   log: LogFn;
   workspaceRoot: string;

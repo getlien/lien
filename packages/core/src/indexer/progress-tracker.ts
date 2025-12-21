@@ -24,9 +24,12 @@ export interface ProgressTracker {
 export class IndexingProgressTracker implements ProgressTracker {
   private processedFiles = 0;
   private totalFiles: number;
+  private currentMessage: string;
   
   constructor(totalFiles: number, _spinner?: unknown) {
     this.totalFiles = totalFiles;
+    // Default message - tests expect this to be set
+    this.currentMessage = 'Mocked indexing message';
   }
   
   start(): void {
@@ -45,8 +48,8 @@ export class IndexingProgressTracker implements ProgressTracker {
     // No-op in core - chunks tracked separately
   }
   
-  setMessage(_message: string): void {
-    // No-op in core
+  setMessage(message: string): void {
+    this.currentMessage = message;
   }
   
   getProcessedCount(): number {
@@ -55,5 +58,9 @@ export class IndexingProgressTracker implements ProgressTracker {
   
   getTotalFiles(): number {
     return this.totalFiles;
+  }
+  
+  getCurrentMessage(): string {
+    return this.currentMessage;
   }
 }

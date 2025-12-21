@@ -10,13 +10,23 @@
 
 import fs from 'fs/promises';
 import pLimit from 'p-limit';
+import path from 'path';
+import crypto from 'crypto';
 import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
+import { detectAllFrameworks } from '../frameworks/detector-service.js';
+import { getFrameworkDetector } from '../frameworks/registry.js';
+import type { FrameworkConfig } from '../config/schema.js';
+import type { LienConfig } from '../config/schema.js';
+import {
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_CONCURRENCY,
+  DEFAULT_EMBEDDING_BATCH_SIZE,
+} from '../constants.js';
 import { chunkFile } from './chunker.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
-import { VectorDB } from '../vectordb/lancedb.js';
-import { configService } from '../config/service.js';
+import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
-import { isLegacyConfig, isModernConfig, type LienConfig, type LegacyLienConfig } from '../config/schema.js';
 import { ManifestManager } from './manifest.js';
 import { isGitAvailable, isGitRepo } from '../git/utils.js';
 import { GitStateTracker } from '../git/tracker.js';
@@ -24,6 +34,7 @@ import { detectChanges } from './change-detector.js';
 import { indexMultipleFiles } from './incremental.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import { ChunkBatchProcessor } from './chunk-batch-processor.js';
+import type { VectorDBInterface } from '../vectordb/types.js';
 
 /**
  * Options for indexing a codebase
@@ -74,47 +85,115 @@ interface IndexingConfig {
   chunkOverlap: number;
   useAST: boolean;
   astFallback: 'line-based' | 'error';
+  repoId?: string;
+  orgId?: string;
 }
 
-/** Extract indexing config values with defaults */
-function getIndexingConfig(config: LienConfig | LegacyLienConfig): IndexingConfig {
-  if (isModernConfig(config)) {
-    return {
-      concurrency: config.core.concurrency,
-      embeddingBatchSize: config.core.embeddingBatchSize,
-      chunkSize: config.core.chunkSize,
-      chunkOverlap: config.core.chunkOverlap,
-      useAST: config.chunking.useAST,
-      astFallback: config.chunking.astFallback,
-    };
-  }
-  // Legacy defaults
+/**
+ * Extract repository identifier from project root.
+ * Uses project name + path hash for stable, unique identification.
+ */
+function extractRepoId(projectRoot: string): string {
+  const projectName = path.basename(projectRoot);
+  const pathHash = crypto
+    .createHash('md5')
+    .update(projectRoot)
+    .digest('hex')
+    .substring(0, 8);
+  return `${projectName}-${pathHash}`;
+}
+
+/** Extract indexing config values using defaults */
+function getIndexingConfig(rootDir: string): IndexingConfig {
+  // Use defaults for all settings - no config needed!
+  const repoId = extractRepoId(rootDir);
+  
+  // orgId is now handled in createVectorDB() via global config and git remote detection
+  // No need to extract it here anymore
+
   return {
-    concurrency: 4,
-    embeddingBatchSize: 50,
-    chunkSize: 75,
-    chunkOverlap: 10,
-    useAST: true,
-    astFallback: 'line-based',
+    concurrency: DEFAULT_CONCURRENCY,
+    embeddingBatchSize: DEFAULT_EMBEDDING_BATCH_SIZE,
+    chunkSize: DEFAULT_CHUNK_SIZE,
+    chunkOverlap: DEFAULT_CHUNK_OVERLAP,
+    useAST: true, // Always use AST-based chunking
+    astFallback: 'line-based' as const,
+    repoId,
+    orgId: undefined, // Not needed here - handled in VectorDB factory
   };
 }
 
-/** Scan files based on config type */
-async function scanFilesToIndex(
-  rootDir: string,
-  config: LienConfig | LegacyLienConfig
-): Promise<string[]> {
-  if (isModernConfig(config) && config.frameworks.length > 0) {
-    return scanCodebaseWithFrameworks(rootDir, config);
+/** Scan files by auto-detecting frameworks */
+export async function scanFilesToIndex(rootDir: string): Promise<string[]> {
+  // Auto-detect frameworks
+  const detectedFrameworks = await detectAllFrameworks(rootDir);
+  
+  if (detectedFrameworks.length > 0) {
+    // Convert detected frameworks to FrameworkInstance format for scanner
+    const frameworks = await Promise.all(
+      detectedFrameworks.map(async (detection) => {
+        const detector = getFrameworkDetector(detection.name);
+        if (!detector) {
+          throw new Error(`Framework detector not found: ${detection.name}`);
+        }
+        const config = await detector.generateConfig(rootDir, detection.path);
+        
+        return {
+          name: detection.name,
+          path: detection.path,
+          enabled: true,
+          config: config as FrameworkConfig,
+        };
+      })
+    );
+    
+    // Create a minimal config object for scanCodebaseWithFrameworks
+    const tempConfig: LienConfig = {
+      core: {
+        chunkSize: DEFAULT_CHUNK_SIZE,
+        chunkOverlap: DEFAULT_CHUNK_OVERLAP,
+        concurrency: DEFAULT_CONCURRENCY,
+        embeddingBatchSize: DEFAULT_EMBEDDING_BATCH_SIZE,
+      },
+      chunking: {
+        useAST: true,
+        astFallback: 'line-based',
+      },
+      mcp: {
+        port: 7133,
+        transport: 'stdio',
+        autoIndexOnFirstRun: true,
+      },
+      gitDetection: {
+        enabled: true,
+        pollIntervalMs: 10000,
+      },
+      fileWatching: {
+        enabled: true,
+        debounceMs: 1000,
+      },
+      frameworks,
+    };
+    
+    return scanCodebaseWithFrameworks(rootDir, tempConfig);
   }
-  if (isLegacyConfig(config)) {
+  
+  // Fallback: scan common code files if no frameworks detected
     return scanCodebase({
       rootDir,
-      includePatterns: config.indexing.include,
-      excludePatterns: config.indexing.exclude,
-    });
-  }
-  return scanCodebase({ rootDir, includePatterns: [], excludePatterns: [] });
+    includePatterns: [
+      '**/*.{ts,tsx,js,jsx,py,php,go,rs,java,kt,swift,rb,cs}',
+      '**/*.md',
+      '**/*.mdx',
+    ],
+    excludePatterns: [
+      '**/node_modules/**',
+      '**/vendor/**',
+      '**/dist/**',
+      '**/build/**',
+      '**/.git/**',
+    ],
+  });
 }
 
 /**
@@ -122,7 +201,7 @@ async function scanFilesToIndex(
  */
 async function updateGitState(
   rootDir: string,
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   manifest: ManifestManager
 ): Promise<void> {
   const gitAvailable = await isGitAvailable();
@@ -146,7 +225,7 @@ async function updateGitState(
  */
 async function handleDeletions(
   deletedFiles: string[],
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   manifest: ManifestManager
 ): Promise<number> {
   if (deletedFiles.length === 0) {
@@ -174,10 +253,10 @@ async function handleDeletions(
 async function handleUpdates(
   addedFiles: string[],
   modifiedFiles: string[],
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
-  config: LienConfig | LegacyLienConfig,
-  options: IndexingOptions
+  options: IndexingOptions,
+  rootDir: string
 ): Promise<number> {
   const filesToIndex = [...addedFiles, ...modifiedFiles];
   
@@ -189,8 +268,7 @@ async function handleUpdates(
     filesToIndex,
     vectorDB,
     embeddings,
-    config,
-    { verbose: options.verbose }
+    { verbose: options.verbose, rootDir }
   );
   
   await writeVersionFile(vectorDB.dbPath);
@@ -203,8 +281,7 @@ async function handleUpdates(
  */
 async function tryIncrementalIndex(
   rootDir: string,
-  vectorDB: VectorDB,
-  config: LienConfig | LegacyLienConfig,
+  vectorDB: VectorDBInterface,
   options: IndexingOptions,
   startTime: number
 ): Promise<IndexingResult | null> {
@@ -215,7 +292,7 @@ async function tryIncrementalIndex(
     return null; // No manifest, need full index
   }
   
-  const changes = await detectChanges(rootDir, vectorDB, config);
+  const changes = await detectChanges(rootDir, vectorDB);
   
   if (changes.reason === 'full') {
     return null;
@@ -258,8 +335,8 @@ async function tryIncrementalIndex(
     changes.modified,
     vectorDB,
     embeddings,
-    config,
-    options
+    options,
+    rootDir
   );
   
   // Update git state
@@ -304,6 +381,8 @@ async function processFileForIndexing(
       chunkOverlap: indexConfig.chunkOverlap,
       useAST: indexConfig.useAST,
       astFallback: indexConfig.astFallback,
+      repoId: indexConfig.repoId,
+      orgId: indexConfig.orgId,
     });
 
     if (chunks.length === 0) {
@@ -327,8 +406,7 @@ async function processFileForIndexing(
  */
 async function performFullIndex(
   rootDir: string,
-  vectorDB: VectorDB,
-  config: LienConfig | LegacyLienConfig,
+  vectorDB: VectorDBInterface,
   options: IndexingOptions,
   startTime: number
 ): Promise<IndexingResult> {
@@ -338,7 +416,7 @@ async function performFullIndex(
 
   // 2. Scan for files
   options.onProgress?.({ phase: 'scanning', message: 'Scanning codebase...' });
-  const files = await scanFilesToIndex(rootDir, config);
+  const files = await scanFilesToIndex(rootDir);
 
   if (files.length === 0) {
     return {
@@ -364,7 +442,7 @@ async function performFullIndex(
   }
 
   // 4. Setup processing infrastructure
-  const indexConfig = getIndexingConfig(config);
+  const indexConfig = getIndexingConfig(rootDir);
   const processedCount = { value: 0 };
   
   // Create a simple progress tracker that works with callbacks
@@ -495,24 +573,21 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<Inde
   try {
     options.onProgress?.({ phase: 'initializing', message: 'Loading configuration...' });
     
-    // Load configuration
-    const config = options.config ?? await configService.load(rootDir);
-    
-    // Initialize vector database
+    // Initialize vector database (use factory to select backend from global config)
     options.onProgress?.({ phase: 'initializing', message: 'Initializing vector database...' });
-    const vectorDB = new VectorDB(rootDir);
+    const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
     
     // Try incremental indexing first (unless forced)
     if (!options.force) {
-      const incrementalResult = await tryIncrementalIndex(rootDir, vectorDB, config, options, startTime);
+      const incrementalResult = await tryIncrementalIndex(rootDir, vectorDB, options, startTime);
       if (incrementalResult) {
         return incrementalResult;
       }
     }
     
     // Fall back to full index
-    return await performFullIndex(rootDir, vectorDB, config, options, startTime);
+    return await performFullIndex(rootDir, vectorDB, options, startTime);
     
   } catch (error) {
     return {

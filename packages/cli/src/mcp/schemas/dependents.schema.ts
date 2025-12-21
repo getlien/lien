@@ -30,6 +30,14 @@ export const GetDependentsSchema = z.object({
       "Depth of transitive dependencies. Only depth=1 (direct dependents) is currently supported.\n\n" +
       "1 = Direct dependents only"
     ),
+  
+  crossRepo: z.boolean()
+    .default(false)
+    .describe(
+      "If true, find dependents across all repos in the organization (requires Qdrant backend).\n\n" +
+      "Default: false (single-repo search)\n" +
+      "When enabled, results are grouped by repository."
+    ),
 });
 
 /**

@@ -282,11 +282,12 @@ describe('E2E: Real Open Source Projects', () => {
       it('should initialize Lien successfully', async () => {
         const output = runLienCommand(projectDir, 'init --yes');
         
-        expect(output).toContain('Created .lien.config.json');
+        // Config file no longer created - init just sets up Cursor rules
+        expect(output).toContain('Lien initialized');
         
-        // Verify config file exists
+        // Verify config file does NOT exist (per-project config removed)
         const configPath = path.join(projectDir, '.lien.config.json');
-        await expect(fs.access(configPath)).resolves.not.toThrow();
+        await expect(fs.access(configPath)).rejects.toThrow();
       }, E2E_TIMEOUT);
       
       it('should index the project without errors', () => {
@@ -329,7 +330,7 @@ describe('E2E: Real Open Source Projects', () => {
         console.log(`✓ Indexed ${project.name}`);
       }, E2E_TIMEOUT);
       
-      it('should index minimum expected number of files', () => {
+      it('should index minimum expected number of files', async () => {
         const stats = getIndexStats(projectDir);
         
         console.log(`📊 ${project.name} stats: ${stats.files} files, ${stats.chunks} chunks`);
@@ -341,12 +342,11 @@ describe('E2E: Real Open Source Projects', () => {
           console.error(`   Project directory: ${projectDir}`);
           console.error(`   Check project structure and include patterns in config`);
           
-          // Show config to help debug
+          // Show detected frameworks to help debug
           try {
-            const configPath = path.join(projectDir, '.lien.config.json');
-            const config = JSON.parse(fsSync.readFileSync(configPath, 'utf-8'));
-            console.error(`   Include patterns:`, config.frameworks?.[0]?.config?.include);
-            console.error(`   Exclude patterns:`, config.frameworks?.[0]?.config?.exclude);
+            const { detectAllFrameworks } = await import('@liendev/core');
+            const frameworks = await detectAllFrameworks(projectDir);
+            console.error(`   Detected frameworks:`, frameworks.map(f => f.name));
           } catch (e) {
             console.error(`   Could not read config`);
           }

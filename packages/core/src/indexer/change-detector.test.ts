@@ -7,7 +7,7 @@ import { detectChanges } from './change-detector.js';
 import { normalizeToRelativePath } from './incremental.js';
 import { VectorDB } from '../vectordb/lancedb.js';
 import { ManifestManager, IndexManifest } from './manifest.js';
-import { createTestDir, cleanupTestDir } from '../../test/helpers/test-db.js';
+import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 import { defaultConfig } from '../config/schema.js';
 import { INDEX_FORMAT_VERSION } from '../constants.js';
 import { getPackageVersion } from '../utils/version.js';

@@ -13,7 +13,6 @@
  *   indexCodebase,
  *   VectorDB,
  *   ComplexityAnalyzer,
- *   loadConfig,
  * } from '@liendev/core';
  * 
  * // Index a codebase
@@ -21,8 +20,7 @@
  * 
  * // Run complexity analysis
  * const db = await VectorDB.load('/path/to/project');
- * const config = await loadConfig('/path/to/project');
- * const analyzer = new ComplexityAnalyzer(db, config);
+ * const analyzer = new ComplexityAnalyzer(db);
  * const report = await analyzer.analyze();
  * ```
  */
@@ -54,6 +52,8 @@ export { EMBEDDING_DIMENSION, EMBEDDING_DIMENSIONS } from './embeddings/types.js
 // =============================================================================
 
 export { VectorDB } from './vectordb/lancedb.js';
+export { QdrantDB } from './vectordb/qdrant.js';
+export { createVectorDB } from './vectordb/factory.js';
 export type { VectorDBInterface, SearchResult } from './vectordb/types.js';
 export { calculateRelevance } from './vectordb/relevance.js';
 export type { RelevanceCategory } from './vectordb/relevance.js';
@@ -68,24 +68,42 @@ export { formatReport, formatTextReport, formatJsonReport, formatSarifReport } f
 export type { OutputFormat } from './insights/formatters/index.js';
 
 // =============================================================================
-// CONFIGURATION
+// CONFIGURATION (DEPRECATED - kept for backward compatibility)
 // =============================================================================
+// Note: Per-project config is no longer required. Lien now uses:
+// - Global config at ~/.lien/config.json (optional, for backend selection)
+// - Environment variables (LIEN_BACKEND, LIEN_QDRANT_URL, etc.)
+// - Auto-detected frameworks
+// - Sensible defaults for all settings
 
 import { ConfigService, configService as _configService } from './config/service.js';
 import { defaultConfig as _defaultConfig, isLegacyConfig, isModernConfig } from './config/schema.js';
 import type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance } from './config/schema.js';
 
+/**
+ * @deprecated Per-project config is no longer required. Use global config or environment variables instead.
+ * @see loadGlobalConfig in config/global-config.ts
+ */
 export { ConfigService, _configService as configService };
-export type { ValidationResult, MigrationResult } from './config/service.js';
-export { MigrationManager } from './config/migration-manager.js';
-export { migrateConfig, migrateConfigFile } from './config/migration.js';
+export type { ValidationResult } from './config/service.js';
+/**
+ * @deprecated Migration is no longer needed - per-project config is deprecated
+ */
+// Migration removed - no longer needed
+/**
+ * @deprecated Migration is no longer needed - per-project config is deprecated
+ */
+// Migration removed - no longer needed
+/**
+ * @deprecated Default config is no longer used - Lien uses sensible defaults automatically
+ */
 export { _defaultConfig as defaultConfig, isLegacyConfig, isModernConfig };
+/**
+ * @deprecated Config types are kept for backward compatibility only
+ */
 export type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance };
 
-// Convenience re-exports
-export const loadConfig = (rootDir?: string) => _configService.load(rootDir);
-export const saveConfig = (rootDir: string, config: LienConfig) => 
-  _configService.save(rootDir, config);
+// Per-project config removed - no longer needed
 export const createDefaultConfig = () => _defaultConfig;
 
 // =============================================================================

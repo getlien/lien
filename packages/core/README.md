@@ -15,7 +15,6 @@ import {
   indexCodebase,
   VectorDB,
   ComplexityAnalyzer,
-  loadConfig,
 } from '@liendev/core';
 
 // Index a codebase
@@ -30,8 +29,7 @@ const db = await VectorDB.load('/path/to/project');
 const results = await db.search('authentication logic', { limit: 10 });
 
 // Analyze complexity
-const config = await loadConfig('/path/to/project');
-const analyzer = new ComplexityAnalyzer(db, config);
+const analyzer = new ComplexityAnalyzer(db);
 const report = await analyzer.analyze();
 
 console.log(`Found ${report.summary.totalViolations} complexity violations`);
@@ -105,13 +103,12 @@ const results = await db.search('error handling', {
 
 ### Complexity Analysis
 
-#### `new ComplexityAnalyzer(db: VectorDB, config: LienConfig)`
+#### `new ComplexityAnalyzer(db: VectorDBInterface)`
 
-Create a complexity analyzer.
+Create a complexity analyzer. Uses default thresholds (no config needed).
 
 ```typescript
-const config = await loadConfig('./my-project');
-const analyzer = new ComplexityAnalyzer(db, config);
+const analyzer = new ComplexityAnalyzer(db);
 ```
 
 #### `analyzer.analyze(files?: string[]): Promise<ComplexityReport>`
@@ -167,26 +164,13 @@ interface ComplexityViolation {
 
 ### Configuration
 
-#### `loadConfig(rootDir?: string): Promise<LienConfig>`
+Lien no longer requires per-project configuration files. It uses:
+- Global config at `~/.lien/config.json` (optional, for backend selection)
+- Environment variables (`LIEN_BACKEND`, `LIEN_QDRANT_URL`, etc.)
+- Auto-detected frameworks
+- Sensible defaults for all settings
 
-Load Lien configuration from `.lien.config.json`.
-
-```typescript
-const config = await loadConfig('./my-project');
-```
-
-#### `saveConfig(rootDir: string, config: LienConfig): Promise<void>`
-
-Save configuration to `.lien.config.json`.
-
-```typescript
-await saveConfig('./my-project', {
-  ...config,
-  complexity: {
-    enabled: true,
-    thresholds: {
-      testPaths: 15,
-      mentalLoad: 15,
+For more details, see the [Configuration Guide](https://lien.dev/docs/guide/configuration).
     },
   },
 });

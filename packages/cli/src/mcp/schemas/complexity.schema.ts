@@ -34,6 +34,22 @@ export const GetComplexitySchema = z.object({
       "This parameter filters those violations to show only items above the specified value. " +
       "Setting threshold below the config threshold will not show additional functions."
     ),
+  
+  crossRepo: z.boolean()
+    .default(false)
+    .describe(
+      "If true, analyze complexity across all repos in the organization (requires Qdrant backend).\n\n" +
+      "Default: false (single-repo analysis)\n" +
+      "When enabled, results are aggregated by repository."
+    ),
+  
+  repoIds: z.array(z.string())
+    .optional()
+    .describe(
+      "Optional: Filter to specific repos when crossRepo=true.\n\n" +
+      "If provided, only analyzes the specified repositories.\n" +
+      "If omitted and crossRepo=true, analyzes all repos in the organization."
+    ),
 });
 
 /**

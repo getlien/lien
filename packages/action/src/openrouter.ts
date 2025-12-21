@@ -144,7 +144,7 @@ export async function generateReview(
         {
           role: 'system',
           content:
-            'You are an expert code reviewer. Provide actionable, specific feedback on code complexity issues. Be concise but thorough.',
+            'You are an expert code reviewer. Provide actionable, specific feedback on code complexity issues. Be concise but thorough. Before suggesting refactorings, analyze the code snippets provided to identify the codebase\'s architectural patterns (e.g., functions vs classes, module organization, naming conventions). Then suggest refactorings that match those existing patterns.',
         },
         {
           role: 'user',
@@ -210,7 +210,7 @@ async function callBatchedCommentsAPI(
         {
           role: 'system',
           content:
-            'You are an expert code reviewer. Write detailed, actionable comments with specific refactoring suggestions. Respond ONLY with valid JSON.',
+            'You are an expert code reviewer. Write detailed, actionable comments with specific refactoring suggestions. Respond ONLY with valid JSON. Before suggesting refactorings, analyze the code snippets provided to identify the codebase\'s architectural patterns (e.g., functions vs classes, module organization, naming conventions). Then suggest refactorings that match those existing patterns.',
         },
         { role: 'user', content: prompt },
       ],

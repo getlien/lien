@@ -1,5 +1,4 @@
-import { VectorDB } from '../vectordb/lancedb.js';
-import { LienConfig } from '../config/schema.js';
+import type { VectorDBInterface } from '../vectordb/types.js';
 import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER, RiskLevel, HalsteadDetails } from './types.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
@@ -16,21 +15,47 @@ const SEVERITY = { warning: 1.0, error: 2.0 } as const;
  * Analyzer for code complexity based on indexed codebase
  */
 export class ComplexityAnalyzer {
+  // Default complexity thresholds (no config needed)
+  private readonly thresholds = {
+    testPaths: 15,
+    mentalLoad: 15,
+    timeToUnderstandMinutes: 60,
+    estimatedBugs: 1.5,
+  };
+
   constructor(
-    private vectorDB: VectorDB,
-    private config: LienConfig
+    private vectorDB: VectorDBInterface
   ) {}
 
   /**
    * Analyze complexity of codebase or specific files
    * @param files - Optional list of specific files to analyze
+   * @param crossRepo - If true, analyze across all repos (requires QdrantDB)
+   * @param repoIds - Optional list of repo IDs to filter to (when crossRepo=true)
    * @returns Complexity report with violations and summary
    */
-  async analyze(files?: string[]): Promise<ComplexityReport> {
-    // 1. Get all chunks from index (uses full scan internally for LanceDB)
+  async analyze(
+    files?: string[],
+    crossRepo?: boolean,
+    repoIds?: string[]
+  ): Promise<ComplexityReport> {
+    // 1. Get all chunks from index
+    // For cross-repo with QdrantDB, use scanCrossRepo
     // Note: We fetch all chunks even with --files filter because dependency analysis
     // needs the complete dataset to find dependents accurately
-    const allChunks = await this.vectorDB.scanAll();
+    let allChunks: SearchResult[];
+    if (crossRepo) {
+      // Check if vectorDB is QdrantDB instance
+      const { QdrantDB } = await import('../vectordb/qdrant.js');
+      if (this.vectorDB instanceof QdrantDB) {
+        allChunks = await this.vectorDB.scanCrossRepo({ limit: 100000, repoIds });
+      } else {
+        // Fallback to regular scan if not QdrantDB
+        allChunks = await this.vectorDB.scanAll();
+      }
+    } else {
+      allChunks = await this.vectorDB.scanAll();
+    }
     
     // 2. Filter to specified files if provided
     const chunks = files 
@@ -282,18 +307,14 @@ export class ComplexityAnalyzer {
    * Checks cyclomatic, cognitive, and Halstead complexity.
    */
   private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
-    const configThresholds = this.config.complexity?.thresholds;
-    
     // Convert timeToUnderstandMinutes to effort internally
-    const halsteadEffort = configThresholds?.timeToUnderstandMinutes 
-      ? this.minutesToEffort(configThresholds.timeToUnderstandMinutes)
-      : this.minutesToEffort(60); // Default: 60 minutes = 64,800 effort
+    const halsteadEffort = this.minutesToEffort(this.thresholds.timeToUnderstandMinutes);
     
     const thresholds = { 
-      testPaths: configThresholds?.testPaths ?? 15, 
-      mentalLoad: configThresholds?.mentalLoad ?? 15, 
-      halsteadEffort, // Converted from minutes to effort internally (see above)
-      estimatedBugs: configThresholds?.estimatedBugs ?? 1.5, // Direct decimal value (no conversion needed)
+      testPaths: this.thresholds.testPaths, 
+      mentalLoad: this.thresholds.mentalLoad, 
+      halsteadEffort, // Converted from minutes to effort internally
+      estimatedBugs: this.thresholds.estimatedBugs,
     };
     const functionChunks = this.getUniqueFunctionChunks(chunks);
     

@@ -1,13 +1,31 @@
 import fs from 'fs/promises';
 import path from 'path';
+import crypto from 'crypto';
 import { chunkFile } from './chunker.js';
 import { EmbeddingService } from '../embeddings/types.js';
-import { VectorDB } from '../vectordb/lancedb.js';
-import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
+import type { VectorDBInterface } from '../vectordb/types.js';
+import {
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+} from '../constants.js';
 import { ManifestManager } from './manifest.js';
 import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
 import { CodeChunk } from './types.js';
 import { Result, Ok, Err, isOk } from '../utils/result.js';
+
+/**
+ * Extract repository identifier from project root.
+ * Uses project name + path hash for stable, unique identification.
+ */
+function extractRepoId(projectRoot: string): string {
+  const projectName = path.basename(projectRoot);
+  const pathHash = crypto
+    .createHash('md5')
+    .update(projectRoot)
+    .digest('hex')
+    .substring(0, 8);
+  return `${projectName}-${pathHash}`;
+}
 
 /**
  * Normalize a file path to a consistent relative format.
@@ -42,6 +60,7 @@ export function normalizeToRelativePath(filepath: string, rootDir?: string): str
 
 export interface IncrementalIndexOptions {
   verbose?: boolean;
+  rootDir?: string; // Root directory for extracting repoId
 }
 
 /**
@@ -80,22 +99,19 @@ async function processFileContent(
   filepath: string,
   content: string,
   embeddings: EmbeddingService,
-  config: LienConfig | LegacyLienConfig,
-  verbose: boolean
+  verbose: boolean,
+  rootDir?: string
 ): Promise<ProcessFileResult | null> {
-  // Get chunk settings (support both v0.3.0 and legacy v0.2.0 configs)
-  const chunkSize = isModernConfig(config)
-    ? config.core.chunkSize
-    : (isLegacyConfig(config) ? config.indexing.chunkSize : 75);
-  const chunkOverlap = isModernConfig(config)
-    ? config.core.chunkOverlap
-    : (isLegacyConfig(config) ? config.indexing.chunkOverlap : 10);
-  const useAST = isModernConfig(config)
-    ? config.chunking.useAST
-    : true;
-  const astFallback = isModernConfig(config)
-    ? config.chunking.astFallback
-    : 'line-based';
+  // Use defaults for all chunk settings
+  const chunkSize = DEFAULT_CHUNK_SIZE;
+  const chunkOverlap = DEFAULT_CHUNK_OVERLAP;
+  const useAST = true; // Always use AST-based chunking
+  const astFallback = 'line-based' as const;
+  
+  // Extract tenant context for multi-tenant scenarios
+  // orgId is now handled in createVectorDB() via global config and git remote detection
+  const repoId = rootDir ? extractRepoId(rootDir) : undefined;
+  const orgId = undefined; // Not needed here - handled in VectorDB factory
   
   // Chunk the file
   const chunks = chunkFile(filepath, content, {
@@ -103,6 +119,8 @@ async function processFileContent(
     chunkOverlap,
     useAST,
     astFallback,
+    repoId,
+    orgId,
   });
   
   if (chunks.length === 0) {
@@ -150,12 +168,11 @@ async function processFileContent(
  */
 export async function indexSingleFile(
   filepath: string,
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
-  config: LienConfig | LegacyLienConfig,
   options: IncrementalIndexOptions = {}
 ): Promise<void> {
-  const { verbose } = options;
+  const { verbose, rootDir } = options;
   
   // Normalize to relative path for consistent storage and queries
   // This ensures paths from git diff (absolute) match paths from scanner (relative)
@@ -181,7 +198,7 @@ export async function indexSingleFile(
     const content = await fs.readFile(filepath, 'utf-8');
     
     // Process file content (chunking + embeddings) - use normalized path for storage
-    const result = await processFileContent(normalizedPath, content, embeddings, config, verbose || false);
+    const result = await processFileContent(normalizedPath, content, embeddings, verbose || false, rootDir);
     
     // Get actual file mtime for manifest
     const stats = await fs.stat(filepath);
@@ -233,8 +250,8 @@ async function processSingleFileForIndexing(
   filepath: string,
   normalizedPath: string,
   embeddings: EmbeddingService,
-  config: LienConfig | LegacyLienConfig,
-  verbose: boolean
+  verbose: boolean,
+  rootDir?: string
 ): Promise<Result<FileProcessResult, string>> {
   try {
     // Read file stats and content using original path (for filesystem access)
@@ -242,7 +259,7 @@ async function processSingleFileForIndexing(
     const content = await fs.readFile(filepath, 'utf-8');
     
     // Process content using normalized path (for storage)
-    const result = await processFileContent(normalizedPath, content, embeddings, config, verbose);
+    const result = await processFileContent(normalizedPath, content, embeddings, verbose, rootDir);
     
     return Ok({
       filepath: normalizedPath,  // Store normalized path
@@ -273,12 +290,11 @@ async function processSingleFileForIndexing(
  */
 export async function indexMultipleFiles(
   filepaths: string[],
-  vectorDB: VectorDB,
+  vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
-  config: LienConfig | LegacyLienConfig,
   options: IncrementalIndexOptions = {}
 ): Promise<number> {
-  const { verbose } = options;
+  const { verbose, rootDir } = options;
   let processedCount = 0;
   
   // Batch manifest updates for performance
@@ -290,7 +306,7 @@ export async function indexMultipleFiles(
     // This ensures paths from git diff (absolute) match paths from scanner (relative)
     const normalizedPath = normalizeToRelativePath(filepath);
     
-    const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, config, verbose || false);
+    const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir);
     
     if (isOk(result)) {
       const { filepath: storedPath, result: processResult, mtime } = result.value;

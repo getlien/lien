@@ -6,7 +6,6 @@ import {
   DEFAULT_PORT,
   DEFAULT_GIT_POLL_INTERVAL_MS,
   DEFAULT_DEBOUNCE_MS,
-  CURRENT_CONFIG_VERSION,
 } from '../constants.js';
 
 /**
@@ -31,7 +30,6 @@ export interface FrameworkInstance {
  * Main Lien configuration supporting monorepo setups
  */
 export interface LienConfig {
-  version: string;
   core: {
     chunkSize: number;
     chunkOverlap: number;
@@ -64,6 +62,14 @@ export interface LienConfig {
       estimatedBugs?: number;            // 🐛 Max estimated bugs (default: 1.5)
     };
     // Severity multipliers are hardcoded: warning = 1x threshold, error = 2x threshold
+  };
+  storage?: {
+    backend?: 'lancedb' | 'qdrant';
+    qdrant?: {
+      url: string;        // e.g., "http://localhost:6333"
+      apiKey?: string;    // Optional, required for Qdrant Cloud
+      orgId: string;      // Organization identifier for multi-tenant isolation
+    };
   };
   frameworks: FrameworkInstance[];
 }
@@ -124,7 +130,6 @@ export function isModernConfig(
  * Frameworks should be detected and added via lien init
  */
 export const defaultConfig: LienConfig = {
-  version: CURRENT_CONFIG_VERSION,
   core: {
     chunkSize: DEFAULT_CHUNK_SIZE,
     chunkOverlap: DEFAULT_CHUNK_OVERLAP,
@@ -157,6 +162,7 @@ export const defaultConfig: LienConfig = {
       estimatedBugs: 1.5,           // 🐛 Functions estimated to have >1.5 bugs
     },
   },
+  storage: undefined, // Defaults to LanceDB (backward compatible)
   frameworks: [], // Will be populated by lien init via framework detection
 };
 

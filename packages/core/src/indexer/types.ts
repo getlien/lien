@@ -31,6 +31,21 @@ export interface ChunkMetadata {
   halsteadDifficulty?: number;  // D = (n1/2) × (N2/n2) - error-proneness
   halsteadEffort?: number;      // E = D × V - mental effort required
   halsteadBugs?: number;        // B = V / 3000 - estimated delivered bugs
+  
+  // Multi-tenant fields (optional for backward compatibility)
+  /**
+   * Unique repository identifier for multi-tenant scenarios.
+   * Used for cross-repo search and tenant isolation in Qdrant backend.
+   * Typically derived from project root path or GitHub repository identifier.
+   */
+  repoId?: string;
+  
+  /**
+   * Organization identifier for multi-tenant scenarios.
+   * Used for tenant isolation in Qdrant backend.
+   * Set from config.storage.qdrant.orgId when using Qdrant backend.
+   */
+  orgId?: string;
 }
 
 export interface ScanOptions {

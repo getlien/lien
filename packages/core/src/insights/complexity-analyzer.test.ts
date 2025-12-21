@@ -1,30 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ComplexityAnalyzer } from './complexity-analyzer.js';
 import { VectorDB } from '../vectordb/lancedb.js';
-import { LienConfig } from '../config/schema.js';
 import { ChunkMetadata } from '../indexer/types.js';
 import { SearchResult } from '../vectordb/types.js';
 
 describe('ComplexityAnalyzer', () => {
   let mockVectorDB: VectorDB;
-  let config: LienConfig;
 
   beforeEach(() => {
     // Create mock VectorDB
     mockVectorDB = {
       scanAll: vi.fn(),
-    } as any;
-
-    // Default config
-    config = {
-      version: '1.0',
-      complexity: {
-        enabled: true,
-        thresholds: {
-          testPaths: 15,
-          mentalLoad: 15,
-        },
-      },
     } as any;
   });
 
@@ -65,7 +51,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       expect(report.summary.totalViolations).toBe(1);
@@ -111,7 +97,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       expect(report.summary.bySeverity.warning).toBe(1);
@@ -154,7 +140,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze(['src/file1.ts']);
 
       expect(report.summary.filesAnalyzed).toBe(1);
@@ -165,7 +151,7 @@ describe('ComplexityAnalyzer', () => {
     it('should handle empty results', async () => {
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue([]);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       expect(report.summary.totalViolations).toBe(0);
@@ -225,7 +211,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       expect(report.summary.avgComplexity).toBe(10); // (5 + 15 + 10) / 3 = 10
@@ -253,7 +239,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       expect(report.summary.totalViolations).toBe(0);
@@ -313,7 +299,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       expect(report.files['src/low.ts'].riskLevel).toBe('low');
@@ -345,7 +331,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       expect(report.summary.totalViolations).toBe(1);
@@ -377,7 +363,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       // Should have 2 violations: one cyclomatic, one cognitive
@@ -420,48 +406,14 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       expect(report.summary.totalViolations).toBe(0);
     });
 
-    it('should use custom cognitive threshold from config', async () => {
-      const customConfig = {
-        ...config,
-        complexity: {
-          ...config.complexity!,
-          thresholds: { testPaths: 15, mentalLoad: 25 }, // Higher mental load threshold
-        },
-      };
-
-      const chunks = [
-        {
-          content: 'function test() { }',
-          metadata: {
-            file: 'src/test.ts',
-            startLine: 1,
-            endLine: 10,
-            type: 'function',
-            language: 'typescript',
-            symbolName: 'test',
-            symbolType: 'function',
-            complexity: 5,
-            cognitiveComplexity: 20, // Above default 15, but below custom 25
-          } as ChunkMetadata,
-          score: 1.0,
-          relevance: 'highly_relevant' as const,
-        },
-      ];
-
-      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
-
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, customConfig);
-      const report = await analyzer.analyze();
-
-      // No violation because 20 < 25
-      expect(report.summary.totalViolations).toBe(0);
-    });
+    // Note: Custom thresholds removed - ComplexityAnalyzer now uses hardcoded defaults
+    // This test removed as it tested config-based threshold customization
   });
 
   describe('Halstead metrics violations', () => {
@@ -491,7 +443,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       expect(report.summary.totalViolations).toBe(1);
@@ -528,7 +480,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       expect(report.summary.totalViolations).toBe(1);
@@ -566,7 +518,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       // Should have both halstead_effort and halstead_bugs violations
@@ -579,52 +531,8 @@ describe('ComplexityAnalyzer', () => {
       expect(bugsViolation).toBeDefined();
     });
 
-    it('should convert timeToUnderstandMinutes config to effort correctly', async () => {
-      // Custom config with 30 minute threshold (instead of default 60)
-      const customConfig = {
-        ...config,
-        complexity: {
-          ...config.complexity!,
-          thresholds: { 
-            testPaths: 15, 
-            mentalLoad: 15,
-            timeToUnderstandMinutes: 30, // 30 minutes = 32400 effort
-          },
-        },
-      };
-
-      const chunks = [
-        {
-          content: 'function moderateFunction() { }',
-          metadata: {
-            file: 'src/test.ts',
-            startLine: 1,
-            endLine: 30,
-            type: 'function',
-            language: 'typescript',
-            symbolName: 'moderateFunction',
-            symbolType: 'function',
-            complexity: 5,
-            cognitiveComplexity: 5,
-            halsteadEffort: 40000, // ~37 minutes - above 30min threshold
-            halsteadVolume: 2000,
-            halsteadDifficulty: 20,
-            halsteadBugs: 0.5,
-          } as ChunkMetadata,
-          score: 1.0,
-          relevance: 'highly_relevant' as const,
-        },
-      ];
-
-      vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
-
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, customConfig);
-      const report = await analyzer.analyze();
-
-      // Should trigger violation because 37min > 30min threshold
-      expect(report.summary.totalViolations).toBe(1);
-      expect(report.files['src/test.ts'].violations[0].metricType).toBe('halstead_effort');
-    });
+    // Note: Custom thresholds removed - ComplexityAnalyzer now uses hardcoded defaults (60 minutes)
+    // This test removed as it tested config-based threshold customization
 
     it('should not create Halstead violations when below thresholds', async () => {
       const chunks = [
@@ -652,7 +560,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       expect(report.summary.totalViolations).toBe(0);
@@ -713,7 +621,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       const fileData = report.files['src/utils.ts'];
@@ -764,7 +672,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       const fileData = report.files['src/utils.ts'];
@@ -811,7 +719,7 @@ describe('ComplexityAnalyzer', () => {
 
       vi.mocked(mockVectorDB.scanAll).mockResolvedValue(chunks);
 
-      const analyzer = new ComplexityAnalyzer(mockVectorDB, config);
+      const analyzer = new ComplexityAnalyzer(mockVectorDB);
       const report = await analyzer.analyze();
 
       const fileData = report.files['src/simple.ts'];

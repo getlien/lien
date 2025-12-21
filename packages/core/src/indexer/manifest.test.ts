@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ManifestManager } from './manifest.js';
-import { createTestDir, cleanupTestDir } from '../../test/helpers/test-db.js';
+import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 
 describe('ManifestManager', () => {
   let testDir: string;

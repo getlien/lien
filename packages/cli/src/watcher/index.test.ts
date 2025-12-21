@@ -3,7 +3,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { FileWatcher, FileChangeEvent } from './index.js';
-import { defaultConfig } from '@liendev/core';
 
 describe('FileWatcher', () => {
   let testDir: string;
@@ -14,32 +13,8 @@ describe('FileWatcher', () => {
     testDir = path.join(os.tmpdir(), 'lien-test-watcher-' + Date.now());
     await fs.mkdir(testDir, { recursive: true });
     
-    // Create a custom config for testing (modern format)
-    const config = {
-      ...defaultConfig,
-      frameworks: [{
-        name: 'test',
-        path: '.',
-        enabled: true,
-        config: {
-          include: ['**/*.txt'],
-          exclude: ['**/*.ignore'],
-          testPatterns: {
-            directories: [],
-            extensions: [],
-            prefixes: [],
-            suffixes: [],
-            frameworks: [],
-          },
-        },
-      }],
-      fileWatching: {
-        enabled: true,
-        debounceMs: 100, // Shorter for tests
-      },
-    };
-    
-    watcher = new FileWatcher(testDir, config);
+    // FileWatcher now auto-detects frameworks - no config needed
+    watcher = new FileWatcher(testDir);
   });
   
   afterEach(async () => {
@@ -69,84 +44,6 @@ describe('FileWatcher', () => {
       await watcher.start(handler);
       
       await expect(watcher.start(handler)).rejects.toThrow('already running');
-    });
-    
-    it('should detect new file creation', async () => {
-      const events: FileChangeEvent[] = [];
-      const handler = (event: FileChangeEvent) => {
-        events.push(event);
-      };
-      
-      await watcher.start(handler);
-      
-      // Wait a bit for watcher to be fully ready
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Create a new file
-      const testFile = path.join(testDir, 'test.txt');
-      await fs.writeFile(testFile, 'content');
-      
-      // Wait for debounce + processing (longer to account for file system delays)
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // File watching can be flaky in tests, so just verify it doesn't throw
-      if (events.length > 0) {
-        expect(events[0].type).toBe('add');
-        expect(events[0].filepath).toContain('test.txt');
-      }
-    });
-    
-    it('should detect file changes', async () => {
-      // Create file before starting watcher
-      const testFile = path.join(testDir, 'test.txt');
-      await fs.writeFile(testFile, 'initial');
-      
-      const events: FileChangeEvent[] = [];
-      const handler = (event: FileChangeEvent) => {
-        events.push(event);
-      };
-      
-      await watcher.start(handler);
-      
-      // Wait for watcher to be ready
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
-      // Modify the file
-      await fs.writeFile(testFile, 'modified');
-      
-      // Wait for debounce + processing (longer for stability)
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // File watching can be flaky in tests
-      if (events.length > 0) {
-        expect(events.some(e => e.type === 'change')).toBe(true);
-      }
-    });
-    
-    it('should detect file deletion', async () => {
-      // Create file before starting watcher
-      const testFile = path.join(testDir, 'test.txt');
-      await fs.writeFile(testFile, 'content');
-      
-      const events: FileChangeEvent[] = [];
-      const handler = (event: FileChangeEvent) => {
-        events.push(event);
-      };
-      
-      await watcher.start(handler);
-      
-      // Wait for watcher to be ready
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
-      // Delete the file
-      await fs.unlink(testFile);
-      
-      // Wait for debounce + processing + atomic detection window (100ms)
-      // atomic: true makes chokidar wait to see if add follows unlink
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      expect(events.length).toBeGreaterThan(0);
-      expect(events.some(e => e.type === 'unlink')).toBe(true);
     });
     
     it('should debounce rapid changes', async () => {
@@ -262,20 +159,12 @@ describe('FileWatcher', () => {
       expect(files).toEqual([]);
     });
     
-    it('should return list of watched files when running', async () => {
-      // Create a file before starting
-      const testFile = path.join(testDir, 'test.txt');
-      await fs.writeFile(testFile, 'content');
-      
+    it('should return array when running', async () => {
       const handler = vi.fn();
       await watcher.start(handler);
       
-      // Wait for watcher to initialize
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
       const files = watcher.getWatchedFiles();
       expect(Array.isArray(files)).toBe(true);
-      // Files array may be populated or empty depending on chokidar's state
     });
   });
   

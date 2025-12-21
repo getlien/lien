@@ -1,4 +1,4 @@
-import type { SearchResult, VectorDB, LocalEmbeddings, LienConfig } from '@liendev/core';
+import type { SearchResult, VectorDBInterface, LocalEmbeddings } from '@liendev/core';
 
 /**
  * MCP log levels matching the protocol specification.
@@ -17,11 +17,9 @@ export type LogFn = (message: string, level?: LogLevel) => void;
  */
 export interface ToolContext {
   /** Vector database instance for queries */
-  vectorDB: VectorDB;
+  vectorDB: VectorDBInterface;
   /** Embeddings instance for generating vectors */
   embeddings: LocalEmbeddings;
-  /** Loaded configuration */
-  config: LienConfig;
   /** Workspace root directory */
   rootDir: string;
   /** Logging function (logs via MCP notifications with proper levels) */

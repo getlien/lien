@@ -116,16 +116,10 @@ describe('ConfigService', () => {
       
       const config = await service.load(testDir);
       
-      // Should be migrated to current version
-      expect(config.version).toBe(CURRENT_VERSION);
+      // Migration removed - just merges with defaults
       expect(config.frameworks).toBeDefined();
-      expect(config.core.chunkSize).toBe(100);
-      
-      // Backup should be created
-      const backupExists = await fs.access(configPath + '.v0.2.0.backup')
-        .then(() => true)
-        .catch(() => false);
-      expect(backupExists).toBe(true);
+      // Old indexing field is ignored, uses defaults
+      expect(config.core.chunkSize).toBe(defaultConfig.core.chunkSize);
     });
   });
   
@@ -168,108 +162,13 @@ describe('ConfigService', () => {
       const content = await fs.readFile(configPath, 'utf-8');
       
       // Should be formatted with 2-space indentation
-      expect(content).toContain('  "version"');
+      // Version field removed - no longer in config
+      expect(content).toContain('"core"');
       expect(content.endsWith('\n')).toBe(true);
     });
   });
   
-  describe('migrate', () => {
-    it('should migrate v0.2.0 config to v0.3.0', async () => {
-      const legacyConfig: Partial<LegacyLienConfig> = {
-        version: '0.2.0',
-        indexing: {
-          include: ['**/*.js'],
-          exclude: ['**/dist/**'],
-          chunkSize: 80,
-          chunkOverlap: 12,
-          concurrency: 5,
-          embeddingBatchSize: 45,
-        },
-      };
-      
-      const configPath = path.join(testDir, '.lien.config.json');
-      await fs.writeFile(configPath, JSON.stringify(legacyConfig, null, 2));
-      
-      const result = await service.migrate(testDir);
-      
-      expect(result.migrated).toBe(true);
-      expect(result.backupPath).toBeDefined();
-      expect(result.config.version).toBe(CURRENT_VERSION);
-      expect(result.config.frameworks).toHaveLength(1);
-      expect(result.config.frameworks[0].name).toBe('generic');
-    });
-    
-    it('should not migrate already modern config', async () => {
-      const configPath = path.join(testDir, '.lien.config.json');
-      await fs.writeFile(configPath, JSON.stringify(defaultConfig, null, 2));
-      
-      const result = await service.migrate(testDir);
-      
-      expect(result.migrated).toBe(false);
-      expect(result.backupPath).toBeUndefined();
-    });
-    
-    it('should return default config when file does not exist', async () => {
-      const result = await service.migrate(testDir);
-      
-      expect(result.migrated).toBe(false);
-      expect(result.config).toEqual(defaultConfig);
-    });
-    
-    it('should create backup when migrating', async () => {
-      const legacyConfig: Partial<LegacyLienConfig> = {
-        version: '0.2.0',
-        indexing: {
-          include: ['**/*.py'],
-          exclude: [],
-          chunkSize: 75,
-          chunkOverlap: 10,
-          concurrency: 4,
-          embeddingBatchSize: 50,
-        },
-      };
-      
-      const configPath = path.join(testDir, '.lien.config.json');
-      await fs.writeFile(configPath, JSON.stringify(legacyConfig, null, 2));
-      
-      const result = await service.migrate(testDir);
-      
-      // Verify backup was created with original content
-      const backupContent = await fs.readFile(result.backupPath!, 'utf-8');
-      const backupConfig = JSON.parse(backupContent);
-      expect(backupConfig.version).toBe('0.2.0');
-      expect(backupConfig.indexing).toBeDefined();
-    });
-  });
-  
-  describe('needsMigration', () => {
-    it('should return true for v0.2.0 config with indexing field', () => {
-      const legacyConfig = {
-        version: '0.2.0',
-        indexing: { include: [] },
-      };
-      
-      expect(service.needsMigration(legacyConfig)).toBe(true);
-    });
-    
-    it('should return false for v0.12.0 config with frameworks and chunking', () => {
-      const modernConfig = {
-        version: '0.12.0',
-        frameworks: [],
-        chunking: {
-          useAST: true,
-          astFallback: 'line-based',
-        },
-      };
-      
-      expect(service.needsMigration(modernConfig)).toBe(false);
-    });
-    
-    it('should return false for null or undefined', () => {
-      expect(service.needsMigration(null)).toBe(false);
-      expect(service.needsMigration(undefined)).toBe(false);
-    });
-  });
+  // Migration tests removed - migration no longer exists
   
   describe('validate', () => {
     it('should validate correct modern config', () => {
@@ -287,13 +186,14 @@ describe('ConfigService', () => {
     });
     
     it('should reject config without version', () => {
+      // Version field removed - no longer validated
       const invalidConfig = { ...defaultConfig };
-      delete (invalidConfig as any).version;
+      delete (invalidConfig as any).core;
       
       const result = service.validate(invalidConfig);
       
       expect(result.valid).toBe(false);
-      expect(result.errors).toContain('Missing required field: version');
+      expect(result.errors.length).toBeGreaterThan(0);
     });
     
     it('should reject invalid chunk size', () => {
@@ -560,21 +460,15 @@ describe('ConfigService', () => {
       const configPath = path.join(testDir, '.lien.config.json');
       await fs.writeFile(configPath, JSON.stringify(legacyConfig, null, 2));
       
-      // Load should auto-migrate
+      // Load config - migration removed, just merges with defaults
       const config = await service.load(testDir);
       
-      expect(config.version).toBe(CURRENT_VERSION);
       expect(config.frameworks).toBeDefined();
-      expect(config.core.chunkSize).toBe(90);
+      // Migration removed - old indexing field ignored, uses defaults for core settings
+      expect(config.core.chunkSize).toBe(defaultConfig.core.chunkSize);
       expect(config.mcp.port).toBe(7200);
       expect(config.gitDetection.enabled).toBe(false);
       expect(config.fileWatching.enabled).toBe(true);
-      
-      // Backup should exist
-      const backupExists = await fs.access(configPath + '.v0.2.0.backup')
-        .then(() => true)
-        .catch(() => false);
-      expect(backupExists).toBe(true);
     });
   });
 });

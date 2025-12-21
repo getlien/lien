@@ -2,7 +2,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import { LienConfig, LegacyLienConfig, defaultConfig, isLegacyConfig, isModernConfig } from './schema.js';
 import { deepMergeConfig } from './merge.js';
-import { needsMigration as checkNeedsMigration, migrateConfig as performMigration } from './migration.js';
 import { ConfigError, wrapError } from '../errors/index.js';
 
 /**
@@ -15,17 +14,9 @@ export interface ValidationResult {
 }
 
 /**
- * Migration result with status and config
- */
-export interface MigrationResult {
-  migrated: boolean;
-  backupPath?: string;
-  config: LienConfig;
-}
-
-/**
  * ConfigService encapsulates all configuration operations including
- * loading, saving, migration, and validation.
+ * loading, saving, and validation.
+ * Migration removed - no longer needed.
  * 
  * This service provides a single point of truth for config management
  * with comprehensive error handling and validation.
@@ -48,22 +39,7 @@ export class ConfigService {
       const configContent = await fs.readFile(configPath, 'utf-8');
       const userConfig = JSON.parse(configContent);
       
-      // Check if migration is needed
-      if (this.needsMigration(userConfig)) {
-        console.log('🔄 Migrating config from v0.2.0 to v0.3.0...');
-        
-        const result = await this.migrate(rootDir);
-        
-        if (result.migrated && result.backupPath) {
-          const backupFilename = path.basename(result.backupPath);
-          console.log(`✅ Migration complete! Backup saved as ${backupFilename}`);
-          console.log('📝 Your config now uses the framework-based structure.');
-        }
-        
-        return result.config;
-      }
-      
-      // Merge with defaults first
+      // Merge with defaults - no migration needed
       const mergedConfig = deepMergeConfig(defaultConfig, userConfig as Partial<LienConfig>);
       
       // Then validate the merged config
@@ -147,79 +123,7 @@ export class ConfigService {
     }
   }
   
-  /**
-   * Migrate configuration from v0.2.0 to v0.3.0 format.
-   * Creates a backup of the original config file.
-   * 
-   * @param rootDir - Root directory containing the config file
-   * @returns Migration result with status and new config
-   * @throws {ConfigError} If migration fails
-   */
-  async migrate(rootDir: string = process.cwd()): Promise<MigrationResult> {
-    const configPath = this.getConfigPath(rootDir);
-    
-    try {
-      // Read existing config
-      const configContent = await fs.readFile(configPath, 'utf-8');
-      const oldConfig = JSON.parse(configContent);
-      
-      // Check if migration is needed
-      if (!this.needsMigration(oldConfig)) {
-        return {
-          migrated: false,
-          config: oldConfig as LienConfig,
-        };
-      }
-      
-      // Perform migration
-      const newConfig = performMigration(oldConfig);
-      
-      // Validate migrated config
-      const validation = this.validate(newConfig);
-      if (!validation.valid) {
-        throw new ConfigError(
-          `Migration produced invalid configuration:\n${validation.errors.join('\n')}`,
-          { errors: validation.errors }
-        );
-      }
-      
-      // Create backup
-      const backupPath = `${configPath}.v0.2.0.backup`;
-      await fs.copyFile(configPath, backupPath);
-      
-      // Write migrated config
-      await this.save(rootDir, newConfig);
-      
-      return {
-        migrated: true,
-        backupPath,
-        config: newConfig,
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return {
-          migrated: false,
-          config: defaultConfig,
-        };
-      }
-      
-      if (error instanceof ConfigError) {
-        throw error;
-      }
-      
-      throw wrapError(error, 'Configuration migration failed', { path: configPath });
-    }
-  }
-  
-  /**
-   * Check if a config object needs migration from v0.2.0 to v0.3.0.
-   * 
-   * @param config - Config object to check
-   * @returns True if migration is needed
-   */
-  needsMigration(config: unknown): boolean {
-    return checkNeedsMigration(config);
-  }
+  // Migration methods removed - no longer needed
   
   /**
    * Validate a configuration object.
@@ -242,11 +146,6 @@ export class ConfigService {
     }
     
     const cfg = config as Partial<LienConfig>;
-    
-    // Check for required top-level fields
-    if (!cfg.version) {
-      errors.push('Missing required field: version');
-    }
     
     // Validate based on config type
     if (isModernConfig(cfg as LienConfig | LegacyLienConfig)) {

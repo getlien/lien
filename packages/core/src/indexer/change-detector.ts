@@ -1,9 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { VectorDB } from '../vectordb/lancedb.js';
+import type { VectorDBInterface } from '../vectordb/types.js';
 import { ManifestManager, IndexManifest } from './manifest.js';
-import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
-import { LienConfig, LegacyLienConfig, isModernConfig, isLegacyConfig } from '../config/schema.js';
+// scanFilesToIndex is imported from index.ts to avoid circular dependency
 import { GitStateTracker } from '../git/tracker.js';
 import { isGitAvailable, isGitRepo, getChangedFiles } from '../git/utils.js';
 import { normalizeToRelativePath } from './incremental.js';
@@ -106,8 +105,7 @@ function normalizeManifestPaths(
 async function detectGitBasedChanges(
   rootDir: string,
   savedManifest: IndexManifest,
-  currentCommit: string,
-  config: LienConfig | LegacyLienConfig
+  currentCommit: string
 ): Promise<ChangeDetectionResult> {
   const changedFilesAbsolute = await getChangedFiles(
     rootDir,
@@ -116,7 +114,7 @@ async function detectGitBasedChanges(
   );
   const changedFilesPaths = changedFilesAbsolute.map(fp => normalizeToRelativePath(fp, rootDir));
 
-  const allFiles = await getAllFiles(rootDir, config);
+  const allFiles = await getAllFiles(rootDir);
   const currentFileSet = new Set(allFiles);
   const normalizedManifestFiles = normalizeManifestPaths(savedManifest.files, rootDir);
 
@@ -135,10 +133,9 @@ async function detectGitBasedChanges(
  */
 async function fallbackToFullReindex(
   rootDir: string,
-  savedManifest: IndexManifest,
-  config: LienConfig | LegacyLienConfig
+  savedManifest: IndexManifest
 ): Promise<ChangeDetectionResult> {
-  const allFiles = await getAllFiles(rootDir, config);
+  const allFiles = await getAllFiles(rootDir);
   const currentFileSet = new Set(allFiles);
 
   const deleted: string[] = [];
@@ -158,15 +155,14 @@ async function fallbackToFullReindex(
  */
 export async function detectChanges(
   rootDir: string,
-  vectorDB: VectorDB,
-  config: LienConfig | LegacyLienConfig
+  vectorDB: VectorDBInterface
 ): Promise<ChangeDetectionResult> {
   const manifest = new ManifestManager(vectorDB.dbPath);
   const savedManifest = await manifest.load();
 
   // No manifest = first run = full index
   if (!savedManifest) {
-    const allFiles = await getAllFiles(rootDir, config);
+    const allFiles = await getAllFiles(rootDir);
     return { added: allFiles, modified: [], deleted: [], reason: 'full' };
   }
 
@@ -175,45 +171,29 @@ export async function detectChanges(
 
   if (gitCheck.changed && gitCheck.currentState) {
     try {
-      return await detectGitBasedChanges(rootDir, savedManifest, gitCheck.currentState.commit, config);
+      return await detectGitBasedChanges(rootDir, savedManifest, gitCheck.currentState.commit);
     } catch (error) {
       console.warn(`[Lien] Git diff failed, falling back to full reindex: ${error}`);
-      return await fallbackToFullReindex(rootDir, savedManifest, config);
+      return await fallbackToFullReindex(rootDir, savedManifest);
     }
   }
 
   // Use mtime-based detection for file-level changes
-  return await mtimeBasedDetection(rootDir, savedManifest, config);
+  return await mtimeBasedDetection(rootDir, savedManifest);
 }
 
 /**
- * Gets all files in the project based on configuration.
+ * Gets all files in the project by auto-detecting frameworks.
  * Always returns relative paths for consistent comparison with manifest and git diff.
  */
-async function getAllFiles(
-  rootDir: string,
-  config: LienConfig | LegacyLienConfig
-): Promise<string[]> {
-  let files: string[];
-  
-  if (isModernConfig(config) && config.frameworks.length > 0) {
-    files = await scanCodebaseWithFrameworks(rootDir, config);
-  } else if (isLegacyConfig(config)) {
-    files = await scanCodebase({
-      rootDir,
-      includePatterns: config.indexing.include,
-      excludePatterns: config.indexing.exclude,
-    });
-  } else {
-    files = await scanCodebase({
-      rootDir,
-      includePatterns: [],
-      excludePatterns: [],
-    });
-  }
+async function getAllFiles(rootDir: string): Promise<string[]> {
+  // Use the same auto-detection logic as scanFilesToIndex
+  // Import it from index.ts to reuse the framework detection logic
+  const { scanFilesToIndex } = await import('./index.js');
+  const files = await scanFilesToIndex(rootDir);
   
   // Normalize all paths to relative for consistent comparison
-  return files.map(fp => normalizeToRelativePath(fp, rootDir));
+  return files.map((fp: string) => normalizeToRelativePath(fp, rootDir));
 }
 
 /**
@@ -221,15 +201,14 @@ async function getAllFiles(
  */
 async function mtimeBasedDetection(
   rootDir: string,
-  savedManifest: IndexManifest,
-  config: LienConfig | LegacyLienConfig
+  savedManifest: IndexManifest
 ): Promise<ChangeDetectionResult> {
   const added: string[] = [];
   const modified: string[] = [];
   const deleted: string[] = [];
   
   // Get all current files (already normalized to relative paths by getAllFiles)
-  const currentFiles = await getAllFiles(rootDir, config);
+  const currentFiles = await getAllFiles(rootDir);
   const currentFileSet = new Set(currentFiles);
   
   // Build a normalized map of manifest files for comparison

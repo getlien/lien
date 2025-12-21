@@ -40,38 +40,12 @@ describe('IndexingProgressTracker', () => {
   });
 
   describe('start()', () => {
-    it('should start updating the spinner', () => {
-      vi.useFakeTimers();
-      tracker.start();
-      
-      // Initially text might not be set yet (interval hasn't fired)
-      // After first interval tick, should show progress
-      vi.advanceTimersByTime(200);
-      expect(mockSpinner.text).toContain('0/100 files | Mocked indexing message');
-      
-      tracker.stop();
-      vi.useRealTimers();
+    it('should start without errors (core implementation is no-op)', () => {
+      expect(() => tracker.start()).not.toThrow();
     });
 
-    it('should rotate messages after 8 seconds', async () => {
-      vi.useFakeTimers();
-      
-      const { getIndexingMessage } = await import('../utils/loading-messages.js');
-      
-      tracker.start();
-      
-      // Reset call count after initialization
-      vi.mocked(getIndexingMessage).mockClear();
-      
-      // After 8 seconds (40 ticks at 200ms each), should rotate message
-      vi.advanceTimersByTime(8000);
-      
-      // Should have called getIndexingMessage at least once for rotation
-      expect(getIndexingMessage).toHaveBeenCalled();
-      
-      tracker.stop();
-      vi.useRealTimers();
-    });
+    // Note: Core implementation is a no-op - spinner updates are CLI-specific
+    // These tests removed as they test CLI behavior, not core behavior
 
     it('should not crash if called multiple times', () => {
       tracker.start();
@@ -107,18 +81,8 @@ describe('IndexingProgressTracker', () => {
       expect(tracker.getProcessedCount()).toBe(2);
     });
 
-    it('should update spinner text on next interval', () => {
-      vi.useFakeTimers();
-      
-      tracker.start();
-      tracker.incrementFiles();
-      
-      vi.advanceTimersByTime(200);
-      expect(mockSpinner.text).toContain('1/100');
-      
-      tracker.stop();
-      vi.useRealTimers();
-    });
+    // Note: Core implementation is a no-op - spinner updates are CLI-specific
+    // This test removed as it tests CLI behavior, not core behavior
   });
 
   describe('setMessage()', () => {
@@ -127,18 +91,8 @@ describe('IndexingProgressTracker', () => {
       expect(tracker.getCurrentMessage()).toBe('Custom message');
     });
 
-    it('should reflect in spinner text on next update', () => {
-      vi.useFakeTimers();
-      
-      tracker.start();
-      tracker.setMessage('Embedding generation...');
-      
-      vi.advanceTimersByTime(200);
-      expect(mockSpinner.text).toContain('Embedding generation...');
-      
-      tracker.stop();
-      vi.useRealTimers();
-    });
+    // Note: Core implementation is a no-op - spinner updates are CLI-specific
+    // This test removed as it tests CLI behavior, not core behavior
   });
 
   describe('stop()', () => {
@@ -189,9 +143,7 @@ describe('IndexingProgressTracker', () => {
   });
 
   describe('Real-world usage pattern', () => {
-    it('should handle typical indexing flow', () => {
-      vi.useFakeTimers();
-      
+    it('should handle typical indexing flow (core tracks counts only)', () => {
       const totalFiles = 10;
       const tracker = new IndexingProgressTracker(totalFiles, mockSpinner);
       
@@ -201,20 +153,17 @@ describe('IndexingProgressTracker', () => {
       // Simulate processing files
       for (let i = 0; i < totalFiles; i++) {
         tracker.incrementFiles();
-        vi.advanceTimersByTime(100); // Some time passes
       }
       
       // Change message for final phase
       tracker.setMessage('Saving manifest...');
-      vi.advanceTimersByTime(200);
       
       expect(tracker.getProcessedCount()).toBe(10);
-      expect(mockSpinner.text).toContain('10/10');
-      expect(mockSpinner.text).toContain('Saving manifest...');
+      expect(tracker.getTotalFiles()).toBe(10);
+      expect(tracker.getCurrentMessage()).toBe('Saving manifest...');
       
       // Clean up
       tracker.stop();
-      vi.useRealTimers();
     });
   });
 });

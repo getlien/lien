@@ -36,9 +36,6 @@ export const DEFAULT_GIT_POLL_INTERVAL_MS = 10000; // Check every 10 seconds
 // File watching
 export const DEFAULT_DEBOUNCE_MS = 1000;
 
-// Configuration version - matches the CLI/core release version
-// Core and CLI are always released together with matching versions
-export const CURRENT_CONFIG_VERSION = '0.20.0';
 
 // Index format version - bump on ANY breaking change to indexing
 // Examples that require version bump:
