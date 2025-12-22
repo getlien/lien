@@ -11,6 +11,63 @@ import { readVersionFile } from './version.js';
 import { QdrantPayloadMapper } from './qdrant-payload-mapper.js';
 
 /**
+ * Builder class for constructing Qdrant filters.
+ * Simplifies filter construction and reduces complexity.
+ */
+class QdrantFilterBuilder {
+  private filter: any;
+
+  constructor(orgId: string) {
+    this.filter = {
+      must: [{ key: 'orgId', match: { value: orgId } }],
+    };
+  }
+
+  addRepoContext(repoId: string, branch: string, commitSha: string): this {
+    this.filter.must.push(
+      { key: 'repoId', match: { value: repoId } },
+      { key: 'branch', match: { value: branch } },
+      { key: 'commitSha', match: { value: commitSha } }
+    );
+    return this;
+  }
+
+  addRepoIds(repoIds: string[]): this {
+    if (repoIds.length > 0) {
+      this.filter.must.push({
+        key: 'repoId',
+        match: { any: repoIds },
+      });
+    }
+    return this;
+  }
+
+  addLanguage(language: string): this {
+    this.filter.must.push({ key: 'language', match: { value: language } });
+    return this;
+  }
+
+  addSymbolType(symbolType: string): this {
+    this.filter.must.push({ key: 'symbolType', match: { value: symbolType } });
+    return this;
+  }
+
+  addPattern(pattern: string, key: 'file' | 'symbolName' = 'file'): this {
+    this.filter.must.push({ key, match: { text: pattern } });
+    return this;
+  }
+
+  addBranch(branch: string): this {
+    this.filter.must.push({ key: 'branch', match: { value: branch } });
+    return this;
+  }
+
+  build(): any {
+    return this.filter;
+  }
+}
+
+/**
  * QdrantDB implements VectorDBInterface using Qdrant vector database.
  * 
  * Features:
@@ -95,7 +152,7 @@ export class QdrantDB implements VectorDBInterface {
 
   /**
    * Build base filter for Qdrant queries.
-   * Handles common filtering logic for orgId, repoId, branch, commitSha, and optional filters.
+   * Uses builder pattern to simplify filter construction.
    */
   private buildBaseFilter(options: {
     language?: string;
@@ -106,50 +163,33 @@ export class QdrantDB implements VectorDBInterface {
     includeCurrentRepo?: boolean;
     patternKey?: 'file' | 'symbolName';
   }): any {
-    const filter: any = {
-      must: [{ key: 'orgId', match: { value: this.orgId } }],
-    };
+    const builder = new QdrantFilterBuilder(this.orgId);
 
-    // Include current repo filters (repoId, branch, commitSha) unless explicitly disabled
     if (options.includeCurrentRepo !== false) {
-      filter.must.push(
-        { key: 'repoId', match: { value: this.repoId } },
-        { key: 'branch', match: { value: this.branch } },
-        { key: 'commitSha', match: { value: this.commitSha } }
-      );
+      builder.addRepoContext(this.repoId, this.branch, this.commitSha);
     }
 
-    // Optionally filter to specific repos (for cross-repo queries)
-    if (options.repoIds && options.repoIds.length > 0) {
-      filter.must.push({
-        key: 'repoId',
-        match: { any: options.repoIds },
-      });
+    if (options.repoIds) {
+      builder.addRepoIds(options.repoIds);
     }
 
-    // Optional filters
     if (options.language) {
-      filter.must.push({ key: 'language', match: { value: options.language } });
+      builder.addLanguage(options.language);
     }
 
     if (options.symbolType) {
-      filter.must.push({ key: 'symbolType', match: { value: options.symbolType } });
+      builder.addSymbolType(options.symbolType);
     }
 
     if (options.pattern) {
-      const key = options.patternKey || 'file';
-      filter.must.push({ key, match: { text: options.pattern } });
+      builder.addPattern(options.pattern, options.patternKey);
     }
 
-    // Optional branch filter (for cross-repo queries)
     if (options.branch) {
-      filter.must.push({
-        key: 'branch',
-        match: { value: options.branch },
-      });
+      builder.addBranch(options.branch);
     }
 
-    return filter;
+    return builder.build();
   }
 
   /**
