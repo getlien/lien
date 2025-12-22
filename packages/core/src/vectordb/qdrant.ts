@@ -24,6 +24,8 @@ export class QdrantDB implements VectorDBInterface {
   private collectionName: string;
   private orgId: string;
   private repoId: string;
+  private branch: string;
+  private commitSha: string;
   private initialized: boolean = false;
   public readonly dbPath: string; // For compatibility with manifest/version file operations
   private lastVersionCheck: number = 0;
@@ -34,7 +36,9 @@ export class QdrantDB implements VectorDBInterface {
     url: string,
     apiKey: string | undefined,
     orgId: string,
-    projectRoot: string
+    projectRoot: string,
+    branch: string,
+    commitSha: string
   ) {
     this.client = new QdrantClient({
       url,
@@ -42,11 +46,13 @@ export class QdrantDB implements VectorDBInterface {
     });
     this.orgId = orgId;
     this.repoId = this.extractRepoId(projectRoot);
+    this.branch = branch;
+    this.commitSha = commitSha;
     // Collection naming: one per org
     this.collectionName = `lien_org_${orgId}`;
     
     // Initialize payload mapper
-    this.payloadMapper = new QdrantPayloadMapper(this.orgId, this.repoId);
+    this.payloadMapper = new QdrantPayloadMapper(this.orgId, this.repoId, this.branch, this.commitSha);
     
     // dbPath is used for manifest and version files (stored locally even with Qdrant)
     // Use same path structure as LanceDB for consistency
@@ -181,7 +187,7 @@ export class QdrantDB implements VectorDBInterface {
     }
 
     try {
-      // Search with tenant isolation (filter by orgId and repoId)
+      // Search with tenant isolation (filter by orgId, repoId, branch, and commitSha)
       const results = await this.client.search(this.collectionName, {
         vector: Array.from(queryVector),
         limit,
@@ -189,6 +195,8 @@ export class QdrantDB implements VectorDBInterface {
           must: [
             { key: 'orgId', match: { value: this.orgId } },
             { key: 'repoId', match: { value: this.repoId } },
+            { key: 'branch', match: { value: this.branch } },
+            { key: 'commitSha', match: { value: this.commitSha } },
           ],
         },
       });
@@ -210,11 +218,13 @@ export class QdrantDB implements VectorDBInterface {
   /**
    * Search across all repos in the organization (cross-repo search).
    * Omits repoId filter to enable cross-repo queries.
+   * Optionally filters by branch to search specific branch across repos.
    */
   async searchCrossRepo(
     queryVector: Float32Array,
     limit: number = 5,
-    repoIds?: string[]
+    repoIds?: string[],
+    branch?: string
   ): Promise<SearchResult[]> {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
@@ -232,6 +242,14 @@ export class QdrantDB implements VectorDBInterface {
         filter.must.push({
           key: 'repoId',
           match: { any: repoIds },
+        });
+      }
+
+      // Optionally filter by branch (e.g., only search main branch)
+      if (branch) {
+        filter.must.push({
+          key: 'branch',
+          match: { value: branch },
         });
       }
 
@@ -269,6 +287,8 @@ export class QdrantDB implements VectorDBInterface {
         must: [
           { key: 'orgId', match: { value: this.orgId } },
           { key: 'repoId', match: { value: this.repoId } },
+          { key: 'branch', match: { value: this.branch } },
+          { key: 'commitSha', match: { value: this.commitSha } },
         ],
       };
 
@@ -317,12 +337,14 @@ export class QdrantDB implements VectorDBInterface {
   /**
    * Scan with filter across all repos in the organization (cross-repo).
    * Omits repoId filter to enable cross-repo queries.
+   * Optionally filters by branch to scan specific branch across repos.
    */
   async scanCrossRepo(options: {
     language?: string;
     pattern?: string;
     limit?: number;
     repoIds?: string[];
+    branch?: string;
   }): Promise<SearchResult[]> {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
@@ -349,6 +371,14 @@ export class QdrantDB implements VectorDBInterface {
 
       if (options.pattern) {
         filter.must.push({ key: 'file', match: { text: options.pattern } });
+      }
+
+      // Optionally filter by branch (e.g., only scan main branch)
+      if (options.branch) {
+        filter.must.push({
+          key: 'branch',
+          match: { value: options.branch },
+        });
       }
 
       const limit = options.limit || 10000; // Higher default for cross-repo
@@ -388,6 +418,8 @@ export class QdrantDB implements VectorDBInterface {
         must: [
           { key: 'orgId', match: { value: this.orgId } },
           { key: 'repoId', match: { value: this.repoId } },
+          { key: 'branch', match: { value: this.branch } },
+          { key: 'commitSha', match: { value: this.commitSha } },
         ],
       };
 
@@ -438,13 +470,15 @@ export class QdrantDB implements VectorDBInterface {
         return;
       }
 
-      // Delete all points for this repository only (filter by both orgId and repoId)
-      // This ensures we only clear the current repo's data, not all repos in the org
+      // Delete all points for this repository and branch/commit only
+      // This ensures we only clear the current branch's data, not all branches
       await this.client.delete(this.collectionName, {
         filter: {
           must: [
             { key: 'orgId', match: { value: this.orgId } },
             { key: 'repoId', match: { value: this.repoId } },
+            { key: 'branch', match: { value: this.branch } },
+            { key: 'commitSha', match: { value: this.commitSha } },
           ],
         },
       });
@@ -467,6 +501,8 @@ export class QdrantDB implements VectorDBInterface {
           must: [
             { key: 'orgId', match: { value: this.orgId } },
             { key: 'repoId', match: { value: this.repoId } },
+            { key: 'branch', match: { value: this.branch } },
+            { key: 'commitSha', match: { value: this.commitSha } },
             { key: 'file', match: { value: filepath } },
           ],
         },

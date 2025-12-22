@@ -16,6 +16,8 @@ import fs from 'fs/promises';
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
 const TEST_ORG_ID = 'test-org-123';
 const TEST_PROJECT_ROOT = '/tmp/test-project';
+const TEST_BRANCH = 'test-branch';
+const TEST_COMMIT_SHA = 'test-commit-sha';
 
 describe('QdrantDB', () => {
   let db: QdrantDB;
@@ -23,8 +25,8 @@ describe('QdrantDB', () => {
 
   beforeEach(async () => {
     // Create two instances with different orgIds to test tenant isolation
-    db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT);
-    db2 = new QdrantDB(QDRANT_URL, undefined, 'test-org-456', TEST_PROJECT_ROOT);
+    db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+    db2 = new QdrantDB(QDRANT_URL, undefined, 'test-org-456', TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
     
     await db.initialize();
     await db2.initialize();
@@ -338,14 +340,14 @@ describe('QdrantDB', () => {
   describe('version management', () => {
     it('should return 0 for getCurrentVersion when no version file exists', async () => {
       // Create a fresh instance without initializing to test default state
-      const freshDb = new QdrantDB(QDRANT_URL, undefined, 'test-org-fresh', '/tmp/test-fresh');
+      const freshDb = new QdrantDB(QDRANT_URL, undefined, 'test-org-fresh', '/tmp/test-fresh', TEST_BRANCH, TEST_COMMIT_SHA);
       const version = freshDb.getCurrentVersion();
       expect(version).toBe(0);
     });
 
     it('should return "Unknown" for getVersionDate when version is 0', () => {
       // Create a fresh instance without initializing to test default state
-      const freshDb = new QdrantDB(QDRANT_URL, undefined, 'test-org-fresh2', '/tmp/test-fresh2');
+      const freshDb = new QdrantDB(QDRANT_URL, undefined, 'test-org-fresh2', '/tmp/test-fresh2', TEST_BRANCH, TEST_COMMIT_SHA);
       const date = freshDb.getVersionDate();
       expect(date).toBe('Unknown');
     });
@@ -356,7 +358,7 @@ describe('QdrantDB', () => {
       await writeVersionFile(db.dbPath);
 
       // Create a new instance and initialize
-      const newDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT);
+      const newDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
       await newDb.initialize();
 
       const version = newDb.getCurrentVersion();
@@ -443,6 +445,193 @@ describe('QdrantDB', () => {
       const date = db.getVersionDate();
       expect(date).not.toBe('Unknown');
       expect(date).toContain('2021'); // Should contain the year
+    });
+  });
+
+  describe('branch and commit tracking', () => {
+    it('should isolate data by branch and commit', async () => {
+      // Create two instances with same org/repo but different branches
+      const mainDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit-sha');
+      const featureDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'feature-commit-sha');
+      
+      await mainDb.initialize();
+      await featureDb.initialize();
+
+      // Insert data into main branch
+      const mainVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)];
+      const mainMetadatas = [{
+        file: 'src/main.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const mainContents = ['main branch content'];
+      await mainDb.insertBatch(mainVectors, mainMetadatas, mainContents);
+
+      // Insert data into feature branch
+      const featureVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.2)];
+      const featureMetadatas = [{
+        file: 'src/feature.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const featureContents = ['feature branch content'];
+      await featureDb.insertBatch(featureVectors, featureMetadatas, featureContents);
+
+      // Search main branch should only return main branch data
+      const mainQueryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.1);
+      const mainResults = await mainDb.search(mainQueryVector, 10);
+      expect(mainResults.length).toBe(1);
+      expect(mainResults[0].content).toBe('main branch content');
+
+      // Search feature branch should only return feature branch data
+      const featureQueryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.2);
+      const featureResults = await featureDb.search(featureQueryVector, 10);
+      expect(featureResults.length).toBe(1);
+      expect(featureResults[0].content).toBe('feature branch content');
+
+      // Clean up
+      await mainDb.clear();
+      await featureDb.clear();
+    });
+
+    it('should filter cross-repo search by branch', async () => {
+      // Create instances with different branches
+      const mainDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit-sha');
+      const featureDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'feature-commit-sha');
+      
+      await mainDb.initialize();
+      await featureDb.initialize();
+
+      // Insert data into both branches
+      const mainVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)];
+      const mainMetadatas = [{
+        file: 'src/main.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const mainContents = ['main content'];
+      await mainDb.insertBatch(mainVectors, mainMetadatas, mainContents);
+
+      const featureVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.2)];
+      const featureMetadatas = [{
+        file: 'src/feature.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const featureContents = ['feature content'];
+      await featureDb.insertBatch(featureVectors, featureMetadatas, featureContents);
+
+      // Cross-repo search with main branch filter should only return main branch data
+      const queryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.1);
+      const mainResults = await mainDb.searchCrossRepo(queryVector, 10, undefined, 'main');
+      expect(mainResults.length).toBe(1);
+      expect(mainResults[0].content).toBe('main content');
+
+      // Cross-repo search without branch filter should return both (if vectors are similar enough)
+      // But with branch filter, should only return filtered branch
+      const allResults = await mainDb.searchCrossRepo(queryVector, 10);
+      // Should return at least main branch results
+      expect(allResults.length).toBeGreaterThanOrEqual(1);
+
+      // Clean up
+      await mainDb.clear();
+      await featureDb.clear();
+    });
+
+    it('should only clear current branch data', async () => {
+      // Create two instances with different branches
+      const mainDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit-sha');
+      const featureDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'feature-commit-sha');
+      
+      await mainDb.initialize();
+      await featureDb.initialize();
+
+      // Insert data into both branches
+      const mainVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)];
+      const mainMetadatas = [{
+        file: 'src/main.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const mainContents = ['main content'];
+      await mainDb.insertBatch(mainVectors, mainMetadatas, mainContents);
+
+      const featureVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.2)];
+      const featureMetadatas = [{
+        file: 'src/feature.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const featureContents = ['feature content'];
+      await featureDb.insertBatch(featureVectors, featureMetadatas, featureContents);
+
+      // Clear main branch
+      await mainDb.clear();
+
+      // Main branch should be empty
+      const mainQueryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.1);
+      const mainResults = await mainDb.search(mainQueryVector, 10);
+      expect(mainResults.length).toBe(0);
+
+      // Feature branch should still have data
+      const featureQueryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.2);
+      const featureResults = await featureDb.search(featureQueryVector, 10);
+      expect(featureResults.length).toBe(1);
+      expect(featureResults[0].content).toBe('feature content');
+
+      // Clean up
+      await featureDb.clear();
+    });
+
+    it('should only delete file from current branch', async () => {
+      // Create two instances with different branches
+      const mainDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit-sha');
+      const featureDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'feature-commit-sha');
+      
+      await mainDb.initialize();
+      await featureDb.initialize();
+
+      // Insert same file into both branches
+      const vectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)];
+      const metadatas = [{
+        file: 'src/shared.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const mainContents = ['main version'];
+      const featureContents = ['feature version'];
+
+      await mainDb.insertBatch(vectors, metadatas, mainContents);
+      await featureDb.insertBatch(vectors, metadatas, featureContents);
+
+      // Delete file from main branch
+      await mainDb.deleteByFile('src/shared.ts');
+
+      // Main branch should not have the file
+      const mainResults = await mainDb.scanWithFilter({ pattern: 'shared' });
+      expect(mainResults.length).toBe(0);
+
+      // Feature branch should still have the file
+      const featureResults = await featureDb.scanWithFilter({ pattern: 'shared' });
+      expect(featureResults.length).toBe(1);
+      expect(featureResults[0].content).toBe('feature version');
+
+      // Clean up
+      await featureDb.clear();
     });
   });
 });

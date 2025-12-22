@@ -31,6 +31,9 @@ export interface QdrantPayload {
   // Multi-tenant fields
   orgId: string;
   repoId: string;
+  // Branch/commit tracking
+  branch: string;
+  commitSha: string;
 }
 
 /**
@@ -40,7 +43,9 @@ export interface QdrantPayload {
 export class QdrantPayloadMapper {
   constructor(
     private orgId: string,
-    private repoId: string
+    private repoId: string,
+    private branch: string,
+    private commitSha: string
   ) {}
 
   /**
@@ -75,6 +80,9 @@ export class QdrantPayloadMapper {
       // Multi-tenant fields
       orgId: this.orgId,
       repoId: this.repoId,
+      // Branch/commit tracking
+      branch: this.branch,
+      commitSha: this.commitSha,
     };
   }
 
@@ -107,6 +115,8 @@ export class QdrantPayloadMapper {
       halsteadBugs: payload.halsteadBugs || undefined,
       repoId: payload.repoId || undefined,
       orgId: payload.orgId || undefined,
+      branch: payload.branch || undefined,
+      commitSha: payload.commitSha || undefined,
     };
   }
 }

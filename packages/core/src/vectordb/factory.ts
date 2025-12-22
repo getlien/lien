@@ -2,6 +2,7 @@ import { VectorDBInterface } from './types.js';
 import { VectorDB } from './lancedb.js';
 import { QdrantDB } from './qdrant.js';
 import { loadGlobalConfig, extractOrgIdFromGit } from '../config/global-config.js';
+import { getCurrentBranch, getCurrentCommit } from '../git/utils.js';
 
 /**
  * Factory function to create a VectorDB instance based on global configuration.
@@ -54,7 +55,11 @@ export async function createVectorDB(
         );
       }
 
-      const db = new QdrantDB(url, apiKey, orgId, projectRoot);
+      // Extract branch and commit from git (with fallbacks)
+      const branch = await getCurrentBranch(projectRoot).catch(() => 'main');
+      const commitSha = await getCurrentCommit(projectRoot).catch(() => 'unknown');
+
+      const db = new QdrantDB(url, apiKey, orgId, projectRoot, branch, commitSha);
       // Verify it has the required methods
       if (typeof db.initialize !== 'function') {
         throw new Error('QdrantDB instance missing initialize method');
