@@ -143,16 +143,20 @@ export class QdrantDB implements VectorDBInterface {
 
   /**
    * Generate a unique point ID from chunk metadata.
-   * Uses hash of file path + line range for stable identification.
+   * Uses hash of file path + line range + branch + commitSha for stable identification.
+   * Includes branch/commit to prevent ID collisions across branches.
    */
   private generatePointId(metadata: ChunkMetadata): string {
-    const idString = `${metadata.file}:${metadata.startLine}:${metadata.endLine}`;
+    const idString = `${metadata.file}:${metadata.startLine}:${metadata.endLine}:${this.branch}:${this.commitSha}`;
     return crypto.createHash('md5').update(idString).digest('hex');
   }
 
   /**
    * Build base filter for Qdrant queries.
    * Uses builder pattern to simplify filter construction.
+   * 
+   * Note: includeCurrentRepo and repoIds are mutually exclusive.
+   * If includeCurrentRepo is true, repoIds should not be provided.
    */
   private buildBaseFilter(options: {
     language?: string;
@@ -163,6 +167,14 @@ export class QdrantDB implements VectorDBInterface {
     includeCurrentRepo?: boolean;
     patternKey?: 'file' | 'symbolName';
   }): any {
+    // Validate: includeCurrentRepo and repoIds are mutually exclusive
+    if (options.includeCurrentRepo !== false && options.repoIds && options.repoIds.length > 0) {
+      throw new Error(
+        'Cannot use includeCurrentRepo=true with repoIds. ' +
+        'These options are mutually exclusive. Use includeCurrentRepo=false for cross-repo queries.'
+      );
+    }
+
     const builder = new QdrantFilterBuilder(this.orgId);
 
     if (options.includeCurrentRepo !== false) {

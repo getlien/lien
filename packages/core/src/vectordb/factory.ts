@@ -45,11 +45,27 @@ async function createQdrantDB(
     );
   }
 
-  // Extract branch and commit from git (with fallbacks)
-  const [branch, commitSha] = await Promise.all([
-    getCurrentBranch(projectRoot).catch(() => 'main'),
-    getCurrentCommit(projectRoot).catch(() => 'unknown'),
-  ]);
+  // Extract branch and commit from git (both are required for Qdrant isolation)
+  // Log warnings if fallbacks are used, as this can lead to unintended data merging
+  let branch: string;
+  let commitSha: string;
+
+  try {
+    [branch, commitSha] = await Promise.all([
+      getCurrentBranch(projectRoot),
+      getCurrentCommit(projectRoot),
+    ]);
+  } catch (error) {
+    // Use fallbacks but log warning - this can cause data merging issues
+    console.warn(
+      `[Lien] Warning: Failed to detect git branch/commit for Qdrant backend. ` +
+      `Using fallback values ('main', 'unknown'). This may cause unintended data merging ` +
+      `if multiple branches use the same fallback values. ` +
+      `Error: ${error instanceof Error ? error.message : String(error)}`
+    );
+    branch = 'main';
+    commitSha = 'unknown';
+  }
 
   const db = new QdrantDB(config.url, config.apiKey, orgId, projectRoot, branch, commitSha);
   validateVectorDBInterface(db);
