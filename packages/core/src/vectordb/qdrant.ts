@@ -93,6 +93,106 @@ export class QdrantDB implements VectorDBInterface {
     return crypto.createHash('md5').update(idString).digest('hex');
   }
 
+  /**
+   * Build base filter for Qdrant queries.
+   * Handles common filtering logic for orgId, repoId, branch, commitSha, and optional filters.
+   */
+  private buildBaseFilter(options: {
+    language?: string;
+    pattern?: string;
+    symbolType?: 'function' | 'class' | 'interface';
+    repoIds?: string[];
+    branch?: string;
+    includeCurrentRepo?: boolean;
+    patternKey?: 'file' | 'symbolName';
+  }): any {
+    const filter: any = {
+      must: [{ key: 'orgId', match: { value: this.orgId } }],
+    };
+
+    // Include current repo filters (repoId, branch, commitSha) unless explicitly disabled
+    if (options.includeCurrentRepo !== false) {
+      filter.must.push(
+        { key: 'repoId', match: { value: this.repoId } },
+        { key: 'branch', match: { value: this.branch } },
+        { key: 'commitSha', match: { value: this.commitSha } }
+      );
+    }
+
+    // Optionally filter to specific repos (for cross-repo queries)
+    if (options.repoIds && options.repoIds.length > 0) {
+      filter.must.push({
+        key: 'repoId',
+        match: { any: options.repoIds },
+      });
+    }
+
+    // Optional filters
+    if (options.language) {
+      filter.must.push({ key: 'language', match: { value: options.language } });
+    }
+
+    if (options.symbolType) {
+      filter.must.push({ key: 'symbolType', match: { value: options.symbolType } });
+    }
+
+    if (options.pattern) {
+      const key = options.patternKey || 'file';
+      filter.must.push({ key, match: { text: options.pattern } });
+    }
+
+    // Optional branch filter (for cross-repo queries)
+    if (options.branch) {
+      filter.must.push({
+        key: 'branch',
+        match: { value: options.branch },
+      });
+    }
+
+    return filter;
+  }
+
+  /**
+   * Map Qdrant scroll results to SearchResult format.
+   */
+  private mapScrollResults(results: any): SearchResult[] {
+    return (results.points || []).map((point: any) => ({
+      content: (point.payload?.content as string) || '',
+      metadata: this.payloadMapper.fromPayload(point.payload || {}),
+      score: 0,
+      relevance: 'not_relevant' as const,
+    }));
+  }
+
+  /**
+   * Execute a scroll query with error handling.
+   */
+  private async executeScrollQuery(
+    filter: any,
+    limit: number,
+    errorContext: string
+  ): Promise<SearchResult[]> {
+    if (!this.initialized) {
+      throw new DatabaseError('Qdrant database not initialized');
+    }
+
+    try {
+      const results = await this.client.scroll(this.collectionName, {
+        filter,
+        limit,
+        with_payload: true,
+        with_vector: false,
+      });
+
+      return this.mapScrollResults(results);
+    } catch (error) {
+      throw new DatabaseError(
+        `Failed to ${errorContext}: ${error instanceof Error ? error.message : String(error)}`,
+        { collectionName: this.collectionName }
+      );
+    }
+  }
+
 
   async initialize(): Promise<void> {
     try {
@@ -278,49 +378,14 @@ export class QdrantDB implements VectorDBInterface {
     pattern?: string;
     limit?: number;
   }): Promise<SearchResult[]> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
+    const filter = this.buildBaseFilter({
+      language: options.language,
+      pattern: options.pattern,
+      patternKey: 'file',
+      includeCurrentRepo: true,
+    });
 
-    try {
-      const filter: any = {
-        must: [
-          { key: 'orgId', match: { value: this.orgId } },
-          { key: 'repoId', match: { value: this.repoId } },
-          { key: 'branch', match: { value: this.branch } },
-          { key: 'commitSha', match: { value: this.commitSha } },
-        ],
-      };
-
-      if (options.language) {
-        filter.must.push({ key: 'language', match: { value: options.language } });
-      }
-
-      if (options.pattern) {
-        // Qdrant supports regex in match filters
-        filter.must.push({ key: 'file', match: { text: options.pattern } });
-      }
-
-      const limit = options.limit || 100;
-      const results = await this.client.scroll(this.collectionName, {
-        filter,
-        limit,
-        with_payload: true,
-        with_vector: false,
-      });
-
-      return (results.points || []).map(point => ({
-        content: (point.payload?.content as string) || '',
-        metadata: this.payloadMapper.fromPayload(point.payload || {}),
-        score: 0, // No relevance score for filtered scans
-        relevance: 'not_relevant' as const,
-      }));
-    } catch (error) {
-      throw new DatabaseError(
-        `Failed to scan Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName }
-      );
-    }
+    return this.executeScrollQuery(filter, options.limit || 100, 'scan Qdrant');
   }
 
   async scanAll(options: {
@@ -346,61 +411,20 @@ export class QdrantDB implements VectorDBInterface {
     repoIds?: string[];
     branch?: string;
   }): Promise<SearchResult[]> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
+    const filter = this.buildBaseFilter({
+      language: options.language,
+      pattern: options.pattern,
+      patternKey: 'file',
+      repoIds: options.repoIds,
+      branch: options.branch,
+      includeCurrentRepo: false, // Cross-repo: don't filter by current repo
+    });
 
-    try {
-      const filter: any = {
-        must: [
-          { key: 'orgId', match: { value: this.orgId } },
-        ],
-      };
-
-      // Optionally filter to specific repos
-      if (options.repoIds && options.repoIds.length > 0) {
-        filter.must.push({
-          key: 'repoId',
-          match: { any: options.repoIds },
-        });
-      }
-
-      if (options.language) {
-        filter.must.push({ key: 'language', match: { value: options.language } });
-      }
-
-      if (options.pattern) {
-        filter.must.push({ key: 'file', match: { text: options.pattern } });
-      }
-
-      // Optionally filter by branch (e.g., only scan main branch)
-      if (options.branch) {
-        filter.must.push({
-          key: 'branch',
-          match: { value: options.branch },
-        });
-      }
-
-      const limit = options.limit || 10000; // Higher default for cross-repo
-      const results = await this.client.scroll(this.collectionName, {
-        filter,
-        limit,
-        with_payload: true,
-        with_vector: false,
-      });
-
-      return (results.points || []).map(point => ({
-        content: (point.payload?.content as string) || '',
-        metadata: this.payloadMapper.fromPayload(point.payload || {}),
-        score: 0,
-        relevance: 'not_relevant' as const,
-      }));
-    } catch (error) {
-      throw new DatabaseError(
-        `Failed to scan Qdrant (cross-repo): ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName }
-      );
-    }
+    return this.executeScrollQuery(
+      filter,
+      options.limit || 10000, // Higher default for cross-repo
+      'scan Qdrant (cross-repo)'
+    );
   }
 
   async querySymbols(options: {
@@ -409,52 +433,15 @@ export class QdrantDB implements VectorDBInterface {
     symbolType?: 'function' | 'class' | 'interface';
     limit?: number;
   }): Promise<SearchResult[]> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
+    const filter = this.buildBaseFilter({
+      language: options.language,
+      pattern: options.pattern,
+      patternKey: 'symbolName',
+      symbolType: options.symbolType,
+      includeCurrentRepo: true,
+    });
 
-    try {
-      const filter: any = {
-        must: [
-          { key: 'orgId', match: { value: this.orgId } },
-          { key: 'repoId', match: { value: this.repoId } },
-          { key: 'branch', match: { value: this.branch } },
-          { key: 'commitSha', match: { value: this.commitSha } },
-        ],
-      };
-
-      if (options.language) {
-        filter.must.push({ key: 'language', match: { value: options.language } });
-      }
-
-      if (options.symbolType) {
-        filter.must.push({ key: 'symbolType', match: { value: options.symbolType } });
-      }
-
-      if (options.pattern) {
-        filter.must.push({ key: 'symbolName', match: { text: options.pattern } });
-      }
-
-      const limit = options.limit || 100;
-      const results = await this.client.scroll(this.collectionName, {
-        filter,
-        limit,
-        with_payload: true,
-        with_vector: false,
-      });
-
-      return (results.points || []).map(point => ({
-        content: (point.payload?.content as string) || '',
-        metadata: this.payloadMapper.fromPayload(point.payload || {}),
-        score: 0,
-        relevance: 'not_relevant' as const,
-      }));
-    } catch (error) {
-      throw new DatabaseError(
-        `Failed to query symbols in Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName }
-      );
-    }
+    return this.executeScrollQuery(filter, options.limit || 100, 'query symbols in Qdrant');
   }
 
   async clear(): Promise<void> {

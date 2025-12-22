@@ -52,6 +52,24 @@ export class QdrantPayloadMapper {
    * Transform chunk metadata to Qdrant payload format.
    */
   toPayload(metadata: ChunkMetadata, content: string = ''): QdrantPayload {
+    // Group tracking fields
+    const trackingInfo = {
+      orgId: this.orgId,
+      repoId: this.repoId,
+      branch: this.branch,
+      commitSha: this.commitSha,
+    };
+
+    // Group metrics
+    const metrics = {
+      complexity: metadata.complexity || 0,
+      cognitiveComplexity: metadata.cognitiveComplexity || 0,
+      halsteadVolume: metadata.halsteadVolume || 0,
+      halsteadDifficulty: metadata.halsteadDifficulty || 0,
+      halsteadEffort: metadata.halsteadEffort || 0,
+      halsteadBugs: metadata.halsteadBugs || 0,
+    };
+
     return {
       content,
       file: metadata.file,
@@ -67,22 +85,49 @@ export class QdrantPayloadMapper {
       symbolName: metadata.symbolName || '',
       symbolType: metadata.symbolType || '',
       parentClass: metadata.parentClass || '',
-      complexity: metadata.complexity || 0,
-      cognitiveComplexity: metadata.cognitiveComplexity || 0,
       parameters: metadata.parameters || [],
       signature: metadata.signature || '',
       imports: metadata.imports || [],
-      // Halstead metrics
-      halsteadVolume: metadata.halsteadVolume || 0,
-      halsteadDifficulty: metadata.halsteadDifficulty || 0,
-      halsteadEffort: metadata.halsteadEffort || 0,
-      halsteadBugs: metadata.halsteadBugs || 0,
-      // Multi-tenant fields
-      orgId: this.orgId,
-      repoId: this.repoId,
-      // Branch/commit tracking
-      branch: this.branch,
-      commitSha: this.commitSha,
+      // Metrics and tracking (grouped for clarity)
+      ...metrics,
+      ...trackingInfo,
+    };
+  }
+
+  /**
+   * Extract symbols from payload.
+   */
+  private extractSymbols(payload: Record<string, any>) {
+    return {
+      functions: payload.functionNames || [],
+      classes: payload.classNames || [],
+      interfaces: payload.interfaceNames || [],
+    };
+  }
+
+  /**
+   * Extract metrics from payload.
+   */
+  private extractMetrics(payload: Record<string, any>) {
+    return {
+      complexity: payload.complexity || undefined,
+      cognitiveComplexity: payload.cognitiveComplexity || undefined,
+      halsteadVolume: payload.halsteadVolume || undefined,
+      halsteadDifficulty: payload.halsteadDifficulty || undefined,
+      halsteadEffort: payload.halsteadEffort || undefined,
+      halsteadBugs: payload.halsteadBugs || undefined,
+    };
+  }
+
+  /**
+   * Extract tracking info from payload.
+   */
+  private extractTrackingInfo(payload: Record<string, any>) {
+    return {
+      repoId: payload.repoId || undefined,
+      orgId: payload.orgId || undefined,
+      branch: payload.branch || undefined,
+      commitSha: payload.commitSha || undefined,
     };
   }
 
@@ -96,27 +141,15 @@ export class QdrantPayloadMapper {
       endLine: payload.endLine,
       type: payload.type,
       language: payload.language,
-      symbols: {
-        functions: payload.functionNames || [],
-        classes: payload.classNames || [],
-        interfaces: payload.interfaceNames || [],
-      },
+      symbols: this.extractSymbols(payload),
       symbolName: payload.symbolName || undefined,
       symbolType: payload.symbolType || undefined,
       parentClass: payload.parentClass || undefined,
-      complexity: payload.complexity || undefined,
-      cognitiveComplexity: payload.cognitiveComplexity || undefined,
       parameters: payload.parameters || undefined,
       signature: payload.signature || undefined,
       imports: payload.imports || undefined,
-      halsteadVolume: payload.halsteadVolume || undefined,
-      halsteadDifficulty: payload.halsteadDifficulty || undefined,
-      halsteadEffort: payload.halsteadEffort || undefined,
-      halsteadBugs: payload.halsteadBugs || undefined,
-      repoId: payload.repoId || undefined,
-      orgId: payload.orgId || undefined,
-      branch: payload.branch || undefined,
-      commitSha: payload.commitSha || undefined,
+      ...this.extractMetrics(payload),
+      ...this.extractTrackingInfo(payload),
     };
   }
 }
