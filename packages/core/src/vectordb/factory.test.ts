@@ -114,10 +114,7 @@ describe('createVectorDB', () => {
       vi.mocked(getCurrentCommit).mockRejectedValue(new Error('Git commit detection failed'));
 
       await expect(createVectorDB(testDir)).rejects.toThrow(
-        'Qdrant backend requires a valid git branch and commit SHA'
-      );
-      await expect(createVectorDB(testDir)).rejects.toThrow(
-        'Failed to detect current branch and/or commit from git'
+        /Qdrant backend requires a valid git branch and commit SHA[\s\S]*Failed to detect current branch and\/or commit from git/
       );
     });
 
