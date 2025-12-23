@@ -119,12 +119,12 @@ export class QdrantPayloadMapper {
    */
   private extractMetrics(payload: Record<string, any>) {
     return {
-      complexity: payload.complexity || undefined,
-      cognitiveComplexity: payload.cognitiveComplexity || undefined,
-      halsteadVolume: payload.halsteadVolume || undefined,
-      halsteadDifficulty: payload.halsteadDifficulty || undefined,
-      halsteadEffort: payload.halsteadEffort || undefined,
-      halsteadBugs: payload.halsteadBugs || undefined,
+      complexity: payload.complexity ?? undefined,
+      cognitiveComplexity: payload.cognitiveComplexity ?? undefined,
+      halsteadVolume: payload.halsteadVolume ?? undefined,
+      halsteadDifficulty: payload.halsteadDifficulty ?? undefined,
+      halsteadEffort: payload.halsteadEffort ?? undefined,
+      halsteadBugs: payload.halsteadBugs ?? undefined,
     };
   }
 
@@ -133,10 +133,10 @@ export class QdrantPayloadMapper {
    */
   private extractTrackingInfo(payload: Record<string, any>) {
     return {
-      repoId: payload.repoId || undefined,
-      orgId: payload.orgId || undefined,
-      branch: payload.branch || undefined,
-      commitSha: payload.commitSha || undefined,
+      repoId: payload.repoId ?? undefined,
+      orgId: payload.orgId ?? undefined,
+      branch: payload.branch ?? undefined,
+      commitSha: payload.commitSha ?? undefined,
     };
   }
 
