@@ -640,6 +640,84 @@ describe('QdrantDB', () => {
       await featureDb.clear();
     });
 
+    it('should clear all commits for a branch using clearBranch()', async () => {
+      // Create instances for same branch but different commits (simulating PR updates)
+      const commit1Db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'commit-1');
+      const commit2Db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'commit-2');
+      const otherBranchDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit');
+      
+      await commit1Db.initialize();
+      await commit2Db.initialize();
+      await otherBranchDb.initialize();
+
+      // Insert data into commit 1
+      const vectors1 = [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)];
+      const metadatas1 = [{
+        file: 'src/file1.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const contents1 = ['commit 1 content'];
+      await commit1Db.insertBatch(vectors1, metadatas1, contents1);
+
+      // Insert data into commit 2 (same branch, different commit)
+      const vectors2 = [new Float32Array(EMBEDDING_DIMENSION).fill(0.2)];
+      const metadatas2 = [{
+        file: 'src/file2.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const contents2 = ['commit 2 content'];
+      await commit2Db.insertBatch(vectors2, metadatas2, contents2);
+
+      // Insert data into other branch
+      const vectors3 = [new Float32Array(EMBEDDING_DIMENSION).fill(0.3)];
+      const metadatas3 = [{
+        file: 'src/main.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const contents3 = ['main branch content'];
+      await otherBranchDb.insertBatch(vectors3, metadatas3, contents3);
+
+      // Verify all commits have data
+      const commit1Results = await commit1Db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.1), 10);
+      const commit2Results = await commit2Db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.2), 10);
+      const otherBranchResults = await otherBranchDb.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.3), 10);
+      
+      expect(commit1Results.length).toBe(1);
+      expect(commit1Results[0].content).toBe('commit 1 content');
+      expect(commit2Results.length).toBe(1);
+      expect(commit2Results[0].content).toBe('commit 2 content');
+      expect(otherBranchResults.length).toBe(1);
+      expect(otherBranchResults[0].content).toBe('main branch content');
+
+      // Clear all commits for feature-x branch
+      await commit1Db.clearBranch('feature-x');
+
+      // Commit 1 should be empty (branch cleared)
+      const commit1After = await commit1Db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.1), 10);
+      expect(commit1After.length).toBe(0);
+
+      // Commit 2 should also be empty (same branch)
+      const commit2After = await commit2Db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.2), 10);
+      expect(commit2After.length).toBe(0);
+
+      // Other branch should still have data
+      const otherBranchAfter = await otherBranchDb.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.3), 10);
+      expect(otherBranchAfter.length).toBe(1);
+      expect(otherBranchAfter[0].content).toBe('main branch content');
+
+      // Clean up
+      await otherBranchDb.clear();
+    });
+
     it('should generate unique point IDs for same file/line range across branches', async () => {
       // Test that point IDs include branch/commit to prevent collisions
       const mainDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit-sha');

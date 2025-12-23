@@ -529,6 +529,44 @@ export class QdrantDB implements VectorDBInterface {
     }
   }
 
+  /**
+   * Clear all data for a specific branch (all commits).
+   * Useful for PR branches where you only want to keep the latest commit.
+   * 
+   * @param branch - Branch name to clear (defaults to current branch)
+   */
+  async clearBranch(branch?: string): Promise<void> {
+    if (!this.initialized) {
+      throw new DatabaseError('Qdrant database not initialized');
+    }
+
+    const targetBranch = branch ?? this.branch;
+
+    try {
+      const collectionCheck = await this.client.collectionExists(this.collectionName);
+      if (!collectionCheck.exists) {
+        // Collection doesn't exist yet, nothing to clear
+        return;
+      }
+
+      // Delete all points for this repository and branch (all commits)
+      await this.client.delete(this.collectionName, {
+        filter: {
+          must: [
+            { key: 'orgId', match: { value: this.orgId } },
+            { key: 'repoId', match: { value: this.repoId } },
+            { key: 'branch', match: { value: targetBranch } },
+          ],
+        },
+      });
+    } catch (error) {
+      throw new DatabaseError(
+        `Failed to clear branch from Qdrant: ${error instanceof Error ? error.message : String(error)}`,
+        { collectionName: this.collectionName, branch: targetBranch }
+      );
+    }
+  }
+
   async deleteByFile(filepath: string): Promise<void> {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
