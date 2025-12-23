@@ -211,7 +211,9 @@ export class QdrantDB implements VectorDBInterface {
       );
     }
 
-    // Validate: branch parameter should only be used when includeCurrentRepo is false
+    // Validate: branch parameter should only be used when includeCurrentRepo is false.
+    // As above, `includeCurrentRepo !== false` treats both undefined and true as "enabled"
+    // for the current repo context, so callers must explicitly pass false for cross-repo.
     if (options.branch && options.includeCurrentRepo !== false) {
       throw new Error(
         'Cannot use branch parameter when includeCurrentRepo is enabled (the default). ' +
