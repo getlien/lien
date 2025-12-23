@@ -568,8 +568,11 @@ export class QdrantDB implements VectorDBInterface {
 
   /**
    * Clear all data for a specific branch (all commits).
-   * Useful for PR branches where you only want to keep the latest commit.
-   * 
+   *
+   * Qdrant-only helper: this is not part of the generic VectorDBInterface and
+   * is intended for cloud/PR workflows where multiple commits exist per branch.
+   * LanceDB and other backends do not implement this method.
+   *
    * @param branch - Branch name to clear (defaults to current branch)
    */
   async clearBranch(branch?: string): Promise<void> {
