@@ -11,11 +11,31 @@ import { readVersionFile } from './version.js';
 import { QdrantPayloadMapper } from './qdrant-payload-mapper.js';
 
 /**
+ * Qdrant filter types for stronger type-safety when constructing filters.
+ */
+interface QdrantMatch {
+  value?: string | number | boolean;
+  text?: string;
+  any?: string[];
+}
+
+interface QdrantCondition {
+  key: string;
+  match: QdrantMatch;
+}
+
+interface QdrantFilter {
+  must: QdrantCondition[];
+  should?: QdrantCondition[];
+  must_not?: QdrantCondition[];
+}
+
+/**
  * Builder class for constructing Qdrant filters.
  * Simplifies filter construction and reduces complexity.
  */
 class QdrantFilterBuilder {
-  private filter: any;
+  private filter: QdrantFilter;
 
   constructor(orgId: string) {
     this.filter = {
@@ -76,7 +96,7 @@ class QdrantFilterBuilder {
     return this;
   }
 
-  build(): any {
+  build(): QdrantFilter {
     return this.filter;
   }
 }
