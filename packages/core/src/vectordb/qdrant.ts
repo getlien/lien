@@ -168,20 +168,20 @@ export class QdrantDB implements VectorDBInterface {
     patternKey?: 'file' | 'symbolName';
   }): any {
     // Validate: includeCurrentRepo and repoIds are mutually exclusive
-    // Note: `includeCurrentRepo !== false` treats undefined as true (default behavior)
-    // This forces explicit use of includeCurrentRepo=false for cross-repo queries
+    // Note: `includeCurrentRepo !== false` treats undefined as "enabled" (default behavior).
+    // Callers must explicitly pass includeCurrentRepo=false when using repoIds for cross-repo queries.
     if (options.includeCurrentRepo !== false && options.repoIds && options.repoIds.length > 0) {
       throw new Error(
-        'Cannot use includeCurrentRepo=true with repoIds. ' +
-        'These options are mutually exclusive. Use includeCurrentRepo=false for cross-repo queries.'
+        'Cannot use repoIds when includeCurrentRepo is enabled (the default). ' +
+        'These options are mutually exclusive. Set includeCurrentRepo=false to perform cross-repo queries with repoIds.'
       );
     }
 
     // Validate: branch parameter should only be used when includeCurrentRepo is false
     if (options.branch && options.includeCurrentRepo !== false) {
       throw new Error(
-        'Cannot use branch parameter when includeCurrentRepo is true. ' +
-        'Branch is automatically included via repo context. Use includeCurrentRepo=false for cross-repo queries.'
+        'Cannot use branch parameter when includeCurrentRepo is enabled (the default). ' +
+        'Branch is automatically included via the current repo context. Set includeCurrentRepo=false to specify a branch explicitly.'
       );
     }
 
