@@ -18,16 +18,16 @@ export interface QdrantPayload {
   symbolName: string;
   symbolType: string;
   parentClass: string;
-  complexity: number;
-  cognitiveComplexity: number;
+  complexity?: number;        // Optional: may be missing in old payloads
+  cognitiveComplexity?: number; // Optional: may be missing in old payloads
   parameters: string[];
   signature: string;
   imports: string[];
   // Halstead metrics
-  halsteadVolume: number;
-  halsteadDifficulty: number;
-  halsteadEffort: number;
-  halsteadBugs: number;
+  halsteadVolume?: number;      // Optional: may be missing in old payloads
+  halsteadDifficulty?: number;   // Optional: may be missing in old payloads
+  halsteadEffort?: number;      // Optional: may be missing in old payloads
+  halsteadBugs?: number;        // Optional: may be missing in old payloads
   // Multi-tenant fields
   orgId: string;
   repoId: string;

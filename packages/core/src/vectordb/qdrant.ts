@@ -168,6 +168,8 @@ export class QdrantDB implements VectorDBInterface {
     patternKey?: 'file' | 'symbolName';
   }): any {
     // Validate: includeCurrentRepo and repoIds are mutually exclusive
+    // Note: `includeCurrentRepo !== false` treats undefined as true (default behavior)
+    // This forces explicit use of includeCurrentRepo=false for cross-repo queries
     if (options.includeCurrentRepo !== false && options.repoIds && options.repoIds.length > 0) {
       throw new Error(
         'Cannot use includeCurrentRepo=true with repoIds. ' +
