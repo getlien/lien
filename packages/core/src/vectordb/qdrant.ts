@@ -37,6 +37,16 @@ class QdrantFilterBuilder {
       .map(id => id.trim())
       .filter(id => id.length > 0);
 
+    // If caller passed repoIds but all were empty/invalid after cleaning,
+    // fail fast instead of silently dropping the repoId filter (which would
+    // otherwise widen the query to all repos in the org).
+    if (repoIds.length > 0 && cleanedRepoIds.length === 0) {
+      throw new Error(
+        'Invalid repoIds: all provided repoIds are empty or whitespace. ' +
+        'Provide at least one non-empty repoId or omit repoIds entirely.'
+      );
+    }
+
     if (cleanedRepoIds.length > 0) {
       this.filter.must.push({
         key: 'repoId',
