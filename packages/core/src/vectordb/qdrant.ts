@@ -33,10 +33,14 @@ class QdrantFilterBuilder {
   }
 
   addRepoIds(repoIds: string[]): this {
-    if (repoIds.length > 0) {
+    const cleanedRepoIds = repoIds
+      .map(id => id.trim())
+      .filter(id => id.length > 0);
+
+    if (cleanedRepoIds.length > 0) {
       this.filter.must.push({
         key: 'repoId',
-        match: { any: repoIds },
+        match: { any: cleanedRepoIds },
       });
     }
     return this;
