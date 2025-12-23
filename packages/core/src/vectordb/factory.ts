@@ -46,7 +46,7 @@ async function createQdrantDB(
   }
 
   // Extract branch and commit from git (both are required for Qdrant isolation)
-  // Log warnings if fallbacks are used, as this can lead to unintended data merging
+  // Fail fast if git commands fail - branch/commit tracking is essential for data isolation
   let branch: string;
   let commitSha: string;
 
@@ -56,15 +56,12 @@ async function createQdrantDB(
       getCurrentCommit(projectRoot),
     ]);
   } catch (error) {
-    // Use fallbacks but log warning - this can cause data merging issues
-    console.warn(
-      `[Lien] Warning: Failed to detect git branch/commit for Qdrant backend. ` +
-      `Using fallback values ('main', 'unknown'). This may cause unintended data merging ` +
-      `if multiple branches use the same fallback values. ` +
-      `Error: ${error instanceof Error ? error.message : String(error)}`
+    throw new Error(
+      'Qdrant backend requires a valid git branch and commit SHA for proper data isolation. ' +
+      'Failed to detect current branch and/or commit from git. ' +
+      'Ensure the repository is initialized, has at least one commit, and HEAD is not detached. ' +
+      `Original error: ${error instanceof Error ? error.message : String(error)}`
     );
-    branch = 'main';
-    commitSha = 'unknown';
   }
 
   const db = new QdrantDB(config.url, config.apiKey, orgId, projectRoot, branch, commitSha);

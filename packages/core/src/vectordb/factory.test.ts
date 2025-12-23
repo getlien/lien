@@ -100,20 +100,16 @@ describe('createVectorDB', () => {
       );
     });
 
-    it('should log warning and use fallbacks when git commands fail', async () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      
-      vi.mocked(getCurrentBranch).mockRejectedValue(new Error('Git error'));
-      vi.mocked(getCurrentCommit).mockRejectedValue(new Error('Git error'));
+    it('should throw error when git commands fail (fail-fast)', async () => {
+      vi.mocked(getCurrentBranch).mockRejectedValue(new Error('Git branch detection failed'));
+      vi.mocked(getCurrentCommit).mockRejectedValue(new Error('Git commit detection failed'));
 
-      const db = await createVectorDB(testDir);
-      
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[Lien] Warning: Failed to detect git branch/commit')
+      await expect(createVectorDB(testDir)).rejects.toThrow(
+        'Qdrant backend requires a valid git branch and commit SHA'
       );
-      expect(db).toBeDefined();
-      
-      consoleSpy.mockRestore();
+      await expect(createVectorDB(testDir)).rejects.toThrow(
+        'Failed to detect current branch and/or commit from git'
+      );
     });
 
     it('should not silently fall back to LanceDB when Qdrant is explicitly configured', async () => {
