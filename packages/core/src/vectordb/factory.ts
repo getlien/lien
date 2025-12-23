@@ -87,27 +87,31 @@ async function createQdrantDB(
 export async function createVectorDB(
   projectRoot: string
 ): Promise<VectorDBInterface> {
+  let globalConfig: GlobalConfig | null = null;
+  
   try {
-    const globalConfig = await loadGlobalConfig();
-    
-    switch (globalConfig.backend) {
-      case 'qdrant':
-        if (!globalConfig.qdrant) {
-          throw new Error('Qdrant backend requires qdrant configuration in global config');
-        }
-        return await createQdrantDB(projectRoot, globalConfig.qdrant);
-      
-      case 'lancedb':
-      case undefined:
-        return await createLanceDB(projectRoot);
-      
-      default:
-        throw new Error(`Unknown storage backend: ${globalConfig.backend}. Supported backends: 'lancedb', 'qdrant'`);
-    }
+    globalConfig = await loadGlobalConfig();
   } catch (error) {
-    // If anything goes wrong, fall back to LanceDB
-    console.warn(`[Lien] Error creating vector DB, falling back to LanceDB: ${error}`);
+    // Config loading failed - fall back to LanceDB (default)
+    console.warn(`[Lien] Failed to load global config, using default LanceDB backend: ${error}`);
     return await createLanceDB(projectRoot);
+  }
+  
+  switch (globalConfig.backend) {
+    case 'qdrant':
+      if (!globalConfig.qdrant) {
+        throw new Error('Qdrant backend requires qdrant configuration in global config');
+      }
+      // Don't catch errors here - let Qdrant-specific errors propagate
+      // User explicitly configured Qdrant, so they should see errors
+      return await createQdrantDB(projectRoot, globalConfig.qdrant);
+    
+    case 'lancedb':
+    case undefined:
+      return await createLanceDB(projectRoot);
+    
+    default:
+      throw new Error(`Unknown storage backend: ${globalConfig.backend}. Supported backends: 'lancedb', 'qdrant'`);
   }
 }
 

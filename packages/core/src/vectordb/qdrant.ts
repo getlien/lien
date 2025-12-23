@@ -175,6 +175,14 @@ export class QdrantDB implements VectorDBInterface {
       );
     }
 
+    // Validate: branch parameter should only be used when includeCurrentRepo is false
+    if (options.branch && options.includeCurrentRepo !== false) {
+      throw new Error(
+        'Cannot use branch parameter when includeCurrentRepo is true. ' +
+        'Branch is automatically included via repo context. Use includeCurrentRepo=false for cross-repo queries.'
+      );
+    }
+
     const builder = new QdrantFilterBuilder(this.orgId);
 
     if (options.includeCurrentRepo !== false) {
@@ -197,7 +205,9 @@ export class QdrantDB implements VectorDBInterface {
       builder.addPattern(options.pattern, options.patternKey);
     }
 
-    if (options.branch) {
+    // Only add branch filter when includeCurrentRepo is false
+    // When includeCurrentRepo is true, branch is already added via addRepoContext
+    if (options.branch && options.includeCurrentRepo === false) {
       builder.addBranch(options.branch);
     }
 

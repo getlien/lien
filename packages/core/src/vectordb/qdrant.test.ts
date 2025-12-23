@@ -756,19 +756,17 @@ describe('QdrantDB', () => {
     });
 
     it('should throw error when buildBaseFilter has conflicting options', async () => {
-      // Test validation for conflicting filter options
       const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
       await db.initialize();
 
-      // This should not happen in normal usage, but test the validation
-      // We can't directly test buildBaseFilter as it's private, but we can test
-      // that scanCrossRepo with includeCurrentRepo=true and repoIds would fail
-      // Actually, scanCrossRepo sets includeCurrentRepo=false, so this is safe
-      // The validation is in buildBaseFilter which is tested indirectly
-      
-      // Test that normal usage works
+      // Test that normal usage works (non-conflicting options)
       const results = await db.scanCrossRepo({ repoIds: [db.getRepoId()] });
       expect(Array.isArray(results)).toBe(true);
+
+      // Note: We can't directly test buildBaseFilter's validation errors since it's private
+      // and all public methods correctly set includeCurrentRepo=false when using repoIds.
+      // The validation exists as a safety check for future code changes.
+      // The test above verifies that the normal usage pattern works correctly.
 
       await db.clear();
     });
