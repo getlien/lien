@@ -440,8 +440,16 @@ export class QdrantDB implements VectorDBInterface {
 
   /**
    * Search across all repos in the organization (cross-repo search).
-   * Omits repoId filter to enable cross-repo queries.
-   * Optionally filters by branch to search specific branch across repos.
+   *
+   * - Omits repoId filter by default to enable true cross-repo queries.
+   * - When repoIds are provided, restricts results to those repositories only.
+   * - When branch is omitted, returns chunks from all branches and commits
+   *   (including historical PR branches and stale commits).
+   * - When branch is provided, filters by branch name only and still returns
+   *   chunks from all commits on that branch across the selected repos.
+   *
+   * This is a low-level primitive for cross-repo augmentation. Higher-level
+   * workflows (e.g. \"latest commit only\") should be built on top of this API.
    */
   async searchCrossRepo(
     queryVector: Float32Array,
@@ -524,8 +532,16 @@ export class QdrantDB implements VectorDBInterface {
 
   /**
    * Scan with filter across all repos in the organization (cross-repo).
-   * Omits repoId filter to enable cross-repo queries.
-   * Optionally filters by branch to scan specific branch across repos.
+   *
+   * - Omits repoId filter by default to enable true cross-repo scans.
+   * - When repoIds are provided, restricts results to those repositories only.
+   * - When branch is omitted, returns chunks from all branches and commits
+   *   (including historical PR branches and stale commits).
+   * - When branch is provided, filters by branch name only and still returns
+   *   chunks from all commits on that branch across the selected repos.
+   *
+   * Like searchCrossRepo, this is a low-level primitive. Higher-level behavior
+   * such as \"latest commit only\" should be implemented in orchestrating code.
    */
   async scanCrossRepo(options: {
     language?: string;
