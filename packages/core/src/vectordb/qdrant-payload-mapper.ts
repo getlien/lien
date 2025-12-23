@@ -130,6 +130,12 @@ export class QdrantPayloadMapper {
 
   /**
    * Extract tracking info from payload.
+   *
+   * For legacy points indexed before branch/commit tracking was added, these
+   * fields may be missing. In that case they are returned as undefined and
+   * the points will not match branch/commitSha-based filters. Such data
+   * effectively becomes \"orphaned\" until it is re-indexed with tracking
+   * metadata, which is the expected migration path for old Qdrant data.
    */
   private extractTrackingInfo(payload: Record<string, any>) {
     return {
