@@ -49,25 +49,45 @@ export class QdrantPayloadMapper {
   ) {}
 
   /**
-   * Transform chunk metadata to Qdrant payload format.
+   * Map metrics from metadata to payload format.
    */
-  toPayload(metadata: ChunkMetadata, content: string = ''): QdrantPayload {
-    // Group tracking fields
-    const trackingInfo = {
-      orgId: this.orgId,
-      repoId: this.repoId,
-      branch: this.branch,
-      commitSha: this.commitSha,
-    };
-
-    // Group metrics
-    const metrics = {
+  private mapMetrics(metadata: ChunkMetadata) {
+    return {
       complexity: metadata.complexity || 0,
       cognitiveComplexity: metadata.cognitiveComplexity || 0,
       halsteadVolume: metadata.halsteadVolume || 0,
       halsteadDifficulty: metadata.halsteadDifficulty || 0,
       halsteadEffort: metadata.halsteadEffort || 0,
       halsteadBugs: metadata.halsteadBugs || 0,
+    };
+  }
+
+  /**
+   * Map symbols from metadata to payload format.
+   */
+  private mapSymbols(metadata: ChunkMetadata) {
+    return {
+      functionNames: metadata.symbols?.functions || [],
+      classNames: metadata.symbols?.classes || [],
+      interfaceNames: metadata.symbols?.interfaces || [],
+      symbolName: metadata.symbolName || '',
+      symbolType: metadata.symbolType || '',
+      parentClass: metadata.parentClass || '',
+      parameters: metadata.parameters || [],
+      signature: metadata.signature || '',
+      imports: metadata.imports || [],
+    };
+  }
+
+  /**
+   * Transform chunk metadata to Qdrant payload format.
+   */
+  toPayload(metadata: ChunkMetadata, content: string = ''): QdrantPayload {
+    const trackingInfo = {
+      orgId: this.orgId,
+      repoId: this.repoId,
+      branch: this.branch,
+      commitSha: this.commitSha,
     };
 
     return {
@@ -77,19 +97,8 @@ export class QdrantPayloadMapper {
       endLine: metadata.endLine,
       type: metadata.type,
       language: metadata.language,
-      // Symbols
-      functionNames: metadata.symbols?.functions || [],
-      classNames: metadata.symbols?.classes || [],
-      interfaceNames: metadata.symbols?.interfaces || [],
-      // AST-derived metadata
-      symbolName: metadata.symbolName || '',
-      symbolType: metadata.symbolType || '',
-      parentClass: metadata.parentClass || '',
-      parameters: metadata.parameters || [],
-      signature: metadata.signature || '',
-      imports: metadata.imports || [],
-      // Metrics and tracking (grouped for clarity)
-      ...metrics,
+      ...this.mapSymbols(metadata),
+      ...this.mapMetrics(metadata),
       ...trackingInfo,
     };
   }

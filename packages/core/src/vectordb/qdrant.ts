@@ -288,11 +288,14 @@ export class QdrantDB implements VectorDBInterface {
     }
   }
 
-  async insertBatch(
+  /**
+   * Validate batch input arrays have matching lengths.
+   */
+  private validateBatchInputs(
     vectors: Float32Array[],
     metadatas: ChunkMetadata[],
     contents: string[]
-  ): Promise<void> {
+  ): void {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
     }
@@ -304,23 +307,41 @@ export class QdrantDB implements VectorDBInterface {
         contentsLength: contents.length,
       });
     }
+  }
+
+  /**
+   * Prepare Qdrant points from vectors, metadatas, and contents.
+   */
+  private preparePoints(
+    vectors: Float32Array[],
+    metadatas: ChunkMetadata[],
+    contents: string[]
+  ): Array<{ id: string; vector: number[]; payload: Record<string, any> }> {
+    return vectors.map((vector, i) => {
+      const metadata = metadatas[i];
+      const payload = this.payloadMapper.toPayload(metadata, contents[i]) as Record<string, any>;
+      
+      return {
+        id: this.generatePointId(metadata),
+        vector: Array.from(vector),
+        payload,
+      };
+    });
+  }
+
+  async insertBatch(
+    vectors: Float32Array[],
+    metadatas: ChunkMetadata[],
+    contents: string[]
+  ): Promise<void> {
+    this.validateBatchInputs(vectors, metadatas, contents);
 
     if (vectors.length === 0) {
       return; // No-op for empty batches
     }
 
     try {
-      // Prepare points for upsert
-      const points = vectors.map((vector, i) => {
-        const metadata = metadatas[i];
-        const payload = this.payloadMapper.toPayload(metadata, contents[i]) as Record<string, any>;
-        
-        return {
-          id: this.generatePointId(metadata),
-          vector: Array.from(vector),
-          payload,
-        };
-      });
+      const points = this.preparePoints(vectors, metadatas, contents);
 
       // Upsert points in batches (Qdrant recommends batches of 100-1000)
       const batchSize = 100;
