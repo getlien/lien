@@ -718,6 +718,57 @@ describe('QdrantDB', () => {
       await otherBranchDb.clear();
     });
 
+    it('should default to current branch when clearBranch is called without arguments', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-y', 'commit-1');
+      const otherBranchDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit');
+
+      await db.initialize();
+      await otherBranchDb.initialize();
+
+      const vectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.4)];
+      const metadatas = [{
+        file: 'src/feature-y.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const contents = ['feature-y content'];
+      await db.insertBatch(vectors, metadatas, contents);
+
+      const mainVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.5)];
+      const mainMetadatas = [{
+        file: 'src/main2.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const mainContents = ['main2 content'];
+      await otherBranchDb.insertBatch(mainVectors, mainMetadatas, mainContents);
+
+      // Sanity check: both branches have data
+      const featureResultsBefore = await db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.4), 10);
+      const mainResultsBefore = await otherBranchDb.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.5), 10);
+      expect(featureResultsBefore.length).toBe(1);
+      expect(mainResultsBefore.length).toBe(1);
+
+      // Clear current branch (feature-y) without passing branch name
+      await db.clearBranch();
+
+      // Current branch should be empty
+      const featureResultsAfter = await db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.4), 10);
+      expect(featureResultsAfter.length).toBe(0);
+
+      // Other branch should still have data
+      const mainResultsAfter = await otherBranchDb.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.5), 10);
+      expect(mainResultsAfter.length).toBe(1);
+      expect(mainResultsAfter[0].content).toBe('main2 content');
+
+      // Clean up
+      await otherBranchDb.clear();
+    });
+
     it('should generate unique point IDs for same file/line range across branches', async () => {
       // Test that point IDs include branch/commit to prevent collisions
       const mainDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit-sha');
