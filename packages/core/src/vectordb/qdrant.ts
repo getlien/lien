@@ -218,6 +218,10 @@ export class QdrantDB implements VectorDBInterface {
 
   /**
    * Map Qdrant scroll results to SearchResult format.
+   *
+   * Note: Scroll/scan operations do not compute semantic similarity scores.
+   * For these results, score is always 0 and relevance is set to 'not_relevant'
+   * to indicate that the results are unscored (not that they are useless).
    */
   private mapScrollResults(results: any): SearchResult[] {
     return (results.points || []).map((point: any) => ({

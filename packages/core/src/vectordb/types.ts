@@ -4,7 +4,21 @@ import { RelevanceCategory } from './relevance.js';
 export interface SearchResult {
   content: string;
   metadata: ChunkMetadata;
+  /**
+   * Similarity score from vector search.
+   *
+   * For semantic search operations, this is the cosine distance returned by the
+   * vector database. For scroll/scan-based operations (e.g. scanWithFilter,
+   * scanAll, querySymbols), this is always 0 because no scoring is performed.
+   */
   score: number;
+  /**
+   * Relevance category derived from the score.
+   *
+   * For scroll/scan-based operations that do not compute scores, this is
+   * always 'not_relevant' to indicate that results are unscored rather than
+   * semantically irrelevant.
+   */
   relevance: RelevanceCategory;
 }
 
