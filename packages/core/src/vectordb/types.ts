@@ -7,9 +7,10 @@ export interface SearchResult {
   /**
    * Similarity score from vector search.
    *
-   * For semantic search operations, this is the cosine distance returned by the
-   * vector database. For scroll/scan-based operations (e.g. scanWithFilter,
-   * scanAll, querySymbols), this is always 0 because no scoring is performed.
+   * For semantic search operations, this is the distance metric (e.g., cosine distance)
+   * returned by the vector database, where lower values indicate more similar results.
+   * For scroll/scan-based operations (e.g. scanWithFilter, scanAll, querySymbols),
+   * this is always 0 because no scoring is performed.
    */
   score: number;
   /**

@@ -64,6 +64,23 @@ async function createQdrantDB(
     );
   }
 
+  // Validate that branch and commitSha are non-empty (fail-fast for invalid git state)
+  if (!branch || branch.trim().length === 0) {
+    throw new Error(
+      'Qdrant backend requires a valid git branch for proper data isolation. ' +
+      'Current branch is empty or whitespace. ' +
+      'Ensure the repository is on a valid branch (not in detached HEAD state).'
+    );
+  }
+
+  if (!commitSha || commitSha.trim().length === 0) {
+    throw new Error(
+      'Qdrant backend requires a valid git commit SHA for proper data isolation. ' +
+      'Current commit SHA is empty or whitespace. ' +
+      'Ensure the repository has at least one commit.'
+    );
+  }
+
   const db = new QdrantDB(config.url, config.apiKey, orgId, projectRoot, branch, commitSha);
   validateVectorDBInterface(db);
   return db;

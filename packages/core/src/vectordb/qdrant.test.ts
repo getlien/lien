@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { QdrantDB } from './qdrant.js';
+import { QdrantDB, validateFilterOptions } from './qdrant.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { writeVersionFile } from './version.js';
 import fs from 'fs/promises';
@@ -806,7 +806,7 @@ describe('QdrantDB', () => {
       await featureDb.clear();
     });
 
-    it('should throw error when buildBaseFilter has conflicting options', async () => {
+    it('should work correctly with non-conflicting options', async () => {
       const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
       await db.initialize();
 
@@ -814,12 +814,111 @@ describe('QdrantDB', () => {
       const results = await db.scanCrossRepo({ repoIds: [db.getRepoId()] });
       expect(Array.isArray(results)).toBe(true);
 
-      // Note: We can't directly test buildBaseFilter's validation errors since it's private
-      // and all public methods correctly set includeCurrentRepo=false when using repoIds.
-      // The validation exists as a safety check for future code changes.
-      // The test above verifies that the normal usage pattern works correctly.
+      await db.clear();
+    });
+
+    it('should throw error when all repoIds are empty or whitespace', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+      await db.initialize();
+
+      // Test empty strings
+      await expect(db.scanCrossRepo({ repoIds: ['', ''] })).rejects.toThrow(
+        'Invalid repoIds: all provided repoIds are empty or whitespace'
+      );
+
+      // Test whitespace-only strings
+      await expect(db.scanCrossRepo({ repoIds: [' ', '\t', '\n'] })).rejects.toThrow(
+        'Invalid repoIds: all provided repoIds are empty or whitespace'
+      );
+
+      // Test mixed empty and whitespace
+      await expect(db.scanCrossRepo({ repoIds: ['', '   ', '\t\n'] })).rejects.toThrow(
+        'Invalid repoIds: all provided repoIds are empty or whitespace'
+      );
 
       await db.clear();
+    });
+  });
+
+  describe('validateFilterOptions', () => {
+    it('should throw error when repoIds is used with includeCurrentRepo enabled', () => {
+      expect(() => {
+        validateFilterOptions({
+          repoIds: ['repo1'],
+          includeCurrentRepo: true,
+        });
+      }).toThrow(
+        'Cannot use repoIds when includeCurrentRepo is enabled (the default)'
+      );
+
+      expect(() => {
+        validateFilterOptions({
+          repoIds: ['repo1'],
+          includeCurrentRepo: undefined, // undefined is treated as "enabled"
+        });
+      }).toThrow(
+        'Cannot use repoIds when includeCurrentRepo is enabled (the default)'
+      );
+    });
+
+    it('should allow repoIds when includeCurrentRepo is explicitly false', () => {
+      expect(() => {
+        validateFilterOptions({
+          repoIds: ['repo1'],
+          includeCurrentRepo: false,
+        });
+      }).not.toThrow();
+    });
+
+    it('should throw error when branch is used with includeCurrentRepo enabled', () => {
+      expect(() => {
+        validateFilterOptions({
+          branch: 'main',
+          includeCurrentRepo: true,
+        });
+      }).toThrow(
+        'Cannot use branch parameter when includeCurrentRepo is enabled (the default)'
+      );
+
+      expect(() => {
+        validateFilterOptions({
+          branch: 'main',
+          includeCurrentRepo: undefined, // undefined is treated as "enabled"
+        });
+      }).toThrow(
+        'Cannot use branch parameter when includeCurrentRepo is enabled (the default)'
+      );
+    });
+
+    it('should allow branch when includeCurrentRepo is explicitly false', () => {
+      expect(() => {
+        validateFilterOptions({
+          branch: 'main',
+          includeCurrentRepo: false,
+        });
+      }).not.toThrow();
+    });
+
+    it('should allow both branch and repoIds when includeCurrentRepo is false', () => {
+      expect(() => {
+        validateFilterOptions({
+          branch: 'main',
+          repoIds: ['repo1'],
+          includeCurrentRepo: false,
+        });
+      }).not.toThrow();
+    });
+
+    it('should not throw when no conflicting options are provided', () => {
+      expect(() => {
+        validateFilterOptions({});
+      }).not.toThrow();
+
+      expect(() => {
+        validateFilterOptions({
+          includeCurrentRepo: true,
+        });
+      }).not.toThrow();
     });
   });
 });

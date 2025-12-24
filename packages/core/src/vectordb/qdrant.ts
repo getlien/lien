@@ -102,6 +102,41 @@ class QdrantFilterBuilder {
 }
 
 /**
+ * Validate filter options for buildBaseFilter.
+ * 
+ * This is a separate function to enable unit testing of validation logic.
+ * The validations ensure that conflicting options are not used together.
+ * 
+ * @param options - Filter options to validate
+ * @throws Error if conflicting options are detected
+ */
+export function validateFilterOptions(options: {
+  repoIds?: string[];
+  branch?: string;
+  includeCurrentRepo?: boolean;
+}): void {
+  // Validate: includeCurrentRepo and repoIds are mutually exclusive
+  // Note: `includeCurrentRepo !== false` treats undefined as "enabled" (default behavior).
+  // Callers must explicitly pass includeCurrentRepo=false when using repoIds for cross-repo queries.
+  if (options.includeCurrentRepo !== false && options.repoIds && options.repoIds.length > 0) {
+    throw new Error(
+      'Cannot use repoIds when includeCurrentRepo is enabled (the default). ' +
+      'These options are mutually exclusive. Set includeCurrentRepo=false to perform cross-repo queries with repoIds.'
+    );
+  }
+
+  // Validate: branch parameter should only be used when includeCurrentRepo is false.
+  // As above, `includeCurrentRepo !== false` treats both undefined and true as "enabled"
+  // for the current repo context, so callers must explicitly pass false for cross-repo.
+  if (options.branch && options.includeCurrentRepo !== false) {
+    throw new Error(
+      'Cannot use branch parameter when includeCurrentRepo is enabled (the default). ' +
+      'Branch is automatically included via the current repo context. Set includeCurrentRepo=false to specify a branch explicitly.'
+    );
+  }
+}
+
+/**
  * QdrantDB implements VectorDBInterface using Qdrant vector database.
  * 
  * Features:
@@ -201,25 +236,12 @@ export class QdrantDB implements VectorDBInterface {
     includeCurrentRepo?: boolean;
     patternKey?: 'file' | 'symbolName';
   }): any {
-    // Validate: includeCurrentRepo and repoIds are mutually exclusive
-    // Note: `includeCurrentRepo !== false` treats undefined as "enabled" (default behavior).
-    // Callers must explicitly pass includeCurrentRepo=false when using repoIds for cross-repo queries.
-    if (options.includeCurrentRepo !== false && options.repoIds && options.repoIds.length > 0) {
-      throw new Error(
-        'Cannot use repoIds when includeCurrentRepo is enabled (the default). ' +
-        'These options are mutually exclusive. Set includeCurrentRepo=false to perform cross-repo queries with repoIds.'
-      );
-    }
-
-    // Validate: branch parameter should only be used when includeCurrentRepo is false.
-    // As above, `includeCurrentRepo !== false` treats both undefined and true as "enabled"
-    // for the current repo context, so callers must explicitly pass false for cross-repo.
-    if (options.branch && options.includeCurrentRepo !== false) {
-      throw new Error(
-        'Cannot use branch parameter when includeCurrentRepo is enabled (the default). ' +
-        'Branch is automatically included via the current repo context. Set includeCurrentRepo=false to specify a branch explicitly.'
-      );
-    }
+    // Validate filter options (extracted to enable unit testing)
+    validateFilterOptions({
+      repoIds: options.repoIds,
+      branch: options.branch,
+      includeCurrentRepo: options.includeCurrentRepo,
+    });
 
     const builder = new QdrantFilterBuilder(this.orgId);
 

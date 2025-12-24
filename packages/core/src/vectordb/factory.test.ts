@@ -118,6 +118,42 @@ describe('createVectorDB', () => {
       );
     });
 
+    it('should throw error when branch is empty string', async () => {
+      vi.mocked(getCurrentBranch).mockResolvedValue('');
+      vi.mocked(getCurrentCommit).mockResolvedValue('abc123');
+
+      await expect(createVectorDB(testDir)).rejects.toThrow(
+        'Qdrant backend requires a valid git branch for proper data isolation'
+      );
+    });
+
+    it('should throw error when commitSha is empty string', async () => {
+      vi.mocked(getCurrentBranch).mockResolvedValue('main');
+      vi.mocked(getCurrentCommit).mockResolvedValue('');
+
+      await expect(createVectorDB(testDir)).rejects.toThrow(
+        'Qdrant backend requires a valid git commit SHA for proper data isolation'
+      );
+    });
+
+    it('should throw error when branch is whitespace only', async () => {
+      vi.mocked(getCurrentBranch).mockResolvedValue('   ');
+      vi.mocked(getCurrentCommit).mockResolvedValue('abc123');
+
+      await expect(createVectorDB(testDir)).rejects.toThrow(
+        'Qdrant backend requires a valid git branch for proper data isolation'
+      );
+    });
+
+    it('should throw error when commitSha is whitespace only', async () => {
+      vi.mocked(getCurrentBranch).mockResolvedValue('main');
+      vi.mocked(getCurrentCommit).mockResolvedValue('\t  \n');
+
+      await expect(createVectorDB(testDir)).rejects.toThrow(
+        'Qdrant backend requires a valid git commit SHA for proper data isolation'
+      );
+    });
+
     it('should not silently fall back to LanceDB when Qdrant is explicitly configured', async () => {
       vi.mocked(extractOrgIdFromGit).mockRejectedValue(new Error('Git remote not found'));
 
