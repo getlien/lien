@@ -77,22 +77,48 @@ class QdrantFilterBuilder {
   }
 
   addLanguage(language: string): this {
-    this.filter.must.push({ key: 'language', match: { value: language } });
+    const cleanedLanguage = language.trim();
+    if (cleanedLanguage.length === 0) {
+      throw new Error(
+        'Invalid language: language must be a non-empty, non-whitespace string.'
+      );
+    }
+    this.filter.must.push({ key: 'language', match: { value: cleanedLanguage } });
     return this;
   }
 
   addSymbolType(symbolType: string): this {
-    this.filter.must.push({ key: 'symbolType', match: { value: symbolType } });
+    const cleanedSymbolType = symbolType.trim();
+    if (cleanedSymbolType.length === 0) {
+      throw new Error(
+        'Invalid symbolType: symbolType must be a non-empty, non-whitespace string.'
+      );
+    }
+    this.filter.must.push({ key: 'symbolType', match: { value: cleanedSymbolType } });
     return this;
   }
 
   addPattern(pattern: string, key: 'file' | 'symbolName' = 'file'): this {
-    this.filter.must.push({ key, match: { text: pattern } });
+    const cleanedPattern = pattern.trim();
+    if (cleanedPattern.length === 0) {
+      throw new Error(
+        'Invalid pattern: pattern must be a non-empty, non-whitespace string.'
+      );
+    }
+    this.filter.must.push({ key, match: { text: cleanedPattern } });
     return this;
   }
 
   addBranch(branch: string): this {
-    this.filter.must.push({ key: 'branch', match: { value: branch } });
+    const cleanedBranch = branch.trim();
+    // Prevent constructing a filter for an empty/whitespace-only branch,
+    // which would search for `branch == ""` and almost certainly return no results.
+    if (cleanedBranch.length === 0) {
+      throw new Error(
+        'Invalid branch: branch must be a non-empty, non-whitespace string.'
+      );
+    }
+    this.filter.must.push({ key: 'branch', match: { value: cleanedBranch } });
     return this;
   }
 
@@ -214,6 +240,17 @@ export class QdrantDB implements VectorDBInterface {
    * Generate a unique point ID from chunk metadata.
    * Uses hash of file path + line range + branch + commitSha for stable identification.
    * Includes branch/commit to prevent ID collisions across branches.
+   * 
+   * **Hash Algorithm Choice:**
+   * Uses MD5 for performance and collision likelihood acceptable for this use case.
+   * - MD5 is deprecated for cryptographic purposes but suitable for non-security ID generation
+   * - Collision probability is extremely low: ~1 in 2^64 for random inputs
+   * - Input includes file path, line range, branch, and commit SHA, making collisions
+   *   even less likely in practice
+   * - For typical codebases (thousands to hundreds of thousands of chunks), collision risk
+   *   is negligible
+   * - If scaling to millions of chunks across many repos, consider upgrading to SHA-256
+   *   for additional collision resistance (at ~10% performance cost)
    */
   private generatePointId(metadata: ChunkMetadata): string {
     const idString = `${metadata.file}:${metadata.startLine}:${metadata.endLine}:${this.branch}:${this.commitSha}`;
@@ -224,8 +261,20 @@ export class QdrantDB implements VectorDBInterface {
    * Build base filter for Qdrant queries.
    * Uses builder pattern to simplify filter construction.
    * 
-   * Note: includeCurrentRepo and repoIds are mutually exclusive.
-   * If includeCurrentRepo is true, repoIds should not be provided.
+   * **Important constraints:**
+   * - `includeCurrentRepo` and `repoIds` are mutually exclusive.
+   * - `includeCurrentRepo` defaults to `true` when `undefined` (treats `undefined` as "enabled").
+   * - To use `repoIds` for cross-repo queries, you must explicitly pass `includeCurrentRepo: false`.
+   * - The `branch` parameter can only be used when `includeCurrentRepo` is explicitly `false`.
+   *   When `includeCurrentRepo` is enabled (default), branch is automatically included via
+   *   the current repo context (`addRepoContext`).
+   * 
+   * @param options - Filter options
+   * @param options.includeCurrentRepo - Whether to filter by current repo context (default: true when undefined).
+   *   Must be explicitly `false` to use `repoIds` or `branch` parameters.
+   * @param options.repoIds - Repository IDs to filter by (requires `includeCurrentRepo: false`).
+   * @param options.branch - Branch name to filter by (requires `includeCurrentRepo: false`).
+   * @returns Qdrant filter object
    */
   private buildBaseFilter(options: {
     language?: string;
@@ -253,21 +302,26 @@ export class QdrantDB implements VectorDBInterface {
       builder.addRepoIds(options.repoIds);
     }
 
-    if (options.language) {
+    // Validate language is non-empty if explicitly provided (even if empty string)
+    if (options.language !== undefined) {
       builder.addLanguage(options.language);
     }
 
-    if (options.symbolType) {
+    // Validate symbolType is non-empty if explicitly provided (even if empty string)
+    if (options.symbolType !== undefined) {
       builder.addSymbolType(options.symbolType);
     }
 
-    if (options.pattern) {
+    // Validate pattern is non-empty if explicitly provided (even if empty string)
+    if (options.pattern !== undefined) {
       builder.addPattern(options.pattern, options.patternKey);
     }
 
     // Only add branch filter when includeCurrentRepo is false
     // When includeCurrentRepo is true, branch is already added via addRepoContext
-    if (options.branch && options.includeCurrentRepo === false) {
+    // Validate branch is non-empty if explicitly provided (even if empty string)
+    if (options.branch !== undefined && options.includeCurrentRepo === false) {
+      // addBranch will validate that branch is non-empty and non-whitespace
       builder.addBranch(options.branch);
     }
 
@@ -474,16 +528,27 @@ export class QdrantDB implements VectorDBInterface {
    *
    * This is a low-level primitive for cross-repo augmentation. Higher-level
    * workflows (e.g. \"latest commit only\") should be built on top of this API.
+   *
+   * @param queryVector - Query vector for semantic search
+   * @param limit - Maximum number of results to return (default: 5)
+   * @param options - Optional search options
+   * @param options.repoIds - Repository IDs to filter by (optional)
+   * @param options.branch - Branch name to filter by (optional)
    */
   async searchCrossRepo(
     queryVector: Float32Array,
     limit: number = 5,
-    repoIds?: string[],
-    branch?: string
+    options?: {
+      repoIds?: string[];
+      branch?: string;
+    }
   ): Promise<SearchResult[]> {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
     }
+
+    const repoIds = options?.repoIds;
+    const branch = options?.branch;
 
     try {
       const filter: any = {

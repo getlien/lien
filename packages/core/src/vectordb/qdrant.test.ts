@@ -148,7 +148,7 @@ describe('QdrantDB', () => {
     it('should filter by specific repos when repoIds provided', async () => {
       const queryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.1);
       const repoId = db.getRepoId();
-      const results = await db.searchCrossRepo(queryVector, 5, [repoId]);
+      const results = await db.searchCrossRepo(queryVector, 5, { repoIds: [repoId] });
       
       expect(Array.isArray(results)).toBe(true);
     });
@@ -213,6 +213,44 @@ describe('QdrantDB', () => {
       const results = await db.scanWithFilter({ pattern: 'user' });
       expect(results.length).toBeGreaterThan(0);
       expect(results.every(r => r.metadata.file.includes('user'))).toBe(true);
+    });
+
+    it('should throw error when language is empty or whitespace-only', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+      await db.initialize();
+
+      await expect(db.scanWithFilter({ language: '' })).rejects.toThrow(
+        'Invalid language: language must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.scanWithFilter({ language: '   ' })).rejects.toThrow(
+        'Invalid language: language must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.scanWithFilter({ language: '\t\n' })).rejects.toThrow(
+        'Invalid language: language must be a non-empty, non-whitespace string'
+      );
+
+      await db.clear();
+    });
+
+    it('should throw error when pattern is empty or whitespace-only', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+      await db.initialize();
+
+      await expect(db.scanWithFilter({ pattern: '' })).rejects.toThrow(
+        'Invalid pattern: pattern must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.scanWithFilter({ pattern: '   ' })).rejects.toThrow(
+        'Invalid pattern: pattern must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.scanWithFilter({ pattern: '\t\n' })).rejects.toThrow(
+        'Invalid pattern: pattern must be a non-empty, non-whitespace string'
+      );
+
+      await db.clear();
     });
   });
 
@@ -531,7 +569,7 @@ describe('QdrantDB', () => {
 
       // Cross-repo search with main branch filter should only return main branch data
       const queryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.1);
-      const mainResults = await mainDb.searchCrossRepo(queryVector, 10, undefined, 'main');
+      const mainResults = await mainDb.searchCrossRepo(queryVector, 10, { branch: 'main' });
       expect(mainResults.length).toBe(1);
       expect(mainResults[0].content).toBe('main content');
 
@@ -806,11 +844,12 @@ describe('QdrantDB', () => {
       await featureDb.clear();
     });
 
-    it('should work correctly with non-conflicting options', async () => {
+    it('should allow repoIds in scanCrossRepo without throwing validation errors', async () => {
       const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
       await db.initialize();
 
-      // Test that normal usage works (non-conflicting options)
+      // scanCrossRepo explicitly passes includeCurrentRepo: false, so repoIds are allowed
+      // This verifies that the validation logic correctly permits this usage pattern
       const results = await db.scanCrossRepo({ repoIds: [db.getRepoId()] });
       expect(Array.isArray(results)).toBe(true);
 
@@ -834,6 +873,53 @@ describe('QdrantDB', () => {
       // Test mixed empty and whitespace
       await expect(db.scanCrossRepo({ repoIds: ['', '   ', '\t\n'] })).rejects.toThrow(
         'Invalid repoIds: all provided repoIds are empty or whitespace'
+      );
+
+      await db.clear();
+    });
+
+    it('should throw error when branch is empty or whitespace-only', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+      await db.initialize();
+
+      // Test empty string branch
+      await expect(db.scanCrossRepo({ branch: '' })).rejects.toThrow(
+        'Invalid branch: branch must be a non-empty, non-whitespace string'
+      );
+
+      // Test whitespace-only branch
+      await expect(db.scanCrossRepo({ branch: '   ' })).rejects.toThrow(
+        'Invalid branch: branch must be a non-empty, non-whitespace string'
+      );
+
+      // Test mixed whitespace
+      await expect(db.scanCrossRepo({ branch: '\t\n  ' })).rejects.toThrow(
+        'Invalid branch: branch must be a non-empty, non-whitespace string'
+      );
+
+      // Test that valid branch works
+      const results = await db.scanCrossRepo({ branch: 'main' });
+      expect(Array.isArray(results)).toBe(true);
+
+      await db.clear();
+    });
+  });
+
+  describe('querySymbols', () => {
+    it('should throw error when symbolType is empty or whitespace-only', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+      await db.initialize();
+
+      await expect(db.querySymbols({ symbolType: '' as any })).rejects.toThrow(
+        'Invalid symbolType: symbolType must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.querySymbols({ symbolType: '   ' as any })).rejects.toThrow(
+        'Invalid symbolType: symbolType must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.querySymbols({ symbolType: '\t\n' as any })).rejects.toThrow(
+        'Invalid symbolType: symbolType must be a non-empty, non-whitespace string'
       );
 
       await db.clear();

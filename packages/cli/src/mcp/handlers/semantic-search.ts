@@ -47,7 +47,7 @@ export async function handleSemanticSearch(
       let results;
       if (crossRepo && vectorDB instanceof QdrantDB) {
         // Cross-repo search: omit repoId filter
-        results = await vectorDB.searchCrossRepo(queryEmbedding, limit, repoIds);
+        results = await vectorDB.searchCrossRepo(queryEmbedding, limit, { repoIds });
         log(`Found ${results.length} results across ${Object.keys(groupResultsByRepo(results)).length} repos`);
       } else {
         // Single-repo search (existing behavior)
