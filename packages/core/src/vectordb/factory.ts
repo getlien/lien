@@ -106,18 +106,34 @@ export async function createVectorDB(
   try {
     globalConfig = await loadGlobalConfig();
   } catch (error) {
-    // Config loading failed - fall back to LanceDB (default)
-    console.warn(`[Lien] Failed to load global config, using default LanceDB backend: ${error}`);
-    return await createLanceDB(projectRoot);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    // Check if this is a "file not found" error (expected) vs other errors (unexpected)
+    const isFileNotFound = errorMessage.includes('ENOENT') || 
+                          errorMessage.includes('not found') || 
+                          errorMessage.includes('does not exist');
+    
+    if (isFileNotFound) {
+      // Expected: No config file exists, use default LanceDB (normal for CLI usage)
+      return await createLanceDB(projectRoot);
+    } else {
+      // Unexpected: Config file exists but failed to load (syntax error, permissions, etc.)
+      // Fail hard - don't silently fall back to LanceDB
+      throw new Error(
+        'Failed to load global config file. Please check your config file for errors. ' +
+        `Error: ${errorMessage}`
+      );
+    }
   }
   
+  // Config loaded successfully - respect the backend choice
   switch (globalConfig.backend) {
     case 'qdrant':
       if (!globalConfig.qdrant) {
         throw new Error('Qdrant backend requires qdrant configuration in global config');
       }
       // Don't catch errors here - let Qdrant-specific errors propagate
-      // User explicitly configured Qdrant, so they should see errors
+      // User explicitly configured Qdrant, so they should see configuration errors
       return await createQdrantDB(projectRoot, globalConfig.qdrant);
     
     case 'lancedb':
