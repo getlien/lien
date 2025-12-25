@@ -53,12 +53,12 @@ export class QdrantPayloadMapper {
    */
   private mapMetrics(metadata: ChunkMetadata) {
     return {
-      complexity: metadata.complexity || 0,
-      cognitiveComplexity: metadata.cognitiveComplexity || 0,
-      halsteadVolume: metadata.halsteadVolume || 0,
-      halsteadDifficulty: metadata.halsteadDifficulty || 0,
-      halsteadEffort: metadata.halsteadEffort || 0,
-      halsteadBugs: metadata.halsteadBugs || 0,
+      complexity: metadata.complexity ?? 0,
+      cognitiveComplexity: metadata.cognitiveComplexity ?? 0,
+      halsteadVolume: metadata.halsteadVolume ?? 0,
+      halsteadDifficulty: metadata.halsteadDifficulty ?? 0,
+      halsteadEffort: metadata.halsteadEffort ?? 0,
+      halsteadBugs: metadata.halsteadBugs ?? 0,
     };
   }
 
@@ -67,15 +67,15 @@ export class QdrantPayloadMapper {
    */
   private mapSymbols(metadata: ChunkMetadata) {
     return {
-      functionNames: metadata.symbols?.functions || [],
-      classNames: metadata.symbols?.classes || [],
-      interfaceNames: metadata.symbols?.interfaces || [],
-      symbolName: metadata.symbolName || '',
-      symbolType: metadata.symbolType || '',
-      parentClass: metadata.parentClass || '',
-      parameters: metadata.parameters || [],
-      signature: metadata.signature || '',
-      imports: metadata.imports || [],
+      functionNames: metadata.symbols?.functions ?? [],
+      classNames: metadata.symbols?.classes ?? [],
+      interfaceNames: metadata.symbols?.interfaces ?? [],
+      symbolName: metadata.symbolName ?? '',
+      symbolType: metadata.symbolType ?? '',
+      parentClass: metadata.parentClass ?? '',
+      parameters: metadata.parameters ?? [],
+      signature: metadata.signature ?? '',
+      imports: metadata.imports ?? [],
     };
   }
 
@@ -108,9 +108,9 @@ export class QdrantPayloadMapper {
    */
   private extractSymbols(payload: Record<string, any>) {
     return {
-      functions: payload.functionNames || [],
-      classes: payload.classNames || [],
-      interfaces: payload.interfaceNames || [],
+      functions: payload.functionNames ?? [],
+      classes: payload.classNames ?? [],
+      interfaces: payload.interfaceNames ?? [],
     };
   }
 
@@ -157,12 +157,12 @@ export class QdrantPayloadMapper {
       type: payload.type,
       language: payload.language,
       symbols: this.extractSymbols(payload),
-      symbolName: payload.symbolName || undefined,
-      symbolType: payload.symbolType || undefined,
-      parentClass: payload.parentClass || undefined,
-      parameters: payload.parameters || undefined,
-      signature: payload.signature || undefined,
-      imports: payload.imports || undefined,
+      symbolName: payload.symbolName ?? undefined,
+      symbolType: payload.symbolType ?? undefined,
+      parentClass: payload.parentClass ?? undefined,
+      parameters: payload.parameters ?? undefined,
+      signature: payload.signature ?? undefined,
+      imports: payload.imports ?? undefined,
       ...this.extractMetrics(payload),
       ...this.extractTrackingInfo(payload),
     };
