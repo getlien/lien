@@ -2,6 +2,9 @@ import { ChunkMetadata } from '../indexer/types.js';
 
 /**
  * Qdrant payload structure for storing chunk metadata.
+ * 
+ * Note: Metrics (complexity, halstead) are always present as numbers.
+ * If missing in source metadata, they are stored as 0.
  */
 export interface QdrantPayload {
   content: string;
@@ -18,16 +21,16 @@ export interface QdrantPayload {
   symbolName: string;
   symbolType: string;
   parentClass: string;
-  complexity?: number;        // Optional: may be missing in old payloads
-  cognitiveComplexity?: number; // Optional: may be missing in old payloads
+  complexity: number;           // Always present (defaults to 0 if missing)
+  cognitiveComplexity: number;  // Always present (defaults to 0 if missing)
   parameters: string[];
   signature: string;
   imports: string[];
   // Halstead metrics
-  halsteadVolume?: number;      // Optional: may be missing in old payloads
-  halsteadDifficulty?: number;   // Optional: may be missing in old payloads
-  halsteadEffort?: number;      // Optional: may be missing in old payloads
-  halsteadBugs?: number;        // Optional: may be missing in old payloads
+  halsteadVolume: number;       // Always present (defaults to 0 if missing)
+  halsteadDifficulty: number;   // Always present (defaults to 0 if missing)
+  halsteadEffort: number;       // Always present (defaults to 0 if missing)
+  halsteadBugs: number;         // Always present (defaults to 0 if missing)
   // Multi-tenant fields
   orgId: string;
   repoId: string;
