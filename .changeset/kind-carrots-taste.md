@@ -24,5 +24,3 @@ Please fix the JSON syntax errors in your config file.
 - Specific syntax error with line/column position
 - Helpful remediation message
 - Missing config files still silently fall back to LanceDB (expected behavior)
-
-None.
