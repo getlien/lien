@@ -34,17 +34,28 @@ export interface GlobalConfig {
  * Load configuration from environment variables if present.
  */
 function loadConfigFromEnv(): GlobalConfig | null {
-  if (!process.env.LIEN_BACKEND) {
+  const backendEnv = process.env.LIEN_BACKEND;
+  if (!backendEnv) {
     return null;
   }
   
-  const backend = process.env.LIEN_BACKEND as 'lancedb' | 'qdrant';
+  const backend = backendEnv as 'lancedb' | 'qdrant';
   
-  if (backend === 'qdrant' && process.env.LIEN_QDRANT_URL) {
+  if (backend === 'qdrant') {
+    const url = process.env.LIEN_QDRANT_URL;
+    if (!url) {
+      // Fail fast with clear error instead of returning incomplete config
+      throw new ConfigValidationError(
+        'Qdrant backend requires LIEN_QDRANT_URL environment variable.\n' +
+        'Set it with: export LIEN_QDRANT_URL=http://localhost:6333',
+        '<environment>'
+      );
+    }
+    
     return {
       backend: 'qdrant',
       qdrant: {
-        url: process.env.LIEN_QDRANT_URL,
+        url,
         apiKey: process.env.LIEN_QDRANT_API_KEY,
       },
     };
