@@ -167,9 +167,17 @@ export function validateFilterOptions(options: {
  * 
  * Features:
  * - Multi-tenant support via payload filtering (orgId/repoId)
+ * - Branch and commit isolation for PR workflows
  * - Collection naming: `lien_org_{orgId}`
  * - Cross-repo search by omitting repoId filter
  * - Tenant isolation via orgId filtering
+ * - Point ID generation includes branch/commit to prevent collisions
+ * 
+ * Data Isolation:
+ * All queries are filtered by orgId, repoId, branch, and commitSha by default.
+ * This ensures that different branches and commits have isolated data, preventing
+ * PRs from overwriting each other's indices. Use cross-repo methods (searchCrossRepo,
+ * scanCrossRepo) to query across repositories within an organization.
  */
 export class QdrantDB implements VectorDBInterface {
   private client: QdrantClient;
@@ -547,31 +555,14 @@ export class QdrantDB implements VectorDBInterface {
       throw new DatabaseError('Qdrant database not initialized');
     }
 
-    const repoIds = options?.repoIds;
-    const branch = options?.branch;
-
     try {
-      const filter: any = {
-        must: [
-          { key: 'orgId', match: { value: this.orgId } },
-        ],
-      };
-
-      // Optionally filter to specific repos
-      if (repoIds && repoIds.length > 0) {
-        filter.must.push({
-          key: 'repoId',
-          match: { any: repoIds },
-        });
-      }
-
-      // Optionally filter by branch (e.g., only search main branch)
-      if (branch) {
-        filter.must.push({
-          key: 'branch',
-          match: { value: branch },
-        });
-      }
+      // Use buildBaseFilter for consistency with scanCrossRepo and other methods
+      // This provides automatic validation for empty repoIds arrays, whitespace-only branches, etc.
+      const filter = this.buildBaseFilter({
+        includeCurrentRepo: false,
+        repoIds: options?.repoIds,
+        branch: options?.branch,
+      });
 
       const results = await this.client.search(this.collectionName, {
         vector: Array.from(queryVector),
