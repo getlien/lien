@@ -77,6 +77,14 @@ describe('loadGlobalConfig', () => {
       await expect(loadGlobalConfig()).rejects.toThrow(ConfigValidationError);
       await expect(loadGlobalConfig()).rejects.toThrow('requires LIEN_QDRANT_URL');
     });
+
+    it('should throw ConfigValidationError when LIEN_BACKEND has an invalid value', async () => {
+      process.env.LIEN_BACKEND = 'invalid';
+      
+      await expect(loadGlobalConfig()).rejects.toThrow(ConfigValidationError);
+      await expect(loadGlobalConfig()).rejects.toThrow('Invalid LIEN_BACKEND');
+      await expect(loadGlobalConfig()).rejects.toThrow('invalid');
+    });
   });
 
   describe('Config file parsing (parseConfigFile)', () => {
@@ -128,6 +136,16 @@ describe('loadGlobalConfig', () => {
       await expect(loadGlobalConfig()).rejects.toThrow(ConfigValidationError);
       await expect(loadGlobalConfig()).rejects.toThrow('Invalid backend in global config');
       await expect(loadGlobalConfig()).rejects.toThrow('invalid');
+    });
+
+    it('should throw ConfigValidationError when backend is qdrant but qdrant config object is missing', async () => {
+      vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ 
+        backend: 'qdrant'
+        // qdrant config object is completely missing
+      }));
+      
+      await expect(loadGlobalConfig()).rejects.toThrow(ConfigValidationError);
+      await expect(loadGlobalConfig()).rejects.toThrow('requires a "qdrant" configuration section');
     });
 
     it('should throw ConfigValidationError when backend is qdrant but qdrant.url is missing', async () => {

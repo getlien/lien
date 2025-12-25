@@ -39,6 +39,16 @@ function loadConfigFromEnv(): GlobalConfig | null {
     return null;
   }
   
+  // Validate backend value
+  const validBackends = ['lancedb', 'qdrant'] as const;
+  if (!validBackends.includes(backendEnv as any)) {
+    throw new ConfigValidationError(
+      `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` +
+      `Valid values: 'lancedb' or 'qdrant'`,
+      '<environment>'
+    );
+  }
+  
   const backend = backendEnv as 'lancedb' | 'qdrant';
   
   if (backend === 'qdrant') {
@@ -79,13 +89,24 @@ function validateConfig(config: GlobalConfig, configPath: string): void {
   }
   
   // Validate Qdrant configuration
-  if (config.backend === 'qdrant' && config.qdrant && !config.qdrant.url) {
-    throw new ConfigValidationError(
-      `Qdrant backend requires qdrant.url in config\n` +
-      `Config file: ${configPath}\n` +
-      `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
-      configPath
-    );
+  if (config.backend === 'qdrant') {
+    if (!config.qdrant) {
+      throw new ConfigValidationError(
+        `Qdrant backend requires a "qdrant" configuration section\n` +
+        `Config file: ${configPath}\n` +
+        `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
+        configPath
+      );
+    }
+    
+    if (!config.qdrant.url) {
+      throw new ConfigValidationError(
+        `Qdrant backend requires qdrant.url in config\n` +
+        `Config file: ${configPath}\n` +
+        `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
+        configPath
+      );
+    }
   }
 }
 
