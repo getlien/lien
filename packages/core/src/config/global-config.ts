@@ -7,6 +7,17 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 
 /**
+ * Error thrown when config file exists but has invalid syntax or structure.
+ * This is separate from "file not found" which is expected behavior.
+ */
+export class ConfigValidationError extends Error {
+  constructor(message: string, public readonly configPath: string) {
+    super(message);
+    this.name = 'ConfigValidationError';
+  }
+}
+
+/**
  * Global configuration for Lien.
  * Only contains what truly needs configuration: storage backend choice.
  */
@@ -51,25 +62,50 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
   const configPath = path.join(os.homedir(), '.lien', 'config.json');
   try {
     const content = await fs.readFile(configPath, 'utf-8');
-    const config = JSON.parse(content) as GlobalConfig;
+    
+    // Try to parse JSON - catch syntax errors explicitly
+    let config: GlobalConfig;
+    try {
+      config = JSON.parse(content) as GlobalConfig;
+    } catch (parseError) {
+      // JSON syntax error - provide helpful message
+      const errorMsg = parseError instanceof Error ? parseError.message : String(parseError);
+      throw new ConfigValidationError(
+        `Failed to parse global config file.\n` +
+        `Config file: ${configPath}\n` +
+        `Syntax error: ${errorMsg}\n\n` +
+        `Please fix the JSON syntax errors in your config file.`,
+        configPath
+      );
+    }
     
     // Validate structure
     if (config.backend && !['lancedb', 'qdrant'].includes(config.backend)) {
-      throw new Error(`Invalid backend: ${config.backend}. Must be 'lancedb' or 'qdrant'`);
+      throw new ConfigValidationError(
+        `Invalid backend in global config: "${config.backend}"\n` +
+        `Config file: ${configPath}\n` +
+        `Valid values: 'lancedb' or 'qdrant'`,
+        configPath
+      );
     }
     
     if (config.backend === 'qdrant' && config.qdrant && !config.qdrant.url) {
-      throw new Error('Qdrant backend requires qdrant.url in config');
+      throw new ConfigValidationError(
+        `Qdrant backend requires qdrant.url in config\n` +
+        `Config file: ${configPath}\n` +
+        `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
+        configPath
+      );
     }
     
     return config;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      // File doesn't exist - use defaults
+      // File doesn't exist - use defaults (this is normal)
       return { backend: 'lancedb' };
     }
     
-    // Re-throw validation errors
+    // Re-throw all other errors (validation errors, JSON parse errors, etc.)
     throw error;
   }
 }

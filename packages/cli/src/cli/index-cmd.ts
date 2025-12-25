@@ -123,6 +123,13 @@ export async function indexCommand(options: { watch?: boolean; verbose?: boolean
     // Clean up intervals
     if (messageRotationInterval) clearInterval(messageRotationInterval);
     
+    // Check if indexing failed
+    if (!result.success && result.error) {
+      spinner.fail(chalk.red('Indexing failed'));
+      console.error(chalk.red('\n' + result.error));
+      process.exit(1);
+    }
+    
     // Ensure spinner is stopped if onProgress didn't mark it complete
     if (!completedViaProgress) {
       if (result.filesIndexed === 0) {

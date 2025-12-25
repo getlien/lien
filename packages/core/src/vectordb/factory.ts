@@ -1,7 +1,7 @@
 import { VectorDBInterface } from './types.js';
 import { VectorDB } from './lancedb.js';
 import { QdrantDB } from './qdrant.js';
-import { loadGlobalConfig, extractOrgIdFromGit, GlobalConfig } from '../config/global-config.js';
+import { loadGlobalConfig, extractOrgIdFromGit, GlobalConfig, ConfigValidationError } from '../config/global-config.js';
 import { getCurrentBranch, getCurrentCommit } from '../git/utils.js';
 
 /**
@@ -106,24 +106,24 @@ export async function createVectorDB(
   try {
     globalConfig = await loadGlobalConfig();
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    // ConfigValidationError: Config file exists but has syntax/validation errors
+    // This should fail hard with a clear error message
+    if (error instanceof ConfigValidationError) {
+      throw error; // Error message already has helpful details
+    }
     
-    // Check if this is a "file not found" error (expected) vs other errors (unexpected)
-    const isFileNotFound = errorMessage.includes('ENOENT') || 
-                          errorMessage.includes('not found') || 
-                          errorMessage.includes('does not exist');
-    
-    if (isFileNotFound) {
+    // Check if this is a "file not found" error (expected)
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // Expected: No config file exists, use default LanceDB (normal for CLI usage)
       return await createLanceDB(projectRoot);
-    } else {
-      // Unexpected: Config file exists but failed to load (syntax error, permissions, etc.)
-      // Fail hard - don't silently fall back to LanceDB
-      throw new Error(
-        'Failed to load global config file. Please check your config file for errors. ' +
-        `Error: ${errorMessage}`
-      );
     }
+    
+    // Any other error: fail hard with details
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      'Failed to load global config file. Please check your config file for errors.\n' +
+      `Error: ${errorMessage}`
+    );
   }
   
   // Config loaded successfully - respect the backend choice
