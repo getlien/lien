@@ -31,6 +31,72 @@ export interface GlobalConfig {
 }
 
 /**
+ * Load configuration from environment variables if present.
+ */
+function loadConfigFromEnv(): GlobalConfig | null {
+  if (!process.env.LIEN_BACKEND) {
+    return null;
+  }
+  
+  const backend = process.env.LIEN_BACKEND as 'lancedb' | 'qdrant';
+  
+  if (backend === 'qdrant' && process.env.LIEN_QDRANT_URL) {
+    return {
+      backend: 'qdrant',
+      qdrant: {
+        url: process.env.LIEN_QDRANT_URL,
+        apiKey: process.env.LIEN_QDRANT_API_KEY,
+      },
+    };
+  }
+  
+  return { backend };
+}
+
+/**
+ * Parse and validate a config object.
+ */
+function validateConfig(config: GlobalConfig, configPath: string): void {
+  // Validate backend value
+  if (config.backend && !['lancedb', 'qdrant'].includes(config.backend)) {
+    throw new ConfigValidationError(
+      `Invalid backend in global config: "${config.backend}"\n` +
+      `Config file: ${configPath}\n` +
+      `Valid values: 'lancedb' or 'qdrant'`,
+      configPath
+    );
+  }
+  
+  // Validate Qdrant configuration
+  if (config.backend === 'qdrant' && config.qdrant && !config.qdrant.url) {
+    throw new ConfigValidationError(
+      `Qdrant backend requires qdrant.url in config\n` +
+      `Config file: ${configPath}\n` +
+      `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
+      configPath
+    );
+  }
+}
+
+/**
+ * Parse JSON config file with helpful error messages.
+ */
+function parseConfigFile(content: string, configPath: string): GlobalConfig {
+  try {
+    return JSON.parse(content) as GlobalConfig;
+  } catch (parseError) {
+    const errorMsg = parseError instanceof Error ? parseError.message : String(parseError);
+    throw new ConfigValidationError(
+      `Failed to parse global config file.\n` +
+      `Config file: ${configPath}\n` +
+      `Syntax error: ${errorMsg}\n\n` +
+      `Please fix the JSON syntax errors in your config file.`,
+      configPath
+    );
+  }
+}
+
+/**
  * Load global configuration from environment variables or config file.
  * 
  * Precedence:
@@ -42,62 +108,17 @@ export interface GlobalConfig {
  */
 export async function loadGlobalConfig(): Promise<GlobalConfig> {
   // 1. Check environment variables first
-  if (process.env.LIEN_BACKEND) {
-    const backend = process.env.LIEN_BACKEND as 'lancedb' | 'qdrant';
-    
-    if (backend === 'qdrant' && process.env.LIEN_QDRANT_URL) {
-      return {
-        backend: 'qdrant',
-        qdrant: {
-          url: process.env.LIEN_QDRANT_URL,
-          apiKey: process.env.LIEN_QDRANT_API_KEY,
-        },
-      };
-    }
-    
-    return { backend };
+  const envConfig = loadConfigFromEnv();
+  if (envConfig) {
+    return envConfig;
   }
   
   // 2. Check global config file
   const configPath = path.join(os.homedir(), '.lien', 'config.json');
   try {
     const content = await fs.readFile(configPath, 'utf-8');
-    
-    // Try to parse JSON - catch syntax errors explicitly
-    let config: GlobalConfig;
-    try {
-      config = JSON.parse(content) as GlobalConfig;
-    } catch (parseError) {
-      // JSON syntax error - provide helpful message
-      const errorMsg = parseError instanceof Error ? parseError.message : String(parseError);
-      throw new ConfigValidationError(
-        `Failed to parse global config file.\n` +
-        `Config file: ${configPath}\n` +
-        `Syntax error: ${errorMsg}\n\n` +
-        `Please fix the JSON syntax errors in your config file.`,
-        configPath
-      );
-    }
-    
-    // Validate structure
-    if (config.backend && !['lancedb', 'qdrant'].includes(config.backend)) {
-      throw new ConfigValidationError(
-        `Invalid backend in global config: "${config.backend}"\n` +
-        `Config file: ${configPath}\n` +
-        `Valid values: 'lancedb' or 'qdrant'`,
-        configPath
-      );
-    }
-    
-    if (config.backend === 'qdrant' && config.qdrant && !config.qdrant.url) {
-      throw new ConfigValidationError(
-        `Qdrant backend requires qdrant.url in config\n` +
-        `Config file: ${configPath}\n` +
-        `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
-        configPath
-      );
-    }
-    
+    const config = parseConfigFile(content, configPath);
+    validateConfig(config, configPath);
     return config;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
