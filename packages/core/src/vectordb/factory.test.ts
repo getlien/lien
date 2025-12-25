@@ -163,7 +163,9 @@ describe('createVectorDB', () => {
 
   describe('Error handling', () => {
     it('should silently fall back to LanceDB when config file does not exist (normal for CLI)', async () => {
-      vi.mocked(loadGlobalConfig).mockRejectedValue(new Error('ENOENT: Config file not found'));
+      const error = new Error('ENOENT: Config file not found') as NodeJS.ErrnoException;
+      error.code = 'ENOENT';
+      vi.mocked(loadGlobalConfig).mockRejectedValue(error);
 
       const db = await createVectorDB(testDir);
       
@@ -172,11 +174,14 @@ describe('createVectorDB', () => {
     });
 
     it('should fail hard when config file exists but has errors (fail-fast)', async () => {
-      vi.mocked(loadGlobalConfig).mockRejectedValue(new Error('JSON syntax error'));
-
-      await expect(createVectorDB(testDir)).rejects.toThrow(
-        /Failed to load global config file.*JSON syntax error/
+      const { ConfigValidationError } = await import('../config/global-config.js');
+      const error = new ConfigValidationError(
+        'Failed to parse global config file.\nConfig file: /test/.lien/config.json\nSyntax error: JSON syntax error',
+        '/test/.lien/config.json'
       );
+      vi.mocked(loadGlobalConfig).mockRejectedValue(error);
+
+      await expect(createVectorDB(testDir)).rejects.toThrow(ConfigValidationError);
     });
 
     it('should throw error for unknown backend', async () => {
