@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { QdrantDB } from './qdrant.js';
+import { QdrantDB, validateFilterOptions } from './qdrant.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { writeVersionFile } from './version.js';
 import fs from 'fs/promises';
@@ -16,6 +16,8 @@ import fs from 'fs/promises';
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
 const TEST_ORG_ID = 'test-org-123';
 const TEST_PROJECT_ROOT = '/tmp/test-project';
+const TEST_BRANCH = 'test-branch';
+const TEST_COMMIT_SHA = 'test-commit-sha';
 
 describe('QdrantDB', () => {
   let db: QdrantDB;
@@ -23,8 +25,8 @@ describe('QdrantDB', () => {
 
   beforeEach(async () => {
     // Create two instances with different orgIds to test tenant isolation
-    db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT);
-    db2 = new QdrantDB(QDRANT_URL, undefined, 'test-org-456', TEST_PROJECT_ROOT);
+    db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+    db2 = new QdrantDB(QDRANT_URL, undefined, 'test-org-456', TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
     
     await db.initialize();
     await db2.initialize();
@@ -146,7 +148,7 @@ describe('QdrantDB', () => {
     it('should filter by specific repos when repoIds provided', async () => {
       const queryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.1);
       const repoId = db.getRepoId();
-      const results = await db.searchCrossRepo(queryVector, 5, [repoId]);
+      const results = await db.searchCrossRepo(queryVector, 5, { repoIds: [repoId] });
       
       expect(Array.isArray(results)).toBe(true);
     });
@@ -211,6 +213,44 @@ describe('QdrantDB', () => {
       const results = await db.scanWithFilter({ pattern: 'user' });
       expect(results.length).toBeGreaterThan(0);
       expect(results.every(r => r.metadata.file.includes('user'))).toBe(true);
+    });
+
+    it('should throw error when language is empty or whitespace-only', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+      await db.initialize();
+
+      await expect(db.scanWithFilter({ language: '' })).rejects.toThrow(
+        'Invalid language: language must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.scanWithFilter({ language: '   ' })).rejects.toThrow(
+        'Invalid language: language must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.scanWithFilter({ language: '\t\n' })).rejects.toThrow(
+        'Invalid language: language must be a non-empty, non-whitespace string'
+      );
+
+      await db.clear();
+    });
+
+    it('should throw error when pattern is empty or whitespace-only', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+      await db.initialize();
+
+      await expect(db.scanWithFilter({ pattern: '' })).rejects.toThrow(
+        'Invalid pattern: pattern must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.scanWithFilter({ pattern: '   ' })).rejects.toThrow(
+        'Invalid pattern: pattern must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.scanWithFilter({ pattern: '\t\n' })).rejects.toThrow(
+        'Invalid pattern: pattern must be a non-empty, non-whitespace string'
+      );
+
+      await db.clear();
     });
   });
 
@@ -338,14 +378,14 @@ describe('QdrantDB', () => {
   describe('version management', () => {
     it('should return 0 for getCurrentVersion when no version file exists', async () => {
       // Create a fresh instance without initializing to test default state
-      const freshDb = new QdrantDB(QDRANT_URL, undefined, 'test-org-fresh', '/tmp/test-fresh');
+      const freshDb = new QdrantDB(QDRANT_URL, undefined, 'test-org-fresh', '/tmp/test-fresh', TEST_BRANCH, TEST_COMMIT_SHA);
       const version = freshDb.getCurrentVersion();
       expect(version).toBe(0);
     });
 
     it('should return "Unknown" for getVersionDate when version is 0', () => {
       // Create a fresh instance without initializing to test default state
-      const freshDb = new QdrantDB(QDRANT_URL, undefined, 'test-org-fresh2', '/tmp/test-fresh2');
+      const freshDb = new QdrantDB(QDRANT_URL, undefined, 'test-org-fresh2', '/tmp/test-fresh2', TEST_BRANCH, TEST_COMMIT_SHA);
       const date = freshDb.getVersionDate();
       expect(date).toBe('Unknown');
     });
@@ -356,7 +396,7 @@ describe('QdrantDB', () => {
       await writeVersionFile(db.dbPath);
 
       // Create a new instance and initialize
-      const newDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT);
+      const newDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
       await newDb.initialize();
 
       const version = newDb.getCurrentVersion();
@@ -443,6 +483,528 @@ describe('QdrantDB', () => {
       const date = db.getVersionDate();
       expect(date).not.toBe('Unknown');
       expect(date).toContain('2021'); // Should contain the year
+    });
+  });
+
+  describe('branch and commit tracking', () => {
+    it('should isolate data by branch and commit', async () => {
+      // Create two instances with same org/repo but different branches
+      const mainDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit-sha');
+      const featureDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'feature-commit-sha');
+      
+      await mainDb.initialize();
+      await featureDb.initialize();
+
+      // Insert data into main branch
+      const mainVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)];
+      const mainMetadatas = [{
+        file: 'src/main.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const mainContents = ['main branch content'];
+      await mainDb.insertBatch(mainVectors, mainMetadatas, mainContents);
+
+      // Insert data into feature branch
+      const featureVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.2)];
+      const featureMetadatas = [{
+        file: 'src/feature.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const featureContents = ['feature branch content'];
+      await featureDb.insertBatch(featureVectors, featureMetadatas, featureContents);
+
+      // Search main branch should only return main branch data
+      const mainQueryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.1);
+      const mainResults = await mainDb.search(mainQueryVector, 10);
+      expect(mainResults.length).toBe(1);
+      expect(mainResults[0].content).toBe('main branch content');
+
+      // Search feature branch should only return feature branch data
+      const featureQueryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.2);
+      const featureResults = await featureDb.search(featureQueryVector, 10);
+      expect(featureResults.length).toBe(1);
+      expect(featureResults[0].content).toBe('feature branch content');
+
+      // Clean up
+      await mainDb.clear();
+      await featureDb.clear();
+    });
+
+    it('should filter cross-repo search by branch', async () => {
+      // Create instances with different branches
+      const mainDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit-sha');
+      const featureDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'feature-commit-sha');
+      
+      await mainDb.initialize();
+      await featureDb.initialize();
+
+      // Insert data into both branches
+      const mainVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)];
+      const mainMetadatas = [{
+        file: 'src/main.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const mainContents = ['main content'];
+      await mainDb.insertBatch(mainVectors, mainMetadatas, mainContents);
+
+      const featureVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.2)];
+      const featureMetadatas = [{
+        file: 'src/feature.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const featureContents = ['feature content'];
+      await featureDb.insertBatch(featureVectors, featureMetadatas, featureContents);
+
+      // Cross-repo search with main branch filter should only return main branch data
+      const queryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.1);
+      const mainResults = await mainDb.searchCrossRepo(queryVector, 10, { branch: 'main' });
+      expect(mainResults.length).toBe(1);
+      expect(mainResults[0].content).toBe('main content');
+
+      // Cross-repo search without branch filter should return both (if vectors are similar enough)
+      // But with branch filter, should only return filtered branch
+      const allResults = await mainDb.searchCrossRepo(queryVector, 10);
+      // Should return at least main branch results
+      expect(allResults.length).toBeGreaterThanOrEqual(1);
+
+      // Clean up
+      await mainDb.clear();
+      await featureDb.clear();
+    });
+
+    it('should only clear current branch data', async () => {
+      // Create two instances with different branches
+      const mainDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit-sha');
+      const featureDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'feature-commit-sha');
+      
+      await mainDb.initialize();
+      await featureDb.initialize();
+
+      // Insert data into both branches
+      const mainVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)];
+      const mainMetadatas = [{
+        file: 'src/main.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const mainContents = ['main content'];
+      await mainDb.insertBatch(mainVectors, mainMetadatas, mainContents);
+
+      const featureVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.2)];
+      const featureMetadatas = [{
+        file: 'src/feature.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const featureContents = ['feature content'];
+      await featureDb.insertBatch(featureVectors, featureMetadatas, featureContents);
+
+      // Clear main branch
+      await mainDb.clear();
+
+      // Main branch should be empty
+      const mainQueryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.1);
+      const mainResults = await mainDb.search(mainQueryVector, 10);
+      expect(mainResults.length).toBe(0);
+
+      // Feature branch should still have data
+      const featureQueryVector = new Float32Array(EMBEDDING_DIMENSION).fill(0.2);
+      const featureResults = await featureDb.search(featureQueryVector, 10);
+      expect(featureResults.length).toBe(1);
+      expect(featureResults[0].content).toBe('feature content');
+
+      // Clean up
+      await featureDb.clear();
+    });
+
+    it('should only delete file from current branch', async () => {
+      // Create two instances with different branches
+      const mainDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit-sha');
+      const featureDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'feature-commit-sha');
+      
+      await mainDb.initialize();
+      await featureDb.initialize();
+
+      // Insert same file into both branches (point IDs will differ due to branch/commit in ID generation)
+      const vectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)];
+      const metadatas = [{
+        file: 'src/shared.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const mainContents = ['main version'];
+      const featureContents = ['feature version'];
+
+      await mainDb.insertBatch(vectors, metadatas, mainContents);
+      await featureDb.insertBatch(vectors, metadatas, featureContents);
+
+      // Verify both branches have their data (point IDs are different due to branch/commit)
+      const mainBefore = await mainDb.scanWithFilter({ pattern: 'shared' });
+      const featureBefore = await featureDb.scanWithFilter({ pattern: 'shared' });
+      expect(mainBefore.length).toBe(1);
+      expect(featureBefore.length).toBe(1);
+
+      // Delete file from main branch
+      await mainDb.deleteByFile('src/shared.ts');
+
+      // Main branch should not have the file
+      const mainResults = await mainDb.scanWithFilter({ pattern: 'shared' });
+      expect(mainResults.length).toBe(0);
+
+      // Feature branch should still have the file
+      const featureResults = await featureDb.scanWithFilter({ pattern: 'shared' });
+      expect(featureResults.length).toBe(1);
+      expect(featureResults[0].content).toBe('feature version');
+
+      // Clean up
+      await featureDb.clear();
+    });
+
+    it('should clear all commits for a branch using clearBranch()', async () => {
+      // Create instances for same branch but different commits (simulating PR updates)
+      const commit1Db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'commit-1');
+      const commit2Db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'commit-2');
+      const otherBranchDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit');
+      
+      await commit1Db.initialize();
+      await commit2Db.initialize();
+      await otherBranchDb.initialize();
+
+      // Insert data into commit 1
+      const vectors1 = [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)];
+      const metadatas1 = [{
+        file: 'src/file1.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const contents1 = ['commit 1 content'];
+      await commit1Db.insertBatch(vectors1, metadatas1, contents1);
+
+      // Insert data into commit 2 (same branch, different commit)
+      const vectors2 = [new Float32Array(EMBEDDING_DIMENSION).fill(0.2)];
+      const metadatas2 = [{
+        file: 'src/file2.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const contents2 = ['commit 2 content'];
+      await commit2Db.insertBatch(vectors2, metadatas2, contents2);
+
+      // Insert data into other branch
+      const vectors3 = [new Float32Array(EMBEDDING_DIMENSION).fill(0.3)];
+      const metadatas3 = [{
+        file: 'src/main.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const contents3 = ['main branch content'];
+      await otherBranchDb.insertBatch(vectors3, metadatas3, contents3);
+
+      // Verify all commits have data
+      const commit1Results = await commit1Db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.1), 10);
+      const commit2Results = await commit2Db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.2), 10);
+      const otherBranchResults = await otherBranchDb.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.3), 10);
+      
+      expect(commit1Results.length).toBe(1);
+      expect(commit1Results[0].content).toBe('commit 1 content');
+      expect(commit2Results.length).toBe(1);
+      expect(commit2Results[0].content).toBe('commit 2 content');
+      expect(otherBranchResults.length).toBe(1);
+      expect(otherBranchResults[0].content).toBe('main branch content');
+
+      // Clear all commits for feature-x branch
+      await commit1Db.clearBranch('feature-x');
+
+      // Commit 1 should be empty (branch cleared)
+      const commit1After = await commit1Db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.1), 10);
+      expect(commit1After.length).toBe(0);
+
+      // Commit 2 should also be empty (same branch)
+      const commit2After = await commit2Db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.2), 10);
+      expect(commit2After.length).toBe(0);
+
+      // Other branch should still have data
+      const otherBranchAfter = await otherBranchDb.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.3), 10);
+      expect(otherBranchAfter.length).toBe(1);
+      expect(otherBranchAfter[0].content).toBe('main branch content');
+
+      // Clean up
+      await otherBranchDb.clear();
+    });
+
+    it('should default to current branch when clearBranch is called without arguments', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-y', 'commit-1');
+      const otherBranchDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit');
+
+      await db.initialize();
+      await otherBranchDb.initialize();
+
+      const vectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.4)];
+      const metadatas = [{
+        file: 'src/feature-y.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const contents = ['feature-y content'];
+      await db.insertBatch(vectors, metadatas, contents);
+
+      const mainVectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.5)];
+      const mainMetadatas = [{
+        file: 'src/main2.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const mainContents = ['main2 content'];
+      await otherBranchDb.insertBatch(mainVectors, mainMetadatas, mainContents);
+
+      // Sanity check: both branches have data
+      const featureResultsBefore = await db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.4), 10);
+      const mainResultsBefore = await otherBranchDb.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.5), 10);
+      expect(featureResultsBefore.length).toBe(1);
+      expect(mainResultsBefore.length).toBe(1);
+
+      // Clear current branch (feature-y) without passing branch name
+      await db.clearBranch();
+
+      // Current branch should be empty
+      const featureResultsAfter = await db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.4), 10);
+      expect(featureResultsAfter.length).toBe(0);
+
+      // Other branch should still have data
+      const mainResultsAfter = await otherBranchDb.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.5), 10);
+      expect(mainResultsAfter.length).toBe(1);
+      expect(mainResultsAfter[0].content).toBe('main2 content');
+
+      // Clean up
+      await otherBranchDb.clear();
+    });
+
+    it('should generate unique point IDs for same file/line range across branches', async () => {
+      // Test that point IDs include branch/commit to prevent collisions
+      const mainDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'main', 'main-commit-sha');
+      const featureDb = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, 'feature-x', 'feature-commit-sha');
+      
+      await mainDb.initialize();
+      await featureDb.initialize();
+
+      // Insert same file/line range into both branches
+      const vectors = [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)];
+      const metadatas = [{
+        file: 'src/same.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+      }];
+      const mainContents = ['main content'];
+      const featureContents = ['feature content'];
+
+      await mainDb.insertBatch(vectors, metadatas, mainContents);
+      await featureDb.insertBatch(vectors, metadatas, featureContents);
+
+      // Both branches should have their data (point IDs are unique due to branch/commit)
+      const mainResults = await mainDb.scanWithFilter({ pattern: 'same' });
+      const featureResults = await featureDb.scanWithFilter({ pattern: 'same' });
+      
+      expect(mainResults.length).toBe(1);
+      expect(mainResults[0].content).toBe('main content');
+      expect(featureResults.length).toBe(1);
+      expect(featureResults[0].content).toBe('feature content');
+
+      // Clean up
+      await mainDb.clear();
+      await featureDb.clear();
+    });
+
+    it('should allow repoIds in scanCrossRepo without throwing validation errors', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+      await db.initialize();
+
+      // scanCrossRepo explicitly passes includeCurrentRepo: false, so repoIds are allowed
+      // This verifies that the validation logic correctly permits this usage pattern
+      const results = await db.scanCrossRepo({ repoIds: [db.getRepoId()] });
+      expect(Array.isArray(results)).toBe(true);
+
+      await db.clear();
+    });
+
+    it('should throw error when all repoIds are empty or whitespace', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+      await db.initialize();
+
+      // Test empty strings
+      await expect(db.scanCrossRepo({ repoIds: ['', ''] })).rejects.toThrow(
+        'Invalid repoIds: all provided repoIds are empty or whitespace'
+      );
+
+      // Test whitespace-only strings
+      await expect(db.scanCrossRepo({ repoIds: [' ', '\t', '\n'] })).rejects.toThrow(
+        'Invalid repoIds: all provided repoIds are empty or whitespace'
+      );
+
+      // Test mixed empty and whitespace
+      await expect(db.scanCrossRepo({ repoIds: ['', '   ', '\t\n'] })).rejects.toThrow(
+        'Invalid repoIds: all provided repoIds are empty or whitespace'
+      );
+
+      await db.clear();
+    });
+
+    it('should throw error when branch is empty or whitespace-only', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+      await db.initialize();
+
+      // Test empty string branch
+      await expect(db.scanCrossRepo({ branch: '' })).rejects.toThrow(
+        'Invalid branch: branch must be a non-empty, non-whitespace string'
+      );
+
+      // Test whitespace-only branch
+      await expect(db.scanCrossRepo({ branch: '   ' })).rejects.toThrow(
+        'Invalid branch: branch must be a non-empty, non-whitespace string'
+      );
+
+      // Test mixed whitespace
+      await expect(db.scanCrossRepo({ branch: '\t\n  ' })).rejects.toThrow(
+        'Invalid branch: branch must be a non-empty, non-whitespace string'
+      );
+
+      // Test that valid branch works
+      const results = await db.scanCrossRepo({ branch: 'main' });
+      expect(Array.isArray(results)).toBe(true);
+
+      await db.clear();
+    });
+  });
+
+  describe('querySymbols', () => {
+    it('should throw error when symbolType is empty or whitespace-only', async () => {
+      const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+      await db.initialize();
+
+      await expect(db.querySymbols({ symbolType: '' as any })).rejects.toThrow(
+        'Invalid symbolType: symbolType must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.querySymbols({ symbolType: '   ' as any })).rejects.toThrow(
+        'Invalid symbolType: symbolType must be a non-empty, non-whitespace string'
+      );
+
+      await expect(db.querySymbols({ symbolType: '\t\n' as any })).rejects.toThrow(
+        'Invalid symbolType: symbolType must be a non-empty, non-whitespace string'
+      );
+
+      await db.clear();
+    });
+  });
+
+  describe('validateFilterOptions', () => {
+    it('should throw error when repoIds is used with includeCurrentRepo enabled', () => {
+      expect(() => {
+        validateFilterOptions({
+          repoIds: ['repo1'],
+          includeCurrentRepo: true,
+        });
+      }).toThrow(
+        'Cannot use repoIds when includeCurrentRepo is enabled (the default)'
+      );
+
+      expect(() => {
+        validateFilterOptions({
+          repoIds: ['repo1'],
+          includeCurrentRepo: undefined, // undefined is treated as "enabled"
+        });
+      }).toThrow(
+        'Cannot use repoIds when includeCurrentRepo is enabled (the default)'
+      );
+    });
+
+    it('should allow repoIds when includeCurrentRepo is explicitly false', () => {
+      expect(() => {
+        validateFilterOptions({
+          repoIds: ['repo1'],
+          includeCurrentRepo: false,
+        });
+      }).not.toThrow();
+    });
+
+    it('should throw error when branch is used with includeCurrentRepo enabled', () => {
+      expect(() => {
+        validateFilterOptions({
+          branch: 'main',
+          includeCurrentRepo: true,
+        });
+      }).toThrow(
+        'Cannot use branch parameter when includeCurrentRepo is enabled (the default)'
+      );
+
+      expect(() => {
+        validateFilterOptions({
+          branch: 'main',
+          includeCurrentRepo: undefined, // undefined is treated as "enabled"
+        });
+      }).toThrow(
+        'Cannot use branch parameter when includeCurrentRepo is enabled (the default)'
+      );
+    });
+
+    it('should allow branch when includeCurrentRepo is explicitly false', () => {
+      expect(() => {
+        validateFilterOptions({
+          branch: 'main',
+          includeCurrentRepo: false,
+        });
+      }).not.toThrow();
+    });
+
+    it('should allow both branch and repoIds when includeCurrentRepo is false', () => {
+      expect(() => {
+        validateFilterOptions({
+          branch: 'main',
+          repoIds: ['repo1'],
+          includeCurrentRepo: false,
+        });
+      }).not.toThrow();
+    });
+
+    it('should not throw when no conflicting options are provided', () => {
+      expect(() => {
+        validateFilterOptions({});
+      }).not.toThrow();
+
+      expect(() => {
+        validateFilterOptions({
+          includeCurrentRepo: true,
+        });
+      }).not.toThrow();
     });
   });
 });

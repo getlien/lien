@@ -46,6 +46,18 @@ export interface ChunkMetadata {
    * Set from config.storage.qdrant.orgId when using Qdrant backend.
    */
   orgId?: string;
+  
+  /**
+   * Git branch name for branch/commit tracking in Qdrant backend.
+   * Used to isolate indexes by branch (e.g., main vs PR branches).
+   */
+  branch?: string;
+  
+  /**
+   * Git commit SHA for branch/commit tracking in Qdrant backend.
+   * Used to isolate indexes by commit (e.g., for PR analysis).
+   */
+  commitSha?: string;
 }
 
 export interface ScanOptions {
