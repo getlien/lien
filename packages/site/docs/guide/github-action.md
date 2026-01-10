@@ -242,7 +242,7 @@ Violations outside the PR diff are noted with a reminder:
 - Only runs on PRs from the same repository (not forks)
 - Analyzes up to 10 violations per review
 - Inline comments require lines to be in the PR diff
-- Supported languages: TypeScript, JavaScript, Python, PHP, Go
+- **Complexity analysis languages**: TypeScript, JavaScript, Python, PHP (requires AST support)
 
 ## Troubleshooting
 

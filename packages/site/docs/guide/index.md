@@ -76,12 +76,13 @@ Lien is built with modern, performant tools:
 
 ## Supported Languages
 
-Lien indexes and understands code in:
-- TypeScript, JavaScript (JSX/TSX), Vue
-- Python, PHP, Liquid
-- Go, Rust
-- Java, C/C++
-- Ruby, Swift, Kotlin, C#, Scala
+**Full AST Support** (function detection, complexity analysis):
+- TypeScript, JavaScript (JSX/TSX)
+- Python
+- PHP
+
+**Semantic Search** (chunking and embeddings):
+- All of the above, plus Vue, Liquid, Go, Rust, Java, C/C++, Ruby, Swift, Kotlin, C#, Scala, Markdown
 
 ## Next Steps
 
