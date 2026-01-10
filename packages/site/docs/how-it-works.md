@@ -73,14 +73,16 @@ Lien indexes and understands code in:
 
 ## Complexity Analysis
 
-Lien tracks two complementary complexity metrics:
+Lien tracks four complementary complexity metrics:
 
 | Metric | What it Measures | Best For |
 |--------|-----------------|----------|
 | **Cyclomatic** | Decision paths (if, for, switch) | Testability - how many tests needed? |
 | **Cognitive** | Mental effort (nesting depth, breaks) | Understandability - how hard to read? |
+| **Halstead Effort** | Reading time based on operators/operands | Learning curve - how long to understand? |
+| **Halstead Bugs** | Predicted bug count (Volume / 3000) | Reliability - how bug-prone is this? |
 
-Both are calculated during indexing using Tree-sitter AST parsing. Cognitive complexity is based on [SonarSource's specification](https://www.sonarsource.com/docs/CognitiveComplexity.pdf).
+All metrics are calculated during indexing using Tree-sitter AST parsing. Cognitive complexity is based on [SonarSource's specification](https://www.sonarsource.com/docs/CognitiveComplexity.pdf), Halstead metrics are based on Maurice Halstead's "Elements of Software Science" (1977).
 
 ## Performance
 

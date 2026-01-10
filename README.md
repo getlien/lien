@@ -26,15 +26,10 @@ Lien connects AI coding assistants like Cursor to your codebase through the Mode
 ## Quick Start
 
 ```bash
-# Install
+# 1. Install
 npm install -g @liendev/lien
 
-# Setup in your project
-cd /path/to/your/project
-lien init
-lien index
-
-# Configure Cursor - create .cursor/mcp.json
+# 2. Add to your project - create .cursor/mcp.json
 {
   "mcpServers": {
     "lien": {
@@ -44,8 +39,10 @@ lien index
   }
 }
 
-# Restart Cursor and start asking questions!
+# 3. Restart Cursor and start asking questions!
 ```
+
+That's it—zero configuration needed. Lien auto-detects your project and indexes on first use.
 
 **👉 [Full installation guide](https://lien.dev/guide/installation)**
 

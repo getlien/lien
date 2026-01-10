@@ -4,7 +4,7 @@ Lien provides a simple command-line interface for managing your codebase index.
 
 ## lien init
 
-Initialize Lien in the current directory.
+Initialize Lien in the current directory. This is optional—Lien works with zero configuration!
 
 ```bash
 lien init [options]
@@ -14,35 +14,32 @@ lien init [options]
 
 | Option | Description |
 |--------|-------------|
-| `--upgrade` | Upgrade existing config to latest version |
+| `--yes` | Skip prompts and use defaults |
 
 ### Behavior
 
-1. Detects frameworks in your project (Node.js, Laravel, Shopify, etc.)
-2. Creates `.lien.config.json` with framework-specific settings
-3. Offers to install Cursor rules to `.cursor/rules/lien.mdc`
-4. Prompts for customization (optional)
+Lien uses a **config-less approach** with sensible defaults:
+
+1. Auto-detects frameworks (Node.js, Laravel, Shopify, etc.)
+2. Installs Cursor rules to `.cursor/rules/lien.mdc` (recommended)
+3. No per-project config file needed!
 
 ### Examples
 
 ```bash
-# Initialize new project
+# Initialize with prompts
 lien init
 
-# Upgrade existing config
-lien init --upgrade
+# Initialize with defaults (non-interactive)
+lien init --yes
 ```
 
-### Interactive Prompts
+### What Gets Created
 
-During initialization:
+- `.cursor/rules/lien.mdc` - Cursor rules for AI to use Lien tools effectively
 
-1. **Framework Detection**: Shows detected frameworks and asks which to enable
-2. **Customization**: Option to customize settings (most users can skip)
-3. **Cursor Rules**: Offers to install recommended rules for Cursor integration
-
-::: tip
-If `.cursor/rules` exists as a file, Lien will offer to convert it to a directory structure, preserving your existing rules.
+::: tip Zero Config
+Unlike previous versions, `lien init` no longer creates `.lien.config.json`. Lien auto-detects your project structure and uses sensible defaults. For advanced configuration, see [Configuration](/guide/configuration).
 :::
 
 ## lien index
@@ -132,7 +129,7 @@ lien serve [options]
 
 ### Behavior
 
-1. Loads configuration from `.lien.config.json`
+1. Auto-detects project structure and frameworks
 2. Checks if index exists (auto-indexes if missing)
 3. Starts MCP server on stdio transport
 4. Listens for tool requests from Cursor
@@ -155,7 +152,7 @@ To disable for a session:
 lien serve --no-watch
 ```
 
-To disable permanently, set in `.lien.config.json`:
+To disable permanently, set in `~/.lien/config.json` (global config):
 ```json
 {
   "fileWatching": {
@@ -170,19 +167,39 @@ Usually run via Cursor's MCP configuration, not manually.
 
 ### MCP Configuration
 
-Add to `~/.cursor/mcp.json`:
+Add to `.cursor/mcp.json` in your project root:
 
 ```json
 {
   "mcpServers": {
     "lien": {
       "command": "lien",
-      "args": ["serve"],
-      "cwd": "/absolute/path/to/your/project"
+      "args": ["serve"]
     }
   }
 }
 ```
+
+::: tip Per-Project Configuration
+Using per-project `.cursor/mcp.json` (not global `~/.cursor/mcp.json`) means each project gets its own Lien instance automatically. No need to specify `--root`!
+:::
+
+::: warning Global MCP Config
+If using a global `~/.cursor/mcp.json`, you must specify the project path with `--root`:
+
+```json
+{
+  "mcpServers": {
+    "my-project": {
+      "command": "lien",
+      "args": ["serve", "--root", "/absolute/path/to/project"]
+    }
+  }
+}
+```
+
+Without `--root`, Lien won't know which project to index. Per-project `.cursor/mcp.json` is recommended.
+:::
 
 ## lien status
 
@@ -198,7 +215,6 @@ lien status
 📊 Lien Status
 
 Project: /path/to/your/project
-Config: .lien.config.json (v0.3.0)
 
 Index Status:
   Location: ~/.lien/indices/abc123
@@ -332,22 +348,34 @@ lien complexity --threshold 20 --cognitive-threshold 10
 
 ### Complexity Metrics
 
-Lien tracks **two complementary metrics**:
+Lien tracks **four complementary metrics**:
 
-#### Cyclomatic Complexity
-The number of independent paths through code. Increased by:
-- `if`, `else if`, `else`
-- `for`, `while`, `do...while`
-- `switch` `case`
-- `catch`
-- `&&`, `||`, `??`
+#### Cyclomatic Complexity (Test Paths)
+The number of independent paths through code—how many test cases you need for full branch coverage. Increased by:
+- `if`, `else if` (but not `else`—it's the default path)
+- `for`, `for...in`, `for...of`, `foreach` (PHP)
+- `while`, `do...while`
+- `switch case`
+- `catch`, `except` (Python)
+- `&&`, `||` (logical operators)
 - `? :` (ternary)
 
-#### Cognitive Complexity
+#### Cognitive Complexity (Mental Load)
 Mental effort to understand code (based on [SonarSource's specification](https://www.sonarsource.com/docs/CognitiveComplexity.pdf)). Penalizes:
-- **Nesting depth**: Deeply nested code is harder to understand
-- **Control flow breaks**: `break`, `continue`, `goto`
-- **Recursion**: Functions calling themselves
+- **Nesting depth**: Deeply nested code is exponentially harder to understand
+- **Control flow breaks**: `break`, `continue`, early returns
+- **Logical operator sequences**: Complex boolean expressions
+
+#### Halstead Effort (Time to Understand)
+Based on Halstead's software science metrics. Estimates reading time:
+- Formula: `Effort = Difficulty × Volume`
+- Where `Difficulty = (n1/2) × (N2/n2)` and `Volume = N × log₂(n)`
+- Default threshold: 1 hour (64,800 effort units)
+
+#### Halstead Bugs (Estimated Bugs)
+Predicted bug count based on code complexity:
+- Formula: `Bugs = Volume / 3000`
+- Default threshold: 1.5 (functions likely to have >1.5 bugs)
 
 | Complexity | Severity | Interpretation |
 |------------|----------|----------------|
@@ -355,9 +383,12 @@ Mental effort to understand code (based on [SonarSource's specification](https:/
 | 15-29 | Warning | Consider refactoring |
 | 30+ | Error | Should refactor |
 
-::: tip Both metrics matter
-Cyclomatic complexity measures **testability** (paths to cover).
-Cognitive complexity measures **understandability** (mental effort).
+::: tip All metrics complement each other
+- **Cyclomatic**: How many tests do I need? (testability)
+- **Cognitive**: How hard is this to understand? (readability)
+- **Halstead Effort**: How long will it take to grok this? (learning curve)
+- **Halstead Bugs**: How bug-prone is this code? (reliability)
+
 A function can have low cyclomatic but high cognitive complexity if deeply nested!
 :::
 
@@ -383,7 +414,7 @@ Show installed version.
 
 ```bash
 lien --version
-# Output: 0.8.1
+# Output: 0.23.0
 ```
 
 ## lien --help
@@ -455,10 +486,10 @@ lien init
 lien index
 ```
 
-### After Config Changes
+### Force Rebuild
 
 ```bash
-# Edit .lien.config.json
+# After major changes or stale results
 lien index --force
 ```
 
@@ -477,10 +508,10 @@ npm update -g @liendev/lien
 
 ## Tips
 
-1. **Run init once**: Each project needs `lien init` only once
-2. **Force rebuild when needed**: Use `lien index --force` after config changes
+1. **Zero config**: Most projects work out of the box with no setup
+2. **Force rebuild when needed**: Use `lien index --force` if results seem stale
 3. **Check status first**: Use `lien status` to verify index state
 4. **Watch the output**: Indexing progress shows potential issues
-5. **Use absolute paths**: In MCP config, always use absolute paths
+5. **Per-project MCP config**: Use `.cursor/mcp.json` in project root for automatic project detection
 
 

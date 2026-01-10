@@ -6,7 +6,12 @@ Lien _(French for "link" or "connection")_ is a local-first semantic code search
 
 Lien indexes your codebase locally and enables AI assistants to understand your code through natural language queries. Unlike cloud-based solutions, everything runs on your machine—your code never leaves your computer.
 
+**Setup takes 30 seconds:** Install globally, add one config file, restart Cursor. That's it.
+
 ## Key Benefits
+
+### Zero Configuration
+Lien auto-detects your project structure and "just works." No config files, no framework selection, no pattern configuration.
 
 ### Privacy First
 Your code is precious intellectual property. Lien processes everything locally with no external API calls, no data collection, and no telemetry.
@@ -71,12 +76,13 @@ Lien is built with modern, performant tools:
 
 ## Supported Languages
 
-Lien indexes and understands code in:
-- TypeScript, JavaScript (JSX/TSX), Vue
-- Python, PHP, Liquid
-- Go, Rust
-- Java, C/C++
-- Ruby, Swift, Kotlin, C#, Scala
+**Full AST Support** (function detection, complexity analysis):
+- TypeScript, JavaScript (JSX/TSX)
+- Python
+- PHP
+
+**Semantic Search** (chunking and embeddings):
+- All of the above, plus Vue, Liquid, Go, Rust, Java, C/C++, Ruby, Swift, Kotlin, C#, Scala, Markdown
 
 ## Next Steps
 

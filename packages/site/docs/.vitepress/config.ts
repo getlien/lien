@@ -15,6 +15,12 @@ export default withMermaid(
       ['meta', { name: 'og:type', content: 'website' }],
       ['meta', { name: 'og:locale', content: 'en' }],
       ['meta', { name: 'og:site_name', content: 'Lien' }],
+      // Cloudflare Web Analytics
+      ['script', { 
+        defer: '', 
+        src: 'https://static.cloudflareinsights.com/beacon.min.js',
+        'data-cf-beacon': '{"token": "8ec4e997ac7a46a6a3049411d9583443"}'
+      }],
     ],
 
     themeConfig: {
@@ -45,12 +51,6 @@ export default withMermaid(
               { text: 'CLI Commands', link: '/guide/cli-commands' },
             ]
           },
-          {
-            text: 'Integrations',
-            items: [
-              { text: 'GitHub Action (Veille)', link: '/guide/github-action' },
-            ]
-          }
         ]
       },
 
@@ -60,7 +60,7 @@ export default withMermaid(
 
       footer: {
         message: 'Released under the AGPL-3.0 License. Free forever for local use.',
-        copyright: 'Copyright © 2024-present Alf Henderson'
+        copyright: 'Copyright © 2025 Alf Henderson'
       },
 
       search: {
