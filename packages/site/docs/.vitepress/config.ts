@@ -15,6 +15,12 @@ export default withMermaid(
       ['meta', { name: 'og:type', content: 'website' }],
       ['meta', { name: 'og:locale', content: 'en' }],
       ['meta', { name: 'og:site_name', content: 'Lien' }],
+      // Cloudflare Web Analytics
+      ['script', { 
+        defer: '', 
+        src: 'https://static.cloudflareinsights.com/beacon.min.js',
+        'data-cf-beacon': '{"token": "8ec4e997ac7a46a6a3049411d9583443"}'
+      }],
     ],
 
     themeConfig: {
