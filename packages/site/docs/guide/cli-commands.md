@@ -348,22 +348,34 @@ lien complexity --threshold 20 --cognitive-threshold 10
 
 ### Complexity Metrics
 
-Lien tracks **two complementary metrics**:
+Lien tracks **four complementary metrics**:
 
-#### Cyclomatic Complexity
-The number of independent paths through code. Increased by:
-- `if`, `else if`, `else`
-- `for`, `while`, `do...while`
-- `switch` `case`
-- `catch`
-- `&&`, `||`, `??`
+#### Cyclomatic Complexity (Test Paths)
+The number of independent paths through code—how many test cases you need for full branch coverage. Increased by:
+- `if`, `else if` (but not `else`—it's the default path)
+- `for`, `for...in`, `for...of`, `foreach` (PHP)
+- `while`, `do...while`
+- `switch case`
+- `catch`, `except` (Python)
+- `&&`, `||` (logical operators)
 - `? :` (ternary)
 
-#### Cognitive Complexity
+#### Cognitive Complexity (Mental Load)
 Mental effort to understand code (based on [SonarSource's specification](https://www.sonarsource.com/docs/CognitiveComplexity.pdf)). Penalizes:
-- **Nesting depth**: Deeply nested code is harder to understand
-- **Control flow breaks**: `break`, `continue`, `goto`
-- **Recursion**: Functions calling themselves
+- **Nesting depth**: Deeply nested code is exponentially harder to understand
+- **Control flow breaks**: `break`, `continue`, early returns
+- **Logical operator sequences**: Complex boolean expressions
+
+#### Halstead Effort (Time to Understand)
+Based on Halstead's software science metrics. Estimates reading time:
+- Formula: `Effort = Difficulty × Volume`
+- Where `Difficulty = (n1/2) × (N2/n2)` and `Volume = N × log₂(n)`
+- Default threshold: 1 hour (64,800 effort units)
+
+#### Halstead Bugs (Estimated Bugs)
+Predicted bug count based on code complexity:
+- Formula: `Bugs = Volume / 3000`
+- Default threshold: 1.5 (functions likely to have >1.5 bugs)
 
 | Complexity | Severity | Interpretation |
 |------------|----------|----------------|
@@ -371,9 +383,12 @@ Mental effort to understand code (based on [SonarSource's specification](https:/
 | 15-29 | Warning | Consider refactoring |
 | 30+ | Error | Should refactor |
 
-::: tip Both metrics matter
-Cyclomatic complexity measures **testability** (paths to cover).
-Cognitive complexity measures **understandability** (mental effort).
+::: tip All metrics complement each other
+- **Cyclomatic**: How many tests do I need? (testability)
+- **Cognitive**: How hard is this to understand? (readability)
+- **Halstead Effort**: How long will it take to grok this? (learning curve)
+- **Halstead Bugs**: How bug-prone is this code? (reliability)
+
 A function can have low cyclomatic but high cognitive complexity if deeply nested!
 :::
 
