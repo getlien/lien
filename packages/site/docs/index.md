@@ -64,6 +64,8 @@ npm install -g @liendev/lien
 
 That's it—no configuration files needed. Lien auto-detects your project structure and indexes on first use.
 
+> **Note:** This per-project `.cursor/mcp.json` approach is recommended. If using a global `~/.cursor/mcp.json`, you'll need to add `--root /path/to/project` to the args. See [Getting Started](/guide/getting-started) for details.
+
 ## How It Works
 
 1. **Index**: Lien scans your codebase, chunks code into manageable pieces, and generates embeddings using a local ML model

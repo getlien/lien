@@ -181,7 +181,24 @@ Add to `.cursor/mcp.json` in your project root:
 ```
 
 ::: tip Per-Project Configuration
-Using per-project `.cursor/mcp.json` (not global `~/.cursor/mcp.json`) means each project gets its own Lien instance automatically. No need to specify `cwd`!
+Using per-project `.cursor/mcp.json` (not global `~/.cursor/mcp.json`) means each project gets its own Lien instance automatically. No need to specify `--root`!
+:::
+
+::: warning Global MCP Config
+If using a global `~/.cursor/mcp.json`, you must specify the project path with `--root`:
+
+```json
+{
+  "mcpServers": {
+    "my-project": {
+      "command": "lien",
+      "args": ["serve", "--root", "/absolute/path/to/project"]
+    }
+  }
+}
+```
+
+Without `--root`, Lien won't know which project to index. Per-project `.cursor/mcp.json` is recommended.
 :::
 
 ## lien status

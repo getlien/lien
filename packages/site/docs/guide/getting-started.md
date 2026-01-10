@@ -23,6 +23,23 @@ That's it! Lien works with **zero configuration**.
 The `.cursor/mcp.json` file is per-project, so each project automatically gets its own Lien instance. When you switch projects in Cursor, the right Lien server starts automatically.
 :::
 
+::: warning Global MCP Config
+If you're using a **global** `~/.cursor/mcp.json` instead, you must specify the project path:
+
+```json
+{
+  "mcpServers": {
+    "my-project": {
+      "command": "lien",
+      "args": ["serve", "--root", "/path/to/your/project"]
+    }
+  }
+}
+```
+
+We recommend per-project `.cursor/mcp.json` for simplicity.
+:::
+
 ## Step 2: Restart Cursor
 
 Restart Cursor completely to load the MCP configuration.
