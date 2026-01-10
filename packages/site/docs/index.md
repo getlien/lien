@@ -41,21 +41,13 @@ features:
 
 ## Quick Start
 
-Install Lien globally via npm:
+**1. Install Lien:**
 
 ```bash
 npm install -g @liendev/lien
 ```
 
-Initialize in your project:
-
-```bash
-cd /path/to/your/project
-lien init
-lien index
-```
-
-Configure Cursor by creating `.cursor/mcp.json` in your project:
+**2. Add to your project** — create `.cursor/mcp.json`:
 
 ```json
 {
@@ -68,7 +60,9 @@ Configure Cursor by creating `.cursor/mcp.json` in your project:
 }
 ```
 
-Restart Cursor and start asking questions about your codebase!
+**3. Restart Cursor** and start asking questions about your codebase!
+
+That's it—no configuration files needed. Lien auto-detects your project structure and indexes on first use.
 
 ## How It Works
 

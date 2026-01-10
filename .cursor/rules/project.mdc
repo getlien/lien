@@ -9,7 +9,7 @@ Local-first semantic code search tool providing context to AI coding assistants 
 **Key Facts:**
 - Package: `@liendev/lien`
 - Port: 7133 (L=7, I=1, E=3, N=3)
-- License: MIT | Domain: lien.dev
+- License: AGPL-3.0 | Domain: lien.dev
 
 **Structure:**
 ```

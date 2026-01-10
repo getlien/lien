@@ -60,7 +60,7 @@ export default withMermaid(
 
       footer: {
         message: 'Released under the AGPL-3.0 License. Free forever for local use.',
-        copyright: 'Copyright © 2024-present Alf Henderson'
+        copyright: 'Copyright © 2025 Alf Henderson'
       },
 
       search: {

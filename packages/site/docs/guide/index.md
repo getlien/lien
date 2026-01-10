@@ -6,7 +6,12 @@ Lien _(French for "link" or "connection")_ is a local-first semantic code search
 
 Lien indexes your codebase locally and enables AI assistants to understand your code through natural language queries. Unlike cloud-based solutions, everything runs on your machine—your code never leaves your computer.
 
+**Setup takes 30 seconds:** Install globally, add one config file, restart Cursor. That's it.
+
 ## Key Benefits
+
+### Zero Configuration
+Lien auto-detects your project structure and "just works." No config files, no framework selection, no pattern configuration.
 
 ### Privacy First
 Your code is precious intellectual property. Lien processes everything locally with no external API calls, no data collection, and no telemetry.
