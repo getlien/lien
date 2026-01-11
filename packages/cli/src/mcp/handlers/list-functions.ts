@@ -37,9 +37,20 @@ export async function handleListFunctions(
           log('No symbol results, falling back to content scan...');
           results = await vectorDB.scanWithFilter({
             language: validatedArgs.language,
-            pattern: validatedArgs.pattern,
-            limit: 50,
+            limit: 200, // Fetch more, we'll filter by symbolName
           });
+          
+          // Filter by symbolName (not content) to match only actual functions/symbols
+          if (validatedArgs.pattern) {
+            const regex = new RegExp(validatedArgs.pattern, 'i');
+            results = results.filter(r => {
+              const symbolName = r.metadata?.symbolName;
+              return symbolName && regex.test(symbolName);
+            });
+          }
+          
+          // Limit results after filtering
+          results = results.slice(0, 50);
           usedMethod = 'content';
         }
       } catch (error) {
@@ -47,9 +58,20 @@ export async function handleListFunctions(
         log(`Symbol query failed, falling back to content scan: ${error}`);
         results = await vectorDB.scanWithFilter({
           language: validatedArgs.language,
-          pattern: validatedArgs.pattern,
-          limit: 50,
+          limit: 200, // Fetch more, we'll filter by symbolName
         });
+        
+        // Filter by symbolName (not content) to match only actual functions/symbols
+        if (validatedArgs.pattern) {
+          const regex = new RegExp(validatedArgs.pattern, 'i');
+          results = results.filter(r => {
+            const symbolName = r.metadata?.symbolName;
+            return symbolName && regex.test(symbolName);
+          });
+        }
+        
+        // Limit results after filtering
+        results = results.slice(0, 50);
         usedMethod = 'content';
       }
 

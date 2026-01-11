@@ -141,6 +141,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should filter by language', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
@@ -165,6 +166,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should filter by pattern', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
@@ -198,6 +200,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should filter out empty string arrays from AST metadata', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
@@ -235,6 +238,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should filter by language', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
@@ -271,6 +275,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should filter by symbolType (function)', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
@@ -309,6 +314,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should filter by symbolType (class)', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
@@ -336,6 +342,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should filter by symbolType (interface)', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
@@ -363,6 +370,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should filter by pattern', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
@@ -401,6 +409,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should filter by pattern and symbolType together', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
@@ -443,6 +452,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should handle records with no symbolType (fallback to pre-AST symbols)', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
@@ -471,6 +481,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should filter out records with empty content', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
@@ -506,6 +517,7 @@ describe('VectorDB Query Operations', () => {
 
     it('should filter out records with empty file paths', async () => {
       const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
         search: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
