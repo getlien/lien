@@ -1,6 +1,43 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { ListFunctionsSchema } from '../schemas/index.js';
-import type { ToolContext, MCPToolResult } from '../types.js';
+import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
+import type { VectorDBInterface, SearchResult } from '@liendev/core';
+
+interface QueryResult {
+  results: SearchResult[];
+  method: 'symbols' | 'content';
+}
+
+/**
+ * Perform content scan fallback when symbol query fails or returns no results.
+ * Filters by symbolName (not content) to match only actual functions/symbols.
+ */
+async function performContentScan(
+  vectorDB: VectorDBInterface,
+  args: { language?: string; pattern?: string },
+  log: LogFn
+): Promise<QueryResult> {
+  log('Falling back to content scan...');
+  
+  let results = await vectorDB.scanWithFilter({
+    language: args.language,
+    limit: 200, // Fetch more, we'll filter by symbolName
+  });
+
+  // Filter by symbolName (not content) to match only actual functions/symbols
+  if (args.pattern) {
+    const regex = new RegExp(args.pattern, 'i');
+    results = results.filter(r => {
+      const symbolName = r.metadata?.symbolName;
+      return symbolName && regex.test(symbolName);
+    });
+  }
+
+  return {
+    results: results.slice(0, 50),
+    method: 'content',
+  };
+}
 
 /**
  * Handle list_functions tool calls.
@@ -16,72 +53,37 @@ export async function handleListFunctions(
     ListFunctionsSchema,
     async (validatedArgs) => {
       log('Listing functions with symbol metadata...');
-
-      // Check if index has been updated and reconnect if needed
       await checkAndReconnect();
 
-      let results;
-      let usedMethod = 'symbols';
+      let queryResult: QueryResult;
 
       try {
-        // Try using symbol-based query first (v0.5.0+)
-        results = await vectorDB.querySymbols({
+        // Try symbol-based query first (v0.5.0+)
+        const results = await vectorDB.querySymbols({
           language: validatedArgs.language,
           pattern: validatedArgs.pattern,
           limit: 50,
         });
 
-        // If no results and pattern was provided, it might be an old index
-        // Fall back to content scanning
+        // Fall back if no results and filters were provided
         if (results.length === 0 && (validatedArgs.language || validatedArgs.pattern)) {
           log('No symbol results, falling back to content scan...');
-          results = await vectorDB.scanWithFilter({
-            language: validatedArgs.language,
-            limit: 200, // Fetch more, we'll filter by symbolName
-          });
-          
-          // Filter by symbolName (not content) to match only actual functions/symbols
-          if (validatedArgs.pattern) {
-            const regex = new RegExp(validatedArgs.pattern, 'i');
-            results = results.filter(r => {
-              const symbolName = r.metadata?.symbolName;
-              return symbolName && regex.test(symbolName);
-            });
-          }
-          
-          // Limit results after filtering
-          results = results.slice(0, 50);
-          usedMethod = 'content';
+          queryResult = await performContentScan(vectorDB, validatedArgs, log);
+        } else {
+          queryResult = { results, method: 'symbols' };
         }
       } catch (error) {
-        // If querySymbols fails (e.g., old index without symbol fields), fall back
-        log(`Symbol query failed, falling back to content scan: ${error}`);
-        results = await vectorDB.scanWithFilter({
-          language: validatedArgs.language,
-          limit: 200, // Fetch more, we'll filter by symbolName
-        });
-        
-        // Filter by symbolName (not content) to match only actual functions/symbols
-        if (validatedArgs.pattern) {
-          const regex = new RegExp(validatedArgs.pattern, 'i');
-          results = results.filter(r => {
-            const symbolName = r.metadata?.symbolName;
-            return symbolName && regex.test(symbolName);
-          });
-        }
-        
-        // Limit results after filtering
-        results = results.slice(0, 50);
-        usedMethod = 'content';
+        log(`Symbol query failed: ${error}`);
+        queryResult = await performContentScan(vectorDB, validatedArgs, log);
       }
 
-      log(`Found ${results.length} matches using ${usedMethod} method`);
+      log(`Found ${queryResult.results.length} matches using ${queryResult.method} method`);
 
       return {
         indexInfo: getIndexMetadata(),
-        method: usedMethod,
-        results,
-        note: usedMethod === 'content'
+        method: queryResult.method,
+        results: queryResult.results,
+        note: queryResult.method === 'content'
           ? 'Using content search. Run "lien reindex" to enable faster symbol-based queries.'
           : undefined,
       };
