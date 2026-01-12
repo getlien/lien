@@ -14,11 +14,11 @@ Each code chunk is converted into a **vector embedding** - a mathematical repres
 These embeddings are stored in a local vector database (LanceDB) in `~/.lien/indices/`. Think of it as a semantic index of your entire codebase that enables lightning-fast searches.
 
 ### 4. 🎯 Search
-When you ask Cursor a question like "how does authentication work?", Lien:
+When you ask your AI assistant a question like "how does authentication work?", Lien:
 - Converts your query into a vector embedding
 - Finds the most semantically similar code chunks
-- Returns relevant results to Cursor
-- Cursor uses this context to give you better answers
+- Returns relevant results to your AI assistant
+- Your AI assistant uses this context to give you better answers
 
 All in under 500ms! ⚡
 
@@ -43,7 +43,7 @@ Lien is built with modern, performant tools:
 - **TypeScript** for type-safe development
 - **transformers.js** for local embeddings
 - **LanceDB** for vector storage
-- **Model Context Protocol (MCP)** for Cursor integration
+- **Model Context Protocol (MCP)** for AI assistant integration (Cursor, Claude Code, etc.)
 
 ## Want to Learn More?
 

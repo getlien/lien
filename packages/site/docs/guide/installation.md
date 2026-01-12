@@ -42,10 +42,10 @@ To upgrade to the latest version:
 npm update -g @liendev/lien
 ```
 
-After upgrading, restart Cursor completely to load the new version.
+After upgrading, restart your AI assistant (Cursor or Claude Desktop) completely to load the new version.
 
 ::: warning
-Code changes (new features) require restarting Cursor. The auto-reconnect feature only handles data changes (reindexing).
+Code changes (new features) require restarting your AI assistant. The auto-reconnect feature only handles data changes (reindexing).
 :::
 
 ## Uninstalling

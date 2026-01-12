@@ -4,7 +4,7 @@
 
 **Give AI deep understanding of your codebase through semantic search. 100% local, 100% private.**
 
-Lien connects AI coding assistants like Cursor to your codebase through the Model Context Protocol (MCP). Ask questions in natural language, get precise answers from semantic search—all running locally on your machine.
+Lien connects AI coding assistants like Cursor and Claude Code to your codebase through the Model Context Protocol (MCP). Ask questions in natural language, get precise answers from semantic search—all running locally on your machine.
 
 📚 **[Full Documentation](https://lien.dev)** | 🚀 **[Getting Started](https://lien.dev/guide/getting-started)** | 🔍 **[How It Works](https://lien.dev/how-it-works)**
 
@@ -15,7 +15,7 @@ Lien connects AI coding assistants like Cursor to your codebase through the Mode
 - 🔒 **100% Local & Private** - All code analysis happens on your machine
 - 🚀 **Semantic Search** - Natural language queries: "How does authentication work?"
 - 🌐 **Cross-Repo Search** - Search across all repositories in your organization (Qdrant backend)
-- 🎯 **MCP Integration** - Works seamlessly with Cursor and other MCP-compatible tools
+- 🎯 **MCP Integration** - Works seamlessly with Cursor, Claude Code, and other MCP-compatible tools
 - ⚡ **Fast** - Sub-500ms queries, minutes to index large codebases
 - 🆓 **Free Forever** - No API costs, no subscriptions, no usage limits
 - 📦 **Framework-Aware** - Auto-detects Node.js, Laravel, Shopify; supports 15+ languages
@@ -39,7 +39,7 @@ npm install -g @liendev/lien
   }
 }
 
-# 3. Restart Cursor and start asking questions!
+# 3. Restart your AI assistant (Cursor, Claude Code) and start asking questions!
 ```
 
 That's it—zero configuration needed. Lien auto-detects your project and indexes on first use.
@@ -99,7 +99,7 @@ Lien tracks code complexity with intuitive outputs:
 ## Documentation
 
 - **[Installation](https://lien.dev/guide/installation)** - npm, npx, or local setup
-- **[Getting Started](https://lien.dev/guide/getting-started)** - Step-by-step configuration for Cursor
+- **[Getting Started](https://lien.dev/guide/getting-started)** - Step-by-step configuration for Cursor or Claude Code
 - **[Configuration](https://lien.dev/guide/configuration)** - Customize indexing, thresholds, performance
 - **[CLI Commands](https://lien.dev/guide/cli-commands)** - Full command reference
 - **[MCP Tools](https://lien.dev/guide/mcp-tools)** - Complete API reference for all 6 tools

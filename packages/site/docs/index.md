@@ -24,7 +24,7 @@ features:
   
   - icon: 🎯
     title: MCP Integration
-    details: Works seamlessly with Cursor and other MCP-compatible AI coding assistants via Model Context Protocol.
+    details: Works seamlessly with Cursor, Claude Code, and other MCP-compatible AI coding assistants via Model Context Protocol.
   
   - icon: ⚡
     title: Fast Performance
@@ -47,7 +47,13 @@ features:
 npm install -g @liendev/lien
 ```
 
-**2. Add to your project** — create `.cursor/mcp.json`:
+**2. Configure your AI assistant:**
+
+- **For Cursor**: Create `.cursor/mcp.json` in your project root
+- **For Claude Code**: Create `claude_desktop_config.json` in your config folder
+
+<details>
+<summary>Cursor Setup (.cursor/mcp.json)</summary>
 
 ```json
 {
@@ -59,12 +65,35 @@ npm install -g @liendev/lien
   }
 }
 ```
+</details>
 
-**3. Restart Cursor** and start asking questions about your codebase!
+<details>
+<summary>Claude Code Setup (claude_desktop_config.json)</summary>
+
+**Location:**
+- macOS: `~/Library/Application Support/Claude/`
+- Windows: `%APPDATA%\Claude\`
+- Linux: `~/.config/Claude/`
+
+```json
+{
+  "mcpServers": {
+    "lien": {
+      "command": "lien",
+      "args": ["serve", "--root", "/path/to/your/project"]
+    }
+  }
+}
+```
+
+Replace `/path/to/your/project` with your actual project path.
+</details>
+
+**3. Restart your AI assistant** and start asking questions about your codebase!
 
 That's it—no configuration files needed. Lien auto-detects your project structure and indexes on first use.
 
-> **Note:** This per-project `.cursor/mcp.json` approach is recommended. If using a global `~/.cursor/mcp.json`, you'll need to add `--root /path/to/project` to the args. See [Getting Started](/guide/getting-started) for details.
+> **Note:** Cursor's per-project `.cursor/mcp.json` approach is recommended for automatic project switching. Claude Code requires global configuration with explicit `--root` paths. See [Getting Started](/guide/getting-started) for details.
 
 ## How It Works
 

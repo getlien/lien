@@ -2,6 +2,8 @@
 
 Lien exposes six powerful tools via the Model Context Protocol (MCP) that enable AI assistants to understand your codebase.
 
+Lien exposes these tools through the Model Context Protocol (MCP), making them available in Cursor, Claude Code, and other MCP-compatible AI assistants.
+
 ## semantic_search
 
 Search your codebase using natural language queries.
@@ -508,7 +510,7 @@ All search results include test association metadata:
 ## Error Handling
 
 ### "Index not found"
-Run `lien index` in your project directory first.
+The MCP server will automatically index your project on first use. If you see this error, try running `lien index` manually in your project directory.
 
 ### "No results found"
 - Try broader queries
@@ -517,5 +519,13 @@ Run `lien index` in your project directory first.
 
 ### "Invalid file path"
 Use paths relative to project root, not absolute paths.
+
+## Supported AI Assistants
+
+Lien works with any MCP-compatible AI assistant:
+
+- **Cursor** ✅ (per-project `.cursor/mcp.json`)
+- **Claude Code** ✅ (global `claude_desktop_config.json`)
+- **Other MCP clients** ✅ (see [Getting Started](/guide/getting-started) for setup)
 
 

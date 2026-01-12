@@ -1,12 +1,12 @@
 # Introduction
 
-Lien _(French for "link" or "connection")_ is a local-first semantic code search tool that provides deep codebase context to AI coding assistants like Cursor through the Model Context Protocol (MCP).
+Lien _(French for "link" or "connection")_ is a local-first semantic code search tool that provides deep codebase context to AI coding assistants like Cursor and Claude Code through the Model Context Protocol (MCP).
 
 ## What is Lien?
 
 Lien indexes your codebase locally and enables AI assistants to understand your code through natural language queries. Unlike cloud-based solutions, everything runs on your machine—your code never leaves your computer.
 
-**Setup takes 30 seconds:** Install globally, add one config file, restart Cursor. That's it.
+**Setup takes 30 seconds:** Install globally, add one config file, restart your AI assistant. That's it.
 
 ## Key Benefits
 
@@ -20,7 +20,7 @@ Your code is precious intellectual property. Lien processes everything locally w
 Instead of simple text search, Lien understands code semantically. Ask "how does authentication work?" and get relevant results even if the code doesn't contain those exact words.
 
 ### AI-Powered Development
-Integrate with Cursor and other MCP-compatible tools to give AI assistants deep context about your codebase, enabling better suggestions and answers.
+Integrate with Cursor, Claude Code, and other MCP-compatible tools to give AI assistants deep context about your codebase, enabling better suggestions and answers.
 
 ### Framework Aware
 Automatically detects and adapts to your project structure:
@@ -71,7 +71,7 @@ Lien is built with modern, performant tools:
 - **TypeScript** for type-safe development
 - **transformers.js** for local embeddings (no external API)
 - **LanceDB** for vector storage
-- **MCP SDK** for Cursor integration
+- **MCP SDK** for AI assistant integration
 - **Commander.js** for CLI
 
 ## Supported Languages
