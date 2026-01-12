@@ -227,7 +227,8 @@ export async function search(
 }
 
 /**
- * Scan the database with filters
+ * Scan the database with filters.
+ * Scans all records to ensure complete coverage.
  */
 export async function scanWithFilter(
   table: LanceDBTable,
@@ -240,32 +241,35 @@ export async function scanWithFilter(
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
-  
+
   const { language, pattern, limit = 100 } = options;
-  
+
   try {
+    // Get total row count to ensure we scan all records
+    const totalRows = await table.countRows();
+
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
     const query = table.search(zeroVector)
       .where('file != ""')
-      .limit(Math.max(limit * 5, 200));
-    
+      .limit(Math.max(totalRows, 1000));
+
     const results = await query.toArray();
-    
+
     let filtered = (results as unknown as DBRecord[]).filter(isValidRecord);
-    
+
     if (language) {
-      filtered = filtered.filter((r: DBRecord) => 
+      filtered = filtered.filter((r: DBRecord) =>
         r.language && r.language.toLowerCase() === language.toLowerCase()
       );
     }
-    
+
     if (pattern) {
       const regex = new RegExp(pattern, 'i');
       filtered = filtered.filter((r: DBRecord) =>
         regex.test(r.content) || regex.test(r.file)
       );
     }
-    
+
     return filtered.slice(0, limit).map((r: DBRecord) => ({
       content: r.content,
       metadata: buildSearchResultMetadata(r),
@@ -356,6 +360,7 @@ function buildLegacySymbols(r: DBRecord) {
 
 /**
  * Query symbols (functions, classes, interfaces)
+ * Scans all records in the database to find matching symbols.
  */
 export async function querySymbols(
   table: LanceDBTable,
@@ -369,21 +374,26 @@ export async function querySymbols(
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
-  
+
   const { language, pattern, symbolType, limit = 50 } = options;
   const filterOpts: SymbolQueryOptions = { language, pattern, symbolType };
-  
+
   try {
+    // Get total row count to ensure we scan all records
+    const totalRows = await table.countRows();
+
+    // Use zero-vector search with limit >= totalRows to get all records
+    // This is the recommended approach for LanceDB full scans
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
     const query = table.search(zeroVector)
       .where('file != ""')
-      .limit(Math.max(limit * 10, 500));
-    
+      .limit(Math.max(totalRows, 1000));
+
     const results = await query.toArray();
-    
+
     const filtered = (results as unknown as DBRecord[])
       .filter((r) => isValidRecord(r) && matchesSymbolFilter(r, filterOpts));
-    
+
     return filtered.slice(0, limit).map((r: DBRecord) => ({
       content: r.content,
       metadata: {
@@ -399,9 +409,8 @@ export async function querySymbols(
 }
 
 /**
- * Scan all chunks in the database
- * First gets the total count, then fetches all with a single query
- * This is more efficient than pagination for local/embedded databases like LanceDB
+ * Scan all chunks in the database.
+ * Returns all records matching the optional filters.
  */
 export async function scanAll(
   table: LanceDBTable,
@@ -413,22 +422,16 @@ export async function scanAll(
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
-  
+
   try {
-    // Get total row count to determine limit
+    // Get total row count to use as the output limit
     const totalRows = await table.countRows();
-    
-    // Fetch all rows in one query (LanceDB is local, this is efficient)
-    // Note: scanWithFilter internally fetches 5x the limit to handle filtering overhead,
-    // then caps output to 'limit'. We pass totalRows so we get all rows back after
-    // filtering. The 5x overfetch is acceptable overhead for local DBs.
-    const MIN_SCAN_LIMIT = 1000;
-    const results = await scanWithFilter(table, {
+
+    // scanWithFilter now handles the full scan internally
+    return await scanWithFilter(table, {
       ...options,
-      limit: Math.max(totalRows, MIN_SCAN_LIMIT),
+      limit: Math.max(totalRows, 1000),
     });
-    
-    return results;
   } catch (error) {
     throw wrapError(error, 'Failed to scan all chunks');
   }

@@ -282,8 +282,8 @@ describe('E2E: Real Open Source Projects', () => {
       it('should initialize Lien successfully', async () => {
         const output = runLienCommand(projectDir, 'init --yes');
         
-        // Config file no longer created - init just sets up Cursor rules
-        expect(output).toContain('Lien initialized');
+        // Config file no longer created - init just shows setup info
+        expect(output).toContain('No per-project configuration needed');
         
         // Verify config file does NOT exist (per-project config removed)
         const configPath = path.join(projectDir, '.lien.config.json');

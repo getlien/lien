@@ -1,9 +1,7 @@
----
-alwaysApply: true
----
 # Lien Project Rules
 
 ## What is Lien?
+
 Local-first semantic code search tool providing context to AI coding assistants via MCP (Model Context Protocol).
 
 **Key Facts:**
@@ -26,6 +24,32 @@ packages/cli/src/
 
 ---
 
+## Lien MCP Tools
+
+Semantic search tools that complement grep. Use Lien for discovery and understanding, grep for exact matches.
+
+### Tool Quick Reference
+
+| Tool | Use for |
+|------|---------|
+| `semantic_search` | "Where/how is X implemented?" - natural language queries |
+| `get_files_context` | Before editing - shows test associations and dependencies |
+| `list_functions` | Find symbols by pattern (e.g., `.*Controller.*`) |
+| `get_dependents` | Impact analysis - "What breaks if I change this?" |
+| `get_complexity` | Tech debt hotspots |
+| `find_similar` | Find similar code patterns |
+
+### Before Editing Files
+
+Always run `get_files_context` first to check `testAssociations`.
+
+### Lien vs grep
+
+- **Lien**: "Where is authentication handled?" (meaning-based)
+- **grep**: `validateEmail` (exact string match)
+
+---
+
 ## Documentation Organization
 
 ### Temporary Documentation Rule
@@ -40,12 +64,6 @@ Examples of temporary docs:
 - Brainstorming and design exploration
 - Session notes and continuation plans
 
-**When AI assistant creates temporary documentation:**
-1. Always create in `.wip/` folder
-2. Use descriptive names with dates: `dogfooding-analysis-2025-11-19.md`
-3. Never create temporary docs in project root
-4. Extract key findings to permanent docs before session ends
-
 ### Permanent Documentation
 
 These live in project root and are tracked in git:
@@ -54,7 +72,7 @@ These live in project root and are tracked in git:
 - `CONTRIBUTING.md` - Contributor guidelines
 - `docs/` - Architecture and design documentation
 
-**Rule:** If it's temporary or experimental → `.wip/`. If it's permanent → root or `docs/`.
+**Rule:** If it's temporary or experimental -> `.wip/`. If it's permanent -> root or `docs/`.
 
 ---
 
@@ -91,37 +109,13 @@ Use `collect.js` for readable data transformations instead of imperative loops.
 
 ### When to Use
 - Aggregating data (groupBy, countBy, sum)
-- Chaining multiple transformations (map → filter → sort)
+- Chaining multiple transformations (map -> filter -> sort)
 - Building lookup structures from arrays
 
 ### When NOT to Use
 - Simple single operations (use native `.map()`, `.filter()`)
 - Performance-critical hot paths
 - When it adds complexity rather than reducing it
-
-### Patterns
-```typescript
-import collect from 'collect.js';
-
-// ✅ Good: Multiple transformations, aggregation
-const byMetric = collect(violations)
-  .groupBy('metricType')
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  .map((group: any) => group.sum('delta'))
-  .all() as unknown as Record<string, number>;
-
-// ✅ Good: Flattening nested structures
-const allItems = collect(Object.values(data))
-  .flatMap(d => d.items)
-  .sortByDesc('score')
-  .all() as Item[];
-
-// ❌ Avoid: Simple operations (use native)
-const names = items.map(i => i.name);  // Not: collect(items).pluck('name').all()
-```
-
-### TypeScript Note
-collect.js has limited type inference. Use `as unknown as T` for complex chains and add explanatory comments.
 
 ---
 
@@ -153,7 +147,7 @@ Follow Conventional Commits:
 - `test(scope): description` - Tests
 - `chore(scope): description` - Maintenance
 
-**NEVER use `git commit --amend`** - Always create new commits. If a commit needs fixing, create a follow-up commit instead.
+**NEVER use `git commit --amend`** - Always create new commits.
 
 ---
 
@@ -172,9 +166,9 @@ npm test           # All tests must pass
 ## Feature Decision Framework
 
 Before adding features, ask:
-1. Is this needed for MVP? (No → defer)
-2. Can users work around this? (Yes → defer)
-3. Is this critical for core value? (No → defer)
+1. Is this needed for MVP? (No -> defer)
+2. Can users work around this? (Yes -> defer)
+3. Is this critical for core value? (No -> defer)
 
 **Bias toward simplicity.** Defer everything that isn't absolutely necessary.
 
@@ -198,31 +192,15 @@ npm run build            # Build CLI
 
 ### Release Workflow
 ```bash
-# 1. Create release notes (for detailed releases)
-#    Create .wip/vX.Y.Z-release-notes.md with changelog content
-
-# 2. Run release script
+# 1. Run release script
 npm run release -- patch "fix: description"
 npm run release -- minor "feat: description" --changelog .wip/vX.Y.Z-release-notes.md
 npm run release -- major "BREAKING: description"
 
-# 3. Push to trigger CI (CI publishes to npm)
+# 2. Push to trigger CI (CI publishes to npm)
 git push origin main
 git push origin vX.Y.Z
 ```
-
-### What the Release Script Does
-1. Bumps version in `packages/cli/package.json`
-2. Updates `CHANGELOG.md` (uses `--changelog` file if provided)
-3. Builds the project
-4. Creates commit and git tag
-
-### What CI Does (on tag push)
-1. Runs typecheck, build, and tests
-2. Publishes to npm (skips if version already exists)
-3. Creates GitHub Release with auto-generated notes
-
-**Do NOT run `npm publish` - let CI handle it to ensure tests pass first.**
 
 ---
 
@@ -237,5 +215,3 @@ git push origin vX.Y.Z
 ---
 
 **Ship early, ship often.** Perfect is the enemy of done.
-
-*"Any fool can write code that a computer can understand. Good programmers write code that humans can understand."* - Martin Fowler

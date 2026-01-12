@@ -21,8 +21,7 @@ lien init [options]
 Lien uses a **config-less approach** with sensible defaults:
 
 1. Auto-detects frameworks (Node.js, Laravel, Shopify, etc.)
-2. Installs Cursor rules to `.cursor/rules/lien.mdc` (recommended)
-3. No per-project config file needed!
+2. No per-project config file needed!
 
 ### Examples
 
@@ -33,10 +32,6 @@ lien init
 # Initialize with defaults (non-interactive)
 lien init --yes
 ```
-
-### What Gets Created
-
-- `.cursor/rules/lien.mdc` - Cursor rules for AI to use Lien tools effectively
 
 ::: tip Zero Config
 Unlike previous versions, `lien init` no longer creates `.lien.config.json`. Lien auto-detects your project structure and uses sensible defaults. For advanced configuration, see [Configuration](/guide/configuration).

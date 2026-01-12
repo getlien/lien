@@ -18,7 +18,7 @@ export const tools = [
   toMCPToolSchema(
     SemanticSearchSchema,
     'semantic_search',
-    `Search codebase by MEANING, not text. USE THIS INSTEAD OF grep/ripgrep for finding implementations, features, or understanding how code works.
+    `Search codebase by MEANING, not text. Complements grep - use this for discovery and understanding, grep for exact matches.
 
 Examples:
 - "Where is authentication handled?" → semantic_search({ query: "handles user authentication" })

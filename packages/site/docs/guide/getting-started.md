@@ -87,16 +87,6 @@ my-app/
 
 Lien scans your project structure and applies appropriate patterns for each detected framework—no configuration needed.
 
-## Optional: Install Cursor Rules
-
-For the best experience, install Lien's Cursor rules:
-
-```bash
-lien init
-```
-
-This creates `.cursor/rules/lien.mdc` with instructions that help Cursor use Lien tools effectively. It teaches Cursor to use semantic search instead of grep and to check test associations before editing files.
-
 ## Troubleshooting
 
 ### Cursor doesn't show Lien tools

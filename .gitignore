@@ -38,8 +38,7 @@ coverage/
 *.swo
 *~
 
-# Cursor (keep project.mdc, ignore generated lien.mdc and local mcp.json)
-.cursor/rules/lien.mdc
+# Cursor (local mcp.json is machine-specific)
 .cursor/mcp.json
 
 # OS

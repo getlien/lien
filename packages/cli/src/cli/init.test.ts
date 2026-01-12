@@ -70,26 +70,7 @@ describe('initCommand', () => {
       );
     });
   });
-  
-  describe('Cursor rules installation', () => {
-    it('should attempt to install Cursor rules with --yes flag', async () => {
-      // Don't mock console.log for this test so inquirer can work
-      vi.restoreAllMocks();
-      vi.spyOn(console, 'log').mockImplementation(() => {});
-      
-      // Should not throw even if installation fails (e.g., template file not found in test)
-      await expect(initCommand({ yes: true })).resolves.not.toThrow();
-      
-      // If installation succeeded, file should exist
-      const cursorRulesPath = path.join(testDir, '.cursor/rules/lien.mdc');
-      const exists = await fs.access(cursorRulesPath).then(() => true).catch(() => false);
-      
-      // Installation may fail in test environment (template file path issues)
-      // Just verify the command completes without error
-      expect(typeof exists).toBe('boolean');
-    });
-  });
-  
+
   describe('error handling', () => {
     it('should handle permission errors gracefully', async () => {
       // This is hard to test reliably across platforms
