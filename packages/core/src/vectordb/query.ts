@@ -128,19 +128,40 @@ function getSymbolsForType(
  * Shared between all query functions to avoid duplication.
  */
 /**
+ * Convert Arrow Vector to plain array if needed.
+ * LanceDB returns Arrow Vector objects for array columns.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toPlainArray<T>(arr: any): T[] | undefined {
+  if (!arr) return undefined;
+  // Arrow Vectors have a toArray() method
+  if (typeof arr.toArray === 'function') {
+    return arr.toArray();
+  }
+  // Already a plain array
+  if (Array.isArray(arr)) {
+    return arr;
+  }
+  return undefined;
+}
+
+/**
  * Deserialize importedSymbols from parallel arrays stored in DB.
  */
 function deserializeImportedSymbols(
-  paths?: string[],
-  names?: string[]
+  paths?: unknown,
+  names?: unknown
 ): Record<string, string[]> | undefined {
-  if (!paths || !names || !hasValidArrayEntries(paths) || !hasValidArrayEntries(names)) {
+  const pathsArr = toPlainArray<string>(paths);
+  const namesArr = toPlainArray<string>(names);
+  
+  if (!pathsArr || !namesArr || !hasValidArrayEntries(pathsArr) || !hasValidArrayEntries(namesArr)) {
     return undefined;
   }
   const result: Record<string, string[]> = {};
-  for (let i = 0; i < paths.length && i < names.length; i++) {
-    const path = paths[i];
-    const namesJson = names[i];
+  for (let i = 0; i < pathsArr.length && i < namesArr.length; i++) {
+    const path = pathsArr[i];
+    const namesJson = namesArr[i];
     if (path && namesJson) {
       try {
         result[path] = JSON.parse(namesJson);
@@ -156,16 +177,19 @@ function deserializeImportedSymbols(
  * Deserialize callSites from parallel arrays stored in DB.
  */
 function deserializeCallSites(
-  symbols?: string[],
-  lines?: number[]
+  symbols?: unknown,
+  lines?: unknown
 ): Array<{ symbol: string; line: number }> | undefined {
-  if (!symbols || !lines || !hasValidArrayEntries(symbols)) {
+  const symbolsArr = toPlainArray<string>(symbols);
+  const linesArr = toPlainArray<number>(lines);
+  
+  if (!symbolsArr || !linesArr || !hasValidArrayEntries(symbolsArr)) {
     return undefined;
   }
   const result: Array<{ symbol: string; line: number }> = [];
-  for (let i = 0; i < symbols.length && i < lines.length; i++) {
-    const symbol = symbols[i];
-    const line = lines[i];
+  for (let i = 0; i < symbolsArr.length && i < linesArr.length; i++) {
+    const symbol = symbolsArr[i];
+    const line = linesArr[i];
     if (symbol && line > 0) {
       result.push({ symbol, line });
     }
@@ -194,7 +218,10 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
     halsteadEffort: r.halsteadEffort != null ? r.halsteadEffort : undefined,
     halsteadBugs: r.halsteadBugs != null ? r.halsteadBugs : undefined,
     // Symbol-level dependency tracking (v0.23.0)
-    exports: hasValidArrayEntries(r.exports) ? r.exports : undefined,
+    exports: (() => {
+      const arr = toPlainArray<string>(r.exports);
+      return hasValidArrayEntries(arr) ? arr : undefined;
+    })(),
     importedSymbols: deserializeImportedSymbols(r.importedSymbolPaths, r.importedSymbolNames),
     callSites: deserializeCallSites(r.callSiteSymbols, r.callSiteLines),
   };
