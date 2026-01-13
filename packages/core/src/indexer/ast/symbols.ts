@@ -318,6 +318,13 @@ export function extractImports(rootNode: Parser.SyntaxNode): string[] {
       const importText = node.text.split('\n')[0];
       imports.push(importText);
     }
+    // PHP: namespace use declarations (use App\Models\User;)
+    else if (node.type === 'namespace_use_declaration') {
+      const phpImport = extractPHPUseDeclaration(node);
+      if (phpImport) {
+        imports.push(phpImport);
+      }
+    }
     
     // Only traverse top-level nodes for imports
     if (node === rootNode) {
@@ -333,14 +340,69 @@ export function extractImports(rootNode: Parser.SyntaxNode): string[] {
 }
 
 /**
+ * Extract the full namespace path from a PHP use declaration.
+ * e.g., "use App\Models\User;" -> "App\Models\User"
+ */
+function extractPHPUseDeclaration(node: Parser.SyntaxNode): string | null {
+  // Find namespace_use_clause
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const clause = node.namedChild(i);
+    if (clause?.type === 'namespace_use_clause') {
+      return extractPHPQualifiedName(clause);
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract qualified name from a PHP namespace use clause.
+ * Handles: qualified_name -> namespace_name + name
+ */
+function extractPHPQualifiedName(clause: Parser.SyntaxNode): string | null {
+  for (let i = 0; i < clause.namedChildCount; i++) {
+    const child = clause.namedChild(i);
+    if (child?.type === 'qualified_name') {
+      // Get the full namespace path by concatenating parts
+      const parts: string[] = [];
+      for (let j = 0; j < child.namedChildCount; j++) {
+        const part = child.namedChild(j);
+        if (part?.type === 'namespace_name') {
+          // namespace_name contains multiple name nodes
+          for (let k = 0; k < part.namedChildCount; k++) {
+            const namePart = part.namedChild(k);
+            if (namePart?.type === 'name') {
+              parts.push(namePart.text);
+            }
+          }
+        } else if (part?.type === 'name') {
+          parts.push(part.text);
+        }
+      }
+      return parts.join('\\');
+    }
+  }
+  return null;
+}
+
+/**
  * Extract imported symbols mapped to their source paths.
  * 
  * Returns a map like: { './validate': ['validateEmail', 'validatePhone'] }
  * 
- * Handles various import styles:
+ * Handles various import styles across languages:
+ * 
+ * TypeScript/JavaScript:
  * - Named imports: import { foo, bar } from './module'
  * - Default imports: import foo from './module' 
  * - Namespace imports: import * as utils from './module'
+ * 
+ * Python:
+ * - from module import foo, bar
+ * - import module (module name as symbol)
+ * 
+ * PHP:
+ * - use App\Models\User (class name as symbol)
+ * - use App\Services\AuthService as Auth (aliased imports)
  *
  * Note: Only top-level static import statements are processed. Dynamic imports
  * (e.g., `await import('./module')`) and non-top-level imports are not tracked.
@@ -351,15 +413,101 @@ export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<stri
   // Only process top-level import statements
   for (let i = 0; i < rootNode.namedChildCount; i++) {
     const node = rootNode.namedChild(i);
-    if (node?.type !== 'import_statement') continue;
+    if (!node) continue;
     
-    const result = processImportStatement(node);
+    let result: { importPath: string; symbols: string[] } | null = null;
+    
+    // TypeScript/JavaScript imports
+    if (node.type === 'import_statement') {
+      result = processImportStatement(node);
+    }
+    // Python: from...import statements
+    else if (node.type === 'import_from_statement') {
+      result = processPythonFromImport(node);
+    }
+    // PHP: namespace use declarations
+    else if (node.type === 'namespace_use_declaration') {
+      result = processPHPUseDeclaration(node);
+    }
+    
     if (result) {
-      importedSymbols[result.importPath] = result.symbols;
+      // Merge symbols if importing from the same path multiple times
+      if (importedSymbols[result.importPath]) {
+        importedSymbols[result.importPath].push(...result.symbols);
+      } else {
+        importedSymbols[result.importPath] = result.symbols;
+      }
     }
   }
   
   return importedSymbols;
+}
+
+/**
+ * Process Python from...import statement.
+ * e.g., "from utils.validate import validateEmail, validatePhone"
+ */
+function processPythonFromImport(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  let modulePath: string | null = null;
+  const symbols: string[] = [];
+  
+  let foundModule = false;
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    
+    // First dotted_name is the module path
+    if (child.type === 'dotted_name' && !foundModule) {
+      modulePath = child.text;
+      foundModule = true;
+    }
+    // Subsequent dotted_names are imported symbols
+    else if (child.type === 'dotted_name' && foundModule) {
+      symbols.push(child.text);
+    }
+    // Aliased imports: "import foo as bar"
+    else if (child.type === 'aliased_import') {
+      const aliasIdentifier = child.namedChildren.find(c => c.type === 'identifier');
+      const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
+      // Use the alias name, or fall back to the original name
+      symbols.push(aliasIdentifier?.text || dottedName?.text || '');
+    }
+  }
+  
+  if (!modulePath || symbols.length === 0) return null;
+  return { importPath: modulePath, symbols };
+}
+
+/**
+ * Process PHP namespace use declaration.
+ * e.g., "use App\Models\User" -> { importPath: "App\Models\User", symbols: ["User"] }
+ */
+function processPHPUseDeclaration(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  // Find namespace_use_clause
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const clause = node.namedChild(i);
+    if (clause?.type !== 'namespace_use_clause') continue;
+    
+    const fullPath = extractPHPQualifiedName(clause);
+    if (!fullPath) continue;
+    
+    // Check for alias (use App\Models\User as U)
+    // Find alias: look for a name node that's a direct child (not inside qualified_name)
+    const directNames = clause.namedChildren.filter(c => c.type === 'name');
+    let symbol: string;
+    if (directNames.length > 0) {
+      // The last direct 'name' child is the alias
+      symbol = directNames[directNames.length - 1].text;
+    } else {
+      // No alias, extract class name from the path
+      const parts = fullPath.split('\\');
+      symbol = parts[parts.length - 1];
+    }
+    
+    return { importPath: fullPath, symbols: [symbol] };
+  }
+  
+  return null;
 }
 
 /**

@@ -394,6 +394,114 @@ import * as utils from '../utils';
       expect(imports).toContain('library');
       expect(imports).toContain('../utils');
     });
+
+    it('should extract PHP use statements', () => {
+      const content = `<?php
+use App\\Models\\User;
+use App\\Services\\AuthService;
+use Illuminate\\Http\\Request;
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const imports = extractImports(parseResult.tree!.rootNode);
+
+      expect(imports).toContain('App\\Models\\User');
+      expect(imports).toContain('App\\Services\\AuthService');
+      expect(imports).toContain('Illuminate\\Http\\Request');
+    });
+
+    it('should extract Python import statements', () => {
+      const content = `
+from utils.validate import validateEmail
+import os
+from typing import Optional
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const imports = extractImports(parseResult.tree!.rootNode);
+
+      expect(imports).toContain('from utils.validate import validateEmail');
+      expect(imports).toContain('import os');
+      expect(imports).toContain('from typing import Optional');
+    });
+  });
+
+  describe('extractImportedSymbols - PHP', () => {
+    it('should extract PHP use statement symbols', () => {
+      const content = `<?php
+use App\\Models\\User;
+use App\\Services\\AuthService;
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      expect(importedSymbols['App\\Models\\User']).toEqual(['User']);
+      expect(importedSymbols['App\\Services\\AuthService']).toEqual(['AuthService']);
+    });
+
+    it('should handle PHP aliased use statements', () => {
+      const content = `<?php
+use App\\Services\\AuthService as Auth;
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      // Should use the alias name
+      expect(importedSymbols['App\\Services\\AuthService']).toEqual(['Auth']);
+    });
+
+    it('should handle deeply nested PHP namespaces', () => {
+      const content = `<?php
+use Domain\\Hobbii\\Collections\\Services\\CollectionManager;
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      expect(importedSymbols['Domain\\Hobbii\\Collections\\Services\\CollectionManager']).toEqual(['CollectionManager']);
+    });
+  });
+
+  describe('extractImportedSymbols - Python', () => {
+    it('should extract Python from...import symbols', () => {
+      const content = `
+from utils.validate import validateEmail, validatePhone
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      expect(importedSymbols['utils.validate']).toContain('validateEmail');
+      expect(importedSymbols['utils.validate']).toContain('validatePhone');
+    });
+
+    it('should handle Python aliased imports', () => {
+      const content = `
+from typing import Optional as Opt
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      // Should use the alias name
+      expect(importedSymbols['typing']).toEqual(['Opt']);
+    });
+
+    it('should handle multiple Python from...import statements', () => {
+      const content = `
+from os import path
+from json import loads, dumps
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      expect(importedSymbols['os']).toEqual(['path']);
+      expect(importedSymbols['json']).toContain('loads');
+      expect(importedSymbols['json']).toContain('dumps');
+    });
   });
 });
 
