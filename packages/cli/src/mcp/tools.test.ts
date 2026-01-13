@@ -268,7 +268,7 @@ describe('MCP Tools Schema', () => {
     describe('find_similar validation', () => {
       it('should accept valid input', () => {
         const valid = FindSimilarSchema.safeParse({
-          code: 'const x = 1;',
+          code: 'const x = 1; return x + 2;',
           limit: 10
         });
         expect(valid.success).toBe(true);
@@ -282,8 +282,18 @@ describe('MCP Tools Schema', () => {
       });
       
       it('should apply defaults', () => {
-        const result = FindSimilarSchema.parse({ code: 'const x = 1;' });
+        const result = FindSimilarSchema.parse({ code: 'const x = 1; return x + 2;' });
         expect(result.limit).toBe(5);
+      });
+
+      it('should accept optional filters', () => {
+        const result = FindSimilarSchema.parse({
+          code: 'const x = 1; return x + 2;',
+          language: 'typescript',
+          pathHint: 'src/api'
+        });
+        expect(result.language).toBe('typescript');
+        expect(result.pathHint).toBe('src/api');
       });
     });
     

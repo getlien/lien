@@ -1,6 +1,38 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { FindSimilarSchema } from '../schemas/index.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
+import type { SearchResult } from '@liendev/core';
+
+interface FiltersApplied {
+  language?: string;
+  pathHint?: string;
+  prunedLowRelevance: number;
+}
+
+/**
+ * Filter results by programming language (case-insensitive).
+ */
+function applyLanguageFilter(results: SearchResult[], language: string): SearchResult[] {
+  const lang = language.toLowerCase();
+  return results.filter(r => r.metadata.language?.toLowerCase() === lang);
+}
+
+/**
+ * Filter results by file path substring (case-insensitive).
+ */
+function applyPathHintFilter(results: SearchResult[], pathHint: string): SearchResult[] {
+  const hint = pathHint.toLowerCase();
+  return results.filter(r => (r.metadata.file?.toLowerCase() ?? '').includes(hint));
+}
+
+/**
+ * Remove low-relevance results (relevance === 'not_relevant').
+ */
+function pruneIrrelevantResults(results: SearchResult[]): { filtered: SearchResult[]; prunedCount: number } {
+  const beforePrune = results.length;
+  const filtered = results.filter(r => r.relevance !== 'not_relevant');
+  return { filtered, prunedCount: beforePrune - filtered.length };
+}
 
 /**
  * Handle find_similar tool calls.
@@ -16,19 +48,38 @@ export async function handleFindSimilar(
     FindSimilarSchema,
     async (validatedArgs) => {
       log(`Finding similar code...`);
-
-      // Check if index has been updated and reconnect if needed
       await checkAndReconnect();
 
       const codeEmbedding = await embeddings.embed(validatedArgs.code);
-      // Pass code as query for relevance boosting
-      const results = await vectorDB.search(codeEmbedding, validatedArgs.limit, validatedArgs.code);
+      const limit = validatedArgs.limit ?? 5;
+      const extraLimit = limit + 10;
+      let results = await vectorDB.search(codeEmbedding, extraLimit, validatedArgs.code);
 
-      log(`Found ${results.length} similar chunks`);
+      const filtersApplied: FiltersApplied = { prunedLowRelevance: 0 };
+
+      // Apply filters sequentially
+      if (validatedArgs.language) {
+        filtersApplied.language = validatedArgs.language;
+        results = applyLanguageFilter(results, validatedArgs.language);
+      }
+
+      if (validatedArgs.pathHint) {
+        filtersApplied.pathHint = validatedArgs.pathHint;
+        results = applyPathHintFilter(results, validatedArgs.pathHint);
+      }
+
+      const { filtered, prunedCount } = pruneIrrelevantResults(results);
+      filtersApplied.prunedLowRelevance = prunedCount;
+
+      const finalResults = filtered.slice(0, limit);
+      log(`Found ${finalResults.length} similar chunks`);
+
+      const hasFilters = filtersApplied.language || filtersApplied.pathHint || filtersApplied.prunedLowRelevance > 0;
 
       return {
         indexInfo: getIndexMetadata(),
-        results,
+        results: finalResults,
+        ...(hasFilters && { filtersApplied }),
       };
     }
   )(args);

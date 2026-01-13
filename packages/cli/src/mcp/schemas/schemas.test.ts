@@ -81,34 +81,74 @@ describe('FindSimilarSchema', () => {
   
   it('should apply default limit', () => {
     const result = FindSimilarSchema.parse({
-      code: 'const x = 1;',
+      code: 'const x = 1; return x + 2;',
     });
     expect(result.limit).toBe(5);
   });
   
   it('should reject short code snippet', () => {
     expect(() => FindSimilarSchema.parse({ code: 'short' }))
-      .toThrow('Code snippet must be at least 10 characters');
+      .toThrow('Code snippet must be at least 24 characters');
   });
   
   it('should reject invalid limit (too low)', () => {
-    expect(() => FindSimilarSchema.parse({ code: 'const x = 1;', limit: 0 }))
+    expect(() => FindSimilarSchema.parse({ code: 'const x = 1; return x + 2;', limit: 0 }))
       .toThrow('Limit must be at least 1');
   });
   
   it('should reject invalid limit (too high)', () => {
-    expect(() => FindSimilarSchema.parse({ code: 'const x = 1;', limit: 25 }))
+    expect(() => FindSimilarSchema.parse({ code: 'const x = 1; return x + 2;', limit: 25 }))
       .toThrow('Limit cannot exceed 20');
   });
   
   it('should accept minimum valid code', () => {
-    const result = FindSimilarSchema.parse({ code: '0123456789' });
-    expect(result.code).toBe('0123456789');
+    const result = FindSimilarSchema.parse({ code: '012345678901234567890123' });
+    expect(result.code).toBe('012345678901234567890123');
   });
   
   it('should accept maximum valid limit', () => {
-    const result = FindSimilarSchema.parse({ code: 'const x = 1;', limit: 20 });
+    const result = FindSimilarSchema.parse({ code: 'const x = 1; return x + 2;', limit: 20 });
     expect(result.limit).toBe(20);
+  });
+
+  it('should accept optional language filter', () => {
+    const result = FindSimilarSchema.parse({
+      code: 'const x = 1; return x + 2;',
+      language: 'typescript',
+    });
+    expect(result.language).toBe('typescript');
+  });
+
+  it('should accept optional pathHint filter', () => {
+    const result = FindSimilarSchema.parse({
+      code: 'const x = 1; return x + 2;',
+      pathHint: 'src/api',
+    });
+    expect(result.pathHint).toBe('src/api');
+  });
+
+  it('should accept both filters together', () => {
+    const result = FindSimilarSchema.parse({
+      code: 'const x = 1; return x + 2;',
+      language: 'typescript',
+      pathHint: 'src/api',
+    });
+    expect(result.language).toBe('typescript');
+    expect(result.pathHint).toBe('src/api');
+  });
+
+  it('should reject empty language filter', () => {
+    expect(() => FindSimilarSchema.parse({
+      code: 'const x = 1; return x + 2;',
+      language: '',
+    })).toThrow('Language filter cannot be empty');
+  });
+
+  it('should reject empty pathHint filter', () => {
+    expect(() => FindSimilarSchema.parse({
+      code: 'const x = 1; return x + 2;',
+      pathHint: '',
+    })).toThrow('Path hint cannot be empty');
   });
 });
 
