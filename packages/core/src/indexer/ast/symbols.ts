@@ -368,6 +368,21 @@ function extractImportPath(node: Parser.SyntaxNode): string | null {
 }
 
 /**
+ * Handler type for import node processing.
+ */
+type ImportNodeHandler = (child: Parser.SyntaxNode, symbols: string[]) => void;
+
+/**
+ * Handlers for different import node types.
+ */
+const IMPORT_NODE_HANDLERS: Record<string, ImportNodeHandler> = {
+  'identifier': (child, symbols) => symbols.push(child.text),
+  'import_clause': (child, symbols) => extractImportClauseSymbols(child, symbols),
+  'named_imports': (child, symbols) => extractNamedImportSymbols(child, symbols),
+  'namespace_import': (child, symbols) => extractNamespaceImportSymbol(child, symbols),
+};
+
+/**
  * Extract all imported symbols from an import statement's children.
  */
 function extractImportStatementSymbols(node: Parser.SyntaxNode): string[] {
@@ -377,21 +392,9 @@ function extractImportStatementSymbols(node: Parser.SyntaxNode): string[] {
     const child = node.namedChild(i);
     if (!child) continue;
     
-    // Default import: import foo from './module'
-    if (child.type === 'identifier') {
-      symbols.push(child.text);
-    }
-    // Import clause wraps both default import, named imports and namespace imports
-    else if (child.type === 'import_clause') {
-      extractImportClauseSymbols(child, symbols);
-    }
-    // Named imports: import { foo, bar } from './module'
-    else if (child.type === 'named_imports') {
-      extractNamedImportSymbols(child, symbols);
-    }
-    // Namespace import: import * as utils from './module'
-    else if (child.type === 'namespace_import') {
-      extractNamespaceImportSymbol(child, symbols);
+    const handler = IMPORT_NODE_HANDLERS[child.type];
+    if (handler) {
+      handler(child, symbols);
     }
   }
   
@@ -454,6 +457,19 @@ function extractNamespaceImportSymbol(node: Parser.SyntaxNode, symbols: string[]
 }
 
 /**
+ * Extract symbol from an import specifier (handles aliases).
+ */
+function extractImportSpecifierSymbol(node: Parser.SyntaxNode, symbols: string[]): void {
+  const aliasNode = node.childForFieldName('alias');
+  const nameNode = node.childForFieldName('name');
+  const symbol = aliasNode?.text || nameNode?.text || node.text;
+  
+  if (symbol && !symbol.includes('{') && !symbol.includes('}')) {
+    symbols.push(symbol);
+  }
+}
+
+/**
  * Helper to extract symbol names from named imports clause
  */
 function extractNamedImportSymbols(node: Parser.SyntaxNode, symbols: string[]): void {
@@ -461,19 +477,42 @@ function extractNamedImportSymbols(node: Parser.SyntaxNode, symbols: string[]): 
     const child = node.namedChild(i);
     if (!child) continue;
     
-    if (child.type === 'import_specifier') {
-      // Get the imported name (or alias if renamed)
-      const aliasNode = child.childForFieldName('alias');
-      const nameNode = child.childForFieldName('name');
-      const symbol = aliasNode?.text || nameNode?.text || child.text;
-      if (symbol && !symbol.includes('{') && !symbol.includes('}')) {
-        symbols.push(symbol);
-      }
-    } else if (child.type === 'identifier') {
-      symbols.push(child.text);
-    } else if (child.type === 'named_imports') {
-      // Recurse into nested named_imports
-      extractNamedImportSymbols(child, symbols);
+    switch (child.type) {
+      case 'import_specifier':
+        extractImportSpecifierSymbol(child, symbols);
+        break;
+      case 'identifier':
+        symbols.push(child.text);
+        break;
+      case 'named_imports':
+        // Recurse into nested named_imports
+        extractNamedImportSymbols(child, symbols);
+        break;
+    }
+  }
+}
+
+/**
+ * Extract symbols from a single export statement.
+ */
+function extractExportStatementSymbols(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  // Check for default export
+  const defaultKeyword = node.children.find(c => c.type === 'default');
+  if (defaultKeyword) {
+    addExport('default');
+  }
+  
+  // Check for declaration (export function/const/class)
+  const declaration = node.childForFieldName('declaration');
+  if (declaration) {
+    extractDeclarationExports(declaration, addExport);
+  }
+  
+  // Check for export clause (export { foo, bar })
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child?.type === 'export_clause') {
+      extractExportClauseSymbols(child, addExport);
     }
   }
 }
@@ -500,40 +539,14 @@ export function extractExports(rootNode: Parser.SyntaxNode): string[] {
     }
   };
   
-  function traverse(node: Parser.SyntaxNode) {
-    // Export statement: export { foo, bar } or export { foo } from './module'
-    if (node.type === 'export_statement') {
-      // Check for default export
-      const defaultKeyword = node.children.find(c => c.type === 'default');
-      if (defaultKeyword) {
-        addExport('default');
-      }
-      
-      // Check for declaration (export function/const/class)
-      const declaration = node.childForFieldName('declaration');
-      if (declaration) {
-        extractDeclarationExports(declaration, addExport);
-      }
-      
-      // Check for export clause (export { foo, bar })
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child?.type === 'export_clause') {
-          extractExportClauseSymbols(child, addExport);
-        }
-      }
-    }
-    
-    // Only traverse top-level nodes
-    if (node === rootNode) {
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child) traverse(child);
-      }
+  // Process only top-level export statements
+  for (let i = 0; i < rootNode.namedChildCount; i++) {
+    const child = rootNode.namedChild(i);
+    if (child?.type === 'export_statement') {
+      extractExportStatementSymbols(child, addExport);
     }
   }
   
-  traverse(rootNode);
   return exports;
 }
 
