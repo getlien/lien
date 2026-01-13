@@ -31,12 +31,11 @@ export async function handleGetDependents(
 
       const riskLevel = calculateRiskLevel(
         analysis.dependents.length,
-        analysis.complexityMetrics.complexityRiskBoost
+        analysis.complexityMetrics.complexityRiskBoost,
+        analysis.productionDependentCount
       );
       log(
-        `Found ${analysis.dependents.length} dependent files (risk: ${riskLevel}${
-          analysis.complexityMetrics.filesWithComplexityData > 0 ? ', complexity-boosted' : ''
-        })`
+        `Found ${analysis.dependents.length} dependents (${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test) - risk: ${riskLevel}`
       );
 
       // Build note(s) for warnings
@@ -54,6 +53,8 @@ export async function handleGetDependents(
         indexInfo: getIndexMetadata(),
         filepath: validatedArgs.filepath,
         dependentCount: analysis.dependents.length,
+        productionDependentCount: analysis.productionDependentCount,
+        testDependentCount: analysis.testDependentCount,
         riskLevel,
         dependents: analysis.dependents,
         complexityMetrics: analysis.complexityMetrics,
