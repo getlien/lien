@@ -547,12 +547,15 @@ function extractSymbolUsagesFromChunks(chunks: SearchResult[], targetSymbol: str
     const callSites = chunk.metadata.callSites;
     if (!callSites) continue;
     
+    // Split content once per chunk for efficiency (avoid repeated splits)
+    const lines = chunk.content.split('\n');
+    
     for (const call of callSites) {
       if (call.symbol === targetSymbol) {
         usages.push({
           callerSymbol: chunk.metadata.symbolName || 'unknown',
           line: call.line,
-          snippet: extractSnippet(chunk, call.line, targetSymbol),
+          snippet: extractSnippet(lines, call.line, chunk.metadata.startLine, targetSymbol),
         });
       }
     }
@@ -564,9 +567,8 @@ function extractSymbolUsagesFromChunks(chunks: SearchResult[], targetSymbol: str
 /**
  * Extract a code snippet for a call site with bounds checking.
  */
-function extractSnippet(chunk: SearchResult, callLine: number, symbolName: string): string {
-  const lines = chunk.content.split('\n');
-  const lineIndex = callLine - chunk.metadata.startLine;
+function extractSnippet(lines: string[], callLine: number, startLine: number, symbolName: string): string {
+  const lineIndex = callLine - startLine;
   
   if (lineIndex >= 0 && lineIndex < lines.length) {
     return lines[lineIndex].trim() || `${symbolName}(...)`;

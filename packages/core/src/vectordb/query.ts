@@ -162,6 +162,10 @@ function deserializeImportedSymbols(
   if (!pathsArr || !namesArr || !hasValidStringEntries(pathsArr) || !hasValidStringEntries(namesArr)) {
     return undefined;
   }
+  // Warn if arrays are mismatched (could indicate data corruption)
+  if (pathsArr.length !== namesArr.length) {
+    console.warn(`deserializeImportedSymbols: array length mismatch (paths: ${pathsArr.length}, names: ${namesArr.length})`);
+  }
   const result: Record<string, string[]> = {};
   for (let i = 0; i < pathsArr.length && i < namesArr.length; i++) {
     const path = pathsArr[i];
@@ -189,6 +193,10 @@ function deserializeCallSites(
   
   if (!symbolsArr || !linesArr || !hasValidStringEntries(symbolsArr) || !hasValidNumberEntries(linesArr)) {
     return undefined;
+  }
+  // Warn if arrays are mismatched (could indicate data corruption)
+  if (symbolsArr.length !== linesArr.length) {
+    console.warn(`deserializeCallSites: array length mismatch (symbols: ${symbolsArr.length}, lines: ${linesArr.length})`);
   }
   const result: Array<{ symbol: string; line: number }> = [];
   for (let i = 0; i < symbolsArr.length && i < linesArr.length; i++) {

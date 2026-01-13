@@ -46,8 +46,8 @@ interface DatabaseRecord {
   halsteadBugs: number;
   // Symbol-level dependency tracking (v0.23.0)
   exports: string[];
-  importedSymbolPaths: string[];    // JSON-encoded import path -> symbols mapping keys
-  importedSymbolNames: string[];    // JSON-encoded import path -> symbols mapping values
+  importedSymbolPaths: string[];    // Import paths (keys from importedSymbols map)
+  importedSymbolNames: string[];    // JSON-encoded symbol arrays (values from importedSymbols map)
   callSiteSymbols: string[];        // Called symbol names
   callSiteLines: number[];          // Line numbers of calls (parallel array)
 }

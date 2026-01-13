@@ -25,6 +25,7 @@ export const GetDependentsSchema = z.object({
     ),
   
   symbol: z.string()
+    .min(1, "Symbol cannot be an empty string")
     .optional()
     .describe(
       "Optional: specific exported symbol to find usages of.\n\n" +
