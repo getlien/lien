@@ -71,8 +71,10 @@ Find code similar to a given snippet.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `code` | string | Yes | - | Code snippet to find similar implementations |
+| `code` | string | Yes | - | Code snippet to find similar implementations (min 24 chars) |
 | `limit` | number | No | 5 | Maximum number of results to return |
+| `language` | string | No | - | Filter by programming language (e.g., "typescript", "python") |
+| `pathHint` | string | No | - | Filter by file path substring (e.g., "src/api", "components") |
 
 ### Usage
 
@@ -83,15 +85,42 @@ async function fetchUser(id: string) {
 }
 ```
 
+```
+Find similar TypeScript code in the API directory:
+find_similar({
+  code: "async function fetchUser(id: string) { ... }",
+  language: "typescript",
+  pathHint: "src/api"
+})
+```
+
 ### Response
 
 Similar format to `semantic_search`, returns semantically similar code chunks.
+
+When filters are applied or low-relevance results are pruned, the response includes:
+
+```json
+{
+  "filtersApplied": {
+    "language": "typescript",
+    "pathHint": "src/api",
+    "prunedLowRelevance": 3
+  }
+}
+```
+
+::: tip Automatic Pruning
+Low-relevance results (`not_relevant` category) are automatically removed to reduce noise. The `prunedLowRelevance` count shows how many were removed.
+:::
 
 ### Use Cases
 
 - **Refactoring**: Find all similar implementations to update together
 - **Consistency**: Ensure new code matches existing patterns
 - **Duplication Detection**: Locate duplicated logic across the codebase
+- **Language-Specific Search**: Focus on implementations in a specific language
+- **Directory-Scoped Search**: Find similar code within a specific area of the codebase
 
 ## get_files_context
 

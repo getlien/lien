@@ -36,7 +36,13 @@ Results include a relevance category (highly_relevant, relevant, loosely_related
 - Finding duplicate implementations
 - Refactoring similar patterns together
 
-Provide at least 10 characters of code to match against. Results include a relevance category for each match.`
+Provide at least 24 characters of code to match against. Results include a relevance category for each match.
+
+Optional filters:
+- language: Filter by programming language (e.g., "typescript", "python")
+- pathHint: Filter by file path substring (e.g., "src/api", "components")
+
+Low-relevance results (not_relevant) are automatically pruned.`
   ),
   toMCPToolSchema(
     GetFilesContextSchema,
