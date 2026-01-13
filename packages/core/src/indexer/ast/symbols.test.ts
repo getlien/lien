@@ -209,6 +209,22 @@ const private = 42;
 
       expect(exports).toHaveLength(0);
     });
+
+    it('should extract re-exports from another module', () => {
+      const content = `
+export { validateEmail, validatePhone } from './validation';
+export { User as UserType } from './types';
+export { default as utils } from './utils';
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const exports = extractExports(parseResult.tree!.rootNode);
+
+      expect(exports).toContain('validateEmail');
+      expect(exports).toContain('validatePhone');
+      expect(exports).toContain('UserType'); // aliased export
+      expect(exports).toContain('utils');    // default re-export with alias
+    });
   });
 
   describe('extractCallSites', () => {
