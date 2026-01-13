@@ -345,53 +345,54 @@ export function extractImports(rootNode: Parser.SyntaxNode): string[] {
 export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<string, string[]> {
   const importedSymbols: Record<string, string[]> = {};
   
-  function traverse(node: Parser.SyntaxNode) {
-    if (node.type === 'import_statement') {
-      const sourceNode = node.childForFieldName('source');
-      if (!sourceNode) return;
-      
-      const importPath = sourceNode.text.replace(/['"]/g, '');
-      const symbols: string[] = [];
-      
-      // Find import clause children
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (!child) continue;
-        
-        // Default import: import foo from './module'
-        if (child.type === 'identifier') {
-          symbols.push(child.text);
-        }
-        // Import clause wraps both default import, named imports and namespace imports
-        else if (child.type === 'import_clause') {
-          extractImportClauseSymbols(child, symbols);
-        }
-        // Named imports: import { foo, bar } from './module'
-        else if (child.type === 'named_imports') {
-          extractNamedImportSymbols(child, symbols);
-        }
-        // Namespace import: import * as utils from './module'
-        else if (child.type === 'namespace_import') {
-          extractNamespaceImportSymbol(child, symbols);
-        }
-      }
-      
-      if (symbols.length > 0) {
-        importedSymbols[importPath] = symbols;
-      }
-    }
+  // Only process top-level import statements
+  for (let i = 0; i < rootNode.namedChildCount; i++) {
+    const node = rootNode.namedChild(i);
+    if (node?.type !== 'import_statement') continue;
     
-    // Only traverse top-level nodes
-    if (node === rootNode) {
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child) traverse(child);
-      }
+    const result = processImportStatement(node);
+    if (result) {
+      importedSymbols[result.importPath] = result.symbols;
     }
   }
   
-  traverse(rootNode);
   return importedSymbols;
+}
+
+/**
+ * Process a single import statement and extract its symbols.
+ */
+function processImportStatement(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  const sourceNode = node.childForFieldName('source');
+  if (!sourceNode) return null;
+  
+  const importPath = sourceNode.text.replace(/['"]/g, '');
+  const symbols: string[] = [];
+  
+  // Find import clause children
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    
+    // Default import: import foo from './module'
+    if (child.type === 'identifier') {
+      symbols.push(child.text);
+    }
+    // Import clause wraps both default import, named imports and namespace imports
+    else if (child.type === 'import_clause') {
+      extractImportClauseSymbols(child, symbols);
+    }
+    // Named imports: import { foo, bar } from './module'
+    else if (child.type === 'named_imports') {
+      extractNamedImportSymbols(child, symbols);
+    }
+    // Namespace import: import * as utils from './module'
+    else if (child.type === 'namespace_import') {
+      extractNamespaceImportSymbol(child, symbols);
+    }
+  }
+  
+  return symbols.length > 0 ? { importPath, symbols } : null;
 }
 
 /**
@@ -575,46 +576,54 @@ export function extractCallSites(node: Parser.SyntaxNode): Array<{ symbol: strin
   const callSites: Array<{ symbol: string; line: number }> = [];
   const seen = new Set<string>();
   
-  function traverse(n: Parser.SyntaxNode) {
-    // call_expression: foo() or foo.bar()
-    if (n.type === 'call_expression') {
-      const functionNode = n.childForFieldName('function');
-      if (functionNode) {
-        // Direct function call: foo()
-        if (functionNode.type === 'identifier') {
-          const key = `${functionNode.text}:${n.startPosition.row + 1}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            callSites.push({
-              symbol: functionNode.text,
-              line: n.startPosition.row + 1,
-            });
-          }
-        }
-        // Member expression: foo.bar() - extract 'bar' if it's a method call
-        else if (functionNode.type === 'member_expression') {
-          const propertyNode = functionNode.childForFieldName('property');
-          if (propertyNode?.type === 'property_identifier') {
-            const key = `${propertyNode.text}:${n.startPosition.row + 1}`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              callSites.push({
-                symbol: propertyNode.text,
-                line: n.startPosition.row + 1,
-              });
-            }
-          }
-        }
-      }
-    }
-    
-    // Recurse into children
-    for (let i = 0; i < n.childCount; i++) {
-      const child = n.child(i);
-      if (child) traverse(child);
+  traverseForCallSites(node, callSites, seen);
+  return callSites;
+}
+
+/**
+ * Recursively traverse AST to find call expressions.
+ */
+function traverseForCallSites(
+  node: Parser.SyntaxNode, 
+  callSites: Array<{ symbol: string; line: number }>,
+  seen: Set<string>
+): void {
+  if (node.type === 'call_expression') {
+    const callSite = extractCallSiteFromExpression(node);
+    if (callSite && !seen.has(callSite.key)) {
+      seen.add(callSite.key);
+      callSites.push({ symbol: callSite.symbol, line: callSite.line });
     }
   }
   
-  traverse(node);
-  return callSites;
+  // Recurse into children
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child) traverseForCallSites(child, callSites, seen);
+  }
+}
+
+/**
+ * Extract symbol and line from a call expression.
+ */
+function extractCallSiteFromExpression(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  const functionNode = node.childForFieldName('function');
+  if (!functionNode) return null;
+  
+  const line = node.startPosition.row + 1;
+  
+  // Direct function call: foo()
+  if (functionNode.type === 'identifier') {
+    return { symbol: functionNode.text, line, key: `${functionNode.text}:${line}` };
+  }
+  
+  // Member expression: foo.bar() - extract 'bar'
+  if (functionNode.type === 'member_expression') {
+    const propertyNode = functionNode.childForFieldName('property');
+    if (propertyNode?.type === 'property_identifier') {
+      return { symbol: propertyNode.text, line, key: `${propertyNode.text}:${line}` };
+    }
+  }
+  
+  return null;
 }

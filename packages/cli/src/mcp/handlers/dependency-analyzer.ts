@@ -91,6 +91,116 @@ export interface DependencyAnalysisResult {
 }
 
 /**
+ * Scan chunks from the database.
+ */
+async function scanChunks(
+  vectorDB: VectorDBInterface,
+  crossRepo: boolean,
+  log: (message: string, level?: 'warning') => void
+): Promise<{ allChunks: SearchResult[]; hitLimit: boolean }> {
+  let allChunks: SearchResult[];
+  
+  if (crossRepo && vectorDB instanceof QdrantDB) {
+    allChunks = await vectorDB.scanCrossRepo({ limit: SCAN_LIMIT });
+  } else {
+    if (crossRepo) {
+      log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.', 'warning');
+    }
+    allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
+  }
+
+  const hitLimit = allChunks.length === SCAN_LIMIT;
+  if (hitLimit) {
+    log(`Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete.`, 'warning');
+  }
+  
+  return { allChunks, hitLimit };
+}
+
+/**
+ * Create a cached path normalizer.
+ */
+function createPathNormalizer(): (path: string) => string {
+  const workspaceRoot = process.cwd().replace(/\\/g, '/');
+  const cache = new Map<string, string>();
+  
+  return (path: string): string => {
+    if (!cache.has(path)) {
+      cache.set(path, normalizePath(path, workspaceRoot));
+    }
+    return cache.get(path)!;
+  };
+}
+
+/**
+ * Group chunks by their canonical file path.
+ */
+function groupChunksByFile(chunks: SearchResult[]): Map<string, SearchResult[]> {
+  const workspaceRoot = process.cwd().replace(/\\/g, '/');
+  const chunksByFile = new Map<string, SearchResult[]>();
+  
+  for (const chunk of chunks) {
+    const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+    const existing = chunksByFile.get(canonical) || [];
+    existing.push(chunk);
+    chunksByFile.set(canonical, existing);
+  }
+  
+  return chunksByFile;
+}
+
+/**
+ * Build the dependents list, either file-level or symbol-level.
+ */
+function buildDependentsList(
+  chunksByFile: Map<string, SearchResult[]>,
+  symbol: string | undefined,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  allChunks: SearchResult[],
+  filepath: string,
+  log: (message: string, level?: 'warning') => void
+): { dependents: DependentInfo[]; totalUsageCount?: number } {
+  if (symbol) {
+    // Validate that the target file exports this symbol
+    validateSymbolExport(allChunks, normalizedTarget, normalizePathCached, symbol, filepath, log);
+    
+    // Symbol-level analysis
+    return findSymbolUsages(chunksByFile, symbol, normalizedTarget, normalizePathCached);
+  }
+  
+  // File-level analysis
+  const dependents = Array.from(chunksByFile.keys()).map(fp => ({
+    filepath: fp,
+    isTestFile: isTestFile(fp),
+  }));
+  
+  return { dependents, totalUsageCount: undefined };
+}
+
+/**
+ * Validate that a symbol is exported from the target file.
+ */
+function validateSymbolExport(
+  allChunks: SearchResult[],
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  symbol: string,
+  filepath: string,
+  log: (message: string, level?: 'warning') => void
+): void {
+  const targetFileExportsSymbol = allChunks.some(chunk => {
+    const chunkFile = normalizePathCached(chunk.metadata.file);
+    return matchesFile(chunkFile, normalizedTarget) && 
+           chunk.metadata.exports?.includes(symbol);
+  });
+  
+  if (!targetFileExportsSymbol) {
+    log(`Warning: Symbol "${symbol}" not found in exports of ${filepath}`, 'warning');
+  }
+}
+
+/**
  * Find all dependents of a target file.
  * 
  * @param vectorDB - Vector database to scan
@@ -106,75 +216,27 @@ export async function findDependents(
   log: (message: string, level?: 'warning') => void,
   symbol?: string
 ): Promise<DependencyAnalysisResult> {
-  // Use cross-repo scan if enabled and backend supports it
-  let allChunks: SearchResult[];
-  if (crossRepo && vectorDB instanceof QdrantDB) {
-    allChunks = await vectorDB.scanCrossRepo({ limit: SCAN_LIMIT });
-  } else {
-    if (crossRepo) {
-      log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.', 'warning');
-    }
-    allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
-  }
-
-  const hitLimit = allChunks.length === SCAN_LIMIT;
-  if (hitLimit) {
-    log(`Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete.`, 'warning');
-  }
+  // Scan chunks from database
+  const { allChunks, hitLimit } = await scanChunks(vectorDB, crossRepo, log);
   log(`Scanning ${allChunks.length} chunks for imports...`);
 
-  const workspaceRoot = process.cwd().replace(/\\/g, '/');
-  const pathCache = new Map<string, string>();
-  const normalizePathCached = (path: string): string => {
-    if (!pathCache.has(path)) pathCache.set(path, normalizePath(path, workspaceRoot));
-    return pathCache.get(path)!;
-  };
-
-  // Build index and find dependents
-  const importIndex = buildImportIndex(allChunks, normalizePathCached);
+  // Setup path normalization
+  const normalizePathCached = createPathNormalizer();
   const normalizedTarget = normalizePathCached(filepath);
+  
+  // Find dependent chunks and group by file
+  const importIndex = buildImportIndex(allChunks, normalizePathCached);
   const dependentChunks = findDependentChunks(importIndex, normalizedTarget);
-
-  // Group by canonical file path
-  const chunksByFile = new Map<string, SearchResult[]>();
-  for (const chunk of dependentChunks) {
-    const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
-    const existing = chunksByFile.get(canonical) || [];
-    existing.push(chunk);
-    chunksByFile.set(canonical, existing);
-  }
+  const chunksByFile = groupChunksByFile(dependentChunks);
 
   // Calculate metrics
   const fileComplexities = calculateFileComplexities(chunksByFile);
   const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
 
-  // Build dependents list with optional symbol-level usages
-  let dependents: DependentInfo[];
-  let totalUsageCount: number | undefined;
-
-  if (symbol) {
-    // Validate that the target file actually exports this symbol
-    const targetFileExportsSymbol = allChunks.some(chunk => {
-      const chunkFile = normalizePathCached(chunk.metadata.file);
-      return matchesFile(chunkFile, normalizedTarget) && 
-             chunk.metadata.exports?.includes(symbol);
-    });
-    
-    if (!targetFileExportsSymbol) {
-      log(`Warning: Symbol "${symbol}" not found in exports of ${filepath}`, 'warning');
-    }
-    
-    // Symbol-level analysis: find usages of the specific symbol
-    const result = findSymbolUsages(chunksByFile, symbol, normalizedTarget, normalizePathCached);
-    dependents = result.dependents;
-    totalUsageCount = result.totalUsageCount;
-  } else {
-    // File-level analysis: just list dependent files
-    dependents = Array.from(chunksByFile.keys()).map(fp => ({
-      filepath: fp,
-      isTestFile: isTestFile(fp),
-    }));
-  }
+  // Build dependents list (file-level or symbol-level)
+  const { dependents, totalUsageCount } = buildDependentsList(
+    chunksByFile, symbol, normalizedTarget, normalizePathCached, allChunks, filepath, log
+  );
 
   // Calculate test/production split
   const testDependentCount = dependents.filter(f => f.isTestFile).length;
@@ -429,69 +491,12 @@ function findSymbolUsages(
   let totalUsageCount = 0;
 
   for (const [filepath, chunks] of chunksByFile.entries()) {
-    // Check if any chunk imports the target symbol
-    const importsSymbol = chunks.some(chunk => {
-      const importedSymbols = chunk.metadata.importedSymbols;
-      if (!importedSymbols) return false;
-      
-      // Check all import paths that might match our target file
-      for (const [importPath, symbols] of Object.entries(importedSymbols)) {
-        const normalizedImport = normalizePathCached(importPath);
-        if (matchesFile(normalizedImport, normalizedTarget)) {
-          // Check if the target symbol is imported
-          if (symbols.includes(targetSymbol)) {
-            return true;
-          }
-          // Also match namespace imports: * as utils
-          // Note: When using namespace imports (e.g., utils.validateEmail()), the call site
-          // tracking extracts only the property name ('validateEmail'). This may lead to
-          // files being marked as importing the symbol but having zero tracked usages if
-          // the call uses a different qualified name.
-          if (symbols.some(s => s.startsWith('* as '))) {
-            return true;
-          }
-        }
-      }
-      return false;
-    });
-
-    if (!importsSymbol) {
-      // This file doesn't import the target symbol, skip it
+    if (!fileImportsSymbol(chunks, targetSymbol, normalizedTarget, normalizePathCached)) {
       continue;
     }
 
-    // Find call sites within this file's chunks
-    const usages: SymbolUsage[] = [];
+    const usages = extractSymbolUsagesFromChunks(chunks, targetSymbol);
     
-    for (const chunk of chunks) {
-      const callSites = chunk.metadata.callSites;
-      if (!callSites) continue;
-      
-      // Find calls to the target symbol
-      for (const call of callSites) {
-        if (call.symbol === targetSymbol) {
-          // Extract snippet from the chunk content with bounds checking
-          const lines = chunk.content.split('\n');
-          const lineIndex = call.line - chunk.metadata.startLine;
-          let snippet: string;
-          if (lineIndex >= 0 && lineIndex < lines.length) {
-            snippet = lines[lineIndex].trim() || `${targetSymbol}(...)`;
-          } else {
-            // Fallback when the call line is outside this chunk's line range
-            snippet = `${targetSymbol}(...)`;
-          }
-          
-          usages.push({
-            callerSymbol: chunk.metadata.symbolName || 'unknown',
-            line: call.line,
-            snippet,
-          });
-        }
-      }
-    }
-
-    // If we found usages, add this file with usage details
-    // If no usages but imports the symbol, still include the file
     dependents.push({
       filepath,
       isTestFile: isTestFile(filepath),
@@ -502,5 +507,70 @@ function findSymbolUsages(
   }
 
   return { dependents, totalUsageCount };
+}
+
+/**
+ * Check if any chunk in the file imports the target symbol.
+ */
+function fileImportsSymbol(
+  chunks: SearchResult[],
+  targetSymbol: string,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string
+): boolean {
+  return chunks.some(chunk => {
+    const importedSymbols = chunk.metadata.importedSymbols;
+    if (!importedSymbols) return false;
+    
+    for (const [importPath, symbols] of Object.entries(importedSymbols)) {
+      const normalizedImport = normalizePathCached(importPath);
+      if (matchesFile(normalizedImport, normalizedTarget)) {
+        // Direct symbol import
+        if (symbols.includes(targetSymbol)) return true;
+        // Namespace import (e.g., * as utils) - grants access to all exports
+        // Note: Call sites will show as the property name, which may not match
+        // the import alias (e.g., utils.foo() tracked as 'foo')
+        if (symbols.some(s => s.startsWith('* as '))) return true;
+      }
+    }
+    return false;
+  });
+}
+
+/**
+ * Extract all usages of a symbol from a file's chunks.
+ */
+function extractSymbolUsagesFromChunks(chunks: SearchResult[], targetSymbol: string): SymbolUsage[] {
+  const usages: SymbolUsage[] = [];
+  
+  for (const chunk of chunks) {
+    const callSites = chunk.metadata.callSites;
+    if (!callSites) continue;
+    
+    for (const call of callSites) {
+      if (call.symbol === targetSymbol) {
+        usages.push({
+          callerSymbol: chunk.metadata.symbolName || 'unknown',
+          line: call.line,
+          snippet: extractSnippet(chunk, call.line, targetSymbol),
+        });
+      }
+    }
+  }
+  
+  return usages;
+}
+
+/**
+ * Extract a code snippet for a call site with bounds checking.
+ */
+function extractSnippet(chunk: SearchResult, callLine: number, symbolName: string): string {
+  const lines = chunk.content.split('\n');
+  const lineIndex = callLine - chunk.metadata.startLine;
+  
+  if (lineIndex >= 0 && lineIndex < lines.length) {
+    return lines[lineIndex].trim() || `${symbolName}(...)`;
+  }
+  return `${symbolName}(...)`;
 }
 
