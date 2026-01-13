@@ -98,11 +98,19 @@ function isValidRecord(r: DBRecord): boolean {
 }
 
 /**
- * Check if an array field has valid (non-empty) entries.
+ * Check if a string array field has valid (non-empty) entries.
  * LanceDB stores empty arrays as [''] which we need to filter out.
  */
-function hasValidArrayEntries(arr: string[] | undefined): boolean {
+function hasValidStringEntries(arr: string[] | undefined): boolean {
   return Boolean(arr && arr.length > 0 && arr[0] !== '');
+}
+
+/**
+ * Check if a number array field has valid (non-zero) entries.
+ * LanceDB stores empty arrays as [0] which we need to filter out.
+ */
+function hasValidNumberEntries(arr: number[] | undefined): boolean {
+  return Boolean(arr && arr.length > 0 && arr[0] !== 0);
 }
 
 /**
@@ -123,10 +131,6 @@ function getSymbolsForType(
   ];
 }
 
-/**
- * Convert a DB record to base SearchResult metadata.
- * Shared between all query functions to avoid duplication.
- */
 /**
  * Convert Arrow Vector to plain array if needed.
  * LanceDB returns Arrow Vector objects for array columns.
@@ -155,7 +159,7 @@ function deserializeImportedSymbols(
   const pathsArr = toPlainArray<string>(paths);
   const namesArr = toPlainArray<string>(names);
   
-  if (!pathsArr || !namesArr || !hasValidArrayEntries(pathsArr) || !hasValidArrayEntries(namesArr)) {
+  if (!pathsArr || !namesArr || !hasValidStringEntries(pathsArr) || !hasValidStringEntries(namesArr)) {
     return undefined;
   }
   const result: Record<string, string[]> = {};
@@ -183,7 +187,7 @@ function deserializeCallSites(
   const symbolsArr = toPlainArray<string>(symbols);
   const linesArr = toPlainArray<number>(lines);
   
-  if (!symbolsArr || !linesArr || !hasValidArrayEntries(symbolsArr)) {
+  if (!symbolsArr || !linesArr || !hasValidStringEntries(symbolsArr) || !hasValidNumberEntries(linesArr)) {
     return undefined;
   }
   const result: Array<{ symbol: string; line: number }> = [];
@@ -211,9 +215,9 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
     parentClass: r.parentClass || undefined,
     complexity: r.complexity || undefined,
     cognitiveComplexity: r.cognitiveComplexity || undefined,
-    parameters: hasValidArrayEntries(r.parameters) ? r.parameters : undefined,
+    parameters: hasValidStringEntries(r.parameters) ? r.parameters : undefined,
     signature: r.signature || undefined,
-    imports: hasValidArrayEntries(r.imports) ? r.imports : undefined,
+    imports: hasValidStringEntries(r.imports) ? r.imports : undefined,
     // Halstead metrics (v0.19.0) - use explicit null check to preserve valid 0 values
     halsteadVolume: r.halsteadVolume != null ? r.halsteadVolume : undefined,
     halsteadDifficulty: r.halsteadDifficulty != null ? r.halsteadDifficulty : undefined,
@@ -222,7 +226,7 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
     // Symbol-level dependency tracking (v0.23.0)
     exports: (() => {
       const arr = toPlainArray<string>(r.exports);
-      return hasValidArrayEntries(arr) ? arr : undefined;
+      return hasValidStringEntries(arr) ? arr : undefined;
     })(),
     importedSymbols: deserializeImportedSymbols(r.importedSymbolPaths, r.importedSymbolNames),
     callSites: deserializeCallSites(r.callSiteSymbols, r.callSiteLines),
@@ -437,9 +441,9 @@ function matchesSymbolFilter(
  */
 function buildLegacySymbols(r: DBRecord) {
   return {
-    functions: hasValidArrayEntries(r.functionNames) ? r.functionNames : [],
-    classes: hasValidArrayEntries(r.classNames) ? r.classNames : [],
-    interfaces: hasValidArrayEntries(r.interfaceNames) ? r.interfaceNames : [],
+    functions: hasValidStringEntries(r.functionNames) ? r.functionNames : [],
+    classes: hasValidStringEntries(r.classNames) ? r.classNames : [],
+    interfaces: hasValidStringEntries(r.interfaceNames) ? r.interfaceNames : [],
   };
 }
 

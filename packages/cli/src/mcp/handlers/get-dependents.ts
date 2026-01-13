@@ -8,6 +8,8 @@ import {
   calculateRiskLevel,
   groupDependentsByRepo,
   type DependencyAnalysisResult,
+  type DependentInfo,
+  type ComplexityMetrics,
 } from './dependency-analyzer.js';
 
 
@@ -21,6 +23,24 @@ interface ValidatedArgs {
 interface IndexInfo {
   indexVersion: number;
   indexDate: string;
+}
+
+/**
+ * Response structure for get_dependents tool.
+ */
+interface DependentsResponse {
+  indexInfo: IndexInfo;
+  filepath: string;
+  symbol?: string;
+  dependentCount: number;
+  productionDependentCount: number;
+  testDependentCount: number;
+  totalUsageCount?: number;
+  riskLevel: string;
+  dependents: DependentInfo[];
+  complexityMetrics: ComplexityMetrics;
+  note?: string;
+  groupedByRepo?: Record<string, DependentInfo[]>;
 }
 
 /**
@@ -77,24 +97,30 @@ function buildDependentsResponse(
   notes: string[],
   crossRepo: boolean | undefined,
   vectorDB: VectorDBInterface
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-): any {
+): DependentsResponse {
   const { symbol, filepath } = args;
   
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const response: any = {
+  const response: DependentsResponse = {
     indexInfo,
     filepath,
-    ...(symbol && { symbol }),
     dependentCount: analysis.dependents.length,
     productionDependentCount: analysis.productionDependentCount,
     testDependentCount: analysis.testDependentCount,
-    ...(analysis.totalUsageCount !== undefined && { totalUsageCount: analysis.totalUsageCount }),
     riskLevel,
     dependents: analysis.dependents,
     complexityMetrics: analysis.complexityMetrics,
-    ...(notes.length > 0 && { note: notes.join(' ') }),
   };
+
+  // Add optional fields
+  if (symbol) {
+    response.symbol = symbol;
+  }
+  if (analysis.totalUsageCount !== undefined) {
+    response.totalUsageCount = analysis.totalUsageCount;
+  }
+  if (notes.length > 0) {
+    response.note = notes.join(' ');
+  }
 
   // Group by repo if cross-repo search with Qdrant
   if (crossRepo && vectorDB instanceof QdrantDB) {
