@@ -2,11 +2,33 @@ import collect from 'collect.js';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetComplexitySchema } from '../schemas/index.js';
 import { ComplexityAnalyzer, QdrantDB } from '@liendev/core';
-import type { ComplexityViolation, FileComplexityData } from '@liendev/core';
-import type { ToolContext, MCPToolResult } from '../types.js';
+import type { ComplexityViolation, FileComplexityData, ComplexityReport, VectorDBInterface } from '@liendev/core';
+import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
+
+// ============================================================================
+// Types
+// ============================================================================
+
+type ChunkWithRepo = { metadata: { file: string; repoId?: string } };
+type TransformedViolation = ReturnType<typeof transformViolation>;
+
+interface CrossRepoResult {
+  chunks: ChunkWithRepo[];
+  fallback: boolean;
+}
+
+interface ProcessedViolations {
+  violations: TransformedViolation[];
+  topViolations: TransformedViolation[];
+  bySeverity: { error: number; warning: number };
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
 /**
- * Transform a violation with file-level metadata for API response
+ * Transform a violation with file-level metadata for API response.
  */
 function transformViolation(v: ComplexityViolation, fileData: FileComplexityData) {
   return {
@@ -28,26 +50,20 @@ function transformViolation(v: ComplexityViolation, fileData: FileComplexityData
 }
 
 /**
- * Handle get_complexity tool calls.
- * Analyzes complexity for files or the entire codebase.
- */
-/**
  * Group complexity violations by repository ID.
  */
 function groupViolationsByRepo(
-  violations: Array<{ filepath: string; [key: string]: any }>,
-  allChunks: Array<{ metadata: { file: string; repoId?: string } }>
-): Record<string, typeof violations> {
+  violations: TransformedViolation[],
+  allChunks: ChunkWithRepo[]
+): Record<string, TransformedViolation[]> {
   const fileToRepo = new Map<string, string>();
   
-  // Build map of filepath -> repoId
   for (const chunk of allChunks) {
     const repoId = chunk.metadata.repoId || 'unknown';
     fileToRepo.set(chunk.metadata.file, repoId);
   }
   
-  // Group violations by repo
-  const grouped: Record<string, typeof violations> = {};
+  const grouped: Record<string, TransformedViolation[]> = {};
   for (const violation of violations) {
     const repoId = fileToRepo.get(violation.filepath) || 'unknown';
     if (!grouped[repoId]) {
@@ -59,6 +75,78 @@ function groupViolationsByRepo(
   return grouped;
 }
 
+/**
+ * Fetch chunks for cross-repo analysis.
+ * Returns fallback=true if cross-repo was requested but Qdrant unavailable.
+ */
+async function fetchCrossRepoChunks(
+  vectorDB: VectorDBInterface,
+  crossRepo: boolean | undefined,
+  repoIds: string[] | undefined,
+  log: LogFn
+): Promise<CrossRepoResult> {
+  if (!crossRepo) {
+    return { chunks: [], fallback: false };
+  }
+  
+  if (vectorDB instanceof QdrantDB) {
+    const chunks = await vectorDB.scanCrossRepo({ limit: 100000, repoIds });
+    log(`Scanned ${chunks.length} chunks across repos`);
+    return { chunks, fallback: false };
+  }
+  
+  return { chunks: [], fallback: true };
+}
+
+/**
+ * Process violations from complexity report.
+ * Transforms, filters, and sorts violations.
+ */
+function processViolations(
+  report: ComplexityReport,
+  threshold: number | undefined,
+  top: number
+): ProcessedViolations {
+  const allViolations: TransformedViolation[] = collect(Object.entries(report.files))
+    .flatMap(([/* filepath unused */, fileData]) => 
+      fileData.violations.map(v => transformViolation(v, fileData))
+    )
+    .sortByDesc('complexity')
+    .all() as unknown as TransformedViolation[];
+
+  const violations = threshold !== undefined
+    ? allViolations.filter(v => v.complexity >= threshold)
+    : allViolations;
+
+  const severityCounts = collect(violations).countBy('severity').all() as { error?: number; warning?: number };
+
+  return {
+    violations,
+    topViolations: violations.slice(0, top),
+    bySeverity: {
+      error: severityCounts['error'] || 0,
+      warning: severityCounts['warning'] || 0,
+    },
+  };
+}
+
+/**
+ * Build warning note for cross-repo fallback.
+ */
+function buildCrossRepoFallbackNote(fallback: boolean): string | undefined {
+  return fallback
+    ? 'Cross-repo analysis requires Qdrant backend. Fell back to single-repo analysis.'
+    : undefined;
+}
+
+// ============================================================================
+// Main Handler
+// ============================================================================
+
+/**
+ * Handle get_complexity tool calls.
+ * Analyzes complexity for files or the entire codebase.
+ */
 export async function handleGetComplexity(
   args: unknown,
   ctx: ToolContext
@@ -72,44 +160,27 @@ export async function handleGetComplexity(
       log(`Analyzing complexity${crossRepo ? ' (cross-repo)' : ''}...`);
       await checkAndReconnect();
 
-      // For cross-repo, we need to use scanCrossRepo to get all chunks
-      // then pass them to ComplexityAnalyzer
-      let allChunks: Array<{ metadata: { file: string; repoId?: string } }> = [];
-      
-      if (crossRepo && vectorDB instanceof QdrantDB) {
-        // Get all chunks across repos for cross-repo analysis
-        allChunks = await vectorDB.scanCrossRepo({ 
-          limit: 100000,
-          repoIds 
-        });
-        log(`Scanned ${allChunks.length} chunks across repos`);
-      }
+      // Step 1: Fetch cross-repo chunks if needed
+      const { chunks: allChunks, fallback } = await fetchCrossRepoChunks(
+        vectorDB,
+        crossRepo,
+        repoIds,
+        log
+      );
 
+      // Step 2: Run complexity analysis
       const analyzer = new ComplexityAnalyzer(vectorDB);
-      
-      // Pass cross-repo parameters to analyzer
-      const report = await analyzer.analyze(files, crossRepo && vectorDB instanceof QdrantDB ? crossRepo : false, repoIds);
+      const report = await analyzer.analyze(files, crossRepo && !fallback, repoIds);
       log(`Analyzed ${report.summary.filesAnalyzed} files`);
 
-      // Transform violations using collect.js
-      type TransformedViolation = ReturnType<typeof transformViolation>;
-      const allViolations: TransformedViolation[] = collect(Object.entries(report.files))
-        .flatMap(([/* filepath unused */, fileData]) => 
-          fileData.violations.map(v => transformViolation(v, fileData))
-        )
-        .sortByDesc('complexity')
-        .all() as unknown as TransformedViolation[];
+      // Step 3: Process violations
+      const { violations, topViolations, bySeverity } = processViolations(
+        report,
+        threshold,
+        top ?? 10
+      );
 
-      // Apply custom threshold filter if provided
-      const violations = threshold !== undefined
-        ? allViolations.filter(v => v.complexity >= threshold)
-        : allViolations;
-
-      const topViolations = violations.slice(0, top);
-
-      // Calculate severity counts - countBy returns { error?: number, warning?: number }
-      const bySeverity = collect(violations).countBy('severity').all() as { error?: number; warning?: number };
-
+      // Step 4: Build response
       const response: any = {
         indexInfo: getIndexMetadata(),
         summary: {
@@ -117,19 +188,21 @@ export async function handleGetComplexity(
           avgComplexity: report.summary.avgComplexity,
           maxComplexity: report.summary.maxComplexity,
           violationCount: violations.length,
-          bySeverity: {
-            error: bySeverity['error'] || 0,
-            warning: bySeverity['warning'] || 0,
-          },
+          bySeverity,
         },
         violations: topViolations,
       };
 
-      // Group by repo if cross-repo search
-      if (crossRepo && vectorDB instanceof QdrantDB && allChunks.length > 0) {
+      // Add cross-repo grouping if applicable
+      if (crossRepo && !fallback && allChunks.length > 0) {
         response.groupedByRepo = groupViolationsByRepo(topViolations, allChunks);
-      } else if (crossRepo) {
+      }
+      
+      // Add fallback note if applicable
+      const note = buildCrossRepoFallbackNote(fallback);
+      if (note) {
         log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo analysis.', 'warning');
+        response.note = note;
       }
 
       return response;

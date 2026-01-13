@@ -275,6 +275,54 @@ export function buildFilesData(
   return filesData;
 }
 
+/**
+ * Build warning note when scan limit is reached.
+ */
+function buildScanLimitNote(hitScanLimit: boolean): string | undefined {
+  return hitScanLimit
+    ? 'Scanned 10,000 chunks (limit reached). Test associations may be incomplete for large codebases.'
+    : undefined;
+}
+
+/** Index metadata shape from context */
+interface IndexInfo {
+  indexVersion: number;
+  indexDate: string;
+}
+
+/**
+ * Build response for single file request.
+ */
+function buildSingleFileResponse(
+  filepath: string,
+  filesData: Record<string, FileData>,
+  indexInfo: IndexInfo,
+  note?: string
+) {
+  return {
+    indexInfo,
+    file: filepath,
+    chunks: filesData[filepath].chunks,
+    testAssociations: filesData[filepath].testAssociations,
+    ...(note && { note }),
+  };
+}
+
+/**
+ * Build response for multiple files request.
+ */
+function buildMultiFileResponse(
+  filesData: Record<string, FileData>,
+  indexInfo: IndexInfo,
+  note?: string
+) {
+  return {
+    indexInfo,
+    files: filesData,
+    ...(note && { note }),
+  };
+}
+
 // ============================================================================
 // Main Handler
 // ============================================================================
@@ -338,8 +386,9 @@ export async function handleGetFilesContext(
 
       // Step 3: Scan for test associations
       const allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
+      const hitScanLimit = allChunks.length === SCAN_LIMIT;
       
-      if (allChunks.length === SCAN_LIMIT) {
+      if (hitScanLimit) {
         log(
           `Scanned ${SCAN_LIMIT} chunks (limit reached). Test associations may be incomplete for large codebases.`,
           'warning'
@@ -367,23 +416,13 @@ export async function handleGetFilesContext(
       );
       log(`Found ${totalChunks} total chunks`);
 
-      // Step 5: Return appropriate response format
-      if (isSingleFile) {
-        // Single file: return backward-compatible format
-        const filepath = filepaths[0];
-        return {
-          indexInfo: getIndexMetadata(),
-          file: filepath,
-          chunks: filesData[filepath].chunks,
-          testAssociations: filesData[filepath].testAssociations,
-        };
-      } else {
-        // Multiple files: return keyed structure
-        return {
-          indexInfo: getIndexMetadata(),
-          files: filesData,
-        };
-      }
+      // Step 5: Build and return response
+      const note = buildScanLimitNote(hitScanLimit);
+      const indexInfo = getIndexMetadata();
+      
+      return isSingleFile
+        ? buildSingleFileResponse(filepaths[0], filesData, indexInfo, note)
+        : buildMultiFileResponse(filesData, indexInfo, note);
     }
   )(args);
 }

@@ -62,6 +62,8 @@ export interface IndexMetadata {
 export interface SearchResultResponse {
   indexInfo: IndexMetadata;
   results: SearchResult[];
+  /** Warning note when cross-repo fallback occurs or other issues */
+  note?: string;
 }
 
 /**
@@ -84,6 +86,8 @@ export interface FilesContextMultiResponse {
     chunks: SearchResult[];
     testAssociations: string[];
   }>;
+  /** Warning note when scan limit reached or other issues */
+  note?: string;
 }
 
 /**

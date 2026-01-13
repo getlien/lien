@@ -39,6 +39,17 @@ export async function handleGetDependents(
         })`
       );
 
+      // Build note(s) for warnings
+      const notes: string[] = [];
+      const crossRepoFallback = crossRepo && !(vectorDB instanceof QdrantDB);
+      
+      if (crossRepoFallback) {
+        notes.push('Cross-repo search requires Qdrant backend. Fell back to single-repo search.');
+      }
+      if (analysis.hitLimit) {
+        notes.push('Scanned 10,000 chunks (limit reached). Results may be incomplete.');
+      }
+
       const response: any = {
         indexInfo: getIndexMetadata(),
         filepath: validatedArgs.filepath,
@@ -46,9 +57,7 @@ export async function handleGetDependents(
         riskLevel,
         dependents: analysis.dependents,
         complexityMetrics: analysis.complexityMetrics,
-        note: analysis.hitLimit
-          ? `Warning: Scanned 10000 chunks (limit reached). Results may be incomplete.`
-          : undefined,
+        ...(notes.length > 0 && { note: notes.join(' ') }),
       };
 
       // Group by repo if cross-repo search
