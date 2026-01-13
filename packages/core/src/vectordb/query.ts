@@ -75,6 +75,12 @@ interface DBRecord {
   halsteadDifficulty?: number;
   halsteadEffort?: number;
   halsteadBugs?: number;
+  // Symbol-level dependency tracking (v0.23.0)
+  exports?: string[];
+  importedSymbolPaths?: string[];
+  importedSymbolNames?: string[];
+  callSiteSymbols?: string[];
+  callSiteLines?: number[];
   _distance?: number; // Added by LanceDB for search results
 }
 
@@ -121,6 +127,52 @@ function getSymbolsForType(
  * Convert a DB record to base SearchResult metadata.
  * Shared between all query functions to avoid duplication.
  */
+/**
+ * Deserialize importedSymbols from parallel arrays stored in DB.
+ */
+function deserializeImportedSymbols(
+  paths?: string[],
+  names?: string[]
+): Record<string, string[]> | undefined {
+  if (!paths || !names || !hasValidArrayEntries(paths) || !hasValidArrayEntries(names)) {
+    return undefined;
+  }
+  const result: Record<string, string[]> = {};
+  for (let i = 0; i < paths.length && i < names.length; i++) {
+    const path = paths[i];
+    const namesJson = names[i];
+    if (path && namesJson) {
+      try {
+        result[path] = JSON.parse(namesJson);
+      } catch {
+        // Skip malformed entries
+      }
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+/**
+ * Deserialize callSites from parallel arrays stored in DB.
+ */
+function deserializeCallSites(
+  symbols?: string[],
+  lines?: number[]
+): Array<{ symbol: string; line: number }> | undefined {
+  if (!symbols || !lines || !hasValidArrayEntries(symbols)) {
+    return undefined;
+  }
+  const result: Array<{ symbol: string; line: number }> = [];
+  for (let i = 0; i < symbols.length && i < lines.length; i++) {
+    const symbol = symbols[i];
+    const line = lines[i];
+    if (symbol && line > 0) {
+      result.push({ symbol, line });
+    }
+  }
+  return result.length > 0 ? result : undefined;
+}
+
 function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
   return {
     file: r.file,
@@ -141,6 +193,10 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
     halsteadDifficulty: r.halsteadDifficulty != null ? r.halsteadDifficulty : undefined,
     halsteadEffort: r.halsteadEffort != null ? r.halsteadEffort : undefined,
     halsteadBugs: r.halsteadBugs != null ? r.halsteadBugs : undefined,
+    // Symbol-level dependency tracking (v0.23.0)
+    exports: hasValidArrayEntries(r.exports) ? r.exports : undefined,
+    importedSymbols: deserializeImportedSymbols(r.importedSymbolPaths, r.importedSymbolNames),
+    callSites: deserializeCallSites(r.callSiteSymbols, r.callSiteLines),
   };
 }
 

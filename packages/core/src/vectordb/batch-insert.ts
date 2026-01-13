@@ -44,17 +44,61 @@ interface DatabaseRecord {
   halsteadDifficulty: number;
   halsteadEffort: number;
   halsteadBugs: number;
+  // Symbol-level dependency tracking (v0.23.0)
+  exports: string[];
+  importedSymbolPaths: string[];    // JSON-encoded import path -> symbols mapping keys
+  importedSymbolNames: string[];    // JSON-encoded import path -> symbols mapping values
+  callSiteSymbols: string[];        // Called symbol names
+  callSiteLines: number[];          // Line numbers of calls (parallel array)
 }
 
 /**
  * Transform a chunk's data into a database record.
  * Handles missing/empty metadata by providing defaults for Arrow type inference.
  */
+/**
+ * Serialize importedSymbols map into parallel arrays for Arrow storage.
+ * Returns { paths: string[], names: string[] } where names[i] is JSON-encoded array
+ * of symbols imported from paths[i].
+ */
+function serializeImportedSymbols(importedSymbols?: Record<string, string[]>): {
+  paths: string[];
+  names: string[];
+} {
+  if (!importedSymbols || Object.keys(importedSymbols).length === 0) {
+    return { paths: [''], names: [''] };
+  }
+  const entries = Object.entries(importedSymbols);
+  return {
+    paths: entries.map(([path]) => path),
+    names: entries.map(([, symbols]) => JSON.stringify(symbols)),
+  };
+}
+
+/**
+ * Serialize callSites into parallel arrays for Arrow storage.
+ */
+function serializeCallSites(callSites?: Array<{ symbol: string; line: number }>): {
+  symbols: string[];
+  lines: number[];
+} {
+  if (!callSites || callSites.length === 0) {
+    return { symbols: [''], lines: [0] };
+  }
+  return {
+    symbols: callSites.map(c => c.symbol),
+    lines: callSites.map(c => c.line),
+  };
+}
+
 function transformChunkToRecord(
   vector: Float32Array,
   content: string,
   metadata: ChunkMetadata
 ): DatabaseRecord {
+  const importedSymbolsSerialized = serializeImportedSymbols(metadata.importedSymbols);
+  const callSitesSerialized = serializeCallSites(metadata.callSites);
+  
   return {
     vector: Array.from(vector),
     content,
@@ -81,6 +125,12 @@ function transformChunkToRecord(
     halsteadDifficulty: metadata.halsteadDifficulty || 0,
     halsteadEffort: metadata.halsteadEffort || 0,
     halsteadBugs: metadata.halsteadBugs || 0,
+    // Symbol-level dependency tracking (v0.23.0)
+    exports: getNonEmptyArray(metadata.exports),
+    importedSymbolPaths: importedSymbolsSerialized.paths,
+    importedSymbolNames: importedSymbolsSerialized.names,
+    callSiteSymbols: callSitesSerialized.symbols,
+    callSiteLines: callSitesSerialized.lines,
   };
 }
 
