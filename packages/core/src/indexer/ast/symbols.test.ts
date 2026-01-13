@@ -379,6 +379,91 @@ function simple() {
     });
   });
 
+  describe('extractCallSites - PHP', () => {
+    it('should extract PHP function calls', () => {
+      const content = `<?php
+function process() {
+    helper_function();
+    another_call();
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const funcNode = parseResult.tree!.rootNode.namedChild(1)!; // Skip php_tag
+      const callSites = extractCallSites(funcNode);
+
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'helper_function' }));
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'another_call' }));
+    });
+
+    it('should extract PHP method calls', () => {
+      const content = `<?php
+class Controller {
+    public function index() {
+        $this->validate($request);
+        $user->save();
+    }
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const classNode = parseResult.tree!.rootNode.namedChild(1)!;
+      const callSites = extractCallSites(classNode);
+
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'validate' }));
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'save' }));
+    });
+
+    it('should extract PHP static method calls', () => {
+      const content = `<?php
+function getData() {
+    $user = User::find(1);
+    $items = Collection::where('active', true)->get();
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const funcNode = parseResult.tree!.rootNode.namedChild(1)!;
+      const callSites = extractCallSites(funcNode);
+
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'find' }));
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'where' }));
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'get' }));
+    });
+  });
+
+  describe('extractCallSites - Python', () => {
+    it('should extract Python function calls', () => {
+      const content = `
+def process():
+    helper_function()
+    another_call()
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode);
+
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'helper_function' }));
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'another_call' }));
+    });
+
+    it('should extract Python method calls', () => {
+      const content = `
+def process(user):
+    user.save()
+    self.validate(data)
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode);
+
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'save' }));
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'validate' }));
+    });
+  });
+
   describe('extractImports (existing)', () => {
     it('should extract import paths from TypeScript', () => {
       const content = `

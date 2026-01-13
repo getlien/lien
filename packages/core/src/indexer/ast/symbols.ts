@@ -753,7 +753,11 @@ function extractExportClauseSymbols(node: Parser.SyntaxNode, addExport: (name: s
  * Extract call sites within a function/method body.
  * 
  * Returns array of function calls made within the node.
- * Tracks direct function calls (e.g. foo()) and simple method calls on objects (e.g. foo.bar()).
+ * 
+ * Supported languages:
+ * - TypeScript/JavaScript: call_expression (foo(), obj.method())
+ * - PHP: function_call_expression, member_call_expression, scoped_call_expression
+ * - Python: call (similar to JS call_expression)
  */
 export function extractCallSites(node: Parser.SyntaxNode): Array<{ symbol: string; line: number }> {
   const callSites: Array<{ symbol: string; line: number }> = [];
@@ -764,6 +768,17 @@ export function extractCallSites(node: Parser.SyntaxNode): Array<{ symbol: strin
 }
 
 /**
+ * Call expression node types by language.
+ */
+const CALL_EXPRESSION_TYPES = new Set([
+  'call_expression',           // TypeScript/JavaScript
+  'call',                      // Python
+  'function_call_expression',  // PHP: helper_function()
+  'member_call_expression',    // PHP: $this->method()
+  'scoped_call_expression',    // PHP: User::find()
+]);
+
+/**
  * Recursively traverse AST to find call expressions.
  */
 function traverseForCallSites(
@@ -771,7 +786,7 @@ function traverseForCallSites(
   callSites: Array<{ symbol: string; line: number }>,
   seen: Set<string>
 ): void {
-  if (node.type === 'call_expression') {
+  if (CALL_EXPRESSION_TYPES.has(node.type)) {
     const callSite = extractCallSiteFromExpression(node);
     if (callSite && !seen.has(callSite.key)) {
       seen.add(callSite.key);
@@ -788,12 +803,54 @@ function traverseForCallSites(
 
 /**
  * Extract symbol and line from a call expression.
+ * Handles multiple languages with different AST structures.
  */
 function extractCallSiteFromExpression(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  const line = node.startPosition.row + 1;
+  
+  // TypeScript/JavaScript: call_expression
+  if (node.type === 'call_expression') {
+    return extractJSCallSite(node, line);
+  }
+  
+  // Python: call
+  if (node.type === 'call') {
+    return extractPythonCallSite(node, line);
+  }
+  
+  // PHP: function_call_expression - helper_function()
+  if (node.type === 'function_call_expression') {
+    const funcNode = node.childForFieldName('function');
+    if (funcNode?.type === 'name') {
+      return { symbol: funcNode.text, line, key: `${funcNode.text}:${line}` };
+    }
+  }
+  
+  // PHP: member_call_expression - $this->method() or $obj->method()
+  if (node.type === 'member_call_expression') {
+    const nameNode = node.childForFieldName('name');
+    if (nameNode?.type === 'name') {
+      return { symbol: nameNode.text, line, key: `${nameNode.text}:${line}` };
+    }
+  }
+  
+  // PHP: scoped_call_expression - User::find() or static::method()
+  if (node.type === 'scoped_call_expression') {
+    const nameNode = node.childForFieldName('name');
+    if (nameNode?.type === 'name') {
+      return { symbol: nameNode.text, line, key: `${nameNode.text}:${line}` };
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Extract call site from JavaScript/TypeScript call_expression.
+ */
+function extractJSCallSite(node: Parser.SyntaxNode, line: number): { symbol: string; line: number; key: string } | null {
   const functionNode = node.childForFieldName('function');
   if (!functionNode) return null;
-  
-  const line = node.startPosition.row + 1;
   
   // Direct function call: foo()
   if (functionNode.type === 'identifier') {
@@ -805,6 +862,29 @@ function extractCallSiteFromExpression(node: Parser.SyntaxNode): { symbol: strin
     const propertyNode = functionNode.childForFieldName('property');
     if (propertyNode?.type === 'property_identifier') {
       return { symbol: propertyNode.text, line, key: `${propertyNode.text}:${line}` };
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Extract call site from Python call expression.
+ */
+function extractPythonCallSite(node: Parser.SyntaxNode, line: number): { symbol: string; line: number; key: string } | null {
+  const funcNode = node.childForFieldName('function');
+  if (!funcNode) return null;
+  
+  // Direct function call: foo()
+  if (funcNode.type === 'identifier') {
+    return { symbol: funcNode.text, line, key: `${funcNode.text}:${line}` };
+  }
+  
+  // Attribute access: obj.method() - extract 'method'
+  if (funcNode.type === 'attribute') {
+    const attrNode = funcNode.childForFieldName('attribute');
+    if (attrNode?.type === 'identifier') {
+      return { symbol: attrNode.text, line, key: `${attrNode.text}:${line}` };
     }
   }
   
