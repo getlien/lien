@@ -136,6 +136,20 @@ describe('FindSimilarSchema', () => {
     expect(result.language).toBe('typescript');
     expect(result.pathHint).toBe('src/api');
   });
+
+  it('should reject empty language filter', () => {
+    expect(() => FindSimilarSchema.parse({
+      code: 'const x = 1; return x + 2;',
+      language: '',
+    })).toThrow('Language filter cannot be empty');
+  });
+
+  it('should reject empty pathHint filter', () => {
+    expect(() => FindSimilarSchema.parse({
+      code: 'const x = 1; return x + 2;',
+      pathHint: '',
+    })).toThrow('Path hint cannot be empty');
+  });
 });
 
 describe('GetFilesContextSchema', () => {

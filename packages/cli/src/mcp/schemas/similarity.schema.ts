@@ -25,6 +25,7 @@ export const FindSimilarSchema = z.object({
     ),
 
   language: z.string()
+    .min(1, "Language filter cannot be empty")
     .optional()
     .describe(
       "Filter by programming language.\n\n" +
@@ -33,6 +34,7 @@ export const FindSimilarSchema = z.object({
     ),
 
   pathHint: z.string()
+    .min(1, "Path hint cannot be empty")
     .optional()
     .describe(
       "Filter by file path substring.\n\n" +

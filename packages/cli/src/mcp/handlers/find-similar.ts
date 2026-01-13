@@ -26,7 +26,7 @@ function applyPathHintFilter(results: SearchResult[], pathHint: string): SearchR
 }
 
 /**
- * Remove low-relevance results (not_relevant = score >= 1.5).
+ * Remove low-relevance results (relevance === 'not_relevant').
  */
 function pruneIrrelevantResults(results: SearchResult[]): { filtered: SearchResult[]; prunedCount: number } {
   const beforePrune = results.length;
