@@ -20,9 +20,10 @@
 export function normalizePath(path: string, workspaceRoot: string): string {
   let normalized = path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
   
-  // Normalize extensions: .ts/.tsx/.js/.jsx → all treated as equivalent
+  // Normalize extensions: .ts/.tsx/.js/.jsx/.php → all treated as equivalent
   // This handles TypeScript's ESM requirement of .js imports for .ts files
-  normalized = normalized.replace(/\.(ts|tsx|js|jsx)$/, '');
+  // Also handles PHP files where namespaces don't include extensions
+  normalized = normalized.replace(/\.(ts|tsx|js|jsx|php)$/, '');
   
   // Normalize to relative path if it starts with workspace root
   if (normalized.startsWith(workspaceRoot + '/')) {
@@ -67,6 +68,7 @@ export function matchesAtBoundary(str: string, pattern: string): boolean {
  * 2. Target path appears in import (at boundaries)
  * 3. Import path appears in target (at boundaries)
  * 4. Relative imports (./logger vs src/utils/logger)
+ * 5. PHP namespace imports (App\Models\User vs app/Models/User.php)
  * 
  * @param normalizedImport - Normalized import path
  * @param normalizedTarget - Normalized target file path
@@ -94,7 +96,55 @@ export function matchesFile(normalizedImport: string, normalizedTarget: string):
     return true;
   }
   
+  // Strategy 4: PHP namespace matching
+  // PHP imports use namespaces like "App\Models\User" which should match "app/Models/User.php"
+  if (matchesPHPNamespace(normalizedImport, normalizedTarget)) {
+    return true;
+  }
+  
   return false;
+}
+
+/**
+ * Checks if paths match using case-insensitive component matching.
+ * 
+ * This handles PHP namespace imports where:
+ * - App/Models/User should match app/Models/User (case difference in first component)
+ * - Domain/Services/Auth should match web/Domain/Services/Auth (prefix in target)
+ * 
+ * Also useful for case-insensitive file systems.
+ * 
+ * @param importPath - The normalized import path
+ * @param targetPath - The normalized file path
+ * @returns True if paths match case-insensitively at component boundaries
+ */
+function matchesPHPNamespace(importPath: string, targetPath: string): boolean {
+  // Split into path components
+  const importComponents = importPath.split('/').filter(Boolean);
+  const targetComponents = targetPath.split('/').filter(Boolean);
+  
+  // Need at least one component to match
+  if (importComponents.length === 0 || targetComponents.length === 0) {
+    return false;
+  }
+  
+  // Match from the end, case-insensitively
+  // This handles prefixes like "web/app" matching "App"
+  let matched = 0;
+  for (let i = 1; i <= importComponents.length && i <= targetComponents.length; i++) {
+    const impComp = importComponents[importComponents.length - i].toLowerCase();
+    const targetComp = targetComponents[targetComponents.length - i].toLowerCase();
+    
+    if (impComp === targetComp) {
+      matched++;
+    } else {
+      break;
+    }
+  }
+  
+  // All import components must match (from the end)
+  // This ensures App/Models/User matches web/app/Models/User but not app/Services/User
+  return matched === importComponents.length;
 }
 
 /**

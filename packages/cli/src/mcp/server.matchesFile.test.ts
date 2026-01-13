@@ -152,5 +152,32 @@ describe('matchesFile - Path Boundary Checking', () => {
       expect(testMatchesFile('src/auth.ts', 'src/auth.spec.ts')).toBe(false);
     });
   });
+
+  describe('PHP namespace matching', () => {
+    it('should match PHP namespace to file path', () => {
+      // PHP uses namespaces like App\Models\User which map to app/Models/User.php
+      expect(testMatchesFile('App\\Models\\User', 'app/Models/User.php')).toBe(true);
+      expect(testMatchesFile('App\\Models\\Collection', 'web/app/Models/Collection.php')).toBe(true);
+    });
+
+    it('should match nested PHP namespaces', () => {
+      expect(testMatchesFile('Domain\\Hobbii\\Collections\\Services\\CollectionManager', 'web/Domain/Hobbii/Collections/Services/CollectionManager.php')).toBe(true);
+    });
+
+    it('should match case-insensitively for App namespace', () => {
+      // Laravel convention: App namespace maps to app directory
+      expect(testMatchesFile('App\\Http\\Controllers\\UserController', 'app/Http/Controllers/UserController.php')).toBe(true);
+    });
+
+    it('should NOT match unrelated PHP namespaces', () => {
+      expect(testMatchesFile('App\\Models\\User', 'app/Models/Product.php')).toBe(false);
+      expect(testMatchesFile('App\\Services\\Auth', 'app/Models/User.php')).toBe(false);
+    });
+
+    it('should NOT apply PHP matching to non-namespace imports', () => {
+      // Regular file paths should not use PHP namespace matching
+      expect(testMatchesFile('src/models/user', 'src/models/product')).toBe(false);
+    });
+  });
 });
 
