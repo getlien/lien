@@ -1,5 +1,11 @@
 # @liendev/lien
 
+## 0.26.0
+
+### Minor Changes
+
+- 0efcbfc: Add warning notes to MCP tool responses for cross-repo fallback and scan limit scenarios
+
 ## 0.25.0
 
 ### Minor Changes
