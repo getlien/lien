@@ -360,16 +360,19 @@ export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<stri
 }
 
 /**
- * Process a single import statement and extract its symbols.
+ * Extract the import path from an import statement.
  */
-function processImportStatement(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+function extractImportPath(node: Parser.SyntaxNode): string | null {
   const sourceNode = node.childForFieldName('source');
-  if (!sourceNode) return null;
-  
-  const importPath = sourceNode.text.replace(/['"]/g, '');
+  return sourceNode?.text.replace(/['"]/g, '') ?? null;
+}
+
+/**
+ * Extract all imported symbols from an import statement's children.
+ */
+function extractImportStatementSymbols(node: Parser.SyntaxNode): string[] {
   const symbols: string[] = [];
   
-  // Find import clause children
   for (let i = 0; i < node.namedChildCount; i++) {
     const child = node.namedChild(i);
     if (!child) continue;
@@ -392,6 +395,17 @@ function processImportStatement(node: Parser.SyntaxNode): { importPath: string; 
     }
   }
   
+  return symbols;
+}
+
+/**
+ * Process a single import statement and extract its symbols.
+ */
+function processImportStatement(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  const importPath = extractImportPath(node);
+  if (!importPath) return null;
+  
+  const symbols = extractImportStatementSymbols(node);
   return symbols.length > 0 ? { importPath, symbols } : null;
 }
 

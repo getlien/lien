@@ -1,5 +1,5 @@
 import type Parser from 'tree-sitter';
-import type { ASTChunk } from './types.js';
+import type { ASTChunk, SupportedLanguage } from './types.js';
 import { parseAST, detectLanguage, isASTSupported } from './parser.js';
 import { extractSymbolInfo, extractImports, extractImportedSymbols, extractExports, extractCallSites } from './symbols.js';
 import { calculateCognitiveComplexity, calculateHalstead } from './complexity/index.js';
@@ -11,6 +11,108 @@ export interface ASTChunkOptions {
   // Multi-tenant fields (optional for backward compatibility)
   repoId?: string; // Repository identifier for multi-tenant scenarios
   orgId?: string;  // Organization identifier for multi-tenant scenarios
+}
+
+/**
+ * Context extracted from the AST for chunk creation.
+ */
+interface ASTContext {
+  lines: string[];
+  fileImports: string[];
+  importedSymbols: Record<string, string[]>;
+  fileExports: string[];
+  traverser: ReturnType<typeof getTraverser>;
+}
+
+/**
+ * Validate language support and parse the file.
+ * @throws Error if language not supported or parsing fails
+ */
+function parseAndValidate(filepath: string, content: string) {
+  const language = detectLanguage(filepath);
+  if (!language) {
+    throw new Error(`Unsupported language for file: ${filepath}`);
+  }
+  
+  const parseResult = parseAST(content, language);
+  if (!parseResult.tree) {
+    throw new Error(`Failed to parse ${filepath}: ${parseResult.error}`);
+  }
+  
+  return { language, rootNode: parseResult.tree.rootNode };
+}
+
+/**
+ * Prepare AST context by extracting imports, exports, and symbols.
+ */
+function prepareASTContext(
+  content: string,
+  rootNode: Parser.SyntaxNode,
+  language: SupportedLanguage
+): ASTContext {
+  return {
+    lines: content.split('\n'),
+    fileImports: extractImports(rootNode),
+    importedSymbols: extractImportedSymbols(rootNode),
+    fileExports: extractExports(rootNode),
+    traverser: getTraverser(language),
+  };
+}
+
+/**
+ * Process a single top-level node into a chunk.
+ */
+function processTopLevelNode(
+  node: Parser.SyntaxNode,
+  filepath: string,
+  content: string,
+  context: ASTContext,
+  language: SupportedLanguage,
+  tenantContext: { repoId?: string; orgId?: string }
+): ASTChunk {
+  const { lines, fileImports, fileExports, importedSymbols, traverser } = context;
+  
+  // For variable declarations, try to find the function inside
+  let actualNode = node;
+  if (traverser.isDeclarationWithFunction(node)) {
+    const declInfo = traverser.findFunctionInDeclaration(node);
+    if (declInfo.functionNode) {
+      actualNode = declInfo.functionNode;
+    }
+  }
+  
+  // For methods, find the parent container name (e.g., class name)
+  const parentClassName = traverser.findParentContainerName(actualNode);
+  const symbolInfo = extractSymbolInfo(actualNode, content, parentClassName, language);
+  const nodeContent = getNodeContent(node, lines);
+  
+  return createChunk(
+    filepath,
+    node,
+    nodeContent,
+    symbolInfo,
+    fileImports,
+    language,
+    tenantContext,
+    fileExports,
+    importedSymbols
+  );
+}
+
+/**
+ * Process all top-level nodes into chunks.
+ */
+function processTopLevelNodes(
+  topLevelNodes: Parser.SyntaxNode[],
+  filepath: string,
+  content: string,
+  context: ASTContext,
+  language: SupportedLanguage,
+  tenantContext: { repoId?: string; orgId?: string }
+): ASTChunk[] {
+  return topLevelNodes.map(node =>
+    processTopLevelNode(node, filepath, content, context, language, tenantContext)
+  );
 }
 
 /**
@@ -36,96 +138,45 @@ export function chunkByAST(
   options: ASTChunkOptions = {}
 ): ASTChunk[] {
   const { minChunkSize = 5, repoId, orgId } = options;
+  const tenantContext = { repoId, orgId };
   
-  // Check if AST is supported for this file
-  const language = detectLanguage(filepath);
-  if (!language) {
-    throw new Error(`Unsupported language for file: ${filepath}`);
-  }
+  // Parse and validate
+  const { language, rootNode } = parseAndValidate(filepath, content);
   
-  // Parse the file
-  const parseResult = parseAST(content, language);
+  // Prepare context
+  const context = prepareASTContext(content, rootNode, language);
   
-  // If parsing failed, throw error (caller should fallback to line-based)
-  if (!parseResult.tree) {
-    throw new Error(`Failed to parse ${filepath}: ${parseResult.error}`);
-  }
+  // Find and process top-level nodes
+  const topLevelNodes = findTopLevelNodes(rootNode, context.traverser);
+  const topLevelChunks = processTopLevelNodes(
+    topLevelNodes,
+    filepath,
+    content,
+    context,
+    language,
+    tenantContext
+  );
   
-  const chunks: ASTChunk[] = [];
-  const lines = content.split('\n');
-  const rootNode = parseResult.tree.rootNode;
-  
-  // Get language-specific traverser
-  const traverser = getTraverser(language);
-  
-  // Extract file-level imports once
-  const fileImports = extractImports(rootNode);
-  
-  // Extract imported symbols map and file exports
-  const importedSymbols = extractImportedSymbols(rootNode);
-  const fileExports = extractExports(rootNode);
-  
-  // Find all top-level function and class declarations
-  const topLevelNodes = findTopLevelNodes(rootNode, traverser);
-  
-  for (const node of topLevelNodes) {
-    // For variable declarations, try to find the function inside
-    let actualNode = node;
-    if (traverser.isDeclarationWithFunction(node)) {
-      const declInfo = traverser.findFunctionInDeclaration(node);
-      if (declInfo.functionNode) {
-        actualNode = declInfo.functionNode;
-      }
-    }
-    
-    // For methods, find the parent container name (e.g., class name)
-    const parentClassName = traverser.findParentContainerName(actualNode);
-    
-    const symbolInfo = extractSymbolInfo(actualNode, content, parentClassName, language);
-    
-    // Extract the code for this node (use original node for full declaration)
-    const nodeContent = getNodeContent(node, lines);
-    
-    // Create a chunk for this semantic unit
-    // Note: Large functions are kept as single chunks (may exceed maxChunkSize)
-    // This preserves semantic boundaries - better than splitting mid-function
-    chunks.push(createChunk(
-      filepath,
-      node,
-      nodeContent,
-      symbolInfo,
-      fileImports,
-      language,
-      { repoId, orgId },
-      fileExports,
-      importedSymbols
-    ));
-  }
-  
-  // Handle remaining code (imports, exports, top-level statements)
+  // Extract uncovered code (imports, exports, top-level statements)
   const coveredRanges = topLevelNodes.map(n => ({
     start: n.startPosition.row,
     end: n.endPosition.row,
   }));
-  
   const uncoveredChunks = extractUncoveredCode(
-    lines,
+    context.lines,
     coveredRanges,
     filepath,
     minChunkSize,
-    fileImports,
+    context.fileImports,
     language,
-    { repoId, orgId },
-    fileExports,
-    importedSymbols
+    tenantContext,
+    context.fileExports,
+    context.importedSymbols
   );
   
-  chunks.push(...uncoveredChunks);
-  
-  // Sort chunks by line number
-  chunks.sort((a, b) => a.metadata.startLine - b.metadata.startLine);
-  
-  return chunks;
+  // Combine and sort by line number
+  return [...topLevelChunks, ...uncoveredChunks]
+    .sort((a, b) => a.metadata.startLine - b.metadata.startLine);
 }
 
 /** Check if node is a function-containing declaration at top level */
@@ -246,7 +297,7 @@ function createChunk(
   content: string,
   symbolInfo: ReturnType<typeof extractSymbolInfo>,
   imports: string[],
-  language: string,
+  language: SupportedLanguage,
   tenantContext?: { repoId?: string; orgId?: string },
   fileExports?: string[],
   importedSymbols?: Record<string, string[]>
@@ -352,7 +403,7 @@ function createChunkFromRange(
   range: LineRange,
   lines: string[],
   filepath: string,
-  language: string,
+  language: SupportedLanguage,
   imports: string[],
   tenantContext?: { repoId?: string; orgId?: string },
   fileExports?: string[],
@@ -400,7 +451,7 @@ function extractUncoveredCode(
   filepath: string,
   minChunkSize: number,
   imports: string[],
-  language: string,
+  language: SupportedLanguage,
   tenantContext?: { repoId?: string; orgId?: string },
   fileExports?: string[],
   importedSymbols?: Record<string, string[]>
