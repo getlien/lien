@@ -52,7 +52,7 @@ export async function handleFindSimilar(
         filtersApplied.pathHint = validatedArgs.pathHint;
         const hint = validatedArgs.pathHint.toLowerCase();
         filtered = filtered.filter(r =>
-          r.metadata.file.toLowerCase().includes(hint)
+          (r.metadata.file?.toLowerCase() ?? '').includes(hint)
         );
       }
 
