@@ -73,18 +73,27 @@ function logRiskAssessment(
   symbol: string | undefined,
   log: (msg: string) => void
 ): void {
+  const prodTest = `(${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test)`;
+  
   if (symbol && analysis.totalUsageCount !== undefined) {
-    const usageInfo = analysis.totalUsageCount > 0
-      ? `Found ${analysis.totalUsageCount} tracked call sites`
-      : `Found ${analysis.dependents.length} files importing '${symbol}' (no call sites tracked)`;
-    log(
-      `${usageInfo} across ${analysis.dependents.length} files ` +
-      `(${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test) - risk: ${riskLevel}`
-    );
+    if (analysis.totalUsageCount > 0) {
+      // Symbol tracking with call sites found
+      log(
+        `Found ${analysis.totalUsageCount} tracked call sites across ${analysis.dependents.length} files ` +
+        `${prodTest} - risk: ${riskLevel}`
+      );
+    } else {
+      // Files import the symbol but no call sites were tracked
+      // This happens when call site tracking isn't available for those chunks
+      log(
+        `Found ${analysis.dependents.length} files importing '${symbol}' (no call sites tracked) ` +
+        `${prodTest} - risk: ${riskLevel}`
+      );
+    }
   } else {
     log(
       `Found ${analysis.dependents.length} dependents ` +
-      `(${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test) - risk: ${riskLevel}`
+      `${prodTest} - risk: ${riskLevel}`
     );
   }
 }

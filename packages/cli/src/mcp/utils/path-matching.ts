@@ -159,19 +159,29 @@ function matchesPythonModule(importPath: string, targetPath: string): boolean {
     return true;
   }
   
-  // Strategy 4: Target contains module path at any position
-  // Handles src/django/http/response.py matching django.http
-  // The module path should appear within target, followed by / or end
-  const modulePathWithSlash = '/' + moduleAsPath + '/';
-  if (targetWithoutPy.includes(modulePathWithSlash) || 
-      targetWithoutPy.endsWith('/' + moduleAsPath)) {
-    return true;
+  // Strategy 4: Module path appears after at most one prefix directory
+  // This handles common patterns like:
+  //   - src/django/http/response → matches django.http (src/ is source prefix)
+  //   - project/myapp/models/__init__ → matches myapp.models (project/ is source prefix)
+  // But NOT:
+  //   - tests/integration/utils/helpers/test_foo → should NOT match utils.helpers
+  //     (tests/integration/ is a package, not a source prefix)
+  const moduleIndex = targetWithoutPy.indexOf(moduleAsPath);
+  if (moduleIndex >= 0) {
+    const prefix = targetWithoutPy.substring(0, moduleIndex);
+    // Prefix should be empty or a single directory (e.g., "src/")
+    const prefixSlashes = (prefix.match(/\//g) || []).length;
+    if (prefixSlashes <= 1) {
+      // Also verify it's at a directory boundary
+      if (moduleIndex === 0 || targetWithoutPy[moduleIndex - 1] === '/') {
+        return true;
+      }
+    }
   }
   
-  // Strategy 5: Target starts with module path (with possible __init__ suffix)
-  // Handles django/http/__init__ matching django.http
+  // Strategy 5: Handle __init__ suffix removal for exact match
   const targetWithoutInit = targetWithoutPy.replace(/\/__init__$/, '');
-  if (targetWithoutInit === moduleAsPath || targetWithoutInit.startsWith(moduleAsPath + '/')) {
+  if (targetWithoutInit === moduleAsPath) {
     return true;
   }
   

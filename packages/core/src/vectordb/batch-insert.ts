@@ -86,7 +86,7 @@ function serializeImportedSymbols(importedSymbols?: Record<string, string[]>): {
  * Note: Returns single-element arrays with placeholder values (empty string, 0)
  * for missing data. This is required for Arrow type inference - empty arrays cause
  * schema inference failures. The deserialization in query.ts filters out these
- * placeholders via hasValidArrayEntries() and the line > 0 check.
+ * placeholders via hasValidStringEntries() and the line > 0 check.
  */
 function serializeCallSites(callSites?: Array<{ symbol: string; line: number }>): {
   symbols: string[];

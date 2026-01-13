@@ -592,13 +592,39 @@ function extractSymbolUsagesFromChunks(chunks: SearchResult[], targetSymbol: str
 
 /**
  * Extract a code snippet for a call site with bounds checking.
+ * If the target line is blank, searches nearby lines for context.
  */
 function extractSnippet(lines: string[], callLine: number, startLine: number, symbolName: string): string {
   const lineIndex = callLine - startLine;
+  const placeholder = `${symbolName}(...)`;
   
-  if (lineIndex >= 0 && lineIndex < lines.length) {
-    return lines[lineIndex].trim() || `${symbolName}(...)`;
+  if (lineIndex < 0 || lineIndex >= lines.length) {
+    return placeholder;
   }
-  return `${symbolName}(...)`;
+  
+  // Try the direct line first
+  const directLine = lines[lineIndex].trim();
+  if (directLine) {
+    return directLine;
+  }
+  
+  // If direct line is blank, search for nearby non-blank context
+  // Search backwards first (prefer earlier lines)
+  for (let i = lineIndex - 1; i >= 0; i--) {
+    const candidate = lines[i].trim();
+    if (candidate) {
+      return candidate;
+    }
+  }
+  
+  // Search forwards
+  for (let i = lineIndex + 1; i < lines.length; i++) {
+    const candidate = lines[i].trim();
+    if (candidate) {
+      return candidate;
+    }
+  }
+  
+  return placeholder;
 }
 
