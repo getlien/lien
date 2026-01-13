@@ -338,6 +338,10 @@ function createChunk(
       signature: symbolInfo?.signature,
       imports,
       // Symbol-level dependency tracking
+      // NOTE: `exports` and `importedSymbols` are file-level concepts, but we deliberately
+      // attach them to every chunk from the same file (including "uncovered" chunks).
+      // This duplicates some metadata, but greatly simplifies dependency analysis,
+      // since consumers can inspect a single chunk in isolation without additional lookups.
       ...(fileExports && fileExports.length > 0 && { exports: fileExports }),
       ...(importedSymbols && Object.keys(importedSymbols).length > 0 && { importedSymbols }),
       ...(callSites && callSites.length > 0 && { callSites }),

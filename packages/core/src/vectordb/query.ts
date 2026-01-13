@@ -173,8 +173,8 @@ function deserializeImportedSymbols(
     if (path && namesJson) {
       try {
         result[path] = JSON.parse(namesJson);
-      } catch {
-        // Skip malformed entries
+      } catch (err) {
+        console.warn(`deserializeImportedSymbols: failed to parse JSON for path "${path}". Skipping entry.`, err);
       }
     }
   }

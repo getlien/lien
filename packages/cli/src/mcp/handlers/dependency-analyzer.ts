@@ -528,8 +528,10 @@ function fileImportsSymbol(
         // Direct symbol import
         if (symbols.includes(targetSymbol)) return true;
         // Namespace import (e.g., * as utils) - grants access to all exports
-        // Note: Call sites will show as the property name, which may not match
-        // the import alias (e.g., utils.foo() tracked as 'foo')
+        // Note: Call sites are tracked as the property name (e.g., utils.foo() → 'foo'),
+        // so namespace imports will correctly match when the call site uses the symbol.
+        // This could produce false positives if another symbol with the same name exists
+        // from a different module, but in practice this is rare.
         if (symbols.some(s => s.startsWith('* as '))) return true;
       }
     }

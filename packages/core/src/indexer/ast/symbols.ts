@@ -341,6 +341,9 @@ export function extractImports(rootNode: Parser.SyntaxNode): string[] {
  * - Named imports: import { foo, bar } from './module'
  * - Default imports: import foo from './module' 
  * - Namespace imports: import * as utils from './module'
+ *
+ * Note: Only top-level static import statements are processed. Dynamic imports
+ * (e.g., `await import('./module')`) and non-top-level imports are not tracked.
  */
 export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<string, string[]> {
   const importedSymbols: Record<string, string[]> = {};
@@ -527,6 +530,11 @@ function extractExportStatementSymbols(node: Parser.SyntaxNode, addExport: (name
  * - Declaration exports: export function foo() {}, export const bar = ...
  * - Default exports: export default ...
  * - Re-exports: export { foo } from './module'
+ * 
+ * Limitations:
+ * - Only static, top-level export statements are processed (direct children of the root node).
+ * - Dynamic or conditional exports (e.g., inside if/for blocks, functions, or created programmatically)
+ *   are not detected and will not be included in the returned symbol list.
  */
 export function extractExports(rootNode: Parser.SyntaxNode): string[] {
   const exports: string[] = [];
@@ -623,9 +631,9 @@ function traverseForCallSites(
     }
   }
   
-  // Recurse into children
-  for (let i = 0; i < node.childCount; i++) {
-    const child = node.child(i);
+  // Recurse into named children to skip punctuation and other non-semantic nodes
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
     if (child) traverseForCallSites(child, callSites, seen);
   }
 }

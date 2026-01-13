@@ -166,7 +166,8 @@ export class QdrantPayloadMapper {
     }
     try {
       return JSON.parse(json);
-    } catch {
+    } catch (err) {
+      console.warn(`QdrantPayloadMapper.safeJsonParse: failed to parse JSON. Returning default.`, err);
       return defaultValue;
     }
   }

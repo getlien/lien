@@ -63,7 +63,7 @@ interface DatabaseRecord {
  * 
  * Note: Returns single-element arrays with empty strings for missing data.
  * This is required for Arrow type inference - empty arrays cause schema inference
- * failures. The deserialization in query.ts uses hasValidArrayEntries() to filter
+ * failures. The deserialization in query.ts uses hasValidStringEntries() to filter
  * out these placeholder values.
  */
 function serializeImportedSymbols(importedSymbols?: Record<string, string[]>): {
