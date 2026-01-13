@@ -238,6 +238,12 @@ export async function findDependents(
     chunksByFile, symbol, normalizedTarget, normalizePathCached, allChunks, filepath, log
   );
 
+  // Sort dependents: production files first, then test files
+  dependents.sort((a, b) => {
+    if (a.isTestFile === b.isTestFile) return 0;
+    return a.isTestFile ? 1 : -1;
+  });
+
   // Calculate test/production split
   const testDependentCount = dependents.filter(f => f.isTestFile).length;
   const productionDependentCount = dependents.length - testDependentCount;
