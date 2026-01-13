@@ -60,6 +60,11 @@ interface DatabaseRecord {
  * Serialize importedSymbols map into parallel arrays for Arrow storage.
  * Returns { paths: string[], names: string[] } where names[i] is JSON-encoded array
  * of symbols imported from paths[i].
+ * 
+ * Note: Returns single-element arrays with empty strings for missing data.
+ * This is required for Arrow type inference - empty arrays cause schema inference
+ * failures. The deserialization in query.ts uses hasValidArrayEntries() to filter
+ * out these placeholder values.
  */
 function serializeImportedSymbols(importedSymbols?: Record<string, string[]>): {
   paths: string[];
@@ -77,6 +82,11 @@ function serializeImportedSymbols(importedSymbols?: Record<string, string[]>): {
 
 /**
  * Serialize callSites into parallel arrays for Arrow storage.
+ * 
+ * Note: Returns single-element arrays with placeholder values (empty string, 0)
+ * for missing data. This is required for Arrow type inference - empty arrays cause
+ * schema inference failures. The deserialization in query.ts filters out these
+ * placeholders via hasValidArrayEntries() and the line >= 0 check.
  */
 function serializeCallSites(callSites?: Array<{ symbol: string; line: number }>): {
   symbols: string[];

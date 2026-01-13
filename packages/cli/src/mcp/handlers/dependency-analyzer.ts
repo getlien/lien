@@ -153,6 +153,17 @@ export async function findDependents(
   let totalUsageCount: number | undefined;
 
   if (symbol) {
+    // Validate that the target file actually exports this symbol
+    const targetFileExportsSymbol = allChunks.some(chunk => {
+      const chunkFile = normalizePathCached(chunk.metadata.file);
+      return matchesFile(chunkFile, normalizedTarget) && 
+             chunk.metadata.exports?.includes(symbol);
+    });
+    
+    if (!targetFileExportsSymbol) {
+      log(`Warning: Symbol "${symbol}" not found in exports of ${filepath}`, 'warning');
+    }
+    
     // Symbol-level analysis: find usages of the specific symbol
     const result = findSymbolUsages(chunksByFile, symbol, normalizedTarget, normalizePathCached);
     dependents = result.dependents;
@@ -432,6 +443,10 @@ function findSymbolUsages(
             return true;
           }
           // Also match namespace imports: * as utils
+          // Note: When using namespace imports (e.g., utils.validateEmail()), the call site
+          // tracking extracts only the property name ('validateEmail'). This may lead to
+          // files being marked as importing the symbol but having zero tracked usages if
+          // the call uses a different qualified name.
           if (symbols.some(s => s.startsWith('* as '))) {
             return true;
           }
@@ -455,10 +470,16 @@ function findSymbolUsages(
       // Find calls to the target symbol
       for (const call of callSites) {
         if (call.symbol === targetSymbol) {
-          // Extract snippet from the chunk content
+          // Extract snippet from the chunk content with bounds checking
           const lines = chunk.content.split('\n');
           const lineIndex = call.line - chunk.metadata.startLine;
-          const snippet = lines[lineIndex]?.trim() || `${targetSymbol}(...)`;
+          let snippet: string;
+          if (lineIndex >= 0 && lineIndex < lines.length) {
+            snippet = lines[lineIndex].trim() || `${targetSymbol}(...)`;
+          } else {
+            // Fallback when the call line is outside this chunk's line range
+            snippet = `${targetSymbol}(...)`;
+          }
           
           usages.push({
             callerSymbol: chunk.metadata.symbolName || 'unknown',

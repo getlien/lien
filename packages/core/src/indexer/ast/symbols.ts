@@ -419,6 +419,13 @@ function extractImportClauseSymbols(node: Parser.SyntaxNode, symbols: string[]):
 
 /**
  * Extract namespace import symbol: import * as utils
+ * 
+ * Format: "* as {alias}" (e.g., "* as utils")
+ * 
+ * The "* as " prefix is intentionally included to distinguish namespace imports
+ * from regular named imports in the symbol matching logic. This allows us to
+ * identify when a file has access to all exports via a namespace, which is
+ * useful for dependency analysis even when we can't track specific call sites.
  */
 function extractNamespaceImportSymbol(node: Parser.SyntaxNode, symbols: string[]): void {
   // Find the identifier child (the alias name)
@@ -562,7 +569,7 @@ function extractExportClauseSymbols(node: Parser.SyntaxNode, addExport: (name: s
  * Extract call sites within a function/method body.
  * 
  * Returns array of function calls made within the node.
- * Only tracks direct function calls (not method calls on objects).
+ * Tracks direct function calls (e.g. foo()) and simple method calls on objects (e.g. foo.bar()).
  */
 export function extractCallSites(node: Parser.SyntaxNode): Array<{ symbol: string; line: number }> {
   const callSites: Array<{ symbol: string; line: number }> = [];

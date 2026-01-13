@@ -41,7 +41,7 @@ export interface ChunkMetadata {
   
   /**
    * Call sites within this chunk - symbols called and their locations.
-   * Only tracked for function/method chunks.
+   * Tracked for chunks whose symbolType supports complexity analysis (e.g. functions and methods).
    */
   callSites?: Array<{
     symbol: string;     // The called symbol name

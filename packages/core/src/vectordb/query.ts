@@ -190,7 +190,9 @@ function deserializeCallSites(
   for (let i = 0; i < symbolsArr.length && i < linesArr.length; i++) {
     const symbol = symbolsArr[i];
     const line = linesArr[i];
-    if (symbol && line > 0) {
+    // Note: line > 0 is intentional - we use 0 as a placeholder value for missing data
+    // in serializeCallSites(). Real line numbers are 1-indexed in source files.
+    if (symbol && typeof line === 'number' && line > 0) {
       result.push({ symbol, line });
     }
   }
