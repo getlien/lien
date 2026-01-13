@@ -74,8 +74,11 @@ function logRiskAssessment(
   log: (msg: string) => void
 ): void {
   if (symbol && analysis.totalUsageCount !== undefined) {
+    const usageInfo = analysis.totalUsageCount > 0
+      ? `Found ${analysis.totalUsageCount} tracked call sites`
+      : `Found ${analysis.dependents.length} files importing '${symbol}' (no call sites tracked)`;
     log(
-      `Found ${analysis.totalUsageCount} usages of '${symbol}' across ${analysis.dependents.length} files ` +
+      `${usageInfo} across ${analysis.dependents.length} files ` +
       `(${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test) - risk: ${riskLevel}`
     );
   } else {
