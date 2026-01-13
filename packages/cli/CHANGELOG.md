@@ -1,5 +1,11 @@
 # @liendev/lien
 
+## 0.25.0
+
+### Minor Changes
+
+- cb16aab: feat(mcp): add language/pathHint filters to find_similar, prune low-relevance results
+
 ## 0.24.0
 
 ### Minor Changes
