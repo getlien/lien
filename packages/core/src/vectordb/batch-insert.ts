@@ -180,6 +180,55 @@ function transformBatchToRecords(batch: BatchToProcess): DatabaseRecord[] {
 }
 
 /**
+ * Validate batch insert inputs.
+ * @throws {DatabaseError} If validation fails
+ */
+function validateBatchInputs(
+  db: LanceDBConnection,
+  vectors: Float32Array[],
+  metadatas: ChunkMetadata[],
+  contents: string[]
+): void {
+  if (!db) {
+    throw new DatabaseError('Vector database not initialized');
+  }
+  
+  if (vectors.length !== metadatas.length || vectors.length !== contents.length) {
+    throw new DatabaseError('Vectors, metadatas, and contents arrays must have the same length', {
+      vectorsLength: vectors.length,
+      metadatasLength: metadatas.length,
+      contentsLength: contents.length,
+    });
+  }
+}
+
+/**
+ * Chunk arrays into batches of specified size.
+ * Returns array of [vectors, metadatas, contents] tuples for each batch.
+ */
+function chunkIntoBatches(
+  vectors: Float32Array[],
+  metadatas: ChunkMetadata[],
+  contents: string[],
+  batchSize: number
+): Array<[Float32Array[], ChunkMetadata[], string[]]> {
+  if (vectors.length <= batchSize) {
+    return [[vectors, metadatas, contents]];
+  }
+  
+  const batches: Array<[Float32Array[], ChunkMetadata[], string[]]> = [];
+  for (let i = 0; i < vectors.length; i += batchSize) {
+    const end = Math.min(i + batchSize, vectors.length);
+    batches.push([
+      vectors.slice(i, end),
+      metadatas.slice(i, end),
+      contents.slice(i, end),
+    ]);
+  }
+  return batches;
+}
+
+/**
  * Insert a batch of vectors into the database
  * 
  * @returns The table instance after insertion, or null only when:
@@ -195,40 +244,25 @@ export async function insertBatch(
   metadatas: ChunkMetadata[],
   contents: string[]
 ): Promise<LanceDBTable | null> {
-  if (!db) {
-    throw new DatabaseError('Vector database not initialized');
-  }
-  
-  if (vectors.length !== metadatas.length || vectors.length !== contents.length) {
-    throw new DatabaseError('Vectors, metadatas, and contents arrays must have the same length', {
-      vectorsLength: vectors.length,
-      metadatasLength: metadatas.length,
-      contentsLength: contents.length,
-    });
-  }
+  validateBatchInputs(db, vectors, metadatas, contents);
   
   // Handle empty batch gracefully - return table as-is (could be null)
   if (vectors.length === 0) {
     return table;
   }
   
-  // Split large batches into smaller chunks
-  if (vectors.length > VECTOR_DB_MAX_BATCH_SIZE) {
-    let currentTable = table;
-    for (let i = 0; i < vectors.length; i += VECTOR_DB_MAX_BATCH_SIZE) {
-      const batchVectors = vectors.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
-      const batchMetadata = metadatas.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
-      const batchContents = contents.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
-      
-      currentTable = await insertBatchInternal(db, currentTable, tableName, batchVectors, batchMetadata, batchContents);
-    }
-    if (!currentTable) {
-      throw new DatabaseError('Failed to create table during batch insert');
-    }
-    return currentTable;
-  } else {
-    return insertBatchInternal(db, table, tableName, vectors, metadatas, contents);
+  // Process batches
+  const batches = chunkIntoBatches(vectors, metadatas, contents, VECTOR_DB_MAX_BATCH_SIZE);
+  
+  let currentTable = table;
+  for (const [batchVectors, batchMetadatas, batchContents] of batches) {
+    currentTable = await insertBatchInternal(db, currentTable, tableName, batchVectors, batchMetadatas, batchContents);
   }
+  
+  if (!currentTable) {
+    throw new DatabaseError('Failed to create table during batch insert');
+  }
+  return currentTable;
 }
 
 /**
