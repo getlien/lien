@@ -722,7 +722,7 @@ describe('handleGetDependents', () => {
       );
 
       expect(mockLog).toHaveBeenCalledWith(
-        expect.stringContaining("Found 5 usages of 'myFunction' across 2 files")
+        expect.stringContaining("Found 5 tracked call sites across 2 files")
       );
     });
 
