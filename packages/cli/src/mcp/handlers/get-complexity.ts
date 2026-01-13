@@ -75,6 +75,7 @@ export async function handleGetComplexity(
       // For cross-repo, we need to use scanCrossRepo to get all chunks
       // then pass them to ComplexityAnalyzer
       let allChunks: Array<{ metadata: { file: string; repoId?: string } }> = [];
+      let crossRepoFallback = false;
       
       if (crossRepo && vectorDB instanceof QdrantDB) {
         // Get all chunks across repos for cross-repo analysis
@@ -83,6 +84,9 @@ export async function handleGetComplexity(
           repoIds 
         });
         log(`Scanned ${allChunks.length} chunks across repos`);
+      } else if (crossRepo) {
+        // Track fallback for note in response
+        crossRepoFallback = true;
       }
 
       const analyzer = new ComplexityAnalyzer(vectorDB);
@@ -128,8 +132,12 @@ export async function handleGetComplexity(
       // Group by repo if cross-repo search
       if (crossRepo && vectorDB instanceof QdrantDB && allChunks.length > 0) {
         response.groupedByRepo = groupViolationsByRepo(topViolations, allChunks);
-      } else if (crossRepo) {
+      }
+      
+      // Add note for cross-repo fallback
+      if (crossRepoFallback) {
         log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo analysis.', 'warning');
+        response.note = 'Cross-repo analysis requires Qdrant backend. Fell back to single-repo analysis.';
       }
 
       return response;

@@ -45,6 +45,8 @@ export async function handleSemanticSearch(
       
       // Check if cross-repo search is requested and backend supports it
       let results;
+      let crossRepoFallback = false;
+      
       if (crossRepo && vectorDB instanceof QdrantDB) {
         // Cross-repo search: omit repoId filter
         results = await vectorDB.searchCrossRepo(queryEmbedding, limit, { repoIds });
@@ -53,12 +55,13 @@ export async function handleSemanticSearch(
         // Single-repo search (existing behavior)
         if (crossRepo) {
           log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.');
+          crossRepoFallback = true;
         }
         results = await vectorDB.search(queryEmbedding, limit, query);
         log(`Found ${results.length} results`);
       }
 
-      // Group results by repo if cross-repo search
+      // Build response
       const response: any = {
         indexInfo: getIndexMetadata(),
         results,
@@ -66,6 +69,10 @@ export async function handleSemanticSearch(
       
       if (crossRepo && vectorDB instanceof QdrantDB) {
         response.groupedByRepo = groupResultsByRepo(results);
+      }
+      
+      if (crossRepoFallback) {
+        response.note = 'Cross-repo search requires Qdrant backend. Fell back to single-repo search.';
       }
 
       return response;

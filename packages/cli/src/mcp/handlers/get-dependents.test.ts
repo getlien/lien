@@ -246,8 +246,8 @@ describe('handleGetDependents', () => {
       );
 
       const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.note).toContain('Warning');
-      expect(parsed.note).toContain('10000');
+      expect(parsed.note).toContain('10,000');
+      expect(parsed.note).toContain('limit reached');
       expect(parsed.note).toContain('incomplete');
     });
 

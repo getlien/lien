@@ -338,8 +338,9 @@ export async function handleGetFilesContext(
 
       // Step 3: Scan for test associations
       const allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
+      const hitScanLimit = allChunks.length === SCAN_LIMIT;
       
-      if (allChunks.length === SCAN_LIMIT) {
+      if (hitScanLimit) {
         log(
           `Scanned ${SCAN_LIMIT} chunks (limit reached). Test associations may be incomplete for large codebases.`,
           'warning'
@@ -367,6 +368,11 @@ export async function handleGetFilesContext(
       );
       log(`Found ${totalChunks} total chunks`);
 
+      // Build note if scan limit was hit
+      const note = hitScanLimit
+        ? 'Scanned 10,000 chunks (limit reached). Test associations may be incomplete for large codebases.'
+        : undefined;
+
       // Step 5: Return appropriate response format
       if (isSingleFile) {
         // Single file: return backward-compatible format
@@ -376,12 +382,14 @@ export async function handleGetFilesContext(
           file: filepath,
           chunks: filesData[filepath].chunks,
           testAssociations: filesData[filepath].testAssociations,
+          ...(note && { note }),
         };
       } else {
         // Multiple files: return keyed structure
         return {
           indexInfo: getIndexMetadata(),
           files: filesData,
+          ...(note && { note }),
         };
       }
     }
