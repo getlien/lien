@@ -46,10 +46,16 @@ describe('handleGetDependents', () => {
       complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical';
     };
   } = {}) {
+    const dependents = overrides.dependents ?? [
+      { filepath: 'src/consumer.ts', isTestFile: false },
+    ];
+    const testDependentCount = dependents.filter(d => d.isTestFile).length;
+    const productionDependentCount = dependents.length - testDependentCount;
+
     return {
-      dependents: overrides.dependents ?? [
-        { filepath: 'src/consumer.ts', isTestFile: false },
-      ],
+      dependents,
+      productionDependentCount,
+      testDependentCount,
       chunksByFile: new Map(),
       fileComplexities: [],
       complexityMetrics: overrides.complexityMetrics ?? {
@@ -452,12 +458,12 @@ describe('handleGetDependents', () => {
       );
     });
 
-    it('should log dependent count and risk level', async () => {
+    it('should log dependent count with prod/test breakdown', async () => {
       vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
         dependents: [
           { filepath: 'src/a.ts', isTestFile: false },
           { filepath: 'src/b.ts', isTestFile: false },
-          { filepath: 'src/c.ts', isTestFile: false },
+          { filepath: 'src/c.test.ts', isTestFile: true },
         ],
       }));
 
@@ -467,7 +473,7 @@ describe('handleGetDependents', () => {
       );
 
       expect(mockLog).toHaveBeenCalledWith(
-        expect.stringContaining('Found 3 dependent files')
+        expect.stringContaining('Found 3 dependents (2 prod, 1 test)')
       );
     });
   });
@@ -493,6 +499,102 @@ describe('handleGetDependents', () => {
       expect(parsed.dependents).toContainEqual(
         expect.objectContaining({ filepath: 'src/__tests__/auth.test.ts', isTestFile: true })
       );
+    });
+  });
+
+  describe('test/production split', () => {
+    it('should return separate counts for test and production dependents', async () => {
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
+        dependents: [
+          { filepath: 'src/auth.ts', isTestFile: false },
+          { filepath: 'src/user.ts', isTestFile: false },
+          { filepath: 'src/__tests__/auth.test.ts', isTestFile: true },
+          { filepath: 'src/__tests__/user.test.ts', isTestFile: true },
+          { filepath: 'src/utils.test.ts', isTestFile: true },
+        ],
+      }));
+
+      const result = await handleGetDependents(
+        { filepath: 'src/utils.ts' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.productionDependentCount).toBe(2);
+      expect(parsed.testDependentCount).toBe(3);
+      expect(parsed.dependentCount).toBe(5);
+    });
+
+    it('should calculate risk based on production dependents only', async () => {
+      // 10 test dependents + 1 production dependent = 11 total
+      // With all dependents: would be "medium" risk (6-15 threshold)
+      // With only production: should be "low" risk (1-5 threshold)
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
+        dependents: [
+          { filepath: 'src/consumer.ts', isTestFile: false },
+          ...Array.from({ length: 10 }, (_, i) => ({
+            filepath: `src/__tests__/test${i}.test.ts`,
+            isTestFile: true,
+          })),
+        ],
+      }));
+
+      const result = await handleGetDependents(
+        { filepath: 'src/utils.ts' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.dependentCount).toBe(11);
+      expect(parsed.productionDependentCount).toBe(1);
+      expect(parsed.testDependentCount).toBe(10);
+      expect(parsed.riskLevel).toBe('low');
+    });
+
+    it('should return low risk when all dependents are test files', async () => {
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
+        dependents: [
+          { filepath: 'src/__tests__/a.test.ts', isTestFile: true },
+          { filepath: 'src/__tests__/b.test.ts', isTestFile: true },
+          { filepath: 'src/__tests__/c.test.ts', isTestFile: true },
+        ],
+      }));
+
+      const result = await handleGetDependents(
+        { filepath: 'src/internal-util.ts' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.productionDependentCount).toBe(0);
+      expect(parsed.testDependentCount).toBe(3);
+      expect(parsed.riskLevel).toBe('low');
+    });
+
+    it('should still boost risk level for high complexity even with few production dependents', async () => {
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
+        dependents: [
+          { filepath: 'src/complex.ts', isTestFile: false },
+        ],
+        complexityMetrics: {
+          averageComplexity: 30,
+          maxComplexity: 50,
+          filesWithComplexityData: 1,
+          highComplexityDependents: [
+            { filepath: 'src/complex.ts', maxComplexity: 50, avgComplexity: 30 },
+          ],
+          complexityRiskBoost: 'critical',
+        },
+      }));
+
+      const result = await handleGetDependents(
+        { filepath: 'src/utils.ts' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.productionDependentCount).toBe(1);
+      expect(parsed.riskLevel).toBe('critical');
     });
   });
 });
@@ -531,6 +633,36 @@ describe('calculateRiskLevel (unit tests)', () => {
   it('should not downgrade risk level from complexity', () => {
     // High dependent count should not be reduced by low complexity
     expect(calculateRiskLevel(50, 'low')).toBe('critical');
+  });
+
+  describe('with productionDependentCount', () => {
+    it('should use productionDependentCount for risk when provided', () => {
+      // 20 total dependents would be "high" risk
+      // But only 3 production dependents = "low" risk
+      expect(calculateRiskLevel(20, 'low', 3)).toBe('low');
+    });
+
+    it('should return low risk when productionDependentCount is 0', () => {
+      // Even with many total dependents, 0 production = low risk
+      expect(calculateRiskLevel(50, 'low', 0)).toBe('low');
+    });
+
+    it('should return medium risk for 6-15 production dependents', () => {
+      expect(calculateRiskLevel(50, 'low', 10)).toBe('medium');
+    });
+
+    it('should return high risk for 16-30 production dependents', () => {
+      expect(calculateRiskLevel(100, 'low', 20)).toBe('high');
+    });
+
+    it('should still boost from complexity even with low production count', () => {
+      expect(calculateRiskLevel(50, 'critical', 1)).toBe('critical');
+    });
+
+    it('should fall back to dependentCount when productionDependentCount is undefined', () => {
+      // Backwards compatibility: undefined should use total count
+      expect(calculateRiskLevel(20, 'low', undefined)).toBe('high');
+    });
   });
 });
 

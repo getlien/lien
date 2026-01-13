@@ -57,6 +57,8 @@ type RiskLevel = keyof typeof RISK_ORDER;
  */
 export interface DependencyAnalysisResult {
   dependents: Array<{ filepath: string; isTestFile: boolean }>;
+  productionDependentCount: number;
+  testDependentCount: number;
   chunksByFile: Map<string, SearchResult[]>;
   fileComplexities: FileComplexity[];
   complexityMetrics: ComplexityMetrics;
@@ -120,8 +122,14 @@ export async function findDependents(
     isTestFile: isTestFile(filepath),
   }));
 
+  // Calculate test/production split
+  const testDependentCount = uniqueFiles.filter(f => f.isTestFile).length;
+  const productionDependentCount = uniqueFiles.length - testDependentCount;
+
   return {
     dependents: uniqueFiles,
+    productionDependentCount,
+    testDependentCount,
     chunksByFile,
     fileComplexities,
     complexityMetrics,
@@ -274,10 +282,14 @@ function calculateComplexityRiskBoost(avgComplexity: number, maxComplexity: numb
 
 /**
  * Calculate risk level based on dependent count and complexity.
+ * @param dependentCount Total number of dependent files
+ * @param complexityRiskBoost Risk boost from complexity analysis
+ * @param productionDependentCount Optional: if provided, use this for risk calculation instead of dependentCount
  */
 export function calculateRiskLevel(
   dependentCount: number,
-  complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical'
+  complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical',
+  productionDependentCount?: number
 ): 'low' | 'medium' | 'high' | 'critical' {
   const DEPENDENT_COUNT_THRESHOLDS = {
     LOW: 5,
@@ -288,11 +300,14 @@ export function calculateRiskLevel(
   const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
   type RiskLevel = keyof typeof RISK_ORDER;
 
+  // Use production count if provided, otherwise fall back to total
+  const effectiveCount = productionDependentCount ?? dependentCount;
+
   let riskLevel: RiskLevel =
-    dependentCount === 0 ? 'low' :
-    dependentCount <= DEPENDENT_COUNT_THRESHOLDS.LOW ? 'low' :
-    dependentCount <= DEPENDENT_COUNT_THRESHOLDS.MEDIUM ? 'medium' :
-    dependentCount <= DEPENDENT_COUNT_THRESHOLDS.HIGH ? 'high' : 'critical';
+    effectiveCount === 0 ? 'low' :
+    effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.LOW ? 'low' :
+    effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.MEDIUM ? 'medium' :
+    effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.HIGH ? 'high' : 'critical';
 
   // Boost if complexity risk is higher
   if (RISK_ORDER[complexityRiskBoost] > RISK_ORDER[riskLevel]) {
