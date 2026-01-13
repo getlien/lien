@@ -1,6 +1,7 @@
 import { FrameworkDetector } from './types.js';
 import { nodejsDetector } from './nodejs/detector.js';
 import { phpDetector } from './php/detector.js';
+import { pythonDetector } from './python/detector.js';
 import { laravelDetector } from './laravel/detector.js';
 import { shopifyDetector } from './shopify/detector.js';
 
@@ -10,12 +11,13 @@ import { shopifyDetector } from './shopify/detector.js';
  * 
  * Order doesn't matter for detection as priority system handles conflicts,
  * but listed here in order from generic to specific for clarity:
- * - Generic language detectors (Node.js, PHP)
+ * - Generic language detectors (Node.js, PHP, Python)
  * - Specific framework detectors (Laravel, Shopify)
  */
 export const frameworkDetectors: FrameworkDetector[] = [
   nodejsDetector,
   phpDetector,
+  pythonDetector,
   laravelDetector,
   shopifyDetector,
 ];

@@ -263,6 +263,10 @@ export async function findDependents(
 
 /**
  * Build import-to-chunk index for O(n) instead of O(n*m) lookup.
+ * 
+ * Uses both:
+ * - `imports` array (raw import statements for TS/JS)
+ * - `importedSymbols` keys (parsed module paths for Python/PHP)
  */
 function buildImportIndex(
   allChunks: SearchResult[],
@@ -270,14 +274,28 @@ function buildImportIndex(
 ): Map<string, SearchResult[]> {
   const importIndex = new Map<string, SearchResult[]>();
 
+  const addToIndex = (importPath: string, chunk: SearchResult) => {
+    const normalizedImport = normalizePathCached(importPath);
+    if (!importIndex.has(normalizedImport)) {
+      importIndex.set(normalizedImport, []);
+    }
+    importIndex.get(normalizedImport)!.push(chunk);
+  };
+
   for (const chunk of allChunks) {
+    // Index raw imports (TS/JS style: "./utils/logger")
     const imports = chunk.metadata.imports || [];
     for (const imp of imports) {
-      const normalizedImport = normalizePathCached(imp);
-      if (!importIndex.has(normalizedImport)) {
-        importIndex.set(normalizedImport, []);
+      addToIndex(imp, chunk);
+    }
+    
+    // Index importedSymbols keys (Python/PHP style: "django.http", "App\Models\User")
+    // This provides the parsed module paths that match file paths better
+    const importedSymbols = chunk.metadata.importedSymbols;
+    if (importedSymbols && typeof importedSymbols === 'object') {
+      for (const modulePath of Object.keys(importedSymbols)) {
+        addToIndex(modulePath, chunk);
       }
-      importIndex.get(normalizedImport)!.push(chunk);
     }
   }
 

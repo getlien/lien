@@ -179,5 +179,46 @@ describe('matchesFile - Path Boundary Checking', () => {
       expect(testMatchesFile('src/models/user', 'src/models/product')).toBe(false);
     });
   });
+
+  describe('Python module matching', () => {
+    it('should match Python dotted module to file path', () => {
+      // Python uses dotted paths like django.http which map to django/http/*.py
+      expect(testMatchesFile('django.http', 'django/http/response.py')).toBe(true);
+      expect(testMatchesFile('django.http', 'django/http/__init__.py')).toBe(true);
+    });
+
+    it('should match exact Python module path', () => {
+      expect(testMatchesFile('django.http.response', 'django/http/response.py')).toBe(true);
+      expect(testMatchesFile('django.views.generic.base', 'django/views/generic/base.py')).toBe(true);
+    });
+
+    it('should match Python module with prefix in target', () => {
+      // When target has extra prefix directories
+      expect(testMatchesFile('django.http', 'src/django/http/response.py')).toBe(true);
+      expect(testMatchesFile('myapp.models', 'project/myapp/models/__init__.py')).toBe(true);
+    });
+
+    it('should match parent package to child modules', () => {
+      // from django.http import HttpResponse - matches any module under django/http/
+      expect(testMatchesFile('django.http', 'django/http/request.py')).toBe(true);
+      expect(testMatchesFile('django.http', 'django/http/cookie.py')).toBe(true);
+    });
+
+    it('should NOT match unrelated Python modules', () => {
+      expect(testMatchesFile('django.http', 'django/views/generic.py')).toBe(false);
+      expect(testMatchesFile('django.db.models', 'django/http/response.py')).toBe(false);
+    });
+
+    it('should NOT apply Python matching to non-dotted imports', () => {
+      // Regular file paths should not use Python module matching
+      expect(testMatchesFile('src/models/user', 'src/models/product.py')).toBe(false);
+    });
+
+    it('should handle single-level Python modules', () => {
+      // Single module without dots should still work if it's part of the path
+      expect(testMatchesFile('django.utils', 'django/utils/__init__.py')).toBe(true);
+      expect(testMatchesFile('django.utils', 'django/utils/timezone.py')).toBe(true);
+    });
+  });
 });
 

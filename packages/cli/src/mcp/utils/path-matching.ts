@@ -20,10 +20,11 @@
 export function normalizePath(path: string, workspaceRoot: string): string {
   let normalized = path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
   
-  // Normalize extensions: .ts/.tsx/.js/.jsx/.php → all treated as equivalent
+  // Normalize extensions: .ts/.tsx/.js/.jsx/.php/.py → all treated as equivalent
   // This handles TypeScript's ESM requirement of .js imports for .ts files
   // Also handles PHP files where namespaces don't include extensions
-  normalized = normalized.replace(/\.(ts|tsx|js|jsx|php)$/, '');
+  // Also handles Python files where module imports don't include extensions
+  normalized = normalized.replace(/\.(ts|tsx|js|jsx|php|py)$/, '');
   
   // Normalize to relative path if it starts with workspace root
   if (normalized.startsWith(workspaceRoot + '/')) {
@@ -69,6 +70,7 @@ export function matchesAtBoundary(str: string, pattern: string): boolean {
  * 3. Import path appears in target (at boundaries)
  * 4. Relative imports (./logger vs src/utils/logger)
  * 5. PHP namespace imports (App\Models\User vs app/Models/User.php)
+ * 6. Python module imports (django.http → django/http/__init__.py or django/http/*.py)
  * 
  * @param normalizedImport - Normalized import path
  * @param normalizedTarget - Normalized target file path
@@ -99,6 +101,77 @@ export function matchesFile(normalizedImport: string, normalizedTarget: string):
   // Strategy 4: PHP namespace matching
   // PHP imports use namespaces like "App\Models\User" which should match "app/Models/User.php"
   if (matchesPHPNamespace(normalizedImport, normalizedTarget)) {
+    return true;
+  }
+  
+  // Strategy 5: Python module matching
+  // Python imports use dotted paths like "django.http" which should match "django/http/response.py"
+  if (matchesPythonModule(normalizedImport, normalizedTarget)) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Checks if a Python dotted module path matches a file path.
+ * 
+ * Python imports use dotted paths like "django.http" which should match:
+ * - django/http/__init__.py (package)
+ * - django/http/response.py (module within package)
+ * - django/http.py (direct module, less common)
+ * 
+ * @param importPath - The import path (may contain dots)
+ * @param targetPath - The normalized file path
+ * @returns True if the Python module matches the file path
+ */
+function matchesPythonModule(importPath: string, targetPath: string): boolean {
+  // Only apply if the import contains dots (Python module syntax)
+  if (!importPath.includes('.')) {
+    return false;
+  }
+  
+  // Convert dotted path to slash path: django.http → django/http
+  const moduleAsPath = importPath.replace(/\./g, '/');
+  
+  // Strip .py extension from target for comparison
+  const targetWithoutPy = targetPath.replace(/\.py$/, '');
+  
+  // Strategy 1: Direct module match
+  // django.http → django/http matches django/http/__init__.py (targetWithoutPy = django/http/__init__)
+  // or django/http.py (targetWithoutPy = django/http)
+  if (targetWithoutPy === moduleAsPath || targetWithoutPy === moduleAsPath + '/__init__') {
+    return true;
+  }
+  
+  // Strategy 2: Parent package match
+  // django.http → django/http matches django/http/response.py
+  // The target path should start with the module path followed by /
+  if (targetWithoutPy.startsWith(moduleAsPath + '/')) {
+    return true;
+  }
+  
+  // Strategy 3: Check if module path is a suffix of target
+  // This handles cases like from django.http import HttpResponse
+  // where the actual file is somewhere/django/http/response.py
+  if (targetWithoutPy.endsWith('/' + moduleAsPath) || 
+      targetWithoutPy.endsWith('/' + moduleAsPath + '/__init__')) {
+    return true;
+  }
+  
+  // Strategy 4: Target contains module path at any position
+  // Handles src/django/http/response.py matching django.http
+  // The module path should appear within target, followed by / or end
+  const modulePathWithSlash = '/' + moduleAsPath + '/';
+  if (targetWithoutPy.includes(modulePathWithSlash) || 
+      targetWithoutPy.endsWith('/' + moduleAsPath)) {
+    return true;
+  }
+  
+  // Strategy 5: Target starts with module path (with possible __init__ suffix)
+  // Handles django/http/__init__ matching django.http
+  const targetWithoutInit = targetWithoutPy.replace(/\/__init__$/, '');
+  if (targetWithoutInit === moduleAsPath || targetWithoutInit.startsWith(moduleAsPath + '/')) {
     return true;
   }
   
