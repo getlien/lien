@@ -53,10 +53,32 @@ const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
 type RiskLevel = keyof typeof RISK_ORDER;
 
 /**
+ * A single usage of a symbol (call site).
+ */
+export interface SymbolUsage {
+  /** The function/method that contains this call */
+  callerSymbol: string;
+  /** Line number where the call occurs */
+  line: number;
+  /** Code snippet showing the call */
+  snippet: string;
+}
+
+/**
+ * Dependent file info, with optional symbol-level usages.
+ */
+export interface DependentInfo {
+  filepath: string;
+  isTestFile: boolean;
+  /** Only present when symbol parameter is provided */
+  usages?: SymbolUsage[];
+}
+
+/**
  * Dependency analysis result.
  */
 export interface DependencyAnalysisResult {
-  dependents: Array<{ filepath: string; isTestFile: boolean }>;
+  dependents: DependentInfo[];
   productionDependentCount: number;
   testDependentCount: number;
   chunksByFile: Map<string, SearchResult[]>;
@@ -64,16 +86,25 @@ export interface DependencyAnalysisResult {
   complexityMetrics: ComplexityMetrics;
   hitLimit: boolean;
   allChunks: SearchResult[];
+  /** Total count of usages across all files (when symbol is specified) */
+  totalUsageCount?: number;
 }
 
 /**
  * Find all dependents of a target file.
+ * 
+ * @param vectorDB - Vector database to scan
+ * @param filepath - Path to file to find dependents for
+ * @param crossRepo - Whether to search across repos
+ * @param log - Logging function
+ * @param symbol - Optional: specific symbol to find usages of
  */
 export async function findDependents(
   vectorDB: VectorDBInterface,
   filepath: string,
   crossRepo: boolean,
-  log: (message: string, level?: 'warning') => void
+  log: (message: string, level?: 'warning') => void,
+  symbol?: string
 ): Promise<DependencyAnalysisResult> {
   // Use cross-repo scan if enabled and backend supports it
   let allChunks: SearchResult[];
@@ -117,17 +148,29 @@ export async function findDependents(
   const fileComplexities = calculateFileComplexities(chunksByFile);
   const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
 
-  const uniqueFiles = Array.from(chunksByFile.keys()).map(filepath => ({
-    filepath,
-    isTestFile: isTestFile(filepath),
-  }));
+  // Build dependents list with optional symbol-level usages
+  let dependents: DependentInfo[];
+  let totalUsageCount: number | undefined;
+
+  if (symbol) {
+    // Symbol-level analysis: find usages of the specific symbol
+    const result = findSymbolUsages(chunksByFile, symbol, normalizedTarget, normalizePathCached);
+    dependents = result.dependents;
+    totalUsageCount = result.totalUsageCount;
+  } else {
+    // File-level analysis: just list dependent files
+    dependents = Array.from(chunksByFile.keys()).map(fp => ({
+      filepath: fp,
+      isTestFile: isTestFile(fp),
+    }));
+  }
 
   // Calculate test/production split
-  const testDependentCount = uniqueFiles.filter(f => f.isTestFile).length;
-  const productionDependentCount = uniqueFiles.length - testDependentCount;
+  const testDependentCount = dependents.filter(f => f.isTestFile).length;
+  const productionDependentCount = dependents.length - testDependentCount;
 
   return {
-    dependents: uniqueFiles,
+    dependents,
     productionDependentCount,
     testDependentCount,
     chunksByFile,
@@ -135,6 +178,7 @@ export async function findDependents(
     complexityMetrics,
     hitLimit,
     allChunks,
+    totalUsageCount,
   };
 }
 
@@ -321,9 +365,9 @@ export function calculateRiskLevel(
  * Group dependents by repository ID.
  */
 export function groupDependentsByRepo(
-  dependents: Array<{ filepath: string; isTestFile: boolean }>,
+  dependents: DependentInfo[],
   chunks: SearchResult[]
-): Record<string, Array<{ filepath: string; isTestFile: boolean }>> {
+): Record<string, DependentInfo[]> {
   const repoMap = new Map<string, Set<string>>();
 
   // Build map of filepath -> repoId
@@ -337,7 +381,7 @@ export function groupDependentsByRepo(
   }
 
   // Group dependents by repo
-  const grouped: Record<string, Array<{ filepath: string; isTestFile: boolean }>> = {};
+  const grouped: Record<string, DependentInfo[]> = {};
   for (const dependent of dependents) {
     // Find which repo this file belongs to
     let foundRepo = 'unknown';
@@ -355,5 +399,87 @@ export function groupDependentsByRepo(
   }
 
   return grouped;
+}
+
+/**
+ * Find usages of a specific symbol in dependent files.
+ * 
+ * Looks for:
+ * 1. Files that import the symbol from the target file
+ * 2. Chunks within those files that have call sites for the symbol
+ */
+function findSymbolUsages(
+  chunksByFile: Map<string, SearchResult[]>,
+  targetSymbol: string,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string
+): { dependents: DependentInfo[]; totalUsageCount: number } {
+  const dependents: DependentInfo[] = [];
+  let totalUsageCount = 0;
+
+  for (const [filepath, chunks] of chunksByFile.entries()) {
+    // Check if any chunk imports the target symbol
+    const importsSymbol = chunks.some(chunk => {
+      const importedSymbols = chunk.metadata.importedSymbols;
+      if (!importedSymbols) return false;
+      
+      // Check all import paths that might match our target file
+      for (const [importPath, symbols] of Object.entries(importedSymbols)) {
+        const normalizedImport = normalizePathCached(importPath);
+        if (matchesFile(normalizedImport, normalizedTarget)) {
+          // Check if the target symbol is imported
+          if (symbols.includes(targetSymbol)) {
+            return true;
+          }
+          // Also match namespace imports: * as utils
+          if (symbols.some(s => s.startsWith('* as '))) {
+            return true;
+          }
+        }
+      }
+      return false;
+    });
+
+    if (!importsSymbol) {
+      // This file doesn't import the target symbol, skip it
+      continue;
+    }
+
+    // Find call sites within this file's chunks
+    const usages: SymbolUsage[] = [];
+    
+    for (const chunk of chunks) {
+      const callSites = chunk.metadata.callSites;
+      if (!callSites) continue;
+      
+      // Find calls to the target symbol
+      for (const call of callSites) {
+        if (call.symbol === targetSymbol) {
+          // Extract snippet from the chunk content
+          const lines = chunk.content.split('\n');
+          const lineIndex = call.line - chunk.metadata.startLine;
+          const snippet = lines[lineIndex]?.trim() || `${targetSymbol}(...)`;
+          
+          usages.push({
+            callerSymbol: chunk.metadata.symbolName || 'unknown',
+            line: call.line,
+            snippet,
+          });
+        }
+      }
+    }
+
+    // If we found usages, add this file with usage details
+    // If no usages but imports the symbol, still include the file
+    dependents.push({
+      filepath,
+      isTestFile: isTestFile(filepath),
+      usages: usages.length > 0 ? usages : undefined,
+    });
+
+    totalUsageCount += usages.length;
+  }
+
+  return { dependents, totalUsageCount };
 }
 

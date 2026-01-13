@@ -6,6 +6,9 @@ import { z } from 'zod';
  * Validates file paths and options for finding reverse dependencies
  * (which files import/depend on a given file).
  * 
+ * When the optional `symbol` parameter is provided, returns specific call sites
+ * for that exported symbol instead of just file-level dependencies.
+ * 
  * Limitations:
  * - Scans up to 10,000 code chunks. For very large codebases (>1M lines),
  *   results may be incomplete. A warning is returned if the limit is reached.
@@ -19,6 +22,15 @@ export const GetDependentsSchema = z.object({
       "Returns all files that import or depend on this file.\n\n" +
       "Note: Scans up to 10,000 code chunks. For very large codebases,\n" +
       "results may be incomplete (a warning will be included if truncated)."
+    ),
+  
+  symbol: z.string()
+    .optional()
+    .describe(
+      "Optional: specific exported symbol to find usages of.\n\n" +
+      "When provided, returns call sites instead of just importing files.\n\n" +
+      "Example: 'validateEmail' to find where validateEmail() is called.\n\n" +
+      "Response includes 'usages' array showing which functions call this symbol."
     ),
     
   depth: z.number()

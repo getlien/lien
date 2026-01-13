@@ -12,6 +12,9 @@ import {
 /**
  * Handle get_dependents tool calls.
  * Finds all code that depends on a file (reverse dependency lookup).
+ * 
+ * When the optional `symbol` parameter is provided, returns specific call sites
+ * for that exported symbol instead of just file-level dependencies.
  */
 export async function handleGetDependents(
   args: unknown,
@@ -22,21 +25,31 @@ export async function handleGetDependents(
   return await wrapToolHandler(
     GetDependentsSchema,
     async (validatedArgs) => {
-      const { crossRepo, filepath } = validatedArgs;
-      log(`Finding dependents of: ${filepath}${crossRepo ? ' (cross-repo)' : ''}`);
+      const { crossRepo, filepath, symbol } = validatedArgs;
+      const symbolSuffix = symbol ? ` (symbol: ${symbol})` : '';
+      const crossRepoSuffix = crossRepo ? ' (cross-repo)' : '';
+      log(`Finding dependents of: ${filepath}${symbolSuffix}${crossRepoSuffix}`);
       await checkAndReconnect();
 
       // Find dependents using dependency analysis functions
-      const analysis = await findDependents(vectorDB, filepath, crossRepo ?? false, log);
+      const analysis = await findDependents(vectorDB, filepath, crossRepo ?? false, log, symbol);
 
       const riskLevel = calculateRiskLevel(
         analysis.dependents.length,
         analysis.complexityMetrics.complexityRiskBoost,
         analysis.productionDependentCount
       );
-      log(
-        `Found ${analysis.dependents.length} dependents (${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test) - risk: ${riskLevel}`
-      );
+      
+      // Log message varies based on whether symbol-level analysis was done
+      if (symbol && analysis.totalUsageCount !== undefined) {
+        log(
+          `Found ${analysis.totalUsageCount} usages of '${symbol}' across ${analysis.dependents.length} files (${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test) - risk: ${riskLevel}`
+        );
+      } else {
+        log(
+          `Found ${analysis.dependents.length} dependents (${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test) - risk: ${riskLevel}`
+        );
+      }
 
       // Build note(s) for warnings
       const notes: string[] = [];
@@ -49,12 +62,16 @@ export async function handleGetDependents(
         notes.push('Scanned 10,000 chunks (limit reached). Results may be incomplete.');
       }
 
+      // Build response
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const response: any = {
         indexInfo: getIndexMetadata(),
         filepath: validatedArgs.filepath,
+        ...(symbol && { symbol }),
         dependentCount: analysis.dependents.length,
         productionDependentCount: analysis.productionDependentCount,
         testDependentCount: analysis.testDependentCount,
+        ...(analysis.totalUsageCount !== undefined && { totalUsageCount: analysis.totalUsageCount }),
         riskLevel,
         dependents: analysis.dependents,
         complexityMetrics: analysis.complexityMetrics,
