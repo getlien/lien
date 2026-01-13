@@ -10,6 +10,31 @@ interface FiltersApplied {
 }
 
 /**
+ * Filter results by programming language (case-insensitive).
+ */
+function applyLanguageFilter(results: SearchResult[], language: string): SearchResult[] {
+  const lang = language.toLowerCase();
+  return results.filter(r => r.metadata.language?.toLowerCase() === lang);
+}
+
+/**
+ * Filter results by file path substring (case-insensitive).
+ */
+function applyPathHintFilter(results: SearchResult[], pathHint: string): SearchResult[] {
+  const hint = pathHint.toLowerCase();
+  return results.filter(r => (r.metadata.file?.toLowerCase() ?? '').includes(hint));
+}
+
+/**
+ * Remove low-relevance results (not_relevant = score >= 1.5).
+ */
+function pruneIrrelevantResults(results: SearchResult[]): { filtered: SearchResult[]; prunedCount: number } {
+  const beforePrune = results.length;
+  const filtered = results.filter(r => r.relevance !== 'not_relevant');
+  return { filtered, prunedCount: beforePrune - filtered.length };
+}
+
+/**
  * Handle find_similar tool calls.
  * Finds code structurally similar to a given snippet.
  */
@@ -23,55 +48,37 @@ export async function handleFindSimilar(
     FindSimilarSchema,
     async (validatedArgs) => {
       log(`Finding similar code...`);
-
-      // Check if index has been updated and reconnect if needed
       await checkAndReconnect();
 
       const codeEmbedding = await embeddings.embed(validatedArgs.code);
-      
-      // Request extra results to account for filtering
       const limit = validatedArgs.limit ?? 5;
       const extraLimit = limit + 10;
-      const rawResults = await vectorDB.search(codeEmbedding, extraLimit, validatedArgs.code);
+      let results = await vectorDB.search(codeEmbedding, extraLimit, validatedArgs.code);
 
-      // Track what filters were applied
       const filtersApplied: FiltersApplied = { prunedLowRelevance: 0 };
-      let filtered: SearchResult[] = rawResults;
 
-      // Filter by language (case-insensitive)
+      // Apply filters sequentially
       if (validatedArgs.language) {
         filtersApplied.language = validatedArgs.language;
-        const lang = validatedArgs.language.toLowerCase();
-        filtered = filtered.filter(r => 
-          r.metadata.language?.toLowerCase() === lang
-        );
+        results = applyLanguageFilter(results, validatedArgs.language);
       }
 
-      // Filter by path hint (case-insensitive substring match)
       if (validatedArgs.pathHint) {
         filtersApplied.pathHint = validatedArgs.pathHint;
-        const hint = validatedArgs.pathHint.toLowerCase();
-        filtered = filtered.filter(r =>
-          (r.metadata.file?.toLowerCase() ?? '').includes(hint)
-        );
+        results = applyPathHintFilter(results, validatedArgs.pathHint);
       }
 
-      // Prune low-relevance results (not_relevant = score >= 1.5)
-      const beforePrune = filtered.length;
-      filtered = filtered.filter(r => r.relevance !== 'not_relevant');
-      filtersApplied.prunedLowRelevance = beforePrune - filtered.length;
+      const { filtered, prunedCount } = pruneIrrelevantResults(results);
+      filtersApplied.prunedLowRelevance = prunedCount;
 
-      // Apply final limit
-      const results = filtered.slice(0, limit);
+      const finalResults = filtered.slice(0, limit);
+      log(`Found ${finalResults.length} similar chunks`);
 
-      log(`Found ${results.length} similar chunks`);
-
-      // Only include filtersApplied if any filtering occurred
       const hasFilters = filtersApplied.language || filtersApplied.pathHint || filtersApplied.prunedLowRelevance > 0;
 
       return {
         indexInfo: getIndexMetadata(),
-        results,
+        results: finalResults,
         ...(hasFilters && { filtersApplied }),
       };
     }
