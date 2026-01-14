@@ -32,13 +32,13 @@ export const pythonDetector: FrameworkDetector = {
     
     let foundIndicator = false;
     
+    // Check all indicators to provide complete evidence
     for (const indicator of indicators) {
       try {
         const filePath = path.join(fullPath, indicator.file);
         await fs.access(filePath);
         result.evidence.push(`Found ${indicator.display}`);
         foundIndicator = true;
-        break; // Found at least one indicator
       } catch {
         // File doesn't exist, continue checking
       }
@@ -117,7 +117,7 @@ export const pythonDetector: FrameworkDetector = {
         }
       }
       
-      // Check for common frameworks
+      // Check for common frameworks - collect all detected frameworks
       const frameworks = [
         { pattern: /django/i, display: 'Django' },
         { pattern: /flask/i, display: 'Flask' },
@@ -129,7 +129,6 @@ export const pythonDetector: FrameworkDetector = {
       for (const framework of frameworks) {
         if (framework.pattern.test(content)) {
           result.evidence.push(`${framework.display} detected`);
-          break;
         }
       }
     } catch {

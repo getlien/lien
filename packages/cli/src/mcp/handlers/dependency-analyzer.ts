@@ -613,8 +613,11 @@ function extractSnippet(lines: string[], callLine: number, startLine: number, sy
   }
   
   // If direct line is blank, search for nearby non-blank context
+  // Limit search radius to 5 lines to ensure contextual relevance
+  const searchRadius = 5;
+  
   // Search backwards first (prefer earlier lines)
-  for (let i = lineIndex - 1; i >= 0; i--) {
+  for (let i = lineIndex - 1; i >= Math.max(0, lineIndex - searchRadius); i--) {
     const candidate = lines[i].trim();
     if (candidate) {
       return candidate;
@@ -622,7 +625,7 @@ function extractSnippet(lines: string[], callLine: number, startLine: number, sy
   }
   
   // Search forwards
-  for (let i = lineIndex + 1; i < lines.length; i++) {
+  for (let i = lineIndex + 1; i < Math.min(lines.length, lineIndex + searchRadius + 1); i++) {
     const candidate = lines[i].trim();
     if (candidate) {
       return candidate;

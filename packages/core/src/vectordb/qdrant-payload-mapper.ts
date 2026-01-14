@@ -158,10 +158,10 @@ export class QdrantPayloadMapper {
   }
 
   /**
-   * Parse JSON safely, returning undefined on error.
+   * Parse JSON safely, returning default value on error or missing input.
    */
   private safeJsonParse<T>(json: string | undefined, defaultValue: T): T {
-    if (!json || json === '{}' || json === '[]') {
+    if (json == null) {
       return defaultValue;
     }
     try {

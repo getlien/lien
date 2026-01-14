@@ -468,10 +468,17 @@ function processPythonFromImport(node: Parser.SyntaxNode): { importPath: string;
     // Aliased imports: "from module import foo as bar"
     else if (child.type === 'aliased_import') {
       const identifierChildren = child.namedChildren.filter(c => c.type === 'identifier');
-      // Use the alias name (last identifier, after 'as'), or fall back to the original name
-      const aliasIdentifier = identifierChildren[identifierChildren.length - 1];
       const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
-      const symbolName = aliasIdentifier?.text || dottedName?.text;
+      let symbolName: string | undefined;
+
+      if (identifierChildren.length >= 2) {
+        // When we have both original and alias identifiers, use the alias (last identifier, after 'as')
+        symbolName = identifierChildren[identifierChildren.length - 1]?.text;
+      } else {
+        // Fallback: prefer the dotted_name text, or the single identifier if present
+        symbolName = dottedName?.text || identifierChildren[0]?.text;
+      }
+
       if (symbolName) {
         symbols.push(symbolName);
       }
