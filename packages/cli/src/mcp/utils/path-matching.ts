@@ -114,18 +114,6 @@ export function matchesFile(normalizedImport: string, normalizedTarget: string):
 }
 
 /**
- * Checks if a Python dotted module path matches a file path.
- * 
- * Python imports use dotted paths like "django.http" which should match:
- * - django/http/__init__.py (package)
- * - django/http/response.py (module within package)
- * - django/http.py (direct module, less common)
- * 
- * @param importPath - The import path (may contain dots)
- * @param targetPath - The normalized file path
- * @returns True if the Python module matches the file path
- */
-/**
  * Check if target exactly matches the module path (handles __init__.py)
  */
 function matchesDirectPythonModule(moduleAsPath: string, targetWithoutPy: string): boolean {
@@ -169,6 +157,18 @@ function matchesWithSourcePrefix(moduleAsPath: string, targetWithoutPy: string):
   return false;
 }
 
+/**
+ * Checks if a Python dotted module path matches a file path.
+ * 
+ * Python imports use dotted paths like "django.http" which should match:
+ * - django/http/__init__.py (package)
+ * - django/http/response.py (module within package)
+ * - django/http.py (direct module, less common)
+ * 
+ * @param importPath - The import path (may contain dots)
+ * @param targetPath - The normalized file path
+ * @returns True if the Python module matches the file path
+ */
 function matchesPythonModule(importPath: string, targetPath: string): boolean {
   // Only apply if the import contains dots (Python module syntax)
   if (!importPath.includes('.')) {
