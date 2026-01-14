@@ -85,9 +85,10 @@ function logRiskAssessment(
     } else {
       // Files import the symbol but no call sites were tracked
       // This happens when call site tracking isn't available for those chunks
+      // (e.g., chunks without complexity analysis)
       log(
-        `Found ${analysis.dependents.length} files importing '${symbol}' (no call sites tracked) ` +
-        `${prodTest} - risk: ${riskLevel}`
+        `Found ${analysis.dependents.length} files importing '${symbol}' ` +
+        `${prodTest} - risk: ${riskLevel} (Note: Call site tracking unavailable for these chunks)`
       );
     }
   } else {
