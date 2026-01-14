@@ -53,10 +53,6 @@ interface DatabaseRecord {
 }
 
 /**
- * Transform a chunk's data into a database record.
- * Handles missing/empty metadata by providing defaults for Arrow type inference.
- */
-/**
  * Serialize importedSymbols map into parallel arrays for Arrow storage.
  * Returns { paths: string[], names: string[] } where names[i] is JSON-encoded array
  * of symbols imported from paths[i].
@@ -101,6 +97,11 @@ function serializeCallSites(callSites?: Array<{ symbol: string; line: number }>)
   };
 }
 
+/**
+ * Transform a chunk's data into a database record.
+ * Serializes complex metadata fields and handles missing/empty data by providing
+ * placeholder values for Arrow type inference.
+ */
 function transformChunkToRecord(
   vector: Float32Array,
   content: string,
