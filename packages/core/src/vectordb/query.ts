@@ -98,8 +98,9 @@ function isValidRecord(r: DBRecord): boolean {
 }
 
 /**
- * Check if a string array field has valid (non-empty) entries.
- * LanceDB stores empty arrays as [''] which we need to filter out.
+ * Check if a string array has valid (non-empty) entries.
+ * LanceDB stores empty string arrays as [''] which we need to filter out.
+ * This is specifically for string arrays (cf. hasValidNumberEntries for number arrays).
  */
 function hasValidStringEntries(arr: string[] | undefined): boolean {
   return Boolean(arr && arr.length > 0 && arr[0] !== '');
@@ -152,6 +153,10 @@ function toPlainArray<T>(arr: any): T[] | undefined {
 
 /**
  * Deserialize importedSymbols from parallel arrays stored in DB.
+ * 
+ * @param paths - Array of import paths (keys from importedSymbols map)
+ * @param names - Array of JSON-encoded symbol arrays (values from importedSymbols map)
+ * @returns Record mapping import paths to symbol arrays, or undefined if no valid data
  */
 function deserializeImportedSymbols(
   paths?: unknown,
@@ -188,6 +193,10 @@ function deserializeImportedSymbols(
 
 /**
  * Deserialize callSites from parallel arrays stored in DB.
+ * 
+ * @param symbols - Array of symbol names called at each site
+ * @param lines - Array of line numbers for each call site (parallel to symbols)
+ * @returns Array of call site objects with symbol and line, or undefined if no valid data
  */
 function deserializeCallSites(
   symbols?: unknown,
