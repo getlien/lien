@@ -170,8 +170,9 @@ function matchesPythonModule(importPath: string, targetPath: string): boolean {
   if (moduleIndex >= 0) {
     const prefix = targetWithoutPy.substring(0, moduleIndex);
     // Prefix should be empty or a single directory (e.g., "src/")
+    // Also verify prefix ends with '/' or is empty to avoid partial matches like "foo/bardjango/http"
     const prefixSlashes = (prefix.match(/\//g) || []).length;
-    if (prefixSlashes <= 1) {
+    if (prefixSlashes <= 1 && (prefix === '' || prefix.endsWith('/'))) {
       // Also verify it's at a directory boundary
       if (moduleIndex === 0 || targetWithoutPy[moduleIndex - 1] === '/') {
         return true;

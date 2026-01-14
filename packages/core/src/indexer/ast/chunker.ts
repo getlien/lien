@@ -342,6 +342,7 @@ function createChunk(
       // attach them to every chunk from the same file (including "uncovered" chunks).
       // This duplicates some metadata, but greatly simplifies dependency analysis,
       // since consumers can inspect a single chunk in isolation without additional lookups.
+      // This increases storage overhead but is acceptable given typical file sizes and chunk counts.
       ...(fileExports && fileExports.length > 0 && { exports: fileExports }),
       ...(importedSymbols && Object.keys(importedSymbols).length > 0 && { importedSymbols }),
       ...(callSites && callSites.length > 0 && { callSites }),

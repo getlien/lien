@@ -164,7 +164,11 @@ function deserializeImportedSymbols(
   }
   // Warn if arrays are mismatched (could indicate data corruption)
   if (pathsArr.length !== namesArr.length) {
-    console.warn(`deserializeImportedSymbols: array length mismatch (paths: ${pathsArr.length}, names: ${namesArr.length})`);
+    const missingCount = Math.abs(pathsArr.length - namesArr.length);
+    console.warn(
+      `deserializeImportedSymbols: array length mismatch (paths: ${pathsArr.length}, names: ${namesArr.length}). ` +
+      `Proceeding with ${Math.min(pathsArr.length, namesArr.length)} entries; ${missingCount} entr${missingCount === 1 ? 'y' : 'ies'} will be skipped.`
+    );
   }
   const result: Record<string, string[]> = {};
   for (let i = 0; i < pathsArr.length && i < namesArr.length; i++) {
@@ -196,7 +200,11 @@ function deserializeCallSites(
   }
   // Warn if arrays are mismatched (could indicate data corruption)
   if (symbolsArr.length !== linesArr.length) {
-    console.warn(`deserializeCallSites: array length mismatch (symbols: ${symbolsArr.length}, lines: ${linesArr.length})`);
+    const missingCount = Math.abs(symbolsArr.length - linesArr.length);
+    console.warn(
+      `deserializeCallSites: array length mismatch (symbols: ${symbolsArr.length}, lines: ${linesArr.length}). ` +
+      `Proceeding with ${Math.min(symbolsArr.length, linesArr.length)} entries; ${missingCount} entr${missingCount === 1 ? 'y' : 'ies'} will be skipped.`
+    );
   }
   const result: Array<{ symbol: string; line: number }> = [];
   for (let i = 0; i < symbolsArr.length && i < linesArr.length; i++) {

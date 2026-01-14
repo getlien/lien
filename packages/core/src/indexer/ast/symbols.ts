@@ -465,12 +465,16 @@ function processPythonFromImport(node: Parser.SyntaxNode): { importPath: string;
     else if (child.type === 'dotted_name' && foundModule) {
       symbols.push(child.text);
     }
-    // Aliased imports: "import foo as bar"
+    // Aliased imports: "from module import foo as bar"
     else if (child.type === 'aliased_import') {
-      const aliasIdentifier = child.namedChildren.find(c => c.type === 'identifier');
+      const identifierChildren = child.namedChildren.filter(c => c.type === 'identifier');
+      // Use the alias name (last identifier, after 'as'), or fall back to the original name
+      const aliasIdentifier = identifierChildren[identifierChildren.length - 1];
       const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
-      // Use the alias name, or fall back to the original name
-      symbols.push(aliasIdentifier?.text || dottedName?.text || '');
+      const symbolName = aliasIdentifier?.text || dottedName?.text;
+      if (symbolName) {
+        symbols.push(symbolName);
+      }
     }
   }
   

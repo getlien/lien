@@ -556,6 +556,8 @@ function fileImportsSymbol(
         // so namespace imports will correctly match when the call site uses the symbol.
         // This could produce false positives if another symbol with the same name exists
         // from a different module, but in practice this is rare.
+        // TODO: Track namespace aliases at call sites (e.g., 'utils.foo' instead of just 'foo')
+        //       to enable more precise matching and further reduce these false positives.
         if (symbols.some(s => s.startsWith('* as '))) return true;
       }
     }
@@ -599,6 +601,8 @@ function extractSnippet(lines: string[], callLine: number, startLine: number, sy
   const placeholder = `${symbolName}(...)`;
   
   if (lineIndex < 0 || lineIndex >= lines.length) {
+    // This can happen when call site line is outside chunk boundaries (edge case)
+    // Not necessarily an error - could be chunk boundary misalignment
     return placeholder;
   }
   
