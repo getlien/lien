@@ -447,6 +447,23 @@ export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<stri
 }
 
 /**
+ * Extract symbol name from Python aliased import node.
+ * Handles "from module import foo as bar" by extracting the alias (bar).
+ */
+function extractPythonAliasedSymbol(node: Parser.SyntaxNode): string | undefined {
+  const identifierChildren = node.namedChildren.filter(c => c.type === 'identifier');
+  const dottedName = node.namedChildren.find(c => c.type === 'dotted_name');
+
+  if (identifierChildren.length >= 2) {
+    // When we have both original and alias identifiers, use the alias (last identifier, after 'as')
+    return identifierChildren[identifierChildren.length - 1]?.text;
+  } else {
+    // Fallback: prefer the dotted_name text, or the single identifier if present
+    return dottedName?.text || identifierChildren[0]?.text;
+  }
+}
+
+/**
  * Process Python from...import statement.
  * e.g., "from utils.validate import validateEmail, validatePhone"
  */
@@ -470,18 +487,7 @@ function processPythonFromImport(node: Parser.SyntaxNode): { importPath: string;
     }
     // Aliased imports: "from module import foo as bar"
     else if (child.type === 'aliased_import') {
-      const identifierChildren = child.namedChildren.filter(c => c.type === 'identifier');
-      const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
-      let symbolName: string | undefined;
-
-      if (identifierChildren.length >= 2) {
-        // When we have both original and alias identifiers, use the alias (last identifier, after 'as')
-        symbolName = identifierChildren[identifierChildren.length - 1]?.text;
-      } else {
-        // Fallback: prefer the dotted_name text, or the single identifier if present
-        symbolName = dottedName?.text || identifierChildren[0]?.text;
-      }
-
+      const symbolName = extractPythonAliasedSymbol(child);
       if (symbolName) {
         symbols.push(symbolName);
       }

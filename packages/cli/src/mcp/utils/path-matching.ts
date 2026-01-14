@@ -125,6 +125,50 @@ export function matchesFile(normalizedImport: string, normalizedTarget: string):
  * @param targetPath - The normalized file path
  * @returns True if the Python module matches the file path
  */
+/**
+ * Check if target exactly matches the module path (handles __init__.py)
+ */
+function matchesDirectPythonModule(moduleAsPath: string, targetWithoutPy: string): boolean {
+  return targetWithoutPy === moduleAsPath || 
+         targetWithoutPy === moduleAsPath + '/__init__' ||
+         targetWithoutPy.replace(/\/__init__$/, '') === moduleAsPath;
+}
+
+/**
+ * Check if target is a child of the module package
+ */
+function matchesParentPythonPackage(moduleAsPath: string, targetWithoutPy: string): boolean {
+  return targetWithoutPy.startsWith(moduleAsPath + '/');
+}
+
+/**
+ * Check if module path appears as a suffix in the target path
+ */
+function matchesSuffixPythonModule(moduleAsPath: string, targetWithoutPy: string): boolean {
+  return targetWithoutPy.endsWith('/' + moduleAsPath) || 
+         targetWithoutPy.endsWith('/' + moduleAsPath + '/__init__');
+}
+
+/**
+ * Check if module appears after a single source directory prefix
+ */
+function matchesWithSourcePrefix(moduleAsPath: string, targetWithoutPy: string): boolean {
+  const moduleIndex = targetWithoutPy.indexOf(moduleAsPath);
+  if (moduleIndex < 0) return false;
+  
+  const prefix = targetWithoutPy.substring(0, moduleIndex);
+  const prefixSlashes = (prefix.match(/\//g) || []).length;
+  
+  // Prefix should be empty or a single directory (e.g., "src/")
+  // Also verify prefix ends with '/' or is empty to avoid partial matches
+  if (prefixSlashes <= 1 && (prefix === '' || prefix.endsWith('/'))) {
+    // Verify it's at a directory boundary
+    return moduleIndex === 0 || targetWithoutPy[moduleIndex - 1] === '/';
+  }
+  
+  return false;
+}
+
 function matchesPythonModule(importPath: string, targetPath: string): boolean {
   // Only apply if the import contains dots (Python module syntax)
   if (!importPath.includes('.')) {
@@ -137,56 +181,11 @@ function matchesPythonModule(importPath: string, targetPath: string): boolean {
   // Strip .py extension from target for comparison
   const targetWithoutPy = targetPath.replace(/\.py$/, '');
   
-  // Strategy 1: Direct module match
-  // django.http → django/http matches django/http/__init__.py (targetWithoutPy = django/http/__init__)
-  // or django/http.py (targetWithoutPy = django/http)
-  if (targetWithoutPy === moduleAsPath || targetWithoutPy === moduleAsPath + '/__init__') {
-    return true;
-  }
-  
-  // Strategy 2: Parent package match
-  // django.http → django/http matches django/http/response.py
-  // The target path should start with the module path followed by /
-  if (targetWithoutPy.startsWith(moduleAsPath + '/')) {
-    return true;
-  }
-  
-  // Strategy 3: Check if module path is a suffix of target
-  // This handles cases like from django.http import HttpResponse
-  // where the actual file is somewhere/django/http/response.py
-  if (targetWithoutPy.endsWith('/' + moduleAsPath) || 
-      targetWithoutPy.endsWith('/' + moduleAsPath + '/__init__')) {
-    return true;
-  }
-  
-  // Strategy 4: Module path appears after at most one prefix directory
-  // This handles common patterns like:
-  //   - src/django/http/response → matches django.http (src/ is source prefix)
-  //   - project/myapp/models/__init__ → matches myapp.models (project/ is source prefix)
-  // But NOT:
-  //   - tests/integration/utils/helpers/test_foo → should NOT match utils.helpers
-  //     (tests/integration/ is a package, not a source prefix)
-  const moduleIndex = targetWithoutPy.indexOf(moduleAsPath);
-  if (moduleIndex >= 0) {
-    const prefix = targetWithoutPy.substring(0, moduleIndex);
-    // Prefix should be empty or a single directory (e.g., "src/")
-    // Also verify prefix ends with '/' or is empty to avoid partial matches like "foo/bardjango/http"
-    const prefixSlashes = (prefix.match(/\//g) || []).length;
-    if (prefixSlashes <= 1 && (prefix === '' || prefix.endsWith('/'))) {
-      // Also verify it's at a directory boundary
-      if (moduleIndex === 0 || targetWithoutPy[moduleIndex - 1] === '/') {
-        return true;
-      }
-    }
-  }
-  
-  // Strategy 5: Handle __init__ suffix removal for exact match
-  const targetWithoutInit = targetWithoutPy.replace(/\/__init__$/, '');
-  if (targetWithoutInit === moduleAsPath) {
-    return true;
-  }
-  
-  return false;
+  // Try matching strategies in order of specificity
+  return matchesDirectPythonModule(moduleAsPath, targetWithoutPy) ||
+         matchesParentPythonPackage(moduleAsPath, targetWithoutPy) ||
+         matchesSuffixPythonModule(moduleAsPath, targetWithoutPy) ||
+         matchesWithSourcePrefix(moduleAsPath, targetWithoutPy);
 }
 
 /**
