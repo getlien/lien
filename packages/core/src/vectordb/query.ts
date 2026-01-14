@@ -106,8 +106,9 @@ function hasValidStringEntries(arr: string[] | undefined): boolean {
 }
 
 /**
- * Check if a number array field has valid (non-zero) entries.
- * LanceDB stores empty arrays as [0] which we need to filter out.
+ * Check if a number array has valid entries (filters out placeholder values).
+ * When there's no data, serializeCallSites() returns [0] as a sentinel value.
+ * This function checks if the array contains real data (line numbers > 0).
  */
 function hasValidNumberEntries(arr: number[] | undefined): boolean {
   return Boolean(arr && arr.length > 0 && arr[0] !== 0);

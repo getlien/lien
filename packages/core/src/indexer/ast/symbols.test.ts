@@ -587,6 +587,47 @@ from json import loads, dumps
       expect(importedSymbols['json']).toContain('loads');
       expect(importedSymbols['json']).toContain('dumps');
     });
+
+    it('should extract Python regular imports', () => {
+      const content = `
+import os
+import sys
+import pathlib
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      expect(importedSymbols['os']).toContain('os');
+      expect(importedSymbols['sys']).toContain('sys');
+      expect(importedSymbols['pathlib']).toContain('pathlib');
+    });
+
+    it('should extract Python aliased regular imports', () => {
+      const content = `
+import numpy as np
+import pandas as pd
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      expect(importedSymbols['numpy']).toContain('np');
+      expect(importedSymbols['pandas']).toContain('pd');
+    });
+
+    it('should extract Python dotted module imports', () => {
+      const content = `
+import os.path
+import xml.etree.ElementTree
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      expect(importedSymbols['os.path']).toContain('os.path');
+      expect(importedSymbols['xml.etree.ElementTree']).toContain('xml.etree.ElementTree');
+    });
   });
 });
 

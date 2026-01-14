@@ -420,9 +420,17 @@ export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<stri
     
     let result: { importPath: string; symbols: string[] } | null = null;
     
-    // TypeScript/JavaScript imports
+    // TypeScript/JavaScript imports vs Python imports both use 'import_statement' type
+    // Distinguish by checking for TypeScript/JavaScript-specific structure (source field)
     if (node.type === 'import_statement') {
-      result = processImportStatement(node);
+      const sourceNode = node.childForFieldName('source');
+      if (sourceNode) {
+        // TypeScript/JavaScript: has a 'source' field
+        result = processImportStatement(node);
+      } else {
+        // Python regular import: no 'source' field
+        result = processPythonImport(node);
+      }
     }
     // Python: from...import statements
     else if (node.type === 'import_from_statement') {
@@ -449,18 +457,68 @@ export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<stri
 /**
  * Extract symbol name from Python aliased import node.
  * Handles "from module import foo as bar" by extracting the alias (bar).
+ * 
+ * AST structure for "from module import Optional as Opt":
+ * - aliased_import contains: dotted_name('Optional') and identifier('Opt')
+ * - The alias is always the last identifier child
  */
 function extractPythonAliasedSymbol(node: Parser.SyntaxNode): string | undefined {
   const identifierChildren = node.namedChildren.filter(c => c.type === 'identifier');
   const dottedName = node.namedChildren.find(c => c.type === 'dotted_name');
 
-  if (identifierChildren.length >= 2) {
-    // When we have both original and alias identifiers, use the alias (last identifier, after 'as')
+  // If there's at least one identifier, it's the alias (after 'as')
+  if (identifierChildren.length >= 1) {
     return identifierChildren[identifierChildren.length - 1]?.text;
-  } else {
-    // Fallback: prefer the dotted_name text, or the single identifier if present
-    return dottedName?.text || identifierChildren[0]?.text;
   }
+  
+  // No alias found, return the original symbol name
+  return dottedName?.text;
+}
+
+/**
+ * Process Python regular import statement.
+ * e.g., "import os", "import os as system", "import os, sys"
+ * 
+ * Note: For aliased imports like "import numpy as np", we use the original module name
+ * as the import path and the alias as the symbol (so it maps to how it's used in code).
+ */
+function processPythonImport(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  const result: Array<{ moduleName: string; symbolName: string }> = [];
+  
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    
+    // Regular module import: "import os"
+    if (child.type === 'dotted_name' || child.type === 'identifier') {
+      const moduleName = child.text;
+      result.push({ moduleName, symbolName: moduleName });
+    }
+    // Aliased import: "import os as system"
+    else if (child.type === 'aliased_import') {
+      // Extract the original module name and the alias
+      const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
+      const identifiers = child.namedChildren.filter(c => c.type === 'identifier');
+      
+      const moduleName = dottedName?.text || identifiers[0]?.text;
+      const aliasName = identifiers.length >= 2 
+        ? identifiers[identifiers.length - 1]?.text  // The alias (after 'as')
+        : identifiers[0]?.text;  // Fallback
+      
+      if (moduleName && aliasName) {
+        result.push({ moduleName, symbolName: aliasName });
+      }
+    }
+  }
+  
+  if (result.length === 0) return null;
+  
+  // For regular imports, use the first module name as the import path
+  // and the symbol name (or alias) as what to track
+  return { 
+    importPath: result[0].moduleName, 
+    symbols: result.map(r => r.symbolName) 
+  };
 }
 
 /**
