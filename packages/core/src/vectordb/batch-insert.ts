@@ -61,10 +61,10 @@ interface DatabaseRecord {
  * Returns { paths: string[], names: string[] } where names[i] is JSON-encoded array
  * of symbols imported from paths[i].
  * 
- * Note: Returns single-element arrays with empty strings for missing data.
- * This is required for Arrow type inference - empty arrays cause schema inference
- * failures. The deserialization in query.ts uses hasValidStringEntries() to filter
- * out these placeholder values.
+ * Note: For missing data, this function uses single-element placeholder arrays with
+ * empty strings. This is required for Arrow type inference - empty arrays cause
+ * schema inference failures. The deserialization in query.ts uses
+ * hasValidStringEntries() to filter out these placeholder values.
  */
 function serializeImportedSymbols(importedSymbols?: Record<string, string[]>): {
   paths: string[];

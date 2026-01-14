@@ -406,6 +406,9 @@ function extractPHPQualifiedName(clause: Parser.SyntaxNode): string | null {
  *
  * Note: Only top-level static import statements are processed. Dynamic imports
  * (e.g., `await import('./module')`) and non-top-level imports are not tracked.
+ * TypeScript/JavaScript side-effect imports without imported symbols (e.g.,
+ * `import './styles.css'`) are also not tracked and will not appear in
+ * `importedSymbols`.
  */
 export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<string, string[]> {
   const importedSymbols: Record<string, string[]> = {};
