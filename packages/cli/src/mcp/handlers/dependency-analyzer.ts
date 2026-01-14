@@ -502,8 +502,15 @@ export function groupDependentsByRepo(
  * Find usages of a specific symbol in dependent files.
  * 
  * Looks for:
- * 1. Files that import the symbol from the target file
+ * 1. Files that import the symbol from the target file (direct or namespace import)
  * 2. Chunks within those files that have call sites for the symbol
+ * 
+ * **Known Limitation - Namespace Imports:**
+ * Files with namespace imports (e.g., `import * as utils from './module'`) are included
+ * in results if they have call sites matching the symbol name. However, call sites are
+ * tracked without namespace prefixes (e.g., `utils.foo()` → tracked as `'foo'`), which
+ * can cause false positives when the same symbol name exists in multiple namespaced modules.
+ * This is rare in practice due to namespace isolation in well-structured codebases.
  */
 function findSymbolUsages(
   chunksByFile: Map<string, SearchResult[]>,
@@ -551,13 +558,27 @@ function fileImportsSymbol(
       if (matchesFile(normalizedImport, normalizedTarget)) {
         // Direct symbol import
         if (symbols.includes(targetSymbol)) return true;
-        // Namespace import (e.g., * as utils) - grants access to all exports
-        // Note: Call sites are tracked as the property name (e.g., utils.foo() → 'foo'),
-        // so namespace imports will correctly match when the call site uses the symbol.
-        // This could produce false positives if another symbol with the same name exists
-        // from a different module, but in practice this is rare.
+        
+        // Namespace import (e.g., import * as utils from './module')
+        // LIMITATION: Namespace imports grant access to all exports from the module.
+        // Call sites are tracked as the property name only (e.g., utils.foo() → 'foo'),
+        // not the qualified name. This means:
+        // - If file imports `* as utils from './validate'` and calls `utils.validateEmail()`
+        // - The call site is tracked as 'validateEmail' (without the 'utils.' prefix)
+        // - This will match correctly when searching for 'validateEmail' usages
+        // 
+        // POTENTIAL FALSE POSITIVES: If the same symbol name exists in multiple modules
+        // that are both imported via namespace imports, we cannot distinguish which one
+        // is being called. For example:
+        //   import * as utils from './utils';
+        //   import * as helpers from './helpers';
+        //   utils.format()  // tracked as 'format'
+        //   helpers.format()  // also tracked as 'format'
+        // Both would match when searching for 'format', even if only one is the target.
+        // In practice, this is rare due to namespace isolation in well-structured code.
+        //
         // TODO: Track namespace aliases at call sites (e.g., 'utils.foo' instead of just 'foo')
-        //       to enable more precise matching and further reduce these false positives.
+        //       to enable precise matching and eliminate these false positives.
         if (symbols.some(s => s.startsWith('* as '))) return true;
       }
     }
