@@ -676,11 +676,13 @@ function extractImportClauseSymbols(node: Parser.SyntaxNode, symbols: string[]):
  */
 function extractNamespaceImportSymbol(node: Parser.SyntaxNode, symbols: string[]): void {
   // Find the identifier child (the alias name)
+  // Namespace imports have exactly one alias identifier, so we return after finding it.
+  // Example: "import * as utils from './module'" → identifier is "utils"
   for (let i = 0; i < node.namedChildCount; i++) {
     const child = node.namedChild(i);
     if (child?.type === 'identifier') {
       symbols.push(`* as ${child.text}`);
-      return;
+      return; // Early return - namespace imports have only one alias
     }
   }
 }
