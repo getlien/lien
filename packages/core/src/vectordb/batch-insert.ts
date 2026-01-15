@@ -53,21 +53,26 @@ interface DatabaseRecord {
 }
 
 /**
+ * Arrow type inference placeholder for empty string arrays.
+ * Used to prevent schema inference failures when no data is present.
+ * Filtered out during deserialization via hasValidStringEntries().
+ */
+const ARROW_EMPTY_STRING_PLACEHOLDER = [''];
+
+/**
  * Serialize importedSymbols map into parallel arrays for Arrow storage.
  * Returns { paths: string[], names: string[] } where names[i] is JSON-encoded array
  * of symbols imported from paths[i].
- * 
- * Note: For missing data, this function uses single-element placeholder arrays with
- * empty strings. This is required for Arrow type inference - empty arrays cause
- * schema inference failures. The deserialization in query.ts uses
- * hasValidStringEntries() to filter out these placeholder values.
+ *
+ * Note: For missing data, this function uses ARROW_EMPTY_STRING_PLACEHOLDER.
+ * This is required for Arrow type inference - empty arrays cause schema inference failures.
  */
 function serializeImportedSymbols(importedSymbols?: Record<string, string[]>): {
   paths: string[];
   names: string[];
 } {
   if (!importedSymbols || Object.keys(importedSymbols).length === 0) {
-    return { paths: [''], names: [''] };
+    return { paths: ARROW_EMPTY_STRING_PLACEHOLDER, names: ARROW_EMPTY_STRING_PLACEHOLDER };
   }
   const entries = Object.entries(importedSymbols);
   return {
@@ -77,19 +82,25 @@ function serializeImportedSymbols(importedSymbols?: Record<string, string[]>): {
 }
 
 /**
+ * Arrow type inference placeholder for empty number arrays.
+ * Used to prevent schema inference failures when no data is present.
+ * Filtered out during deserialization via hasValidNumberEntries().
+ */
+const ARROW_EMPTY_NUMBER_PLACEHOLDER = [0];
+
+/**
  * Serialize callSites into parallel arrays for Arrow storage.
  * 
- * Note: Returns single-element arrays with placeholder values (empty string, 0)
+ * Note: Uses ARROW_EMPTY_STRING_PLACEHOLDER and ARROW_EMPTY_NUMBER_PLACEHOLDER
  * for missing data. This is required for Arrow type inference - empty arrays cause
- * schema inference failures. The deserialization in query.ts filters out these
- * placeholders via hasValidStringEntries() and the line > 0 check.
+ * schema inference failures.
  */
 function serializeCallSites(callSites?: Array<{ symbol: string; line: number }>): {
   symbols: string[];
   lines: number[];
 } {
   if (!callSites || callSites.length === 0) {
-    return { symbols: [''], lines: [0] };
+    return { symbols: ARROW_EMPTY_STRING_PLACEHOLDER, lines: ARROW_EMPTY_NUMBER_PLACEHOLDER };
   }
   return {
     symbols: callSites.map(c => c.symbol),

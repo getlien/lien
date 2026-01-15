@@ -148,13 +148,10 @@ function matchesWithSourcePrefix(moduleAsPath: string, targetWithoutPy: string):
   const prefixSlashes = (prefix.match(/\//g) || []).length;
   
   // Prefix should be empty or a single directory (e.g., "src/")
-  // Also verify prefix ends with '/' or is empty to avoid partial matches
-  if (prefixSlashes <= 1 && (prefix === '' || prefix.endsWith('/'))) {
-    // Verify it's at a directory boundary
-    return moduleIndex === 0 || targetWithoutPy[moduleIndex - 1] === '/';
-  }
-  
-  return false;
+  // The check for prefix === '' || prefix.endsWith('/') ensures we're at a directory boundary:
+  // - If prefix is empty, moduleIndex is 0 (start of string)
+  // - If prefix ends with '/', then it's a valid directory separator
+  return prefixSlashes <= 1 && (prefix === '' || prefix.endsWith('/'));
 }
 
 /**

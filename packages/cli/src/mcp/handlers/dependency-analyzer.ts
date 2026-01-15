@@ -181,6 +181,19 @@ function buildDependentsList(
 /**
  * Validate that a symbol is exported from the target file.
  */
+/**
+ * Validate that the target file exports the requested symbol.
+ * 
+ * Design decision: This function only logs a warning and does NOT throw an error
+ * or return false to stop execution. This is intentional because:
+ * 
+ * 1. The export might be dynamic or conditional (not captured by static analysis)
+ * 2. False positives are better than false negatives (we want to show potential matches)
+ * 3. The user can see the warning and interpret results accordingly
+ * 
+ * The function continues to search for usages even if the symbol isn't found in exports,
+ * which may reveal re-exports, dynamic exports, or help diagnose indexing issues.
+ */
 function validateSymbolExport(
   allChunks: SearchResult[],
   normalizedTarget: string,

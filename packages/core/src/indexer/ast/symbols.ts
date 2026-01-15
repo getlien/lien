@@ -468,7 +468,8 @@ function extractPythonAliasedSymbol(node: Parser.SyntaxNode): string | undefined
 
   // If there's at least one identifier, it's the alias (after 'as')
   if (identifierChildren.length >= 1) {
-    return identifierChildren[identifierChildren.length - 1]?.text;
+    // Length check guarantees element exists, no optional chaining needed
+    return identifierChildren[identifierChildren.length - 1].text;
   }
   
   // No alias found, return the original symbol name
