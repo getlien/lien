@@ -27,11 +27,18 @@ const extractorRegistry: Record<SupportedLanguage, LanguageExportExtractor> = {
  * 
  * @param language - Programming language
  * @returns Language-specific export extractor
- * @throws Error if language is not supported
+ * @throws Error if language is not supported (defensive check for runtime safety)
+ * 
+ * Note: While TypeScript's type system guarantees all SupportedLanguage values
+ * have corresponding extractors, this runtime check provides defense against:
+ * - Type system bypasses (e.g., `as any` casting elsewhere)
+ * - JavaScript consumers without type checking
+ * - Future refactoring errors during registry modifications
  */
 export function getExtractor(language: SupportedLanguage): LanguageExportExtractor {
   const extractor = extractorRegistry[language];
   
+  // Defensive runtime check - see function documentation
   if (!extractor) {
     throw new Error(`No export extractor available for language: ${language}`);
   }

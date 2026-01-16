@@ -753,12 +753,12 @@ function extractNamedImportSymbols(node: Parser.SyntaxNode, symbols: string[]): 
  * - Dynamic or conditional exports/declarations are not detected.
  * 
  * @param rootNode - AST root node
- * @param language - Programming language
+ * @param language - Programming language (defaults to 'javascript' for backwards compatibility)
  * @returns Array of exported symbol names
  */
-export function extractExports(rootNode: Parser.SyntaxNode, language?: string): string[] {
+export function extractExports(rootNode: Parser.SyntaxNode, language?: SupportedLanguage): string[] {
   // Default to JavaScript if no language specified (for backwards compatibility)
-  const lang = (language || 'javascript') as SupportedLanguage;
+  const lang: SupportedLanguage = language ?? 'javascript';
   const extractor = getExtractor(lang);
   return extractor.extractExports(rootNode);
 }
