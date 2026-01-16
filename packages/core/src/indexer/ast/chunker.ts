@@ -54,7 +54,7 @@ function prepareASTContext(
     lines: content.split('\n'),
     fileImports: extractImports(rootNode),
     importedSymbols: extractImportedSymbols(rootNode),
-    fileExports: extractExports(rootNode),
+    fileExports: extractExports(rootNode, language),
     traverser: getTraverser(language),
   };
 }
