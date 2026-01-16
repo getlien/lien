@@ -22,11 +22,25 @@ export function createReindexStateManager() {
   let activeOperations = 0;
 
   return {
+    /**
+     * Get a copy of the current reindex state.
+     * Returns a new object to prevent external mutation.
+     */
     getState: () => ({ ...state }),
     
+    /**
+     * Start a new reindex operation.
+     * 
+     * **Important**: Silently ignores empty or null file arrays without incrementing
+     * activeOperations. This is intentional - if there's no work to do, no operation
+     * is started. Callers should check for empty arrays before calling if they need
+     * to track "attempted" operations.
+     * 
+     * @param files - Array of file paths to reindex. Empty/null arrays are ignored.
+     */
     startReindex: (files: string[]) => {
       if (!files || files.length === 0) {
-        return;
+        return; // No work to do, don't increment operation counter
       }
       
       activeOperations += 1;
@@ -41,6 +55,14 @@ export function createReindexStateManager() {
       }
     },
     
+    /**
+     * Mark a reindex operation as complete.
+     * 
+     * Logs a warning if called without a matching startReindex.
+     * Only clears state when all concurrent operations finish.
+     * 
+     * @param durationMs - Duration of the reindex operation in milliseconds
+     */
     completeReindex: (durationMs: number) => {
       if (activeOperations === 0) {
         console.warn('[Lien] completeReindex called without matching startReindex');
@@ -58,6 +80,12 @@ export function createReindexStateManager() {
       }
     },
     
+    /**
+     * Mark a reindex operation as failed.
+     * 
+     * Logs a warning if called without a matching startReindex.
+     * Only clears state when all concurrent operations finish/fail.
+     */
     failReindex: () => {
       if (activeOperations === 0) {
         console.warn('[Lien] failReindex called without matching startReindex');

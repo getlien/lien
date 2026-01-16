@@ -3,10 +3,25 @@ import path from 'path';
 import { detectAllFrameworks, getFrameworkDetector } from '@liendev/core';
 import type { FrameworkConfig } from '@liendev/core';
 
+/**
+ * File change event emitted by the watcher.
+ * 
+ * For individual events (add/change/unlink), use the `filepath` field.
+ * For batch events, use the array fields (added/modified/deleted).
+ * 
+ * @property type - Event type: 'add', 'change', 'unlink', or 'batch'
+ * @property filepath - Single file path. For batch events, this contains the first
+ *                      file from the batch for backwards compatibility only.
+ *                      **Do not rely on this field for batch events** - use the
+ *                      array fields instead.
+ * @property added - Array of added files (batch events only)
+ * @property modified - Array of modified files (batch events only)
+ * @property deleted - Array of deleted files (batch events only)
+ */
 export interface FileChangeEvent {
   type: 'add' | 'change' | 'unlink' | 'batch';
   filepath: string;
-  // Batch fields (optional for backwards compatibility)
+  // Batch fields - use these for 'batch' type events
   added?: string[];
   modified?: string[];
   deleted?: string[];
