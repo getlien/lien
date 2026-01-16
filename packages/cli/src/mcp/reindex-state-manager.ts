@@ -24,9 +24,9 @@ export function createReindexStateManager() {
   return {
     /**
      * Get a copy of the current reindex state.
-     * Returns a new object to prevent external mutation.
+     * Returns a deep copy to prevent external mutation of nested arrays.
      */
-    getState: () => ({ ...state }),
+    getState: () => ({ ...state, pendingFiles: [...state.pendingFiles] }),
     
     /**
      * Start a new reindex operation.

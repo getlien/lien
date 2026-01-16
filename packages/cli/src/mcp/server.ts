@@ -132,7 +132,8 @@ async function handleGitStartup(
 }
 
 /**
- * Create background polling interval for git changes
+ * Create background polling interval for git changes.
+ * Uses reindexStateManager to track and prevent concurrent operations.
  */
 function createGitPollInterval(
   gitTracker: GitStateTracker,
@@ -142,19 +143,17 @@ function createGitPollInterval(
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): NodeJS.Timeout {
-  let reindexInProgress = false;
-  
   return setInterval(async () => {
     try {
       const changedFiles = await gitTracker.detectChanges();
       if (changedFiles && changedFiles.length > 0) {
-        if (reindexInProgress) {
+        // Check if a reindex is already in progress (file watch or previous git poll)
+        if (reindexStateManager.getState().inProgress) {
           log('Background reindex already in progress, skipping git poll cycle', 'debug');
           return;
         }
         
         const startTime = Date.now();
-        reindexInProgress = true;
         reindexStateManager.startReindex(changedFiles);
         log(`🌿 Git change detected: ${changedFiles.length} files changed`);
         
@@ -166,8 +165,6 @@ function createGitPollInterval(
         } catch (error) {
           reindexStateManager.failReindex();
           log(`Git background reindex failed: ${error}`, 'warning');
-        } finally {
-          reindexInProgress = false;
         }
       }
     } catch (error) {
