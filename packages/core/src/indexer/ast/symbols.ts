@@ -1,6 +1,7 @@
 import type Parser from 'tree-sitter';
-import type { SymbolInfo } from './types.js';
+import type { SymbolInfo, SupportedLanguage } from './types.js';
 import { calculateComplexity } from './complexity/index.js';
+import { getExtractor } from './extractors/index.js';
 
 /**
  * Type for symbol extractor functions
@@ -727,31 +728,6 @@ function extractNamedImportSymbols(node: Parser.SyntaxNode, symbols: string[]): 
 }
 
 /**
- * Extract symbols from a single export statement.
- */
-function extractExportStatementSymbols(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
-  // Check for default export
-  const defaultKeyword = node.children.find(c => c.type === 'default');
-  if (defaultKeyword) {
-    addExport('default');
-  }
-  
-  // Check for declaration (export function/const/class)
-  const declaration = node.childForFieldName('declaration');
-  if (declaration) {
-    extractDeclarationExports(declaration, addExport);
-  }
-  
-  // Check for export clause (export { foo, bar })
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (child?.type === 'export_clause') {
-      extractExportClauseSymbols(child, addExport);
-    }
-  }
-}
-
-/**
  * Extract exported symbols from a file.
  * 
  * Returns array of exported symbol names like: ['validateEmail', 'validatePhone', 'default']
@@ -777,222 +753,14 @@ function extractExportStatementSymbols(node: Parser.SyntaxNode, addExport: (name
  * - Dynamic or conditional exports/declarations are not detected.
  * 
  * @param rootNode - AST root node
- * @param language - Programming language (required for PHP/Python)
+ * @param language - Programming language
  * @returns Array of exported symbol names
  */
 export function extractExports(rootNode: Parser.SyntaxNode, language?: string): string[] {
-  // Dispatch to language-specific implementation
-  switch (language) {
-    case 'php':
-      return extractPHPExports(rootNode);
-    case 'python':
-      return extractPythonExports(rootNode);
-    default:
-      // JavaScript/TypeScript
-      return extractJSExports(rootNode);
-  }
-}
-
-/**
- * Extract exports from JavaScript/TypeScript files.
- * 
- * Handles explicit export statements:
- * - Named exports: export { foo, bar }
- * - Declaration exports: export function foo() {}
- * - Default exports: export default ...
- * - Re-exports: export { foo } from './module'
- */
-function extractJSExports(rootNode: Parser.SyntaxNode): string[] {
-  const exports: string[] = [];
-  const seen = new Set<string>();
-  
-  const addExport = (name: string) => {
-    if (name && !seen.has(name)) {
-      seen.add(name);
-      exports.push(name);
-    }
-  };
-  
-  // Process only top-level export statements
-  for (let i = 0; i < rootNode.namedChildCount; i++) {
-    const child = rootNode.namedChild(i);
-    if (child?.type === 'export_statement') {
-      extractExportStatementSymbols(child, addExport);
-    }
-  }
-  
-  return exports;
-}
-
-/**
- * Extract exports from PHP files.
- * 
- * PHP doesn't have explicit export syntax. All top-level declarations are
- * considered exported (accessible via `use` statements):
- * - Classes: class User {}
- * - Traits: trait HasTimestamps {}
- * - Interfaces: interface Repository {}
- * - Functions: function helper() {}
- * - Namespaced declarations are also tracked
- */
-function extractPHPExports(rootNode: Parser.SyntaxNode): string[] {
-  const exports: string[] = [];
-  const seen = new Set<string>();
-  
-  for (let i = 0; i < rootNode.namedChildCount; i++) {
-    const child = rootNode.namedChild(i);
-    if (!child) continue;
-    
-    const childExports = extractPHPExportsFromNode(child);
-    childExports.forEach(exp => {
-      if (exp && !seen.has(exp)) {
-        seen.add(exp);
-        exports.push(exp);
-      }
-    });
-  }
-  
-  return exports;
-}
-
-/**
- * Extract PHP exports from a single AST node.
- * Handles both direct declarations and namespace definitions.
- */
-function extractPHPExportsFromNode(node: Parser.SyntaxNode): string[] {
-  if (node.type === 'namespace_definition') {
-    return extractPHPExportsFromNamespace(node);
-  }
-  
-  const name = extractPHPExportableDeclaration(node);
-  return name ? [name] : [];
-}
-
-/**
- * Extract exports from within a PHP namespace definition.
- */
-function extractPHPExportsFromNamespace(node: Parser.SyntaxNode): string[] {
-  const exports: string[] = [];
-  const body = node.childForFieldName('body');
-  
-  if (body) {
-    for (let i = 0; i < body.namedChildCount; i++) {
-      const child = body.namedChild(i);
-      if (child) {
-        const name = extractPHPExportableDeclaration(child);
-        if (name) exports.push(name);
-      }
-    }
-  }
-  
-  return exports;
-}
-
-/**
- * Extract the name from a PHP exportable declaration (class, trait, interface, function).
- */
-function extractPHPExportableDeclaration(node: Parser.SyntaxNode): string | null {
-  const exportableTypes = new Set([
-    'class_declaration',
-    'trait_declaration',
-    'interface_declaration',
-    'function_definition',
-  ]);
-  
-  if (exportableTypes.has(node.type)) {
-    const nameNode = node.childForFieldName('name');
-    return nameNode ? nameNode.text : null;
-  }
-  
-  return null;
-}
-
-/**
- * Extract exports from Python files.
- * 
- * Python doesn't have explicit export syntax. All module-level (top-level)
- * declarations are considered exported (importable by other modules):
- * - Classes: class User: ...
- * - Functions: def helper(): ...
- * - Async functions: async def fetch_data(): ...
- * 
- * Note: Only top-level definitions are tracked. Nested functions/classes
- * inside other functions are not considered exports.
- */
-function extractPythonExports(rootNode: Parser.SyntaxNode): string[] {
-  const exports: string[] = [];
-  const seen = new Set<string>();
-  
-  // Node types that represent exportable Python declarations
-  const exportableTypes = new Set([
-    'class_definition',
-    'function_definition',
-    'async_function_definition',
-  ]);
-  
-  const addExport = (name: string) => {
-    if (name && !seen.has(name)) {
-      seen.add(name);
-      exports.push(name);
-    }
-  };
-  
-  // Process only top-level nodes (module-level definitions)
-  for (let i = 0; i < rootNode.namedChildCount; i++) {
-    const child = rootNode.namedChild(i);
-    if (!child) continue;
-    
-    // Extract name from exportable node types
-    if (exportableTypes.has(child.type)) {
-      const nameNode = child.childForFieldName('name');
-      if (nameNode) addExport(nameNode.text);
-    }
-  }
-  
-  return exports;
-}
-
-/**
- * Extract exported names from a declaration (function, const, class, interface)
- */
-function extractDeclarationExports(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
-  // function/class/interface declaration
-  const nameNode = node.childForFieldName('name');
-  if (nameNode) {
-    addExport(nameNode.text);
-    return;
-  }
-  
-  // lexical_declaration: const/let declarations
-  if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'variable_declarator') {
-        const varName = child.childForFieldName('name');
-        if (varName) {
-          addExport(varName.text);
-        }
-      }
-    }
-  }
-}
-
-/**
- * Extract symbol names from export clause: export { foo, bar as baz }
- */
-function extractExportClauseSymbols(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (child?.type === 'export_specifier') {
-      // Use alias if present, otherwise use the name
-      const aliasNode = child.childForFieldName('alias');
-      const nameNode = child.childForFieldName('name');
-      const exported = aliasNode?.text || nameNode?.text;
-      if (exported) {
-        addExport(exported);
-      }
-    }
-  }
+  // Default to JavaScript if no language specified (for backwards compatibility)
+  const lang = (language || 'javascript') as SupportedLanguage;
+  const extractor = getExtractor(lang);
+  return extractor.extractExports(rootNode);
 }
 
 /**
