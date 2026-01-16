@@ -36,7 +36,7 @@ describe('Performance Benchmarks', () => {
 
     // Seed vector database with test data
     await seedTestData();
-  });
+  }, 60000); // 60 second timeout for CI (embedding model initialization is slow)
 
   afterAll(async () => {
     // Cleanup

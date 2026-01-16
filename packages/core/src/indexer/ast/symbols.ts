@@ -1,6 +1,7 @@
 import type Parser from 'tree-sitter';
-import type { SymbolInfo } from './types.js';
+import type { SymbolInfo, SupportedLanguage } from './types.js';
 import { calculateComplexity } from './complexity/index.js';
+import { getExtractor } from './extractors/index.js';
 
 /**
  * Type for symbol extractor functions
@@ -727,109 +728,39 @@ function extractNamedImportSymbols(node: Parser.SyntaxNode, symbols: string[]): 
 }
 
 /**
- * Extract symbols from a single export statement.
- */
-function extractExportStatementSymbols(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
-  // Check for default export
-  const defaultKeyword = node.children.find(c => c.type === 'default');
-  if (defaultKeyword) {
-    addExport('default');
-  }
-  
-  // Check for declaration (export function/const/class)
-  const declaration = node.childForFieldName('declaration');
-  if (declaration) {
-    extractDeclarationExports(declaration, addExport);
-  }
-  
-  // Check for export clause (export { foo, bar })
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (child?.type === 'export_clause') {
-      extractExportClauseSymbols(child, addExport);
-    }
-  }
-}
-
-/**
  * Extract exported symbols from a file.
  * 
  * Returns array of exported symbol names like: ['validateEmail', 'validatePhone', 'default']
  * 
- * Handles various export styles:
+ * Language-specific behavior:
+ * 
+ * **JavaScript/TypeScript:**
  * - Named exports: export { foo, bar }
  * - Declaration exports: export function foo() {}, export const bar = ...
  * - Default exports: export default ...
  * - Re-exports: export { foo } from './module'
  * 
+ * **PHP:**
+ * - All top-level classes, traits, interfaces, and functions are considered exported
+ * - PHP doesn't have explicit export syntax - all public declarations are accessible
+ * 
+ * **Python:**
+ * - All module-level classes and functions are considered exported
+ * - Python doesn't have explicit export syntax - module-level names are importable
+ * 
  * Limitations:
- * - Only static, top-level export statements are processed (direct children of the root node).
- * - Dynamic or conditional exports (e.g., inside if/for blocks, functions, or created programmatically)
- *   are not detected and will not be included in the returned symbol list.
+ * - Only static, top-level declarations are processed (direct children of the root node).
+ * - Dynamic or conditional exports/declarations are not detected.
+ * 
+ * @param rootNode - AST root node
+ * @param language - Programming language (defaults to 'javascript' for backwards compatibility)
+ * @returns Array of exported symbol names
  */
-export function extractExports(rootNode: Parser.SyntaxNode): string[] {
-  const exports: string[] = [];
-  const seen = new Set<string>();
-  
-  const addExport = (name: string) => {
-    if (name && !seen.has(name)) {
-      seen.add(name);
-      exports.push(name);
-    }
-  };
-  
-  // Process only top-level export statements
-  for (let i = 0; i < rootNode.namedChildCount; i++) {
-    const child = rootNode.namedChild(i);
-    if (child?.type === 'export_statement') {
-      extractExportStatementSymbols(child, addExport);
-    }
-  }
-  
-  return exports;
-}
-
-/**
- * Extract exported names from a declaration (function, const, class, interface)
- */
-function extractDeclarationExports(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
-  // function/class/interface declaration
-  const nameNode = node.childForFieldName('name');
-  if (nameNode) {
-    addExport(nameNode.text);
-    return;
-  }
-  
-  // lexical_declaration: const/let declarations
-  if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'variable_declarator') {
-        const varName = child.childForFieldName('name');
-        if (varName) {
-          addExport(varName.text);
-        }
-      }
-    }
-  }
-}
-
-/**
- * Extract symbol names from export clause: export { foo, bar as baz }
- */
-function extractExportClauseSymbols(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (child?.type === 'export_specifier') {
-      // Use alias if present, otherwise use the name
-      const aliasNode = child.childForFieldName('alias');
-      const nameNode = child.childForFieldName('name');
-      const exported = aliasNode?.text || nameNode?.text;
-      if (exported) {
-        addExport(exported);
-      }
-    }
-  }
+export function extractExports(rootNode: Parser.SyntaxNode, language?: SupportedLanguage): string[] {
+  // Default to JavaScript if no language specified (for backwards compatibility)
+  const lang: SupportedLanguage = language ?? 'javascript';
+  const extractor = getExtractor(lang);
+  return extractor.extractExports(rootNode);
 }
 
 /**
