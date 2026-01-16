@@ -16,7 +16,7 @@ import {
   createVectorDB,
   VectorDBInterface,
 } from '@liendev/core';
-import { FileWatcher } from '../watcher/index.js';
+import { FileWatcher, type FileChangeHandler } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import type { ToolContext, LogFn, LogLevel, ReindexState } from './types.js';
 
@@ -314,6 +314,41 @@ async function handleSingleFileChange(
 }
 
 /**
+ * Create file change event handler
+ */
+function createFileChangeHandler(
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  verbose: boolean | undefined,
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
+): FileChangeHandler {
+  return async (event) => {
+    const { type } = event;
+
+    if (type === 'batch') {
+      // Handle batched changes
+      const filesToIndex = [...(event.added || []), ...(event.modified || [])];
+      
+      if (filesToIndex.length > 0) {
+        await handleBatchChanges(filesToIndex, vectorDB, embeddings, verbose, log, reindexStateManager);
+      }
+      
+      // Handle deletions
+      for (const deleted of event.deleted || []) {
+        await handleFileDeletion(deleted, vectorDB, log);
+      }
+    } else if (type === 'unlink') {
+      // Fallback for single file deletion (backwards compatibility)
+      await handleFileDeletion(event.filepath, vectorDB, log);
+    } else {
+      // Fallback for single file add/change (backwards compatibility)
+      await handleSingleFileChange(event.filepath, type, vectorDB, embeddings, verbose, log, reindexStateManager);
+    }
+  };
+}
+
+/**
  * Setup file watching for real-time updates.
  * Enabled by default (or via --watch flag).
  */
@@ -336,30 +371,8 @@ async function setupFileWatching(
   const fileWatcher = new FileWatcher(rootDir);
 
   try {
-    await fileWatcher.start(async (event) => {
-      const { type } = event;
-
-      if (type === 'batch') {
-        // Handle batched changes
-        const filesToIndex = [...(event.added || []), ...(event.modified || [])];
-        
-        if (filesToIndex.length > 0) {
-          await handleBatchChanges(filesToIndex, vectorDB, embeddings, verbose, log, reindexStateManager);
-        }
-        
-        // Handle deletions
-        for (const deleted of event.deleted || []) {
-          await handleFileDeletion(deleted, vectorDB, log);
-        }
-      } else if (type === 'unlink') {
-        // Fallback for single file deletion (backwards compatibility)
-        await handleFileDeletion(event.filepath, vectorDB, log);
-      } else {
-        // Fallback for single file add/change (backwards compatibility)
-        await handleSingleFileChange(event.filepath, type, vectorDB, embeddings, verbose, log, reindexStateManager);
-      }
-    });
-
+    const handler = createFileChangeHandler(vectorDB, embeddings, verbose, log, reindexStateManager);
+    await fileWatcher.start(handler);
     log(`✓ File watching enabled (watching ${fileWatcher.getWatchedFiles().length} files)`);
     return fileWatcher;
   } catch (error) {
