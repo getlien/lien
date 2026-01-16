@@ -136,5 +136,39 @@ async def fetch():
       
       expect(exports).toEqual(['User', 'helper', 'fetch']);
     });
+    
+    it('should extract decorated class exports', () => {
+      const code = `@dataclass
+class User:
+    pass`;
+      const tree = parser.parse(code);
+      const extractor = getExtractor('python');
+      const exports = extractor.extractExports(tree.rootNode);
+      
+      expect(exports).toEqual(['User']);
+    });
+    
+    it('should extract decorated function exports', () => {
+      const code = `@property
+def get_name():
+    pass`;
+      const tree = parser.parse(code);
+      const extractor = getExtractor('python');
+      const exports = extractor.extractExports(tree.rootNode);
+      
+      expect(exports).toEqual(['get_name']);
+    });
+    
+    it('should extract multiple decorators', () => {
+      const code = `@staticmethod
+@cache
+def compute():
+    pass`;
+      const tree = parser.parse(code);
+      const extractor = getExtractor('python');
+      const exports = extractor.extractExports(tree.rootNode);
+      
+      expect(exports).toEqual(['compute']);
+    });
   });
 });

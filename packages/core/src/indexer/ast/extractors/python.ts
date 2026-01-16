@@ -39,6 +39,17 @@ export class PythonExportExtractor implements LanguageExportExtractor {
       const child = rootNode.namedChild(i);
       if (!child) continue;
       
+      // Handle decorated definitions (@dataclass, @property, etc.)
+      // Decorators wrap the actual definition in a 'decorated_definition' node
+      if (child.type === 'decorated_definition') {
+        const definition = child.childForFieldName('definition');
+        if (definition && this.exportableTypes.has(definition.type)) {
+          const nameNode = definition.childForFieldName('name');
+          if (nameNode) addExport(nameNode.text);
+        }
+        continue;
+      }
+      
       // Extract name from exportable node types
       if (this.exportableTypes.has(child.type)) {
         const nameNode = child.childForFieldName('name');
