@@ -455,14 +455,6 @@ export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<stri
 }
 
 /**
- * Extract symbol name from Python aliased import node.
- * Handles "from module import foo as bar" by extracting the alias (bar).
- * 
- * AST structure for "from module import Optional as Opt":
- * - aliased_import contains: dotted_name('Optional') and identifier('Opt')
- * - The alias is always the last identifier child
- */
-/**
  * Extract the aliased symbol from a Python aliased_import node.
  * For "from typing import Optional as Opt", returns "Opt" (the alias).
  * 

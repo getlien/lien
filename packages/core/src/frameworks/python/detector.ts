@@ -57,7 +57,7 @@ export const pythonDetector: FrameworkDetector = {
     const managePyPath = path.join(fullPath, 'manage.py');
     try {
       const content = await fs.readFile(managePyPath, 'utf-8');
-      if (content.includes('django') || content.includes('DJANGO')) {
+      if (content.includes('django.core.management') || content.includes('DJANGO_SETTINGS_MODULE')) {
         result.evidence.push('Django project detected (manage.py)');
       }
     } catch {
