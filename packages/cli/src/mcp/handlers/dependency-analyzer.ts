@@ -179,9 +179,6 @@ function buildDependentsList(
 }
 
 /**
- * Validate that a symbol is exported from the target file.
- */
-/**
  * Validate that the target file exports the requested symbol.
  * 
  * Design decision: This function only logs a warning and does NOT throw an error

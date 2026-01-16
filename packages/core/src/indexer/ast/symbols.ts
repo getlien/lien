@@ -502,12 +502,11 @@ function processPythonImport(node: Parser.SyntaxNode): { importPath: string; sym
     // Regular module import: "import os"
     if (child.type === 'dotted_name' || child.type === 'identifier') {
       const moduleName = child.text;
-      // For 'import foo.bar', 'foo' is the module, 'bar' is not a direct symbol
+      // For 'import foo.bar', track the full module path as the symbol
       // For 'import foo', 'foo' is both module and symbol
-      const parts = moduleName.split('.');
       return { 
         importPath: moduleName, 
-        symbols: [parts[0]]  // Only track the top-level module name
+        symbols: [moduleName]
       };
     }
     // Aliased import: "import os as system"

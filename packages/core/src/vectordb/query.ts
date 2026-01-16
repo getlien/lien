@@ -181,7 +181,7 @@ function deserializeImportedSymbols(
     );
   }
   const result: Record<string, string[]> = {};
-  for (let i = 0; i < pathsArr.length && i < namesArr.length; i++) {
+  for (let i = 0; i < pathsArr.length; i++) {
     const path = pathsArr[i];
     const namesJson = namesArr[i];
     if (path && namesJson) {
@@ -221,7 +221,7 @@ function deserializeCallSites(
     );
   }
   const result: Array<{ symbol: string; line: number }> = [];
-  for (let i = 0; i < symbolsArr.length && i < linesArr.length; i++) {
+  for (let i = 0; i < symbolsArr.length; i++) {
     const symbol = symbolsArr[i];
     const line = linesArr[i];
     // Note: line > 0 is intentional - we use 0 as a placeholder value for missing data
