@@ -131,6 +131,75 @@ async function handleAutoIndexing(
 }
 
 /**
+ * Handle git changes detected on startup
+ */
+async function handleGitStartup(
+  gitTracker: GitStateTracker,
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  verbose: boolean | undefined,
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
+): Promise<void> {
+  log('Checking for git changes...');
+  const changedFiles = await gitTracker.initialize();
+
+  if (changedFiles && changedFiles.length > 0) {
+    const startTime = Date.now();
+    reindexStateManager.startReindex(changedFiles);
+    log(`🌿 Git changes detected: ${changedFiles.length} files changed`);
+    
+    try {
+      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
+      const duration = Date.now() - startTime;
+      reindexStateManager.completeReindex(duration);
+      log(`✓ Reindexed ${count} files in ${duration}ms`);
+    } catch (error) {
+      reindexStateManager.failReindex();
+      throw error;
+    }
+  } else {
+    log('✓ Index is up to date with git state');
+  }
+}
+
+/**
+ * Create background polling interval for git changes
+ */
+function createGitPollInterval(
+  gitTracker: GitStateTracker,
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  verbose: boolean | undefined,
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
+): NodeJS.Timeout {
+  return setInterval(async () => {
+    try {
+      const changedFiles = await gitTracker.detectChanges();
+      if (changedFiles && changedFiles.length > 0) {
+        const startTime = Date.now();
+        reindexStateManager.startReindex(changedFiles);
+        log(`🌿 Git change detected: ${changedFiles.length} files changed`);
+        
+        indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose })
+          .then(count => {
+            const duration = Date.now() - startTime;
+            reindexStateManager.completeReindex(duration);
+            log(`✓ Background reindex complete: ${count} files in ${duration}ms`);
+          })
+          .catch(error => {
+            reindexStateManager.failReindex();
+            log(`Git background reindex failed: ${error}`, 'warning');
+          });
+      }
+    } catch (error) {
+      log(`Git detection check failed: ${error}`, 'warning');
+    }
+  }, DEFAULT_GIT_POLL_INTERVAL_MS);
+}
+
+/**
  * Setup git detection and background polling.
  * Always enabled by default if git is available.
  */
@@ -159,57 +228,15 @@ async function setupGitDetection(
 
   // Check for git changes on startup
   try {
-    log('Checking for git changes...');
-    const changedFiles = await gitTracker.initialize();
-
-    if (changedFiles && changedFiles.length > 0) {
-      const startTime = Date.now();
-      reindexStateManager.startReindex(changedFiles);
-      log(`🌿 Git changes detected: ${changedFiles.length} files changed`);
-      
-      try {
-        const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
-        const duration = Date.now() - startTime;
-        reindexStateManager.completeReindex(duration);
-        log(`✓ Reindexed ${count} files in ${duration}ms`);
-      } catch (error) {
-        reindexStateManager.failReindex();
-        throw error;
-      }
-    } else {
-      log('✓ Index is up to date with git state');
-    }
+    await handleGitStartup(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
   } catch (error) {
     log(`Failed to check git state on startup: ${error}`, 'warning');
   }
 
-  // Start background polling (use default interval)
+  // Start background polling
   const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
   log(`✓ Git detection enabled (checking every ${pollIntervalSeconds}s)`);
-
-  const gitPollInterval = setInterval(async () => {
-    try {
-      const changedFiles = await gitTracker.detectChanges();
-      if (changedFiles && changedFiles.length > 0) {
-        const startTime = Date.now();
-        reindexStateManager.startReindex(changedFiles);
-        log(`🌿 Git change detected: ${changedFiles.length} files changed`);
-        
-        indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose })
-          .then(count => {
-            const duration = Date.now() - startTime;
-            reindexStateManager.completeReindex(duration);
-            log(`✓ Background reindex complete: ${count} files in ${duration}ms`);
-          })
-          .catch(error => {
-            reindexStateManager.failReindex();
-            log(`Background reindex failed: ${error}`, 'warning');
-          });
-      }
-    } catch (error) {
-      log(`Git detection check failed: ${error}`, 'warning');
-    }
-  }, DEFAULT_GIT_POLL_INTERVAL_MS);
+  const gitPollInterval = createGitPollInterval(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
 
   return { gitTracker, gitPollInterval };
 }
