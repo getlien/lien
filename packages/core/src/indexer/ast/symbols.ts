@@ -839,7 +839,59 @@ function extractPHPExports(rootNode: Parser.SyntaxNode): string[] {
   const exports: string[] = [];
   const seen = new Set<string>();
   
-  // Node types that represent exportable PHP declarations
+  for (let i = 0; i < rootNode.namedChildCount; i++) {
+    const child = rootNode.namedChild(i);
+    if (!child) continue;
+    
+    const childExports = extractPHPExportsFromNode(child);
+    childExports.forEach(exp => {
+      if (exp && !seen.has(exp)) {
+        seen.add(exp);
+        exports.push(exp);
+      }
+    });
+  }
+  
+  return exports;
+}
+
+/**
+ * Extract PHP exports from a single AST node.
+ * Handles both direct declarations and namespace definitions.
+ */
+function extractPHPExportsFromNode(node: Parser.SyntaxNode): string[] {
+  if (node.type === 'namespace_definition') {
+    return extractPHPExportsFromNamespace(node);
+  }
+  
+  const name = extractPHPExportableDeclaration(node);
+  return name ? [name] : [];
+}
+
+/**
+ * Extract exports from within a PHP namespace definition.
+ */
+function extractPHPExportsFromNamespace(node: Parser.SyntaxNode): string[] {
+  const exports: string[] = [];
+  const body = node.childForFieldName('body');
+  
+  if (body) {
+    for (let i = 0; i < body.namedChildCount; i++) {
+      const child = body.namedChild(i);
+      if (child) {
+        const name = extractPHPExportableDeclaration(child);
+        if (name) exports.push(name);
+      }
+    }
+  }
+  
+  return exports;
+}
+
+/**
+ * Extract the name from a PHP exportable declaration (class, trait, interface, function).
+ */
+function extractPHPExportableDeclaration(node: Parser.SyntaxNode): string | null {
   const exportableTypes = new Set([
     'class_declaration',
     'trait_declaration',
@@ -847,40 +899,12 @@ function extractPHPExports(rootNode: Parser.SyntaxNode): string[] {
     'function_definition',
   ]);
   
-  const addExport = (name: string) => {
-    if (name && !seen.has(name)) {
-      seen.add(name);
-      exports.push(name);
-    }
-  };
-  
-  function traverse(node: Parser.SyntaxNode): void {
-    // Handle namespace definitions by recursing into their body
-    if (node.type === 'namespace_definition') {
-      const body = node.childForFieldName('body');
-      if (body) {
-        for (let i = 0; i < body.namedChildCount; i++) {
-          const child = body.namedChild(i);
-          if (child) traverse(child);
-        }
-      }
-      return;
-    }
-    
-    // Extract name from exportable node types
-    if (exportableTypes.has(node.type)) {
-      const nameNode = node.childForFieldName('name');
-      if (nameNode) addExport(nameNode.text);
-    }
+  if (exportableTypes.has(node.type)) {
+    const nameNode = node.childForFieldName('name');
+    return nameNode ? nameNode.text : null;
   }
   
-  // Process top-level nodes
-  for (let i = 0; i < rootNode.namedChildCount; i++) {
-    const child = rootNode.namedChild(i);
-    if (child) traverse(child);
-  }
-  
-  return exports;
+  return null;
 }
 
 /**
