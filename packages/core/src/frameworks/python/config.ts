@@ -27,8 +27,8 @@ export async function generatePythonConfig(
       '.venv/**',
       '**/env/**',
       'env/**',
-      '**/.env/**',
-      '.env/**',
+      '**/.env/**',    // .env directory (virtual environment)
+      '.env',          // .env file (environment variables)
       '**/virtualenv/**',
       'virtualenv/**',
       

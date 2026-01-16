@@ -108,8 +108,12 @@ function hasValidStringEntries(arr: string[] | undefined): boolean {
 
 /**
  * Check if a number array has valid entries (filters out placeholder values).
- * When there's no data, serializeCallSites() returns [0] as a sentinel value.
- * This function checks if the array contains real data (line numbers > 0).
+ * 
+ * serializeCallSites() uses 0 as a sentinel meaning "no valid line number"
+ * (not actual missing data - the array is never truly empty, it contains [0]).
+ * This function checks if the array contains real line numbers (> 0).
+ * 
+ * Note: Real line numbers are 1-indexed in source files, so 0 is safe as a placeholder.
  */
 function hasValidNumberEntries(arr: number[] | undefined): boolean {
   return Boolean(arr && arr.length > 0 && arr[0] !== 0);
@@ -168,12 +172,12 @@ function deserializeImportedSymbols(
   if (!pathsArr || !namesArr || !hasValidStringEntries(pathsArr) || !hasValidStringEntries(namesArr)) {
     return undefined;
   }
-  // Warn if arrays are mismatched (could indicate data corruption)
+  
+  // Treat mismatched arrays as a hard error (indicates data corruption during serialization)
   if (pathsArr.length !== namesArr.length) {
-    const missingCount = Math.abs(pathsArr.length - namesArr.length);
-    console.warn(
+    throw new DatabaseError(
       `deserializeImportedSymbols: array length mismatch (paths: ${pathsArr.length}, names: ${namesArr.length}). ` +
-      `Proceeding with ${Math.min(pathsArr.length, namesArr.length)} entries; ${missingCount} entr${missingCount === 1 ? 'y' : 'ies'} will be skipped.`
+      `This indicates data corruption. Refusing to deserialize to avoid silent data loss.`
     );
   }
   const result: Record<string, string[]> = {};
@@ -208,12 +212,12 @@ function deserializeCallSites(
   if (!symbolsArr || !linesArr || !hasValidStringEntries(symbolsArr) || !hasValidNumberEntries(linesArr)) {
     return undefined;
   }
-  // Warn if arrays are mismatched (could indicate data corruption)
+  
+  // Treat mismatched arrays as a hard error (indicates data corruption during serialization)
   if (symbolsArr.length !== linesArr.length) {
-    const missingCount = Math.abs(symbolsArr.length - linesArr.length);
-    console.warn(
+    throw new DatabaseError(
       `deserializeCallSites: array length mismatch (symbols: ${symbolsArr.length}, lines: ${linesArr.length}). ` +
-      `Proceeding with ${Math.min(symbolsArr.length, linesArr.length)} entries; ${missingCount} entr${missingCount === 1 ? 'y' : 'ies'} will be skipped.`
+      `This indicates data corruption. Refusing to deserialize to avoid silent data loss.`
     );
   }
   const result: Array<{ symbol: string; line: number }> = [];

@@ -462,30 +462,39 @@ export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<stri
  * - aliased_import contains: dotted_name('Optional') and identifier('Opt')
  * - The alias is always the last identifier child
  */
+/**
+ * Extract the aliased symbol from a Python aliased_import node.
+ * For "from typing import Optional as Opt", returns "Opt" (the alias).
+ * 
+ * The alias is always the last identifier child when there are at least two identifiers
+ * (original name + alias). If fewer identifiers exist, falls back to dotted_name or first identifier.
+ */
 function extractPythonAliasedSymbol(node: Parser.SyntaxNode): string | undefined {
   const identifierChildren = node.namedChildren.filter(c => c.type === 'identifier');
   const dottedName = node.namedChildren.find(c => c.type === 'dotted_name');
 
-  // If there's at least one identifier, it's the alias (after 'as')
-  if (identifierChildren.length >= 1) {
+  // If there are at least two identifiers, the last one is the alias (after 'as')
+  if (identifierChildren.length >= 2) {
     // Length check guarantees element exists, no optional chaining needed
     return identifierChildren[identifierChildren.length - 1].text;
   }
   
-  // No alias found, return the original symbol name
-  return dottedName?.text;
+  // Fallback: prefer dotted_name, then single identifier if present
+  return dottedName?.text ?? identifierChildren[0]?.text;
 }
 
 /**
  * Process Python regular import statement.
- * e.g., "import os", "import os as system", "import os, sys"
+ * e.g., "import os", "import os as system"
  * 
  * Note: For aliased imports like "import numpy as np", we use the original module name
  * as the import path and the alias as the symbol (so it maps to how it's used in code).
+ * 
+ * Limitation: Multi-module imports (e.g., "import os, sys") only track the first module.
+ * This is acceptable since PEP 8 recommends separate import statements for each module.
  */
 function processPythonImport(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
-  const result: Array<{ moduleName: string; symbolName: string }> = [];
-  
+  // Only process the first module in multi-module imports (PEP 8 recommends separate imports anyway)
   for (let i = 0; i < node.namedChildCount; i++) {
     const child = node.namedChild(i);
     if (!child) continue;
@@ -493,7 +502,13 @@ function processPythonImport(node: Parser.SyntaxNode): { importPath: string; sym
     // Regular module import: "import os"
     if (child.type === 'dotted_name' || child.type === 'identifier') {
       const moduleName = child.text;
-      result.push({ moduleName, symbolName: moduleName });
+      // For 'import foo.bar', 'foo' is the module, 'bar' is not a direct symbol
+      // For 'import foo', 'foo' is both module and symbol
+      const parts = moduleName.split('.');
+      return { 
+        importPath: moduleName, 
+        symbols: [parts[0]]  // Only track the top-level module name
+      };
     }
     // Aliased import: "import os as system"
     else if (child.type === 'aliased_import') {
@@ -507,19 +522,15 @@ function processPythonImport(node: Parser.SyntaxNode): { importPath: string; sym
         : identifiers[0]?.text;  // Fallback
       
       if (moduleName && aliasName) {
-        result.push({ moduleName, symbolName: aliasName });
+        return { 
+          importPath: moduleName, 
+          symbols: [aliasName] 
+        };
       }
     }
   }
   
-  if (result.length === 0) return null;
-  
-  // For regular imports, use the first module name as the import path
-  // and the symbol name (or alias) as what to track
-  return { 
-    importPath: result[0].moduleName, 
-    symbols: result.map(r => r.symbolName) 
-  };
+  return null;
 }
 
 /**
