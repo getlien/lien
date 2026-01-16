@@ -839,6 +839,14 @@ function extractPHPExports(rootNode: Parser.SyntaxNode): string[] {
   const exports: string[] = [];
   const seen = new Set<string>();
   
+  // Node types that represent exportable PHP declarations
+  const exportableTypes = new Set([
+    'class_declaration',
+    'trait_declaration',
+    'interface_declaration',
+    'function_definition',
+  ]);
+  
   const addExport = (name: string) => {
     if (name && !seen.has(name)) {
       seen.add(name);
@@ -847,28 +855,8 @@ function extractPHPExports(rootNode: Parser.SyntaxNode): string[] {
   };
   
   function traverse(node: Parser.SyntaxNode): void {
-    // Extract class declarations
-    if (node.type === 'class_declaration') {
-      const nameNode = node.childForFieldName('name');
-      if (nameNode) addExport(nameNode.text);
-    }
-    // Extract trait declarations
-    else if (node.type === 'trait_declaration') {
-      const nameNode = node.childForFieldName('name');
-      if (nameNode) addExport(nameNode.text);
-    }
-    // Extract interface declarations
-    else if (node.type === 'interface_declaration') {
-      const nameNode = node.childForFieldName('name');
-      if (nameNode) addExport(nameNode.text);
-    }
-    // Extract top-level function definitions
-    else if (node.type === 'function_definition') {
-      const nameNode = node.childForFieldName('name');
-      if (nameNode) addExport(nameNode.text);
-    }
-    // Recurse into namespace definitions
-    else if (node.type === 'namespace_definition') {
+    // Handle namespace definitions by recursing into their body
+    if (node.type === 'namespace_definition') {
       const body = node.childForFieldName('body');
       if (body) {
         for (let i = 0; i < body.namedChildCount; i++) {
@@ -876,6 +864,13 @@ function extractPHPExports(rootNode: Parser.SyntaxNode): string[] {
           if (child) traverse(child);
         }
       }
+      return;
+    }
+    
+    // Extract name from exportable node types
+    if (exportableTypes.has(node.type)) {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) addExport(nameNode.text);
     }
   }
   
@@ -904,6 +899,13 @@ function extractPythonExports(rootNode: Parser.SyntaxNode): string[] {
   const exports: string[] = [];
   const seen = new Set<string>();
   
+  // Node types that represent exportable Python declarations
+  const exportableTypes = new Set([
+    'class_definition',
+    'function_definition',
+    'async_function_definition',
+  ]);
+  
   const addExport = (name: string) => {
     if (name && !seen.has(name)) {
       seen.add(name);
@@ -916,13 +918,8 @@ function extractPythonExports(rootNode: Parser.SyntaxNode): string[] {
     const child = rootNode.namedChild(i);
     if (!child) continue;
     
-    // Extract class definitions
-    if (child.type === 'class_definition') {
-      const nameNode = child.childForFieldName('name');
-      if (nameNode) addExport(nameNode.text);
-    }
-    // Extract function definitions (including async functions)
-    else if (child.type === 'function_definition' || child.type === 'async_function_definition') {
+    // Extract name from exportable node types
+    if (exportableTypes.has(child.type)) {
       const nameNode = child.childForFieldName('name');
       if (nameNode) addExport(nameNode.text);
     }
