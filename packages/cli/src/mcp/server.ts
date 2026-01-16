@@ -18,7 +18,8 @@ import {
 } from '@liendev/core';
 import { FileWatcher, type FileChangeHandler } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
-import type { ToolContext, LogFn, LogLevel, ReindexState } from './types.js';
+import { createReindexStateManager } from './reindex-state-manager.js';
+import type { ToolContext, LogFn, LogLevel } from './types.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -36,75 +37,6 @@ export interface MCPServerOptions {
   rootDir: string;
   verbose?: boolean;
   watch?: boolean;
-}
-
-/**
- * Create reindex state manager for tracking file reindexing operations.
- * Handles concurrent reindex operations by tracking active operation count.
- */
-function createReindexStateManager() {
-  let state: ReindexState = {
-    inProgress: false,
-    pendingFiles: [],
-    lastReindexTimestamp: null,
-    lastReindexDurationMs: null,
-  };
-  
-  // Track number of concurrent reindex operations
-  let activeOperations = 0;
-
-  return {
-    getState: () => ({ ...state }),
-    
-    startReindex: (files: string[]) => {
-      if (!files || files.length === 0) {
-        return;
-      }
-      
-      activeOperations += 1;
-      state.inProgress = true;
-      
-      // Merge new files into pending list (avoid duplicates)
-      const existing = new Set(state.pendingFiles);
-      for (const file of files) {
-        if (!existing.has(file)) {
-          state.pendingFiles.push(file);
-        }
-      }
-    },
-    
-    completeReindex: (durationMs: number) => {
-      if (activeOperations === 0) {
-        console.warn('[Lien] completeReindex called without matching startReindex');
-        return; // Avoid corrupting state
-      }
-      
-      activeOperations -= 1;
-      
-      // Only mark complete when all operations finish
-      if (activeOperations === 0) {
-        state.inProgress = false;
-        state.pendingFiles = [];
-        state.lastReindexTimestamp = Date.now();
-        state.lastReindexDurationMs = durationMs;
-      }
-    },
-    
-    failReindex: () => {
-      if (activeOperations === 0) {
-        console.warn('[Lien] failReindex called without matching startReindex');
-        return; // Avoid corrupting state
-      }
-      
-      activeOperations -= 1;
-      
-      // Only clear when all operations complete/fail
-      if (activeOperations === 0) {
-        state.inProgress = false;
-        state.pendingFiles = [];
-      }
-    },
-  };
 }
 
 /**

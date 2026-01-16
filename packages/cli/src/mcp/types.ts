@@ -1,4 +1,5 @@
 import type { SearchResult, VectorDBInterface, LocalEmbeddings } from '@liendev/core';
+import type { ReindexState } from './reindex-state-manager.js';
 
 /**
  * MCP log levels matching the protocol specification.
@@ -10,16 +11,6 @@ export type LogLevel = 'debug' | 'info' | 'notice' | 'warning' | 'error';
  * Supports optional log level (defaults to 'info' for informational messages).
  */
 export type LogFn = (message: string, level?: LogLevel) => void;
-
-/**
- * Reindex state tracking for AI assistant visibility.
- */
-export interface ReindexState {
-  inProgress: boolean;
-  pendingFiles: string[];
-  lastReindexTimestamp: number | null;
-  lastReindexDurationMs: number | null;
-}
 
 /**
  * Shared context passed to all tool handlers.
