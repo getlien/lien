@@ -18,7 +18,7 @@ import {
 } from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
-import type { ToolContext, LogFn, LogLevel } from './types.js';
+import type { ToolContext, LogFn, LogLevel, ReindexState } from './types.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -36,6 +36,39 @@ export interface MCPServerOptions {
   rootDir: string;
   verbose?: boolean;
   watch?: boolean;
+}
+
+/**
+ * Create reindex state manager for tracking file reindexing operations.
+ */
+function createReindexStateManager() {
+  let state: ReindexState = {
+    inProgress: false,
+    pendingFiles: [],
+    lastReindexTimestamp: null,
+    lastReindexDurationMs: null,
+  };
+
+  return {
+    getState: () => ({ ...state }),
+    
+    startReindex: (files: string[]) => {
+      state.inProgress = true;
+      state.pendingFiles = files;
+    },
+    
+    completeReindex: (durationMs: number) => {
+      state.inProgress = false;
+      state.pendingFiles = [];
+      state.lastReindexTimestamp = Date.now();
+      state.lastReindexDurationMs = durationMs;
+    },
+    
+    failReindex: () => {
+      state.inProgress = false;
+      state.pendingFiles = [];
+    },
+  };
 }
 
 /**
@@ -106,7 +139,8 @@ async function setupGitDetection(
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
-  log: LogFn
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<{ gitTracker: GitStateTracker | null; gitPollInterval: NodeJS.Timeout | null }> {
   const gitAvailable = await isGitAvailable();
   const isRepo = await isGitRepo(rootDir);
@@ -129,9 +163,19 @@ async function setupGitDetection(
     const changedFiles = await gitTracker.initialize();
 
     if (changedFiles && changedFiles.length > 0) {
+      const startTime = Date.now();
+      reindexStateManager.startReindex(changedFiles);
       log(`🌿 Git changes detected: ${changedFiles.length} files changed`);
-      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
-      log(`✓ Reindexed ${count} files`);
+      
+      try {
+        const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
+        const duration = Date.now() - startTime;
+        reindexStateManager.completeReindex(duration);
+        log(`✓ Reindexed ${count} files in ${duration}ms`);
+      } catch (error) {
+        reindexStateManager.failReindex();
+        throw error;
+      }
     } else {
       log('✓ Index is up to date with git state');
     }
@@ -147,10 +191,20 @@ async function setupGitDetection(
     try {
       const changedFiles = await gitTracker.detectChanges();
       if (changedFiles && changedFiles.length > 0) {
+        const startTime = Date.now();
+        reindexStateManager.startReindex(changedFiles);
         log(`🌿 Git change detected: ${changedFiles.length} files changed`);
+        
         indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose })
-          .then(count => log(`✓ Background reindex complete: ${count} files`))
-          .catch(error => log(`Background reindex failed: ${error}`, 'warning'));
+          .then(count => {
+            const duration = Date.now() - startTime;
+            reindexStateManager.completeReindex(duration);
+            log(`✓ Background reindex complete: ${count} files in ${duration}ms`);
+          })
+          .catch(error => {
+            reindexStateManager.failReindex();
+            log(`Background reindex failed: ${error}`, 'warning');
+          });
       }
     } catch (error) {
       log(`Git detection check failed: ${error}`, 'warning');
@@ -170,7 +224,8 @@ async function setupFileWatching(
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
-  log: LogFn
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<FileWatcher | null> {
   // Enable by default, or use --watch flag
   const fileWatchingEnabled = watch !== undefined ? watch : true;
@@ -183,23 +238,68 @@ async function setupFileWatching(
 
   try {
     await fileWatcher.start(async (event) => {
-      const { type, filepath } = event;
+      const { type } = event;
 
-      if (type === 'unlink') {
-        log(`🗑️  File deleted: ${filepath}`);
-        try {
-          await vectorDB.deleteByFile(filepath);
-          const manifest = new ManifestManager(vectorDB.dbPath);
-          await manifest.removeFile(filepath);
-          log(`✓ Removed ${filepath} from index`);
-        } catch (error) {
-          log(`Failed to remove ${filepath}: ${error}`, 'warning');
+      if (type === 'batch') {
+        // Handle batched changes
+        const filesToIndex = [...(event.added || []), ...(event.modified || [])];
+        
+        if (filesToIndex.length > 0) {
+          const startTime = Date.now();
+          reindexStateManager.startReindex(filesToIndex);
+          log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
+          
+          try {
+            const count = await indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose });
+            const duration = Date.now() - startTime;
+            reindexStateManager.completeReindex(duration);
+            log(`✓ Reindexed ${count} file(s) in ${duration}ms`);
+          } catch (error) {
+            reindexStateManager.failReindex();
+            log(`Reindex failed: ${error}`, 'warning');
+          }
+        }
+        
+        // Handle deletions
+        for (const deleted of event.deleted || []) {
+          log(`🗑️  File deleted: ${deleted}`);
+          try {
+            await vectorDB.deleteByFile(deleted);
+            const manifest = new ManifestManager(vectorDB.dbPath);
+            await manifest.removeFile(deleted);
+            log(`✓ Removed ${deleted} from index`);
+          } catch (error) {
+            log(`Failed to remove ${deleted}: ${error}`, 'warning');
+          }
         }
       } else {
-        const action = type === 'add' ? 'added' : 'changed';
-        log(`📝 File ${action}: ${filepath}`);
-        indexSingleFile(filepath, vectorDB, embeddings, { verbose })
-          .catch((error) => log(`Failed to reindex ${filepath}: ${error}`, 'warning'));
+        // Fallback for single file events (backwards compatibility)
+        const { filepath } = event;
+        if (type === 'unlink') {
+          log(`🗑️  File deleted: ${filepath}`);
+          try {
+            await vectorDB.deleteByFile(filepath);
+            const manifest = new ManifestManager(vectorDB.dbPath);
+            await manifest.removeFile(filepath);
+            log(`✓ Removed ${filepath} from index`);
+          } catch (error) {
+            log(`Failed to remove ${filepath}: ${error}`, 'warning');
+          }
+        } else {
+          const action = type === 'add' ? 'added' : 'changed';
+          const startTime = Date.now();
+          reindexStateManager.startReindex([filepath]);
+          log(`📝 File ${action}: ${filepath}`);
+          
+          try {
+            await indexSingleFile(filepath, vectorDB, embeddings, { verbose });
+            const duration = Date.now() - startTime;
+            reindexStateManager.completeReindex(duration);
+          } catch (error) {
+            reindexStateManager.failReindex();
+            log(`Failed to reindex ${filepath}: ${error}`, 'warning');
+          }
+        }
       }
     });
 
@@ -250,8 +350,9 @@ function setupCleanupHandlers(
  */
 function setupVersionChecking(
   vectorDB: VectorDBInterface,
-  log: LogFn
-): { interval: NodeJS.Timeout; checkAndReconnect: () => Promise<void>; getIndexMetadata: () => { indexVersion: number; indexDate: string } } {
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
+): { interval: NodeJS.Timeout; checkAndReconnect: () => Promise<void>; getIndexMetadata: () => { indexVersion: number; indexDate: string; reindexInProgress?: boolean; pendingFileCount?: number; lastReindexDurationMs?: number | null; msSinceLastReindex?: number | null } } {
   const checkAndReconnect = async () => {
     try {
       if (await vectorDB.checkVersion()) {
@@ -263,10 +364,19 @@ function setupVersionChecking(
     }
   };
 
-  const getIndexMetadata = () => ({
-    indexVersion: vectorDB.getCurrentVersion(),
-    indexDate: vectorDB.getVersionDate(),
-  });
+  const getIndexMetadata = () => {
+    const reindex = reindexStateManager.getState();
+    return {
+      indexVersion: vectorDB.getCurrentVersion(),
+      indexDate: vectorDB.getVersionDate(),
+      reindexInProgress: reindex.inProgress,
+      pendingFileCount: reindex.pendingFiles.length,
+      lastReindexDurationMs: reindex.lastReindexDurationMs,
+      msSinceLastReindex: reindex.lastReindexTimestamp 
+        ? Date.now() - reindex.lastReindexTimestamp 
+        : null,
+    };
+  };
 
   const interval = setInterval(checkAndReconnect, VERSION_CHECK_INTERVAL_MS);
 
@@ -348,6 +458,7 @@ async function setupAndConnectServer(
   toolContext: ToolContext,
   log: LogFn,
   versionCheckInterval: NodeJS.Timeout,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
   options: { rootDir: string; verbose: boolean | undefined; watch: boolean | undefined }
 ): Promise<void> {
   const { rootDir, verbose, watch } = options;
@@ -358,8 +469,8 @@ async function setupAndConnectServer(
   
   // Setup features
   await handleAutoIndexing(vectorDB, rootDir, log);
-  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log);
-  const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log);
+  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager);
+  const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log, reindexStateManager);
 
   // Setup cleanup handlers
   const cleanup = setupCleanupHandlers(versionCheckInterval, gitPollInterval, fileWatcher, log);
@@ -391,8 +502,19 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   const server = createMCPServer();
   const log = createMCPLog(server, verbose);
 
-  const { interval: versionCheckInterval, checkAndReconnect, getIndexMetadata } = setupVersionChecking(vectorDB, log);
-  const toolContext: ToolContext = { vectorDB, embeddings, rootDir, log, checkAndReconnect, getIndexMetadata };
+  // Create reindex state manager
+  const reindexStateManager = createReindexStateManager();
 
-  await setupAndConnectServer(server, toolContext, log, versionCheckInterval, { rootDir, verbose, watch });
+  const { interval: versionCheckInterval, checkAndReconnect, getIndexMetadata } = setupVersionChecking(vectorDB, log, reindexStateManager);
+  const toolContext: ToolContext = { 
+    vectorDB, 
+    embeddings, 
+    rootDir, 
+    log, 
+    checkAndReconnect, 
+    getIndexMetadata,
+    getReindexState: () => reindexStateManager.getState(),
+  };
+
+  await setupAndConnectServer(server, toolContext, log, versionCheckInterval, reindexStateManager, { rootDir, verbose, watch });
 }

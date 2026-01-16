@@ -629,5 +629,318 @@ import xml.etree.ElementTree
       expect(importedSymbols['xml.etree.ElementTree']).toContain('xml.etree.ElementTree');
     });
   });
+
+  describe('extractExports - PHP', () => {
+    it('should extract class exports', () => {
+      const content = `<?php
+namespace App\\Models;
+
+class User {
+    public function getName() {}
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const exports = extractExports(parseResult.tree!.rootNode, 'php');
+
+      expect(exports).toContain('User');
+    });
+
+    it('should extract multiple classes in one file', () => {
+      const content = `<?php
+class User {
+    public function getName() {}
+}
+
+class Product {
+    public function getPrice() {}
+}
+
+class Order {
+    public function getTotal() {}
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const exports = extractExports(parseResult.tree!.rootNode, 'php');
+
+      expect(exports).toContain('User');
+      expect(exports).toContain('Product');
+      expect(exports).toContain('Order');
+      expect(exports).toHaveLength(3);
+    });
+
+    it('should extract trait exports', () => {
+      const content = `<?php
+namespace App\\Traits;
+
+trait HasTimestamps {
+    public function created() {}
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const exports = extractExports(parseResult.tree!.rootNode, 'php');
+
+      expect(exports).toContain('HasTimestamps');
+    });
+
+    it('should extract interface exports', () => {
+      const content = `<?php
+namespace App\\Contracts;
+
+interface Repository {
+    public function find($id);
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const exports = extractExports(parseResult.tree!.rootNode, 'php');
+
+      expect(exports).toContain('Repository');
+    });
+
+    it('should extract top-level function exports', () => {
+      const content = `<?php
+function helper_function() {
+    return true;
+}
+
+function another_helper() {
+    return false;
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const exports = extractExports(parseResult.tree!.rootNode, 'php');
+
+      expect(exports).toContain('helper_function');
+      expect(exports).toContain('another_helper');
+    });
+
+    it('should extract namespaced exports', () => {
+      const content = `<?php
+namespace App\\Services;
+
+class AuthService {
+    public function login() {}
+}
+
+trait Authenticatable {
+    public function authenticate() {}
+}
+
+interface AuthProvider {
+    public function check();
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const exports = extractExports(parseResult.tree!.rootNode, 'php');
+
+      expect(exports).toContain('AuthService');
+      expect(exports).toContain('Authenticatable');
+      expect(exports).toContain('AuthProvider');
+    });
+
+    it('should return empty array for empty PHP file', () => {
+      const content = `<?php
+// Just a comment
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const exports = extractExports(parseResult.tree!.rootNode, 'php');
+
+      expect(exports).toHaveLength(0);
+    });
+
+    it('should handle mixed PHP declarations', () => {
+      const content = `<?php
+namespace App;
+
+class User {}
+trait HasUuid {}
+interface Searchable {}
+
+function helper() {
+    return true;
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'php');
+      const exports = extractExports(parseResult.tree!.rootNode, 'php');
+
+      expect(exports).toContain('User');
+      expect(exports).toContain('HasUuid');
+      expect(exports).toContain('Searchable');
+      expect(exports).toContain('helper');
+      expect(exports).toHaveLength(4);
+    });
+  });
+
+  describe('extractExports - Python', () => {
+    it('should extract class exports', () => {
+      const content = `
+class User:
+    def __init__(self):
+        pass
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const exports = extractExports(parseResult.tree!.rootNode, 'python');
+
+      expect(exports).toContain('User');
+    });
+
+    it('should extract multiple classes in one file', () => {
+      const content = `
+class User:
+    pass
+
+class Product:
+    pass
+
+class Order:
+    pass
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const exports = extractExports(parseResult.tree!.rootNode, 'python');
+
+      expect(exports).toContain('User');
+      expect(exports).toContain('Product');
+      expect(exports).toContain('Order');
+      expect(exports).toHaveLength(3);
+    });
+
+    it('should extract function exports', () => {
+      const content = `
+def validate_email(email):
+    return '@' in email
+
+def validate_phone(phone):
+    return len(phone) == 10
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const exports = extractExports(parseResult.tree!.rootNode, 'python');
+
+      expect(exports).toContain('validate_email');
+      expect(exports).toContain('validate_phone');
+    });
+
+    it('should extract async function exports', () => {
+      const content = `
+async def fetch_user(user_id):
+    return await db.get(user_id)
+
+async def save_user(user):
+    return await db.save(user)
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const exports = extractExports(parseResult.tree!.rootNode, 'python');
+
+      expect(exports).toContain('fetch_user');
+      expect(exports).toContain('save_user');
+    });
+
+    it('should extract mixed classes and functions', () => {
+      const content = `
+class UserService:
+    def get_user(self):
+        pass
+
+def helper_function():
+    return True
+
+class ProductService:
+    pass
+
+async def async_helper():
+    pass
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const exports = extractExports(parseResult.tree!.rootNode, 'python');
+
+      expect(exports).toContain('UserService');
+      expect(exports).toContain('helper_function');
+      expect(exports).toContain('ProductService');
+      expect(exports).toContain('async_helper');
+      expect(exports).toHaveLength(4);
+    });
+
+    it('should return empty array for empty Python file', () => {
+      const content = `
+# Just a comment
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const exports = extractExports(parseResult.tree!.rootNode, 'python');
+
+      expect(exports).toHaveLength(0);
+    });
+
+    it('should NOT export nested functions (only top-level)', () => {
+      const content = `
+def outer_function():
+    def inner_function():
+        pass
+    return inner_function
+
+class MyClass:
+    def method(self):
+        def nested():
+            pass
+        return nested
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const exports = extractExports(parseResult.tree!.rootNode, 'python');
+
+      // Should only export top-level outer_function and MyClass
+      expect(exports).toContain('outer_function');
+      expect(exports).toContain('MyClass');
+      expect(exports).not.toContain('inner_function');
+      expect(exports).not.toContain('nested');
+      expect(exports).not.toContain('method');
+      expect(exports).toHaveLength(2);
+    });
+  });
+
+  describe('extractExports - Regression tests', () => {
+    it('should still handle JavaScript/TypeScript exports correctly', () => {
+      const content = `
+export function validateEmail(email: string): boolean {
+  return email.includes('@');
+}
+
+export class UserService {
+  getUser() {}
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      // Test without language parameter (defaults to JS/TS)
+      const exports = extractExports(parseResult.tree!.rootNode);
+
+      expect(exports).toContain('validateEmail');
+      expect(exports).toContain('UserService');
+    });
+
+    it('should handle explicit typescript language parameter', () => {
+      const content = `
+export const API_URL = 'https://api.example.com';
+export default function main() {}
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const exports = extractExports(parseResult.tree!.rootNode, 'typescript');
+
+      expect(exports).toContain('API_URL');
+      expect(exports).toContain('default');
+    });
+  });
 });
 

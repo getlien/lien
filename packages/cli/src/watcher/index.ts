@@ -1,11 +1,15 @@
 import chokidar from 'chokidar';
 import path from 'path';
-import { detectAllFrameworks, getFrameworkDetector, DEFAULT_DEBOUNCE_MS } from '@liendev/core';
+import { detectAllFrameworks, getFrameworkDetector } from '@liendev/core';
 import type { FrameworkConfig } from '@liendev/core';
 
 export interface FileChangeEvent {
-  type: 'add' | 'change' | 'unlink';
+  type: 'add' | 'change' | 'unlink' | 'batch';
   filepath: string;
+  // Batch fields (optional for backwards compatibility)
+  added?: string[];
+  modified?: string[];
+  deleted?: string[];
 }
 
 export type FileChangeHandler = (event: FileChangeEvent) => void | Promise<void>;
@@ -24,6 +28,11 @@ export class FileWatcher {
   private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private rootDir: string;
   private onChangeHandler: FileChangeHandler | null = null;
+  
+  // Batch state for aggregating rapid changes
+  private pendingChanges: Map<string, 'add' | 'change' | 'unlink'> = new Map();
+  private batchTimer: NodeJS.Timeout | null = null;
+  private readonly BATCH_WINDOW_MS = 500; // Collect changes for 500ms before processing
   
   constructor(rootDir: string) {
     this.rootDir = rootDir;
@@ -189,46 +198,79 @@ export class FileWatcher {
   }
   
   /**
-   * Handles a file change event with debouncing.
-   * Debouncing prevents rapid reindexing when files are saved multiple times quickly.
+   * Handles a file change event with smart batching.
+   * Collects rapid changes across multiple files and processes them together.
    */
   private handleChange(type: 'add' | 'change' | 'unlink', filepath: string): void {
-    // Clear existing debounce timer for this file
-    const existingTimer = this.debounceTimers.get(filepath);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
+    // Add to pending batch (later events overwrite earlier for same file)
+    this.pendingChanges.set(filepath, type);
+    
+    // Reset/start batch timer
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
     }
     
-    // Set new debounce timer
-    const timer = setTimeout(() => {
-      this.debounceTimers.delete(filepath);
-      
-      // Call handler
-      if (this.onChangeHandler) {
-        // Use path.join for proper cross-platform path handling
-        const absolutePath = path.isAbsolute(filepath)
-          ? filepath
-          : path.join(this.rootDir, filepath);
-        
-        try {
-          const result = this.onChangeHandler({
-            type,
-            filepath: absolutePath,
-          });
-          
-          // Handle async handlers
-          if (result instanceof Promise) {
-            result.catch((error) => {
-              console.error(`[Lien] Error handling file change: ${error}`);
-            });
-          }
-        } catch (error) {
-          console.error(`[Lien] Error handling file change: ${error}`);
-        }
-      }
-    }, DEFAULT_DEBOUNCE_MS);
+    this.batchTimer = setTimeout(() => {
+      this.flushBatch();
+    }, this.BATCH_WINDOW_MS);
+  }
+  
+  /**
+   * Flush pending changes and dispatch batch event.
+   */
+  private flushBatch(): void {
+    if (this.pendingChanges.size === 0) return;
     
-    this.debounceTimers.set(filepath, timer);
+    const changes = new Map(this.pendingChanges);
+    this.pendingChanges.clear();
+    this.batchTimer = null;
+    
+    // Group by change type
+    const added: string[] = [];
+    const modified: string[] = [];
+    const deleted: string[] = [];
+    
+    for (const [filepath, type] of changes) {
+      // Use path.join for proper cross-platform path handling
+      const absolutePath = path.isAbsolute(filepath)
+        ? filepath
+        : path.join(this.rootDir, filepath);
+      
+      switch (type) {
+        case 'add':
+          added.push(absolutePath);
+          break;
+        case 'change':
+          modified.push(absolutePath);
+          break;
+        case 'unlink':
+          deleted.push(absolutePath);
+          break;
+      }
+    }
+    
+    // Call handler with batched changes
+    if (this.onChangeHandler) {
+      try {
+        const allFiles = [...added, ...modified];
+        const result = this.onChangeHandler({
+          type: 'batch',
+          filepath: allFiles[0] || deleted[0], // For backwards compat
+          added,
+          modified,
+          deleted,
+        });
+        
+        // Handle async handlers
+        if (result instanceof Promise) {
+          result.catch((error) => {
+            console.error(`[Lien] Error handling batch change: ${error}`);
+          });
+        }
+      } catch (error) {
+        console.error(`[Lien] Error handling batch change: ${error}`);
+      }
+    }
   }
   
   /**
@@ -237,6 +279,12 @@ export class FileWatcher {
   async stop(): Promise<void> {
     if (!this.watcher) {
       return;
+    }
+    
+    // Flush any pending changes before stopping
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.flushBatch();
     }
     
     // Clear all pending debounce timers

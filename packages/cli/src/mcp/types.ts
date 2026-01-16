@@ -12,6 +12,16 @@ export type LogLevel = 'debug' | 'info' | 'notice' | 'warning' | 'error';
 export type LogFn = (message: string, level?: LogLevel) => void;
 
 /**
+ * Reindex state tracking for AI assistant visibility.
+ */
+export interface ReindexState {
+  inProgress: boolean;
+  pendingFiles: string[];
+  lastReindexTimestamp: number | null;
+  lastReindexDurationMs: number | null;
+}
+
+/**
  * Shared context passed to all tool handlers.
  * Contains dependencies and utilities needed by handlers.
  */
@@ -27,7 +37,9 @@ export interface ToolContext {
   /** Check if index has been updated and reconnect if needed */
   checkAndReconnect: () => Promise<void>;
   /** Get current index metadata for responses */
-  getIndexMetadata: () => { indexVersion: number; indexDate: string };
+  getIndexMetadata: () => { indexVersion: number; indexDate: string; reindexInProgress?: boolean; pendingFileCount?: number; lastReindexDurationMs?: number | null; msSinceLastReindex?: number | null };
+  /** Get current reindex state */
+  getReindexState: () => ReindexState;
 }
 
 /**
@@ -54,6 +66,11 @@ export interface IndexMetadata {
   lastIndexed: string | null;
   version: number;
   hasData: boolean;
+  // Reindex status fields
+  reindexInProgress?: boolean;
+  pendingFileCount?: number;
+  lastReindexDurationMs?: number | null;
+  msSinceLastReindex?: number | null;
 }
 
 /**

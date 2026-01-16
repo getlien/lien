@@ -63,6 +63,12 @@ describe('handleFindSimilar', () => {
       log: mockLog,
       checkAndReconnect: mockCheckAndReconnect,
       getIndexMetadata: mockGetIndexMetadata,
+      getReindexState: vi.fn(() => ({
+        inProgress: false,
+        pendingFiles: [],
+        lastReindexTimestamp: null,
+        lastReindexDurationMs: null,
+      })),
       rootDir: '/fake/workspace',
     };
   });
