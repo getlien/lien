@@ -53,10 +53,32 @@ const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
 type RiskLevel = keyof typeof RISK_ORDER;
 
 /**
+ * A single usage of a symbol (call site).
+ */
+export interface SymbolUsage {
+  /** The function/method that contains this call */
+  callerSymbol: string;
+  /** Line number where the call occurs */
+  line: number;
+  /** Code snippet showing the call */
+  snippet: string;
+}
+
+/**
+ * Dependent file info, with optional symbol-level usages.
+ */
+export interface DependentInfo {
+  filepath: string;
+  isTestFile: boolean;
+  /** Only present when symbol parameter is provided */
+  usages?: SymbolUsage[];
+}
+
+/**
  * Dependency analysis result.
  */
 export interface DependencyAnalysisResult {
-  dependents: Array<{ filepath: string; isTestFile: boolean }>;
+  dependents: DependentInfo[];
   productionDependentCount: number;
   testDependentCount: number;
   chunksByFile: Map<string, SearchResult[]>;
@@ -64,19 +86,20 @@ export interface DependencyAnalysisResult {
   complexityMetrics: ComplexityMetrics;
   hitLimit: boolean;
   allChunks: SearchResult[];
+  /** Total count of usages across all files (when symbol is specified) */
+  totalUsageCount?: number;
 }
 
 /**
- * Find all dependents of a target file.
+ * Scan chunks from the database.
  */
-export async function findDependents(
+async function scanChunks(
   vectorDB: VectorDBInterface,
-  filepath: string,
   crossRepo: boolean,
   log: (message: string, level?: 'warning') => void
-): Promise<DependencyAnalysisResult> {
-  // Use cross-repo scan if enabled and backend supports it
+): Promise<{ allChunks: SearchResult[]; hitLimit: boolean }> {
   let allChunks: SearchResult[];
+  
   if (crossRepo && vectorDB instanceof QdrantDB) {
     allChunks = await vectorDB.scanCrossRepo({ limit: SCAN_LIMIT });
   } else {
@@ -90,44 +113,153 @@ export async function findDependents(
   if (hitLimit) {
     log(`Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete.`, 'warning');
   }
-  log(`Scanning ${allChunks.length} chunks for imports...`);
+  
+  return { allChunks, hitLimit };
+}
 
+/**
+ * Create a cached path normalizer.
+ */
+function createPathNormalizer(): (path: string) => string {
   const workspaceRoot = process.cwd().replace(/\\/g, '/');
-  const pathCache = new Map<string, string>();
-  const normalizePathCached = (path: string): string => {
-    if (!pathCache.has(path)) pathCache.set(path, normalizePath(path, workspaceRoot));
-    return pathCache.get(path)!;
+  const cache = new Map<string, string>();
+  
+  return (path: string): string => {
+    if (!cache.has(path)) {
+      cache.set(path, normalizePath(path, workspaceRoot));
+    }
+    return cache.get(path)!;
   };
+}
 
-  // Build index and find dependents
-  const importIndex = buildImportIndex(allChunks, normalizePathCached);
-  const normalizedTarget = normalizePathCached(filepath);
-  const dependentChunks = findDependentChunks(importIndex, normalizedTarget);
-
-  // Group by canonical file path
+/**
+ * Group chunks by their canonical file path.
+ */
+function groupChunksByFile(chunks: SearchResult[]): Map<string, SearchResult[]> {
+  const workspaceRoot = process.cwd().replace(/\\/g, '/');
   const chunksByFile = new Map<string, SearchResult[]>();
-  for (const chunk of dependentChunks) {
+  
+  for (const chunk of chunks) {
     const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
     const existing = chunksByFile.get(canonical) || [];
     existing.push(chunk);
     chunksByFile.set(canonical, existing);
   }
+  
+  return chunksByFile;
+}
+
+/**
+ * Build the dependents list, either file-level or symbol-level.
+ */
+function buildDependentsList(
+  chunksByFile: Map<string, SearchResult[]>,
+  symbol: string | undefined,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  allChunks: SearchResult[],
+  filepath: string,
+  log: (message: string, level?: 'warning') => void
+): { dependents: DependentInfo[]; totalUsageCount?: number } {
+  if (symbol) {
+    // Validate that the target file exports this symbol
+    validateSymbolExport(allChunks, normalizedTarget, normalizePathCached, symbol, filepath, log);
+    
+    // Symbol-level analysis
+    return findSymbolUsages(chunksByFile, symbol, normalizedTarget, normalizePathCached);
+  }
+  
+  // File-level analysis
+  const dependents = Array.from(chunksByFile.keys()).map(fp => ({
+    filepath: fp,
+    isTestFile: isTestFile(fp),
+  }));
+  
+  return { dependents, totalUsageCount: undefined };
+}
+
+/**
+ * Validate that the target file exports the requested symbol.
+ * 
+ * Design decision: This function only logs a warning and does NOT throw an error
+ * or return false to stop execution. This is intentional because:
+ * 
+ * 1. The export might be dynamic or conditional (not captured by static analysis)
+ * 2. False positives are better than false negatives (we want to show potential matches)
+ * 3. The user can see the warning and interpret results accordingly
+ * 
+ * The function continues to search for usages even if the symbol isn't found in exports,
+ * which may reveal re-exports, dynamic exports, or help diagnose indexing issues.
+ */
+function validateSymbolExport(
+  allChunks: SearchResult[],
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  symbol: string,
+  filepath: string,
+  log: (message: string, level?: 'warning') => void
+): void {
+  const targetFileExportsSymbol = allChunks.some(chunk => {
+    const chunkFile = normalizePathCached(chunk.metadata.file);
+    return matchesFile(chunkFile, normalizedTarget) && 
+           chunk.metadata.exports?.includes(symbol);
+  });
+  
+  if (!targetFileExportsSymbol) {
+    log(`Warning: Symbol "${symbol}" not found in exports of ${filepath}`, 'warning');
+  }
+}
+
+/**
+ * Find all dependents of a target file.
+ * 
+ * @param vectorDB - Vector database to scan
+ * @param filepath - Path to file to find dependents for
+ * @param crossRepo - Whether to search across repos
+ * @param log - Logging function
+ * @param symbol - Optional: specific symbol to find usages of
+ */
+export async function findDependents(
+  vectorDB: VectorDBInterface,
+  filepath: string,
+  crossRepo: boolean,
+  log: (message: string, level?: 'warning') => void,
+  symbol?: string
+): Promise<DependencyAnalysisResult> {
+  // Scan chunks from database
+  const { allChunks, hitLimit } = await scanChunks(vectorDB, crossRepo, log);
+  log(`Scanning ${allChunks.length} chunks for imports...`);
+
+  // Setup path normalization
+  const normalizePathCached = createPathNormalizer();
+  const normalizedTarget = normalizePathCached(filepath);
+  
+  // Find dependent chunks and group by file
+  const importIndex = buildImportIndex(allChunks, normalizePathCached);
+  const dependentChunks = findDependentChunks(importIndex, normalizedTarget);
+  const chunksByFile = groupChunksByFile(dependentChunks);
 
   // Calculate metrics
   const fileComplexities = calculateFileComplexities(chunksByFile);
   const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
 
-  const uniqueFiles = Array.from(chunksByFile.keys()).map(filepath => ({
-    filepath,
-    isTestFile: isTestFile(filepath),
-  }));
+  // Build dependents list (file-level or symbol-level)
+  const { dependents, totalUsageCount } = buildDependentsList(
+    chunksByFile, symbol, normalizedTarget, normalizePathCached, allChunks, filepath, log
+  );
+
+  // Sort dependents: production files first, then test files
+  dependents.sort((a, b) => {
+    if (a.isTestFile === b.isTestFile) return 0;
+    return a.isTestFile ? 1 : -1;
+  });
 
   // Calculate test/production split
-  const testDependentCount = uniqueFiles.filter(f => f.isTestFile).length;
-  const productionDependentCount = uniqueFiles.length - testDependentCount;
+  const testDependentCount = dependents.filter(f => f.isTestFile).length;
+  const productionDependentCount = dependents.length - testDependentCount;
 
   return {
-    dependents: uniqueFiles,
+    dependents,
     productionDependentCount,
     testDependentCount,
     chunksByFile,
@@ -135,11 +267,16 @@ export async function findDependents(
     complexityMetrics,
     hitLimit,
     allChunks,
+    totalUsageCount,
   };
 }
 
 /**
  * Build import-to-chunk index for O(n) instead of O(n*m) lookup.
+ * 
+ * Uses both:
+ * - `imports` array (raw import statements for TS/JS)
+ * - `importedSymbols` keys (parsed module paths for Python/PHP)
  */
 function buildImportIndex(
   allChunks: SearchResult[],
@@ -147,14 +284,28 @@ function buildImportIndex(
 ): Map<string, SearchResult[]> {
   const importIndex = new Map<string, SearchResult[]>();
 
+  const addToIndex = (importPath: string, chunk: SearchResult) => {
+    const normalizedImport = normalizePathCached(importPath);
+    if (!importIndex.has(normalizedImport)) {
+      importIndex.set(normalizedImport, []);
+    }
+    importIndex.get(normalizedImport)!.push(chunk);
+  };
+
   for (const chunk of allChunks) {
+    // Index raw imports (TS/JS style: "./utils/logger")
     const imports = chunk.metadata.imports || [];
     for (const imp of imports) {
-      const normalizedImport = normalizePathCached(imp);
-      if (!importIndex.has(normalizedImport)) {
-        importIndex.set(normalizedImport, []);
+      addToIndex(imp, chunk);
+    }
+    
+    // Index importedSymbols keys (Python/PHP style: "django.http", "App\Models\User")
+    // This provides the parsed module paths that match file paths better
+    const importedSymbols = chunk.metadata.importedSymbols;
+    if (importedSymbols && typeof importedSymbols === 'object') {
+      for (const modulePath of Object.keys(importedSymbols)) {
+        addToIndex(modulePath, chunk);
       }
-      importIndex.get(normalizedImport)!.push(chunk);
     }
   }
 
@@ -321,9 +472,9 @@ export function calculateRiskLevel(
  * Group dependents by repository ID.
  */
 export function groupDependentsByRepo(
-  dependents: Array<{ filepath: string; isTestFile: boolean }>,
+  dependents: DependentInfo[],
   chunks: SearchResult[]
-): Record<string, Array<{ filepath: string; isTestFile: boolean }>> {
+): Record<string, DependentInfo[]> {
   const repoMap = new Map<string, Set<string>>();
 
   // Build map of filepath -> repoId
@@ -337,7 +488,7 @@ export function groupDependentsByRepo(
   }
 
   // Group dependents by repo
-  const grouped: Record<string, Array<{ filepath: string; isTestFile: boolean }>> = {};
+  const grouped: Record<string, DependentInfo[]> = {};
   for (const dependent of dependents) {
     // Find which repo this file belongs to
     let foundRepo = 'unknown';
@@ -355,5 +506,163 @@ export function groupDependentsByRepo(
   }
 
   return grouped;
+}
+
+/**
+ * Find usages of a specific symbol in dependent files.
+ * 
+ * Looks for:
+ * 1. Files that import the symbol from the target file (direct or namespace import)
+ * 2. Chunks within those files that have call sites for the symbol
+ * 
+ * **Known Limitation - Namespace Imports:**
+ * Files with namespace imports (e.g., `import * as utils from './module'`) are included
+ * in results if they have call sites matching the symbol name. However, call sites are
+ * tracked without namespace prefixes (e.g., `utils.foo()` → tracked as `'foo'`), which
+ * can cause false positives when the same symbol name exists in multiple namespaced modules.
+ * This is rare in practice due to namespace isolation in well-structured codebases.
+ */
+function findSymbolUsages(
+  chunksByFile: Map<string, SearchResult[]>,
+  targetSymbol: string,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string
+): { dependents: DependentInfo[]; totalUsageCount: number } {
+  const dependents: DependentInfo[] = [];
+  let totalUsageCount = 0;
+
+  for (const [filepath, chunks] of chunksByFile.entries()) {
+    if (!fileImportsSymbol(chunks, targetSymbol, normalizedTarget, normalizePathCached)) {
+      continue;
+    }
+
+    const usages = extractSymbolUsagesFromChunks(chunks, targetSymbol);
+    
+    dependents.push({
+      filepath,
+      isTestFile: isTestFile(filepath),
+      usages: usages.length > 0 ? usages : undefined,
+    });
+
+    totalUsageCount += usages.length;
+  }
+
+  return { dependents, totalUsageCount };
+}
+
+/**
+ * Check if any chunk in the file imports the target symbol.
+ */
+function fileImportsSymbol(
+  chunks: SearchResult[],
+  targetSymbol: string,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string
+): boolean {
+  return chunks.some(chunk => {
+    const importedSymbols = chunk.metadata.importedSymbols;
+    if (!importedSymbols) return false;
+    
+    for (const [importPath, symbols] of Object.entries(importedSymbols)) {
+      const normalizedImport = normalizePathCached(importPath);
+      if (matchesFile(normalizedImport, normalizedTarget)) {
+        // Direct symbol import
+        if (symbols.includes(targetSymbol)) return true;
+        
+        // Namespace import (e.g., import * as utils from './module')
+        // LIMITATION: Namespace imports grant access to all exports from the module.
+        // Call sites are tracked as the property name only (e.g., utils.foo() → 'foo'),
+        // not the qualified name. This means:
+        // - If file imports `* as utils from './validate'` and calls `utils.validateEmail()`
+        // - The call site is tracked as 'validateEmail' (without the 'utils.' prefix)
+        // - This will match correctly when searching for 'validateEmail' usages
+        // 
+        // POTENTIAL FALSE POSITIVES: If the same symbol name exists in multiple modules
+        // that are both imported via namespace imports, we cannot distinguish which one
+        // is being called. For example:
+        //   import * as utils from './utils';
+        //   import * as helpers from './helpers';
+        //   utils.format()  // tracked as 'format'
+        //   helpers.format()  // also tracked as 'format'
+        // Both would match when searching for 'format', even if only one is the target.
+        // In practice, this is rare due to namespace isolation in well-structured code.
+        //
+        // TODO: Track namespace aliases at call sites (e.g., 'utils.foo' instead of just 'foo')
+        //       to enable precise matching and eliminate these false positives.
+        if (symbols.some(s => s.startsWith('* as '))) return true;
+      }
+    }
+    return false;
+  });
+}
+
+/**
+ * Extract all usages of a symbol from a file's chunks.
+ */
+function extractSymbolUsagesFromChunks(chunks: SearchResult[], targetSymbol: string): SymbolUsage[] {
+  const usages: SymbolUsage[] = [];
+  
+  for (const chunk of chunks) {
+    const callSites = chunk.metadata.callSites;
+    if (!callSites) continue;
+    
+    // Split content once per chunk for efficiency (avoid repeated splits)
+    const lines = chunk.content.split('\n');
+    
+    for (const call of callSites) {
+      if (call.symbol === targetSymbol) {
+        usages.push({
+          callerSymbol: chunk.metadata.symbolName || 'unknown',
+          line: call.line,
+          snippet: extractSnippet(lines, call.line, chunk.metadata.startLine, targetSymbol),
+        });
+      }
+    }
+  }
+  
+  return usages;
+}
+
+/**
+ * Extract a code snippet for a call site with bounds checking.
+ * If the target line is blank, searches nearby lines for context.
+ */
+function extractSnippet(lines: string[], callLine: number, startLine: number, symbolName: string): string {
+  const lineIndex = callLine - startLine;
+  const placeholder = `${symbolName}(...)`;
+  
+  if (lineIndex < 0 || lineIndex >= lines.length) {
+    // This can happen when call site line is outside chunk boundaries (edge case)
+    // Not necessarily an error - could be chunk boundary misalignment
+    return placeholder;
+  }
+  
+  // Try the direct line first
+  const directLine = lines[lineIndex].trim();
+  if (directLine) {
+    return directLine;
+  }
+  
+  // If direct line is blank, search for nearby non-blank context
+  // Limit search radius to 5 lines to ensure contextual relevance
+  const searchRadius = 5;
+  
+  // Search backwards first (prefer earlier lines)
+  for (let i = lineIndex - 1; i >= Math.max(0, lineIndex - searchRadius); i--) {
+    const candidate = lines[i].trim();
+    if (candidate) {
+      return candidate;
+    }
+  }
+  
+  // Search forwards
+  for (let i = lineIndex + 1; i < Math.min(lines.length, lineIndex + searchRadius + 1); i++) {
+    const candidate = lines[i].trim();
+    if (candidate) {
+      return candidate;
+    }
+  }
+  
+  return placeholder;
 }
 

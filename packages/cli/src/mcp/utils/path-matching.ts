@@ -20,9 +20,11 @@
 export function normalizePath(path: string, workspaceRoot: string): string {
   let normalized = path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
   
-  // Normalize extensions: .ts/.tsx/.js/.jsx → all treated as equivalent
+  // Normalize extensions: .ts/.tsx/.js/.jsx/.php/.py → all treated as equivalent
   // This handles TypeScript's ESM requirement of .js imports for .ts files
-  normalized = normalized.replace(/\.(ts|tsx|js|jsx)$/, '');
+  // Also handles PHP files where namespaces don't include extensions
+  // Also handles Python files where module imports don't include extensions
+  normalized = normalized.replace(/\.(ts|tsx|js|jsx|php|py)$/, '');
   
   // Normalize to relative path if it starts with workspace root
   if (normalized.startsWith(workspaceRoot + '/')) {
@@ -67,6 +69,8 @@ export function matchesAtBoundary(str: string, pattern: string): boolean {
  * 2. Target path appears in import (at boundaries)
  * 3. Import path appears in target (at boundaries)
  * 4. Relative imports (./logger vs src/utils/logger)
+ * 5. PHP namespace imports (App\Models\User vs app/Models/User.php)
+ * 6. Python module imports (django.http → django/http/__init__.py or django/http/*.py)
  * 
  * @param normalizedImport - Normalized import path
  * @param normalizedTarget - Normalized target file path
@@ -94,7 +98,133 @@ export function matchesFile(normalizedImport: string, normalizedTarget: string):
     return true;
   }
   
+  // Strategy 4: PHP namespace matching
+  // PHP imports use namespaces like "App\Models\User" which should match "app/Models/User.php"
+  if (matchesPHPNamespace(normalizedImport, normalizedTarget)) {
+    return true;
+  }
+  
+  // Strategy 5: Python module matching
+  // Python imports use dotted paths like "django.http" which should match "django/http/response.py"
+  if (matchesPythonModule(normalizedImport, normalizedTarget)) {
+    return true;
+  }
+  
   return false;
+}
+
+/**
+ * Check if target exactly matches the module path (handles __init__.py)
+ */
+function matchesDirectPythonModule(moduleAsPath: string, targetWithoutPy: string): boolean {
+  return targetWithoutPy === moduleAsPath || 
+         targetWithoutPy === moduleAsPath + '/__init__' ||
+         targetWithoutPy.replace(/\/__init__$/, '') === moduleAsPath;
+}
+
+/**
+ * Check if target is a child of the module package
+ */
+function matchesParentPythonPackage(moduleAsPath: string, targetWithoutPy: string): boolean {
+  return targetWithoutPy.startsWith(moduleAsPath + '/');
+}
+
+/**
+ * Check if module path appears as a suffix in the target path
+ */
+function matchesSuffixPythonModule(moduleAsPath: string, targetWithoutPy: string): boolean {
+  return targetWithoutPy.endsWith('/' + moduleAsPath) || 
+         targetWithoutPy.endsWith('/' + moduleAsPath + '/__init__');
+}
+
+/**
+ * Check if module appears after a single source directory prefix
+ */
+function matchesWithSourcePrefix(moduleAsPath: string, targetWithoutPy: string): boolean {
+  const moduleIndex = targetWithoutPy.indexOf(moduleAsPath);
+  if (moduleIndex < 0) return false;
+  
+  const prefix = targetWithoutPy.substring(0, moduleIndex);
+  const prefixSlashes = (prefix.match(/\//g) || []).length;
+  
+  // Prefix should be empty or a single directory (e.g., "src/")
+  // The check for prefix === '' || prefix.endsWith('/') ensures we're at a directory boundary:
+  // - If prefix is empty, moduleIndex is 0 (start of string)
+  // - If prefix ends with '/', then it's a valid directory separator
+  return prefixSlashes <= 1 && (prefix === '' || prefix.endsWith('/'));
+}
+
+/**
+ * Checks if a Python dotted module path matches a file path.
+ * 
+ * Python imports use dotted paths like "django.http" which should match:
+ * - django/http/__init__.py (package)
+ * - django/http/response.py (module within package)
+ * - django/http.py (direct module, less common)
+ * 
+ * @param importPath - The import path (may contain dots)
+ * @param targetPath - The normalized file path
+ * @returns True if the Python module matches the file path
+ */
+function matchesPythonModule(importPath: string, targetPath: string): boolean {
+  // Only apply if the import contains dots (Python module syntax)
+  if (!importPath.includes('.')) {
+    return false;
+  }
+  
+  // Convert dotted path to slash path: django.http → django/http
+  const moduleAsPath = importPath.replace(/\./g, '/');
+  
+  // Strip .py extension from target for comparison
+  const targetWithoutPy = targetPath.replace(/\.py$/, '');
+  
+  // Try matching strategies in order of specificity
+  return matchesDirectPythonModule(moduleAsPath, targetWithoutPy) ||
+         matchesParentPythonPackage(moduleAsPath, targetWithoutPy) ||
+         matchesSuffixPythonModule(moduleAsPath, targetWithoutPy) ||
+         matchesWithSourcePrefix(moduleAsPath, targetWithoutPy);
+}
+
+/**
+ * Checks if paths match using case-insensitive component matching.
+ * 
+ * This handles PHP namespace imports where:
+ * - App/Models/User should match app/Models/User (case difference in first component)
+ * - Domain/Services/Auth should match web/Domain/Services/Auth (prefix in target)
+ * 
+ * Also useful for case-insensitive file systems.
+ * 
+ * @param importPath - The normalized import path
+ * @param targetPath - The normalized file path
+ * @returns True if paths match case-insensitively at component boundaries
+ */
+function matchesPHPNamespace(importPath: string, targetPath: string): boolean {
+  // Split into path components
+  const importComponents = importPath.split('/').filter(Boolean);
+  const targetComponents = targetPath.split('/').filter(Boolean);
+  
+  // Need at least one component to match
+  if (importComponents.length === 0 || targetComponents.length === 0) {
+    return false;
+  }
+  
+  // Match from the end, case-insensitively
+  // This handles prefixes like "web/app" matching "App"
+  let matched = 0;
+  for (let i = 1; i <= importComponents.length && i <= targetComponents.length; i++) {
+    const impComp = importComponents[importComponents.length - i].toLowerCase();
+    const targetComp = targetComponents[targetComponents.length - i].toLowerCase();
+    
+    if (impComp === targetComp) {
+      matched++;
+    } else {
+      break;
+    }
+  }
+  
+  // All import components must match (from the end)
+  // This ensures App/Models/User matches web/app/Models/User but not app/Services/User
+  return matched === importComponents.length;
 }
 
 /**

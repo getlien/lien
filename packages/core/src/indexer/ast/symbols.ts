@@ -318,6 +318,13 @@ export function extractImports(rootNode: Parser.SyntaxNode): string[] {
       const importText = node.text.split('\n')[0];
       imports.push(importText);
     }
+    // PHP: namespace use declarations (use App\Models\User;)
+    else if (node.type === 'namespace_use_declaration') {
+      const phpImport = extractPHPUseDeclaration(node);
+      if (phpImport) {
+        imports.push(phpImport);
+      }
+    }
     
     // Only traverse top-level nodes for imports
     if (node === rootNode) {
@@ -330,4 +337,639 @@ export function extractImports(rootNode: Parser.SyntaxNode): string[] {
   
   traverse(rootNode);
   return imports;
+}
+
+/**
+ * Extract the full namespace path from a PHP use declaration.
+ * e.g., "use App\Models\User;" -> "App\Models\User"
+ */
+function extractPHPUseDeclaration(node: Parser.SyntaxNode): string | null {
+  // Find namespace_use_clause
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const clause = node.namedChild(i);
+    if (clause?.type === 'namespace_use_clause') {
+      return extractPHPQualifiedName(clause);
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract qualified name from a PHP namespace use clause.
+ * Handles: qualified_name -> namespace_name + name
+ */
+function extractPHPQualifiedName(clause: Parser.SyntaxNode): string | null {
+  for (let i = 0; i < clause.namedChildCount; i++) {
+    const child = clause.namedChild(i);
+    if (child?.type === 'qualified_name') {
+      // Get the full namespace path by concatenating parts
+      const parts: string[] = [];
+      for (let j = 0; j < child.namedChildCount; j++) {
+        const part = child.namedChild(j);
+        if (part?.type === 'namespace_name') {
+          // namespace_name contains multiple name nodes
+          for (let k = 0; k < part.namedChildCount; k++) {
+            const namePart = part.namedChild(k);
+            if (namePart?.type === 'name') {
+              parts.push(namePart.text);
+            }
+          }
+        } else if (part?.type === 'name') {
+          parts.push(part.text);
+        }
+      }
+      return parts.join('\\');
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract imported symbols mapped to their source paths.
+ * 
+ * Returns a map like: { './validate': ['validateEmail', 'validatePhone'] }
+ * 
+ * Handles various import styles across languages:
+ * 
+ * TypeScript/JavaScript:
+ * - Named imports: import { foo, bar } from './module'
+ * - Default imports: import foo from './module' 
+ * - Namespace imports: import * as utils from './module'
+ * 
+ * Python:
+ * - from module import foo, bar
+ * - import module (module name as symbol)
+ * 
+ * PHP:
+ * - use App\Models\User (class name as symbol)
+ * - use App\Services\AuthService as Auth (aliased imports)
+ *
+ * Note: Only top-level static import statements are processed. Dynamic imports
+ * (e.g., `await import('./module')`) and non-top-level imports are not tracked.
+ * TypeScript/JavaScript side-effect imports without imported symbols (e.g.,
+ * `import './styles.css'`) are also not tracked and will not appear in
+ * `importedSymbols`.
+ */
+export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<string, string[]> {
+  const importedSymbols: Record<string, string[]> = {};
+  
+  // Only process top-level import statements
+  for (let i = 0; i < rootNode.namedChildCount; i++) {
+    const node = rootNode.namedChild(i);
+    if (!node) continue;
+    
+    let result: { importPath: string; symbols: string[] } | null = null;
+    
+    // TypeScript/JavaScript imports vs Python imports both use 'import_statement' type
+    // Distinguish by checking for TypeScript/JavaScript-specific structure (source field)
+    if (node.type === 'import_statement') {
+      const sourceNode = node.childForFieldName('source');
+      if (sourceNode) {
+        // TypeScript/JavaScript: has a 'source' field
+        result = processImportStatement(node);
+      } else {
+        // Python regular import: no 'source' field
+        result = processPythonImport(node);
+      }
+    }
+    // Python: from...import statements
+    else if (node.type === 'import_from_statement') {
+      result = processPythonFromImport(node);
+    }
+    // PHP: namespace use declarations
+    else if (node.type === 'namespace_use_declaration') {
+      result = processPHPUseDeclaration(node);
+    }
+    
+    if (result) {
+      // Merge symbols if importing from the same path multiple times
+      if (importedSymbols[result.importPath]) {
+        importedSymbols[result.importPath].push(...result.symbols);
+      } else {
+        importedSymbols[result.importPath] = result.symbols;
+      }
+    }
+  }
+  
+  return importedSymbols;
+}
+
+/**
+ * Extract the aliased symbol from a Python aliased_import node.
+ * For "from typing import Optional as Opt", returns "Opt" (the alias).
+ * 
+ * The alias is always the last identifier child when there are at least two identifiers
+ * (original name + alias). If fewer identifiers exist, falls back to dotted_name or first identifier.
+ */
+function extractPythonAliasedSymbol(node: Parser.SyntaxNode): string | undefined {
+  const identifierChildren = node.namedChildren.filter(c => c.type === 'identifier');
+  const dottedName = node.namedChildren.find(c => c.type === 'dotted_name');
+
+  // If there are at least two identifiers, the last one is the alias (after 'as')
+  if (identifierChildren.length >= 2) {
+    // Length check guarantees element exists, no optional chaining needed
+    return identifierChildren[identifierChildren.length - 1].text;
+  }
+  
+  // Fallback: prefer dotted_name, then single identifier if present
+  return dottedName?.text ?? identifierChildren[0]?.text;
+}
+
+/**
+ * Process Python regular import statement.
+ * e.g., "import os", "import os as system"
+ * 
+ * Note: For aliased imports like "import numpy as np", we use the original module name
+ * as the import path and the alias as the symbol (so it maps to how it's used in code).
+ * 
+ * Limitation: Multi-module imports (e.g., "import os, sys") only track the first module.
+ * This is acceptable since PEP 8 recommends separate import statements for each module.
+ */
+function processPythonImport(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  // Only process the first module in multi-module imports (PEP 8 recommends separate imports anyway)
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    
+    // Regular module import: "import os"
+    if (child.type === 'dotted_name' || child.type === 'identifier') {
+      const moduleName = child.text;
+      // For 'import foo.bar', track the full module path as the symbol
+      // For 'import foo', 'foo' is both module and symbol
+      return { 
+        importPath: moduleName, 
+        symbols: [moduleName]
+      };
+    }
+    // Aliased import: "import os as system"
+    else if (child.type === 'aliased_import') {
+      // Extract the original module name and the alias
+      const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
+      const identifiers = child.namedChildren.filter(c => c.type === 'identifier');
+      
+      const moduleName = dottedName?.text || identifiers[0]?.text;
+      const aliasName = identifiers.length >= 2 
+        ? identifiers[identifiers.length - 1]?.text  // The alias (after 'as')
+        : identifiers[0]?.text;  // Fallback
+      
+      if (moduleName && aliasName) {
+        return { 
+          importPath: moduleName, 
+          symbols: [aliasName] 
+        };
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Process Python from...import statement.
+ * e.g., "from utils.validate import validateEmail, validatePhone"
+ */
+function processPythonFromImport(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  let modulePath: string | null = null;
+  const symbols: string[] = [];
+  
+  let foundModule = false;
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    
+    // First dotted_name is the module path
+    if (child.type === 'dotted_name' && !foundModule) {
+      modulePath = child.text;
+      foundModule = true;
+    }
+    // Subsequent dotted_names are imported symbols
+    else if (child.type === 'dotted_name' && foundModule) {
+      symbols.push(child.text);
+    }
+    // Aliased imports: "from module import foo as bar"
+    else if (child.type === 'aliased_import') {
+      const symbolName = extractPythonAliasedSymbol(child);
+      if (symbolName) {
+        symbols.push(symbolName);
+      }
+    }
+  }
+  
+  if (!modulePath || symbols.length === 0) return null;
+  return { importPath: modulePath, symbols };
+}
+
+/**
+ * Process PHP namespace use declaration.
+ * e.g., "use App\Models\User" -> { importPath: "App\Models\User", symbols: ["User"] }
+ */
+function processPHPUseDeclaration(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  // Find namespace_use_clause
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const clause = node.namedChild(i);
+    if (clause?.type !== 'namespace_use_clause') continue;
+    
+    const fullPath = extractPHPQualifiedName(clause);
+    if (!fullPath) continue;
+    
+    // Check for alias (use App\Models\User as U)
+    // Find alias: look for a name node that's a direct child (not inside qualified_name)
+    const directNames = clause.namedChildren.filter(c => c.type === 'name');
+    let symbol: string;
+    if (directNames.length > 0) {
+      // The last direct 'name' child is the alias
+      symbol = directNames[directNames.length - 1].text;
+    } else {
+      // No alias, extract class name from the path
+      const parts = fullPath.split('\\');
+      symbol = parts[parts.length - 1];
+    }
+    
+    return { importPath: fullPath, symbols: [symbol] };
+  }
+  
+  return null;
+}
+
+/**
+ * Extract the import path from an import statement.
+ */
+function extractImportPath(node: Parser.SyntaxNode): string | null {
+  const sourceNode = node.childForFieldName('source');
+  return sourceNode?.text.replace(/['"]/g, '') ?? null;
+}
+
+/**
+ * Handler type for import node processing.
+ */
+type ImportNodeHandler = (child: Parser.SyntaxNode, symbols: string[]) => void;
+
+/**
+ * Handlers for different import node types.
+ */
+const IMPORT_NODE_HANDLERS: Record<string, ImportNodeHandler> = {
+  'identifier': (child, symbols) => symbols.push(child.text),
+  'import_clause': (child, symbols) => extractImportClauseSymbols(child, symbols),
+  'named_imports': (child, symbols) => extractNamedImportSymbols(child, symbols),
+  'namespace_import': (child, symbols) => extractNamespaceImportSymbol(child, symbols),
+};
+
+/**
+ * Extract all imported symbols from an import statement's children.
+ */
+function extractImportStatementSymbols(node: Parser.SyntaxNode): string[] {
+  const symbols: string[] = [];
+  
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    
+    const handler = IMPORT_NODE_HANDLERS[child.type];
+    if (handler) {
+      handler(child, symbols);
+    }
+  }
+  
+  return symbols;
+}
+
+/**
+ * Process a single import statement and extract its symbols.
+ */
+function processImportStatement(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  const importPath = extractImportPath(node);
+  if (!importPath) return null;
+  
+  const symbols = extractImportStatementSymbols(node);
+  return symbols.length > 0 ? { importPath, symbols } : null;
+}
+
+/**
+ * Extract symbols from an import clause (handles default, named, and namespace imports)
+ */
+function extractImportClauseSymbols(node: Parser.SyntaxNode, symbols: string[]): void {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    
+    // Default import identifier
+    if (child.type === 'identifier') {
+      symbols.push(child.text);
+    }
+    // Named imports
+    else if (child.type === 'named_imports') {
+      extractNamedImportSymbols(child, symbols);
+    }
+    // Namespace import
+    else if (child.type === 'namespace_import') {
+      extractNamespaceImportSymbol(child, symbols);
+    }
+  }
+}
+
+/**
+ * Extract namespace import symbol: import * as utils
+ * 
+ * Format: "* as {alias}" (e.g., "* as utils")
+ * 
+ * The "* as " prefix is intentionally included to distinguish namespace imports
+ * from regular named imports in the symbol matching logic. This allows us to
+ * identify when a file has access to all exports via a namespace, which is
+ * useful for dependency analysis even when we can't track specific call sites.
+ */
+function extractNamespaceImportSymbol(node: Parser.SyntaxNode, symbols: string[]): void {
+  // Find the identifier child (the alias name)
+  // Namespace imports have exactly one alias identifier, so we return after finding it.
+  // Example: "import * as utils from './module'" → identifier is "utils"
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child?.type === 'identifier') {
+      symbols.push(`* as ${child.text}`);
+      return; // Early return - namespace imports have only one alias
+    }
+  }
+}
+
+/**
+ * Extract symbol from an import specifier (handles aliases).
+ */
+function extractImportSpecifierSymbol(node: Parser.SyntaxNode, symbols: string[]): void {
+  const aliasNode = node.childForFieldName('alias');
+  const nameNode = node.childForFieldName('name');
+  const symbol = aliasNode?.text || nameNode?.text || node.text;
+  
+  if (symbol && !symbol.includes('{') && !symbol.includes('}')) {
+    symbols.push(symbol);
+  }
+}
+
+/**
+ * Helper to extract symbol names from named imports clause
+ */
+function extractNamedImportSymbols(node: Parser.SyntaxNode, symbols: string[]): void {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+    
+    switch (child.type) {
+      case 'import_specifier':
+        extractImportSpecifierSymbol(child, symbols);
+        break;
+      case 'identifier':
+        symbols.push(child.text);
+        break;
+      case 'named_imports':
+        // Recurse into nested named_imports
+        extractNamedImportSymbols(child, symbols);
+        break;
+    }
+  }
+}
+
+/**
+ * Extract symbols from a single export statement.
+ */
+function extractExportStatementSymbols(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  // Check for default export
+  const defaultKeyword = node.children.find(c => c.type === 'default');
+  if (defaultKeyword) {
+    addExport('default');
+  }
+  
+  // Check for declaration (export function/const/class)
+  const declaration = node.childForFieldName('declaration');
+  if (declaration) {
+    extractDeclarationExports(declaration, addExport);
+  }
+  
+  // Check for export clause (export { foo, bar })
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child?.type === 'export_clause') {
+      extractExportClauseSymbols(child, addExport);
+    }
+  }
+}
+
+/**
+ * Extract exported symbols from a file.
+ * 
+ * Returns array of exported symbol names like: ['validateEmail', 'validatePhone', 'default']
+ * 
+ * Handles various export styles:
+ * - Named exports: export { foo, bar }
+ * - Declaration exports: export function foo() {}, export const bar = ...
+ * - Default exports: export default ...
+ * - Re-exports: export { foo } from './module'
+ * 
+ * Limitations:
+ * - Only static, top-level export statements are processed (direct children of the root node).
+ * - Dynamic or conditional exports (e.g., inside if/for blocks, functions, or created programmatically)
+ *   are not detected and will not be included in the returned symbol list.
+ */
+export function extractExports(rootNode: Parser.SyntaxNode): string[] {
+  const exports: string[] = [];
+  const seen = new Set<string>();
+  
+  const addExport = (name: string) => {
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      exports.push(name);
+    }
+  };
+  
+  // Process only top-level export statements
+  for (let i = 0; i < rootNode.namedChildCount; i++) {
+    const child = rootNode.namedChild(i);
+    if (child?.type === 'export_statement') {
+      extractExportStatementSymbols(child, addExport);
+    }
+  }
+  
+  return exports;
+}
+
+/**
+ * Extract exported names from a declaration (function, const, class, interface)
+ */
+function extractDeclarationExports(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  // function/class/interface declaration
+  const nameNode = node.childForFieldName('name');
+  if (nameNode) {
+    addExport(nameNode.text);
+    return;
+  }
+  
+  // lexical_declaration: const/let declarations
+  if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (child?.type === 'variable_declarator') {
+        const varName = child.childForFieldName('name');
+        if (varName) {
+          addExport(varName.text);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Extract symbol names from export clause: export { foo, bar as baz }
+ */
+function extractExportClauseSymbols(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child?.type === 'export_specifier') {
+      // Use alias if present, otherwise use the name
+      const aliasNode = child.childForFieldName('alias');
+      const nameNode = child.childForFieldName('name');
+      const exported = aliasNode?.text || nameNode?.text;
+      if (exported) {
+        addExport(exported);
+      }
+    }
+  }
+}
+
+/**
+ * Extract call sites within a function/method body.
+ * 
+ * Returns array of function calls made within the node.
+ * 
+ * Supported languages:
+ * - TypeScript/JavaScript: call_expression (foo(), obj.method())
+ * - PHP: function_call_expression, member_call_expression, scoped_call_expression
+ * - Python: call (similar to JS call_expression)
+ */
+export function extractCallSites(node: Parser.SyntaxNode): Array<{ symbol: string; line: number }> {
+  const callSites: Array<{ symbol: string; line: number }> = [];
+  const seen = new Set<string>();
+  
+  traverseForCallSites(node, callSites, seen);
+  return callSites;
+}
+
+/**
+ * Call expression node types by language.
+ */
+const CALL_EXPRESSION_TYPES = new Set([
+  'call_expression',           // TypeScript/JavaScript
+  'call',                      // Python
+  'function_call_expression',  // PHP: helper_function()
+  'member_call_expression',    // PHP: $this->method()
+  'scoped_call_expression',    // PHP: User::find()
+]);
+
+/**
+ * Recursively traverse AST to find call expressions.
+ */
+function traverseForCallSites(
+  node: Parser.SyntaxNode, 
+  callSites: Array<{ symbol: string; line: number }>,
+  seen: Set<string>
+): void {
+  if (CALL_EXPRESSION_TYPES.has(node.type)) {
+    const callSite = extractCallSiteFromExpression(node);
+    if (callSite && !seen.has(callSite.key)) {
+      seen.add(callSite.key);
+      callSites.push({ symbol: callSite.symbol, line: callSite.line });
+    }
+  }
+  
+  // Recurse into named children to skip punctuation and other non-semantic nodes
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child) traverseForCallSites(child, callSites, seen);
+  }
+}
+
+/**
+ * Extract symbol and line from a call expression.
+ * Handles multiple languages with different AST structures.
+ */
+function extractCallSiteFromExpression(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
+  const line = node.startPosition.row + 1;
+  
+  // TypeScript/JavaScript: call_expression
+  if (node.type === 'call_expression') {
+    return extractJSCallSite(node, line);
+  }
+  
+  // Python: call
+  if (node.type === 'call') {
+    return extractPythonCallSite(node, line);
+  }
+  
+  // PHP: function_call_expression - helper_function()
+  if (node.type === 'function_call_expression') {
+    const funcNode = node.childForFieldName('function');
+    if (funcNode?.type === 'name') {
+      return { symbol: funcNode.text, line, key: `${funcNode.text}:${line}` };
+    }
+  }
+  
+  // PHP: member_call_expression - $this->method() or $obj->method()
+  if (node.type === 'member_call_expression') {
+    const nameNode = node.childForFieldName('name');
+    if (nameNode?.type === 'name') {
+      return { symbol: nameNode.text, line, key: `${nameNode.text}:${line}` };
+    }
+  }
+  
+  // PHP: scoped_call_expression - User::find() or static::method()
+  if (node.type === 'scoped_call_expression') {
+    const nameNode = node.childForFieldName('name');
+    if (nameNode?.type === 'name') {
+      return { symbol: nameNode.text, line, key: `${nameNode.text}:${line}` };
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Extract call site from JavaScript/TypeScript call_expression.
+ */
+function extractJSCallSite(node: Parser.SyntaxNode, line: number): { symbol: string; line: number; key: string } | null {
+  const functionNode = node.childForFieldName('function');
+  if (!functionNode) return null;
+  
+  // Direct function call: foo()
+  if (functionNode.type === 'identifier') {
+    return { symbol: functionNode.text, line, key: `${functionNode.text}:${line}` };
+  }
+  
+  // Member expression: foo.bar() - extract 'bar'
+  if (functionNode.type === 'member_expression') {
+    const propertyNode = functionNode.childForFieldName('property');
+    if (propertyNode?.type === 'property_identifier') {
+      return { symbol: propertyNode.text, line, key: `${propertyNode.text}:${line}` };
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Extract call site from Python call expression.
+ */
+function extractPythonCallSite(node: Parser.SyntaxNode, line: number): { symbol: string; line: number; key: string } | null {
+  const funcNode = node.childForFieldName('function');
+  if (!funcNode) return null;
+  
+  // Direct function call: foo()
+  if (funcNode.type === 'identifier') {
+    return { symbol: funcNode.text, line, key: `${funcNode.text}:${line}` };
+  }
+  
+  // Attribute access: obj.method() - extract 'method'
+  if (funcNode.type === 'attribute') {
+    const attrNode = funcNode.childForFieldName('attribute');
+    if (attrNode?.type === 'identifier') {
+      return { symbol: attrNode.text, line, key: `${attrNode.text}:${line}` };
+    }
+  }
+  
+  return null;
 }

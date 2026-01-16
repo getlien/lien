@@ -1,7 +1,7 @@
 import type Parser from 'tree-sitter';
-import type { ASTChunk } from './types.js';
+import type { ASTChunk, SupportedLanguage } from './types.js';
 import { parseAST, detectLanguage, isASTSupported } from './parser.js';
-import { extractSymbolInfo, extractImports } from './symbols.js';
+import { extractSymbolInfo, extractImports, extractImportedSymbols, extractExports, extractCallSites } from './symbols.js';
 import { calculateCognitiveComplexity, calculateHalstead } from './complexity/index.js';
 import { getTraverser } from './traversers/index.js';
 
@@ -11,6 +11,108 @@ export interface ASTChunkOptions {
   // Multi-tenant fields (optional for backward compatibility)
   repoId?: string; // Repository identifier for multi-tenant scenarios
   orgId?: string;  // Organization identifier for multi-tenant scenarios
+}
+
+/**
+ * Context extracted from the AST for chunk creation.
+ */
+interface ASTContext {
+  lines: string[];
+  fileImports: string[];
+  importedSymbols: Record<string, string[]>;
+  fileExports: string[];
+  traverser: ReturnType<typeof getTraverser>;
+}
+
+/**
+ * Validate language support and parse the file.
+ * @throws Error if language not supported or parsing fails
+ */
+function parseAndValidate(filepath: string, content: string) {
+  const language = detectLanguage(filepath);
+  if (!language) {
+    throw new Error(`Unsupported language for file: ${filepath}`);
+  }
+  
+  const parseResult = parseAST(content, language);
+  if (!parseResult.tree) {
+    throw new Error(`Failed to parse ${filepath}: ${parseResult.error}`);
+  }
+  
+  return { language, rootNode: parseResult.tree.rootNode };
+}
+
+/**
+ * Prepare AST context by extracting imports, exports, and symbols.
+ */
+function prepareASTContext(
+  content: string,
+  rootNode: Parser.SyntaxNode,
+  language: SupportedLanguage
+): ASTContext {
+  return {
+    lines: content.split('\n'),
+    fileImports: extractImports(rootNode),
+    importedSymbols: extractImportedSymbols(rootNode),
+    fileExports: extractExports(rootNode),
+    traverser: getTraverser(language),
+  };
+}
+
+/**
+ * Process a single top-level node into a chunk.
+ */
+function processTopLevelNode(
+  node: Parser.SyntaxNode,
+  filepath: string,
+  content: string,
+  context: ASTContext,
+  language: SupportedLanguage,
+  tenantContext: { repoId?: string; orgId?: string }
+): ASTChunk {
+  const { lines, fileImports, fileExports, importedSymbols, traverser } = context;
+  
+  // For variable declarations, try to find the function inside
+  let actualNode = node;
+  if (traverser.isDeclarationWithFunction(node)) {
+    const declInfo = traverser.findFunctionInDeclaration(node);
+    if (declInfo.functionNode) {
+      actualNode = declInfo.functionNode;
+    }
+  }
+  
+  // For methods, find the parent container name (e.g., class name)
+  const parentClassName = traverser.findParentContainerName(actualNode);
+  const symbolInfo = extractSymbolInfo(actualNode, content, parentClassName, language);
+  const nodeContent = getNodeContent(node, lines);
+  
+  return createChunk(
+    filepath,
+    node,
+    nodeContent,
+    symbolInfo,
+    fileImports,
+    language,
+    tenantContext,
+    fileExports,
+    importedSymbols
+  );
+}
+
+/**
+ * Process all top-level nodes into chunks.
+ */
+function processTopLevelNodes(
+  topLevelNodes: Parser.SyntaxNode[],
+  filepath: string,
+  content: string,
+  context: ASTContext,
+  language: SupportedLanguage,
+  tenantContext: { repoId?: string; orgId?: string }
+): ASTChunk[] {
+  return topLevelNodes.map(node =>
+    processTopLevelNode(node, filepath, content, context, language, tenantContext)
+  );
 }
 
 /**
@@ -36,80 +138,45 @@ export function chunkByAST(
   options: ASTChunkOptions = {}
 ): ASTChunk[] {
   const { minChunkSize = 5, repoId, orgId } = options;
+  const tenantContext = { repoId, orgId };
   
-  // Check if AST is supported for this file
-  const language = detectLanguage(filepath);
-  if (!language) {
-    throw new Error(`Unsupported language for file: ${filepath}`);
-  }
+  // Parse and validate
+  const { language, rootNode } = parseAndValidate(filepath, content);
   
-  // Parse the file
-  const parseResult = parseAST(content, language);
+  // Prepare context
+  const context = prepareASTContext(content, rootNode, language);
   
-  // If parsing failed, throw error (caller should fallback to line-based)
-  if (!parseResult.tree) {
-    throw new Error(`Failed to parse ${filepath}: ${parseResult.error}`);
-  }
+  // Find and process top-level nodes
+  const topLevelNodes = findTopLevelNodes(rootNode, context.traverser);
+  const topLevelChunks = processTopLevelNodes(
+    topLevelNodes,
+    filepath,
+    content,
+    context,
+    language,
+    tenantContext
+  );
   
-  const chunks: ASTChunk[] = [];
-  const lines = content.split('\n');
-  const rootNode = parseResult.tree.rootNode;
-  
-  // Get language-specific traverser
-  const traverser = getTraverser(language);
-  
-  // Extract file-level imports once
-  const fileImports = extractImports(rootNode);
-  
-  // Find all top-level function and class declarations
-  const topLevelNodes = findTopLevelNodes(rootNode, traverser);
-  
-  for (const node of topLevelNodes) {
-    // For variable declarations, try to find the function inside
-    let actualNode = node;
-    if (traverser.isDeclarationWithFunction(node)) {
-      const declInfo = traverser.findFunctionInDeclaration(node);
-      if (declInfo.functionNode) {
-        actualNode = declInfo.functionNode;
-      }
-    }
-    
-    // For methods, find the parent container name (e.g., class name)
-    const parentClassName = traverser.findParentContainerName(actualNode);
-    
-    const symbolInfo = extractSymbolInfo(actualNode, content, parentClassName, language);
-    
-    // Extract the code for this node (use original node for full declaration)
-    const nodeContent = getNodeContent(node, lines);
-    
-    // Create a chunk for this semantic unit
-    // Note: Large functions are kept as single chunks (may exceed maxChunkSize)
-    // This preserves semantic boundaries - better than splitting mid-function
-    chunks.push(createChunk(filepath, node, nodeContent, symbolInfo, fileImports, language, { repoId, orgId }));
-  }
-  
-  // Handle remaining code (imports, exports, top-level statements)
+  // Extract uncovered code (imports, exports, top-level statements)
   const coveredRanges = topLevelNodes.map(n => ({
     start: n.startPosition.row,
     end: n.endPosition.row,
   }));
-  
   const uncoveredChunks = extractUncoveredCode(
-    lines,
+    context.lines,
     coveredRanges,
     filepath,
     minChunkSize,
-    fileImports,
+    context.fileImports,
     language,
-    { repoId, orgId }
+    tenantContext,
+    context.fileExports,
+    context.importedSymbols
   );
   
-  chunks.push(...uncoveredChunks);
-  
-  // Sort chunks by line number
-  chunks.sort((a, b) => a.metadata.startLine - b.metadata.startLine);
-  
-  return chunks;
+  // Combine and sort by line number
+  return [...topLevelChunks, ...uncoveredChunks]
+    .sort((a, b) => a.metadata.startLine - b.metadata.startLine);
 }
 
 /** Check if node is a function-containing declaration at top level */
@@ -230,8 +297,10 @@ function createChunk(
   content: string,
   symbolInfo: ReturnType<typeof extractSymbolInfo>,
   imports: string[],
-  language: string,
-  tenantContext?: { repoId?: string; orgId?: string }
+  language: SupportedLanguage,
+  tenantContext?: { repoId?: string; orgId?: string },
+  fileExports?: string[],
+  importedSymbols?: Record<string, string[]>
 ): ASTChunk {
   const symbols = buildLegacySymbols(symbolInfo);
   const shouldCalcComplexity = symbolInfo?.type && COMPLEXITY_SYMBOL_TYPES.has(symbolInfo.type);
@@ -244,6 +313,11 @@ function createChunk(
   // Calculate Halstead metrics only for functions and methods
   const halstead = shouldCalcComplexity
     ? calculateHalstead(node, language)
+    : undefined;
+  
+  // Extract call sites for functions and methods
+  const callSites = shouldCalcComplexity
+    ? extractCallSites(node)
     : undefined;
   
   return {
@@ -263,6 +337,15 @@ function createChunk(
       parameters: symbolInfo?.parameters,
       signature: symbolInfo?.signature,
       imports,
+      // Symbol-level dependency tracking
+      // NOTE: `exports` and `importedSymbols` are file-level concepts, but we deliberately
+      // attach them to every chunk from the same file (including "uncovered" chunks).
+      // This duplicates some metadata, but greatly simplifies dependency analysis,
+      // since consumers can inspect a single chunk in isolation without additional lookups.
+      // This increases storage overhead but is acceptable given typical file sizes and chunk counts.
+      ...(fileExports && fileExports.length > 0 && { exports: fileExports }),
+      ...(importedSymbols && Object.keys(importedSymbols).length > 0 && { importedSymbols }),
+      ...(callSites && callSites.length > 0 && { callSites }),
       // Halstead metrics
       halsteadVolume: halstead?.volume,
       halsteadDifficulty: halstead?.difficulty,
@@ -325,9 +408,11 @@ function createChunkFromRange(
   range: LineRange,
   lines: string[],
   filepath: string,
-  language: string,
+  language: SupportedLanguage,
   imports: string[],
-  tenantContext?: { repoId?: string; orgId?: string }
+  tenantContext?: { repoId?: string; orgId?: string },
+  fileExports?: string[],
+  importedSymbols?: Record<string, string[]>
 ): ASTChunk {
   const uncoveredLines = lines.slice(range.start, range.end + 1);
   const content = uncoveredLines.join('\n').trim();
@@ -343,6 +428,9 @@ function createChunkFromRange(
       // Empty symbols for uncovered code (imports, exports, etc.)
       symbols: { functions: [], classes: [], interfaces: [] },
       imports,
+      // Symbol-level dependency tracking
+      ...(fileExports && fileExports.length > 0 && { exports: fileExports }),
+      ...(importedSymbols && Object.keys(importedSymbols).length > 0 && { importedSymbols }),
       // Multi-tenant fields
       ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
       ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
@@ -368,13 +456,15 @@ function extractUncoveredCode(
   filepath: string,
   minChunkSize: number,
   imports: string[],
-  language: string,
-  tenantContext?: { repoId?: string; orgId?: string }
+  language: SupportedLanguage,
+  tenantContext?: { repoId?: string; orgId?: string },
+  fileExports?: string[],
+  importedSymbols?: Record<string, string[]>
 ): ASTChunk[] {
   const uncoveredRanges = findUncoveredRanges(coveredRanges, lines.length);
   
   return uncoveredRanges
-    .map(range => createChunkFromRange(range, lines, filepath, language, imports, tenantContext))
+    .map(range => createChunkFromRange(range, lines, filepath, language, imports, tenantContext, fileExports, importedSymbols))
     .filter(chunk => isValidChunk(chunk, minChunkSize));
 }
 

@@ -31,6 +31,10 @@ export interface QdrantPayload {
   halsteadDifficulty: number;   // Always present (defaults to 0 if missing)
   halsteadEffort: number;       // Always present (defaults to 0 if missing)
   halsteadBugs: number;         // Always present (defaults to 0 if missing)
+  // Symbol-level dependency tracking (v0.23.0)
+  exports: string[];
+  importedSymbols: string;      // JSON-encoded Record<string, string[]>
+  callSites: string;            // JSON-encoded Array<{symbol, line}>
   // Multi-tenant fields
   orgId: string;
   repoId: string;
@@ -79,6 +83,10 @@ export class QdrantPayloadMapper {
       parameters: metadata.parameters ?? [],
       signature: metadata.signature ?? '',
       imports: metadata.imports ?? [],
+      // Symbol-level dependency tracking (v0.23.0)
+      exports: metadata.exports ?? [],
+      importedSymbols: metadata.importedSymbols ? JSON.stringify(metadata.importedSymbols) : '{}',
+      callSites: metadata.callSites ? JSON.stringify(metadata.callSites) : '[]',
     };
   }
 
@@ -150,6 +158,42 @@ export class QdrantPayloadMapper {
   }
 
   /**
+   * Parse JSON safely, returning default value on error or missing input.
+   */
+  private safeJsonParse<T>(json: string | undefined, defaultValue: T): T {
+    if (json == null) {
+      return defaultValue;
+    }
+    try {
+      return JSON.parse(json);
+    } catch (err) {
+      console.warn(`QdrantPayloadMapper.safeJsonParse: failed to parse JSON. Returning default.`, err);
+      return defaultValue;
+    }
+  }
+
+  /**
+   * Extract symbol-level dependency tracking fields.
+   */
+  private extractDependencyTracking(payload: Record<string, any>) {
+    const exports = payload.exports?.length > 0 ? payload.exports : undefined;
+    const importedSymbols = this.safeJsonParse<Record<string, string[]>>(
+      payload.importedSymbols,
+      {}
+    );
+    const callSites = this.safeJsonParse<Array<{ symbol: string; line: number }>>(
+      payload.callSites,
+      []
+    );
+
+    return {
+      exports,
+      importedSymbols: Object.keys(importedSymbols).length > 0 ? importedSymbols : undefined,
+      callSites: callSites.length > 0 ? callSites : undefined,
+    };
+  }
+
+  /**
    * Transform Qdrant payload back to ChunkMetadata.
    */
   fromPayload(payload: Record<string, any>): ChunkMetadata {
@@ -168,6 +212,7 @@ export class QdrantPayloadMapper {
       imports: payload.imports ?? undefined,
       ...this.extractMetrics(payload),
       ...this.extractTrackingInfo(payload),
+      ...this.extractDependencyTracking(payload),
     };
   }
 }

@@ -36,7 +36,11 @@ describe('handleGetDependents', () => {
 
   // Helper to create mock analysis result
   function createMockAnalysis(overrides: {
-    dependents?: Array<{ filepath: string; isTestFile: boolean }>;
+    dependents?: Array<{
+      filepath: string;
+      isTestFile: boolean;
+      usages?: Array<{ callerSymbol: string; line: number; snippet: string }>;
+    }>;
     hitLimit?: boolean;
     complexityMetrics?: {
       averageComplexity: number;
@@ -45,6 +49,7 @@ describe('handleGetDependents', () => {
       highComplexityDependents: Array<{ filepath: string; maxComplexity: number; avgComplexity: number }>;
       complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical';
     };
+    totalUsageCount?: number;
   } = {}) {
     const dependents = overrides.dependents ?? [
       { filepath: 'src/consumer.ts', isTestFile: false },
@@ -67,6 +72,7 @@ describe('handleGetDependents', () => {
       },
       hitLimit: overrides.hitLimit ?? false,
       allChunks: [] as SearchResult[],
+      totalUsageCount: overrides.totalUsageCount,
     };
   }
 
@@ -126,7 +132,8 @@ describe('handleGetDependents', () => {
         mockVectorDB,
         'src/utils/helpers.ts',
         false, // crossRepo default
-        mockLog
+        mockLog,
+        undefined // symbol default
       );
     });
 
@@ -305,7 +312,8 @@ describe('handleGetDependents', () => {
         mockQdrantDB,
         'src/shared/utils.ts',
         true,
-        mockLog
+        mockLog,
+        undefined
       );
     });
 
@@ -384,7 +392,8 @@ describe('handleGetDependents', () => {
         mockVectorDB,
         'src/utils.ts',
         true,
-        mockLog
+        mockLog,
+        undefined
       );
     });
   });
@@ -595,6 +604,152 @@ describe('handleGetDependents', () => {
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.productionDependentCount).toBe(1);
       expect(parsed.riskLevel).toBe('critical');
+    });
+  });
+
+  describe('symbol-level usage tracking', () => {
+    it('should pass symbol parameter to findDependents', async () => {
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
+
+      await handleGetDependents(
+        { filepath: 'src/utils/validate.ts', symbol: 'validateEmail' },
+        mockCtx
+      );
+
+      expect(findDependents).toHaveBeenCalledWith(
+        mockVectorDB,
+        'src/utils/validate.ts',
+        false,
+        mockLog,
+        'validateEmail'
+      );
+    });
+
+    it('should include symbol in response when provided', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis(),
+        totalUsageCount: 3,
+      });
+
+      const result = await handleGetDependents(
+        { filepath: 'src/utils/validate.ts', symbol: 'validateEmail' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.symbol).toBe('validateEmail');
+      expect(parsed.totalUsageCount).toBe(3);
+    });
+
+    it('should include usages array in dependents when symbol usages found', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [
+            {
+              filepath: 'src/signup.ts',
+              isTestFile: false,
+              usages: [
+                { callerSymbol: 'signupUser', line: 45, snippet: 'validateEmail(input.email)' },
+              ],
+            },
+            {
+              filepath: 'src/profile.ts',
+              isTestFile: false,
+              usages: [
+                { callerSymbol: 'updateEmail', line: 89, snippet: 'if (!validateEmail(newEmail))' },
+              ],
+            },
+          ],
+        }),
+        totalUsageCount: 2,
+      });
+
+      const result = await handleGetDependents(
+        { filepath: 'src/utils/validate.ts', symbol: 'validateEmail' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.totalUsageCount).toBe(2);
+      expect(parsed.dependents).toHaveLength(2);
+      expect(parsed.dependents[0].usages).toHaveLength(1);
+      expect(parsed.dependents[0].usages[0]).toEqual({
+        callerSymbol: 'signupUser',
+        line: 45,
+        snippet: 'validateEmail(input.email)',
+      });
+    });
+
+    it('should include dependents that import symbol but have no tracked call sites', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [
+            {
+              filepath: 'src/consumer.ts',
+              isTestFile: false,
+              usages: undefined, // Imports but no call sites tracked
+            },
+          ],
+        }),
+        totalUsageCount: 0,
+      });
+
+      const result = await handleGetDependents(
+        { filepath: 'src/utils/validate.ts', symbol: 'validateEmail' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.dependentCount).toBe(1);
+      expect(parsed.totalUsageCount).toBe(0);
+      expect(parsed.dependents[0].usages).toBeUndefined();
+    });
+
+    it('should log usage count when symbol is provided', async () => {
+      vi.mocked(findDependents).mockResolvedValue({
+        ...createMockAnalysis({
+          dependents: [
+            { filepath: 'src/a.ts', isTestFile: false },
+            { filepath: 'src/b.ts', isTestFile: false },
+          ],
+        }),
+        totalUsageCount: 5,
+      });
+
+      await handleGetDependents(
+        { filepath: 'src/utils.ts', symbol: 'myFunction' },
+        mockCtx
+      );
+
+      expect(mockLog).toHaveBeenCalledWith(
+        expect.stringContaining("Found 5 tracked call sites across 2 files")
+      );
+    });
+
+    it('should indicate symbol in initial log message', async () => {
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
+
+      await handleGetDependents(
+        { filepath: 'src/utils.ts', symbol: 'helper' },
+        mockCtx
+      );
+
+      expect(mockLog).toHaveBeenCalledWith(
+        'Finding dependents of: src/utils.ts (symbol: helper)'
+      );
+    });
+
+    it('should not include totalUsageCount when symbol not provided', async () => {
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
+
+      const result = await handleGetDependents(
+        { filepath: 'src/utils.ts' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.symbol).toBeUndefined();
+      expect(parsed.totalUsageCount).toBeUndefined();
     });
   });
 });

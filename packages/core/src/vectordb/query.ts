@@ -75,6 +75,12 @@ interface DBRecord {
   halsteadDifficulty?: number;
   halsteadEffort?: number;
   halsteadBugs?: number;
+  // Symbol-level dependency tracking (v0.23.0)
+  exports?: string[];
+  importedSymbolPaths?: string[];
+  importedSymbolNames?: string[];
+  callSiteSymbols?: string[];
+  callSiteLines?: number[];
   _distance?: number; // Added by LanceDB for search results
 }
 
@@ -92,11 +98,25 @@ function isValidRecord(r: DBRecord): boolean {
 }
 
 /**
- * Check if an array field has valid (non-empty) entries.
- * LanceDB stores empty arrays as [''] which we need to filter out.
+ * Check if a string array has valid (non-empty) entries.
+ * LanceDB stores empty string arrays as [''] which we need to filter out.
+ * This is specifically for string arrays (cf. hasValidNumberEntries for number arrays).
  */
-function hasValidArrayEntries(arr: string[] | undefined): boolean {
+function hasValidStringEntries(arr: string[] | undefined): boolean {
   return Boolean(arr && arr.length > 0 && arr[0] !== '');
+}
+
+/**
+ * Check if a number array has valid entries (filters out placeholder values).
+ * 
+ * serializeCallSites() uses 0 as a sentinel meaning "no valid line number"
+ * (not actual missing data - the array is never truly empty, it contains [0]).
+ * This function checks if the array contains real line numbers (> 0).
+ * 
+ * Note: Real line numbers are 1-indexed in source files, so 0 is safe as a placeholder.
+ */
+function hasValidNumberEntries(arr: number[] | undefined): boolean {
+  return Boolean(arr && arr.length > 0 && arr[0] !== 0);
 }
 
 /**
@@ -118,9 +138,101 @@ function getSymbolsForType(
 }
 
 /**
- * Convert a DB record to base SearchResult metadata.
- * Shared between all query functions to avoid duplication.
+ * Convert Arrow Vector to plain array if needed.
+ * LanceDB returns Arrow Vector objects for array columns.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toPlainArray<T>(arr: any): T[] | undefined {
+  if (!arr) return undefined;
+  // Arrow Vectors have a toArray() method
+  if (typeof arr.toArray === 'function') {
+    return arr.toArray();
+  }
+  // Already a plain array
+  if (Array.isArray(arr)) {
+    return arr;
+  }
+  return undefined;
+}
+
+/**
+ * Deserialize importedSymbols from parallel arrays stored in DB.
+ * 
+ * @param paths - Array of import paths (keys from importedSymbols map)
+ * @param names - Array of JSON-encoded symbol arrays (values from importedSymbols map)
+ * @returns Record mapping import paths to symbol arrays, or undefined if no valid data
+ */
+function deserializeImportedSymbols(
+  paths?: unknown,
+  names?: unknown
+): Record<string, string[]> | undefined {
+  const pathsArr = toPlainArray<string>(paths);
+  const namesArr = toPlainArray<string>(names);
+  
+  if (!pathsArr || !namesArr || !hasValidStringEntries(pathsArr) || !hasValidStringEntries(namesArr)) {
+    return undefined;
+  }
+  
+  // Treat mismatched arrays as a hard error (indicates data corruption during serialization)
+  if (pathsArr.length !== namesArr.length) {
+    throw new DatabaseError(
+      `deserializeImportedSymbols: array length mismatch (paths: ${pathsArr.length}, names: ${namesArr.length}). ` +
+      `This indicates data corruption. Refusing to deserialize to avoid silent data loss.`
+    );
+  }
+  const result: Record<string, string[]> = {};
+  for (let i = 0; i < pathsArr.length; i++) {
+    const path = pathsArr[i];
+    const namesJson = namesArr[i];
+    if (path && namesJson) {
+      try {
+        result[path] = JSON.parse(namesJson);
+      } catch (err) {
+        console.warn(`deserializeImportedSymbols: failed to parse JSON for path "${path}". Skipping entry.`, err);
+      }
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+/**
+ * Deserialize callSites from parallel arrays stored in DB.
+ * 
+ * @param symbols - Array of symbol names called at each site
+ * @param lines - Array of line numbers for each call site (parallel to symbols)
+ * @returns Array of call site objects with symbol and line, or undefined if no valid data
+ */
+function deserializeCallSites(
+  symbols?: unknown,
+  lines?: unknown
+): Array<{ symbol: string; line: number }> | undefined {
+  const symbolsArr = toPlainArray<string>(symbols);
+  const linesArr = toPlainArray<number>(lines);
+  
+  if (!symbolsArr || !linesArr || !hasValidStringEntries(symbolsArr) || !hasValidNumberEntries(linesArr)) {
+    return undefined;
+  }
+  
+  // Treat mismatched arrays as a hard error (indicates data corruption during serialization)
+  if (symbolsArr.length !== linesArr.length) {
+    throw new DatabaseError(
+      `deserializeCallSites: array length mismatch (symbols: ${symbolsArr.length}, lines: ${linesArr.length}). ` +
+      `This indicates data corruption. Refusing to deserialize to avoid silent data loss.`
+    );
+  }
+  const result: Array<{ symbol: string; line: number }> = [];
+  for (let i = 0; i < symbolsArr.length; i++) {
+    const symbol = symbolsArr[i];
+    const line = linesArr[i];
+    // Note: line > 0 is intentional - we use 0 as a placeholder value for missing data
+    // in serializeCallSites(). Real line numbers are 1-indexed in source files.
+    if (symbol && typeof line === 'number' && line > 0) {
+      result.push({ symbol, line });
+    }
+  }
+  return result.length > 0 ? result : undefined;
+}
+
 function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
   return {
     file: r.file,
@@ -133,14 +245,21 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
     parentClass: r.parentClass || undefined,
     complexity: r.complexity || undefined,
     cognitiveComplexity: r.cognitiveComplexity || undefined,
-    parameters: hasValidArrayEntries(r.parameters) ? r.parameters : undefined,
+    parameters: hasValidStringEntries(r.parameters) ? r.parameters : undefined,
     signature: r.signature || undefined,
-    imports: hasValidArrayEntries(r.imports) ? r.imports : undefined,
+    imports: hasValidStringEntries(r.imports) ? r.imports : undefined,
     // Halstead metrics (v0.19.0) - use explicit null check to preserve valid 0 values
     halsteadVolume: r.halsteadVolume != null ? r.halsteadVolume : undefined,
     halsteadDifficulty: r.halsteadDifficulty != null ? r.halsteadDifficulty : undefined,
     halsteadEffort: r.halsteadEffort != null ? r.halsteadEffort : undefined,
     halsteadBugs: r.halsteadBugs != null ? r.halsteadBugs : undefined,
+    // Symbol-level dependency tracking (v0.23.0)
+    exports: (() => {
+      const arr = toPlainArray<string>(r.exports);
+      return hasValidStringEntries(arr) ? arr : undefined;
+    })(),
+    importedSymbols: deserializeImportedSymbols(r.importedSymbolPaths, r.importedSymbolNames),
+    callSites: deserializeCallSites(r.callSiteSymbols, r.callSiteLines),
   };
 }
 
@@ -352,9 +471,9 @@ function matchesSymbolFilter(
  */
 function buildLegacySymbols(r: DBRecord) {
   return {
-    functions: hasValidArrayEntries(r.functionNames) ? r.functionNames : [],
-    classes: hasValidArrayEntries(r.classNames) ? r.classNames : [],
-    interfaces: hasValidArrayEntries(r.interfaceNames) ? r.interfaceNames : [],
+    functions: hasValidStringEntries(r.functionNames) ? r.functionNames : [],
+    classes: hasValidStringEntries(r.classNames) ? r.classNames : [],
+    interfaces: hasValidStringEntries(r.interfaceNames) ? r.interfaceNames : [],
   };
 }
 

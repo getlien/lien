@@ -152,5 +152,73 @@ describe('matchesFile - Path Boundary Checking', () => {
       expect(testMatchesFile('src/auth.ts', 'src/auth.spec.ts')).toBe(false);
     });
   });
+
+  describe('PHP namespace matching', () => {
+    it('should match PHP namespace to file path', () => {
+      // PHP uses namespaces like App\Models\User which map to app/Models/User.php
+      expect(testMatchesFile('App\\Models\\User', 'app/Models/User.php')).toBe(true);
+      expect(testMatchesFile('App\\Models\\Collection', 'web/app/Models/Collection.php')).toBe(true);
+    });
+
+    it('should match nested PHP namespaces', () => {
+      expect(testMatchesFile('Domain\\Hobbii\\Collections\\Services\\CollectionManager', 'web/Domain/Hobbii/Collections/Services/CollectionManager.php')).toBe(true);
+    });
+
+    it('should match case-insensitively for App namespace', () => {
+      // Laravel convention: App namespace maps to app directory
+      expect(testMatchesFile('App\\Http\\Controllers\\UserController', 'app/Http/Controllers/UserController.php')).toBe(true);
+    });
+
+    it('should NOT match unrelated PHP namespaces', () => {
+      expect(testMatchesFile('App\\Models\\User', 'app/Models/Product.php')).toBe(false);
+      expect(testMatchesFile('App\\Services\\Auth', 'app/Models/User.php')).toBe(false);
+    });
+
+    it('should NOT apply PHP matching to non-namespace imports', () => {
+      // Regular file paths should not use PHP namespace matching
+      expect(testMatchesFile('src/models/user', 'src/models/product')).toBe(false);
+    });
+  });
+
+  describe('Python module matching', () => {
+    it('should match Python dotted module to file path', () => {
+      // Python uses dotted paths like django.http which map to django/http/*.py
+      expect(testMatchesFile('django.http', 'django/http/response.py')).toBe(true);
+      expect(testMatchesFile('django.http', 'django/http/__init__.py')).toBe(true);
+    });
+
+    it('should match exact Python module path', () => {
+      expect(testMatchesFile('django.http.response', 'django/http/response.py')).toBe(true);
+      expect(testMatchesFile('django.views.generic.base', 'django/views/generic/base.py')).toBe(true);
+    });
+
+    it('should match Python module with prefix in target', () => {
+      // When target has extra prefix directories
+      expect(testMatchesFile('django.http', 'src/django/http/response.py')).toBe(true);
+      expect(testMatchesFile('myapp.models', 'project/myapp/models/__init__.py')).toBe(true);
+    });
+
+    it('should match parent package to child modules', () => {
+      // from django.http import HttpResponse - matches any module under django/http/
+      expect(testMatchesFile('django.http', 'django/http/request.py')).toBe(true);
+      expect(testMatchesFile('django.http', 'django/http/cookie.py')).toBe(true);
+    });
+
+    it('should NOT match unrelated Python modules', () => {
+      expect(testMatchesFile('django.http', 'django/views/generic.py')).toBe(false);
+      expect(testMatchesFile('django.db.models', 'django/http/response.py')).toBe(false);
+    });
+
+    it('should NOT apply Python matching to non-dotted imports', () => {
+      // Regular file paths should not use Python module matching
+      expect(testMatchesFile('src/models/user', 'src/models/product.py')).toBe(false);
+    });
+
+    it('should handle single-level Python modules', () => {
+      // Single module without dots should still work if it's part of the path
+      expect(testMatchesFile('django.utils', 'django/utils/__init__.py')).toBe(true);
+      expect(testMatchesFile('django.utils', 'django/utils/timezone.py')).toBe(true);
+    });
+  });
 });
 

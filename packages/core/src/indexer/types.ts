@@ -26,6 +26,28 @@ export interface ChunkMetadata {
   signature?: string;         // Full signature
   imports?: string[];         // File imports (for context)
   
+  // Symbol-level dependency tracking (v0.23.0)
+  /**
+   * Symbols exported by this file. Extracted from export statements.
+   * Example: ['validateEmail', 'validatePhone', 'ValidationError']
+   */
+  exports?: string[];
+  
+  /**
+   * Map of import paths to the symbols imported from them.
+   * Example: { './validate': ['validateEmail', 'validatePhone'] }
+   */
+  importedSymbols?: Record<string, string[]>;
+  
+  /**
+   * Call sites within this chunk - symbols called and their locations.
+   * Tracked for chunks whose symbolType supports complexity analysis (e.g. functions and methods).
+   */
+  callSites?: Array<{
+    symbol: string;     // The called symbol name
+    line: number;       // Line number of the call
+  }>;
+  
   // Halstead metrics (v0.19.0)
   halsteadVolume?: number;      // V = N × log₂(n) - size of implementation
   halsteadDifficulty?: number;  // D = (n1/2) × (N2/n2) - error-proneness

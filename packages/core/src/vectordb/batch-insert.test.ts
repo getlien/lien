@@ -183,6 +183,12 @@ describe('batch-insert', () => {
           halsteadDifficulty: 0,
           halsteadEffort: 0,
           halsteadBugs: 0,
+          // Symbol-level tracking (v0.23.0) - placeholders for missing data
+          exports: [''],
+          importedSymbolPaths: [''],
+          importedSymbolNames: [''],
+          callSiteSymbols: [''],
+          callSiteLines: [0],
         });
       });
 

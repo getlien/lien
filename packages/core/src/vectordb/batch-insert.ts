@@ -44,17 +44,83 @@ interface DatabaseRecord {
   halsteadDifficulty: number;
   halsteadEffort: number;
   halsteadBugs: number;
+  // Symbol-level dependency tracking (v0.23.0)
+  exports: string[];
+  importedSymbolPaths: string[];    // Import paths (keys from importedSymbols map)
+  importedSymbolNames: string[];    // JSON-encoded symbol arrays (values from importedSymbols map)
+  callSiteSymbols: string[];        // Called symbol names
+  callSiteLines: number[];          // Line numbers of calls (parallel array)
+}
+
+/**
+ * Arrow type inference placeholder for empty string arrays.
+ * Used to prevent schema inference failures when no data is present.
+ * Filtered out during deserialization via hasValidStringEntries().
+ */
+const ARROW_EMPTY_STRING_PLACEHOLDER = [''];
+
+/**
+ * Serialize importedSymbols map into parallel arrays for Arrow storage.
+ * Returns { paths: string[], names: string[] } where names[i] is JSON-encoded array
+ * of symbols imported from paths[i].
+ *
+ * Note: For missing data, this function uses ARROW_EMPTY_STRING_PLACEHOLDER.
+ * This is required for Arrow type inference - empty arrays cause schema inference failures.
+ */
+function serializeImportedSymbols(importedSymbols?: Record<string, string[]>): {
+  paths: string[];
+  names: string[];
+} {
+  if (!importedSymbols || Object.keys(importedSymbols).length === 0) {
+    return { paths: ARROW_EMPTY_STRING_PLACEHOLDER, names: ARROW_EMPTY_STRING_PLACEHOLDER };
+  }
+  const entries = Object.entries(importedSymbols);
+  return {
+    paths: entries.map(([path]) => path),
+    names: entries.map(([, symbols]) => JSON.stringify(symbols)),
+  };
+}
+
+/**
+ * Arrow type inference placeholder for empty number arrays.
+ * Used to prevent schema inference failures when no data is present.
+ * Filtered out during deserialization via hasValidNumberEntries().
+ */
+const ARROW_EMPTY_NUMBER_PLACEHOLDER = [0];
+
+/**
+ * Serialize callSites into parallel arrays for Arrow storage.
+ * 
+ * Note: Uses ARROW_EMPTY_STRING_PLACEHOLDER and ARROW_EMPTY_NUMBER_PLACEHOLDER
+ * for missing data. This is required for Arrow type inference - empty arrays cause
+ * schema inference failures.
+ */
+function serializeCallSites(callSites?: Array<{ symbol: string; line: number }>): {
+  symbols: string[];
+  lines: number[];
+} {
+  if (!callSites || callSites.length === 0) {
+    return { symbols: ARROW_EMPTY_STRING_PLACEHOLDER, lines: ARROW_EMPTY_NUMBER_PLACEHOLDER };
+  }
+  return {
+    symbols: callSites.map(c => c.symbol),
+    lines: callSites.map(c => c.line),
+  };
 }
 
 /**
  * Transform a chunk's data into a database record.
- * Handles missing/empty metadata by providing defaults for Arrow type inference.
+ * Serializes complex metadata fields and handles missing/empty data by providing
+ * placeholder values for Arrow type inference.
  */
 function transformChunkToRecord(
   vector: Float32Array,
   content: string,
   metadata: ChunkMetadata
 ): DatabaseRecord {
+  const importedSymbolsSerialized = serializeImportedSymbols(metadata.importedSymbols);
+  const callSitesSerialized = serializeCallSites(metadata.callSites);
+  
   return {
     vector: Array.from(vector),
     content,
@@ -81,6 +147,12 @@ function transformChunkToRecord(
     halsteadDifficulty: metadata.halsteadDifficulty || 0,
     halsteadEffort: metadata.halsteadEffort || 0,
     halsteadBugs: metadata.halsteadBugs || 0,
+    // Symbol-level dependency tracking (v0.23.0)
+    exports: getNonEmptyArray(metadata.exports),
+    importedSymbolPaths: importedSymbolsSerialized.paths,
+    importedSymbolNames: importedSymbolsSerialized.names,
+    callSiteSymbols: callSitesSerialized.symbols,
+    callSiteLines: callSitesSerialized.lines,
   };
 }
 
@@ -120,6 +192,55 @@ function transformBatchToRecords(batch: BatchToProcess): DatabaseRecord[] {
 }
 
 /**
+ * Validate batch insert inputs.
+ * @throws {DatabaseError} If validation fails
+ */
+function validateBatchInputs(
+  db: LanceDBConnection,
+  vectors: Float32Array[],
+  metadatas: ChunkMetadata[],
+  contents: string[]
+): void {
+  if (!db) {
+    throw new DatabaseError('Vector database not initialized');
+  }
+  
+  if (vectors.length !== metadatas.length || vectors.length !== contents.length) {
+    throw new DatabaseError('Vectors, metadatas, and contents arrays must have the same length', {
+      vectorsLength: vectors.length,
+      metadatasLength: metadatas.length,
+      contentsLength: contents.length,
+    });
+  }
+}
+
+/**
+ * Chunk arrays into batches of specified size.
+ * Returns array of [vectors, metadatas, contents] tuples for each batch.
+ */
+function chunkIntoBatches(
+  vectors: Float32Array[],
+  metadatas: ChunkMetadata[],
+  contents: string[],
+  batchSize: number
+): Array<[Float32Array[], ChunkMetadata[], string[]]> {
+  if (vectors.length <= batchSize) {
+    return [[vectors, metadatas, contents]];
+  }
+  
+  const batches: Array<[Float32Array[], ChunkMetadata[], string[]]> = [];
+  for (let i = 0; i < vectors.length; i += batchSize) {
+    const end = Math.min(i + batchSize, vectors.length);
+    batches.push([
+      vectors.slice(i, end),
+      metadatas.slice(i, end),
+      contents.slice(i, end),
+    ]);
+  }
+  return batches;
+}
+
+/**
  * Insert a batch of vectors into the database
  * 
  * @returns The table instance after insertion, or null only when:
@@ -135,40 +256,25 @@ export async function insertBatch(
   metadatas: ChunkMetadata[],
   contents: string[]
 ): Promise<LanceDBTable | null> {
-  if (!db) {
-    throw new DatabaseError('Vector database not initialized');
-  }
-  
-  if (vectors.length !== metadatas.length || vectors.length !== contents.length) {
-    throw new DatabaseError('Vectors, metadatas, and contents arrays must have the same length', {
-      vectorsLength: vectors.length,
-      metadatasLength: metadatas.length,
-      contentsLength: contents.length,
-    });
-  }
+  validateBatchInputs(db, vectors, metadatas, contents);
   
   // Handle empty batch gracefully - return table as-is (could be null)
   if (vectors.length === 0) {
     return table;
   }
   
-  // Split large batches into smaller chunks
-  if (vectors.length > VECTOR_DB_MAX_BATCH_SIZE) {
-    let currentTable = table;
-    for (let i = 0; i < vectors.length; i += VECTOR_DB_MAX_BATCH_SIZE) {
-      const batchVectors = vectors.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
-      const batchMetadata = metadatas.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
-      const batchContents = contents.slice(i, Math.min(i + VECTOR_DB_MAX_BATCH_SIZE, vectors.length));
-      
-      currentTable = await insertBatchInternal(db, currentTable, tableName, batchVectors, batchMetadata, batchContents);
-    }
-    if (!currentTable) {
-      throw new DatabaseError('Failed to create table during batch insert');
-    }
-    return currentTable;
-  } else {
-    return insertBatchInternal(db, table, tableName, vectors, metadatas, contents);
+  // Process batches
+  const batches = chunkIntoBatches(vectors, metadatas, contents, VECTOR_DB_MAX_BATCH_SIZE);
+  
+  let currentTable = table;
+  for (const [batchVectors, batchMetadatas, batchContents] of batches) {
+    currentTable = await insertBatchInternal(db, currentTable, tableName, batchVectors, batchMetadatas, batchContents);
   }
+  
+  if (!currentTable) {
+    throw new DatabaseError('Failed to create table during batch insert');
+  }
+  return currentTable;
 }
 
 /**
