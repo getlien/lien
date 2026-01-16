@@ -25,7 +25,6 @@ interface WatchPatterns {
 
 export class FileWatcher {
   private watcher: chokidar.FSWatcher | null = null;
-  private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private rootDir: string;
   private onChangeHandler: FileChangeHandler | null = null;
   
@@ -286,12 +285,6 @@ export class FileWatcher {
       clearTimeout(this.batchTimer);
       this.flushBatch();
     }
-    
-    // Clear all pending debounce timers
-    for (const timer of this.debounceTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.debounceTimers.clear();
     
     // Close watcher
     await this.watcher.close();

@@ -37,7 +37,14 @@ export interface ToolContext {
   /** Check if index has been updated and reconnect if needed */
   checkAndReconnect: () => Promise<void>;
   /** Get current index metadata for responses */
-  getIndexMetadata: () => { indexVersion: number; indexDate: string; reindexInProgress?: boolean; pendingFileCount?: number; lastReindexDurationMs?: number | null; msSinceLastReindex?: number | null };
+  getIndexMetadata: () => {
+    indexVersion: number;
+    indexDate: string;
+    reindexInProgress?: boolean;
+    pendingFileCount?: number;
+    lastReindexDurationMs?: number | null;
+    msSinceLastReindex?: number | null;
+  };
   /** Get current reindex state */
   getReindexState: () => ReindexState;
 }

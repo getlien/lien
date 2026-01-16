@@ -40,6 +40,7 @@ export interface MCPServerOptions {
 
 /**
  * Create reindex state manager for tracking file reindexing operations.
+ * Handles concurrent reindex operations by tracking active operation count.
  */
 function createReindexStateManager() {
   let state: ReindexState = {
@@ -48,25 +49,58 @@ function createReindexStateManager() {
     lastReindexTimestamp: null,
     lastReindexDurationMs: null,
   };
+  
+  // Track number of concurrent reindex operations
+  let activeOperations = 0;
 
   return {
     getState: () => ({ ...state }),
     
     startReindex: (files: string[]) => {
+      if (!files || files.length === 0) {
+        return;
+      }
+      
+      activeOperations += 1;
       state.inProgress = true;
-      state.pendingFiles = files;
+      
+      // Merge new files into pending list (avoid duplicates)
+      const existing = new Set(state.pendingFiles);
+      for (const file of files) {
+        if (!existing.has(file)) {
+          state.pendingFiles.push(file);
+        }
+      }
     },
     
     completeReindex: (durationMs: number) => {
-      state.inProgress = false;
-      state.pendingFiles = [];
-      state.lastReindexTimestamp = Date.now();
-      state.lastReindexDurationMs = durationMs;
+      if (activeOperations === 0) {
+        return; // Avoid corrupting state
+      }
+      
+      activeOperations -= 1;
+      
+      // Only mark complete when all operations finish
+      if (activeOperations === 0) {
+        state.inProgress = false;
+        state.pendingFiles = [];
+        state.lastReindexTimestamp = Date.now();
+        state.lastReindexDurationMs = durationMs;
+      }
     },
     
     failReindex: () => {
-      state.inProgress = false;
-      state.pendingFiles = [];
+      if (activeOperations === 0) {
+        return; // Avoid corrupting state
+      }
+      
+      activeOperations -= 1;
+      
+      // Only clear when all operations complete/fail
+      if (activeOperations === 0) {
+        state.inProgress = false;
+        state.pendingFiles = [];
+      }
     },
   };
 }
@@ -174,24 +208,33 @@ function createGitPollInterval(
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): NodeJS.Timeout {
+  let reindexInProgress = false;
+  
   return setInterval(async () => {
     try {
       const changedFiles = await gitTracker.detectChanges();
       if (changedFiles && changedFiles.length > 0) {
+        if (reindexInProgress) {
+          log('Background reindex already in progress, skipping git poll cycle', 'debug');
+          return;
+        }
+        
         const startTime = Date.now();
+        reindexInProgress = true;
         reindexStateManager.startReindex(changedFiles);
         log(`🌿 Git change detected: ${changedFiles.length} files changed`);
         
-        indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose })
-          .then(count => {
-            const duration = Date.now() - startTime;
-            reindexStateManager.completeReindex(duration);
-            log(`✓ Background reindex complete: ${count} files in ${duration}ms`);
-          })
-          .catch(error => {
-            reindexStateManager.failReindex();
-            log(`Git background reindex failed: ${error}`, 'warning');
-          });
+        try {
+          const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
+          const duration = Date.now() - startTime;
+          reindexStateManager.completeReindex(duration);
+          log(`✓ Background reindex complete: ${count} files in ${duration}ms`);
+        } catch (error) {
+          reindexStateManager.failReindex();
+          log(`Git background reindex failed: ${error}`, 'warning');
+        } finally {
+          reindexInProgress = false;
+        }
       }
     } catch (error) {
       log(`Git detection check failed: ${error}`, 'warning');
