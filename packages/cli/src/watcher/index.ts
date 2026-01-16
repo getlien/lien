@@ -255,7 +255,7 @@ export class FileWatcher {
         const allFiles = [...added, ...modified];
         const result = this.onChangeHandler({
           type: 'batch',
-          filepath: allFiles[0] || deleted[0], // For backwards compat
+          filepath: allFiles[0] || deleted[0] || '', // For backwards compat
           added,
           modified,
           deleted,

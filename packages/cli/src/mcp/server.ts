@@ -256,7 +256,7 @@ async function setupFileWatching(
             log(`✓ Reindexed ${count} file(s) in ${duration}ms`);
           } catch (error) {
             reindexStateManager.failReindex();
-            log(`Reindex failed: ${error}`, 'warning');
+            log(`File watch reindex failed: ${error}`, 'warning');
           }
         }
         
@@ -346,13 +346,29 @@ function setupCleanupHandlers(
 }
 
 /**
+ * Version checking result with index metadata getter
+ */
+interface VersionCheckingResult {
+  interval: NodeJS.Timeout;
+  checkAndReconnect: () => Promise<void>;
+  getIndexMetadata: () => {
+    indexVersion: number;
+    indexDate: string;
+    reindexInProgress?: boolean;
+    pendingFileCount?: number;
+    lastReindexDurationMs?: number | null;
+    msSinceLastReindex?: number | null;
+  };
+}
+
+/**
  * Setup version checking and reconnection logic.
  */
 function setupVersionChecking(
   vectorDB: VectorDBInterface,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
-): { interval: NodeJS.Timeout; checkAndReconnect: () => Promise<void>; getIndexMetadata: () => { indexVersion: number; indexDate: string; reindexInProgress?: boolean; pendingFileCount?: number; lastReindexDurationMs?: number | null; msSinceLastReindex?: number | null } } {
+): VersionCheckingResult {
   const checkAndReconnect = async () => {
     try {
       if (await vectorDB.checkVersion()) {
