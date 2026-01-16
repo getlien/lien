@@ -148,8 +148,12 @@ function createGitPollInterval(
       const changedFiles = await gitTracker.detectChanges();
       if (changedFiles && changedFiles.length > 0) {
         // Check if a reindex is already in progress (file watch or previous git poll)
-        if (reindexStateManager.getState().inProgress) {
-          log('Background reindex already in progress, skipping git poll cycle', 'debug');
+        const currentState = reindexStateManager.getState();
+        if (currentState.inProgress) {
+          log(
+            `Background reindex already in progress (${currentState.pendingFiles.length} files pending), skipping git poll cycle`,
+            'debug'
+          );
           return;
         }
         
@@ -432,6 +436,8 @@ function setupVersionChecking(
       reindexInProgress: reindex.inProgress,
       pendingFileCount: reindex.pendingFiles.length,
       lastReindexDurationMs: reindex.lastReindexDurationMs,
+      // Note: msSinceLastReindex is computed at call time, not cached.
+      // This ensures AI assistants always get current freshness info.
       msSinceLastReindex: reindex.lastReindexTimestamp 
         ? Date.now() - reindex.lastReindexTimestamp 
         : null,

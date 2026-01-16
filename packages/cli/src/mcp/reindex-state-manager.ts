@@ -3,6 +3,16 @@
  * Handles concurrent reindex operations by tracking active operation count.
  */
 
+/**
+ * State tracking for file reindexing operations.
+ * 
+ * @property inProgress - Whether any reindex operation is currently active
+ * @property pendingFiles - Array of files queued for reindexing (from all concurrent operations)
+ * @property lastReindexTimestamp - Timestamp (ms) when the last operation completed
+ * @property lastReindexDurationMs - Duration of the most recent completed operation.
+ *                                   Note: For concurrent operations, this reflects only the
+ *                                   last operation to complete, not cumulative time.
+ */
 export interface ReindexState {
   inProgress: boolean;
   pendingFiles: string[];
