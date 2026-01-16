@@ -921,19 +921,10 @@ function extractPythonExports(rootNode: Parser.SyntaxNode): string[] {
       const nameNode = child.childForFieldName('name');
       if (nameNode) addExport(nameNode.text);
     }
-    // Extract function definitions
-    else if (child.type === 'function_definition') {
+    // Extract function definitions (including async functions)
+    else if (child.type === 'function_definition' || child.type === 'async_function_definition') {
       const nameNode = child.childForFieldName('name');
       if (nameNode) addExport(nameNode.text);
-    }
-    // Extract async function definitions
-    else if (child.type === 'async_function_definition') {
-      // For async functions, the actual function_definition is nested
-      const funcDef = child.namedChildren.find(n => n.type === 'function_definition');
-      if (funcDef) {
-        const nameNode = funcDef.childForFieldName('name');
-        if (nameNode) addExport(nameNode.text);
-      }
     }
   }
   
