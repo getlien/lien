@@ -75,6 +75,7 @@ function createReindexStateManager() {
     
     completeReindex: (durationMs: number) => {
       if (activeOperations === 0) {
+        console.warn('[Lien] completeReindex called without matching startReindex');
         return; // Avoid corrupting state
       }
       
@@ -91,6 +92,7 @@ function createReindexStateManager() {
     
     failReindex: () => {
       if (activeOperations === 0) {
+        console.warn('[Lien] failReindex called without matching startReindex');
         return; // Avoid corrupting state
       }
       
