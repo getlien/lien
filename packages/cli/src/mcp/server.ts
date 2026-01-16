@@ -215,6 +215,78 @@ async function setupGitDetection(
 }
 
 /**
+ * Handle file deletion (remove from index and manifest)
+ */
+async function handleFileDeletion(
+  filepath: string,
+  vectorDB: VectorDBInterface,
+  log: LogFn
+): Promise<void> {
+  log(`🗑️  File deleted: ${filepath}`);
+  try {
+    await vectorDB.deleteByFile(filepath);
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    await manifest.removeFile(filepath);
+    log(`✓ Removed ${filepath} from index`);
+  } catch (error) {
+    log(`Failed to remove ${filepath}: ${error}`, 'warning');
+  }
+}
+
+/**
+ * Handle batch file changes (reindex multiple files)
+ */
+async function handleBatchChanges(
+  filesToIndex: string[],
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  verbose: boolean | undefined,
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
+): Promise<void> {
+  const startTime = Date.now();
+  reindexStateManager.startReindex(filesToIndex);
+  log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
+  
+  try {
+    const count = await indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose });
+    const duration = Date.now() - startTime;
+    reindexStateManager.completeReindex(duration);
+    log(`✓ Reindexed ${count} file(s) in ${duration}ms`);
+  } catch (error) {
+    reindexStateManager.failReindex();
+    log(`File watch reindex failed: ${error}`, 'warning');
+  }
+}
+
+/**
+ * Handle single file change (reindex one file)
+ */
+async function handleSingleFileChange(
+  filepath: string,
+  type: 'add' | 'change',
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  verbose: boolean | undefined,
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
+): Promise<void> {
+  const action = type === 'add' ? 'added' : 'changed';
+  const startTime = Date.now();
+  reindexStateManager.startReindex([filepath]);
+  log(`📝 File ${action}: ${filepath}`);
+  
+  try {
+    await indexSingleFile(filepath, vectorDB, embeddings, { verbose });
+    const duration = Date.now() - startTime;
+    reindexStateManager.completeReindex(duration);
+  } catch (error) {
+    reindexStateManager.failReindex();
+    log(`Failed to reindex ${filepath}: ${error}`, 'warning');
+  }
+}
+
+/**
  * Setup file watching for real-time updates.
  * Enabled by default (or via --watch flag).
  */
@@ -245,61 +317,19 @@ async function setupFileWatching(
         const filesToIndex = [...(event.added || []), ...(event.modified || [])];
         
         if (filesToIndex.length > 0) {
-          const startTime = Date.now();
-          reindexStateManager.startReindex(filesToIndex);
-          log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
-          
-          try {
-            const count = await indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose });
-            const duration = Date.now() - startTime;
-            reindexStateManager.completeReindex(duration);
-            log(`✓ Reindexed ${count} file(s) in ${duration}ms`);
-          } catch (error) {
-            reindexStateManager.failReindex();
-            log(`File watch reindex failed: ${error}`, 'warning');
-          }
+          await handleBatchChanges(filesToIndex, vectorDB, embeddings, verbose, log, reindexStateManager);
         }
         
         // Handle deletions
         for (const deleted of event.deleted || []) {
-          log(`🗑️  File deleted: ${deleted}`);
-          try {
-            await vectorDB.deleteByFile(deleted);
-            const manifest = new ManifestManager(vectorDB.dbPath);
-            await manifest.removeFile(deleted);
-            log(`✓ Removed ${deleted} from index`);
-          } catch (error) {
-            log(`Failed to remove ${deleted}: ${error}`, 'warning');
-          }
+          await handleFileDeletion(deleted, vectorDB, log);
         }
+      } else if (type === 'unlink') {
+        // Fallback for single file deletion (backwards compatibility)
+        await handleFileDeletion(event.filepath, vectorDB, log);
       } else {
-        // Fallback for single file events (backwards compatibility)
-        const { filepath } = event;
-        if (type === 'unlink') {
-          log(`🗑️  File deleted: ${filepath}`);
-          try {
-            await vectorDB.deleteByFile(filepath);
-            const manifest = new ManifestManager(vectorDB.dbPath);
-            await manifest.removeFile(filepath);
-            log(`✓ Removed ${filepath} from index`);
-          } catch (error) {
-            log(`Failed to remove ${filepath}: ${error}`, 'warning');
-          }
-        } else {
-          const action = type === 'add' ? 'added' : 'changed';
-          const startTime = Date.now();
-          reindexStateManager.startReindex([filepath]);
-          log(`📝 File ${action}: ${filepath}`);
-          
-          try {
-            await indexSingleFile(filepath, vectorDB, embeddings, { verbose });
-            const duration = Date.now() - startTime;
-            reindexStateManager.completeReindex(duration);
-          } catch (error) {
-            reindexStateManager.failReindex();
-            log(`Failed to reindex ${filepath}: ${error}`, 'warning');
-          }
-        }
+        // Fallback for single file add/change (backwards compatibility)
+        await handleSingleFileChange(event.filepath, type, vectorDB, embeddings, verbose, log, reindexStateManager);
       }
     });
 
