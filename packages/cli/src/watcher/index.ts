@@ -252,7 +252,7 @@ export class FileWatcher {
       path.join(this.rootDir, '.git/MERGE_HEAD'),
       path.join(this.rootDir, '.git/REBASE_HEAD'),
       path.join(this.rootDir, '.git/CHERRY_PICK_HEAD'),
-      path.join(this.rootDir, '.git/refs/stash'),  // git stash operations
+      path.join(this.rootDir, '.git/logs/refs/stash'),  // git stash operations
     ]);
     
     // Git watching enabled (logged via MCP server log, not console)

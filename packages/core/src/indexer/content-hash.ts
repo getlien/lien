@@ -45,8 +45,9 @@ export async function computeContentHash(filepath: string): Promise<string> {
  * Compute fingerprint for large files to avoid reading entire content.
  * Uses first 8KB + last 8KB + file size.
  * 
- * Note: For files between 1MB and 16KB, the head and tail regions may overlap.
- * This is acceptable as the size component still provides uniqueness.
+ * Note: This function is only used for files larger than 1MB (LARGE_FILE_THRESHOLD),
+ * so the sampled head (first 8KB) and tail (last 8KB) regions never overlap
+ * (even for files just over 1MB, 1MB >> 16KB ensures distinct regions).
  * 
  * @param filepath - Absolute path to the file
  * @param size - File size in bytes

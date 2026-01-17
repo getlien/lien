@@ -187,12 +187,6 @@ function createGitPollInterval(
 }
 
 /**
- * Setup git detection and background polling.
- * Always enabled by default if git is available.
- * 
- * If a file watcher is provided, uses event-driven detection instead of polling.
- */
-/**
  * Create a git change handler for event-driven detection.
  * Handles cooldown and concurrent operation prevention.
  */
@@ -335,6 +329,10 @@ async function handleFileDeletion(
 /**
  * Handle single file change (reindex one file)
  * Uses content hash to skip reindexing if file content hasn't actually changed.
+ * 
+ * Note: This function loads and modifies the manifest without explicit locking.
+ * This is safe because file watcher events are processed serially (one at a time),
+ * preventing concurrent calls to this function.
  */
 async function handleSingleFileChange(
   filepath: string,
@@ -420,6 +418,10 @@ async function shouldReindexFile(
 /**
  * Filter modified files based on content hash, updating manifest for unchanged files.
  * Returns array of files that need reindexing.
+ * 
+ * Note: This function loads and modifies the manifest without explicit locking.
+ * This is safe because file watcher events are processed serially (one at a time),
+ * preventing concurrent calls to this function.
  */
 async function filterModifiedFilesByHash(
   modifiedFiles: string[],

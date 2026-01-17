@@ -407,9 +407,6 @@ async function processFileForIndexing(
 }
 
 /**
- * Perform a full index of the codebase.
- */
-/**
  * Create progress tracker for full indexing
  */
 function createProgressTracker(
