@@ -128,7 +128,7 @@ async function processFileContent(
   if (chunks.length === 0) {
     // Empty file - return null so caller can handle appropriately
     if (verbose) {
-      console.error(`[Lien] Empty file: ${filepath}`);
+      console.log(`[Lien] Empty file (0 chunks): ${filepath}`);
     }
     return null;
   }
