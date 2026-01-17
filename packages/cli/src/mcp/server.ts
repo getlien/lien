@@ -16,7 +16,7 @@ import {
   createVectorDB,
   VectorDBInterface,
 } from '@liendev/core';
-import { FileWatcher, type FileChangeHandler } from '../watcher/index.js';
+import { FileWatcher, type FileChangeHandler, type FileChangeEvent } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import { createReindexStateManager } from './reindex-state-manager.js';
 import type { ToolContext, LogFn, LogLevel } from './types.js';
@@ -274,6 +274,78 @@ async function handleSingleFileChange(
 }
 
 /**
+ * Handle batch file change event (additions, modifications, and deletions)
+ */
+async function handleBatchEvent(
+  event: FileChangeEvent,
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  verbose: boolean | undefined,
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
+): Promise<void> {
+  const filesToIndex = [...(event.added || []), ...(event.modified || [])];
+  const deletedFiles = event.deleted || [];
+  const allFiles = [...filesToIndex, ...deletedFiles];
+  
+  if (allFiles.length === 0) {
+    return; // Nothing to process
+  }
+
+  const startTime = Date.now();
+  reindexStateManager.startReindex(allFiles);
+  
+  try {
+    // Process additions/modifications and deletions in parallel
+    const operations: Promise<unknown>[] = [];
+    
+    if (filesToIndex.length > 0) {
+      log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
+      operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose }));
+    }
+    
+    if (deletedFiles.length > 0) {
+      operations.push(
+        Promise.all(
+          deletedFiles.map((deleted: string) => handleFileDeletion(deleted, vectorDB, log))
+        )
+      );
+    }
+    
+    await Promise.all(operations);
+    
+    const duration = Date.now() - startTime;
+    reindexStateManager.completeReindex(duration);
+    log(`✓ Processed ${filesToIndex.length} file(s) + ${deletedFiles.length} deletion(s) in ${duration}ms`);
+  } catch (error) {
+    reindexStateManager.failReindex();
+    log(`Batch reindex failed: ${error}`, 'warning');
+  }
+}
+
+/**
+ * Handle single file deletion event
+ */
+async function handleUnlinkEvent(
+  filepath: string,
+  vectorDB: VectorDBInterface,
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
+): Promise<void> {
+  const startTime = Date.now();
+  reindexStateManager.startReindex([filepath]);
+  
+  try {
+    await handleFileDeletion(filepath, vectorDB, log);
+    const duration = Date.now() - startTime;
+    reindexStateManager.completeReindex(duration);
+  } catch (error) {
+    reindexStateManager.failReindex();
+    log(`Failed to process deletion for ${filepath}: ${error}`, 'warning');
+  }
+}
+
+/**
  * Create file change event handler
  */
 function createFileChangeHandler(
@@ -287,57 +359,9 @@ function createFileChangeHandler(
     const { type } = event;
 
     if (type === 'batch') {
-      // Handle batched changes as a single atomic operation
-      const filesToIndex = [...(event.added || []), ...(event.modified || [])];
-      const deletedFiles = event.deleted || [];
-      const allFiles = [...filesToIndex, ...deletedFiles];
-      
-      if (allFiles.length === 0) {
-        return; // Nothing to process
-      }
-
-      const startTime = Date.now();
-      reindexStateManager.startReindex(allFiles);
-      
-      try {
-        // Process additions/modifications and deletions in parallel
-        const operations: Promise<unknown>[] = [];
-        
-        if (filesToIndex.length > 0) {
-          log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
-          operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose }));
-        }
-        
-        if (deletedFiles.length > 0) {
-          operations.push(
-            Promise.all(
-              deletedFiles.map((deleted) => handleFileDeletion(deleted, vectorDB, log))
-            )
-          );
-        }
-        
-        await Promise.all(operations);
-        
-        const duration = Date.now() - startTime;
-        reindexStateManager.completeReindex(duration);
-        log(`✓ Processed ${filesToIndex.length} file(s) + ${deletedFiles.length} deletion(s) in ${duration}ms`);
-      } catch (error) {
-        reindexStateManager.failReindex();
-        log(`Batch reindex failed: ${error}`, 'warning');
-      }
+      await handleBatchEvent(event, vectorDB, embeddings, verbose, log, reindexStateManager);
     } else if (type === 'unlink') {
-      // Fallback for single file deletion (backwards compatibility)
-      const startTime = Date.now();
-      reindexStateManager.startReindex([event.filepath]);
-      
-      try {
-        await handleFileDeletion(event.filepath, vectorDB, log);
-        const duration = Date.now() - startTime;
-        reindexStateManager.completeReindex(duration);
-      } catch (error) {
-        reindexStateManager.failReindex();
-        log(`Failed to process deletion for ${event.filepath}: ${error}`, 'warning');
-      }
+      await handleUnlinkEvent(event.filepath, vectorDB, log, reindexStateManager);
     } else {
       // Fallback for single file add/change (backwards compatibility)
       await handleSingleFileChange(event.filepath, type, vectorDB, embeddings, verbose, log, reindexStateManager);
