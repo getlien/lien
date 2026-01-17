@@ -239,6 +239,43 @@ export class ManifestManager {
   }
   
   /**
+   * Check if a file needs reindexing based on mtime and content hash.
+   * Returns true if file should be reindexed, false otherwise.
+   * Updates entry mtime if content unchanged.
+   */
+  private async shouldReindexFile(
+    filepath: string,
+    mtime: number,
+    entry: FileEntry | undefined,
+    hashCompatible: boolean
+  ): Promise<{ needsReindex: boolean; mtimeUpdated: boolean }> {
+    // New file
+    if (!entry) {
+      return { needsReindex: true, mtimeUpdated: false };
+    }
+    
+    // Quick check: if mtime unchanged, skip
+    if (entry.lastModified === mtime) {
+      return { needsReindex: false, mtimeUpdated: false };
+    }
+    
+    // mtime changed - check if content actually changed (if hash available)
+    if (hashCompatible && entry.contentHash) {
+      const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(this.indexPath, '..', filepath);
+      const currentHash = await computeContentHash(absolutePath);
+      
+      if (currentHash && currentHash === entry.contentHash) {
+        // Content unchanged - update mtime and skip reindex
+        entry.lastModified = mtime;
+        return { needsReindex: false, mtimeUpdated: true };
+      }
+    }
+    
+    // Content changed or hash unavailable
+    return { needsReindex: true, mtimeUpdated: false };
+  }
+
+  /**
    * Detects which files have changed based on mtime and content hash comparison.
    * 
    * Uses a two-stage approach:
@@ -257,45 +294,26 @@ export class ManifestManager {
       return Array.from(currentFiles.keys());
     }
     
-    // Check if hash algorithm is compatible
     const hashCompatible = isHashAlgorithmCompatible(manifest.hashAlgorithm);
-    
     const changedFiles: string[] = [];
     let skippedByHash = 0;
     let manifestNeedsUpdate = false;
     
     for (const [filepath, mtime] of currentFiles) {
       const entry = manifest.files[filepath];
+      const { needsReindex, mtimeUpdated } = await this.shouldReindexFile(
+        filepath,
+        mtime,
+        entry,
+        hashCompatible
+      );
       
-      if (!entry) {
-        // New file
+      if (needsReindex) {
         changedFiles.push(filepath);
-        continue;
+      } else if (mtimeUpdated) {
+        skippedByHash++;
+        manifestNeedsUpdate = true;
       }
-      
-      // Quick check: if mtime unchanged, skip
-      if (entry.lastModified === mtime) {
-        continue;
-      }
-      
-      // mtime changed - check if content actually changed (if hash available and compatible)
-      if (hashCompatible && entry.contentHash) {
-        const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(this.indexPath, '..', filepath);
-        const currentHash = await computeContentHash(absolutePath);
-        
-        if (currentHash && currentHash === entry.contentHash) {
-          // Content unchanged despite mtime change - skip reindex
-          skippedByHash++;
-          
-          // Update mtime to avoid repeated hash checks
-          entry.lastModified = mtime;
-          manifestNeedsUpdate = true;
-          continue;
-        }
-      }
-      
-      // Either no hash, hash incompatible, or content actually changed
-      changedFiles.push(filepath);
     }
     
     // Save manifest if we updated any mtimes

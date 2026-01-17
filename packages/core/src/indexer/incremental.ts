@@ -279,6 +279,95 @@ async function processSingleFileForIndexing(
 }
 
 /**
+ * Handle indexing result for an empty file
+ */
+async function handleEmptyFile(
+  storedPath: string,
+  mtime: number,
+  contentHash: string,
+  vectorDB: VectorDBInterface
+): Promise<void> {
+  // Remove from vector DB
+  try {
+    await vectorDB.deleteByFile(storedPath);
+  } catch {
+    // Ignore errors if file wasn't in index
+  }
+  
+  // Update manifest immediately for empty files (not batched)
+  const manifest = new ManifestManager(vectorDB.dbPath);
+  await manifest.updateFile(storedPath, {
+    filepath: storedPath,
+    lastModified: mtime,
+    chunkCount: 0,
+    contentHash,
+  });
+}
+
+/**
+ * Handle indexing result for a non-empty file
+ */
+async function handleNonEmptyFile(
+  storedPath: string,
+  processResult: ProcessFileResult,
+  mtime: number,
+  contentHash: string,
+  vectorDB: VectorDBInterface,
+  verbose: boolean,
+  manifestEntries: Array<{ filepath: string; chunkCount: number; mtime: number; contentHash: string }>
+): Promise<void> {
+  // Delete old chunks if they exist
+  try {
+    await vectorDB.deleteByFile(storedPath);
+  } catch {
+    // Ignore - file might not be in index yet
+  }
+  
+  // Insert new chunks
+  await vectorDB.insertBatch(
+    processResult.vectors,
+    processResult.chunks.map(c => c.metadata),
+    processResult.texts
+  );
+  
+  // Queue manifest update (batch at end)
+  manifestEntries.push({
+    filepath: storedPath,
+    chunkCount: processResult.chunkCount,
+    mtime,
+    contentHash,
+  });
+  
+  if (verbose) {
+    console.log(`[Lien] ✓ Updated ${storedPath} (${processResult.chunkCount} chunks)`);
+  }
+}
+
+/**
+ * Handle file deletion (file doesn't exist or couldn't be read)
+ */
+async function handleFileNotFound(
+  normalizedPath: string,
+  errorMessage: string,
+  vectorDB: VectorDBInterface,
+  verbose: boolean
+): Promise<void> {
+  if (verbose) {
+    console.error(`[Lien] ${errorMessage}`);
+  }
+  
+  try {
+    await vectorDB.deleteByFile(normalizedPath);
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    await manifest.removeFile(normalizedPath);
+  } catch {
+    if (verbose) {
+      console.log(`[Lien] Note: ${normalizedPath} not in index`);
+    }
+  }
+}
+
+/**
  * Indexes multiple files incrementally.
  * Processes files sequentially for simplicity and reliability.
  * 
@@ -309,81 +398,20 @@ export async function indexMultipleFiles(
   
   // Process each file sequentially (simple and reliable)
   for (const filepath of filepaths) {
-    // Normalize to relative path for consistent storage and queries
-    // This ensures paths from git diff (absolute) match paths from scanner (relative)
     const normalizedPath = normalizeToRelativePath(filepath);
-    
     const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir);
     
     if (isOk(result)) {
       const { filepath: storedPath, result: processResult, mtime, contentHash } = result.value;
       
       if (processResult === null) {
-        // Empty file - remove from vector DB but keep in manifest with chunkCount: 0
-        try {
-          await vectorDB.deleteByFile(storedPath);
-        } catch (error) {
-          // Ignore errors if file wasn't in index
-        }
-        
-        // Update manifest immediately for empty files (not batched)
-        const manifest = new ManifestManager(vectorDB.dbPath);
-        await manifest.updateFile(storedPath, {
-          filepath: storedPath,
-          lastModified: mtime,
-          chunkCount: 0,
-          contentHash,
-        });
-        
-        processedCount++;
-        continue;
+        await handleEmptyFile(storedPath, mtime, contentHash, vectorDB);
+      } else {
+        await handleNonEmptyFile(storedPath, processResult, mtime, contentHash, vectorDB, verbose || false, manifestEntries);
       }
-      
-      // Non-empty file - delete old chunks if they exist
-      try {
-        await vectorDB.deleteByFile(storedPath);
-      } catch (error) {
-        // Ignore - file might not be in index yet
-      }
-      
-      // Insert new chunks
-      await vectorDB.insertBatch(
-        processResult.vectors,
-        processResult.chunks.map(c => c.metadata),
-        processResult.texts
-      );
-      
-      // Queue manifest update (batch at end)
-      manifestEntries.push({
-        filepath: storedPath,
-        chunkCount: processResult.chunkCount,
-        mtime,
-        contentHash,
-      });
-      
-      if (verbose) {
-        console.log(`[Lien] ✓ Updated ${storedPath} (${processResult.chunkCount} chunks)`);
-      }
-      
       processedCount++;
     } else {
-      // File doesn't exist or couldn't be read - handle deletion
-      if (verbose) {
-        console.error(`[Lien] ${result.error}`);
-      }
-      
-      try {
-        await vectorDB.deleteByFile(normalizedPath);
-        const manifest = new ManifestManager(vectorDB.dbPath);
-        await manifest.removeFile(normalizedPath);
-      } catch (error) {
-        // Ignore errors if file wasn't in index
-        if (verbose) {
-          console.log(`[Lien] Note: ${normalizedPath} not in index`);
-        }
-      }
-      
-      // Count as processed regardless of deletion success/failure
+      await handleFileNotFound(normalizedPath, result.error, vectorDB, verbose || false);
       processedCount++;
     }
   }
