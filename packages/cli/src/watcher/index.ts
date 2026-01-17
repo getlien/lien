@@ -27,10 +27,10 @@ import type { FrameworkConfig } from '@liendev/core';
 export interface FileChangeEvent {
   type: 'add' | 'change' | 'unlink' | 'batch';
   filepath: string;
-  // Batch fields - always present but only populated for 'batch' type events
-  added: string[];
-  modified: string[];
-  deleted: string[];
+  // Batch fields - only present for 'batch' type events
+  added?: string[];
+  modified?: string[];
+  deleted?: string[];
 }
 
 export type FileChangeHandler = (event: FileChangeEvent) => void | Promise<void>;
@@ -357,8 +357,7 @@ export class FileWatcher {
           })
           .finally(() => this.handleBatchComplete());
       } else {
-        // Sync handler - mark as complete immediately and check for accumulated changes
-        this.batchInProgress = false;
+        // Sync handler - mark as complete and check for accumulated changes
         this.handleBatchComplete();
       }
     } catch (error) {
