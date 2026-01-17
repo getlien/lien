@@ -37,6 +37,43 @@ export interface ReindexState {
   lastReindexDurationMs: number | null;
 }
 
+/**
+ * Check for stuck state and log warning if detected.
+ * Detects operations that have been stuck for > 5 minutes.
+ */
+function checkForStuckState(
+  inProgress: boolean,
+  lastStateChangeTimestamp: number,
+  activeOperations: number,
+  pendingFilesCount: number
+): void {
+  if (!inProgress) return;
+  
+  const STUCK_STATE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+  const stuckDuration = Date.now() - lastStateChangeTimestamp;
+  
+  if (stuckDuration > STUCK_STATE_THRESHOLD_MS) {
+    console.warn(
+      `[Lien] HEALTH CHECK: Reindex stuck in progress for ${Math.round(stuckDuration / 1000)}s. ` +
+      `This indicates an operation crashed without cleanup. ` +
+      `Active operations: ${activeOperations}, Pending files: ${pendingFilesCount}. ` +
+      `Consider using resetIfStuck() to recover.`
+    );
+  }
+}
+
+/**
+ * Merge files into pending list, avoiding duplicates.
+ */
+function mergePendingFiles(pendingFiles: string[], newFiles: string[]): void {
+  const existing = new Set(pendingFiles);
+  for (const file of newFiles) {
+    if (!existing.has(file)) {
+      pendingFiles.push(file);
+    }
+  }
+}
+
 export function createReindexStateManager() {
   let state: ReindexState = {
     inProgress: false,
@@ -48,9 +85,6 @@ export function createReindexStateManager() {
   // Track number of concurrent reindex operations
   let activeOperations = 0;
   let lastStateChangeTimestamp = Date.now();
-  
-  // Health check: Warn if stuck for > 5 minutes
-  const STUCK_STATE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
   return {
     /**
@@ -58,19 +92,12 @@ export function createReindexStateManager() {
      * Returns a deep copy to prevent external mutation of nested arrays.
      */
     getState: () => {
-      // Health check: Detect stuck state
-      if (state.inProgress) {
-        const stuckDuration = Date.now() - lastStateChangeTimestamp;
-        if (stuckDuration > STUCK_STATE_THRESHOLD_MS) {
-          console.warn(
-            `[Lien] HEALTH CHECK: Reindex stuck in progress for ${Math.round(stuckDuration / 1000)}s. ` +
-            `This indicates an operation crashed without cleanup. ` +
-            `Active operations: ${activeOperations}, Pending files: ${state.pendingFiles.length}. ` +
-            `Consider using resetIfStuck() to recover.`
-          );
-        }
-      }
-      
+      checkForStuckState(
+        state.inProgress,
+        lastStateChangeTimestamp,
+        activeOperations,
+        state.pendingFiles.length
+      );
       return { ...state, pendingFiles: [...state.pendingFiles] };
     },
     
@@ -93,13 +120,7 @@ export function createReindexStateManager() {
       state.inProgress = true;
       lastStateChangeTimestamp = Date.now();
       
-      // Merge new files into pending list (avoid duplicates)
-      const existing = new Set(state.pendingFiles);
-      for (const file of files) {
-        if (!existing.has(file)) {
-          state.pendingFiles.push(file);
-        }
-      }
+      mergePendingFiles(state.pendingFiles, files);
     },
     
     /**

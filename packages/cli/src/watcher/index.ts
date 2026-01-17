@@ -398,6 +398,45 @@ export class FileWatcher {
   }
   
   /**
+   * Flush final batch during shutdown.
+   * Handles edge case where watcher is stopped while batch is pending.
+   */
+  private async flushFinalBatch(handler: FileChangeHandler): Promise<void> {
+    if (this.pendingChanges.size === 0) return;
+    
+    const changes = new Map(this.pendingChanges);
+    this.pendingChanges.clear();
+    
+    const { added, modified, deleted } = this.groupPendingChanges(changes);
+    
+    // Only flush if we have actual files to process
+    if (added.length === 0 && modified.length === 0 && deleted.length === 0) {
+      return;
+    }
+    
+    try {
+      const allFiles = [...added, ...modified];
+      const firstFile = allFiles.length > 0 ? allFiles[0] : deleted[0];
+      
+      // Defensive check - should never happen given the guard above
+      if (!firstFile) {
+        console.error('[FileWatcher] INTERNAL ERROR: No files in final batch');
+        return;
+      }
+      
+      await handler({
+        type: 'batch',
+        filepath: firstFile,
+        added,
+        modified,
+        deleted,
+      });
+    } catch (error) {
+      console.error('[FileWatcher] Error flushing final batch during shutdown:', error);
+    }
+  }
+
+  /**
    * Stops the file watcher and cleans up resources.
    */
   async stop(): Promise<void> {
@@ -413,35 +452,9 @@ export class FileWatcher {
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
-      // Manually flush with the saved handler
-      if (handler && this.pendingChanges.size > 0) {
-        const changes = new Map(this.pendingChanges);
-        this.pendingChanges.clear();
-        
-        const { added, modified, deleted } = this.groupPendingChanges(changes);
-        
-        // Only flush if we have actual files to process
-        if (added.length > 0 || modified.length > 0 || deleted.length > 0) {
-          try {
-            const allFiles = [...added, ...modified];
-            const firstFile = allFiles.length > 0 ? allFiles[0] : deleted[0];
-            // Defensive check - should never happen given the guard above
-            if (!firstFile) {
-              console.error('[FileWatcher] INTERNAL ERROR: No files in final batch');
-              return;
-            }
-            
-            await handler({
-              type: 'batch',
-              filepath: firstFile,
-              added,
-              modified,
-              deleted,
-            });
-          } catch (error) {
-            console.error('[FileWatcher] Error flushing final batch during shutdown:', error);
-          }
-        }
+      
+      if (handler) {
+        await this.flushFinalBatch(handler);
       }
     }
     
