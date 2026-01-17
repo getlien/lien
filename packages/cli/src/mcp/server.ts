@@ -239,32 +239,6 @@ async function handleFileDeletion(
 }
 
 /**
- * Handle batch file changes (reindex multiple files)
- */
-async function handleBatchChanges(
-  filesToIndex: string[],
-  vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
-  log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
-): Promise<void> {
-  const startTime = Date.now();
-  reindexStateManager.startReindex(filesToIndex);
-  log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
-  
-  try {
-    const count = await indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose });
-    const duration = Date.now() - startTime;
-    reindexStateManager.completeReindex(duration);
-    log(`✓ Reindexed ${count} file(s) in ${duration}ms`);
-  } catch (error) {
-    reindexStateManager.failReindex();
-    log(`File watch reindex failed: ${error}`, 'warning');
-  }
-}
-
-/**
  * Handle single file change (reindex one file)
  */
 async function handleSingleFileChange(
@@ -305,30 +279,43 @@ function createFileChangeHandler(
     const { type } = event;
 
     if (type === 'batch') {
-      // Handle batched changes
+      // Handle batched changes as a single atomic operation
       const filesToIndex = [...(event.added || []), ...(event.modified || [])];
-      
-      if (filesToIndex.length > 0) {
-        await handleBatchChanges(filesToIndex, vectorDB, embeddings, verbose, log, reindexStateManager);
-      }
-      
-      // Handle deletions in parallel with state tracking
       const deletedFiles = event.deleted || [];
-      if (deletedFiles.length > 0) {
-        const startTime = Date.now();
-        reindexStateManager.startReindex(deletedFiles);
+      const allFiles = [...filesToIndex, ...deletedFiles];
+      
+      if (allFiles.length === 0) {
+        return; // Nothing to process
+      }
+
+      const startTime = Date.now();
+      reindexStateManager.startReindex(allFiles);
+      
+      try {
+        // Process additions/modifications and deletions in parallel
+        const operations: Promise<unknown>[] = [];
         
-        try {
-          await Promise.all(
-            deletedFiles.map((deleted) => handleFileDeletion(deleted, vectorDB, log))
-          );
-          const duration = Date.now() - startTime;
-          reindexStateManager.completeReindex(duration);
-          log(`✓ Removed ${deletedFiles.length} file(s) in ${duration}ms`);
-        } catch (error) {
-          reindexStateManager.failReindex();
-          log(`Failed to process deletions: ${error}`, 'warning');
+        if (filesToIndex.length > 0) {
+          log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
+          operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose }));
         }
+        
+        if (deletedFiles.length > 0) {
+          operations.push(
+            Promise.all(
+              deletedFiles.map((deleted) => handleFileDeletion(deleted, vectorDB, log))
+            )
+          );
+        }
+        
+        await Promise.all(operations);
+        
+        const duration = Date.now() - startTime;
+        reindexStateManager.completeReindex(duration);
+        log(`✓ Processed ${filesToIndex.length} file(s) + ${deletedFiles.length} deletion(s) in ${duration}ms`);
+      } catch (error) {
+        reindexStateManager.failReindex();
+        log(`Batch reindex failed: ${error}`, 'warning');
       }
     } else if (type === 'unlink') {
       // Fallback for single file deletion (backwards compatibility)
