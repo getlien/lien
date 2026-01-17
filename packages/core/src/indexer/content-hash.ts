@@ -31,11 +31,12 @@ export async function computeContentHash(filepath: string): Promise<string> {
       return await computeLargeFileFingerprint(filepath, stats.size);
     }
     
-    // For normal files, hash entire content
-    const content = await fs.readFile(filepath, 'utf-8');
+    // For normal files, hash entire content (read as binary to support all file types)
+    const content = await fs.readFile(filepath);
     return crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
-  } catch {
+  } catch (err) {
     // If file can't be read, return empty hash (will trigger reindex)
+    // Common cases: file deleted, permission denied, file handle issues
     return '';
   }
 }
@@ -43,6 +44,9 @@ export async function computeContentHash(filepath: string): Promise<string> {
 /**
  * Compute fingerprint for large files to avoid reading entire content.
  * Uses first 8KB + last 8KB + file size.
+ * 
+ * Note: For files between 1MB and 16KB, the head and tail regions may overlap.
+ * This is acceptable as the size component still provides uniqueness.
  * 
  * @param filepath - Absolute path to the file
  * @param size - File size in bytes

@@ -292,50 +292,60 @@ export class ManifestManager {
    * 
    * This avoids unnecessary reindexing when files are touched without content changes.
    * 
+   * Thread-safe: Uses the same update lock as other manifest operations.
+   * 
    * @param currentFiles - Map of current files with their mtimes
    * @param rootDir - Optional project root directory for resolving relative paths (required for hash checking)
    * @returns Array of filepaths that have changed
    */
   async getChangedFiles(currentFiles: Map<string, number>, rootDir?: string): Promise<string[]> {
-    const manifest = await this.load();
-    if (!manifest) {
-      // No manifest = all files are "changed" (need full index)
-      return Array.from(currentFiles.keys());
-    }
-    
-    const hashCompatible = isHashAlgorithmCompatible(manifest.hashAlgorithm);
-    const changedFiles: string[] = [];
-    let skippedByHash = 0;
-    let manifestNeedsUpdate = false;
-    
-    for (const [filepath, mtime] of currentFiles) {
-      const entry = manifest.files[filepath];
-      const { needsReindex, mtimeUpdated } = await this.shouldReindexFile(
-        filepath,
-        mtime,
-        entry,
-        hashCompatible,
-        rootDir
-      );
-      
-      if (needsReindex) {
-        changedFiles.push(filepath);
-      } else if (mtimeUpdated) {
-        skippedByHash++;
-        manifestNeedsUpdate = true;
+    // Protect against concurrent updates using the same lock as updateFile/updateFiles
+    const result = this.updateLock.then(async () => {
+      const manifest = await this.load();
+      if (!manifest) {
+        // No manifest = all files are "changed" (need full index)
+        return Array.from(currentFiles.keys());
       }
-    }
+      
+      const hashCompatible = isHashAlgorithmCompatible(manifest.hashAlgorithm);
+      const changedFiles: string[] = [];
+      let skippedByHash = 0;
+      let manifestNeedsUpdate = false;
+      
+      for (const [filepath, mtime] of currentFiles) {
+        const entry = manifest.files[filepath];
+        const { needsReindex, mtimeUpdated } = await this.shouldReindexFile(
+          filepath,
+          mtime,
+          entry,
+          hashCompatible,
+          rootDir
+        );
+        
+        if (needsReindex) {
+          changedFiles.push(filepath);
+        } else if (mtimeUpdated) {
+          skippedByHash++;
+          manifestNeedsUpdate = true;
+        }
+      }
+      
+      // Save manifest if we updated any mtimes
+      if (manifestNeedsUpdate) {
+        await this.save(manifest);
+      }
+      
+      if (skippedByHash > 0) {
+        console.log(`[Lien] Skipped ${skippedByHash} file(s) with unchanged content`);
+      }
+      
+      return changedFiles;
+    });
     
-    // Save manifest if we updated any mtimes
-    if (manifestNeedsUpdate) {
-      await this.save(manifest);
-    }
+    // Update the lock for the next operation
+    this.updateLock = result.then(() => {});
     
-    if (skippedByHash > 0) {
-      console.log(`[Lien] Skipped ${skippedByHash} file(s) with unchanged content`);
-    }
-    
-    return changedFiles;
+    return result;
   }
   
   /**

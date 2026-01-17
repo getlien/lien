@@ -357,19 +357,14 @@ async function handleSingleFileChange(
       const normalizedPath = normalizeToRelativePath(filepath);
       const existingEntry = manifestData.files[normalizedPath];
       
-      if (existingEntry?.contentHash) {
-        // Compute current content hash
-        const currentHash = await computeContentHash(filepath);
-        
-        if (currentHash && currentHash === existingEntry.contentHash) {
-          // Content hasn't changed, just update lastModified and skip reindex
-          log(`⏭️  File mtime changed but content unchanged: ${filepath}`, 'debug');
-          const fs = await import('fs/promises');
-          const stats = await fs.stat(filepath);
-          existingEntry.lastModified = stats.mtimeMs;
-          await manifest.save(manifestData);
-          return;
-        }
+      // Use shared shouldReindexFile logic
+      const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
+      
+      if (!shouldReindex && newMtime && existingEntry) {
+        // Content hasn't changed, update mtime and skip reindex
+        existingEntry.lastModified = newMtime;
+        await manifest.save(manifestData);
+        return;
       }
     }
   }
