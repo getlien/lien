@@ -109,7 +109,7 @@ async function handleGitStartup(
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
+  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
@@ -147,7 +147,7 @@ function createGitPollInterval(
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
+  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): NodeJS.Timeout {
@@ -311,7 +311,7 @@ async function handleSingleFileChange(
   type: 'add' | 'change',
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
+  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
@@ -364,7 +364,7 @@ async function handleBatchEvent(
   event: FileChangeEvent,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
+  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
