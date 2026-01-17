@@ -99,7 +99,12 @@ async function handleAutoIndexing(
 }
 
 /**
- * Handle git changes detected on startup
+ * Handle git changes detected on startup.
+ * 
+ * **Error Handling:** Re-throws errors after calling failReindex() to ensure proper cleanup
+ * and signal caller that startup failed. This is intentional - git startup failures are
+ * considered fatal and should be caught by setupGitDetection() which logs and calls 
+ * failReindex() again (safe - failReindex() guards against double-call when activeOperations=0).
  */
 async function handleGitStartup(
   gitTracker: GitStateTracker,
@@ -134,6 +139,10 @@ async function handleGitStartup(
 /**
  * Create background polling interval for git changes.
  * Uses reindexStateManager to track and prevent concurrent operations.
+ * 
+ * **Error Handling:** Background poll errors are caught and logged as warnings (non-fatal).
+ * This differs from handleGitStartup() which re-throws (fatal). Background failures
+ * should not crash the server - just log and continue polling.
  */
 function createGitPollInterval(
   gitTracker: GitStateTracker,
@@ -209,6 +218,7 @@ async function setupGitDetection(
     await handleGitStartup(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
   } catch (error) {
     log(`Failed to check git state on startup: ${error}`, 'warning');
+    reindexStateManager.failReindex(); // Clean up state if startup fails
   }
 
   // Start background polling

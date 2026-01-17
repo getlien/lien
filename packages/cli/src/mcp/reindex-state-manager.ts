@@ -1,6 +1,24 @@
 /**
  * Reindex state manager for tracking file reindexing operations.
  * Handles concurrent reindex operations by tracking active operation count.
+ * 
+ * **Error Handling Strategy:**
+ * - Operations MUST call either completeReindex() or failReindex() in all code paths
+ * - Use try/catch/finally blocks to ensure cleanup even if operations crash
+ * - If an operation fails to call complete/fail, activeOperations will never decrement
+ *   and state becomes permanently stuck with inProgress=true
+ * 
+ * **Stuck State Risk:**
+ * - If activeOperations counter gets stuck > 0, all future operations that check
+ *   inProgress will be blocked (e.g., git polling skips when inProgress=true)
+ * - Currently no automatic timeout/reset mechanism - operations MUST clean up properly
+ * - Consider adding periodic state validation or manual reset capability if needed
+ * 
+ * **Partial Failures:**
+ * - When completeReindex() is called, ALL pending files are cleared from state
+ * - No tracking of which specific files succeeded vs failed in batch operations
+ * - Consumers cannot determine which files need re-indexing after partial failures
+ * - This is a simplification - full failure tracking would require more complex state
  */
 
 /**

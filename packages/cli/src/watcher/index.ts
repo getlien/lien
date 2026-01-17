@@ -16,17 +16,17 @@ import type { FrameworkConfig } from '@liendev/core';
  *                      on lines 293-295 prevents this in practice).
  *                      **Do not rely on this field for batch events** - use the
  *                      array fields instead.
- * @property added - Array of added files (batch events only)
- * @property modified - Array of modified files (batch events only)
- * @property deleted - Array of deleted files (batch events only)
+ * @property added - Array of added files (batch events only, empty array for non-batch)
+ * @property modified - Array of modified files (batch events only, empty array for non-batch)
+ * @property deleted - Array of deleted files (batch events only, empty array for non-batch)
  */
 export interface FileChangeEvent {
   type: 'add' | 'change' | 'unlink' | 'batch';
   filepath: string;
-  // Batch fields - use these for 'batch' type events
-  added?: string[];
-  modified?: string[];
-  deleted?: string[];
+  // Batch fields - always present but only populated for 'batch' type events
+  added: string[];
+  modified: string[];
+  deleted: string[];
 }
 
 export type FileChangeHandler = (event: FileChangeEvent) => void | Promise<void>;
@@ -221,6 +221,11 @@ export class FileWatcher {
    * Forces flush after MAX_BATCH_WAIT_MS even if changes keep arriving.
    */
   private handleChange(type: 'add' | 'change' | 'unlink', filepath: string): void {
+    // Prevent queuing events during shutdown (handler is null after stop())
+    if (!this.onChangeHandler) {
+      return;
+    }
+    
     // Track when the batch started
     if (this.pendingChanges.size === 0) {
       this.firstChangeTimestamp = Date.now();
@@ -233,6 +238,11 @@ export class FileWatcher {
     const elapsed = Date.now() - (this.firstChangeTimestamp || 0);
     if (elapsed >= this.MAX_BATCH_WAIT_MS) {
       // Force flush - we've been batching for too long
+      // Clear timer first to prevent race with timer callback
+      if (this.batchTimer) {
+        clearTimeout(this.batchTimer);
+        this.batchTimer = null;
+      }
       this.flushBatch();
       return;
     }
@@ -296,7 +306,7 @@ export class FileWatcher {
       
       try {
         const allFiles = [...added, ...modified];
-        const firstFile = allFiles[0] || deleted[0] || ''; // Guaranteed non-empty due to check on lines 293-295
+        const firstFile = allFiles[0] || deleted[0] || ''; // Should be non-empty due to guard above, fallback for safety
         const result = this.onChangeHandler({
           type: 'batch',
           filepath: firstFile, // For backwards compat: first file from the batch
