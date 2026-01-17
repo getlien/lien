@@ -242,12 +242,19 @@ export class ManifestManager {
    * Check if a file needs reindexing based on mtime and content hash.
    * Returns true if file should be reindexed, false otherwise.
    * Updates entry mtime if content unchanged.
+   * 
+   * @param filepath - File path (relative to project root)
+   * @param mtime - Current file modification time
+   * @param entry - Existing manifest entry
+   * @param hashCompatible - Whether hash algorithm is compatible
+   * @param rootDir - Project root directory for resolving relative paths
    */
   private async shouldReindexFile(
     filepath: string,
     mtime: number,
     entry: FileEntry | undefined,
-    hashCompatible: boolean
+    hashCompatible: boolean,
+    rootDir?: string
   ): Promise<{ needsReindex: boolean; mtimeUpdated: boolean }> {
     // New file
     if (!entry) {
@@ -259,9 +266,10 @@ export class ManifestManager {
       return { needsReindex: false, mtimeUpdated: false };
     }
     
-    // mtime changed - check if content actually changed (if hash available)
-    if (hashCompatible && entry.contentHash) {
-      const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(this.indexPath, '..', filepath);
+    // mtime changed - check if content actually changed (if hash available and rootDir provided)
+    if (hashCompatible && entry.contentHash && rootDir) {
+      // Resolve relative path against rootDir
+      const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
       const currentHash = await computeContentHash(absolutePath);
       
       if (currentHash && currentHash === entry.contentHash) {
@@ -285,9 +293,10 @@ export class ManifestManager {
    * This avoids unnecessary reindexing when files are touched without content changes.
    * 
    * @param currentFiles - Map of current files with their mtimes
+   * @param rootDir - Optional project root directory for resolving relative paths (required for hash checking)
    * @returns Array of filepaths that have changed
    */
-  async getChangedFiles(currentFiles: Map<string, number>): Promise<string[]> {
+  async getChangedFiles(currentFiles: Map<string, number>, rootDir?: string): Promise<string[]> {
     const manifest = await this.load();
     if (!manifest) {
       // No manifest = all files are "changed" (need full index)
@@ -305,7 +314,8 @@ export class ManifestManager {
         filepath,
         mtime,
         entry,
-        hashCompatible
+        hashCompatible,
+        rootDir
       );
       
       if (needsReindex) {

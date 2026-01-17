@@ -16,6 +16,7 @@ import {
   createVectorDB,
   VectorDBInterface,
   computeContentHash,
+  normalizeToRelativePath,
 } from '@liendev/core';
 import { FileWatcher, type FileChangeHandler, type FileChangeEvent } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
@@ -352,7 +353,9 @@ async function handleSingleFileChange(
     const manifestData = await manifest.load();
     
     if (manifestData) {
-      const existingEntry = manifestData.files[filepath];
+      // Normalize filepath to relative path for manifest lookup
+      const normalizedPath = normalizeToRelativePath(filepath);
+      const existingEntry = manifestData.files[normalizedPath];
       
       if (existingEntry?.contentHash) {
         // Compute current content hash
@@ -443,7 +446,9 @@ async function filterModifiedFilesByHash(
   const filesToReindex: string[] = [];
   
   for (const filepath of modifiedFiles) {
-    const existingEntry = manifestData.files[filepath];
+    // Normalize filepath to relative path for manifest lookup
+    const normalizedPath = normalizeToRelativePath(filepath);
+    const existingEntry = manifestData.files[normalizedPath];
     const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
     
     if (shouldReindex) {
