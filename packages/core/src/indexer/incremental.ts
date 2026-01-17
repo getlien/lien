@@ -187,7 +187,7 @@ export async function indexSingleFile(
     } catch {
       // File doesn't exist - delete from index and manifest using normalized path
       if (verbose) {
-        console.error(`[Lien] File deleted: ${normalizedPath}`);
+        console.log(`[Lien] File deleted: ${normalizedPath}`);
       }
       await vectorDB.deleteByFile(normalizedPath);
       
@@ -236,7 +236,7 @@ export async function indexSingleFile(
     });
     
     if (verbose) {
-      console.error(`[Lien] ✓ Updated ${normalizedPath} (${result.chunkCount} chunks)`);
+      console.log(`[Lien] ✓ Updated ${normalizedPath} (${result.chunkCount} chunks)`);
     }
   } catch (error) {
     // Log error but don't throw - we want to continue with other files
@@ -362,7 +362,7 @@ export async function indexMultipleFiles(
       });
       
       if (verbose) {
-        console.error(`[Lien] ✓ Updated ${storedPath} (${processResult.chunkCount} chunks)`);
+        console.log(`[Lien] ✓ Updated ${storedPath} (${processResult.chunkCount} chunks)`);
       }
       
       processedCount++;
@@ -379,7 +379,7 @@ export async function indexMultipleFiles(
       } catch (error) {
         // Ignore errors if file wasn't in index
         if (verbose) {
-          console.error(`[Lien] Note: ${normalizedPath} not in index`);
+          console.log(`[Lien] Note: ${normalizedPath} not in index`);
         }
       }
       
