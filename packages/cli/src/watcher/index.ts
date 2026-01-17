@@ -244,11 +244,7 @@ export class FileWatcher {
     
     // Check if we've been batching for too long
     const now = Date.now();
-    if (!this.firstChangeTimestamp) {
-      // Defensive: ensure timestamp is set (should always be set above, but be safe)
-      this.firstChangeTimestamp = now;
-    }
-    const elapsed = now - this.firstChangeTimestamp;
+    const elapsed = now - this.firstChangeTimestamp!
     
     if (elapsed >= this.MAX_BATCH_WAIT_MS) {
       // Force flush - we've been batching for too long
@@ -361,9 +357,8 @@ export class FileWatcher {
         this.handleBatchComplete();
       }
     } catch (error) {
-      this.batchInProgress = false;
       console.error(`[Lien] Error handling batch change: ${error}`);
-      // Still check for accumulated changes after error
+      // handleBatchComplete() will reset batchInProgress and check for accumulated changes
       this.handleBatchComplete();
     }
   }
@@ -447,14 +442,19 @@ export class FileWatcher {
     const handler = this.onChangeHandler;
     this.onChangeHandler = null;
     
+    // Wait for any in-progress batch to complete before flushing final changes
+    // This prevents race conditions where handleBatchComplete() tries to start a new timer
+    while (this.batchInProgress) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    
     // Clear any pending batch timer
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
     }
     
-    // Flush any pending changes before stopping, regardless of timer state
-    // (changes can be queued without a timer when batchInProgress is true)
+    // Flush any pending changes before stopping
     if (handler && this.pendingChanges.size > 0) {
       await this.flushFinalBatch(handler);
     }

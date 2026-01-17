@@ -237,9 +237,12 @@ async function handleFileDeletion(
   log: LogFn
 ): Promise<void> {
   log(`🗑️  File deleted: ${filepath}`);
+  
+  // Initialize manifest manager before any operations to ensure consistency
+  const manifest = new ManifestManager(vectorDB.dbPath);
+  
   try {
     await vectorDB.deleteByFile(filepath);
-    const manifest = new ManifestManager(vectorDB.dbPath);
     await manifest.removeFile(filepath);
     log(`✓ Removed ${filepath} from index`);
   } catch (error) {
