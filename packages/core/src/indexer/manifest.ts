@@ -3,6 +3,7 @@ import path from 'path';
 import { INDEX_FORMAT_VERSION } from '../constants.js';
 import { GitState } from '../git/tracker.js';
 import { getPackageVersion } from '../utils/version.js';
+import { computeContentHash, isHashAlgorithmCompatible } from './content-hash.js';
 
 const MANIFEST_FILE = 'manifest.json';
 
@@ -13,6 +14,8 @@ export interface FileEntry {
   filepath: string;
   lastModified: number;
   chunkCount: number;
+  // Content hash for detecting actual content changes (optional for backwards compatibility)
+  contentHash?: string;
 }
 
 /**
@@ -24,6 +27,7 @@ export interface IndexManifest {
   lastIndexed: number;         // Timestamp of last indexing operation
   gitState?: GitState;         // Last known git state
   files: Record<string, FileEntry>;  // Map of filepath -> FileEntry (stored as object for JSON)
+  hashAlgorithm?: 'sha256-16' | 'sha256-16-large';  // Content hash algorithm (for future migrations)
 }
 
 /**
@@ -109,6 +113,7 @@ export class ManifestManager {
         formatVersion: INDEX_FORMAT_VERSION,
         lienVersion: getPackageVersion(),
         lastIndexed: Date.now(),
+        hashAlgorithm: 'sha256-16-large', // Current hash algorithm
       };
       
       const content = JSON.stringify(manifestToSave, null, 2);
@@ -234,7 +239,13 @@ export class ManifestManager {
   }
   
   /**
-   * Detects which files have changed based on mtime comparison
+   * Detects which files have changed based on mtime and content hash comparison.
+   * 
+   * Uses a two-stage approach:
+   * 1. Quick mtime check - if unchanged, skip file
+   * 2. Content hash check - if mtime changed but hash matches, skip reindex
+   * 
+   * This avoids unnecessary reindexing when files are touched without content changes.
    * 
    * @param currentFiles - Map of current files with their mtimes
    * @returns Array of filepaths that have changed
@@ -246,7 +257,12 @@ export class ManifestManager {
       return Array.from(currentFiles.keys());
     }
     
+    // Check if hash algorithm is compatible
+    const hashCompatible = isHashAlgorithmCompatible(manifest.hashAlgorithm);
+    
     const changedFiles: string[] = [];
+    let skippedByHash = 0;
+    let manifestNeedsUpdate = false;
     
     for (const [filepath, mtime] of currentFiles) {
       const entry = manifest.files[filepath];
@@ -254,10 +270,41 @@ export class ManifestManager {
       if (!entry) {
         // New file
         changedFiles.push(filepath);
-      } else if (entry.lastModified < mtime) {
-        // File modified since last index
-        changedFiles.push(filepath);
+        continue;
       }
+      
+      // Quick check: if mtime unchanged, skip
+      if (entry.lastModified === mtime) {
+        continue;
+      }
+      
+      // mtime changed - check if content actually changed (if hash available and compatible)
+      if (hashCompatible && entry.contentHash) {
+        const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(this.indexPath, '..', filepath);
+        const currentHash = await computeContentHash(absolutePath);
+        
+        if (currentHash && currentHash === entry.contentHash) {
+          // Content unchanged despite mtime change - skip reindex
+          skippedByHash++;
+          
+          // Update mtime to avoid repeated hash checks
+          entry.lastModified = mtime;
+          manifestNeedsUpdate = true;
+          continue;
+        }
+      }
+      
+      // Either no hash, hash incompatible, or content actually changed
+      changedFiles.push(filepath);
+    }
+    
+    // Save manifest if we updated any mtimes
+    if (manifestNeedsUpdate) {
+      await this.save(manifest);
+    }
+    
+    if (skippedByHash > 0) {
+      console.log(`[Lien] Skipped ${skippedByHash} file(s) with unchanged content`);
     }
     
     return changedFiles;

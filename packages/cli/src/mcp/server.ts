@@ -187,6 +187,8 @@ function createGitPollInterval(
 /**
  * Setup git detection and background polling.
  * Always enabled by default if git is available.
+ * 
+ * If a file watcher is provided, uses event-driven detection instead of polling.
  */
 async function setupGitDetection(
   rootDir: string,
@@ -194,7 +196,8 @@ async function setupGitDetection(
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
   log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
+  fileWatcher: FileWatcher | null
 ): Promise<{ gitTracker: GitStateTracker | null; gitPollInterval: NodeJS.Timeout | null }> {
   const gitAvailable = await isGitAvailable();
   const isRepo = await isGitRepo(rootDir);
@@ -219,12 +222,59 @@ async function setupGitDetection(
     log(`Failed to check git state on startup: ${error}`, 'warning');
   }
 
-  // Start background polling
-  const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
-  log(`✓ Git detection enabled (checking every ${pollIntervalSeconds}s)`);
-  const gitPollInterval = createGitPollInterval(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
-
-  return { gitTracker, gitPollInterval };
+  // If file watcher is available, use event-driven detection
+  if (fileWatcher) {
+    let gitReindexInProgress = false;
+    let lastGitReindexTime = 0;
+    const GIT_REINDEX_COOLDOWN_MS = 5000; // 5 second cooldown
+    
+    fileWatcher.watchGit(async () => {
+      // Prevent concurrent git reindex operations
+      if (gitReindexInProgress) {
+        log('Git reindex already in progress, skipping', 'debug');
+        return;
+      }
+      
+      // Cooldown check - don't reindex again too soon
+      const timeSinceLastReindex = Date.now() - lastGitReindexTime;
+      if (timeSinceLastReindex < GIT_REINDEX_COOLDOWN_MS) {
+        log(`Git change ignored (cooldown: ${GIT_REINDEX_COOLDOWN_MS - timeSinceLastReindex}ms remaining)`, 'debug');
+        return;
+      }
+      
+      log('🌿 Git change detected (event-driven)');
+      const changedFiles = await gitTracker.detectChanges();
+      
+      if (changedFiles && changedFiles.length > 0) {
+        gitReindexInProgress = true;
+        const startTime = Date.now();
+        reindexStateManager.startReindex(changedFiles);
+        log(`Reindexing ${changedFiles.length} files from git change`);
+        
+        try {
+          const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
+          const duration = Date.now() - startTime;
+          reindexStateManager.completeReindex(duration);
+          log(`✓ Reindexed ${count} files in ${duration}ms`);
+          lastGitReindexTime = Date.now();
+        } catch (error) {
+          reindexStateManager.failReindex();
+          log(`Git reindex failed: ${error}`, 'warning');
+        } finally {
+          gitReindexInProgress = false;
+        }
+      }
+    });
+    
+    log('✓ Git detection enabled (event-driven via file watcher)');
+    return { gitTracker, gitPollInterval: null };
+  } else {
+    // Fallback to polling if no file watcher (--no-watch mode)
+    const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
+    log(`✓ Git detection enabled (polling fallback every ${pollIntervalSeconds}s)`);
+    const gitPollInterval = createGitPollInterval(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
+    return { gitTracker, gitPollInterval };
+  }
 }
 
 /**
@@ -583,8 +633,12 @@ async function setupAndConnectServer(
   
   // Setup features
   await handleAutoIndexing(vectorDB, rootDir, log);
-  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager);
+  
+  // Setup file watching first (needed for event-driven git detection)
   const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log, reindexStateManager);
+  
+  // Setup git detection (will use event-driven approach if fileWatcher is available)
+  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager, fileWatcher);
 
   // Setup cleanup handlers
   const cleanup = setupCleanupHandlers(versionCheckInterval, gitPollInterval, fileWatcher, log);

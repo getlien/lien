@@ -57,6 +57,11 @@ export class FileWatcher {
   private readonly MAX_BATCH_WAIT_MS = 5000; // Force flush after 5s even if changes keep coming
   private firstChangeTimestamp: number | null = null; // Track when batch started
   
+  // Git watching state
+  private gitChangeTimer: NodeJS.Timeout | null = null;
+  private gitChangeHandler: (() => void | Promise<void>) | null = null;
+  private readonly GIT_DEBOUNCE_MS = 1000; // Git operations touch multiple files
+  
   constructor(rootDir: string) {
     this.rootDir = rootDir;
   }
@@ -221,6 +226,66 @@ export class FileWatcher {
   }
   
   /**
+   * Enable watching .git directory for git operations.
+   * Call this after start() to enable event-driven git detection.
+   * 
+   * @param onGitChange - Callback invoked when git operations detected
+   */
+  watchGit(onGitChange: () => void | Promise<void>): void {
+    if (!this.watcher) {
+      throw new Error('Cannot watch git - watcher not started');
+    }
+    
+    this.gitChangeHandler = onGitChange;
+    
+    // Add .git paths to watcher
+    // These files change during various git operations:
+    // - HEAD: checkout, commit, rebase
+    // - index: staging changes
+    // - refs/**:  commits, branch creation, remote updates
+    // - MERGE_HEAD, REBASE_HEAD, etc.: in-progress operations
+    this.watcher.add([
+      path.join(this.rootDir, '.git/HEAD'),
+      path.join(this.rootDir, '.git/index'),
+      path.join(this.rootDir, '.git/refs/**'),
+      path.join(this.rootDir, '.git/MERGE_HEAD'),
+      path.join(this.rootDir, '.git/REBASE_HEAD'),
+      path.join(this.rootDir, '.git/CHERRY_PICK_HEAD'),
+      path.join(this.rootDir, '.git/refs/stash'),  // git stash operations
+    ]);
+    
+    console.log('[FileWatcher] Git watching enabled');
+  }
+  
+  /**
+   * Check if a filepath is a git-related change
+   */
+  private isGitChange(filepath: string): boolean {
+    // Normalize path separators for cross-platform
+    const normalized = filepath.replace(/\\/g, '/');
+    return normalized.includes('.git/');
+  }
+  
+  /**
+   * Handle git-related file changes with debouncing
+   */
+  private handleGitChange(): void {
+    // Debounce git changes (commits touch multiple .git files)
+    if (this.gitChangeTimer) {
+      clearTimeout(this.gitChangeTimer);
+    }
+    
+    this.gitChangeTimer = setTimeout(async () => {
+      try {
+        await this.gitChangeHandler?.();
+      } catch (error) {
+        console.error('[FileWatcher] Git change handler error:', error);
+      }
+      this.gitChangeTimer = null;
+    }, this.GIT_DEBOUNCE_MS);
+  }
+  
+  /**
    * Handles a file change event with smart batching.
    * Collects rapid changes across multiple files and processes them together.
    * Forces flush after MAX_BATCH_WAIT_MS even if changes keep arriving.
@@ -229,6 +294,12 @@ export class FileWatcher {
    * before starting a new batch to prevent race conditions.
    */
   private handleChange(type: 'add' | 'change' | 'unlink', filepath: string): void {
+    // Check if this is a git-related change
+    if (this.gitChangeHandler && this.isGitChange(filepath)) {
+      this.handleGitChange();
+      return; // Don't treat as regular file change
+    }
+    
     // Prevent queuing events during shutdown (handler is null after stop())
     if (!this.onChangeHandler) {
       return;
@@ -441,6 +512,13 @@ export class FileWatcher {
     // Prevent new changes from being queued during shutdown
     const handler = this.onChangeHandler;
     this.onChangeHandler = null;
+    this.gitChangeHandler = null; // Also clear git handler
+    
+    // Clear git timer
+    if (this.gitChangeTimer) {
+      clearTimeout(this.gitChangeTimer);
+      this.gitChangeTimer = null;
+    }
     
     // Wait for any in-progress batch to complete before flushing final changes
     // This prevents race conditions where handleBatchComplete() tries to start a new timer

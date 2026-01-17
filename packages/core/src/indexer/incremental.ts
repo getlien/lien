@@ -9,6 +9,7 @@ import {
   DEFAULT_CHUNK_OVERLAP,
 } from '../constants.js';
 import { ManifestManager } from './manifest.js';
+import { computeContentHash } from './content-hash.js';
 import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
 import { CodeChunk } from './types.js';
 import { Result, Ok, Err, isOk } from '../utils/result.js';
@@ -80,6 +81,7 @@ interface FileProcessResult {
   filepath: string;
   result: ProcessFileResult | null; // null for empty files
   mtime: number;
+  contentHash: string; // Content hash for change detection
 }
 
 /**
@@ -200,8 +202,9 @@ export async function indexSingleFile(
     // Process file content (chunking + embeddings) - use normalized path for storage
     const result = await processFileContent(normalizedPath, content, embeddings, verbose || false, rootDir);
     
-    // Get actual file mtime for manifest
+    // Get actual file mtime and compute content hash for manifest
     const stats = await fs.stat(filepath);
+    const contentHash = await computeContentHash(filepath);
     const manifest = new ManifestManager(vectorDB.dbPath);
     
     if (result === null) {
@@ -211,6 +214,7 @@ export async function indexSingleFile(
         filepath: normalizedPath,
         lastModified: stats.mtimeMs,
         chunkCount: 0,
+        contentHash,
       });
       return;
     }
@@ -228,6 +232,7 @@ export async function indexSingleFile(
       filepath: normalizedPath,
       lastModified: stats.mtimeMs,
       chunkCount: result.chunkCount,
+      contentHash,
     });
     
     if (verbose) {
@@ -257,6 +262,7 @@ async function processSingleFileForIndexing(
     // Read file stats and content using original path (for filesystem access)
     const stats = await fs.stat(filepath);
     const content = await fs.readFile(filepath, 'utf-8');
+    const contentHash = await computeContentHash(filepath);
     
     // Process content using normalized path (for storage)
     const result = await processFileContent(normalizedPath, content, embeddings, verbose, rootDir);
@@ -265,6 +271,7 @@ async function processSingleFileForIndexing(
       filepath: normalizedPath,  // Store normalized path
       result,
       mtime: stats.mtimeMs,
+      contentHash,
     });
   } catch (error) {
     return Err(`Failed to process ${normalizedPath}: ${error}`);
@@ -298,7 +305,7 @@ export async function indexMultipleFiles(
   let processedCount = 0;
   
   // Batch manifest updates for performance
-  const manifestEntries: Array<{ filepath: string; chunkCount: number; mtime: number }> = [];
+  const manifestEntries: Array<{ filepath: string; chunkCount: number; mtime: number; contentHash: string }> = [];
   
   // Process each file sequentially (simple and reliable)
   for (const filepath of filepaths) {
@@ -309,7 +316,7 @@ export async function indexMultipleFiles(
     const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir);
     
     if (isOk(result)) {
-      const { filepath: storedPath, result: processResult, mtime } = result.value;
+      const { filepath: storedPath, result: processResult, mtime, contentHash } = result.value;
       
       if (processResult === null) {
         // Empty file - remove from vector DB but keep in manifest with chunkCount: 0
@@ -325,6 +332,7 @@ export async function indexMultipleFiles(
           filepath: storedPath,
           lastModified: mtime,
           chunkCount: 0,
+          contentHash,
         });
         
         processedCount++;
@@ -350,6 +358,7 @@ export async function indexMultipleFiles(
         filepath: storedPath,
         chunkCount: processResult.chunkCount,
         mtime,
+        contentHash,
       });
       
       if (verbose) {
@@ -387,6 +396,7 @@ export async function indexMultipleFiles(
         filepath: entry.filepath,
         lastModified: entry.mtime, // Use actual file mtime for accurate change detection
         chunkCount: entry.chunkCount,
+        contentHash: entry.contentHash, // Include content hash for change detection
       }))
     );
   }
