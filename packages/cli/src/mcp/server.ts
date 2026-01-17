@@ -122,7 +122,7 @@ async function handleGitStartup(
     log(`🌿 Git changes detected: ${changedFiles.length} files changed`);
     
     try {
-      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
+      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose: false });
       const duration = Date.now() - startTime;
       reindexStateManager.completeReindex(duration);
       log(`✓ Reindexed ${count} files in ${duration}ms`);
@@ -170,7 +170,7 @@ function createGitPollInterval(
         log(`🌿 Git change detected: ${changedFiles.length} files changed`);
         
         try {
-          const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
+          const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose: false });
           const duration = Date.now() - startTime;
           reindexStateManager.completeReindex(duration);
           log(`✓ Background reindex complete: ${count} files in ${duration}ms`);
@@ -253,7 +253,7 @@ async function setupGitDetection(
         log(`Reindexing ${changedFiles.length} files from git change`);
         
         try {
-          const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
+          const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose: false });
           const duration = Date.now() - startTime;
           reindexStateManager.completeReindex(duration);
           log(`✓ Reindexed ${count} files in ${duration}ms`);
@@ -347,7 +347,7 @@ async function handleSingleFileChange(
   log(`📝 File ${action}: ${filepath}`);
   
   try {
-    await indexSingleFile(filepath, vectorDB, embeddings, { verbose });
+    await indexSingleFile(filepath, vectorDB, embeddings, { verbose: false });
     const duration = Date.now() - startTime;
     reindexStateManager.completeReindex(duration);
   } catch (error) {
@@ -432,7 +432,7 @@ async function handleBatchEvent(
     
     if (filesToIndex.length > 0) {
       log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
-      operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose }));
+      operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose: false }));
     }
     
     if (deletedFiles.length > 0) {
