@@ -7,7 +7,9 @@
  * State tracking for file reindexing operations.
  * 
  * @property inProgress - Whether any reindex operation is currently active
- * @property pendingFiles - Array of files queued for reindexing (from all concurrent operations)
+ * @property pendingFiles - Array of files queued for reindexing. For concurrent operations,
+ *                          this represents the union of all files from all active operations.
+ *                          The list is only cleared when all operations complete.
  * @property lastReindexTimestamp - Timestamp (ms) when the last operation completed
  * @property lastReindexDurationMs - Duration of the most recent completed operation.
  *                                   Note: For concurrent operations, this reflects only the

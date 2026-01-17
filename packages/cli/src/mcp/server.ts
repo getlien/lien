@@ -312,13 +312,37 @@ function createFileChangeHandler(
         await handleBatchChanges(filesToIndex, vectorDB, embeddings, verbose, log, reindexStateManager);
       }
       
-      // Handle deletions
-      for (const deleted of event.deleted || []) {
-        await handleFileDeletion(deleted, vectorDB, log);
+      // Handle deletions in parallel with state tracking
+      const deletedFiles = event.deleted || [];
+      if (deletedFiles.length > 0) {
+        const startTime = Date.now();
+        reindexStateManager.startReindex(deletedFiles);
+        
+        try {
+          await Promise.all(
+            deletedFiles.map((deleted) => handleFileDeletion(deleted, vectorDB, log))
+          );
+          const duration = Date.now() - startTime;
+          reindexStateManager.completeReindex(duration);
+          log(`✓ Removed ${deletedFiles.length} file(s) in ${duration}ms`);
+        } catch (error) {
+          reindexStateManager.failReindex();
+          log(`Failed to process deletions: ${error}`, 'warning');
+        }
       }
     } else if (type === 'unlink') {
       // Fallback for single file deletion (backwards compatibility)
-      await handleFileDeletion(event.filepath, vectorDB, log);
+      const startTime = Date.now();
+      reindexStateManager.startReindex([event.filepath]);
+      
+      try {
+        await handleFileDeletion(event.filepath, vectorDB, log);
+        const duration = Date.now() - startTime;
+        reindexStateManager.completeReindex(duration);
+      } catch (error) {
+        reindexStateManager.failReindex();
+        log(`Failed to process deletion for ${event.filepath}: ${error}`, 'warning');
+      }
     } else {
       // Fallback for single file add/change (backwards compatibility)
       await handleSingleFileChange(event.filepath, type, vectorDB, embeddings, verbose, log, reindexStateManager);

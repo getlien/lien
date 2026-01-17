@@ -233,11 +233,16 @@ export class FileWatcher {
    * Flush pending changes and dispatch batch event.
    */
   private flushBatch(): void {
+    // Clear timer first to prevent race condition between timer and stop()
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    
     if (this.pendingChanges.size === 0) return;
     
     const changes = new Map(this.pendingChanges);
     this.pendingChanges.clear();
-    this.batchTimer = null;
     
     // Group by change type
     const added: string[] = [];
