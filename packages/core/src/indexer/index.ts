@@ -24,6 +24,7 @@ import {
   DEFAULT_EMBEDDING_BATCH_SIZE,
 } from '../constants.js';
 import { chunkFile } from './chunker.js';
+import { computeContentHash } from './content-hash.js';
 import { LocalEmbeddings } from '../embeddings/local.js';
 import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
@@ -390,8 +391,11 @@ async function processFileForIndexing(
       return false;
     }
 
+    // Compute content hash for change detection
+    const contentHash = await computeContentHash(file);
+
     // Add chunks to batch processor (handles mutex internally)
-    await batchProcessor.addChunks(chunks, file, stats.mtimeMs);
+    await batchProcessor.addChunks(chunks, file, stats.mtimeMs, contentHash);
     progressTracker.incrementFiles();
 
     return true;
@@ -512,6 +516,7 @@ async function performFullIndex(
       filepath: entry.filepath,
       lastModified: entry.mtime,
       chunkCount: entry.chunkCount,
+      contentHash: entry.contentHash,
     }))
   );
 

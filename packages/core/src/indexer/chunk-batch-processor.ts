@@ -38,6 +38,7 @@ export interface FileIndexEntry {
   filepath: string;
   chunkCount: number;
   mtime: number;
+  contentHash: string;
 }
 
 /**
@@ -103,11 +104,13 @@ export class ChunkBatchProcessor {
    * @param chunks - Code chunks to add
    * @param filepath - Source file path (for manifest)
    * @param mtime - File modification time in ms (for change detection)
+   * @param contentHash - Content hash for change detection
    */
   async addChunks(
     chunks: CodeChunk[],
     filepath: string,
-    mtime: number
+    mtime: number,
+    contentHash: string
   ): Promise<void> {
     if (chunks.length === 0) {
       return;
@@ -138,6 +141,7 @@ export class ChunkBatchProcessor {
         filepath,
         chunkCount: chunks.length,
         mtime,
+        contentHash,
       });
 
       // Process if batch threshold reached
