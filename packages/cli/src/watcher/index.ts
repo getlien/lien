@@ -13,7 +13,7 @@ import type { FrameworkConfig } from '@liendev/core';
  * @property filepath - Single file path. For batch events, this contains the first
  *                      file from the batch for backwards compatibility only, or may
  *                      be an empty string in edge cases (though the empty batch guard
- *                      on lines 274-276 prevents this in practice).
+ *                      on lines 293-295 prevents this in practice).
  *                      **Do not rely on this field for batch events** - use the
  *                      array fields instead.
  * @property added - Array of added files (batch events only)
@@ -296,7 +296,7 @@ export class FileWatcher {
       
       try {
         const allFiles = [...added, ...modified];
-        const firstFile = allFiles[0] || deleted[0] || ''; // Guaranteed non-empty due to check on lines 274-276
+        const firstFile = allFiles[0] || deleted[0] || ''; // Guaranteed non-empty due to check on lines 293-295
         const result = this.onChangeHandler({
           type: 'batch',
           filepath: firstFile, // For backwards compat: first file from the batch
