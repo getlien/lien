@@ -277,9 +277,10 @@ export class FileWatcher {
       
       try {
         const allFiles = [...added, ...modified];
+        const firstFile = allFiles[0] || deleted[0] || ''; // Guaranteed non-empty due to check on lines 274-276
         const result = this.onChangeHandler({
           type: 'batch',
-          filepath: allFiles[0] || deleted[0] || '', // For backwards compat
+          filepath: firstFile, // For backwards compat: first file from the batch
           added,
           modified,
           deleted,
@@ -305,16 +306,49 @@ export class FileWatcher {
       return;
     }
     
+    // Prevent new changes from being queued during shutdown
+    const handler = this.onChangeHandler;
+    this.onChangeHandler = null;
+    
     // Flush any pending changes before stopping
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
-      this.flushBatch();
+      this.batchTimer = null;
+      // Manually flush with the saved handler
+      if (handler && this.pendingChanges.size > 0) {
+        const changes = new Map(this.pendingChanges);
+        this.pendingChanges.clear();
+        
+        const added: string[] = [];
+        const modified: string[] = [];
+        const deleted: string[] = [];
+        
+        for (const [filepath, type] of changes.entries()) {
+          if (type === 'add') added.push(filepath);
+          else if (type === 'change') modified.push(filepath);
+          else if (type === 'unlink') deleted.push(filepath);
+        }
+        
+        if (added.length > 0 || modified.length > 0 || deleted.length > 0) {
+          try {
+            const allFiles = [...added, ...modified];
+            await handler({
+              type: 'batch',
+              filepath: allFiles[0] || deleted[0] || '',
+              added,
+              modified,
+              deleted,
+            });
+          } catch (error) {
+            console.error('[FileWatcher] Error flushing final batch during shutdown:', error);
+          }
+        }
+      }
     }
     
     // Close watcher
     await this.watcher.close();
     this.watcher = null;
-    this.onChangeHandler = null;
   }
   
   /**
