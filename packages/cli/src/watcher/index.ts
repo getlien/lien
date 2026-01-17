@@ -13,7 +13,7 @@ import type { FrameworkConfig } from '@liendev/core';
  * @property filepath - Single file path. For batch events, this contains the first
  *                      file from the batch for backwards compatibility only, or may
  *                      be an empty string in edge cases (though the empty batch guard
- *                      on lines 293-295 prevents this in practice).
+ *                      on lines 303-305 prevents this in practice).
  *                      **Do not rely on this field for batch events** - use the
  *                      array fields instead.
  * @property added - Array of added files (batch events only, empty array for non-batch)
@@ -258,22 +258,14 @@ export class FileWatcher {
   }
   
   /**
-   * Flush pending changes and dispatch batch event.
+   * Group pending changes by type and convert to absolute paths.
+   * Returns arrays of added, modified, and deleted files.
    */
-  private flushBatch(): void {
-    // Clear timer first to prevent race condition between timer and stop()
-    if (this.batchTimer) {
-      clearTimeout(this.batchTimer);
-      this.batchTimer = null;
-    }
-    
-    if (this.pendingChanges.size === 0) return;
-    
-    const changes = new Map(this.pendingChanges);
-    this.pendingChanges.clear();
-    this.firstChangeTimestamp = null; // Reset batch start time
-    
-    // Group by change type
+  private groupPendingChanges(changes: Map<string, 'add' | 'change' | 'unlink'>): {
+    added: string[];
+    modified: string[];
+    deleted: string[];
+  } {
     const added: string[] = [];
     const modified: string[] = [];
     const deleted: string[] = [];
@@ -296,6 +288,28 @@ export class FileWatcher {
           break;
       }
     }
+    
+    return { added, modified, deleted };
+  }
+
+  /**
+   * Flush pending changes and dispatch batch event.
+   */
+  private flushBatch(): void {
+    // Clear timer first to prevent race condition between timer and stop()
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    
+    if (this.pendingChanges.size === 0) return;
+    
+    const changes = new Map(this.pendingChanges);
+    this.pendingChanges.clear();
+    this.firstChangeTimestamp = null; // Reset batch start time
+    
+    // Group by change type
+    const { added, modified, deleted } = this.groupPendingChanges(changes);
     
     // Call handler with batched changes
     if (this.onChangeHandler) {
@@ -348,20 +362,7 @@ export class FileWatcher {
         const changes = new Map(this.pendingChanges);
         this.pendingChanges.clear();
         
-        const added: string[] = [];
-        const modified: string[] = [];
-        const deleted: string[] = [];
-        
-        for (const [filepath, type] of changes.entries()) {
-          // Convert to absolute path for consistency with flushBatch()
-          const absolutePath = path.isAbsolute(filepath)
-            ? filepath
-            : path.join(this.rootDir, filepath);
-          
-          if (type === 'add') added.push(absolutePath);
-          else if (type === 'change') modified.push(absolutePath);
-          else if (type === 'unlink') deleted.push(absolutePath);
-        }
+        const { added, modified, deleted } = this.groupPendingChanges(changes);
         
         if (added.length > 0 || modified.length > 0 || deleted.length > 0) {
           try {
