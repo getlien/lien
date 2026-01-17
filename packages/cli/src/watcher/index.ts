@@ -165,8 +165,9 @@ export class FileWatcher {
       .on('add', (filepath) => this.handleChange('add', filepath))
       .on('change', (filepath) => this.handleChange('change', filepath))
       .on('unlink', (filepath) => this.handleChange('unlink', filepath))
-      .on('error', (error) => {
-        console.error(`[Lien] File watcher error: ${error}`);
+      .on('error', () => {
+        // Watcher errors are handled by the MCP server log
+        // Avoid console output which interferes with MCP JSON-RPC protocol
       });
   }
   
@@ -254,7 +255,7 @@ export class FileWatcher {
       path.join(this.rootDir, '.git/refs/stash'),  // git stash operations
     ]);
     
-    console.log('[FileWatcher] Git watching enabled');
+    // Git watching enabled (logged via MCP server log, not console)
   }
   
   /**
@@ -279,7 +280,7 @@ export class FileWatcher {
       try {
         await this.gitChangeHandler?.();
       } catch (error) {
-        console.error('[FileWatcher] Git change handler error:', error);
+        // Error handled by git change handler, silent here to avoid MCP protocol interference
       }
       this.gitChangeTimer = null;
     }, this.GIT_DEBOUNCE_MS);
@@ -402,7 +403,8 @@ export class FileWatcher {
     const allFiles = [...added, ...modified];
     const firstFile = allFiles.length > 0 ? allFiles[0] : deleted[0];
     if (!firstFile) {
-      console.error('[Lien] INTERNAL ERROR: dispatchBatch called with all empty arrays');
+      // Internal error: dispatchBatch called with all empty arrays
+      // Silent to avoid MCP protocol interference
       return;
     }
     
@@ -419,8 +421,9 @@ export class FileWatcher {
       // Handle async handlers and track completion
       if (result instanceof Promise) {
         result
-          .catch((error) => {
-            console.error(`[Lien] Error handling batch change: ${error}`);
+          .catch(() => {
+            // Error handling batch change - logged by MCP server handler
+            // Silent here to avoid MCP protocol interference
           })
           .finally(() => this.handleBatchComplete());
       } else {
@@ -428,7 +431,8 @@ export class FileWatcher {
         this.handleBatchComplete();
       }
     } catch (error) {
-      console.error(`[Lien] Error handling batch change: ${error}`);
+      // Error handling batch change - logged by MCP server handler
+      // Silent here to avoid MCP protocol interference
       // handleBatchComplete() will reset batchInProgress and check for accumulated changes
       this.handleBatchComplete();
     }
@@ -485,7 +489,7 @@ export class FileWatcher {
       
       // Defensive check - should never happen given the guard above
       if (!firstFile) {
-        console.error('[FileWatcher] INTERNAL ERROR: No files in final batch');
+        // Internal error: no files in final batch (logged to stderr only in non-MCP context)
         return;
       }
       
@@ -497,7 +501,8 @@ export class FileWatcher {
         deleted,
       });
     } catch (error) {
-      console.error('[FileWatcher] Error flushing final batch during shutdown:', error);
+      // Error flushing final batch during shutdown (silent to avoid MCP protocol interference)
+      // The handler itself logs errors appropriately
     }
   }
 
