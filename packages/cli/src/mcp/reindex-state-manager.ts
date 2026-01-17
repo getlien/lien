@@ -8,17 +8,11 @@
  * - If an operation fails to call complete/fail, activeOperations will never decrement
  *   and state becomes permanently stuck with inProgress=true
  * 
- * **Stuck State Risk:**
- * - If activeOperations counter gets stuck > 0, all future operations that check
- *   inProgress will be blocked (e.g., git polling skips when inProgress=true)
- * - Currently no automatic timeout/reset mechanism - operations MUST clean up properly
- * - Consider adding periodic state validation or manual reset capability if needed
- * 
- * **Partial Failures:**
- * - When completeReindex() is called, ALL pending files are cleared from state
- * - No tracking of which specific files succeeded vs failed in batch operations
- * - Consumers cannot determine which files need re-indexing after partial failures
- * - This is a simplification - full failure tracking would require more complex state
+ * **Stuck State Recovery:**
+ * - If inProgress remains true for > 5 minutes, a health check logs a warning
+ * - This indicates an operation crashed without cleanup
+ * - Use `resetIfStuck()` method to manually recover from stuck state
+ * - Automatic timeout recovery not implemented to avoid interrupting legitimate long operations
  */
 
 /**
@@ -53,13 +47,32 @@ export function createReindexStateManager() {
   
   // Track number of concurrent reindex operations
   let activeOperations = 0;
+  let lastStateChangeTimestamp = Date.now();
+  
+  // Health check: Warn if stuck for > 5 minutes
+  const STUCK_STATE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
   return {
     /**
      * Get a copy of the current reindex state.
      * Returns a deep copy to prevent external mutation of nested arrays.
      */
-    getState: () => ({ ...state, pendingFiles: [...state.pendingFiles] }),
+    getState: () => {
+      // Health check: Detect stuck state
+      if (state.inProgress) {
+        const stuckDuration = Date.now() - lastStateChangeTimestamp;
+        if (stuckDuration > STUCK_STATE_THRESHOLD_MS) {
+          console.warn(
+            `[Lien] HEALTH CHECK: Reindex stuck in progress for ${Math.round(stuckDuration / 1000)}s. ` +
+            `This indicates an operation crashed without cleanup. ` +
+            `Active operations: ${activeOperations}, Pending files: ${state.pendingFiles.length}. ` +
+            `Consider using resetIfStuck() to recover.`
+          );
+        }
+      }
+      
+      return { ...state, pendingFiles: [...state.pendingFiles] };
+    },
     
     /**
      * Start a new reindex operation.
@@ -78,6 +91,7 @@ export function createReindexStateManager() {
       
       activeOperations += 1;
       state.inProgress = true;
+      lastStateChangeTimestamp = Date.now();
       
       // Merge new files into pending list (avoid duplicates)
       const existing = new Set(state.pendingFiles);
@@ -110,6 +124,7 @@ export function createReindexStateManager() {
         state.pendingFiles = [];
         state.lastReindexTimestamp = Date.now();
         state.lastReindexDurationMs = durationMs;
+        lastStateChangeTimestamp = Date.now();
       }
     },
     
@@ -131,7 +146,34 @@ export function createReindexStateManager() {
       if (activeOperations === 0) {
         state.inProgress = false;
         state.pendingFiles = [];
+        lastStateChangeTimestamp = Date.now();
       }
+    },
+    
+    /**
+     * Manually reset state if it's stuck.
+     * 
+     * **WARNING**: Only use this if you're certain operations have crashed without cleanup.
+     * This will forcibly clear the inProgress flag and reset activeOperations counter.
+     * 
+     * Use this when getState() health check detects stuck state and you've verified
+     * no legitimate operations are running.
+     * 
+     * @returns true if state was reset, false if state was already clean
+     */
+    resetIfStuck: (): boolean => {
+      if (state.inProgress && activeOperations > 0) {
+        console.warn(
+          `[Lien] Manually resetting stuck reindex state. ` +
+          `Active operations: ${activeOperations}, Pending files: ${state.pendingFiles.length}`
+        );
+        activeOperations = 0;
+        state.inProgress = false;
+        state.pendingFiles = [];
+        lastStateChangeTimestamp = Date.now();
+        return true;
+      }
+      return false;
     },
   };
 }

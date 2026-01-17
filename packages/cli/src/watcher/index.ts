@@ -11,11 +11,15 @@ import type { FrameworkConfig } from '@liendev/core';
  * 
  * @property type - Event type: 'add', 'change', 'unlink', or 'batch'
  * @property filepath - Single file path. For batch events, this contains the first
- *                      file from the batch for backwards compatibility only, or may
- *                      be an empty string in edge cases (though the empty batch guard
- *                      on lines 303-305 prevents this in practice).
- *                      **Do not rely on this field for batch events** - use the
- *                      array fields instead.
+ *                      file from the batch **for backwards compatibility only**.
+ *                      
+ *                      **IMPORTANT**: Batch events should use the array fields (added/modified/deleted).
+ *                      This field exists only to maintain backwards compatibility with existing
+ *                      consumers that expect a filepath field. New code should NOT rely on this field
+ *                      for batch events and should migrate to using the array fields.
+ *                      
+ *                      If the guard fails (all arrays empty), an internal error is logged and the
+ *                      handler is not called.
  * @property added - Array of added files (batch events only, empty array for non-batch)
  * @property modified - Array of modified files (batch events only, empty array for non-batch)
  * @property deleted - Array of deleted files (batch events only, empty array for non-batch)
@@ -239,7 +243,13 @@ export class FileWatcher {
     this.pendingChanges.set(filepath, type);
     
     // Check if we've been batching for too long
-    const elapsed = Date.now() - (this.firstChangeTimestamp || 0);
+    const now = Date.now();
+    if (!this.firstChangeTimestamp) {
+      // Defensive: ensure timestamp is set (should always be set above, but be safe)
+      this.firstChangeTimestamp = now;
+    }
+    const elapsed = now - this.firstChangeTimestamp;
+    
     if (elapsed >= this.MAX_BATCH_WAIT_MS) {
       // Force flush - we've been batching for too long
       // Clear timer first to prevent race with timer callback
@@ -316,15 +326,21 @@ export class FileWatcher {
 
   /**
    * Dispatch batch event to handler and track async state.
+   * Caller must ensure at least one of added/modified/deleted is non-empty.
    */
   private dispatchBatch(added: string[], modified: string[], deleted: string[]): void {
     if (!this.onChangeHandler) return;
     
+    // SAFETY: Caller guarantees at least one array is non-empty (empty batch guard before this call)
+    const allFiles = [...added, ...modified];
+    const firstFile = allFiles.length > 0 ? allFiles[0] : deleted[0];
+    if (!firstFile) {
+      console.error('[Lien] INTERNAL ERROR: dispatchBatch called with all empty arrays');
+      return;
+    }
+    
     try {
       this.batchInProgress = true;
-      const allFiles = [...added, ...modified];
-      const firstFile = allFiles[0] || deleted[0] || '';
-      
       const result = this.onChangeHandler({
         type: 'batch',
         filepath: firstFile,
@@ -341,12 +357,15 @@ export class FileWatcher {
           })
           .finally(() => this.handleBatchComplete());
       } else {
-        // Sync handler - mark as complete immediately
+        // Sync handler - mark as complete immediately and check for accumulated changes
         this.batchInProgress = false;
+        this.handleBatchComplete();
       }
     } catch (error) {
       this.batchInProgress = false;
       console.error(`[Lien] Error handling batch change: ${error}`);
+      // Still check for accumulated changes after error
+      this.handleBatchComplete();
     }
   }
 
@@ -401,12 +420,20 @@ export class FileWatcher {
         
         const { added, modified, deleted } = this.groupPendingChanges(changes);
         
+        // Only flush if we have actual files to process
         if (added.length > 0 || modified.length > 0 || deleted.length > 0) {
           try {
             const allFiles = [...added, ...modified];
+            const firstFile = allFiles.length > 0 ? allFiles[0] : deleted[0];
+            // Defensive check - should never happen given the guard above
+            if (!firstFile) {
+              console.error('[FileWatcher] INTERNAL ERROR: No files in final batch');
+              return;
+            }
+            
             await handler({
               type: 'batch',
-              filepath: allFiles[0] || deleted[0] || '',
+              filepath: firstFile,
               added,
               modified,
               deleted,

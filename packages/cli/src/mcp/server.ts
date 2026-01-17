@@ -229,6 +229,7 @@ async function setupGitDetection(
 
 /**
  * Handle file deletion (remove from index and manifest)
+ * Throws error on failure to allow batch operations to track partial failures.
  */
 async function handleFileDeletion(
   filepath: string,
@@ -243,6 +244,7 @@ async function handleFileDeletion(
     log(`✓ Removed ${filepath} from index`);
   } catch (error) {
     log(`Failed to remove ${filepath}: ${error}`, 'warning');
+    throw error; // Propagate error to allow batch handler to track failures
   }
 }
 
