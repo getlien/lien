@@ -11,7 +11,9 @@ import type { FrameworkConfig } from '@liendev/core';
  * 
  * @property type - Event type: 'add', 'change', 'unlink', or 'batch'
  * @property filepath - Single file path. For batch events, this contains the first
- *                      file from the batch for backwards compatibility only.
+ *                      file from the batch for backwards compatibility only, or may
+ *                      be an empty string in edge cases (though the empty batch guard
+ *                      on lines 274-276 prevents this in practice).
  *                      **Do not rely on this field for batch events** - use the
  *                      array fields instead.
  * @property added - Array of added files (batch events only)
@@ -47,6 +49,8 @@ export class FileWatcher {
   private pendingChanges: Map<string, 'add' | 'change' | 'unlink'> = new Map();
   private batchTimer: NodeJS.Timeout | null = null;
   private readonly BATCH_WINDOW_MS = 500; // Collect changes for 500ms before processing
+  private readonly MAX_BATCH_WAIT_MS = 5000; // Force flush after 5s even if changes keep coming
+  private firstChangeTimestamp: number | null = null; // Track when batch started
   
   constructor(rootDir: string) {
     this.rootDir = rootDir;
@@ -214,10 +218,24 @@ export class FileWatcher {
   /**
    * Handles a file change event with smart batching.
    * Collects rapid changes across multiple files and processes them together.
+   * Forces flush after MAX_BATCH_WAIT_MS even if changes keep arriving.
    */
   private handleChange(type: 'add' | 'change' | 'unlink', filepath: string): void {
+    // Track when the batch started
+    if (this.pendingChanges.size === 0) {
+      this.firstChangeTimestamp = Date.now();
+    }
+    
     // Add to pending batch (later events overwrite earlier for same file)
     this.pendingChanges.set(filepath, type);
+    
+    // Check if we've been batching for too long
+    const elapsed = Date.now() - (this.firstChangeTimestamp || 0);
+    if (elapsed >= this.MAX_BATCH_WAIT_MS) {
+      // Force flush - we've been batching for too long
+      this.flushBatch();
+      return;
+    }
     
     // Reset/start batch timer
     if (this.batchTimer) {
@@ -243,6 +261,7 @@ export class FileWatcher {
     
     const changes = new Map(this.pendingChanges);
     this.pendingChanges.clear();
+    this.firstChangeTimestamp = null; // Reset batch start time
     
     // Group by change type
     const added: string[] = [];
@@ -324,9 +343,14 @@ export class FileWatcher {
         const deleted: string[] = [];
         
         for (const [filepath, type] of changes.entries()) {
-          if (type === 'add') added.push(filepath);
-          else if (type === 'change') modified.push(filepath);
-          else if (type === 'unlink') deleted.push(filepath);
+          // Convert to absolute path for consistency with flushBatch()
+          const absolutePath = path.isAbsolute(filepath)
+            ? filepath
+            : path.join(this.rootDir, filepath);
+          
+          if (type === 'add') added.push(absolutePath);
+          else if (type === 'change') modified.push(absolutePath);
+          else if (type === 'unlink') deleted.push(absolutePath);
         }
         
         if (added.length > 0 || modified.length > 0 || deleted.length > 0) {

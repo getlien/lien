@@ -288,16 +288,6 @@ function createFileChangeHandler(
         return; // Nothing to process
       }
 
-      // Check if a reindex is already in progress (git poll or previous file watch)
-      const currentState = reindexStateManager.getState();
-      if (currentState.inProgress) {
-        log(
-          `File watch reindex skipped: background reindex already in progress (${currentState.pendingFiles.length} files pending)`,
-          'debug'
-        );
-        return;
-      }
-
       const startTime = Date.now();
       reindexStateManager.startReindex(allFiles);
       

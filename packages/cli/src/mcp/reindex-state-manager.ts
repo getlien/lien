@@ -12,8 +12,11 @@
  *                          The list is only cleared when all operations complete.
  * @property lastReindexTimestamp - Timestamp (ms) when the last operation completed
  * @property lastReindexDurationMs - Duration of the most recent completed operation.
- *                                   Note: For concurrent operations, this reflects only the
- *                                   last operation to complete, not cumulative time.
+ *                                   **Important**: For concurrent operations, this reflects only
+ *                                   the last operation to complete, NOT total or cumulative time.
+ *                                   Example: If operation A takes 5000ms and operation B takes 1000ms
+ *                                   but finishes last, this will be 1000ms. This shows per-operation
+ *                                   timing, not wall-clock time for all concurrent work.
  */
 export interface ReindexState {
   inProgress: boolean;
