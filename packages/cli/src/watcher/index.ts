@@ -1,11 +1,36 @@
 import chokidar from 'chokidar';
 import path from 'path';
-import { detectAllFrameworks, getFrameworkDetector, DEFAULT_DEBOUNCE_MS } from '@liendev/core';
+import { detectAllFrameworks, getFrameworkDetector } from '@liendev/core';
 import type { FrameworkConfig } from '@liendev/core';
 
+/**
+ * File change event emitted by the watcher.
+ * 
+ * For individual events (add/change/unlink), use the `filepath` field.
+ * For batch events, use the array fields (added/modified/deleted).
+ * 
+ * @property type - Event type: 'add', 'change', 'unlink', or 'batch'
+ * @property filepath - Single file path. For batch events, this contains the first
+ *                      file from the batch **for backwards compatibility only**.
+ *                      
+ *                      **IMPORTANT**: Batch events should use the array fields (added/modified/deleted).
+ *                      This field exists only to maintain backwards compatibility with existing
+ *                      consumers that expect a filepath field. New code should NOT rely on this field
+ *                      for batch events and should migrate to using the array fields.
+ *                      
+ *                      If the guard fails (all arrays empty), an internal error is logged and the
+ *                      handler is not called.
+ * @property added - Array of added files (batch events only, empty array for non-batch)
+ * @property modified - Array of modified files (batch events only, empty array for non-batch)
+ * @property deleted - Array of deleted files (batch events only, empty array for non-batch)
+ */
 export interface FileChangeEvent {
-  type: 'add' | 'change' | 'unlink';
+  type: 'add' | 'change' | 'unlink' | 'batch';
   filepath: string;
+  // Batch fields - only present for 'batch' type events
+  added?: string[];
+  modified?: string[];
+  deleted?: string[];
 }
 
 export type FileChangeHandler = (event: FileChangeEvent) => void | Promise<void>;
@@ -21,9 +46,16 @@ interface WatchPatterns {
 
 export class FileWatcher {
   private watcher: chokidar.FSWatcher | null = null;
-  private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
   private rootDir: string;
   private onChangeHandler: FileChangeHandler | null = null;
+  
+  // Batch state for aggregating rapid changes
+  private pendingChanges: Map<string, 'add' | 'change' | 'unlink'> = new Map();
+  private batchTimer: NodeJS.Timeout | null = null;
+  private batchInProgress = false; // Track if handler is currently processing a batch
+  private readonly BATCH_WINDOW_MS = 500; // Collect changes for 500ms before processing
+  private readonly MAX_BATCH_WAIT_MS = 5000; // Force flush after 5s even if changes keep coming
+  private firstChangeTimestamp: number | null = null; // Track when batch started
   
   constructor(rootDir: string) {
     this.rootDir = rootDir;
@@ -189,48 +221,215 @@ export class FileWatcher {
   }
   
   /**
-   * Handles a file change event with debouncing.
-   * Debouncing prevents rapid reindexing when files are saved multiple times quickly.
+   * Handles a file change event with smart batching.
+   * Collects rapid changes across multiple files and processes them together.
+   * Forces flush after MAX_BATCH_WAIT_MS even if changes keep arriving.
+   * 
+   * If a batch is currently being processed by an async handler, waits for completion
+   * before starting a new batch to prevent race conditions.
    */
   private handleChange(type: 'add' | 'change' | 'unlink', filepath: string): void {
-    // Clear existing debounce timer for this file
-    const existingTimer = this.debounceTimers.get(filepath);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
+    // Prevent queuing events during shutdown (handler is null after stop())
+    if (!this.onChangeHandler) {
+      return;
     }
     
-    // Set new debounce timer
-    const timer = setTimeout(() => {
-      this.debounceTimers.delete(filepath);
-      
-      // Call handler
-      if (this.onChangeHandler) {
-        // Use path.join for proper cross-platform path handling
-        const absolutePath = path.isAbsolute(filepath)
-          ? filepath
-          : path.join(this.rootDir, filepath);
-        
-        try {
-          const result = this.onChangeHandler({
-            type,
-            filepath: absolutePath,
-          });
-          
-          // Handle async handlers
-          if (result instanceof Promise) {
-            result.catch((error) => {
-              console.error(`[Lien] Error handling file change: ${error}`);
-            });
-          }
-        } catch (error) {
-          console.error(`[Lien] Error handling file change: ${error}`);
-        }
-      }
-    }, DEFAULT_DEBOUNCE_MS);
+    // Track when the batch started
+    if (this.pendingChanges.size === 0) {
+      this.firstChangeTimestamp = Date.now();
+    }
     
-    this.debounceTimers.set(filepath, timer);
+    // Add to pending batch (later events overwrite earlier for same file)
+    this.pendingChanges.set(filepath, type);
+    
+    // Check if we've been batching for too long
+    const now = Date.now();
+    const elapsed = now - this.firstChangeTimestamp!
+    
+    if (elapsed >= this.MAX_BATCH_WAIT_MS) {
+      // Force flush - we've been batching for too long
+      // Clear timer first to prevent race with timer callback
+      if (this.batchTimer) {
+        clearTimeout(this.batchTimer);
+        this.batchTimer = null;
+      }
+      this.flushBatch();
+      return;
+    }
+    
+    // Reset/start batch timer (only if not currently processing)
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+    }
+    
+    // If batch is in progress, don't start timer - let it finish first
+    // Changes will accumulate and be flushed after current batch completes
+    if (!this.batchInProgress) {
+      this.batchTimer = setTimeout(() => {
+        this.flushBatch();
+      }, this.BATCH_WINDOW_MS);
+    }
   }
   
+  /**
+   * Group pending changes by type and convert to absolute paths.
+   * Returns arrays of added, modified, and deleted files.
+   */
+  private groupPendingChanges(changes: Map<string, 'add' | 'change' | 'unlink'>): {
+    added: string[];
+    modified: string[];
+    deleted: string[];
+  } {
+    const added: string[] = [];
+    const modified: string[] = [];
+    const deleted: string[] = [];
+    
+    for (const [filepath, type] of changes) {
+      // Use path.join for proper cross-platform path handling
+      const absolutePath = path.isAbsolute(filepath)
+        ? filepath
+        : path.join(this.rootDir, filepath);
+      
+      switch (type) {
+        case 'add':
+          added.push(absolutePath);
+          break;
+        case 'change':
+          modified.push(absolutePath);
+          break;
+        case 'unlink':
+          deleted.push(absolutePath);
+          break;
+      }
+    }
+    
+    return { added, modified, deleted };
+  }
+
+  /**
+   * Handle completion of async batch handler.
+   * Triggers flush of accumulated changes if any.
+   */
+  private handleBatchComplete(): void {
+    this.batchInProgress = false;
+    // If changes accumulated during processing, flush them now
+    if (this.pendingChanges.size > 0 && !this.batchTimer) {
+      this.batchTimer = setTimeout(() => {
+        this.flushBatch();
+      }, this.BATCH_WINDOW_MS);
+    }
+  }
+
+  /**
+   * Dispatch batch event to handler and track async state.
+   * Caller must ensure at least one of added/modified/deleted is non-empty.
+   */
+  private dispatchBatch(added: string[], modified: string[], deleted: string[]): void {
+    if (!this.onChangeHandler) return;
+    
+    // SAFETY: Caller guarantees at least one array is non-empty (empty batch guard before this call)
+    const allFiles = [...added, ...modified];
+    const firstFile = allFiles.length > 0 ? allFiles[0] : deleted[0];
+    if (!firstFile) {
+      console.error('[Lien] INTERNAL ERROR: dispatchBatch called with all empty arrays');
+      return;
+    }
+    
+    try {
+      this.batchInProgress = true;
+      const result = this.onChangeHandler({
+        type: 'batch',
+        filepath: firstFile,
+        added,
+        modified,
+        deleted,
+      });
+      
+      // Handle async handlers and track completion
+      if (result instanceof Promise) {
+        result
+          .catch((error) => {
+            console.error(`[Lien] Error handling batch change: ${error}`);
+          })
+          .finally(() => this.handleBatchComplete());
+      } else {
+        // Sync handler - mark as complete and check for accumulated changes
+        this.handleBatchComplete();
+      }
+    } catch (error) {
+      console.error(`[Lien] Error handling batch change: ${error}`);
+      // handleBatchComplete() will reset batchInProgress and check for accumulated changes
+      this.handleBatchComplete();
+    }
+  }
+
+  /**
+   * Flush pending changes and dispatch batch event.
+   * Tracks async handler state to prevent race conditions.
+   */
+  private flushBatch(): void {
+    // Clear timer first to prevent race condition between timer and stop()
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    
+    if (this.pendingChanges.size === 0) return;
+    
+    const changes = new Map(this.pendingChanges);
+    this.pendingChanges.clear();
+    this.firstChangeTimestamp = null; // Reset batch start time
+    
+    // Group by change type
+    const { added, modified, deleted } = this.groupPendingChanges(changes);
+    
+    // Skip empty batches
+    if (added.length === 0 && modified.length === 0 && deleted.length === 0) {
+      return;
+    }
+    
+    this.dispatchBatch(added, modified, deleted);
+  }
+  
+  /**
+   * Flush final batch during shutdown.
+   * Handles edge case where watcher is stopped while batch is pending.
+   */
+  private async flushFinalBatch(handler: FileChangeHandler): Promise<void> {
+    if (this.pendingChanges.size === 0) return;
+    
+    const changes = new Map(this.pendingChanges);
+    this.pendingChanges.clear();
+    
+    const { added, modified, deleted } = this.groupPendingChanges(changes);
+    
+    // Only flush if we have actual files to process
+    if (added.length === 0 && modified.length === 0 && deleted.length === 0) {
+      return;
+    }
+    
+    try {
+      const allFiles = [...added, ...modified];
+      const firstFile = allFiles.length > 0 ? allFiles[0] : deleted[0];
+      
+      // Defensive check - should never happen given the guard above
+      if (!firstFile) {
+        console.error('[FileWatcher] INTERNAL ERROR: No files in final batch');
+        return;
+      }
+      
+      await handler({
+        type: 'batch',
+        filepath: firstFile,
+        added,
+        modified,
+        deleted,
+      });
+    } catch (error) {
+      console.error('[FileWatcher] Error flushing final batch during shutdown:', error);
+    }
+  }
+
   /**
    * Stops the file watcher and cleans up resources.
    */
@@ -239,16 +438,30 @@ export class FileWatcher {
       return;
     }
     
-    // Clear all pending debounce timers
-    for (const timer of this.debounceTimers.values()) {
-      clearTimeout(timer);
+    // Prevent new changes from being queued during shutdown
+    const handler = this.onChangeHandler;
+    this.onChangeHandler = null;
+    
+    // Wait for any in-progress batch to complete before flushing final changes
+    // This prevents race conditions where handleBatchComplete() tries to start a new timer
+    while (this.batchInProgress) {
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
-    this.debounceTimers.clear();
+    
+    // Clear any pending batch timer
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    
+    // Flush any pending changes before stopping
+    if (handler && this.pendingChanges.size > 0) {
+      await this.flushFinalBatch(handler);
+    }
     
     // Close watcher
     await this.watcher.close();
     this.watcher = null;
-    this.onChangeHandler = null;
   }
   
   /**

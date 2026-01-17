@@ -1,4 +1,5 @@
 import type { SearchResult, VectorDBInterface, LocalEmbeddings } from '@liendev/core';
+import type { ReindexState } from './reindex-state-manager.js';
 
 /**
  * MCP log levels matching the protocol specification.
@@ -27,7 +28,16 @@ export interface ToolContext {
   /** Check if index has been updated and reconnect if needed */
   checkAndReconnect: () => Promise<void>;
   /** Get current index metadata for responses */
-  getIndexMetadata: () => { indexVersion: number; indexDate: string };
+  getIndexMetadata: () => {
+    indexVersion: number;
+    indexDate: string;
+    reindexInProgress?: boolean;
+    pendingFileCount?: number;
+    lastReindexDurationMs?: number | null;
+    msSinceLastReindex?: number | null;
+  };
+  /** Get current reindex state */
+  getReindexState: () => ReindexState;
 }
 
 /**
@@ -54,6 +64,11 @@ export interface IndexMetadata {
   lastIndexed: string | null;
   version: number;
   hasData: boolean;
+  // Reindex status fields
+  reindexInProgress?: boolean;
+  pendingFileCount?: number;
+  lastReindexDurationMs?: number | null;
+  msSinceLastReindex?: number | null;
 }
 
 /**

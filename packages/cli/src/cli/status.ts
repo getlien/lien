@@ -13,7 +13,6 @@ import {
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_GIT_POLL_INTERVAL_MS,
-  DEFAULT_DEBOUNCE_MS,
 } from '@liendev/core';
 import { showCompactBanner } from '../utils/banner.js';
 
@@ -103,7 +102,7 @@ export async function statusCommand() {
   
   // File watching status (enabled by default)
   console.log(chalk.dim('File watching:'), chalk.green('✓ Enabled (default)'));
-  console.log(chalk.dim('  Debounce:'), `${DEFAULT_DEBOUNCE_MS}ms`);
+  console.log(chalk.dim('  Batch window:'), '500ms (collects rapid changes, force-flush after 5s)');
   console.log(chalk.dim('  Disable with:'), chalk.bold('lien serve --no-watch'));
   
   // Indexing settings (defaults)
