@@ -265,6 +265,11 @@ export class FileWatcher {
     
     // Call handler with batched changes
     if (this.onChangeHandler) {
+      // Skip empty batches (shouldn't happen, but guard against it)
+      if (added.length === 0 && modified.length === 0 && deleted.length === 0) {
+        return;
+      }
+      
       try {
         const allFiles = [...added, ...modified];
         const result = this.onChangeHandler({
