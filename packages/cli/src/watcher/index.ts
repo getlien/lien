@@ -447,14 +447,16 @@ export class FileWatcher {
     const handler = this.onChangeHandler;
     this.onChangeHandler = null;
     
-    // Flush any pending changes before stopping
+    // Clear any pending batch timer
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
-      
-      if (handler) {
-        await this.flushFinalBatch(handler);
-      }
+    }
+    
+    // Flush any pending changes before stopping, regardless of timer state
+    // (changes can be queued without a timer when batchInProgress is true)
+    if (handler && this.pendingChanges.size > 0) {
+      await this.flushFinalBatch(handler);
     }
     
     // Close watcher
