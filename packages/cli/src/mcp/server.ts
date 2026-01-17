@@ -15,6 +15,7 @@ import {
   DEFAULT_GIT_POLL_INTERVAL_MS,
   createVectorDB,
   VectorDBInterface,
+  computeContentHash,
 } from '@liendev/core';
 import { FileWatcher, type FileChangeHandler, type FileChangeEvent } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
@@ -303,6 +304,7 @@ async function handleFileDeletion(
 
 /**
  * Handle single file change (reindex one file)
+ * Uses content hash to skip reindexing if file content hasn't actually changed.
  */
 async function handleSingleFileChange(
   filepath: string,
@@ -314,6 +316,32 @@ async function handleSingleFileChange(
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
   const action = type === 'add' ? 'added' : 'changed';
+  
+  // For 'change' events, check content hash to avoid unnecessary reindexing
+  if (type === 'change') {
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    const manifestData = await manifest.load();
+    
+    if (manifestData) {
+      const existingEntry = manifestData.files[filepath];
+      
+      if (existingEntry?.contentHash) {
+        // Compute current content hash
+        const currentHash = await computeContentHash(filepath);
+        
+        if (currentHash && currentHash === existingEntry.contentHash) {
+          // Content hasn't changed, just update lastModified and skip reindex
+          log(`⏭️  File mtime changed but content unchanged: ${filepath}`, 'debug');
+          const fs = await import('fs/promises');
+          const stats = await fs.stat(filepath);
+          existingEntry.lastModified = stats.mtimeMs;
+          await manifest.save(manifestData);
+          return;
+        }
+      }
+    }
+  }
+  
   const startTime = Date.now();
   reindexStateManager.startReindex([filepath]);
   log(`📝 File ${action}: ${filepath}`);
@@ -330,6 +358,7 @@ async function handleSingleFileChange(
 
 /**
  * Handle batch file change event (additions, modifications, and deletions)
+ * Uses content hash to skip reindexing files whose content hasn't actually changed.
  */
 async function handleBatchEvent(
   event: FileChangeEvent,
@@ -339,8 +368,55 @@ async function handleBatchEvent(
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
-  const filesToIndex = [...(event.added || []), ...(event.modified || [])];
+  const addedFiles = event.added || [];
+  const modifiedFiles = event.modified || [];
   const deletedFiles = event.deleted || [];
+  
+  // For modified files, filter out those with unchanged content
+  let filesToIndex = [...addedFiles];
+  
+  if (modifiedFiles.length > 0) {
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    const manifestData = await manifest.load();
+    
+    if (manifestData) {
+      const fs = await import('fs/promises');
+      
+      for (const filepath of modifiedFiles) {
+        const existingEntry = manifestData.files[filepath];
+        
+        if (existingEntry?.contentHash) {
+          // Compute current content hash
+          const currentHash = await computeContentHash(filepath);
+          
+          if (currentHash && currentHash === existingEntry.contentHash) {
+            // Content hasn't changed, just update lastModified
+            log(`⏭️  File mtime changed but content unchanged: ${filepath}`, 'debug');
+            try {
+              const stats = await fs.stat(filepath);
+              existingEntry.lastModified = stats.mtimeMs;
+            } catch {
+              // If stat fails, we'll just reindex to be safe
+              filesToIndex.push(filepath);
+            }
+          } else {
+            // Content changed, needs reindexing
+            filesToIndex.push(filepath);
+          }
+        } else {
+          // No hash available, reindex to be safe
+          filesToIndex.push(filepath);
+        }
+      }
+      
+      // Save updated lastModified timestamps
+      await manifest.save(manifestData);
+    } else {
+      // No manifest, reindex all modified files
+      filesToIndex.push(...modifiedFiles);
+    }
+  }
+  
   const allFiles = [...filesToIndex, ...deletedFiles];
   
   if (allFiles.length === 0) {
