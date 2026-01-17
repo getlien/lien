@@ -191,6 +191,67 @@ function createGitPollInterval(
  * 
  * If a file watcher is provided, uses event-driven detection instead of polling.
  */
+/**
+ * Create a git change handler for event-driven detection.
+ * Handles cooldown and concurrent operation prevention.
+ */
+function createGitChangeHandler(
+  gitTracker: GitStateTracker,
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  _verbose: boolean | undefined,
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
+): () => Promise<void> {
+  let gitReindexInProgress = false;
+  let lastGitReindexTime = 0;
+  const GIT_REINDEX_COOLDOWN_MS = 5000; // 5 second cooldown
+  
+  return async () => {
+    // Prevent concurrent git reindex operations
+    if (gitReindexInProgress) {
+      log('Git reindex already in progress, skipping', 'debug');
+      return;
+    }
+    
+    // Cooldown check - don't reindex again too soon
+    const timeSinceLastReindex = Date.now() - lastGitReindexTime;
+    if (timeSinceLastReindex < GIT_REINDEX_COOLDOWN_MS) {
+      log(`Git change ignored (cooldown: ${GIT_REINDEX_COOLDOWN_MS - timeSinceLastReindex}ms remaining)`, 'debug');
+      return;
+    }
+    
+    log('🌿 Git change detected (event-driven)');
+    const changedFiles = await gitTracker.detectChanges();
+    
+    if (!changedFiles || changedFiles.length === 0) {
+      return;
+    }
+    
+    gitReindexInProgress = true;
+    const startTime = Date.now();
+    reindexStateManager.startReindex(changedFiles);
+    log(`Reindexing ${changedFiles.length} files from git change`);
+    
+    try {
+      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose: false });
+      const duration = Date.now() - startTime;
+      reindexStateManager.completeReindex(duration);
+      log(`✓ Reindexed ${count} files in ${duration}ms`);
+      lastGitReindexTime = Date.now();
+    } catch (error) {
+      reindexStateManager.failReindex();
+      log(`Git reindex failed: ${error}`, 'warning');
+    } finally {
+      gitReindexInProgress = false;
+    }
+  };
+}
+
+/**
+ * Setup git detection for the MCP server.
+ * Uses event-driven detection if file watcher available, otherwise falls back to polling.
+ */
 async function setupGitDetection(
   rootDir: string,
   vectorDB: VectorDBInterface,
@@ -225,57 +286,25 @@ async function setupGitDetection(
 
   // If file watcher is available, use event-driven detection
   if (fileWatcher) {
-    let gitReindexInProgress = false;
-    let lastGitReindexTime = 0;
-    const GIT_REINDEX_COOLDOWN_MS = 5000; // 5 second cooldown
-    
-    fileWatcher.watchGit(async () => {
-      // Prevent concurrent git reindex operations
-      if (gitReindexInProgress) {
-        log('Git reindex already in progress, skipping', 'debug');
-        return;
-      }
-      
-      // Cooldown check - don't reindex again too soon
-      const timeSinceLastReindex = Date.now() - lastGitReindexTime;
-      if (timeSinceLastReindex < GIT_REINDEX_COOLDOWN_MS) {
-        log(`Git change ignored (cooldown: ${GIT_REINDEX_COOLDOWN_MS - timeSinceLastReindex}ms remaining)`, 'debug');
-        return;
-      }
-      
-      log('🌿 Git change detected (event-driven)');
-      const changedFiles = await gitTracker.detectChanges();
-      
-      if (changedFiles && changedFiles.length > 0) {
-        gitReindexInProgress = true;
-        const startTime = Date.now();
-        reindexStateManager.startReindex(changedFiles);
-        log(`Reindexing ${changedFiles.length} files from git change`);
-        
-        try {
-          const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose: false });
-          const duration = Date.now() - startTime;
-          reindexStateManager.completeReindex(duration);
-          log(`✓ Reindexed ${count} files in ${duration}ms`);
-          lastGitReindexTime = Date.now();
-        } catch (error) {
-          reindexStateManager.failReindex();
-          log(`Git reindex failed: ${error}`, 'warning');
-        } finally {
-          gitReindexInProgress = false;
-        }
-      }
-    });
+    const gitChangeHandler = createGitChangeHandler(
+      gitTracker,
+      vectorDB,
+      embeddings,
+      verbose,
+      log,
+      reindexStateManager
+    );
+    fileWatcher.watchGit(gitChangeHandler);
     
     log('✓ Git detection enabled (event-driven via file watcher)');
     return { gitTracker, gitPollInterval: null };
-  } else {
-    // Fallback to polling if no file watcher (--no-watch mode)
-    const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
-    log(`✓ Git detection enabled (polling fallback every ${pollIntervalSeconds}s)`);
-    const gitPollInterval = createGitPollInterval(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
-    return { gitTracker, gitPollInterval };
   }
+  
+  // Fallback to polling if no file watcher (--no-watch mode)
+  const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
+  log(`✓ Git detection enabled (polling fallback every ${pollIntervalSeconds}s)`);
+  const gitPollInterval = createGitPollInterval(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
+  return { gitTracker, gitPollInterval };
 }
 
 /**
@@ -357,6 +386,81 @@ async function handleSingleFileChange(
 }
 
 /**
+ * Check if a modified file's content has actually changed using hash comparison.
+ * Returns true if file should be reindexed, false if content unchanged.
+ */
+async function shouldReindexFile(
+  filepath: string,
+  existingEntry: { contentHash?: string; lastModified: number } | undefined,
+  log: LogFn
+): Promise<{ shouldReindex: boolean; newMtime?: number }> {
+  // No existing entry or no hash - reindex to be safe
+  if (!existingEntry?.contentHash) {
+    return { shouldReindex: true };
+  }
+
+  // Compute current content hash
+  const currentHash = await computeContentHash(filepath);
+  
+  if (currentHash && currentHash === existingEntry.contentHash) {
+    // Content hasn't changed, just update lastModified
+    log(`⏭️  File mtime changed but content unchanged: ${filepath}`, 'debug');
+    try {
+      const fs = await import('fs/promises');
+      const stats = await fs.stat(filepath);
+      return { shouldReindex: false, newMtime: stats.mtimeMs };
+    } catch {
+      // If stat fails, reindex to be safe
+      return { shouldReindex: true };
+    }
+  }
+  
+  // Content changed, needs reindexing
+  return { shouldReindex: true };
+}
+
+/**
+ * Filter modified files based on content hash, updating manifest for unchanged files.
+ * Returns array of files that need reindexing.
+ */
+async function filterModifiedFilesByHash(
+  modifiedFiles: string[],
+  vectorDB: VectorDBInterface,
+  log: LogFn
+): Promise<string[]> {
+  if (modifiedFiles.length === 0) {
+    return [];
+  }
+
+  const manifest = new ManifestManager(vectorDB.dbPath);
+  const manifestData = await manifest.load();
+  
+  // No manifest - reindex all
+  if (!manifestData) {
+    return modifiedFiles;
+  }
+
+  const filesToReindex: string[] = [];
+  
+  for (const filepath of modifiedFiles) {
+    const existingEntry = manifestData.files[filepath];
+    const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
+    
+    if (shouldReindex) {
+      filesToReindex.push(filepath);
+    } else if (newMtime && existingEntry) {
+      // Update mtime for unchanged file
+      existingEntry.lastModified = newMtime;
+    }
+  }
+  
+  // Save updated timestamps
+  await manifest.save(manifestData);
+  
+  return filesToReindex;
+}
+
+/**
  * Handle batch file change event (additions, modifications, and deletions)
  * Uses content hash to skip reindexing files whose content hasn't actually changed.
  */
@@ -372,51 +476,9 @@ async function handleBatchEvent(
   const modifiedFiles = event.modified || [];
   const deletedFiles = event.deleted || [];
   
-  // For modified files, filter out those with unchanged content
-  let filesToIndex = [...addedFiles];
-  
-  if (modifiedFiles.length > 0) {
-    const manifest = new ManifestManager(vectorDB.dbPath);
-    const manifestData = await manifest.load();
-    
-    if (manifestData) {
-      const fs = await import('fs/promises');
-      
-      for (const filepath of modifiedFiles) {
-        const existingEntry = manifestData.files[filepath];
-        
-        if (existingEntry?.contentHash) {
-          // Compute current content hash
-          const currentHash = await computeContentHash(filepath);
-          
-          if (currentHash && currentHash === existingEntry.contentHash) {
-            // Content hasn't changed, just update lastModified
-            log(`⏭️  File mtime changed but content unchanged: ${filepath}`, 'debug');
-            try {
-              const stats = await fs.stat(filepath);
-              existingEntry.lastModified = stats.mtimeMs;
-            } catch {
-              // If stat fails, we'll just reindex to be safe
-              filesToIndex.push(filepath);
-            }
-          } else {
-            // Content changed, needs reindexing
-            filesToIndex.push(filepath);
-          }
-        } else {
-          // No hash available, reindex to be safe
-          filesToIndex.push(filepath);
-        }
-      }
-      
-      // Save updated lastModified timestamps
-      await manifest.save(manifestData);
-    } else {
-      // No manifest, reindex all modified files
-      filesToIndex.push(...modifiedFiles);
-    }
-  }
-  
+  // Filter modified files by content hash
+  const modifiedFilesToReindex = await filterModifiedFilesByHash(modifiedFiles, vectorDB, log);
+  const filesToIndex = [...addedFiles, ...modifiedFilesToReindex];
   const allFiles = [...filesToIndex, ...deletedFiles];
   
   if (allFiles.length === 0) {
