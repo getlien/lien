@@ -17,6 +17,7 @@ import { detectAllFrameworks } from '../frameworks/detector-service.js';
 import { getFrameworkDetector } from '../frameworks/registry.js';
 import type { FrameworkConfig } from '../config/schema.js';
 import type { LienConfig } from '../config/schema.js';
+import type { ProgressTracker } from './progress-tracker.js';
 import {
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
@@ -408,13 +409,69 @@ async function processFileForIndexing(
 /**
  * Perform a full index of the codebase.
  */
+/**
+ * Create progress tracker for full indexing
+ */
+function createProgressTracker(
+  files: string[],
+  onProgress?: (progress: IndexingProgress) => void
+): ProgressTracker {
+  const processedCount = { value: 0 };
+  
+  return {
+    incrementFiles: () => {
+      processedCount.value++;
+      onProgress?.({
+        phase: 'indexing',
+        message: `Processing files...`,
+        filesTotal: files.length,
+        filesProcessed: processedCount.value,
+      });
+    },
+    incrementChunks: () => {},
+    getProcessedCount: () => processedCount.value,
+    start: () => {},
+    stop: () => {},
+  };
+}
+
+/**
+ * Save indexing results to manifest and write version file
+ */
+async function saveIndexResults(
+  batchProcessor: ChunkBatchProcessor,
+  vectorDB: VectorDBInterface,
+  rootDir: string
+): Promise<void> {
+  const { indexedFiles } = batchProcessor.getResults();
+  
+  const manifest = new ManifestManager(vectorDB.dbPath);
+  await manifest.updateFiles(
+    indexedFiles.map(entry => ({
+      filepath: entry.filepath,
+      lastModified: entry.mtime,
+      chunkCount: entry.chunkCount,
+      contentHash: entry.contentHash,
+    }))
+  );
+
+  // Save git state if in a git repo
+  await updateGitState(rootDir, vectorDB, manifest);
+
+  // Write version file to mark successful completion
+  await writeVersionFile(vectorDB.dbPath);
+}
+
+/**
+ * Perform full indexing of the codebase
+ */
 async function performFullIndex(
   rootDir: string,
   vectorDB: VectorDBInterface,
   options: IndexingOptions,
   startTime: number
 ): Promise<IndexingResult> {
-  // 1. Clear existing index (required for schema changes)
+  // 1. Clear existing index
   options.onProgress?.({ phase: 'initializing', message: 'Clearing existing index...' });
   await vectorDB.clear();
 
@@ -433,7 +490,7 @@ async function performFullIndex(
     };
   }
 
-  // 3. Initialize embeddings model
+  // 3. Initialize embeddings
   options.onProgress?.({ 
     phase: 'embedding', 
     message: 'Loading embedding model...',
@@ -447,25 +504,7 @@ async function performFullIndex(
 
   // 4. Setup processing infrastructure
   const indexConfig = getIndexingConfig(rootDir);
-  const processedCount = { value: 0 };
-  
-  // Create a simple progress tracker that works with callbacks
-  const progressTracker = {
-    incrementFiles: () => {
-      processedCount.value++;
-      options.onProgress?.({
-        phase: 'indexing',
-        message: `Processing files...`,
-        filesTotal: files.length,
-        filesProcessed: processedCount.value,
-      });
-    },
-    incrementChunks: () => {},
-    getProcessedCount: () => processedCount.value,
-    start: () => {},
-    stop: () => {},
-  };
-  
+  const progressTracker = createProgressTracker(files, options.onProgress);
   const batchProcessor = new ChunkBatchProcessor(vectorDB, embeddings, {
     batchThreshold: 100,
     embeddingBatchSize: indexConfig.embeddingBatchSize,
@@ -492,13 +531,11 @@ async function performFullIndex(
     );
 
     await Promise.all(filePromises);
-
-    // 6. Flush remaining chunks
     await batchProcessor.flush();
   } catch (error) {
     return {
       success: false,
-      filesIndexed: processedCount.value,
+      filesIndexed: progressTracker.getProcessedCount(),
       chunksCreated: 0,
       durationMs: Date.now() - startTime,
       incremental: false,
@@ -506,37 +543,22 @@ async function performFullIndex(
     };
   }
 
-  // 7. Save results
+  // 6. Save results
   options.onProgress?.({ phase: 'saving', message: 'Saving index manifest...' });
-  const { processedChunks, indexedFiles } = batchProcessor.getResults();
-  
-  const manifest = new ManifestManager(vectorDB.dbPath);
-  await manifest.updateFiles(
-    indexedFiles.map(entry => ({
-      filepath: entry.filepath,
-      lastModified: entry.mtime,
-      chunkCount: entry.chunkCount,
-      contentHash: entry.contentHash,
-    }))
-  );
+  await saveIndexResults(batchProcessor, vectorDB, rootDir);
 
-  // Save git state if in a git repo
-  await updateGitState(rootDir, vectorDB, manifest);
-
-  // Write version file to mark successful completion
-  await writeVersionFile(vectorDB.dbPath);
-
+  const { processedChunks } = batchProcessor.getResults();
   options.onProgress?.({ 
     phase: 'complete', 
     message: 'Indexing complete',
     filesTotal: files.length,
-    filesProcessed: processedCount.value,
+    filesProcessed: progressTracker.getProcessedCount(),
     chunksProcessed: processedChunks,
   });
 
   return {
     success: true,
-    filesIndexed: processedCount.value,
+    filesIndexed: progressTracker.getProcessedCount(),
     chunksCreated: processedChunks,
     durationMs: Date.now() - startTime,
     incremental: false,
