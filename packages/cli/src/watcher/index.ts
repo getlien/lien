@@ -48,6 +48,7 @@ export class FileWatcher {
   // Batch state for aggregating rapid changes
   private pendingChanges: Map<string, 'add' | 'change' | 'unlink'> = new Map();
   private batchTimer: NodeJS.Timeout | null = null;
+  private batchInProgress = false; // Track if handler is currently processing a batch
   private readonly BATCH_WINDOW_MS = 500; // Collect changes for 500ms before processing
   private readonly MAX_BATCH_WAIT_MS = 5000; // Force flush after 5s even if changes keep coming
   private firstChangeTimestamp: number | null = null; // Track when batch started
@@ -219,6 +220,9 @@ export class FileWatcher {
    * Handles a file change event with smart batching.
    * Collects rapid changes across multiple files and processes them together.
    * Forces flush after MAX_BATCH_WAIT_MS even if changes keep arriving.
+   * 
+   * If a batch is currently being processed by an async handler, waits for completion
+   * before starting a new batch to prevent race conditions.
    */
   private handleChange(type: 'add' | 'change' | 'unlink', filepath: string): void {
     // Prevent queuing events during shutdown (handler is null after stop())
@@ -247,14 +251,18 @@ export class FileWatcher {
       return;
     }
     
-    // Reset/start batch timer
+    // Reset/start batch timer (only if not currently processing)
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
     }
     
-    this.batchTimer = setTimeout(() => {
-      this.flushBatch();
-    }, this.BATCH_WINDOW_MS);
+    // If batch is in progress, don't start timer - let it finish first
+    // Changes will accumulate and be flushed after current batch completes
+    if (!this.batchInProgress) {
+      this.batchTimer = setTimeout(() => {
+        this.flushBatch();
+      }, this.BATCH_WINDOW_MS);
+    }
   }
   
   /**
@@ -294,6 +302,7 @@ export class FileWatcher {
 
   /**
    * Flush pending changes and dispatch batch event.
+   * Tracks async handler state to prevent race conditions.
    */
   private flushBatch(): void {
     // Clear timer first to prevent race condition between timer and stop()
@@ -319,6 +328,7 @@ export class FileWatcher {
       }
       
       try {
+        this.batchInProgress = true;
         const allFiles = [...added, ...modified];
         const firstFile = allFiles[0] || deleted[0] || ''; // Should be non-empty due to guard above, fallback for safety
         const result = this.onChangeHandler({
@@ -329,13 +339,27 @@ export class FileWatcher {
           deleted,
         });
         
-        // Handle async handlers
+        // Handle async handlers and track completion
         if (result instanceof Promise) {
-          result.catch((error) => {
-            console.error(`[Lien] Error handling batch change: ${error}`);
-          });
+          result
+            .catch((error) => {
+              console.error(`[Lien] Error handling batch change: ${error}`);
+            })
+            .finally(() => {
+              this.batchInProgress = false;
+              // If changes accumulated during processing, flush them now
+              if (this.pendingChanges.size > 0 && !this.batchTimer) {
+                this.batchTimer = setTimeout(() => {
+                  this.flushBatch();
+                }, this.BATCH_WINDOW_MS);
+              }
+            });
+        } else {
+          // Sync handler - mark as complete immediately
+          this.batchInProgress = false;
         }
       } catch (error) {
+        this.batchInProgress = false;
         console.error(`[Lien] Error handling batch change: ${error}`);
       }
     }

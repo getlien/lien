@@ -101,10 +101,8 @@ async function handleAutoIndexing(
 /**
  * Handle git changes detected on startup.
  * 
- * **Error Handling:** Re-throws errors after calling failReindex() to ensure proper cleanup
- * and signal caller that startup failed. This is intentional - git startup failures are
- * considered fatal and should be caught by setupGitDetection() which logs and calls 
- * failReindex() again (safe - failReindex() guards against double-call when activeOperations=0).
+ * **Error Handling:** Calls failReindex() before re-throwing to ensure proper cleanup.
+ * Caller should catch and log but NOT call failReindex() again (already handled here).
  */
 async function handleGitStartup(
   gitTracker: GitStateTracker,
@@ -217,8 +215,8 @@ async function setupGitDetection(
   try {
     await handleGitStartup(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
   } catch (error) {
+    // handleGitStartup already calls failReindex() before re-throwing, no need to call again
     log(`Failed to check git state on startup: ${error}`, 'warning');
-    reindexStateManager.failReindex(); // Clean up state if startup fails
   }
 
   // Start background polling
