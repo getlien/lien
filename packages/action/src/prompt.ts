@@ -10,6 +10,29 @@ import { formatDelta } from './delta.js';
 import { formatTime, formatDeltaValue } from './format.js';
 
 /**
+ * Few-shot examples for each complexity metric type.
+ * These show the model what a good review comment looks like.
+ * 
+ * Guidelines for these examples:
+ * - Keep to 2-3 sentences (~30-40 words)
+ * - Name specific functions to extract
+ * - Mention line numbers or specific patterns
+ * - State the concrete benefit
+ */
+const COMMENT_EXAMPLES: Record<string, string> = {
+  cyclomatic: `The 5 permission cases (lines 45-67) can be extracted to \`checkAdminAccess()\`, \`checkEditorAccess()\`, \`checkViewerAccess()\`. Each returns early if unauthorized, reducing test paths from ~15 to ~5.`,
+
+  cognitive: `The 6 levels of nesting create significant mental load. Flatten with guard clauses: \`if (!user) return null;\` at line 23, then \`if (!hasPermission) throw new UnauthorizedError();\` at line 28. The remaining logic becomes linear.`,
+
+  halstead_effort: `This function uses 23 unique operators across complex expressions. Extract the date math (lines 34-41) into \`calculateDaysUntilExpiry()\` and replace magic numbers (30, 86400) with named constants.`,
+
+  halstead_bugs: `High predicted bug density from complex expressions. The chained ternaries on lines 56-62 should be a lookup object: \`const STATUS_MAP = { pending: 'yellow', approved: 'green', ... }\`. Reduces operator count and improves readability.`,
+};
+
+// Default to cyclomatic if metric type not found
+const DEFAULT_EXAMPLE = COMMENT_EXAMPLES.cyclomatic;
+
+/**
  * Create a unique key for delta lookups
  * Includes metricType since a function can have multiple metric violations
  */
@@ -751,6 +774,33 @@ See inline comments below for specific suggestions.
 }
 
 /**
+ * Get the example that matches the most common metric type in the violations.
+ * This ensures the example is relevant to what we're reviewing.
+ */
+function getExampleForPrimaryMetric(violations: ComplexityViolation[]): string {
+  if (violations.length === 0) return DEFAULT_EXAMPLE;
+  
+  // Count metric types
+  const counts = new Map<string, number>();
+  for (const v of violations) {
+    const type = v.metricType || 'cyclomatic';
+    counts.set(type, (counts.get(type) || 0) + 1);
+  }
+  
+  // Find most common
+  let maxType = 'cyclomatic';
+  let maxCount = 0;
+  for (const [type, count] of counts) {
+    if (count > maxCount) {
+      maxType = type;
+      maxCount = count;
+    }
+  }
+  
+  return COMMENT_EXAMPLES[maxType] || DEFAULT_EXAMPLE;
+}
+
+/**
  * Build a batched prompt for generating multiple line comments at once
  * This is more efficient than individual prompts as:
  * - System prompt only sent once
@@ -828,6 +878,11 @@ For each violation, write a code review comment that:
    - Don't suggest over-engineering for marginal gains
 
 Be direct and specific to THIS code. Avoid generic advice like "break into smaller functions."
+
+**Example of a good comment:**
+"${getExampleForPrimaryMetric(violations)}"
+
+Write comments of similar quality and specificity for each violation below.
 
 IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
 
