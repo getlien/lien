@@ -470,17 +470,14 @@ async function filterModifiedFilesByHash(
 }
 
 /**
- * Handle batch file change event (additions, modifications, and deletions)
- * Uses content hash to skip reindexing files whose content hasn't actually changed.
+ * Prepare files for reindexing by filtering based on content hash.
+ * Returns files that need to be indexed and deleted files.
  */
-async function handleBatchEvent(
+async function prepareFilesForReindexing(
   event: FileChangeEvent,
   vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
-  _verbose: boolean | undefined,
-  log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
-): Promise<void> {
+  log: LogFn
+): Promise<{ filesToIndex: string[]; deletedFiles: string[] }> {
   const addedFiles = event.added || [];
   const modifiedFiles = event.modified || [];
   const deletedFiles = event.deleted || [];
@@ -496,33 +493,65 @@ async function handleBatchEvent(
   }
   
   const filesToIndex = [...addedFiles, ...modifiedFilesToReindex];
+  
+  return { filesToIndex, deletedFiles };
+}
+
+/**
+ * Execute reindex operations for files to index and deletions.
+ * Processes both in parallel for efficiency.
+ */
+async function executeReindexOperations(
+  filesToIndex: string[],
+  deletedFiles: string[],
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  log: LogFn
+): Promise<void> {
+  const operations: Promise<unknown>[] = [];
+  
+  if (filesToIndex.length > 0) {
+    log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
+    operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose: false }));
+  }
+  
+  if (deletedFiles.length > 0) {
+    operations.push(
+      Promise.all(
+        deletedFiles.map((deleted: string) => handleFileDeletion(deleted, vectorDB, log))
+      )
+    );
+  }
+  
+  await Promise.all(operations);
+}
+
+/**
+ * Handle batch file change event (additions, modifications, and deletions)
+ * Uses content hash to skip reindexing files whose content hasn't actually changed.
+ */
+async function handleBatchEvent(
+  event: FileChangeEvent,
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  _verbose: boolean | undefined,
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
+): Promise<void> {
+  // Prepare files for reindexing
+  const { filesToIndex, deletedFiles } = await prepareFilesForReindexing(event, vectorDB, log);
   const allFiles = [...filesToIndex, ...deletedFiles];
   
   if (allFiles.length === 0) {
     return; // Nothing to process
   }
 
+  // Execute with state tracking
   const startTime = Date.now();
   reindexStateManager.startReindex(allFiles);
   
   try {
-    // Process additions/modifications and deletions in parallel
-    const operations: Promise<unknown>[] = [];
-    
-    if (filesToIndex.length > 0) {
-      log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
-      operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose: false }));
-    }
-    
-    if (deletedFiles.length > 0) {
-      operations.push(
-        Promise.all(
-          deletedFiles.map((deleted: string) => handleFileDeletion(deleted, vectorDB, log))
-        )
-      );
-    }
-    
-    await Promise.all(operations);
+    await executeReindexOperations(filesToIndex, deletedFiles, vectorDB, embeddings, log);
     
     const duration = Date.now() - startTime;
     reindexStateManager.completeReindex(duration);
