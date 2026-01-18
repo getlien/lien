@@ -165,9 +165,17 @@ export class FileWatcher {
       .on('add', (filepath) => this.handleChange('add', filepath))
       .on('change', (filepath) => this.handleChange('change', filepath))
       .on('unlink', (filepath) => this.handleChange('unlink', filepath))
-      .on('error', () => {
-        // Watcher errors are handled by the MCP server log
-        // Avoid console output which interferes with MCP JSON-RPC protocol
+      .on('error', (error) => {
+        // Log watcher errors to stderr to avoid interfering with MCP JSON-RPC protocol on stdout
+        try {
+          const message =
+            '[FileWatcher] Error: ' +
+            (error instanceof Error ? error.stack || error.message : String(error)) +
+            '\n';
+          process.stderr.write(message);
+        } catch {
+          // Swallow logging failures to avoid crashing
+        }
       });
   }
   

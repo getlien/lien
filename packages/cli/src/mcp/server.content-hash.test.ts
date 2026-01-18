@@ -80,6 +80,32 @@ describe('Stage 4: Content-Hash Based Change Detection', () => {
       // Large file hashes have 'L' prefix
       expect(hash[0]).toBe('L');
     });
+
+    it('should NOT detect changes to middle of large files (known limitation)', async () => {
+      const testFile = path.join(testDir, 'large-middle.ts');
+      
+      // Create 2MB file with distinct head, middle, and tail
+      const head = 'HEAD'.repeat(2048); // First 8KB
+      const middle = 'MIDDLE'.repeat(300000); // ~1.8MB middle
+      const tail = 'TAIL'.repeat(2048); // Last 8KB
+      await fs.writeFile(testFile, head + middle + tail);
+
+      const hash1 = await computeContentHash(testFile);
+
+      // Modify ONLY the middle section (head and tail unchanged, same length)
+      const modifiedMiddle = 'CHANGE'.repeat(300000); // Same length as 'MIDDLE'
+      await fs.writeFile(testFile, head + modifiedMiddle + tail);
+
+      const hash2 = await computeContentHash(testFile);
+
+      // Known limitation: hashes are identical because only head + tail + size are sampled
+      expect(hash1).toBe(hash2);
+      
+      // Sanity check: modifying head or tail DOES change the hash
+      await fs.writeFile(testFile, 'MODIFIED' + head + middle + tail);
+      const hash3 = await computeContentHash(testFile);
+      expect(hash3).not.toBe(hash1);
+    });
   });
 
   describe('ManifestManager with contentHash', () => {

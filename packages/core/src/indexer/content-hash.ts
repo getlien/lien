@@ -49,20 +49,26 @@ export async function computeContentHash(filepath: string): Promise<string> {
  * so the sampled head (first 8KB) and tail (last 8KB) regions never overlap
  * (even for files just over 1MB, 1MB >> 16KB ensures distinct regions).
  * 
+ * **Known Limitation**: Changes made exclusively to the middle of large files
+ * (i.e., modifications that don't affect the first or last 8KB) will NOT be detected.
+ * This is an acceptable trade-off for performance, as the primary use case is detecting
+ * `touch` operations and header/footer changes. Files with substantive code changes
+ * typically have modifications near the beginning or end.
+ * 
  * @param filepath - Absolute path to the file
  * @param size - File size in bytes
  * @returns Fingerprint hash with 'L' prefix
  */
 async function computeLargeFileFingerprint(filepath: string, size: number): Promise<string> {
   const handle = await fs.open(filepath, 'r');
-  
+
   try {
     const headBuffer = Buffer.alloc(SAMPLE_SIZE);
     const tailBuffer = Buffer.alloc(SAMPLE_SIZE);
-    
+
     // Read first 8KB
     await handle.read(headBuffer, 0, SAMPLE_SIZE, 0);
-    
+
     // Read last 8KB
     const tailOffset = Math.max(0, size - SAMPLE_SIZE);
     await handle.read(tailBuffer, 0, SAMPLE_SIZE, tailOffset);

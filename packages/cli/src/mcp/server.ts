@@ -2,7 +2,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import {
   LocalEmbeddings,
   GitStateTracker,
@@ -203,8 +203,9 @@ function createGitChangeHandler(
   const GIT_REINDEX_COOLDOWN_MS = 5000; // 5 second cooldown
   
   return async () => {
-    // Prevent concurrent git reindex operations
-    if (gitReindexInProgress) {
+    // Prevent concurrent git reindex operations (check both local and global state)
+    const { inProgress: globalInProgress } = reindexStateManager.getState();
+    if (gitReindexInProgress || globalInProgress) {
       log('Git reindex already in progress, skipping', 'debug');
       return;
     }
@@ -331,8 +332,9 @@ async function handleFileDeletion(
  * Uses content hash to skip reindexing if file content hasn't actually changed.
  * 
  * Note: This function loads and modifies the manifest without explicit locking.
- * This is safe because file watcher events are processed serially (one at a time),
- * preventing concurrent calls to this function.
+ * While file watcher events are processed serially, git change handlers can run concurrently.
+ * To prevent race conditions, the git handler checks global reindex state before running,
+ * ensuring this function is not called during concurrent operations.
  */
 async function handleSingleFileChange(
   filepath: string,
@@ -351,8 +353,11 @@ async function handleSingleFileChange(
     const manifestData = await manifest.load();
     
     if (manifestData) {
+      // Derive rootDir from dbPath (dbPath is .lien/indices/<hash>, so rootDir is 3 levels up)
+      const rootDir = resolve(vectorDB.dbPath, '../../..');
+      
       // Normalize filepath to relative path for manifest lookup
-      const normalizedPath = normalizeToRelativePath(filepath);
+      const normalizedPath = normalizeToRelativePath(filepath, rootDir);
       const existingEntry = manifestData.files[normalizedPath];
       
       // Use shared shouldReindexFile logic
@@ -420,8 +425,9 @@ async function shouldReindexFile(
  * Returns array of files that need reindexing.
  * 
  * Note: This function loads and modifies the manifest without explicit locking.
- * This is safe because file watcher events are processed serially (one at a time),
- * preventing concurrent calls to this function.
+ * While file watcher events are processed serially, git change handlers can run concurrently.
+ * To prevent race conditions, the git handler checks global reindex state before running,
+ * ensuring this function is not called during concurrent operations.
  */
 async function filterModifiedFilesByHash(
   modifiedFiles: string[],
@@ -440,11 +446,14 @@ async function filterModifiedFilesByHash(
     return modifiedFiles;
   }
 
+  // Derive rootDir from dbPath (dbPath is .lien/indices/<hash>, so rootDir is 3 levels up)
+  const rootDir = resolve(vectorDB.dbPath, '../../..');
+  
   const filesToReindex: string[] = [];
   
   for (const filepath of modifiedFiles) {
     // Normalize filepath to relative path for manifest lookup
-    const normalizedPath = normalizeToRelativePath(filepath);
+    const normalizedPath = normalizeToRelativePath(filepath, rootDir);
     const existingEntry = manifestData.files[normalizedPath];
     const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
     
