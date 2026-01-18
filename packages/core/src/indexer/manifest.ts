@@ -3,6 +3,7 @@ import path from 'path';
 import { INDEX_FORMAT_VERSION } from '../constants.js';
 import { GitState } from '../git/tracker.js';
 import { getPackageVersion } from '../utils/version.js';
+import { computeContentHash, isHashAlgorithmCompatible } from './content-hash.js';
 
 const MANIFEST_FILE = 'manifest.json';
 
@@ -13,6 +14,8 @@ export interface FileEntry {
   filepath: string;
   lastModified: number;
   chunkCount: number;
+  // Content hash for detecting actual content changes (optional for backwards compatibility)
+  contentHash?: string;
 }
 
 /**
@@ -24,6 +27,7 @@ export interface IndexManifest {
   lastIndexed: number;         // Timestamp of last indexing operation
   gitState?: GitState;         // Last known git state
   files: Record<string, FileEntry>;  // Map of filepath -> FileEntry (stored as object for JSON)
+  hashAlgorithm?: 'sha256-16' | 'sha256-16-large';  // Content hash algorithm (for future migrations)
 }
 
 /**
@@ -109,6 +113,7 @@ export class ManifestManager {
         formatVersion: INDEX_FORMAT_VERSION,
         lienVersion: getPackageVersion(),
         lastIndexed: Date.now(),
+        hashAlgorithm: 'sha256-16-large', // Current hash algorithm
       };
       
       const content = JSON.stringify(manifestToSave, null, 2);
@@ -222,6 +227,46 @@ export class ManifestManager {
   }
   
   /**
+   * Perform an atomic transaction on the manifest.
+   * The updater function receives the current manifest and can modify it.
+   * All changes are applied atomically under lock protection.
+   * 
+   * @param updater - Function that modifies the manifest
+   * @returns Result returned by updater function
+   * @throws Error if transaction fails
+   */
+  async transaction<T>(updater: (manifest: IndexManifest) => T | Promise<T>): Promise<T> {
+    let result: T;
+    let error: Error | undefined;
+    
+    // Chain this operation to the lock to ensure atomicity
+    this.updateLock = this.updateLock.then(async () => {
+      const manifest = await this.load() || this.createEmpty();
+      
+      // Execute updater function
+      result = await Promise.resolve(updater(manifest));
+      
+      // Save changes
+      await this.save(manifest);
+    }).catch(err => {
+      console.error(`[Lien] Failed to execute manifest transaction: ${err}`);
+      error = err instanceof Error ? err : new Error(String(err));
+      // Return to reset lock - don't let errors block future operations
+      return undefined;
+    });
+    
+    // Wait for this operation to complete
+    await this.updateLock;
+    
+    // If an error occurred, throw it
+    if (error) {
+      throw error;
+    }
+    
+    return result!;
+  }
+  
+  /**
    * Gets the list of files currently in the manifest
    * 
    * @returns Array of filepaths
@@ -234,33 +279,118 @@ export class ManifestManager {
   }
   
   /**
-   * Detects which files have changed based on mtime comparison
+   * Check if a file needs reindexing based on mtime and content hash.
+   * Returns true if file should be reindexed, false otherwise.
+   * Updates entry mtime if content unchanged.
    * 
-   * @param currentFiles - Map of current files with their mtimes
-   * @returns Array of filepaths that have changed
+   * @param filepath - File path (relative to project root)
+   * @param mtime - Current file modification time
+   * @param entry - Existing manifest entry
+   * @param hashCompatible - Whether hash algorithm is compatible
+   * @param rootDir - Project root directory for resolving relative paths
    */
-  async getChangedFiles(currentFiles: Map<string, number>): Promise<string[]> {
-    const manifest = await this.load();
-    if (!manifest) {
-      // No manifest = all files are "changed" (need full index)
-      return Array.from(currentFiles.keys());
+  private async shouldReindexFile(
+    filepath: string,
+    mtime: number,
+    entry: FileEntry | undefined,
+    hashCompatible: boolean,
+    rootDir?: string
+  ): Promise<{ needsReindex: boolean; mtimeUpdated: boolean }> {
+    // New file
+    if (!entry) {
+      return { needsReindex: true, mtimeUpdated: false };
     }
     
-    const changedFiles: string[] = [];
+    // Quick check: if mtime unchanged, skip
+    if (entry.lastModified === mtime) {
+      return { needsReindex: false, mtimeUpdated: false };
+    }
     
-    for (const [filepath, mtime] of currentFiles) {
-      const entry = manifest.files[filepath];
+    // mtime changed - check if content actually changed (if hash available and rootDir provided)
+    if (hashCompatible && entry.contentHash && rootDir) {
+      // Resolve relative path against rootDir
+      const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
+      const currentHash = await computeContentHash(absolutePath);
       
-      if (!entry) {
-        // New file
-        changedFiles.push(filepath);
-      } else if (entry.lastModified < mtime) {
-        // File modified since last index
-        changedFiles.push(filepath);
+      if (currentHash && currentHash === entry.contentHash) {
+        // Content unchanged - update mtime and skip reindex
+        entry.lastModified = mtime;
+        return { needsReindex: false, mtimeUpdated: true };
       }
     }
     
-    return changedFiles;
+    // Content changed or hash unavailable
+    return { needsReindex: true, mtimeUpdated: false };
+  }
+
+  /**
+   * Detects which files have changed based on mtime and content hash comparison.
+   * 
+   * Uses a two-stage approach:
+   * 1. Quick mtime check - if unchanged, skip file
+   * 2. Content hash check - if mtime changed but hash matches, skip reindex
+   * 
+   * This avoids unnecessary reindexing when files are touched without content changes.
+   * 
+   * Thread-safe: Uses the same update lock as other manifest operations.
+   * 
+   * @param currentFiles - Map of current files with their mtimes
+   * @param rootDir - Optional project root directory for resolving relative paths (required for hash checking)
+   * @returns Array of filepaths that have changed
+   */
+  async getChangedFiles(currentFiles: Map<string, number>, rootDir?: string): Promise<string[]> {
+    // Protect against concurrent updates using the same lock as updateFile/updateFiles
+    const result = this.updateLock.then(async () => {
+      const manifest = await this.load();
+      if (!manifest) {
+        // No manifest = all files are "changed" (need full index)
+        return Array.from(currentFiles.keys());
+      }
+      
+      const hashCompatible = isHashAlgorithmCompatible(manifest.hashAlgorithm);
+      const changedFiles: string[] = [];
+      let skippedByHash = 0;
+      let manifestNeedsUpdate = false;
+      
+      for (const [filepath, mtime] of currentFiles) {
+        const entry = manifest.files[filepath];
+        const { needsReindex, mtimeUpdated } = await this.shouldReindexFile(
+          filepath,
+          mtime,
+          entry,
+          hashCompatible,
+          rootDir
+        );
+        
+        if (needsReindex) {
+          changedFiles.push(filepath);
+        } else if (mtimeUpdated) {
+          skippedByHash++;
+          manifestNeedsUpdate = true;
+        }
+      }
+      
+      // Save manifest if we updated any mtimes
+      if (manifestNeedsUpdate) {
+        await this.save(manifest);
+      }
+      
+      if (skippedByHash > 0) {
+        console.log(`[Lien] Skipped ${skippedByHash} file(s) with unchanged content`);
+      }
+      
+      return changedFiles;
+    });
+    
+    // Update the lock for the next operation, with error handling
+    this.updateLock = result.then(
+      () => {},
+      (error) => {
+        console.error('[Lien] Warning: Failed to get changed files:', error);
+      }
+    );
+    
+    return result;
   }
   
   /**

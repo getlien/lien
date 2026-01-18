@@ -2,7 +2,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import {
   LocalEmbeddings,
   GitStateTracker,
@@ -15,6 +15,8 @@ import {
   DEFAULT_GIT_POLL_INTERVAL_MS,
   createVectorDB,
   VectorDBInterface,
+  computeContentHash,
+  normalizeToRelativePath,
 } from '@liendev/core';
 import { FileWatcher, type FileChangeHandler, type FileChangeEvent } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
@@ -37,6 +39,21 @@ export interface MCPServerOptions {
   rootDir: string;
   verbose?: boolean;
   watch?: boolean;
+}
+
+/**
+ * Derive the project root directory from the vector database path.
+ * 
+ * This centralizes the path structure assumption: dbPath is .lien/indices/<hash>
+ * If the directory structure changes, only this function needs updating.
+ * 
+ * @param dbPath - Path to the vector database (typically .lien/indices/<hash>)
+ * @returns Absolute path to project root directory
+ */
+function getRootDirFromDbPath(dbPath: string): string {
+  // dbPath structure: <rootDir>/.lien/indices/<hash>
+  // Therefore rootDir is 3 levels up from dbPath
+  return resolve(dbPath, '../../..');
 }
 
 /**
@@ -108,7 +125,7 @@ async function handleGitStartup(
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
+  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
@@ -121,7 +138,7 @@ async function handleGitStartup(
     log(`🌿 Git changes detected: ${changedFiles.length} files changed`);
     
     try {
-      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
+      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose: false });
       const duration = Date.now() - startTime;
       reindexStateManager.completeReindex(duration);
       log(`✓ Reindexed ${count} files in ${duration}ms`);
@@ -146,7 +163,7 @@ function createGitPollInterval(
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
+  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): NodeJS.Timeout {
@@ -169,7 +186,7 @@ function createGitPollInterval(
         log(`🌿 Git change detected: ${changedFiles.length} files changed`);
         
         try {
-          const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose });
+          const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose: false });
           const duration = Date.now() - startTime;
           reindexStateManager.completeReindex(duration);
           log(`✓ Background reindex complete: ${count} files in ${duration}ms`);
@@ -185,8 +202,66 @@ function createGitPollInterval(
 }
 
 /**
- * Setup git detection and background polling.
- * Always enabled by default if git is available.
+ * Create a git change handler for event-driven detection.
+ * Handles cooldown and concurrent operation prevention.
+ */
+function createGitChangeHandler(
+  gitTracker: GitStateTracker,
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  _verbose: boolean | undefined,
+  log: LogFn,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>
+): () => Promise<void> {
+  let gitReindexInProgress = false;
+  let lastGitReindexTime = 0;
+  const GIT_REINDEX_COOLDOWN_MS = 5000; // 5 second cooldown
+  
+  return async () => {
+    // Prevent concurrent git reindex operations (check both local and global state)
+    const { inProgress: globalInProgress } = reindexStateManager.getState();
+    if (gitReindexInProgress || globalInProgress) {
+      log('Git reindex already in progress, skipping', 'debug');
+      return;
+    }
+    
+    // Cooldown check - don't reindex again too soon
+    const timeSinceLastReindex = Date.now() - lastGitReindexTime;
+    if (timeSinceLastReindex < GIT_REINDEX_COOLDOWN_MS) {
+      log(`Git change ignored (cooldown: ${GIT_REINDEX_COOLDOWN_MS - timeSinceLastReindex}ms remaining)`, 'debug');
+      return;
+    }
+    
+    log('🌿 Git change detected (event-driven)');
+    const changedFiles = await gitTracker.detectChanges();
+    
+    if (!changedFiles || changedFiles.length === 0) {
+      return;
+    }
+    
+    gitReindexInProgress = true;
+    const startTime = Date.now();
+    reindexStateManager.startReindex(changedFiles);
+    log(`Reindexing ${changedFiles.length} files from git change`);
+    
+    try {
+      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose: false });
+      const duration = Date.now() - startTime;
+      reindexStateManager.completeReindex(duration);
+      log(`✓ Reindexed ${count} files in ${duration}ms`);
+      lastGitReindexTime = Date.now();
+    } catch (error) {
+      reindexStateManager.failReindex();
+      log(`Git reindex failed: ${error}`, 'warning');
+    } finally {
+      gitReindexInProgress = false;
+    }
+  };
+}
+
+/**
+ * Setup git detection for the MCP server.
+ * Uses event-driven detection if file watcher available, otherwise falls back to polling.
  */
 async function setupGitDetection(
   rootDir: string,
@@ -194,7 +269,8 @@ async function setupGitDetection(
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
   log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
+  fileWatcher: FileWatcher | null
 ): Promise<{ gitTracker: GitStateTracker | null; gitPollInterval: NodeJS.Timeout | null }> {
   const gitAvailable = await isGitAvailable();
   const isRepo = await isGitRepo(rootDir);
@@ -219,11 +295,26 @@ async function setupGitDetection(
     log(`Failed to check git state on startup: ${error}`, 'warning');
   }
 
-  // Start background polling
+  // If file watcher is available, use event-driven detection
+  if (fileWatcher) {
+    const gitChangeHandler = createGitChangeHandler(
+      gitTracker,
+      vectorDB,
+      embeddings,
+      verbose,
+      log,
+      reindexStateManager
+    );
+    fileWatcher.watchGit(gitChangeHandler);
+    
+    log('✓ Git detection enabled (event-driven via file watcher)');
+    return { gitTracker, gitPollInterval: null };
+  }
+  
+  // Fallback to polling if no file watcher (--no-watch mode)
   const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
-  log(`✓ Git detection enabled (checking every ${pollIntervalSeconds}s)`);
+  log(`✓ Git detection enabled (polling fallback every ${pollIntervalSeconds}s)`);
   const gitPollInterval = createGitPollInterval(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
-
   return { gitTracker, gitPollInterval };
 }
 
@@ -253,23 +344,64 @@ async function handleFileDeletion(
 
 /**
  * Handle single file change (reindex one file)
+ * Uses content hash to skip reindexing if file content hasn't actually changed.
+ * Uses atomic manifest operations to prevent race conditions.
  */
 async function handleSingleFileChange(
   filepath: string,
   type: 'add' | 'change',
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
+  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
   const action = type === 'add' ? 'added' : 'changed';
+  
+  // Derive rootDir from dbPath using helper function
+  const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
+  
+  // For 'change' events, check content hash to avoid unnecessary reindexing
+  if (type === 'change') {
+    const manifest = new ManifestManager(vectorDB.dbPath);
+    const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+    
+    try {
+      // Step 1: Read existing entry in a fast transaction (no file I/O)
+      const existingEntry = await manifest.transaction(async (manifestData) => {
+        return manifestData.files[normalizedPath];
+      });
+      
+      // Step 2: Perform file I/O outside of any transaction to avoid holding the lock
+      const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
+      
+      // Step 3: If content hasn't changed, update mtime in a short transaction
+      if (!shouldReindex && newMtime && existingEntry) {
+        const skipReindex = await manifest.transaction(async (manifestData) => {
+          const entry = manifestData.files[normalizedPath];
+          if (entry) {
+            entry.lastModified = newMtime;
+            return true; // Skip reindex
+          }
+          return false; // No entry to update, proceed with reindex
+        });
+        
+        if (skipReindex) {
+          return;
+        }
+      }
+    } catch (error) {
+      // If transaction fails, log warning and proceed with reindex
+      log(`Content hash check failed, will reindex: ${error}`, 'warning');
+    }
+  }
+  
   const startTime = Date.now();
   reindexStateManager.startReindex([filepath]);
   log(`📝 File ${action}: ${filepath}`);
   
   try {
-    await indexSingleFile(filepath, vectorDB, embeddings, { verbose });
+    await indexSingleFile(filepath, vectorDB, embeddings, { verbose: false, rootDir });
     const duration = Date.now() - startTime;
     reindexStateManager.completeReindex(duration);
   } catch (error) {
@@ -279,45 +411,189 @@ async function handleSingleFileChange(
 }
 
 /**
+ * Check if a modified file's content has actually changed using hash comparison.
+ * Returns true if file should be reindexed, false if content unchanged.
+ */
+async function shouldReindexFile(
+  filepath: string,
+  existingEntry: { contentHash?: string; lastModified: number } | undefined,
+  log: LogFn
+): Promise<{ shouldReindex: boolean; newMtime?: number }> {
+  // No existing entry or no hash - reindex to be safe
+  if (!existingEntry?.contentHash) {
+    return { shouldReindex: true };
+  }
+
+  // Compute current content hash
+  const currentHash = await computeContentHash(filepath);
+  
+  if (currentHash && currentHash === existingEntry.contentHash) {
+    // Content hasn't changed, just update lastModified
+    log(`⏭️  File mtime changed but content unchanged: ${filepath}`, 'debug');
+    try {
+      const fs = await import('fs/promises');
+      const stats = await fs.stat(filepath);
+      return { shouldReindex: false, newMtime: stats.mtimeMs };
+    } catch {
+      // If stat fails, reindex to be safe
+      return { shouldReindex: true };
+    }
+  }
+  
+  // Content changed, needs reindexing
+  return { shouldReindex: true };
+}
+
+/**
+ * Filter modified files based on content hash, updating manifest for unchanged files.
+ * Returns array of files that need reindexing.
+ * Uses atomic manifest operations to prevent race conditions.
+ */
+async function filterModifiedFilesByHash(
+  modifiedFiles: string[],
+  vectorDB: VectorDBInterface,
+  log: LogFn
+): Promise<string[]> {
+  if (modifiedFiles.length === 0) {
+    return [];
+  }
+
+  const manifest = new ManifestManager(vectorDB.dbPath);
+  
+  // Derive rootDir from dbPath using helper function
+  const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
+  
+  // Step 1: Read manifest entries in a fast transaction (no file I/O)
+  const manifestData = await manifest.transaction(async (data) => data);
+  
+  if (!manifestData) {
+    // No manifest - all files need reindexing
+    return modifiedFiles;
+  }
+  
+  // Step 2: Check all files outside of any transaction (file I/O here)
+  interface FileCheckResult {
+    filepath: string;
+    normalizedPath: string;
+    shouldReindex: boolean;
+    newMtime?: number;
+  }
+  
+  const checkResults: FileCheckResult[] = [];
+  
+  for (const filepath of modifiedFiles) {
+    const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+    const existingEntry = manifestData.files[normalizedPath];
+    const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
+    
+    checkResults.push({
+      filepath,
+      normalizedPath,
+      shouldReindex,
+      newMtime,
+    });
+  }
+  
+  // Step 3: Update all mtimes in a single short transaction
+  await manifest.transaction(async (data) => {
+    for (const result of checkResults) {
+      if (!result.shouldReindex && result.newMtime) {
+        const entry = data.files[result.normalizedPath];
+        if (entry) {
+          entry.lastModified = result.newMtime;
+        }
+      }
+    }
+    return null; // No return value needed, manifest is mutated in place
+  });
+  
+  // Return only files that need reindexing
+  return checkResults.filter(r => r.shouldReindex).map(r => r.filepath);
+}
+
+/**
+ * Prepare files for reindexing by filtering based on content hash.
+ * Returns files that need to be indexed and deleted files.
+ */
+async function prepareFilesForReindexing(
+  event: FileChangeEvent,
+  vectorDB: VectorDBInterface,
+  log: LogFn
+): Promise<{ filesToIndex: string[]; deletedFiles: string[] }> {
+  const addedFiles = event.added || [];
+  const modifiedFiles = event.modified || [];
+  const deletedFiles = event.deleted || [];
+  
+  // Filter modified files by content hash, with error handling
+  let modifiedFilesToReindex: string[] = [];
+  try {
+    modifiedFilesToReindex = await filterModifiedFilesByHash(modifiedFiles, vectorDB, log);
+  } catch (error) {
+    // If hash-based filtering fails, fall back to reindexing all modified files
+    log(`Hash-based filtering failed, will reindex all modified files: ${error}`, 'warning');
+    modifiedFilesToReindex = modifiedFiles;
+  }
+  
+  const filesToIndex = [...addedFiles, ...modifiedFilesToReindex];
+  
+  return { filesToIndex, deletedFiles };
+}
+
+/**
+ * Execute reindex operations for files to index and deletions.
+ * Processes both in parallel for efficiency.
+ */
+async function executeReindexOperations(
+  filesToIndex: string[],
+  deletedFiles: string[],
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  log: LogFn
+): Promise<void> {
+  const operations: Promise<unknown>[] = [];
+  
+  if (filesToIndex.length > 0) {
+    log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
+    operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose: false }));
+  }
+  
+  if (deletedFiles.length > 0) {
+    operations.push(
+      Promise.all(
+        deletedFiles.map((deleted: string) => handleFileDeletion(deleted, vectorDB, log))
+      )
+    );
+  }
+  
+  await Promise.all(operations);
+}
+
+/**
  * Handle batch file change event (additions, modifications, and deletions)
+ * Uses content hash to skip reindexing files whose content hasn't actually changed.
  */
 async function handleBatchEvent(
   event: FileChangeEvent,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
+  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
-  const filesToIndex = [...(event.added || []), ...(event.modified || [])];
-  const deletedFiles = event.deleted || [];
+  // Prepare files for reindexing
+  const { filesToIndex, deletedFiles } = await prepareFilesForReindexing(event, vectorDB, log);
   const allFiles = [...filesToIndex, ...deletedFiles];
   
   if (allFiles.length === 0) {
     return; // Nothing to process
   }
 
+  // Execute with state tracking
   const startTime = Date.now();
   reindexStateManager.startReindex(allFiles);
   
   try {
-    // Process additions/modifications and deletions in parallel
-    const operations: Promise<unknown>[] = [];
-    
-    if (filesToIndex.length > 0) {
-      log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
-      operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose }));
-    }
-    
-    if (deletedFiles.length > 0) {
-      operations.push(
-        Promise.all(
-          deletedFiles.map((deleted: string) => handleFileDeletion(deleted, vectorDB, log))
-        )
-      );
-    }
-    
-    await Promise.all(operations);
+    await executeReindexOperations(filesToIndex, deletedFiles, vectorDB, embeddings, log);
     
     const duration = Date.now() - startTime;
     reindexStateManager.completeReindex(duration);
@@ -583,8 +859,12 @@ async function setupAndConnectServer(
   
   // Setup features
   await handleAutoIndexing(vectorDB, rootDir, log);
-  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager);
+  
+  // Setup file watching first (needed for event-driven git detection)
   const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log, reindexStateManager);
+  
+  // Setup git detection (will use event-driven approach if fileWatcher is available)
+  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager, fileWatcher);
 
   // Setup cleanup handlers
   const cleanup = setupCleanupHandlers(versionCheckInterval, gitPollInterval, fileWatcher, log);

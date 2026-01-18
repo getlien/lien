@@ -37,6 +37,7 @@ export { chunkFile } from './indexer/chunker.js';
 export { scanCodebase, scanCodebaseWithFrameworks, detectLanguage } from './indexer/scanner.js';
 export { indexSingleFile, indexMultipleFiles, normalizeToRelativePath } from './indexer/incremental.js';
 export { extractSymbols } from './indexer/symbol-extractor.js';
+export { computeContentHash, isHashAlgorithmCompatible } from './indexer/content-hash.js';
 
 // =============================================================================
 // EMBEDDINGS
