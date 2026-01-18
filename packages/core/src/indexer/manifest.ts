@@ -227,6 +227,38 @@ export class ManifestManager {
   }
   
   /**
+   * Perform an atomic transaction on the manifest.
+   * The updater function receives the current manifest and can modify it.
+   * All changes are applied atomically under lock protection.
+   * 
+   * @param updater - Function that modifies the manifest
+   * @returns Result returned by updater function
+   */
+  async transaction<T>(updater: (manifest: IndexManifest) => T | Promise<T>): Promise<T> {
+    let result: T;
+    
+    // Chain this operation to the lock to ensure atomicity
+    this.updateLock = this.updateLock.then(async () => {
+      const manifest = await this.load() || this.createEmpty();
+      
+      // Execute updater function
+      result = await Promise.resolve(updater(manifest));
+      
+      // Save changes
+      await this.save(manifest);
+    }).catch(error => {
+      console.error(`[Lien] Failed to execute manifest transaction: ${error}`);
+      // Return to reset lock - don't let errors block future operations
+      return undefined;
+    });
+    
+    // Wait for this operation to complete
+    await this.updateLock;
+    
+    return result!;
+  }
+  
+  /**
    * Gets the list of files currently in the manifest
    * 
    * @returns Array of filepaths

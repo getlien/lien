@@ -330,11 +330,7 @@ async function handleFileDeletion(
 /**
  * Handle single file change (reindex one file)
  * Uses content hash to skip reindexing if file content hasn't actually changed.
- * 
- * Note: This function loads and modifies the manifest without explicit locking.
- * While file watcher events are processed serially, git change handlers can run concurrently.
- * To prevent race conditions, the git handler checks global reindex state before running,
- * ensuring this function is not called during concurrent operations.
+ * Uses atomic manifest operations to prevent race conditions.
  */
 async function handleSingleFileChange(
   filepath: string,
@@ -347,15 +343,15 @@ async function handleSingleFileChange(
 ): Promise<void> {
   const action = type === 'add' ? 'added' : 'changed';
   
+  // Derive rootDir from dbPath (dbPath is .lien/indices/<hash>, so rootDir is 3 levels up)
+  const rootDir = resolve(vectorDB.dbPath, '../../..');
+  
   // For 'change' events, check content hash to avoid unnecessary reindexing
   if (type === 'change') {
     const manifest = new ManifestManager(vectorDB.dbPath);
-    const manifestData = await manifest.load();
     
-    if (manifestData) {
-      // Derive rootDir from dbPath (dbPath is .lien/indices/<hash>, so rootDir is 3 levels up)
-      const rootDir = resolve(vectorDB.dbPath, '../../..');
-      
+    // Use atomic transaction to check hash and conditionally update mtime
+    const skipReindex = await manifest.transaction(async (manifestData) => {
       // Normalize filepath to relative path for manifest lookup
       const normalizedPath = normalizeToRelativePath(filepath, rootDir);
       const existingEntry = manifestData.files[normalizedPath];
@@ -364,11 +360,16 @@ async function handleSingleFileChange(
       const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
       
       if (!shouldReindex && newMtime && existingEntry) {
-        // Content hasn't changed, update mtime and skip reindex
+        // Content hasn't changed, update mtime atomically
         existingEntry.lastModified = newMtime;
-        await manifest.save(manifestData);
-        return;
+        return true; // Skip reindex
       }
+      
+      return false; // Proceed with reindex
+    });
+    
+    if (skipReindex) {
+      return;
     }
   }
   
@@ -377,7 +378,7 @@ async function handleSingleFileChange(
   log(`📝 File ${action}: ${filepath}`);
   
   try {
-    await indexSingleFile(filepath, vectorDB, embeddings, { verbose: false });
+    await indexSingleFile(filepath, vectorDB, embeddings, { verbose: false, rootDir });
     const duration = Date.now() - startTime;
     reindexStateManager.completeReindex(duration);
   } catch (error) {
@@ -423,11 +424,7 @@ async function shouldReindexFile(
 /**
  * Filter modified files based on content hash, updating manifest for unchanged files.
  * Returns array of files that need reindexing.
- * 
- * Note: This function loads and modifies the manifest without explicit locking.
- * While file watcher events are processed serially, git change handlers can run concurrently.
- * To prevent race conditions, the git handler checks global reindex state before running,
- * ensuring this function is not called during concurrent operations.
+ * Uses atomic manifest operations to prevent race conditions.
  */
 async function filterModifiedFilesByHash(
   modifiedFiles: string[],
@@ -439,34 +436,30 @@ async function filterModifiedFilesByHash(
   }
 
   const manifest = new ManifestManager(vectorDB.dbPath);
-  const manifestData = await manifest.load();
   
-  // No manifest - reindex all
-  if (!manifestData) {
-    return modifiedFiles;
-  }
-
   // Derive rootDir from dbPath (dbPath is .lien/indices/<hash>, so rootDir is 3 levels up)
   const rootDir = resolve(vectorDB.dbPath, '../../..');
   
-  const filesToReindex: string[] = [];
-  
-  for (const filepath of modifiedFiles) {
-    // Normalize filepath to relative path for manifest lookup
-    const normalizedPath = normalizeToRelativePath(filepath, rootDir);
-    const existingEntry = manifestData.files[normalizedPath];
-    const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
+  // Use atomic transaction to filter files and update mtimes
+  const filesToReindex = await manifest.transaction(async (manifestData) => {
+    const filesToReindex: string[] = [];
     
-    if (shouldReindex) {
-      filesToReindex.push(filepath);
-    } else if (newMtime && existingEntry) {
-      // Update mtime for unchanged file
-      existingEntry.lastModified = newMtime;
+    for (const filepath of modifiedFiles) {
+      // Normalize filepath to relative path for manifest lookup
+      const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+      const existingEntry = manifestData.files[normalizedPath];
+      const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
+      
+      if (shouldReindex) {
+        filesToReindex.push(filepath);
+      } else if (newMtime && existingEntry) {
+        // Update mtime for unchanged file (atomically)
+        existingEntry.lastModified = newMtime;
+      }
     }
-  }
-  
-  // Save updated timestamps
-  await manifest.save(manifestData);
+    
+    return filesToReindex;
+  });
   
   return filesToReindex;
 }
