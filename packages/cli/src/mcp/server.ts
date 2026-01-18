@@ -42,6 +42,21 @@ export interface MCPServerOptions {
 }
 
 /**
+ * Derive the project root directory from the vector database path.
+ * 
+ * This centralizes the path structure assumption: dbPath is .lien/indices/<hash>
+ * If the directory structure changes, only this function needs updating.
+ * 
+ * @param dbPath - Path to the vector database (typically .lien/indices/<hash>)
+ * @returns Absolute path to project root directory
+ */
+function getRootDirFromDbPath(dbPath: string): string {
+  // dbPath structure: <rootDir>/.lien/indices/<hash>
+  // Therefore rootDir is 3 levels up from dbPath
+  return resolve(dbPath, '../../..');
+}
+
+/**
  * Initialize embeddings and vector database.
  * Uses factory to select backend (LanceDB or Qdrant) based on config.
  */
@@ -343,8 +358,8 @@ async function handleSingleFileChange(
 ): Promise<void> {
   const action = type === 'add' ? 'added' : 'changed';
   
-  // Derive rootDir from dbPath (dbPath is .lien/indices/<hash>, so rootDir is 3 levels up)
-  const rootDir = resolve(vectorDB.dbPath, '../../..');
+  // Derive rootDir from dbPath using helper function
+  const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
   
   // For 'change' events, check content hash to avoid unnecessary reindexing
   if (type === 'change') {
@@ -442,8 +457,8 @@ async function filterModifiedFilesByHash(
 
   const manifest = new ManifestManager(vectorDB.dbPath);
   
-  // Derive rootDir from dbPath (dbPath is .lien/indices/<hash>, so rootDir is 3 levels up)
-  const rootDir = resolve(vectorDB.dbPath, '../../..');
+  // Derive rootDir from dbPath using helper function
+  const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
   
   // Use atomic transaction to filter files and update mtimes
   const filesToReindex = await manifest.transaction(async (manifestData) => {
