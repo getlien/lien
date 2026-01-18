@@ -233,9 +233,11 @@ export class ManifestManager {
    * 
    * @param updater - Function that modifies the manifest
    * @returns Result returned by updater function
+   * @throws Error if transaction fails
    */
   async transaction<T>(updater: (manifest: IndexManifest) => T | Promise<T>): Promise<T> {
     let result: T;
+    let error: Error | undefined;
     
     // Chain this operation to the lock to ensure atomicity
     this.updateLock = this.updateLock.then(async () => {
@@ -246,14 +248,20 @@ export class ManifestManager {
       
       // Save changes
       await this.save(manifest);
-    }).catch(error => {
-      console.error(`[Lien] Failed to execute manifest transaction: ${error}`);
+    }).catch(err => {
+      console.error(`[Lien] Failed to execute manifest transaction: ${err}`);
+      error = err instanceof Error ? err : new Error(String(err));
       // Return to reset lock - don't let errors block future operations
       return undefined;
     });
     
     // Wait for this operation to complete
     await this.updateLock;
+    
+    // If an error occurred, throw it
+    if (error) {
+      throw error;
+    }
     
     return result!;
   }
@@ -374,8 +382,13 @@ export class ManifestManager {
       return changedFiles;
     });
     
-    // Update the lock for the next operation
-    this.updateLock = result.then(() => {});
+    // Update the lock for the next operation, with error handling
+    this.updateLock = result.then(
+      () => {},
+      (error) => {
+        console.error('[Lien] Warning: Failed to get changed files:', error);
+      }
+    );
     
     return result;
   }

@@ -350,26 +350,31 @@ async function handleSingleFileChange(
   if (type === 'change') {
     const manifest = new ManifestManager(vectorDB.dbPath);
     
-    // Use atomic transaction to check hash and conditionally update mtime
-    const skipReindex = await manifest.transaction(async (manifestData) => {
-      // Normalize filepath to relative path for manifest lookup
-      const normalizedPath = normalizeToRelativePath(filepath, rootDir);
-      const existingEntry = manifestData.files[normalizedPath];
+    try {
+      // Use atomic transaction to check hash and conditionally update mtime
+      const skipReindex = await manifest.transaction(async (manifestData) => {
+        // Normalize filepath to relative path for manifest lookup
+        const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+        const existingEntry = manifestData.files[normalizedPath];
+        
+        // Use shared shouldReindexFile logic
+        const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
+        
+        if (!shouldReindex && newMtime && existingEntry) {
+          // Content hasn't changed, update mtime atomically
+          existingEntry.lastModified = newMtime;
+          return true; // Skip reindex
+        }
+        
+        return false; // Proceed with reindex
+      });
       
-      // Use shared shouldReindexFile logic
-      const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
-      
-      if (!shouldReindex && newMtime && existingEntry) {
-        // Content hasn't changed, update mtime atomically
-        existingEntry.lastModified = newMtime;
-        return true; // Skip reindex
+      if (skipReindex) {
+        return;
       }
-      
-      return false; // Proceed with reindex
-    });
-    
-    if (skipReindex) {
-      return;
+    } catch (error) {
+      // If transaction fails, log warning and proceed with reindex
+      log(`Content hash check failed, will reindex: ${error}`, 'warning');
     }
   }
   
@@ -480,8 +485,16 @@ async function handleBatchEvent(
   const modifiedFiles = event.modified || [];
   const deletedFiles = event.deleted || [];
   
-  // Filter modified files by content hash
-  const modifiedFilesToReindex = await filterModifiedFilesByHash(modifiedFiles, vectorDB, log);
+  // Filter modified files by content hash, with error handling
+  let modifiedFilesToReindex: string[] = [];
+  try {
+    modifiedFilesToReindex = await filterModifiedFilesByHash(modifiedFiles, vectorDB, log);
+  } catch (error) {
+    // If hash-based filtering fails, fall back to reindexing all modified files
+    log(`Hash-based filtering failed, will reindex all modified files: ${error}`, 'warning');
+    modifiedFilesToReindex = modifiedFiles;
+  }
+  
   const filesToIndex = [...addedFiles, ...modifiedFilesToReindex];
   const allFiles = [...filesToIndex, ...deletedFiles];
   
