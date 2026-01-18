@@ -780,23 +780,17 @@ See inline comments below for specific suggestions.
 function getExampleForPrimaryMetric(violations: ComplexityViolation[]): string {
   if (violations.length === 0) return DEFAULT_EXAMPLE;
   
-  // Count metric types
-  const counts = new Map<string, number>();
-  for (const v of violations) {
-    const type = v.metricType || 'cyclomatic';
-    counts.set(type, (counts.get(type) || 0) + 1);
-  }
-  
-  // Find most common
-  let maxType = 'cyclomatic';
-  let maxCount = 0;
-  for (const [type, count] of counts) {
-    if (count > maxCount) {
-      maxType = type;
-      maxCount = count;
-    }
-  }
-  
+  const counts = collect(violations)
+    .countBy((v: ComplexityViolation) => v.metricType || 'cyclomatic')
+    .all() as Record<string, number>;
+
+  const maxType = Object.entries(counts)
+    .reduce(
+      (max, [type, count]) =>
+        count > max.count ? { type, count } : max,
+      { type: 'cyclomatic', count: 0 }
+    ).type;
+
   return COMMENT_EXAMPLES[maxType] || DEFAULT_EXAMPLE;
 }
 

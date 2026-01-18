@@ -267,6 +267,211 @@ describe('prompt', () => {
     });
   });
 
+  describe('buildBatchedCommentsPrompt - few-shot examples', () => {
+    it('should include cyclomatic example when violations are mostly cyclomatic', () => {
+      const violations = [
+        {
+          filepath: 'src/test.ts',
+          startLine: 1,
+          endLine: 20,
+          symbolName: 'func1',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 20,
+          threshold: 15,
+          severity: 'error',
+          message: 'Too complex',
+          metricType: 'cyclomatic',
+        },
+        {
+          filepath: 'src/test.ts',
+          startLine: 21,
+          endLine: 40,
+          symbolName: 'func2',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 18,
+          threshold: 15,
+          severity: 'warning',
+          message: 'Too complex',
+          metricType: 'cyclomatic',
+        },
+      ];
+
+      const prompt = buildBatchedCommentsPrompt(violations, new Map(), mockReport);
+
+      expect(prompt).toContain('Example of a good comment:');
+      expect(prompt).toContain('permission cases');
+      expect(prompt).toContain('checkAdminAccess');
+    });
+
+    it('should include cognitive example when violations are mostly cognitive', () => {
+      const violations = [
+        {
+          filepath: 'src/test.ts',
+          startLine: 1,
+          endLine: 20,
+          symbolName: 'func1',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 25,
+          threshold: 15,
+          severity: 'error',
+          message: 'Too complex',
+          metricType: 'cognitive',
+        },
+        {
+          filepath: 'src/test.ts',
+          startLine: 21,
+          endLine: 40,
+          symbolName: 'func2',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 20,
+          threshold: 15,
+          severity: 'warning',
+          message: 'Too complex',
+          metricType: 'cognitive',
+        },
+      ];
+
+      const prompt = buildBatchedCommentsPrompt(violations, new Map(), mockReport);
+
+      expect(prompt).toContain('Example of a good comment:');
+      expect(prompt).toContain('levels of nesting');
+      expect(prompt).toContain('guard clauses');
+    });
+
+    it('should include halstead_effort example when violations are mostly halstead', () => {
+      const violations = [
+        {
+          filepath: 'src/test.ts',
+          startLine: 1,
+          endLine: 20,
+          symbolName: 'func1',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 80,
+          threshold: 60,
+          severity: 'error',
+          message: 'Too complex',
+          metricType: 'halstead_effort',
+        },
+      ];
+
+      const prompt = buildBatchedCommentsPrompt(violations, new Map(), mockReport);
+
+      expect(prompt).toContain('Example of a good comment:');
+      expect(prompt).toContain('unique operators');
+      expect(prompt).toContain('named constants');
+    });
+
+    it('should include halstead_bugs example when violations are mostly halstead_bugs', () => {
+      const violations = [
+        {
+          filepath: 'src/test.ts',
+          startLine: 1,
+          endLine: 20,
+          symbolName: 'func1',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 2.5,
+          threshold: 1.5,
+          severity: 'error',
+          message: 'Too complex',
+          metricType: 'halstead_bugs',
+        },
+      ];
+
+      const prompt = buildBatchedCommentsPrompt(violations, new Map(), mockReport);
+
+      expect(prompt).toContain('Example of a good comment:');
+      expect(prompt).toContain('predicted bug density');
+      expect(prompt).toContain('chained ternaries');
+    });
+
+    it('should use default cyclomatic example for empty violations', () => {
+      const prompt = buildBatchedCommentsPrompt([], new Map(), mockReport);
+
+      expect(prompt).toContain('Example of a good comment:');
+      expect(prompt).toContain('permission cases');
+    });
+
+    it('should use default for unknown metric type', () => {
+      const violations = [
+        {
+          filepath: 'src/test.ts',
+          startLine: 1,
+          endLine: 20,
+          symbolName: 'func1',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 20,
+          threshold: 15,
+          severity: 'error',
+          message: 'Too complex',
+          metricType: 'unknown_metric' as any,
+        },
+      ];
+
+      const prompt = buildBatchedCommentsPrompt(violations, new Map(), mockReport);
+
+      expect(prompt).toContain('Example of a good comment:');
+      expect(prompt).toContain('permission cases');
+    });
+
+    it('should pick most common metric when multiple types exist', () => {
+      const violations = [
+        {
+          filepath: 'src/test.ts',
+          startLine: 1,
+          endLine: 20,
+          symbolName: 'func1',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 20,
+          threshold: 15,
+          severity: 'error',
+          message: 'Too complex',
+          metricType: 'cognitive',
+        },
+        {
+          filepath: 'src/test.ts',
+          startLine: 21,
+          endLine: 40,
+          symbolName: 'func2',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 18,
+          threshold: 15,
+          severity: 'warning',
+          message: 'Too complex',
+          metricType: 'cognitive',
+        },
+        {
+          filepath: 'src/test.ts',
+          startLine: 41,
+          endLine: 60,
+          symbolName: 'func3',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 16,
+          threshold: 15,
+          severity: 'warning',
+          message: 'Too complex',
+          metricType: 'cyclomatic',
+        },
+      ];
+
+      const prompt = buildBatchedCommentsPrompt(violations, new Map(), mockReport);
+
+      // Should use cognitive example (2 cognitive vs 1 cyclomatic)
+      expect(prompt).toContain('Example of a good comment:');
+      expect(prompt).toContain('levels of nesting');
+      expect(prompt).toContain('guard clauses');
+    });
+  });
+
   describe('buildDescriptionBadge', () => {
     it('should show improved when complexity reduced even with pre-existing violations', () => {
       const deltaSummary: DeltaSummary = {
