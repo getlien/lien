@@ -80,5 +80,5 @@ jobs:
           threshold: '15'
           github_token: ${{ secrets.GITHUB_TOKEN }}
           enable_delta_tracking: true  # Automatic base vs head comparison
-          review_style: 'line'  # Use inline comments to test few-shot examples
+          review_style: 'summary'
 
