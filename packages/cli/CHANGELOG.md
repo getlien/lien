@@ -1,5 +1,11 @@
 # @liendev/lien
 
+## 0.28.1
+
+### Patch Changes
+
+- 6ee8f63: Improve tool description suggestions for semantic_search results
+
 ## 0.28.0
 
 ### Minor Changes
