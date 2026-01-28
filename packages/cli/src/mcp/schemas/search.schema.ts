@@ -14,9 +14,9 @@ export const SemanticSearchSchema = z.object({
       "Natural language description of what you're looking for.\n\n" +
       "Use full sentences describing functionality, not exact names.\n\n" +
       "Good examples:\n" +
-      "  - 'handles user authentication'\n" +
-      "  - 'validates email format'\n" +
-      "  - 'processes payment transactions'\n\n" +
+      "  - 'How does the code handle user authentication?'\n" +
+      "  - 'Where are email addresses validated?'\n" +
+      "  - 'How are payment transactions processed?'\n\n" +
       "Bad examples:\n" +
       "  - 'auth' (too vague)\n" +
       "  - 'validateEmail' (use grep for exact names)"

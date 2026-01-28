@@ -30,8 +30,9 @@ REQUIRED sequence:
 
 ## Tool Reference
 
-**`semantic_search({ query: "what the code does", limit: 5 })`**
-- Use natural language: "handles authentication", "validates email"
+**`semantic_search({ query: "How does the code do X?", limit: 5 })`**
+- Phrase queries as FULL QUESTIONS: "How does the code handle authentication?", "Where are email addresses validated?"
+- Full questions produce significantly better relevance than keyword phrases
 - NOT function names (use grep for exact names)
 - Returns relevance category: `highly_relevant`, `relevant`, `loosely_related`, `not_relevant`
 
@@ -93,7 +94,7 @@ get_files_context({ filepaths: ["src/auth.ts", "src/user.ts"] })
 
 ### Pattern 1: "Where is X?" / "How does X work?"
 ```
-1. semantic_search({ query: "X implementation" })
+1. semantic_search({ query: "How is X implemented?" })
 2. Review results (check relevance scores)
 3. get_files_context({ filepaths: "identified/file.ts" })
 4. Answer with specific code locations
@@ -101,7 +102,7 @@ get_files_context({ filepaths: ["src/auth.ts", "src/user.ts"] })
 
 ### Pattern 2: Edit or Change Code
 ```
-1. semantic_search({ query: "area being modified" })
+1. semantic_search({ query: "How does the code handle [area being modified]?" })
 2. get_files_context({ filepaths: "target/file.ts" })
 3. Check testAssociations in response
 4. Make changes
@@ -119,19 +120,20 @@ get_files_context({ filepaths: ["src/auth.ts", "src/user.ts"] })
 
 ## Query Construction
 
-### Good Queries (DO THIS)
-- "handles user authentication"
-- "validates email addresses"
-- "processes payment transactions"
-- "React components with form state"
-- "API endpoints for user data"
+### Good Queries (DO THIS) - Use Full Questions!
+- "How does the code handle user authentication?"
+- "Where are email addresses validated?"
+- "How are payment transactions processed and validated?"
+- "What React components manage form state?"
+- "How do the API endpoints handle user data?"
 
 ### Bad Queries (DON'T DO THIS)
 - "auth" (too vague)
+- "handles authentication" (keyword phrase - use full question instead)
 - "validateEmail" (use grep for exact names)
 - "code" (way too generic)
 
-**Formula:** `[action verb] + [domain object] + [optional context]`
+**Formula:** `[Question word] + [action/location] + [domain object] + [optional context]?`
 
 ## AST Metadata
 

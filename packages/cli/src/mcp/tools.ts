@@ -21,8 +21,10 @@ export const tools = [
     `Search codebase by MEANING, not text. Complements grep - use this for discovery and understanding, grep for exact matches.
 
 Examples:
-- "Where is authentication handled?" → semantic_search({ query: "handles user authentication" })
-- "How does payment work?" → semantic_search({ query: "processes payment transactions" })
+- "Where is authentication handled?" → semantic_search({ query: "How does the code handle user authentication?" })
+- "How does payment work?" → semantic_search({ query: "How are payment transactions processed and validated?" })
+
+IMPORTANT: Phrase queries as full questions starting with "How", "Where", "What", etc. Full questions produce significantly better relevance than keyword phrases.
 
 Use natural language describing what the code DOES, not function names. For exact string matching, use grep instead.
 
