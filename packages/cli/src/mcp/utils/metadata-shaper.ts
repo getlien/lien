@@ -119,8 +119,26 @@ function pickMetadata(
   const out = result as unknown as Record<string, unknown>;
   for (const key of allowlist) {
     if (key === 'file' || key === 'startLine' || key === 'endLine') continue;
-    if (metadata[key] !== undefined) {
-      out[key] = metadata[key];
+    const value = metadata[key];
+    if (value === undefined || value === '') continue;
+
+    // Strip empty strings from arrays (e.g., parameters: [""] → omit)
+    if (Array.isArray(value)) {
+      const filtered = value.filter((v: unknown) => v !== '');
+      if (filtered.length === 0) continue;
+      out[key] = filtered;
+    }
+    // Strip empty strings from symbols object (classes: [""] → classes: [])
+    else if (key === 'symbols' && typeof value === 'object' && value !== null) {
+      const symbols = value as { functions: string[]; classes: string[]; interfaces: string[] };
+      out[key] = {
+        functions: symbols.functions.filter(s => s !== ''),
+        classes: symbols.classes.filter(s => s !== ''),
+        interfaces: symbols.interfaces.filter(s => s !== ''),
+      };
+    }
+    else {
+      out[key] = value;
     }
   }
 

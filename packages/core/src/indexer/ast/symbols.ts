@@ -271,7 +271,7 @@ function extractParameters(node: Parser.SyntaxNode, _content: string): string[] 
   // Traverse parameter nodes
   for (let i = 0; i < paramsNode.namedChildCount; i++) {
     const param = paramsNode.namedChild(i);
-    if (param) {
+    if (param && param.text.trim()) {
       parameters.push(param.text);
     }
   }

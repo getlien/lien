@@ -88,20 +88,12 @@ export async function handleSemanticSearch(
       const shaped = shapeResults(results, 'semantic_search');
 
       // Build response
-      const response: any = {
+      return {
         indexInfo: getIndexMetadata(),
         results: shaped,
+        ...(crossRepo && vectorDB instanceof QdrantDB && { groupedByRepo: groupResultsByRepo(shaped) }),
+        ...(notes.length > 0 && { note: notes.join(' ') }),
       };
-
-      if (crossRepo && vectorDB instanceof QdrantDB) {
-        response.groupedByRepo = groupResultsByRepo(shaped);
-      }
-
-      if (notes.length > 0) {
-        response.note = notes.join(' ');
-      }
-
-      return response;
     }
   )(args);
 }
