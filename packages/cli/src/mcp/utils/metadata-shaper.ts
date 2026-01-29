@@ -23,7 +23,7 @@ export interface ToolResultMetadata {
   language?: string;
   type?: ChunkMetadata['type'];
   symbolName?: string;
-  symbolType?: string;
+  symbolType?: ChunkMetadata['symbolType'];
   signature?: string;
   parentClass?: string;
   parameters?: string[];
@@ -93,8 +93,7 @@ const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<AllowlistKey>> = {
 export function deduplicateResults(results: SearchResult[]): SearchResult[] {
   const seen = new Set<string>();
   return results.filter(r => {
-    const repo = r.metadata.repoId ?? '';
-    const key = `${repo}:${r.metadata.file}:${r.metadata.startLine}-${r.metadata.endLine}`;
+    const key = JSON.stringify([r.metadata.repoId ?? '', r.metadata.file, r.metadata.startLine, r.metadata.endLine]);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

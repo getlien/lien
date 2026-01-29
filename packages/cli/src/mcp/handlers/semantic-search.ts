@@ -64,7 +64,6 @@ export async function handleSemanticSearch(
 
       // Deduplicate results
       results = deduplicateResults(results);
-      log(`Returning ${results.length} results`);
 
       // Collect notes
       const notes: string[] = [];
@@ -75,12 +74,15 @@ export async function handleSemanticSearch(
       // If all results are irrelevant, return empty with a note
       if (results.length > 0 && results.every(r => r.relevance === 'not_relevant')) {
         notes.push('No relevant matches found.');
+        log('Returning 0 results (all not_relevant)');
         return {
           indexInfo: getIndexMetadata(),
           results: [],
           note: notes.join(' '),
         };
       }
+
+      log(`Returning ${results.length} results`);
 
       // Shape metadata for context efficiency
       const shaped = shapeResults(results, 'semantic_search');
