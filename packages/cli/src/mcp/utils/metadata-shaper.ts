@@ -75,7 +75,7 @@ const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<AllowlistKey>> = {
     'language', 'type',
     'symbolName', 'symbolType', 'signature', 'parentClass',
     'parameters', 'exports',
-    'imports', 'importedSymbols', 'callSites',
+    'imports', 'importedSymbols', 'callSites', 'symbols',
   ]),
   list_functions: new Set<AllowlistKey>([
     'language', 'type',
