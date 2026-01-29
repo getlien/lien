@@ -74,6 +74,23 @@ describe('shapeResultMetadata', () => {
     expect(keys).not.toContain('halsteadEffort');
   });
 
+  it('get_files_context: keeps imports/importedSymbols/callSites but strips halstead/symbols', () => {
+    const result = shapeResultMetadata(createFullResult(), 'get_files_context');
+    const m = result.metadata;
+
+    // Kept
+    expect(m.imports).toEqual(['./utils']);
+    expect(m.importedSymbols).toEqual({ './utils': ['helper'] });
+    expect(m.callSites).toEqual([{ symbol: 'helper', line: 5 }]);
+    expect(m.exports).toEqual(['example']);
+
+    // Stripped
+    const keys = Object.keys(m);
+    expect(keys).not.toContain('symbols');
+    expect(keys).not.toContain('complexity');
+    expect(keys).not.toContain('halsteadVolume');
+  });
+
   it('list_functions: keeps symbols but strips imports/callSites/halstead', () => {
     const result = shapeResultMetadata(createFullResult(), 'list_functions');
     const m = result.metadata;

@@ -1,6 +1,7 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetFilesContextSchema } from '../schemas/index.js';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
+import { shapeResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { SearchResult, LocalEmbeddings, VectorDBInterface } from '@liendev/core';
 
@@ -30,7 +31,7 @@ interface HandlerContext {
 
 /** File data with chunks and test associations */
 interface FileData {
-  chunks: SearchResult[];
+  chunks: SearchResult[] | import('../utils/metadata-shaper.js').ToolResult[];
   testAssociations: string[];
 }
 
@@ -409,6 +410,11 @@ export async function handleGetFilesContext(
         testAssociationsMap,
         workspaceRoot
       );
+
+      // Shape metadata for context efficiency
+      for (const fileData of Object.values(filesData)) {
+        fileData.chunks = shapeResults(fileData.chunks as SearchResult[], 'get_files_context');
+      }
 
       const totalChunks = Object.values(filesData).reduce(
         (sum, f) => sum + f.chunks.length,

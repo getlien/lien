@@ -3,11 +3,11 @@ import type { SearchResult, ChunkMetadata, RelevanceCategory } from '@liendev/co
 /**
  * Tool names that support metadata shaping.
  * get_dependents and get_complexity use their own response formats.
- * get_files_context nests chunks inside FileData and is not yet wired up.
  */
 export type ToolName =
   | 'semantic_search'
   | 'find_similar'
+  | 'get_files_context'
   | 'list_functions';
 
 /**
@@ -28,6 +28,9 @@ export interface ToolResultMetadata {
   parentClass?: string;
   parameters?: string[];
   exports?: string[];
+  imports?: string[];
+  importedSymbols?: Record<string, string[]>;
+  callSites?: Array<{ symbol: string; line: number }>;
   symbols?: { functions: string[]; classes: string[]; interfaces: string[] };
   repoId?: string;
 }
@@ -59,6 +62,12 @@ const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<keyof ChunkMetadata>> = {
     'file', 'startLine', 'endLine', 'language', 'type',
     'symbolName', 'symbolType', 'signature', 'parentClass',
     'parameters', 'exports',
+  ]),
+  get_files_context: new Set<keyof ChunkMetadata>([
+    'file', 'startLine', 'endLine', 'language', 'type',
+    'symbolName', 'symbolType', 'signature', 'parentClass',
+    'parameters', 'exports',
+    'imports', 'importedSymbols', 'callSites',
   ]),
   list_functions: new Set<keyof ChunkMetadata>([
     'file', 'startLine', 'endLine', 'language', 'type',
