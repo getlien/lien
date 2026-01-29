@@ -79,8 +79,8 @@ describe('handleSemanticSearch', () => {
   describe('basic search', () => {
     it('should return search results with indexInfo', async () => {
       const mockResults = [
-        createMockResult({ content: 'function handleAuth() {}' }),
-        createMockResult({ content: 'function validateUser() {}' }),
+        createMockResult({ content: 'function handleAuth() {}', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 } }),
+        createMockResult({ content: 'function validateUser() {}', metadata: { file: 'src/validate.ts', startLine: 1, endLine: 10 } }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
@@ -200,8 +200,8 @@ describe('handleSemanticSearch', () => {
 
     it('should use searchCrossRepo when crossRepo=true and using Qdrant', async () => {
       const mockResults = [
-        createMockResult({ metadata: { repoId: 'repo-a' } }),
-        createMockResult({ metadata: { repoId: 'repo-b' } }),
+        createMockResult({ metadata: { repoId: 'repo-a', file: 'src/a.ts' } }),
+        createMockResult({ metadata: { repoId: 'repo-b', file: 'src/b.ts' } }),
       ];
       mockQdrantDB.searchCrossRepo.mockResolvedValue(mockResults);
 
@@ -224,9 +224,9 @@ describe('handleSemanticSearch', () => {
 
     it('should group results by repository when crossRepo=true', async () => {
       const mockResults = [
-        createMockResult({ content: 'result 1', metadata: { repoId: 'repo-a' } }),
-        createMockResult({ content: 'result 2', metadata: { repoId: 'repo-a' } }),
-        createMockResult({ content: 'result 3', metadata: { repoId: 'repo-b' } }),
+        createMockResult({ content: 'result 1', metadata: { repoId: 'repo-a', file: 'src/a1.ts' } }),
+        createMockResult({ content: 'result 2', metadata: { repoId: 'repo-a', file: 'src/a2.ts' } }),
+        createMockResult({ content: 'result 3', metadata: { repoId: 'repo-b', file: 'src/b1.ts' } }),
       ];
       mockQdrantDB.searchCrossRepo.mockResolvedValue(mockResults);
 
@@ -283,8 +283,8 @@ describe('handleSemanticSearch', () => {
 
     it('should still return results when falling back', async () => {
       const mockResults = [
-        createMockResult({ content: 'fallback result 1' }),
-        createMockResult({ content: 'fallback result 2' }),
+        createMockResult({ content: 'fallback result 1', metadata: { file: 'src/fb1.ts' } }),
+        createMockResult({ content: 'fallback result 2', metadata: { file: 'src/fb2.ts' } }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 

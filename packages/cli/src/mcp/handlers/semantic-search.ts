@@ -1,5 +1,6 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { SemanticSearchSchema } from '../schemas/index.js';
+import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import { QdrantDB } from '@liendev/core';
 
@@ -61,16 +62,31 @@ export async function handleSemanticSearch(
         log(`Found ${results.length} results`);
       }
 
+      // Deduplicate results
+      results = deduplicateResults(results);
+
+      // If all results are irrelevant, return empty with a note
+      if (results.length > 0 && results.every(r => r.relevance === 'not_relevant')) {
+        return {
+          indexInfo: getIndexMetadata(),
+          results: [],
+          note: 'No relevant matches found.',
+        };
+      }
+
+      // Shape metadata for context efficiency
+      const shaped = shapeResults(results, 'semantic_search');
+
       // Build response
       const response: any = {
         indexInfo: getIndexMetadata(),
-        results,
+        results: shaped,
       };
-      
+
       if (crossRepo && vectorDB instanceof QdrantDB) {
-        response.groupedByRepo = groupResultsByRepo(results);
+        response.groupedByRepo = groupResultsByRepo(shaped);
       }
-      
+
       if (crossRepoFallback) {
         response.note = 'Cross-repo search requires Qdrant backend. Fell back to single-repo search.';
       }

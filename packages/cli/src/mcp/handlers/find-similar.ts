@@ -1,5 +1,6 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { FindSimilarSchema } from '../schemas/index.js';
+import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import type { SearchResult } from '@liendev/core';
 
@@ -55,6 +56,14 @@ export async function handleFindSimilar(
       const extraLimit = limit + 10;
       let results = await vectorDB.search(codeEmbedding, extraLimit, validatedArgs.code);
 
+      // Deduplicate and filter out self-matches
+      results = deduplicateResults(results);
+      const inputCode = validatedArgs.code.trim();
+      results = results.filter(r => {
+        if (r.score >= 0.1) return true;
+        return r.content.trim() !== inputCode;
+      });
+
       const filtersApplied: FiltersApplied = { prunedLowRelevance: 0 };
 
       // Apply filters sequentially
@@ -78,7 +87,7 @@ export async function handleFindSimilar(
 
       return {
         indexInfo: getIndexMetadata(),
-        results: finalResults,
+        results: shapeResults(finalResults, 'find_similar'),
         ...(hasFilters && { filtersApplied }),
       };
     }
