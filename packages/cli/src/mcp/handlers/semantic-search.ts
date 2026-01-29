@@ -64,13 +64,21 @@ export async function handleSemanticSearch(
 
       // Deduplicate results
       results = deduplicateResults(results);
+      log(`Returning ${results.length} results`);
+
+      // Collect notes
+      const notes: string[] = [];
+      if (crossRepoFallback) {
+        notes.push('Cross-repo search requires Qdrant backend. Fell back to single-repo search.');
+      }
 
       // If all results are irrelevant, return empty with a note
       if (results.length > 0 && results.every(r => r.relevance === 'not_relevant')) {
+        notes.push('No relevant matches found.');
         return {
           indexInfo: getIndexMetadata(),
           results: [],
-          note: 'No relevant matches found.',
+          note: notes.join(' '),
         };
       }
 
@@ -87,8 +95,8 @@ export async function handleSemanticSearch(
         response.groupedByRepo = groupResultsByRepo(shaped);
       }
 
-      if (crossRepoFallback) {
-        response.note = 'Cross-repo search requires Qdrant backend. Fell back to single-repo search.';
+      if (notes.length > 0) {
+        response.note = notes.join(' ');
       }
 
       return response;

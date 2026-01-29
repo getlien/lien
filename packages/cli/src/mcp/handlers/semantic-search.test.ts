@@ -398,6 +398,23 @@ describe('handleSemanticSearch', () => {
       expect(parsed.indexInfo).toBeDefined();
     });
 
+    it('should merge crossRepo fallback note with not_relevant note', async () => {
+      const mockResults = [
+        createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/a.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleSemanticSearch(
+        { query: 'something irrelevant', crossRepo: true },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.note).toContain('Cross-repo search requires Qdrant backend');
+      expect(parsed.note).toContain('No relevant matches found.');
+    });
+
     it('should keep results when at least one is relevant', async () => {
       const mockResults = [
         createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/a.ts' } }),
