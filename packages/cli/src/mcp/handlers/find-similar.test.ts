@@ -346,6 +346,77 @@ describe('handleFindSimilar', () => {
     });
   });
 
+  describe('deduplication', () => {
+    it('should deduplicate results with same file + line range', async () => {
+      const mockResults = [
+        createMockResult({ content: 'first', metadata: { file: 'src/a.ts', startLine: 1, endLine: 5 } }),
+        createMockResult({ content: 'duplicate', metadata: { file: 'src/a.ts', startLine: 1, endLine: 5 } }),
+        createMockResult({ content: 'different', metadata: { file: 'src/b.ts', startLine: 1, endLine: 5 } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleFindSimilar(
+        { code: 'async function test() {}' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(2);
+    });
+  });
+
+  describe('self-match filtering', () => {
+    it('should filter out exact self-matches with low score', async () => {
+      const inputCode = 'function selfMatch() { return true; }';
+      const mockResults = [
+        createMockResult({ content: inputCode, score: 0.05, metadata: { file: 'src/self.ts' } }),
+        createMockResult({ content: 'function other() {}', score: 0.5, metadata: { file: 'src/other.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleFindSimilar(
+        { code: inputCode },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(1);
+      expect(parsed.results[0].metadata.file).toBe('src/other.ts');
+    });
+
+    it('should keep near-matches even with low score', async () => {
+      const inputCode = 'function selfMatch() { return true; }';
+      const mockResults = [
+        createMockResult({ content: 'function selfMatch() { return false; }', score: 0.05, metadata: { file: 'src/near.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleFindSimilar(
+        { code: inputCode },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(1);
+    });
+
+    it('should keep exact match if score >= 0.1', async () => {
+      const inputCode = 'function selfMatch() { return true; }';
+      const mockResults = [
+        createMockResult({ content: inputCode, score: 0.5, metadata: { file: 'src/self.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleFindSimilar(
+        { code: inputCode },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(1);
+    });
+  });
+
   describe('filtersApplied metadata', () => {
     it('should not include filtersApplied when no filtering occurred', async () => {
       const mockResults = [

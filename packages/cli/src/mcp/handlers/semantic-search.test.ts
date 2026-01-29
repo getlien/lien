@@ -379,6 +379,42 @@ describe('handleSemanticSearch', () => {
     });
   });
 
+  describe('empty result signaling', () => {
+    it('should return empty results with note when all results are not_relevant', async () => {
+      const mockResults = [
+        createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/a.ts' } }),
+        createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/b.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleSemanticSearch(
+        { query: 'something irrelevant' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.note).toBe('No relevant matches found.');
+      expect(parsed.indexInfo).toBeDefined();
+    });
+
+    it('should keep results when at least one is relevant', async () => {
+      const mockResults = [
+        createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/a.ts' } }),
+        createMockResult({ relevance: 'relevant', metadata: { file: 'src/b.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleSemanticSearch(
+        { query: 'partially relevant' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(2);
+    });
+  });
+
   describe('logging', () => {
     it('should log search query', async () => {
       mockVectorDB.search.mockResolvedValue([]);

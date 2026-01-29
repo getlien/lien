@@ -312,6 +312,35 @@ describe('handleListFunctions', () => {
     });
   });
 
+  describe('deduplication', () => {
+    it('should deduplicate results with same file + line range', async () => {
+      const duplicate: SearchResult = {
+        content: 'function testCommand() {}',
+        metadata: {
+          file: 'src/cli.ts',
+          startLine: 1,
+          endLine: 5,
+          type: 'function',
+          language: 'typescript',
+          symbolName: 'testCommand',
+          symbolType: 'function',
+        },
+        score: 1,
+        relevance: 'highly_relevant',
+      };
+
+      mockVectorDB.querySymbols.mockResolvedValue([duplicate, { ...duplicate }]);
+
+      const result = await handleListFunctions(
+        { pattern: '.*Command.*' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(1);
+    });
+  });
+
   describe('index metadata', () => {
     it('should include index metadata in response', async () => {
       mockVectorDB.querySymbols.mockResolvedValue([]);
