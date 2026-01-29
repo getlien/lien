@@ -250,6 +250,36 @@ describe('get_files_context - Helper Functions', () => {
       expect(result[0]).toHaveLength(1);
       expect(result[0][0].metadata.file).toBe('src/utils.ts');
     });
+
+    it('should exclude markdown files from related chunks', async () => {
+      const mockEmbeddings = {
+        embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+      };
+
+      const mockVectorDB = {
+        search: vi.fn().mockResolvedValue([
+          { content: 'code chunk', metadata: { file: 'src/utils.ts', language: 'typescript', startLine: 1, endLine: 10 }, score: 0.9 },
+          { content: '# Auth docs', metadata: { file: 'docs/auth.md', language: 'markdown', startLine: 1, endLine: 5 }, score: 0.85 },
+          { content: 'more code', metadata: { file: 'src/helper.ts', language: 'typescript', startLine: 1, endLine: 8 }, score: 0.8 },
+        ]),
+      };
+
+      const ctx = {
+        vectorDB: mockVectorDB as any,
+        embeddings: mockEmbeddings as any,
+        log: vi.fn(),
+        workspaceRoot,
+      };
+
+      const fileChunksMap = [
+        [{ content: 'auth chunk', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0.9 }],
+      ];
+
+      const result = await findRelatedChunks(['src/auth.ts'], fileChunksMap as any, ctx);
+
+      expect(result[0]).toHaveLength(2);
+      expect(result[0].map((r: any) => r.metadata.file)).toEqual(['src/utils.ts', 'src/helper.ts']);
+    });
   });
 
   describe('findTestAssociations', () => {
