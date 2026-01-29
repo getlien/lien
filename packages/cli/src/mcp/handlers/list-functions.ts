@@ -1,5 +1,6 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { ListFunctionsSchema } from '../schemas/index.js';
+import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
 
@@ -77,12 +78,13 @@ export async function handleListFunctions(
         queryResult = await performContentScan(vectorDB, validatedArgs, log);
       }
 
-      log(`Found ${queryResult.results.length} matches using ${queryResult.method} method`);
+      const dedupedResults = deduplicateResults(queryResult.results);
+      log(`Found ${dedupedResults.length} matches using ${queryResult.method} method`);
 
       return {
         indexInfo: getIndexMetadata(),
         method: queryResult.method,
-        results: queryResult.results,
+        results: shapeResults(dedupedResults, 'list_functions'),
         note: queryResult.method === 'content'
           ? 'Using content search. Run "lien reindex" to enable faster symbol-based queries.'
           : undefined,

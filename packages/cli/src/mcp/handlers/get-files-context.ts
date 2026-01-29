@@ -1,6 +1,7 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetFilesContextSchema } from '../schemas/index.js';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
+import { shapeResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { SearchResult, LocalEmbeddings, VectorDBInterface } from '@liendev/core';
 
@@ -299,11 +300,12 @@ function buildSingleFileResponse(
   indexInfo: IndexInfo,
   note?: string
 ) {
+  const data = filesData[filepath];
   return {
     indexInfo,
     file: filepath,
-    chunks: filesData[filepath].chunks,
-    testAssociations: filesData[filepath].testAssociations,
+    chunks: shapeResults(data.chunks, 'get_files_context'),
+    testAssociations: data.testAssociations,
     ...(note && { note }),
   };
 }
@@ -316,9 +318,16 @@ function buildMultiFileResponse(
   indexInfo: IndexInfo,
   note?: string
 ) {
+  const shaped: Record<string, { chunks: ReturnType<typeof shapeResults>; testAssociations: string[] }> = {};
+  for (const [filepath, data] of Object.entries(filesData)) {
+    shaped[filepath] = {
+      chunks: shapeResults(data.chunks, 'get_files_context'),
+      testAssociations: data.testAssociations,
+    };
+  }
   return {
     indexInfo,
-    files: filesData,
+    files: shaped,
     ...(note && { note }),
   };
 }

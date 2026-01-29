@@ -79,8 +79,8 @@ describe('handleSemanticSearch', () => {
   describe('basic search', () => {
     it('should return search results with indexInfo', async () => {
       const mockResults = [
-        createMockResult({ content: 'function handleAuth() {}' }),
-        createMockResult({ content: 'function validateUser() {}' }),
+        createMockResult({ content: 'function handleAuth() {}', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 } }),
+        createMockResult({ content: 'function validateUser() {}', metadata: { file: 'src/validate.ts', startLine: 1, endLine: 10 } }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
@@ -200,8 +200,8 @@ describe('handleSemanticSearch', () => {
 
     it('should use searchCrossRepo when crossRepo=true and using Qdrant', async () => {
       const mockResults = [
-        createMockResult({ metadata: { repoId: 'repo-a' } }),
-        createMockResult({ metadata: { repoId: 'repo-b' } }),
+        createMockResult({ metadata: { repoId: 'repo-a', file: 'src/a.ts' } }),
+        createMockResult({ metadata: { repoId: 'repo-b', file: 'src/b.ts' } }),
       ];
       mockQdrantDB.searchCrossRepo.mockResolvedValue(mockResults);
 
@@ -224,9 +224,9 @@ describe('handleSemanticSearch', () => {
 
     it('should group results by repository when crossRepo=true', async () => {
       const mockResults = [
-        createMockResult({ content: 'result 1', metadata: { repoId: 'repo-a' } }),
-        createMockResult({ content: 'result 2', metadata: { repoId: 'repo-a' } }),
-        createMockResult({ content: 'result 3', metadata: { repoId: 'repo-b' } }),
+        createMockResult({ content: 'result 1', metadata: { repoId: 'repo-a', file: 'src/a1.ts' } }),
+        createMockResult({ content: 'result 2', metadata: { repoId: 'repo-a', file: 'src/a2.ts' } }),
+        createMockResult({ content: 'result 3', metadata: { repoId: 'repo-b', file: 'src/b1.ts' } }),
       ];
       mockQdrantDB.searchCrossRepo.mockResolvedValue(mockResults);
 
@@ -283,8 +283,8 @@ describe('handleSemanticSearch', () => {
 
     it('should still return results when falling back', async () => {
       const mockResults = [
-        createMockResult({ content: 'fallback result 1' }),
-        createMockResult({ content: 'fallback result 2' }),
+        createMockResult({ content: 'fallback result 1', metadata: { file: 'src/fb1.ts' } }),
+        createMockResult({ content: 'fallback result 2', metadata: { file: 'src/fb2.ts' } }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
@@ -376,6 +376,59 @@ describe('handleSemanticSearch', () => {
         mockCtx
       );
       expect(result2.isError).toBeUndefined();
+    });
+  });
+
+  describe('empty result signaling', () => {
+    it('should return empty results with note when all results are not_relevant', async () => {
+      const mockResults = [
+        createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/a.ts' } }),
+        createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/b.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleSemanticSearch(
+        { query: 'something irrelevant' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.note).toBe('No relevant matches found.');
+      expect(parsed.indexInfo).toBeDefined();
+    });
+
+    it('should merge crossRepo fallback note with not_relevant note', async () => {
+      const mockResults = [
+        createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/a.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleSemanticSearch(
+        { query: 'something irrelevant', crossRepo: true },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.note).toContain('Cross-repo search requires Qdrant backend');
+      expect(parsed.note).toContain('No relevant matches found.');
+    });
+
+    it('should keep results when at least one is relevant', async () => {
+      const mockResults = [
+        createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/a.ts' } }),
+        createMockResult({ relevance: 'relevant', metadata: { file: 'src/b.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleSemanticSearch(
+        { query: 'partially relevant' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(2);
     });
   });
 

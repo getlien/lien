@@ -76,8 +76,8 @@ describe('handleFindSimilar', () => {
   describe('basic search', () => {
     it('should return search results without filters', async () => {
       const mockResults = [
-        createMockResult({ content: 'function fetchUser() {}' }),
-        createMockResult({ content: 'function getUser() {}' }),
+        createMockResult({ content: 'function fetchUser() {}', metadata: { file: 'src/fetch.ts' } }),
+        createMockResult({ content: 'function getUser() {}', metadata: { file: 'src/get.ts' } }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
@@ -111,9 +111,9 @@ describe('handleFindSimilar', () => {
   describe('language filter', () => {
     it('should filter results by language (case-insensitive)', async () => {
       const mockResults = [
-        createMockResult({ metadata: { language: 'typescript' } }),
-        createMockResult({ metadata: { language: 'python' } }),
-        createMockResult({ metadata: { language: 'TypeScript' } }),
+        createMockResult({ metadata: { language: 'typescript', file: 'src/a.ts' } }),
+        createMockResult({ metadata: { language: 'python', file: 'src/b.py' } }),
+        createMockResult({ metadata: { language: 'TypeScript', file: 'src/c.ts' } }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
@@ -221,10 +221,10 @@ describe('handleFindSimilar', () => {
   describe('low-relevance pruning', () => {
     it('should prune not_relevant results', async () => {
       const mockResults = [
-        createMockResult({ relevance: 'highly_relevant', score: 0.5 }),
-        createMockResult({ relevance: 'relevant', score: 1.1 }),
-        createMockResult({ relevance: 'not_relevant', score: 1.6 }),
-        createMockResult({ relevance: 'loosely_related', score: 1.4 }),
+        createMockResult({ relevance: 'highly_relevant', score: 0.5, metadata: { file: 'src/a.ts' } }),
+        createMockResult({ relevance: 'relevant', score: 1.1, metadata: { file: 'src/b.ts' } }),
+        createMockResult({ relevance: 'not_relevant', score: 1.6, metadata: { file: 'src/c.ts' } }),
+        createMockResult({ relevance: 'loosely_related', score: 1.4, metadata: { file: 'src/d.ts' } }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
@@ -241,8 +241,8 @@ describe('handleFindSimilar', () => {
 
     it('should handle all results being pruned', async () => {
       const mockResults = [
-        createMockResult({ relevance: 'not_relevant', score: 1.8 }),
-        createMockResult({ relevance: 'not_relevant', score: 2.0 }),
+        createMockResult({ relevance: 'not_relevant', score: 1.8, metadata: { file: 'src/a.ts' } }),
+        createMockResult({ relevance: 'not_relevant', score: 2.0, metadata: { file: 'src/b.ts' } }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
@@ -346,6 +346,77 @@ describe('handleFindSimilar', () => {
     });
   });
 
+  describe('deduplication', () => {
+    it('should deduplicate results with same file + line range', async () => {
+      const mockResults = [
+        createMockResult({ content: 'first', metadata: { file: 'src/a.ts', startLine: 1, endLine: 5 } }),
+        createMockResult({ content: 'duplicate', metadata: { file: 'src/a.ts', startLine: 1, endLine: 5 } }),
+        createMockResult({ content: 'different', metadata: { file: 'src/b.ts', startLine: 1, endLine: 5 } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleFindSimilar(
+        { code: 'async function test() {}' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(2);
+    });
+  });
+
+  describe('self-match filtering', () => {
+    it('should filter out exact self-matches with low score', async () => {
+      const inputCode = 'function selfMatch() { return true; }';
+      const mockResults = [
+        createMockResult({ content: inputCode, score: 0.05, metadata: { file: 'src/self.ts' } }),
+        createMockResult({ content: 'function other() {}', score: 0.5, metadata: { file: 'src/other.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleFindSimilar(
+        { code: inputCode },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(1);
+      expect(parsed.results[0].metadata.file).toBe('src/other.ts');
+    });
+
+    it('should keep near-matches even with low score', async () => {
+      const inputCode = 'function selfMatch() { return true; }';
+      const mockResults = [
+        createMockResult({ content: 'function selfMatch() { return false; }', score: 0.05, metadata: { file: 'src/near.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleFindSimilar(
+        { code: inputCode },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(1);
+    });
+
+    it('should keep exact match if score >= 0.1', async () => {
+      const inputCode = 'function selfMatch() { return true; }';
+      const mockResults = [
+        createMockResult({ content: inputCode, score: 0.5, metadata: { file: 'src/self.ts' } }),
+      ];
+      mockVectorDB.search.mockResolvedValue(mockResults);
+
+      const result = await handleFindSimilar(
+        { code: inputCode },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(1);
+    });
+  });
+
   describe('filtersApplied metadata', () => {
     it('should not include filtersApplied when no filtering occurred', async () => {
       const mockResults = [
@@ -364,8 +435,8 @@ describe('handleFindSimilar', () => {
 
     it('should include filtersApplied when pruning occurred', async () => {
       const mockResults = [
-        createMockResult({ relevance: 'highly_relevant' }),
-        createMockResult({ relevance: 'not_relevant' }),
+        createMockResult({ relevance: 'highly_relevant', metadata: { file: 'src/a.ts' } }),
+        createMockResult({ relevance: 'not_relevant', metadata: { file: 'src/b.ts' } }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
