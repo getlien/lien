@@ -35,7 +35,7 @@ function createFullResult(): SearchResult {
 }
 
 describe('shapeResultMetadata', () => {
-  it('semantic_search: keeps core fields and exports, strips imports/callSites/halstead/symbols', () => {
+  it('semantic_search: keeps core fields and exports, strips everything else', () => {
     const result = shapeResultMetadata(createFullResult(), 'semantic_search');
     const m = result.metadata;
 
@@ -52,45 +52,26 @@ describe('shapeResultMetadata', () => {
     expect(m.parameters).toEqual(['a', 'b']);
     expect(m.exports).toEqual(['example']);
 
-    // Stripped
-    expect(m.imports).toBeUndefined();
-    expect(m.importedSymbols).toBeUndefined();
-    expect(m.callSites).toBeUndefined();
-    expect(m.symbols).toBeUndefined();
-    expect(m.complexity).toBeUndefined();
-    expect(m.cognitiveComplexity).toBeUndefined();
-    expect(m.halsteadVolume).toBeUndefined();
-    expect(m.halsteadDifficulty).toBeUndefined();
-    expect(m.halsteadEffort).toBeUndefined();
-    expect(m.halsteadBugs).toBeUndefined();
+    // Stripped — only allowed keys should be present
+    const keys = Object.keys(m);
+    expect(keys).not.toContain('imports');
+    expect(keys).not.toContain('importedSymbols');
+    expect(keys).not.toContain('callSites');
+    expect(keys).not.toContain('symbols');
+    expect(keys).not.toContain('complexity');
+    expect(keys).not.toContain('halsteadVolume');
   });
 
-  it('find_similar: same allowlist as semantic_search', () => {
+  it('find_similar: keeps core fields, strips imports/callSites/halstead', () => {
     const result = shapeResultMetadata(createFullResult(), 'find_similar');
     const m = result.metadata;
 
     expect(m.exports).toEqual(['example']);
-    expect(m.imports).toBeUndefined();
-    expect(m.importedSymbols).toBeUndefined();
-    expect(m.callSites).toBeUndefined();
-    expect(m.complexity).toBeUndefined();
-    expect(m.halsteadEffort).toBeUndefined();
-  });
-
-  it('get_files_context: keeps imports, importedSymbols, callSites but strips halstead/symbols', () => {
-    const result = shapeResultMetadata(createFullResult(), 'get_files_context');
-    const m = result.metadata;
-
-    // Kept
-    expect(m.imports).toEqual(['./utils']);
-    expect(m.importedSymbols).toEqual({ './utils': ['helper'] });
-    expect(m.callSites).toEqual([{ symbol: 'helper', line: 5 }]);
-    expect(m.exports).toEqual(['example']);
-
-    // Stripped
-    expect(m.symbols).toBeUndefined();
-    expect(m.complexity).toBeUndefined();
-    expect(m.halsteadVolume).toBeUndefined();
+    const keys = Object.keys(m);
+    expect(keys).not.toContain('imports');
+    expect(keys).not.toContain('callSites');
+    expect(keys).not.toContain('complexity');
+    expect(keys).not.toContain('halsteadEffort');
   });
 
   it('list_functions: keeps symbols but strips imports/callSites/halstead', () => {
@@ -102,33 +83,11 @@ describe('shapeResultMetadata', () => {
     expect(m.exports).toEqual(['example']);
 
     // Stripped
-    expect(m.imports).toBeUndefined();
-    expect(m.importedSymbols).toBeUndefined();
-    expect(m.callSites).toBeUndefined();
-    expect(m.complexity).toBeUndefined();
-    expect(m.halsteadEffort).toBeUndefined();
-  });
-
-  it('get_complexity: keeps halstead/complexity but strips imports/callSites/symbols/exports', () => {
-    const result = shapeResultMetadata(createFullResult(), 'get_complexity');
-    const m = result.metadata;
-
-    // Kept
-    expect(m.complexity).toBe(3);
-    expect(m.cognitiveComplexity).toBe(2);
-    expect(m.halsteadVolume).toBe(100);
-    expect(m.halsteadDifficulty).toBe(5);
-    expect(m.halsteadEffort).toBe(500);
-    expect(m.halsteadBugs).toBe(0.03);
-
-    // Stripped
-    expect(m.imports).toBeUndefined();
-    expect(m.importedSymbols).toBeUndefined();
-    expect(m.callSites).toBeUndefined();
-    expect(m.symbols).toBeUndefined();
-    expect(m.exports).toBeUndefined();
-    expect(m.type).toBeUndefined();
-    expect(m.parameters).toBeUndefined();
+    const keys = Object.keys(m);
+    expect(keys).not.toContain('imports');
+    expect(keys).not.toContain('callSites');
+    expect(keys).not.toContain('complexity');
+    expect(keys).not.toContain('halsteadEffort');
   });
 
   it('preserves content, score, and relevance', () => {
@@ -156,7 +115,7 @@ describe('shapeResultMetadata', () => {
     const result = shapeResultMetadata(sparse, 'semantic_search');
     expect(result.metadata.file).toBe('src/x.ts');
     expect(result.metadata.symbolName).toBeUndefined();
-    expect(result.metadata.imports).toBeUndefined();
+    expect(Object.keys(result.metadata)).not.toContain('imports');
   });
 });
 
@@ -167,8 +126,9 @@ describe('shapeResults', () => {
 
     expect(shaped).toHaveLength(2);
     for (const r of shaped) {
-      expect(r.metadata.imports).toBeUndefined();
-      expect(r.metadata.halsteadEffort).toBeUndefined();
+      const keys = Object.keys(r.metadata);
+      expect(keys).not.toContain('imports');
+      expect(keys).not.toContain('halsteadEffort');
     }
   });
 
@@ -214,5 +174,34 @@ describe('deduplicateResults', () => {
 
   it('handles empty array', () => {
     expect(deduplicateResults([])).toEqual([]);
+  });
+
+  it('keeps results from different repos with same file path and line range', () => {
+    const r1 = {
+      ...createFullResult(),
+      metadata: { ...createFullResult().metadata, repoId: 'repo-a' },
+    };
+    const r2 = {
+      ...createFullResult(),
+      metadata: { ...createFullResult().metadata, repoId: 'repo-b' },
+    };
+
+    const results = deduplicateResults([r1, r2]);
+    expect(results).toHaveLength(2);
+  });
+
+  it('deduplicates results within the same repo', () => {
+    const r1 = {
+      ...createFullResult(),
+      metadata: { ...createFullResult().metadata, repoId: 'repo-a' },
+    };
+    const r2 = {
+      ...createFullResult(),
+      metadata: { ...createFullResult().metadata, repoId: 'repo-a' },
+      content: 'duplicate',
+    };
+
+    const results = deduplicateResults([r1, r2]);
+    expect(results).toHaveLength(1);
   });
 });

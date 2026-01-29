@@ -2,14 +2,13 @@ import type { SearchResult, ChunkMetadata, RelevanceCategory } from '@liendev/co
 
 /**
  * Tool names that support metadata shaping.
- * get_dependents uses its own response format.
+ * get_dependents and get_complexity use their own response formats.
+ * get_files_context nests chunks inside FileData and is not yet wired up.
  */
 export type ToolName =
   | 'semantic_search'
   | 'find_similar'
-  | 'get_files_context'
-  | 'list_functions'
-  | 'get_complexity';
+  | 'list_functions';
 
 /**
  * Slim metadata included in MCP tool responses.
@@ -29,16 +28,7 @@ export interface ToolResultMetadata {
   parentClass?: string;
   parameters?: string[];
   exports?: string[];
-  imports?: string[];
-  importedSymbols?: Record<string, string[]>;
-  callSites?: Array<{ symbol: string; line: number }>;
   symbols?: { functions: string[]; classes: string[]; interfaces: string[] };
-  complexity?: number;
-  cognitiveComplexity?: number;
-  halsteadVolume?: number;
-  halsteadDifficulty?: number;
-  halsteadEffort?: number;
-  halsteadBugs?: number;
   repoId?: string;
 }
 
@@ -70,33 +60,24 @@ const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<keyof ChunkMetadata>> = {
     'symbolName', 'symbolType', 'signature', 'parentClass',
     'parameters', 'exports',
   ]),
-  get_files_context: new Set<keyof ChunkMetadata>([
-    'file', 'startLine', 'endLine', 'language', 'type',
-    'symbolName', 'symbolType', 'signature', 'parentClass',
-    'parameters', 'exports',
-    'imports', 'importedSymbols', 'callSites',
-  ]),
   list_functions: new Set<keyof ChunkMetadata>([
     'file', 'startLine', 'endLine', 'language', 'type',
     'symbolName', 'symbolType', 'signature', 'parentClass',
     'parameters', 'exports', 'symbols',
   ]),
-  get_complexity: new Set<keyof ChunkMetadata>([
-    'file', 'startLine', 'endLine', 'language',
-    'symbolName', 'symbolType', 'signature', 'parentClass',
-    'complexity', 'cognitiveComplexity',
-    'halsteadVolume', 'halsteadDifficulty', 'halsteadEffort', 'halsteadBugs',
-  ]),
 };
 
 /**
- * Deduplicate results by file + startLine + endLine.
+ * Deduplicate results by repoId + file + startLine + endLine.
  * Keeps the first occurrence (highest ranked) of each unique chunk.
+ * Includes repoId so cross-repo searches don't collapse results from
+ * different repos that share the same relative path and line range.
  */
 export function deduplicateResults(results: SearchResult[]): SearchResult[] {
   const seen = new Set<string>();
   return results.filter(r => {
-    const key = `${r.metadata.file}:${r.metadata.startLine}-${r.metadata.endLine}`;
+    const repo = r.metadata.repoId ?? '';
+    const key = `${repo}:${r.metadata.file}:${r.metadata.startLine}-${r.metadata.endLine}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
