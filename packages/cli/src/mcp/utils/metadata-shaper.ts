@@ -101,10 +101,6 @@ export function deduplicateResults(results: SearchResult[]): SearchResult[] {
 }
 
 /**
- * Pick allowed fields from metadata based on tool-specific allowlist.
- * Required fields (file, startLine, endLine) are always set explicitly.
- */
-/**
  * Clean a metadata value by stripping empty strings.
  * Returns null if the value should be omitted entirely.
  */
