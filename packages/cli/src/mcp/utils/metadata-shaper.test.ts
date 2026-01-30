@@ -156,11 +156,18 @@ describe('shapeResultMetadata', () => {
     expect(shaped.metadata.parameters).toEqual(['a: string']);
   });
 
-  it('strips empty strings from symbols arrays', () => {
+  it('omits symbols when all arrays contain only empty strings', () => {
     const result = createFullResult();
     result.metadata.symbols = { functions: [''], classes: [''], interfaces: [''] };
     const shaped = shapeResultMetadata(result, 'get_files_context');
-    expect(shaped.metadata.symbols).toEqual({ functions: [], classes: [], interfaces: [] });
+    expect(Object.keys(shaped.metadata)).not.toContain('symbols');
+  });
+
+  it('keeps symbols when at least one array has non-empty values', () => {
+    const result = createFullResult();
+    result.metadata.symbols = { functions: ['foo'], classes: [''], interfaces: [] };
+    const shaped = shapeResultMetadata(result, 'get_files_context');
+    expect(shaped.metadata.symbols).toEqual({ functions: ['foo'], classes: [], interfaces: [] });
   });
 });
 
