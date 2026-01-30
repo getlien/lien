@@ -117,11 +117,13 @@ function cleanMetadataValue(key: string, value: unknown): unknown | null {
   }
 
   if (key === 'symbols' && typeof value === 'object' && value !== null) {
-    const symbols = value as { functions: string[]; classes: string[]; interfaces: string[] };
+    const symbols = value as Record<string, unknown>;
+    const filterArr = (arr: unknown): string[] =>
+      Array.isArray(arr) ? arr.filter((s: unknown) => s !== '') : [];
     const filtered = {
-      functions: symbols.functions.filter(s => s !== ''),
-      classes: symbols.classes.filter(s => s !== ''),
-      interfaces: symbols.interfaces.filter(s => s !== ''),
+      functions: filterArr(symbols.functions),
+      classes: filterArr(symbols.classes),
+      interfaces: filterArr(symbols.interfaces),
     };
     const hasAny = filtered.functions.length > 0 || filtered.classes.length > 0 || filtered.interfaces.length > 0;
     return hasAny ? filtered : null;
