@@ -11,7 +11,11 @@ export interface Logger {
 }
 
 /**
- * Simple console-based logger for use outside GitHub Actions
+ * Simple console-based logger for use outside GitHub Actions.
+ *
+ * WARNING: Do NOT use this in MCP server contexts where stdout
+ * is reserved for JSON-RPC. Pass a custom Logger that writes
+ * to stderr or a file instead.
  */
 export const consoleLogger: Logger = {
   info: (message: string) => console.log(`[info] ${message}`),

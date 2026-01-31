@@ -24,6 +24,8 @@ export async function cloneRepo(
   logger: Logger,
 ): Promise<CloneResult> {
   const dir = await mkdtemp(join(tmpdir(), 'veille-'));
+
+  // Token is in the URL but never logged — only passed to git directly
   const cloneUrl = `https://x-access-token:${token}@github.com/${repoFullName}.git`;
 
   logger.info(`Cloning ${repoFullName}@${ref} into ${dir}`);
@@ -37,8 +39,11 @@ export async function cloneRepo(
   return {
     dir,
     cleanup: async () => {
-      logger.info(`Cleaning up ${dir}`);
-      await rm(dir, { recursive: true, force: true });
+      try {
+        await rm(dir, { recursive: true, force: true });
+      } catch (error) {
+        logger.warning(`Failed to clean up ${dir}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     },
   };
 }

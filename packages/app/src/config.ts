@@ -25,9 +25,14 @@ export function loadConfig(): AppConfig {
   };
 
   const privateKey = required('GITHUB_APP_PRIVATE_KEY').replace(/\\n/g, '\n');
+  if (!privateKey.includes('-----BEGIN') || !privateKey.includes('-----END')) {
+    throw new Error('GITHUB_APP_PRIVATE_KEY does not appear to be a valid PEM key');
+  }
 
   const allowedOrgIds = process.env.ALLOWED_ORG_IDS
-    ? process.env.ALLOWED_ORG_IDS.split(',').map(id => parseInt(id.trim(), 10))
+    ? process.env.ALLOWED_ORG_IDS.split(',')
+        .map(id => parseInt(id.trim(), 10))
+        .filter(id => !Number.isNaN(id))
     : [];
 
   return {

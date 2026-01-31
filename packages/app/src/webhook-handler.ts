@@ -8,7 +8,6 @@ import {
   type ReviewConfig,
   type Logger,
   consoleLogger,
-  orchestrateAnalysis,
   handleAnalysisOutputs,
   postReviewIfNeeded,
   runComplexityAnalysis,
@@ -161,7 +160,8 @@ export async function handlePullRequest(
 
     logger.info(`Review complete for PR #${prContext.pullNumber}`);
   } finally {
-    if (headClone) await headClone.cleanup();
-    if (baseClone) await baseClone.cleanup();
+    // Cleanup independently so one failure doesn't prevent the other
+    if (headClone) await headClone.cleanup().catch(() => {});
+    if (baseClone) await baseClone.cleanup().catch(() => {});
   }
 }

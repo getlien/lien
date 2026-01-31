@@ -8,7 +8,7 @@
 import http from 'node:http';
 
 import { App } from '@octokit/app';
-import { Webhooks, createNodeMiddleware } from '@octokit/webhooks';
+import { createNodeMiddleware } from '@octokit/webhooks';
 
 import { consoleLogger, type Logger } from '@liendev/review';
 
@@ -39,15 +39,16 @@ function setupWebhooks(app: App, config: AppConfig, queue: JobQueue): void {
     logger.info(`Received PR event for ${repoFullName}#${payload.pull_request.number}`);
 
     // Get installation token for cloning
-    const installationId = (payload as any).installation?.id as number | undefined;
-    if (!installationId) {
-      logger.error('No installation ID in webhook payload');
+    const installationId = (payload as Record<string, unknown>).installation;
+    if (!installationId || typeof (installationId as Record<string, unknown>).id !== 'number') {
+      logger.error('No valid installation ID in webhook payload');
       return;
     }
+    const instId = (installationId as { id: number }).id;
 
     const { token } = await (octokit as any).auth({
       type: 'installation',
-      installationId,
+      installationId: instId,
     });
 
     queue.enqueue(async () => {
@@ -62,7 +63,7 @@ function setupWebhooks(app: App, config: AppConfig, queue: JobQueue): void {
   });
 }
 
-function startServer(app: App, config: AppConfig): void {
+function startServer(app: App, config: AppConfig, queue: JobQueue): http.Server {
   const middleware = createNodeMiddleware(app.webhooks, {
     path: '/api/webhooks',
   });
@@ -71,7 +72,10 @@ function startServer(app: App, config: AppConfig): void {
     // Health check endpoint
     if (req.url === '/health' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok' }));
+      res.end(JSON.stringify({
+        status: 'ok',
+        queue: { size: queue.size, processing: queue.isProcessing },
+      }));
       return;
     }
 
@@ -84,6 +88,38 @@ function startServer(app: App, config: AppConfig): void {
     logger.info(`Webhook endpoint: POST /api/webhooks`);
     logger.info(`Health check: GET /health`);
   });
+
+  return server;
+}
+
+/**
+ * Graceful shutdown — stop accepting connections and wait for queue to drain
+ */
+function setupGracefulShutdown(server: http.Server, queue: JobQueue): void {
+  const shutdown = () => {
+    logger.info('Shutting down...');
+    server.close(() => {
+      logger.info('HTTP server closed');
+    });
+
+    // Wait for queue to drain (with timeout)
+    const timeout = setTimeout(() => {
+      logger.warning('Shutdown timeout — exiting with pending jobs');
+      process.exit(1);
+    }, 30_000);
+
+    const check = setInterval(() => {
+      if (!queue.isProcessing && queue.size === 0) {
+        clearInterval(check);
+        clearTimeout(timeout);
+        logger.info('Queue drained, exiting');
+        process.exit(0);
+      }
+    }, 500);
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -94,7 +130,8 @@ try {
   const queue = new JobQueue(logger);
 
   setupWebhooks(app, config, queue);
-  startServer(app, config);
+  const server = startServer(app, config, queue);
+  setupGracefulShutdown(server, queue);
 
   logger.info('Veille GitHub App started');
   if (config.allowedOrgIds.length > 0) {
