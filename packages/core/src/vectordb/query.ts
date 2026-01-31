@@ -354,6 +354,7 @@ export async function scanWithFilter(
   options: {
     language?: string;
     pattern?: string;
+    symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }
 ): Promise<SearchResult[]> {
@@ -361,7 +362,7 @@ export async function scanWithFilter(
     throw new DatabaseError('Vector database not initialized');
   }
 
-  const { language, pattern, limit = 100 } = options;
+  const { language, pattern, symbolType, limit = 100 } = options;
 
   try {
     // Get total row count to ensure we scan all records
@@ -386,6 +387,13 @@ export async function scanWithFilter(
       const regex = new RegExp(pattern, 'i');
       filtered = filtered.filter((r: DBRecord) =>
         regex.test(r.content) || regex.test(r.file)
+      );
+    }
+
+    if (symbolType) {
+      const allowedTypes = SYMBOL_TYPE_MATCHES[symbolType];
+      filtered = filtered.filter((r: DBRecord) =>
+        r.symbolType != null && allowedTypes?.has(r.symbolType)
       );
     }
 

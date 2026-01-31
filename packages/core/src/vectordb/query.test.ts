@@ -198,6 +198,57 @@ describe('VectorDB Query Operations', () => {
       expect(results.length).toBeGreaterThan(0);
     });
 
+    it('should filter by symbolType', async () => {
+      const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'function test() {}',
+              file: 'src/test.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'test',
+              symbolType: 'function',
+            },
+            {
+              content: 'class TestClass {}',
+              file: 'src/test.ts',
+              startLine: 5,
+              endLine: 10,
+              type: 'class',
+              language: 'typescript',
+              symbolName: 'TestClass',
+              symbolType: 'class',
+            },
+            {
+              content: 'getName() { return this.name; }',
+              file: 'src/test.ts',
+              startLine: 12,
+              endLine: 14,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'getName',
+              symbolType: 'method',
+            },
+          ]),
+        }),
+      };
+
+      const classResults = await scanWithFilter(mockTable, { symbolType: 'class', limit: 10 });
+      expect(classResults).toHaveLength(1);
+      expect(classResults[0].metadata.symbolType).toBe('class');
+
+      const funcResults = await scanWithFilter(mockTable, { symbolType: 'function', limit: 10 });
+      // symbolType 'function' matches both 'function' and 'method'
+      expect(funcResults).toHaveLength(2);
+      expect(funcResults.map(r => r.metadata.symbolType)).toEqual(['function', 'method']);
+    });
+
     it('should filter out empty string arrays from AST metadata', async () => {
       const mockTable = {
         countRows: vi.fn().mockResolvedValue(10),
