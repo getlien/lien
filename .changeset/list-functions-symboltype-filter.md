@@ -1,6 +1,6 @@
 ---
-'@liendev/lien': patch
-'@liendev/core': patch
+'@liendev/lien': minor
+'@liendev/core': minor
 ---
 
 feat(mcp): add symbolType filter to list_functions tool
