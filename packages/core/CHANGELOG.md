@@ -1,5 +1,16 @@
 # @liendev/core
 
+## 0.30.0
+
+### Minor Changes
+
+- 02dbd79: feat(mcp): add symbolType filter to list_functions tool
+
+  Adds an optional `symbolType` parameter to the `list_functions` MCP tool,
+  allowing callers to filter results by symbol kind: function, method, class,
+  or interface. The `function` filter includes methods for backward compatibility;
+  use `method` to target only class/object methods.
+
 ## 0.29.1
 
 ### Patch Changes
