@@ -149,7 +149,7 @@ export class VectorDB implements VectorDBInterface {
   async querySymbols(options: {
     language?: string;
     pattern?: string;
-    symbolType?: 'function' | 'class' | 'interface';
+    symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }): Promise<SearchResult[]> {
     if (!this.table) {

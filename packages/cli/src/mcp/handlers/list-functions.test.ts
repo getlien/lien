@@ -75,6 +75,7 @@ describe('handleListFunctions', () => {
       expect(mockVectorDB.querySymbols).toHaveBeenCalledWith({
         language: undefined,
         pattern: '.*Command.*',
+        symbolType: undefined,
         limit: 50,
       });
       expect(mockVectorDB.scanWithFilter).not.toHaveBeenCalled();
@@ -82,6 +83,88 @@ describe('handleListFunctions', () => {
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.method).toBe('symbols');
       expect(parsed.results).toHaveLength(1);
+    });
+  });
+
+  describe('symbolType filter', () => {
+    it('should pass symbolType to querySymbols', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([
+        {
+          content: 'class UserService {}',
+          metadata: {
+            file: 'src/user.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'class',
+            language: 'typescript',
+            symbolName: 'UserService',
+            symbolType: 'class',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions(
+        { symbolType: 'class' },
+        mockCtx
+      );
+
+      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith({
+        language: undefined,
+        pattern: undefined,
+        symbolType: 'class',
+        limit: 50,
+      });
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.method).toBe('symbols');
+      expect(parsed.results).toHaveLength(1);
+    });
+
+    it('should return all types when symbolType is omitted', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([
+        {
+          content: 'function helper() {}',
+          metadata: {
+            file: 'src/utils.ts',
+            startLine: 1,
+            endLine: 3,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'helper',
+            symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'class MyClass {}',
+          metadata: {
+            file: 'src/class.ts',
+            startLine: 1,
+            endLine: 5,
+            type: 'class',
+            language: 'typescript',
+            symbolName: 'MyClass',
+            symbolType: 'class',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions({}, mockCtx);
+
+      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith({
+        language: undefined,
+        pattern: undefined,
+        symbolType: undefined,
+        limit: 50,
+      });
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(2);
     });
   });
 

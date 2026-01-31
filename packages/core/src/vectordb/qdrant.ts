@@ -287,7 +287,7 @@ export class QdrantDB implements VectorDBInterface {
   private buildBaseFilter(options: {
     language?: string;
     pattern?: string;
-    symbolType?: 'function' | 'class' | 'interface';
+    symbolType?: 'function' | 'method' | 'class' | 'interface';
     repoIds?: string[];
     branch?: string;
     includeCurrentRepo?: boolean;
@@ -649,7 +649,7 @@ export class QdrantDB implements VectorDBInterface {
   async querySymbols(options: {
     language?: string;
     pattern?: string;
-    symbolType?: 'function' | 'class' | 'interface';
+    symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }): Promise<SearchResult[]> {
     const filter = this.buildBaseFilter({

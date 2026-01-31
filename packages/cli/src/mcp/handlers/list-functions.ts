@@ -63,6 +63,7 @@ export async function handleListFunctions(
         const results = await vectorDB.querySymbols({
           language: validatedArgs.language,
           pattern: validatedArgs.pattern,
+          symbolType: validatedArgs.symbolType,
           limit: 50,
         });
 
