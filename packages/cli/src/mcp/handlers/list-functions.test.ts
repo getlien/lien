@@ -158,6 +158,55 @@ describe('handleListFunctions', () => {
       expect(parsed.results[0].metadata.symbolType).toBe('method');
     });
 
+    it('should include methods when symbolType is function in content scan fallback', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([]);
+      mockVectorDB.scanWithFilter.mockResolvedValue([
+        {
+          content: 'function standalone() {}',
+          metadata: {
+            file: 'src/utils.ts',
+            symbolName: 'standalone',
+            symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'getName() { return this.name; }',
+          metadata: {
+            file: 'src/user.ts',
+            symbolName: 'getName',
+            symbolType: 'method',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'class UserService {}',
+          metadata: {
+            file: 'src/user.ts',
+            symbolName: 'UserService',
+            symbolType: 'class',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions(
+        { symbolType: 'function' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      // symbolType: 'function' should match both functions and methods
+      expect(parsed.results).toHaveLength(2);
+      expect(parsed.results.map((r: any) => r.metadata.symbolType)).toEqual([
+        'function',
+        'method',
+      ]);
+    });
+
     it('should return all types when symbolType is omitted', async () => {
       mockVectorDB.querySymbols.mockResolvedValue([
         {

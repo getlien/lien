@@ -98,6 +98,17 @@ class QdrantFilterBuilder {
     return this;
   }
 
+  addSymbolTypes(symbolTypes: string[]): this {
+    const cleaned = symbolTypes.map(s => s.trim()).filter(s => s.length > 0);
+    if (cleaned.length === 0) {
+      throw new Error(
+        'Invalid symbolTypes: at least one non-empty, non-whitespace string is required.'
+      );
+    }
+    this.filter.must.push({ key: 'symbolType', match: { any: cleaned } });
+    return this;
+  }
+
   addPattern(pattern: string, key: 'file' | 'symbolName' = 'file'): this {
     const cleanedPattern = pattern.trim();
     if (cleanedPattern.length === 0) {
@@ -317,7 +328,12 @@ export class QdrantDB implements VectorDBInterface {
 
     // Validate symbolType is non-empty if explicitly provided (even if empty string)
     if (options.symbolType !== undefined) {
-      builder.addSymbolType(options.symbolType);
+      if (options.symbolType === 'function') {
+        // Match both functions and methods for backward compatibility
+        builder.addSymbolTypes(['function', 'method']);
+      } else {
+        builder.addSymbolType(options.symbolType);
+      }
     }
 
     // Validate pattern is non-empty if explicitly provided (even if empty string)

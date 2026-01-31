@@ -4,6 +4,14 @@ import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
 
+/** Maps symbolType filter values to the set of matching record types */
+const SYMBOL_TYPE_MATCHES: Record<string, Set<string>> = {
+  function: new Set(['function', 'method']),
+  method: new Set(['method']),
+  class: new Set(['class']),
+  interface: new Set(['interface']),
+};
+
 interface QueryResult {
   results: SearchResult[];
   method: 'symbols' | 'content';
@@ -34,9 +42,13 @@ async function performContentScan(
     });
   }
 
-  // Filter by symbolType if provided
+  // Filter by symbolType if provided (using same matching logic as primary query path)
   if (args.symbolType) {
-    results = results.filter(r => r.metadata?.symbolType === args.symbolType);
+    const allowedTypes = SYMBOL_TYPE_MATCHES[args.symbolType];
+    results = results.filter(r => {
+      const recordType = r.metadata?.symbolType;
+      return recordType && allowedTypes?.has(recordType);
+    });
   }
 
   return {
