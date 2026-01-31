@@ -40,6 +40,7 @@ import {
   formatReviewComment,
   getViolationKey,
   buildDescriptionBadge,
+  buildHeaderLine,
   getMetricLabel,
   formatComplexityValue,
   formatThresholdValue,
@@ -656,7 +657,20 @@ function getMetricEmoji(metricType: string): string {
 }
 
 /**
+ * Format a single uncovered violation line
+ */
+function formatUncoveredLine(v: ComplexityViolation, deltaMap: Map<string, ComplexityDelta>): string {
+  const delta = deltaMap.get(createDeltaKey(v));
+  const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+  const emoji = getMetricEmoji(v.metricType);
+  const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
+  const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
+  return `* \`${v.symbolName}\` in \`${v.filepath}\`: ${emoji} ${metricLabel} ${valueDisplay}${deltaStr}`;
+}
+
+/**
  * Build uncovered violations note for summary
+ * Splits into new/worsened (shown prominently) vs pre-existing (collapsed)
  */
 function buildUncoveredNote(
   uncoveredViolations: ComplexityViolation[],
@@ -664,18 +678,38 @@ function buildUncoveredNote(
 ): string {
   if (uncoveredViolations.length === 0) return '';
 
-  const uncoveredList = uncoveredViolations
-    .map(v => {
-      const delta = deltaMap.get(createDeltaKey(v));
-      const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-      const emoji = getMetricEmoji(v.metricType);
-      const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
-      const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
-      return `* \`${v.symbolName}\` in \`${v.filepath}\`: ${emoji} ${metricLabel} ${valueDisplay}${deltaStr}`;
-    })
-    .join('\n');
+  // Split uncovered into new/worsened vs pre-existing
+  const newOrWorsened = uncoveredViolations.filter(v => {
+    const delta = deltaMap.get(createDeltaKey(v));
+    return delta && (delta.severity === 'new' || delta.severity === 'warning' || delta.severity === 'error') && (delta.severity === 'new' || delta.delta > 0);
+  });
 
-  return `\n\n<details>\n<summary>⚠️ ${uncoveredViolations.length} violation${uncoveredViolations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${uncoveredList}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
+  const preExisting = uncoveredViolations.filter(v => {
+    const delta = deltaMap.get(createDeltaKey(v));
+    return !delta || delta.delta === 0;
+  });
+
+  let result = '';
+
+  // New/worsened: show prominently (not collapsed)
+  if (newOrWorsened.length > 0) {
+    const list = newOrWorsened.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
+    result += `\n\n⚠️ **${newOrWorsened.length} new/worsened violation${newOrWorsened.length === 1 ? '' : 's'} outside diff:**\n\n${list}`;
+  }
+
+  // Pre-existing: collapsed, informational tone
+  if (preExisting.length > 0) {
+    const list = preExisting.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
+    result += `\n\n<details>\n<summary>ℹ️ ${preExisting.length} pre-existing violation${preExisting.length === 1 ? '' : 's'} outside diff</summary>\n\n${list}\n\n> *These violations existed before this PR. No action required, but consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
+  }
+
+  // Fallback: if no delta data, show all in collapsed section (legacy behavior)
+  if (newOrWorsened.length === 0 && preExisting.length === 0) {
+    const list = uncoveredViolations.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
+    result += `\n\n<details>\n<summary>⚠️ ${uncoveredViolations.length} violation${uncoveredViolations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${list}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
+  }
+
+  return result;
 }
 
 /**
@@ -730,12 +764,20 @@ function buildMetricBreakdown(deltaByMetric: Record<string, number>): string {
 
 /**
  * Format delta display with metric breakdown and summary
+ * When all deltas are zero, shows a simple "no change" message
  */
 function formatDeltaDisplay(deltas: ComplexityDelta[] | null): string {
   if (!deltas || deltas.length === 0) return '';
 
   const deltaSummary = calculateDeltaSummary(deltas);
   const deltaByMetric = groupDeltasByMetric(deltas);
+
+  // When nothing changed, keep it simple
+  // Note: pre-existing violations may have severity 'warning' but delta=0
+  if (deltaSummary.totalDelta === 0 && deltaSummary.improved === 0 && deltaSummary.newFunctions === 0) {
+    return '\n\n**Complexity:** No change from this PR.';
+  }
+
   const metricBreakdown = buildMetricBreakdown(deltaByMetric);
   const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
 
@@ -756,11 +798,12 @@ function buildReviewSummary(
   const { summary } = report;
   const costDisplay = formatCostDisplay(getTokenUsage());
   const deltaDisplay = formatDeltaDisplay(deltas);
+  const headerLine = buildHeaderLine(summary.totalViolations, deltas);
 
   return `<!-- lien-ai-review -->
 ## 👁️ Veille
 
-${summary.totalViolations} issue${summary.totalViolations === 1 ? '' : 's'} spotted in this PR.${deltaDisplay}
+${headerLine}${deltaDisplay}
 
 See inline comments on the diff for specific suggestions.${uncoveredNote}
 

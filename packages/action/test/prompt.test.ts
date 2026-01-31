@@ -6,9 +6,11 @@ import {
   getViolationKey,
   buildBatchedCommentsPrompt,
   buildDescriptionBadge,
+  buildHeaderLine,
 } from '../src/prompt.js';
 import type { DeltaSummary } from '../src/types.js';
 import type { ComplexityReport, PRContext } from '../src/types.js';
+import type { ComplexityDelta } from '../src/delta.js';
 
 const mockPRContext: PRContext = {
   owner: 'testowner',
@@ -914,6 +916,131 @@ describe('prompt', () => {
       expect(prompt).not.toContain('src/dep10.ts');
       // Should show "... (and more)" note
       expect(prompt).toContain('... (and more)');
+    });
+  });
+
+  describe('buildHeaderLine', () => {
+    it('should fall back to total count when no deltas', () => {
+      const header = buildHeaderLine(7, null);
+      expect(header).toBe('7 issues spotted in this PR.');
+    });
+
+    it('should fall back to total count with empty deltas', () => {
+      const header = buildHeaderLine(3, []);
+      expect(header).toBe('3 issues spotted in this PR.');
+    });
+
+    it('should handle singular issue', () => {
+      const header = buildHeaderLine(1, null);
+      expect(header).toBe('1 issue spotted in this PR.');
+    });
+
+    it('should show "No new complexity" when all violations are pre-existing (delta=0)', () => {
+      const deltas: ComplexityDelta[] = [
+        { filepath: 'a.ts', symbolName: 'fn1', symbolType: 'function', startLine: 1, metricType: 'cyclomatic', baseComplexity: 20, headComplexity: 20, delta: 0, threshold: 15, severity: 'warning' },
+        { filepath: 'a.ts', symbolName: 'fn2', symbolType: 'function', startLine: 10, metricType: 'cognitive', baseComplexity: 18, headComplexity: 18, delta: 0, threshold: 15, severity: 'warning' },
+      ];
+      const header = buildHeaderLine(2, deltas);
+      expect(header).toContain('No new complexity introduced.');
+      expect(header).toContain('2 pre-existing issues in touched files.');
+    });
+
+    it('should show new count when PR introduces new violations', () => {
+      const deltas: ComplexityDelta[] = [
+        { filepath: 'a.ts', symbolName: 'fn1', symbolType: 'function', startLine: 1, metricType: 'cyclomatic', baseComplexity: null, headComplexity: 20, delta: 20, threshold: 15, severity: 'new' },
+        { filepath: 'a.ts', symbolName: 'fn2', symbolType: 'function', startLine: 10, metricType: 'cognitive', baseComplexity: 18, headComplexity: 18, delta: 0, threshold: 15, severity: 'warning' },
+      ];
+      const header = buildHeaderLine(2, deltas);
+      expect(header).toContain('1 new issue spotted in this PR.');
+      expect(header).toContain('1 pre-existing issue in touched files.');
+    });
+
+    it('should count worsened violations as new', () => {
+      const deltas: ComplexityDelta[] = [
+        { filepath: 'a.ts', symbolName: 'fn1', symbolType: 'function', startLine: 1, metricType: 'cyclomatic', baseComplexity: 16, headComplexity: 25, delta: 9, threshold: 15, severity: 'warning' },
+        { filepath: 'a.ts', symbolName: 'fn2', symbolType: 'function', startLine: 10, metricType: 'cognitive', baseComplexity: 12, headComplexity: 18, delta: 6, threshold: 15, severity: 'error' },
+      ];
+      const header = buildHeaderLine(2, deltas);
+      expect(header).toContain('2 new issues spotted in this PR.');
+      expect(header).not.toContain('pre-existing');
+    });
+
+    it('should note improved functions', () => {
+      const deltas: ComplexityDelta[] = [
+        { filepath: 'a.ts', symbolName: 'fn1', symbolType: 'function', startLine: 1, metricType: 'cyclomatic', baseComplexity: 25, headComplexity: 18, delta: -7, threshold: 15, severity: 'improved' },
+        { filepath: 'a.ts', symbolName: 'fn2', symbolType: 'function', startLine: 10, metricType: 'cognitive', baseComplexity: 18, headComplexity: 18, delta: 0, threshold: 15, severity: 'warning' },
+      ];
+      const header = buildHeaderLine(2, deltas);
+      expect(header).toContain('No new complexity introduced.');
+      expect(header).toContain('1 function improved.');
+      expect(header).toContain('pre-existing');
+    });
+  });
+
+  describe('formatReviewComment with new/pre-existing separation', () => {
+    it('should show new vs pre-existing header when deltas provided', () => {
+      const deltas: ComplexityDelta[] = [
+        { filepath: 'src/utils.ts', symbolName: 'processData', symbolType: 'function', startLine: 10, metricType: 'cyclomatic', baseComplexity: 20, headComplexity: 23, delta: 3, threshold: 15, severity: 'warning' },
+        { filepath: 'src/utils.ts', symbolName: 'validateInput', symbolType: 'function', startLine: 60, metricType: 'cyclomatic', baseComplexity: 12, headComplexity: 12, delta: 0, threshold: 15, severity: 'warning' },
+        { filepath: 'src/handler.ts', symbolName: 'handleRequest', symbolType: 'function', startLine: 5, metricType: 'cyclomatic', baseComplexity: 11, headComplexity: 11, delta: 0, threshold: 15, severity: 'warning' },
+      ];
+      const comment = formatReviewComment('Review', mockReport, false, undefined, deltas);
+      expect(comment).toContain('1 new issue spotted in this PR.');
+      expect(comment).toContain('2 pre-existing issues in touched files.');
+    });
+
+    it('should show "No new complexity" when all deltas are zero', () => {
+      const deltas: ComplexityDelta[] = [
+        { filepath: 'src/utils.ts', symbolName: 'processData', symbolType: 'function', startLine: 10, metricType: 'cyclomatic', baseComplexity: 23, headComplexity: 23, delta: 0, threshold: 15, severity: 'warning' },
+      ];
+      const reportOneViolation: ComplexityReport = {
+        ...mockReport,
+        summary: { ...mockReport.summary, totalViolations: 1 },
+      };
+      const comment = formatReviewComment('Review', reportOneViolation, false, undefined, deltas);
+      expect(comment).toContain('No new complexity introduced.');
+      expect(comment).toContain('1 pre-existing issue in touched files.');
+      expect(comment).toContain('**Complexity:** No change from this PR.');
+    });
+  });
+
+  describe('buildReviewPrompt with new/pre-existing separation', () => {
+    it('should separate violations into new vs pre-existing when deltas provided', () => {
+      // Use a report with metricType set on violations to match delta keys
+      const reportWithMetrics: ComplexityReport = {
+        summary: mockReport.summary,
+        files: {
+          'src/utils.ts': {
+            violations: [
+              { ...mockReport.files['src/utils.ts'].violations[0], metricType: 'cyclomatic' },
+            ],
+            dependents: [],
+            testAssociations: [],
+            riskLevel: 'high',
+          },
+          'src/handler.ts': {
+            violations: [
+              { ...mockReport.files['src/handler.ts'].violations[0], metricType: 'cyclomatic' },
+            ],
+            dependents: [],
+            testAssociations: [],
+            riskLevel: 'medium',
+          },
+        },
+      };
+      const deltas: ComplexityDelta[] = [
+        { filepath: 'src/utils.ts', symbolName: 'processData', symbolType: 'function', startLine: 10, metricType: 'cyclomatic', baseComplexity: null, headComplexity: 23, delta: 23, threshold: 15, severity: 'new' },
+        { filepath: 'src/handler.ts', symbolName: 'handleRequest', symbolType: 'function', startLine: 5, metricType: 'cyclomatic', baseComplexity: 11, headComplexity: 11, delta: 0, threshold: 15, severity: 'warning' },
+      ];
+      const prompt = buildReviewPrompt(reportWithMetrics, mockPRContext, new Map(), deltas);
+      expect(prompt).toContain('New/Worsened Violations');
+      expect(prompt).toContain('Pre-existing Violations');
+    });
+
+    it('should not separate when no deltas provided', () => {
+      const prompt = buildReviewPrompt(mockReport, mockPRContext, new Map());
+      expect(prompt).not.toContain('New/Worsened Violations');
+      expect(prompt).not.toContain('Pre-existing Violations');
     });
   });
 });

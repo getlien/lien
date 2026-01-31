@@ -230,23 +230,76 @@ function buildFileContext(filepath: string, fileData: ComplexityReport['files'][
 }
 
 /**
+ * Check if a violation is new or worsened based on delta data
+ */
+function isNewOrWorsened(v: ComplexityViolation, deltaMap: Map<string, ComplexityDelta>): boolean {
+  const delta = deltaMap.get(createDeltaKey(v));
+  return !!delta && (delta.severity === 'new' || delta.delta > 0);
+}
+
+/**
  * Build violations summary grouped by file
+ * When delta data is available, separates new/worsened from pre-existing
  */
 function buildViolationsSummary(
   files: ComplexityReport['files'],
   deltaMap: Map<string, ComplexityDelta>
 ): string {
-  return Object.entries(files)
+  const hasDeltaData = deltaMap.size > 0;
+
+  if (!hasDeltaData) {
+    // No delta data - show all violations without distinction
+    return Object.entries(files)
+      .filter(([_, data]) => data.violations.length > 0)
+      .map(([filepath, data]) => {
+        const violationList = data.violations
+          .map(v => formatViolationLine(v, deltaMap))
+          .join('\n');
+        const dependencyContext = buildDependencyContext(data);
+        const fileContext = buildFileContext(filepath, data);
+        return `**${filepath}** (risk: ${data.riskLevel})${fileContext}\n${violationList}${dependencyContext}`;
+      })
+      .join('\n\n');
+  }
+
+  // With delta data, separate into new/worsened vs pre-existing
+  const allViolations = Object.entries(files)
     .filter(([_, data]) => data.violations.length > 0)
-    .map(([filepath, data]) => {
-      const violationList = data.violations
-        .map(v => formatViolationLine(v, deltaMap))
-        .join('\n');
-      const dependencyContext = buildDependencyContext(data);
-      const fileContext = buildFileContext(filepath, data);
-      return `**${filepath}** (risk: ${data.riskLevel})${fileContext}\n${violationList}${dependencyContext}`;
-    })
-    .join('\n\n');
+    .flatMap(([_, data]) => data.violations);
+
+  const newViolations = allViolations.filter(v => isNewOrWorsened(v, deltaMap));
+  const preExisting = allViolations.filter(v => !isNewOrWorsened(v, deltaMap));
+
+  const formatFileGroup = (violations: ComplexityViolation[]) => {
+    const byFile = new Map<string, ComplexityViolation[]>();
+    for (const v of violations) {
+      const existing = byFile.get(v.filepath) || [];
+      existing.push(v);
+      byFile.set(v.filepath, existing);
+    }
+
+    return Array.from(byFile.entries())
+      .map(([filepath, vs]) => {
+        const fileData = files[filepath];
+        const violationList = vs.map(v => formatViolationLine(v, deltaMap)).join('\n');
+        const dependencyContext = fileData ? buildDependencyContext(fileData) : '';
+        const fileContext = fileData ? buildFileContext(filepath, fileData) : '';
+        return `**${filepath}** (risk: ${fileData?.riskLevel || 'unknown'})${fileContext}\n${violationList}${dependencyContext}`;
+      })
+      .join('\n\n');
+  };
+
+  const sections: string[] = [];
+
+  if (newViolations.length > 0) {
+    sections.push(`### New/Worsened Violations (introduced or worsened in this PR)\n\n${formatFileGroup(newViolations)}`);
+  }
+
+  if (preExisting.length > 0) {
+    sections.push(`### Pre-existing Violations (in files touched by this PR)\n\n${formatFileGroup(preExisting)}`);
+  }
+
+  return sections.join('\n\n');
 }
 
 /**
@@ -449,14 +502,22 @@ function getTrendEmoji(totalDelta: number): string {
 
 /**
  * Format delta display with per-metric breakdown
+ * When all deltas are zero, shows a simple "no change" message
  */
 function formatDeltaDisplay(deltas: ComplexityDelta[] | null | undefined): string {
   if (!deltas || deltas.length === 0) return '';
-  
+
   const { improved, degraded } = categorizeDeltas(deltas);
   const deltaByMetric = groupDeltasByMetric(deltas);
-  const metricBreakdown = buildMetricBreakdownForDisplay(deltaByMetric);
   const totalDelta = Object.values(deltaByMetric).reduce((sum, v) => sum + v, 0);
+
+  // When nothing changed, keep it simple
+  // Note: pre-existing violations may have severity 'warning' but delta=0
+  if (totalDelta === 0 && improved === 0) {
+    return '\n\n**Complexity:** No change from this PR.';
+  }
+
+  const metricBreakdown = buildMetricBreakdownForDisplay(deltaByMetric);
   const trend = getTrendEmoji(totalDelta);
 
   let display = `\n\n**Complexity Change:** ${metricBreakdown} ${trend}`;
@@ -482,6 +543,61 @@ function formatFallbackNote(isFallback: boolean): string {
 }
 
 /**
+ * Count new/worsened vs pre-existing violations from deltas
+ */
+function countViolationsByNovelty(
+  totalViolations: number,
+  deltas: ComplexityDelta[] | null | undefined
+): { newCount: number; preExistingCount: number; improvedCount: number } {
+  if (!deltas || deltas.length === 0) {
+    return { newCount: 0, preExistingCount: 0, improvedCount: 0 };
+  }
+
+  const newCount = deltas.filter(d =>
+    d.severity === 'new' || d.severity === 'warning' || d.severity === 'error'
+  ).filter(d => d.severity === 'new' || d.delta > 0).length;
+
+  const improvedCount = deltas.filter(d => d.severity === 'improved').length;
+
+  const preExistingCount = Math.max(0, totalViolations - newCount);
+
+  return { newCount, preExistingCount, improvedCount };
+}
+
+/**
+ * Build the header line distinguishing new vs pre-existing violations
+ */
+export function buildHeaderLine(
+  totalViolations: number,
+  deltas: ComplexityDelta[] | null | undefined
+): string {
+  const { newCount, preExistingCount, improvedCount } = countViolationsByNovelty(totalViolations, deltas);
+
+  // No delta data available - fall back to old behavior
+  if (!deltas || deltas.length === 0) {
+    return `${totalViolations} issue${totalViolations === 1 ? '' : 's'} spotted in this PR.`;
+  }
+
+  const parts: string[] = [];
+
+  if (newCount > 0) {
+    parts.push(`${newCount} new issue${newCount === 1 ? '' : 's'} spotted in this PR.`);
+  } else {
+    parts.push('No new complexity introduced.');
+  }
+
+  if (improvedCount > 0) {
+    parts.push(`${improvedCount} function${improvedCount === 1 ? '' : 's'} improved.`);
+  }
+
+  if (preExistingCount > 0) {
+    parts.push(`${preExistingCount} pre-existing issue${preExistingCount === 1 ? '' : 's'} in touched files.`);
+  }
+
+  return parts.join(' ');
+}
+
+/**
  * Format the AI review as a GitHub comment
  */
 export function formatReviewComment(
@@ -497,10 +613,12 @@ export function formatReviewComment(
   const fallbackNote = formatFallbackNote(isFallback);
   const tokenStats = formatTokenStats(tokenUsage);
 
+  const headerLine = buildHeaderLine(summary.totalViolations, deltas);
+
   return `<!-- lien-ai-review -->
 ## 👁️ Veille
 
-${summary.totalViolations} issue${summary.totalViolations === 1 ? '' : 's'} spotted in this PR.${deltaDisplay}${fallbackNote}
+${headerLine}${deltaDisplay}${fallbackNote}
 
 ---
 
