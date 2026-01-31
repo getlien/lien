@@ -17,4 +17,6 @@ services:
     deploy:
       resources:
         limits:
+          # Embedding model (~1GB) + tree-sitter + LanceDB + two git clones
+          # Sequential queue ensures only one PR analyzed at a time
           memory: 8g

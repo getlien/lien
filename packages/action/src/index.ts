@@ -113,8 +113,6 @@ async function run(): Promise<void> {
 
     core.info(`Reviewing PR #${prContext.pullNumber}: ${prContext.title}`);
 
-    // Use @octokit/rest directly instead of @actions/github's wrapper,
-    // because the wrapper puts paginate on the top level but pulls/issues on .rest
     const octokit = createOctokit(githubToken);
 
     const setup: ReviewSetup = {

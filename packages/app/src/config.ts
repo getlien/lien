@@ -15,6 +15,14 @@ export interface AppConfig {
   allowedOrgIds: number[];
 }
 
+function parsePort(value: string | undefined): number {
+  const port = parseInt(value ?? '3000', 10);
+  if (Number.isNaN(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid PORT: ${value}`);
+  }
+  return port;
+}
+
 export function loadConfig(): AppConfig {
   const required = (name: string): string => {
     const value = process.env[name];
@@ -41,7 +49,7 @@ export function loadConfig(): AppConfig {
     webhookSecret: required('WEBHOOK_SECRET'),
     openRouterApiKey: required('OPENROUTER_API_KEY'),
     openRouterModel: process.env.OPENROUTER_MODEL ?? 'google/gemini-2.0-flash-001',
-    port: parseInt(process.env.PORT ?? '3000', 10),
+    port: parsePort(process.env.PORT),
     allowedOrgIds,
   };
 }

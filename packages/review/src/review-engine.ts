@@ -260,7 +260,9 @@ function loadBaselineComplexity(path: string, logger: Logger): ComplexityReport 
 }
 
 /**
- * Analyze base branch complexity for delta tracking
+ * Analyze base branch complexity for delta tracking.
+ * Uses git checkout — only suitable for the Action context where the repo is isolated.
+ * The App clones base separately via clone.ts instead.
  */
 async function analyzeBaseBranch(
   baseSha: string,

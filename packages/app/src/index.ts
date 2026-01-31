@@ -96,7 +96,11 @@ function startServer(app: App, config: AppConfig, queue: JobQueue): http.Server 
  * Graceful shutdown — stop accepting connections and wait for queue to drain
  */
 function setupGracefulShutdown(server: http.Server, queue: JobQueue): void {
+  let shuttingDown = false;
+
   const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info('Shutting down...');
     server.close(() => {
       logger.info('HTTP server closed');
