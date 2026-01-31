@@ -1,5 +1,17 @@
 # @liendev/core
 
+## 0.29.1
+
+### Patch Changes
+
+- 808a1b6: fix: clean up empty string artifacts in metadata, fix list_functions crash with LanceDB storage
+
+  - Filter empty strings from metadata fields (parameters, symbolType, symbols) at both AST extraction and MCP response shaping
+  - Fix list_functions crash when LanceDB flattens nested symbols objects
+  - Consolidate duplicate deduplication logic into shared utility
+  - Remove untyped response objects in MCP handlers
+  - Filter markdown files from related chunks in get_files_context
+
 ## 0.28.0
 
 ### Minor Changes
