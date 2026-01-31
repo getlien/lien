@@ -250,6 +250,36 @@ describe('get_files_context - Helper Functions', () => {
       expect(result[0]).toHaveLength(1);
       expect(result[0][0].metadata.file).toBe('src/utils.ts');
     });
+
+    it('should exclude markdown files from related chunks', async () => {
+      const mockEmbeddings = {
+        embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+      };
+
+      const mockVectorDB = {
+        search: vi.fn().mockResolvedValue([
+          { content: 'code chunk', metadata: { file: 'src/utils.ts', language: 'typescript', startLine: 1, endLine: 10 }, score: 0.9 },
+          { content: '# Auth docs', metadata: { file: 'docs/auth.md', language: 'markdown', startLine: 1, endLine: 5 }, score: 0.85 },
+          { content: 'more code', metadata: { file: 'src/helper.ts', language: 'typescript', startLine: 1, endLine: 8 }, score: 0.8 },
+        ]),
+      };
+
+      const ctx = {
+        vectorDB: mockVectorDB as any,
+        embeddings: mockEmbeddings as any,
+        log: vi.fn(),
+        workspaceRoot,
+      };
+
+      const fileChunksMap = [
+        [{ content: 'auth chunk', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0.9 }],
+      ];
+
+      const result = await findRelatedChunks(['src/auth.ts'], fileChunksMap as any, ctx);
+
+      expect(result[0]).toHaveLength(2);
+      expect(result[0].map((r: any) => r.metadata.file)).toEqual(['src/utils.ts', 'src/helper.ts']);
+    });
   });
 
   describe('findTestAssociations', () => {
@@ -342,13 +372,13 @@ describe('get_files_context - Helper Functions', () => {
         { content: 'chunk2', metadata: { file: 'src/auth.ts', startLine: 11, endLine: 20 }, score: 0.8 },
       ];
       
-      const result = deduplicateChunks(chunks as any, [], workspaceRoot);
-      
+      const result = deduplicateChunks(chunks as any, []);
+
       expect(result).toHaveLength(2);
       expect(result[0].metadata.startLine).toBe(1);
       expect(result[1].metadata.startLine).toBe(11);
     });
-    
+
     it('should merge file chunks and related chunks', () => {
       const fileChunks = [
         { content: 'file', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0.9 },
@@ -356,20 +386,20 @@ describe('get_files_context - Helper Functions', () => {
       const relatedChunks = [
         { content: 'related', metadata: { file: 'src/utils.ts', startLine: 1, endLine: 10 }, score: 0.8 },
       ];
-      
-      const result = deduplicateChunks(fileChunks as any, relatedChunks as any, workspaceRoot);
-      
+
+      const result = deduplicateChunks(fileChunks as any, relatedChunks as any);
+
       expect(result).toHaveLength(2);
     });
-    
-    it('should handle absolute paths via canonicalization', () => {
+
+    it('should deduplicate by file + startLine + endLine', () => {
       const chunks = [
-        { content: 'chunk1', metadata: { file: '/fake/workspace/src/auth.ts', startLine: 1, endLine: 10 }, score: 0.9 },
-        { content: 'chunk1', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0.85 }, // Same after canonicalization
+        { content: 'chunk1', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0.9 },
+        { content: 'chunk1', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0.85 }, // Same key
       ];
-      
-      const result = deduplicateChunks(chunks as any, [], workspaceRoot);
-      
+
+      const result = deduplicateChunks(chunks as any, []);
+
       expect(result).toHaveLength(1);
     });
   });
@@ -395,23 +425,21 @@ describe('get_files_context - Helper Functions', () => {
         fileChunksMap as any,
         relatedChunksMap as any,
         testAssociationsMap,
-        workspaceRoot
       );
-      
+
       expect(Object.keys(result)).toEqual(['src/auth.ts', 'src/user.ts']);
       expect(result['src/auth.ts'].chunks).toHaveLength(2); // file + related
       expect(result['src/auth.ts'].testAssociations).toEqual(['src/__tests__/auth.test.ts']);
       expect(result['src/user.ts'].chunks).toHaveLength(1);
       expect(result['src/user.ts'].testAssociations).toEqual(['src/__tests__/user.test.ts']);
     });
-    
+
     it('should handle empty related chunks', () => {
       const result = buildFilesData(
         ['src/auth.ts'],
         [[{ content: 'auth', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0.9 }]] as any,
         [], // Empty related chunks
         [['src/__tests__/auth.test.ts']],
-        workspaceRoot
       );
       
       expect(result['src/auth.ts'].chunks).toHaveLength(1);

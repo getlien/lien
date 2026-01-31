@@ -181,7 +181,12 @@ export async function handleGetComplexity(
       );
 
       // Step 4: Build response
-      const response: any = {
+      const note = buildCrossRepoFallbackNote(fallback);
+      if (note) {
+        log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo analysis.', 'warning');
+      }
+
+      return {
         indexInfo: getIndexMetadata(),
         summary: {
           filesAnalyzed: report.summary.filesAnalyzed,
@@ -191,21 +196,11 @@ export async function handleGetComplexity(
           bySeverity,
         },
         violations: topViolations,
+        ...(crossRepo && !fallback && allChunks.length > 0 && {
+          groupedByRepo: groupViolationsByRepo(topViolations, allChunks),
+        }),
+        ...(note && { note }),
       };
-
-      // Add cross-repo grouping if applicable
-      if (crossRepo && !fallback && allChunks.length > 0) {
-        response.groupedByRepo = groupViolationsByRepo(topViolations, allChunks);
-      }
-      
-      // Add fallback note if applicable
-      const note = buildCrossRepoFallbackNote(fallback);
-      if (note) {
-        log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo analysis.', 'warning');
-        response.note = note;
-      }
-
-      return response;
     }
   )(args);
 }

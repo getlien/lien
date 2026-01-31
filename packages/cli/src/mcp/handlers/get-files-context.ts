@@ -1,7 +1,7 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetFilesContextSchema } from '../schemas/index.js';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
-import { shapeResults } from '../utils/metadata-shaper.js';
+import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { SearchResult, LocalEmbeddings, VectorDBInterface } from '@liendev/core';
 
@@ -132,10 +132,12 @@ export async function findRelatedChunks(
     const related = relatedSearches[i];
     const targetCanonical = getCanonicalPath(filepath, workspaceRoot);
     
-    // Filter out chunks from the same file using exact matching
+    // Filter out chunks from the same file and markdown files
     relatedChunksMap[index] = related.filter(r => {
       const chunkCanonical = getCanonicalPath(r.metadata.file, workspaceRoot);
-      return chunkCanonical !== targetCanonical;
+      if (chunkCanonical === targetCanonical) return false;
+      if (r.metadata.language === 'markdown') return false;
+      return true;
     });
   });
 
@@ -212,30 +214,19 @@ export function findTestAssociations(
 
 /**
  * Deduplicate chunks by file path and line range.
- * 
- * Combines file chunks and related chunks, removing duplicates
- * based on canonical file path + line range.
- * 
+ *
+ * Combines file chunks and related chunks, removing duplicates.
+ * Delegates to the shared deduplicateResults utility.
+ *
  * @param fileChunks - Primary chunks for the file
  * @param relatedChunks - Related chunks from other files
- * @param workspaceRoot - Workspace root for path canonicalization
  * @returns Deduplicated array of chunks
  */
 export function deduplicateChunks(
   fileChunks: SearchResult[],
   relatedChunks: SearchResult[],
-  workspaceRoot: string
 ): SearchResult[] {
-  const seenChunks = new Set<string>();
-  
-  return [...fileChunks, ...relatedChunks].filter(chunk => {
-    const canonicalFile = getCanonicalPath(chunk.metadata.file, workspaceRoot);
-    const chunkId = `${canonicalFile}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
-    
-    if (seenChunks.has(chunkId)) return false;
-    seenChunks.add(chunkId);
-    return true;
-  });
+  return deduplicateResults([...fileChunks, ...relatedChunks]);
 }
 
 /**
@@ -256,7 +247,6 @@ export function buildFilesData(
   fileChunksMap: SearchResult[][],
   relatedChunksMap: SearchResult[][],
   testAssociationsMap: string[][],
-  workspaceRoot: string
 ): Record<string, FileData> {
   const filesData: Record<string, FileData> = {};
   
@@ -264,7 +254,6 @@ export function buildFilesData(
     const dedupedChunks = deduplicateChunks(
       fileChunksMap[i],
       relatedChunksMap[i] || [],
-      workspaceRoot
     );
     
     filesData[filepath] = {
@@ -416,7 +405,6 @@ export async function handleGetFilesContext(
         fileChunksMap,
         relatedChunksMap,
         testAssociationsMap,
-        workspaceRoot
       );
 
       const totalChunks = Object.values(filesData).reduce(

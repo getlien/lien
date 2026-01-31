@@ -134,6 +134,41 @@ describe('shapeResultMetadata', () => {
     expect(result.metadata.symbolName).toBeUndefined();
     expect(Object.keys(result.metadata)).not.toContain('imports');
   });
+
+  it('strips empty string symbolType', () => {
+    const result = createFullResult();
+    (result.metadata as any).symbolType = '';
+    const shaped = shapeResultMetadata(result, 'semantic_search');
+    expect(Object.keys(shaped.metadata)).not.toContain('symbolType');
+  });
+
+  it('strips parameters with only empty strings', () => {
+    const result = createFullResult();
+    result.metadata.parameters = [''];
+    const shaped = shapeResultMetadata(result, 'semantic_search');
+    expect(Object.keys(shaped.metadata)).not.toContain('parameters');
+  });
+
+  it('filters empty strings from parameters but keeps non-empty', () => {
+    const result = createFullResult();
+    result.metadata.parameters = ['', 'a: string', ''];
+    const shaped = shapeResultMetadata(result, 'semantic_search');
+    expect(shaped.metadata.parameters).toEqual(['a: string']);
+  });
+
+  it('omits symbols when all arrays contain only empty strings', () => {
+    const result = createFullResult();
+    result.metadata.symbols = { functions: [''], classes: [''], interfaces: [''] };
+    const shaped = shapeResultMetadata(result, 'get_files_context');
+    expect(Object.keys(shaped.metadata)).not.toContain('symbols');
+  });
+
+  it('keeps symbols when at least one array has non-empty values', () => {
+    const result = createFullResult();
+    result.metadata.symbols = { functions: ['foo'], classes: [''], interfaces: [] };
+    const shaped = shapeResultMetadata(result, 'get_files_context');
+    expect(shaped.metadata.symbols).toEqual({ functions: ['foo'], classes: [], interfaces: [] });
+  });
 });
 
 describe('shapeResults', () => {

@@ -101,6 +101,34 @@ export function deduplicateResults(results: SearchResult[]): SearchResult[] {
 }
 
 /**
+ * Clean a metadata value by stripping empty strings.
+ * Returns null if the value should be omitted entirely.
+ */
+function cleanMetadataValue(key: string, value: unknown): unknown | null {
+  if (value === undefined || value === '') return null;
+
+  if (Array.isArray(value)) {
+    const filtered = value.filter((v: unknown) => v !== '');
+    return filtered.length > 0 ? filtered : null;
+  }
+
+  if (key === 'symbols' && typeof value === 'object' && value !== null) {
+    const symbols = value as Record<string, unknown>;
+    const filterArr = (arr: unknown): string[] =>
+      Array.isArray(arr) ? arr.filter((s: unknown) => s !== '') : [];
+    const filtered = {
+      functions: filterArr(symbols.functions),
+      classes: filterArr(symbols.classes),
+      interfaces: filterArr(symbols.interfaces),
+    };
+    const hasAny = filtered.functions.length > 0 || filtered.classes.length > 0 || filtered.interfaces.length > 0;
+    return hasAny ? filtered : null;
+  }
+
+  return value;
+}
+
+/**
  * Pick allowed fields from metadata based on tool-specific allowlist.
  * Required fields (file, startLine, endLine) are always set explicitly.
  */
@@ -119,8 +147,9 @@ function pickMetadata(
   const out = result as unknown as Record<string, unknown>;
   for (const key of allowlist) {
     if (key === 'file' || key === 'startLine' || key === 'endLine') continue;
-    if (metadata[key] !== undefined) {
-      out[key] = metadata[key];
+    const cleaned = cleanMetadataValue(key, metadata[key]);
+    if (cleaned !== null) {
+      out[key] = cleaned;
     }
   }
 
