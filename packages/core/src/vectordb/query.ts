@@ -346,6 +346,47 @@ export async function search(
 }
 
 /**
+ * Filter records by language (case-insensitive match).
+ */
+function filterByLanguage(records: DBRecord[], language: string): DBRecord[] {
+  return records.filter((r: DBRecord) =>
+    r.language && r.language.toLowerCase() === language.toLowerCase()
+  );
+}
+
+/**
+ * Filter records by regex pattern against content and file path.
+ */
+function filterByPattern(records: DBRecord[], pattern: string): DBRecord[] {
+  const regex = new RegExp(pattern, 'i');
+  return records.filter((r: DBRecord) =>
+    regex.test(r.content) || regex.test(r.file)
+  );
+}
+
+/**
+ * Filter records by symbol type using SYMBOL_TYPE_MATCHES lookup.
+ */
+function filterBySymbolType(records: DBRecord[], symbolType: string): DBRecord[] {
+  const allowedTypes = SYMBOL_TYPE_MATCHES[symbolType];
+  return records.filter((r: DBRecord) =>
+    r.symbolType != null && allowedTypes?.has(r.symbolType)
+  );
+}
+
+/**
+ * Convert DB records to unscored SearchResults (for scan/scroll operations).
+ */
+function toUnscoredSearchResults(records: DBRecord[], limit: number): SearchResult[] {
+  return records.slice(0, limit).map((r: DBRecord) => ({
+    content: r.content,
+    metadata: buildSearchResultMetadata(r),
+    score: 0,
+    relevance: calculateRelevance(0),
+  }));
+}
+
+/**
  * Scan the database with filters.
  * Scans all records to ensure complete coverage.
  */
@@ -377,32 +418,11 @@ export async function scanWithFilter(
 
     let filtered = (results as unknown as DBRecord[]).filter(isValidRecord);
 
-    if (language) {
-      filtered = filtered.filter((r: DBRecord) =>
-        r.language && r.language.toLowerCase() === language.toLowerCase()
-      );
-    }
+    if (language) filtered = filterByLanguage(filtered, language);
+    if (pattern) filtered = filterByPattern(filtered, pattern);
+    if (symbolType) filtered = filterBySymbolType(filtered, symbolType);
 
-    if (pattern) {
-      const regex = new RegExp(pattern, 'i');
-      filtered = filtered.filter((r: DBRecord) =>
-        regex.test(r.content) || regex.test(r.file)
-      );
-    }
-
-    if (symbolType) {
-      const allowedTypes = SYMBOL_TYPE_MATCHES[symbolType];
-      filtered = filtered.filter((r: DBRecord) =>
-        r.symbolType != null && allowedTypes?.has(r.symbolType)
-      );
-    }
-
-    return filtered.slice(0, limit).map((r: DBRecord) => ({
-      content: r.content,
-      metadata: buildSearchResultMetadata(r),
-      score: 0,
-      relevance: calculateRelevance(0),
-    }));
+    return toUnscoredSearchResults(filtered, limit);
   } catch (error) {
     throw wrapError(error, 'Failed to scan with filter');
   }
