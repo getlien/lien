@@ -1,9 +1,9 @@
 /**
- * Tests for github.ts utility functions
+ * Tests for github-api.ts utility functions
  */
 
 import { describe, it, expect } from 'vitest';
-import { parsePatchLines } from '../src/github.js';
+import { parsePatchLines } from '@liendev/review';
 
 describe('parsePatchLines', () => {
   it('parses a simple single-hunk diff', () => {
@@ -14,7 +14,7 @@ describe('parsePatchLines', () => {
  line 3`;
 
     const lines = parsePatchLines(patch);
-    
+
     expect(lines.has(1)).toBe(true);  // context line
     expect(lines.has(2)).toBe(true);  // context line
     expect(lines.has(3)).toBe(true);  // added line
@@ -29,7 +29,7 @@ describe('parsePatchLines', () => {
 +line 3`;
 
     const lines = parsePatchLines(patch);
-    
+
     expect(lines.has(1)).toBe(true);
     expect(lines.has(2)).toBe(true);
     expect(lines.has(3)).toBe(true);
@@ -44,7 +44,7 @@ describe('parsePatchLines', () => {
  line 3`;
 
     const lines = parsePatchLines(patch);
-    
+
     // Lines should be 1, 2, 3 (deleted line doesn't affect numbering)
     expect(lines.has(1)).toBe(true);
     expect(lines.has(2)).toBe(true);
@@ -65,13 +65,13 @@ describe('parsePatchLines', () => {
  line 12`;
 
     const lines = parsePatchLines(patch);
-    
+
     // First hunk: lines 1-4
     expect(lines.has(1)).toBe(true);
     expect(lines.has(2)).toBe(true);
     expect(lines.has(3)).toBe(true);
     expect(lines.has(4)).toBe(true);
-    
+
     // Second hunk: lines 11-14
     expect(lines.has(11)).toBe(true);
     expect(lines.has(12)).toBe(true);
@@ -80,16 +80,13 @@ describe('parsePatchLines', () => {
   });
 
   it('ignores file header lines (+++ and ---)', () => {
-    // Note: In GitHub's patch format, +++ lines usually don't appear
-    // in the middle of hunks, but we should handle them gracefully
     const patch = `@@ -1,2 +1,3 @@
  existing
 +new line
  another`;
 
     const lines = parsePatchLines(patch);
-    
-    // Should have lines 1, 2, 3
+
     expect(lines.has(1)).toBe(true);
     expect(lines.has(2)).toBe(true);
     expect(lines.has(3)).toBe(true);
@@ -103,7 +100,7 @@ describe('parsePatchLines', () => {
  context 3`;
 
     const lines = parsePatchLines(patch);
-    
+
     expect(lines.has(5)).toBe(true);
     expect(lines.has(6)).toBe(true);
     expect(lines.has(7)).toBe(true);
@@ -117,7 +114,6 @@ describe('parsePatchLines', () => {
   });
 
   it('handles hunk header with function context', () => {
-    // GitHub often includes function context after @@
     const patch = `@@ -10,5 +10,6 @@ function example() {
  line 10
  line 11
@@ -127,7 +123,7 @@ describe('parsePatchLines', () => {
  line 14`;
 
     const lines = parsePatchLines(patch);
-    
+
     expect(lines.has(10)).toBe(true);
     expect(lines.has(11)).toBe(true);
     expect(lines.has(12)).toBe(true);
@@ -148,7 +144,7 @@ describe('parsePatchLines', () => {
  line 5`;
 
     const lines = parsePatchLines(patch);
-    
+
     // Result should be lines 1, 2, 3, 4, 5 in the new file
     expect(lines.has(1)).toBe(true);
     expect(lines.has(2)).toBe(true);  // new line 2
@@ -158,4 +154,3 @@ describe('parsePatchLines', () => {
     expect(lines.size).toBe(5);
   });
 });
-

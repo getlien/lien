@@ -4,7 +4,7 @@
 
 import collect from 'collect.js';
 import type { ComplexityReport, ComplexityViolation } from '@liendev/core';
-import type { PRContext } from './github.js';
+import type { PRContext } from './types.js';
 import type { ComplexityDelta, DeltaSummary } from './delta.js';
 import { formatDelta } from './delta.js';
 import { formatTime, formatDeltaValue } from './format.js';
@@ -12,7 +12,7 @@ import { formatTime, formatDeltaValue } from './format.js';
 /**
  * Few-shot examples for each complexity metric type.
  * These show the model what a good review comment looks like.
- * 
+ *
  * Guidelines for these examples:
  * - Keep to 2-3 sentences (~30-40 words)
  * - Name specific functions to extract
@@ -45,7 +45,7 @@ function createDeltaKey(v: { filepath: string; symbolName: string; metricType: s
  */
 function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, ComplexityDelta> {
   if (!deltas) return new Map();
-  
+
   return new Map(
     collect(deltas)
       .map(d => [createDeltaKey(d), d] as [string, ComplexityDelta])
@@ -116,30 +116,30 @@ function buildDependencyContext(fileData: ComplexityReport['files'][string]): st
   if (!fileData.dependentCount || fileData.dependentCount === 0) {
     return '';
   }
-  
+
   const riskEmoji: Record<string, string> = {
     low: '🟢',
     medium: '🟡',
     high: '🟠',
     critical: '🔴',
   };
-  
+
   const emoji = riskEmoji[fileData.riskLevel] || '⚪';
-  
+
   // Build dependents list (only if we have the array and it's not empty)
   const hasDependentsList = fileData.dependents && fileData.dependents.length > 0;
   const dependentsList = hasDependentsList
     ? fileData.dependents.slice(0, 10).map(f => `  - ${f}`).join('\n')
     : '';
-  
+
   const complexityNote = fileData.dependentComplexityMetrics
     ? `\n- **Dependent complexity**: Avg ${fileData.dependentComplexityMetrics.averageComplexity.toFixed(1)}, Max ${fileData.dependentComplexityMetrics.maxComplexity}`
     : '';
-  
+
   const moreNote = hasDependentsList && fileData.dependents.length > 10
     ? '\n  ... (and more)'
     : '';
-  
+
   return `\n**Dependency Impact**: ${emoji} ${fileData.riskLevel.toUpperCase()} risk
 - **Dependents**: ${fileData.dependentCount} file(s) import this
 ${dependentsList ? `\n**Key dependents:**\n${dependentsList}${moreNote}` : ''}${complexityNote}
@@ -152,10 +152,10 @@ ${dependentsList ? `\n**Key dependents:**\n${dependentsList}${moreNote}` : ''}${
  */
 function buildFileContext(filepath: string, fileData: ComplexityReport['files'][string]): string {
   const parts: string[] = [];
-  
+
   // Try to get language from violations first (more accurate)
   const languageFromViolation = fileData.violations[0]?.language;
-  
+
   // Language/framework hint - use violation language or detect from extension
   if (languageFromViolation) {
     const languageMap: Record<string, string> = {
@@ -205,7 +205,7 @@ function buildFileContext(filepath: string, fileData: ComplexityReport['files'][
       parts.push(`Language: ${languageHints[ext]}`);
     }
   }
-  
+
   // File purpose hint from path (language-agnostic patterns)
   const pathLower = filepath.toLowerCase();
   // Common patterns across languages
@@ -220,12 +220,12 @@ function buildFileContext(filepath: string, fileData: ComplexityReport['files'][
   // Java patterns
   if (pathLower.includes('/model/') || pathLower.includes('/models/')) parts.push('Type: Model');
   if (pathLower.includes('/repository/') || pathLower.includes('/repositories/')) parts.push('Type: Repository');
-  
+
   // Other violations in same file
   if (fileData.violations.length > 1) {
     parts.push(`${fileData.violations.length} total violations in this file`);
   }
-  
+
   return parts.length > 0 ? `\n*Context: ${parts.join(', ')}*` : '';
 }
 
@@ -316,12 +316,12 @@ function formatDeltaChange(d: ComplexityDelta): string {
  */
 function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
   if (!deltas || deltas.length === 0) return '';
-  
+
   const improved = deltas.filter(d => d.severity === 'improved');
   const degraded = deltas.filter(d => (d.severity === 'error' || d.severity === 'warning') && d.delta > 0);
   const newFuncs = deltas.filter(d => d.severity === 'new');
   const deleted = deltas.filter(d => d.severity === 'deleted');
-  
+
   const sections = [
     `\n## Complexity Changes (vs base branch)`,
     `- **Degraded**: ${degraded.length} function(s) got more complex`,
@@ -329,7 +329,7 @@ function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
     `- **New**: ${newFuncs.length} new complex function(s)`,
     `- **Removed**: ${deleted.length} complex function(s) deleted`,
   ];
-  
+
   if (degraded.length > 0) {
     sections.push(`\nFunctions that got worse:\n${degraded.map(formatDeltaChange).join('\n')}`);
   }
@@ -339,7 +339,7 @@ function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
   if (newFuncs.length > 0) {
     sections.push(`\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}`);
   }
-  
+
   return sections.join('\n');
 }
 
@@ -422,7 +422,7 @@ Be concise but actionable. Focus on the highest-impact improvements.`;
  */
 export function buildNoViolationsMessage(prContext: PRContext, deltas: ComplexityDelta[] | null = null): string {
   let deltaMessage = '';
-  
+
   if (deltas && deltas.length > 0) {
     const improved = deltas.filter(d => d.severity === 'improved' || d.severity === 'deleted');
     if (improved.length > 0) {
@@ -702,17 +702,6 @@ function determineStatus(
 }
 
 /**
- * Format delta display string with sign and trend emoji
- */
-function formatBadgeDelta(deltaSummary: DeltaSummary | null): string {
-  if (!deltaSummary) return '—';
-
-  const sign = deltaSummary.totalDelta >= 0 ? '+' : '';
-  const trend = deltaSummary.totalDelta > 0 ? '⬆️' : deltaSummary.totalDelta < 0 ? '⬇️' : '➡️';
-  return `${sign}${deltaSummary.totalDelta} ${trend}`;
-}
-
-/**
  * Get emoji for metric type
  */
 function getMetricEmoji(metricType: string): string {
@@ -777,14 +766,14 @@ function buildImpactSummary(report: ComplexityReport | null): string {
 
   const filesWithDependents = Object.values(report.files)
     .filter(f => f.dependentCount && f.dependentCount > 0);
-  
+
   if (filesWithDependents.length === 0) return '';
 
   const totalDependents = filesWithDependents.reduce((sum, f) => sum + (f.dependentCount || 0), 0);
-  const highRiskFiles = filesWithDependents.filter(f => 
+  const highRiskFiles = filesWithDependents.filter(f =>
     ['high', 'critical'].includes(f.riskLevel)
   ).length;
-  
+
   if (highRiskFiles === 0) return '';
 
   return `\n🔗 **Impact**: ${highRiskFiles} high-risk file(s) with ${totalDependents} total dependents`;
@@ -816,7 +805,7 @@ ${metricTable}
 function formatHalsteadContext(violation: ComplexityViolation): string {
   if (!violation.metricType?.startsWith('halstead_')) return '';
   if (!violation.halsteadDetails) return '';
-  
+
   const details = violation.halsteadDetails;
   return `\n**Halstead Metrics**: Volume: ${details.volume?.toLocaleString()}, Difficulty: ${details.difficulty?.toFixed(1)}, Effort: ${details.effort?.toLocaleString()}, Est. bugs: ${details.bugs?.toFixed(3)}`;
 }
@@ -831,7 +820,7 @@ export function buildLineCommentPrompt(
   const snippetSection = codeSnippet
     ? `\n\n**Code:**\n\`\`\`\n${codeSnippet}\n\`\`\``
     : '';
-  
+
   const metricType = violation.metricType || 'cyclomatic';
   const metricLabel = getMetricLabel(metricType);
   const valueDisplay = formatComplexityValue(metricType, violation.complexity);
@@ -897,7 +886,7 @@ See inline comments below for specific suggestions.
  */
 function getExampleForPrimaryMetric(violations: ComplexityViolation[]): string {
   if (violations.length === 0) return DEFAULT_EXAMPLE;
-  
+
   const counts = collect(violations)
     .countBy((v: ComplexityViolation) => v.metricType || 'cyclomatic')
     .all() as Record<string, number>;
@@ -931,7 +920,7 @@ export function buildBatchedCommentsPrompt(
       const snippetSection = snippet
         ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\``
         : '';
-      
+
       const metricType = v.metricType || 'cyclomatic';
       const metricLabel = getMetricLabel(metricType);
       const valueDisplay = formatComplexityValue(metricType, v.complexity);
@@ -941,7 +930,7 @@ export function buildBatchedCommentsPrompt(
       // Add dependency context for this violation's file
       const fileData = report.files[v.filepath];
       const dependencyContext = fileData ? buildDependencyContext(fileData) : '';
-      
+
       // Add file-level context (language, type, other violations)
       const fileContext = fileData ? buildFileContext(v.filepath, fileData) : '';
 
@@ -1009,4 +998,3 @@ ${jsonKeys}
 }
 \`\`\``;
 }
-

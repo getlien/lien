@@ -1,45 +1,19 @@
 /**
- * GitHub API helpers for the action
+ * GitHub API helpers using @octokit/rest
+ * Portable across GitHub Actions and GitHub App contexts.
  */
 
-import * as core from '@actions/core';
-import * as github from '@actions/github';
+import { Octokit } from '@octokit/rest';
+import type { PRContext, LineComment } from './types.js';
+import type { Logger } from './logger.js';
 
-type Octokit = ReturnType<typeof github.getOctokit>;
+export type { Octokit };
 
 /**
- * PR context for review
+ * Create an Octokit instance from a token
  */
-export interface PRContext {
-  owner: string;
-  repo: string;
-  pullNumber: number;
-  title: string;
-  baseSha: string;
-  headSha: string;
-}
-
-/**
- * Get PR context from the GitHub event
- */
-export function getPRContext(): PRContext | null {
-  const { context } = github;
-
-  if (!context.payload.pull_request) {
-    core.warning('This action only works on pull_request events');
-    return null;
-  }
-
-  const pr = context.payload.pull_request;
-
-  return {
-    owner: context.repo.owner,
-    repo: context.repo.repo,
-    pullNumber: pr.number,
-    title: pr.title,
-    baseSha: pr.base.sha,
-    headSha: pr.head.sha,
-  };
+export function createOctokit(token: string): Octokit {
+  return new Octokit({ auth: token });
 }
 
 /**
@@ -54,7 +28,7 @@ export async function getPRChangedFiles(
   const perPage = 100;
 
   while (true) {
-    const response = await octokit.rest.pulls.listFiles({
+    const response = await octokit.pulls.listFiles({
       owner: prContext.owner,
       repo: prContext.repo,
       pull_number: prContext.pullNumber,
@@ -79,27 +53,28 @@ export async function getPRChangedFiles(
 }
 
 /**
- * Post a comment on the PR
+ * Post a comment on the PR (creates or updates existing Lien comment)
  */
 export async function postPRComment(
   octokit: Octokit,
   prContext: PRContext,
-  body: string
+  body: string,
+  logger: Logger
 ): Promise<void> {
   // Check for existing Lien comment to update instead of creating new
   const existingComment = await findExistingComment(octokit, prContext);
 
   if (existingComment) {
-    core.info(`Updating existing comment ${existingComment.id}`);
-    await octokit.rest.issues.updateComment({
+    logger.info(`Updating existing comment ${existingComment.id}`);
+    await octokit.issues.updateComment({
       owner: prContext.owner,
       repo: prContext.repo,
       comment_id: existingComment.id,
       body,
     });
   } else {
-    core.info('Creating new comment');
-    await octokit.rest.issues.createComment({
+    logger.info('Creating new comment');
+    await octokit.issues.createComment({
       owner: prContext.owner,
       repo: prContext.repo,
       issue_number: prContext.pullNumber,
@@ -117,7 +92,7 @@ async function findExistingComment(
 ): Promise<{ id: number } | null> {
   const COMMENT_MARKER = '<!-- lien-ai-review -->';
 
-  const comments = await octokit.rest.issues.listComments({
+  const comments = await octokit.issues.listComments({
     owner: prContext.owner,
     repo: prContext.repo,
     issue_number: prContext.pullNumber,
@@ -140,10 +115,11 @@ export async function getFileContent(
   prContext: PRContext,
   filepath: string,
   startLine: number,
-  endLine: number
+  endLine: number,
+  logger: Logger
 ): Promise<string | null> {
   try {
-    const response = await octokit.rest.repos.getContent({
+    const response = await octokit.repos.getContent({
       owner: prContext.owner,
       repo: prContext.repo,
       path: filepath,
@@ -151,7 +127,7 @@ export async function getFileContent(
     });
 
     if ('content' in response.data) {
-      const content = Buffer.from(response.data.content, 'base64').toString(
+      const content = Buffer.from(response.data.content as string, 'base64').toString(
         'utf-8'
       );
       const lines = content.split('\n');
@@ -160,26 +136,10 @@ export async function getFileContent(
       return snippet;
     }
   } catch (error) {
-    core.warning(`Failed to get content for ${filepath}: ${error}`);
+    logger.warning(`Failed to get content for ${filepath}: ${error}`);
   }
 
   return null;
-}
-
-/**
- * Create an Octokit instance from token
- */
-export function createOctokit(token: string): Octokit {
-  return github.getOctokit(token);
-}
-
-/**
- * Line comment for PR review
- */
-export interface LineComment {
-  path: string;
-  line: number;
-  body: string;
 }
 
 /**
@@ -189,19 +149,20 @@ export async function postPRReview(
   octokit: Octokit,
   prContext: PRContext,
   comments: LineComment[],
-  summaryBody: string
+  summaryBody: string,
+  logger: Logger
 ): Promise<void> {
   if (comments.length === 0) {
     // No line comments, just post summary as regular comment
-    await postPRComment(octokit, prContext, summaryBody);
+    await postPRComment(octokit, prContext, summaryBody, logger);
     return;
   }
 
-  core.info(`Creating review with ${comments.length} line comments`);
+  logger.info(`Creating review with ${comments.length} line comments`);
 
   try {
     // Create a review with line comments
-    await octokit.rest.pulls.createReview({
+    await octokit.pulls.createReview({
       owner: prContext.owner,
       repo: prContext.repo,
       pull_number: prContext.pullNumber,
@@ -215,12 +176,12 @@ export async function postPRReview(
       })),
     });
 
-    core.info('Review posted successfully');
+    logger.info('Review posted successfully');
   } catch (error) {
     // If line comments fail (e.g., lines not in diff), fall back to regular comment
-    core.warning(`Failed to post line comments: ${error}`);
-    core.info('Falling back to regular PR comment');
-    await postPRComment(octokit, prContext, summaryBody);
+    logger.warning(`Failed to post line comments: ${error}`);
+    logger.info('Falling back to regular PR comment');
+    await postPRComment(octokit, prContext, summaryBody, logger);
   }
 }
 
@@ -237,11 +198,12 @@ const DESCRIPTION_END_MARKER = '<!-- /lien-stats -->';
 export async function updatePRDescription(
   octokit: Octokit,
   prContext: PRContext,
-  badgeMarkdown: string
+  badgeMarkdown: string,
+  logger: Logger
 ): Promise<void> {
   try {
     // Get current PR
-    const { data: pr } = await octokit.rest.pulls.get({
+    const { data: pr } = await octokit.pulls.get({
       owner: prContext.owner,
       repo: prContext.repo,
       pull_number: prContext.pullNumber,
@@ -262,25 +224,25 @@ export async function updatePRDescription(
         currentBody.slice(0, startIdx) +
         wrappedBadge +
         currentBody.slice(endIdx + DESCRIPTION_END_MARKER.length);
-      core.info('Updating existing stats badge in PR description');
+      logger.info('Updating existing stats badge in PR description');
     } else {
       // Append to end
       newBody = currentBody.trim() + '\n\n---\n\n' + wrappedBadge;
-      core.info('Adding stats badge to PR description');
+      logger.info('Adding stats badge to PR description');
     }
 
     // Update the PR
-    await octokit.rest.pulls.update({
+    await octokit.pulls.update({
       owner: prContext.owner,
       repo: prContext.repo,
       pull_number: prContext.pullNumber,
       body: newBody,
     });
 
-    core.info('PR description updated with complexity stats');
+    logger.info('PR description updated with complexity stats');
   } catch (error) {
     // Don't fail the action if we can't update the description
-    core.warning(`Failed to update PR description: ${error}`);
+    logger.warning(`Failed to update PR description: ${error}`);
   }
 }
 
@@ -324,7 +286,7 @@ export async function getPRDiffLines(
   const diffLines = new Map<string, Set<number>>();
 
   // Use pagination to handle PRs with 100+ files
-  const iterator = octokit.paginate.iterator(octokit.rest.pulls.listFiles, {
+  const iterator = octokit.paginate.iterator(octokit.pulls.listFiles, {
     owner: prContext.owner,
     repo: prContext.repo,
     pull_number: prContext.pullNumber,
@@ -344,4 +306,3 @@ export async function getPRDiffLines(
 
   return diffLines;
 }
-

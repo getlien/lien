@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatTime, formatDeltaValue } from '../src/format.js';
+import { formatTime, formatDeltaValue } from '@liendev/review';
 
 describe('formatTime', () => {
   describe('positive values', () => {

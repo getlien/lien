@@ -3,12 +3,12 @@
  * Compares base branch complexity to head branch complexity
  */
 
-import * as core from '@actions/core';
 import collect from 'collect.js';
 import type {
   ComplexityReport,
   ComplexityViolation,
 } from '@liendev/core';
+import type { Logger } from './logger.js';
 
 /**
  * Complexity delta for a single function/method
@@ -167,7 +167,7 @@ export function calculateDeltas(
  */
 export function calculateDeltaSummary(deltas: ComplexityDelta[]): DeltaSummary {
   const collection = collect(deltas);
-  
+
   // Categorize each delta
   const categorized = collection.map(d => {
     if (d.severity === 'improved') return 'improved';
@@ -221,10 +221,9 @@ export function formatSeverityEmoji(severity: ComplexityDelta['severity']): stri
 /**
  * Log delta summary
  */
-export function logDeltaSummary(summary: DeltaSummary): void {
+export function logDeltaSummary(summary: DeltaSummary, logger: Logger): void {
   const sign = summary.totalDelta >= 0 ? '+' : '';
-  core.info(`Complexity delta: ${sign}${summary.totalDelta}`);
-  core.info(`  Degraded: ${summary.degraded}, Improved: ${summary.improved}`);
-  core.info(`  New: ${summary.newFunctions}, Deleted: ${summary.deletedFunctions}`);
+  logger.info(`Complexity delta: ${sign}${summary.totalDelta}`);
+  logger.info(`  Degraded: ${summary.degraded}, Improved: ${summary.improved}`);
+  logger.info(`  New: ${summary.newFunctions}, Deleted: ${summary.deletedFunctions}`);
 }
-
