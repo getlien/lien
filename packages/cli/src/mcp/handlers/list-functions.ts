@@ -1,16 +1,10 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { ListFunctionsSchema } from '../schemas/index.js';
+import type { ListFunctionsInput } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
+import { SYMBOL_TYPE_MATCHES } from '@liendev/core';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
-
-/** Maps symbolType filter values to the set of matching record types */
-const SYMBOL_TYPE_MATCHES: Record<string, Set<string>> = {
-  function: new Set(['function', 'method']),
-  method: new Set(['method']),
-  class: new Set(['class']),
-  interface: new Set(['interface']),
-};
 
 interface QueryResult {
   results: SearchResult[];
@@ -23,7 +17,7 @@ interface QueryResult {
  */
 async function performContentScan(
   vectorDB: VectorDBInterface,
-  args: { language?: string; pattern?: string; symbolType?: string },
+  args: ListFunctionsInput,
   log: LogFn
 ): Promise<QueryResult> {
   log('Falling back to content scan...');

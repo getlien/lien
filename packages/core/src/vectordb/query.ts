@@ -1,4 +1,4 @@
-import { SearchResult } from './types.js';
+import { SearchResult, SYMBOL_TYPE_MATCHES } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
@@ -403,14 +403,6 @@ export async function scanWithFilter(
 /**
  * Helper to check if a record matches the requested symbol type
  */
-/** Maps query symbolType to acceptable AST symbolType values */
-const SYMBOL_TYPE_MATCHES: Record<string, Set<string>> = {
-  function: new Set(['function', 'method']),
-  method: new Set(['method']),
-  class: new Set(['class']),
-  interface: new Set(['interface']),
-};
-
 function matchesSymbolType(
   record: DBRecord,
   symbolType: 'function' | 'method' | 'class' | 'interface',
