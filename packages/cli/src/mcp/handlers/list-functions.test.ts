@@ -200,6 +200,52 @@ describe('handleListFunctions', () => {
       expect(parsed.note).toContain('lien reindex');
     });
 
+    it('should filter by symbolType in content scan fallback', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([]);
+      mockVectorDB.scanWithFilter.mockResolvedValue([
+        {
+          content: 'function helper() {}',
+          metadata: {
+            file: 'src/utils.ts',
+            symbolName: 'helper',
+            symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'class UserService {}',
+          metadata: {
+            file: 'src/user.ts',
+            symbolName: 'UserService',
+            symbolType: 'class',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'getName() { return this.name; }',
+          metadata: {
+            file: 'src/user.ts',
+            symbolName: 'getName',
+            symbolType: 'method',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions(
+        { symbolType: 'class' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.method).toBe('content');
+      expect(parsed.results).toHaveLength(1);
+      expect(parsed.results[0].metadata.symbolType).toBe('class');
+    });
+
     it('should fall back to content scan when querySymbols throws', async () => {
       mockVectorDB.querySymbols.mockRejectedValue(new Error('Symbol query failed'));
       mockVectorDB.scanWithFilter.mockResolvedValue([

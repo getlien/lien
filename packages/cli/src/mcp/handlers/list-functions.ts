@@ -15,11 +15,11 @@ interface QueryResult {
  */
 async function performContentScan(
   vectorDB: VectorDBInterface,
-  args: { language?: string; pattern?: string },
+  args: { language?: string; pattern?: string; symbolType?: string },
   log: LogFn
 ): Promise<QueryResult> {
   log('Falling back to content scan...');
-  
+
   let results = await vectorDB.scanWithFilter({
     language: args.language,
     limit: 200, // Fetch more, we'll filter by symbolName
@@ -32,6 +32,11 @@ async function performContentScan(
       const symbolName = r.metadata?.symbolName;
       return symbolName && regex.test(symbolName);
     });
+  }
+
+  // Filter by symbolType if provided
+  if (args.symbolType) {
+    results = results.filter(r => r.metadata?.symbolType === args.symbolType);
   }
 
   return {
@@ -68,7 +73,7 @@ export async function handleListFunctions(
         });
 
         // Fall back if no results and filters were provided
-        if (results.length === 0 && (validatedArgs.language || validatedArgs.pattern)) {
+        if (results.length === 0 && (validatedArgs.language || validatedArgs.pattern || validatedArgs.symbolType)) {
           log('No symbol results, falling back to content scan...');
           queryResult = await performContentScan(vectorDB, validatedArgs, log);
         } else {
