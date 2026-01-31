@@ -459,6 +459,54 @@ function formatUncoveredLine(v: ComplexityViolation, deltaMap: Map<string, Compl
   return `* \`${v.symbolName}\` in \`${v.filepath}\`: ${emoji} ${metricLabel} ${valueDisplay}${deltaStr}`;
 }
 
+const BOY_SCOUT_LINK = '[boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)';
+
+/**
+ * Categorize uncovered violations into new/worsened vs pre-existing
+ */
+function categorizeUncoveredViolations(
+  violations: ComplexityViolation[],
+  deltaMap: Map<string, ComplexityDelta>
+): { newOrWorsened: ComplexityViolation[]; preExisting: ComplexityViolation[] } {
+  const newOrWorsened = violations.filter(v => {
+    const delta = deltaMap.get(createDeltaKey(v));
+    return delta && (delta.severity === 'new' || delta.delta > 0);
+  });
+
+  const preExisting = violations.filter(v => {
+    const delta = deltaMap.get(createDeltaKey(v));
+    return !delta || delta.delta === 0;
+  });
+
+  return { newOrWorsened, preExisting };
+}
+
+/**
+ * Format new/worsened violations section (shown prominently)
+ */
+function buildNewWorsenedSection(violations: ComplexityViolation[], deltaMap: Map<string, ComplexityDelta>): string {
+  if (violations.length === 0) return '';
+  const list = violations.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
+  return `\n\n⚠️ **${violations.length} new/worsened violation${violations.length === 1 ? '' : 's'} outside diff:**\n\n${list}`;
+}
+
+/**
+ * Format pre-existing violations section (collapsed)
+ */
+function buildPreExistingSection(violations: ComplexityViolation[], deltaMap: Map<string, ComplexityDelta>): string {
+  if (violations.length === 0) return '';
+  const list = violations.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
+  return `\n\n<details>\n<summary>ℹ️ ${violations.length} pre-existing violation${violations.length === 1 ? '' : 's'} outside diff</summary>\n\n${list}\n\n> *These violations existed before this PR. No action required, but consider the ${BOY_SCOUT_LINK}!*\n\n</details>`;
+}
+
+/**
+ * Format fallback section when no delta data is available (legacy)
+ */
+function buildFallbackUncoveredSection(violations: ComplexityViolation[], deltaMap: Map<string, ComplexityDelta>): string {
+  const list = violations.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
+  return `\n\n<details>\n<summary>⚠️ ${violations.length} violation${violations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${list}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the ${BOY_SCOUT_LINK}!*\n\n</details>`;
+}
+
 /**
  * Build uncovered violations note for summary
  * Splits into new/worsened (shown prominently) vs pre-existing (collapsed)
@@ -469,38 +517,15 @@ function buildUncoveredNote(
 ): string {
   if (uncoveredViolations.length === 0) return '';
 
-  // Split uncovered into new/worsened vs pre-existing
-  const newOrWorsened = uncoveredViolations.filter(v => {
-    const delta = deltaMap.get(createDeltaKey(v));
-    return delta && (delta.severity === 'new' || delta.severity === 'warning' || delta.severity === 'error') && (delta.severity === 'new' || delta.delta > 0);
-  });
-
-  const preExisting = uncoveredViolations.filter(v => {
-    const delta = deltaMap.get(createDeltaKey(v));
-    return !delta || delta.delta === 0;
-  });
-
-  let result = '';
-
-  // New/worsened: show prominently (not collapsed)
-  if (newOrWorsened.length > 0) {
-    const list = newOrWorsened.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
-    result += `\n\n⚠️ **${newOrWorsened.length} new/worsened violation${newOrWorsened.length === 1 ? '' : 's'} outside diff:**\n\n${list}`;
-  }
-
-  // Pre-existing: collapsed, informational tone
-  if (preExisting.length > 0) {
-    const list = preExisting.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
-    result += `\n\n<details>\n<summary>ℹ️ ${preExisting.length} pre-existing violation${preExisting.length === 1 ? '' : 's'} outside diff</summary>\n\n${list}\n\n> *These violations existed before this PR. No action required, but consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
-  }
+  const { newOrWorsened, preExisting } = categorizeUncoveredViolations(uncoveredViolations, deltaMap);
 
   // Fallback: if no delta data, show all in collapsed section (legacy behavior)
   if (newOrWorsened.length === 0 && preExisting.length === 0) {
-    const list = uncoveredViolations.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
-    result += `\n\n<details>\n<summary>⚠️ ${uncoveredViolations.length} violation${uncoveredViolations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${list}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*\n\n</details>`;
+    return buildFallbackUncoveredSection(uncoveredViolations, deltaMap);
   }
 
-  return result;
+  return buildNewWorsenedSection(newOrWorsened, deltaMap)
+    + buildPreExistingSection(preExisting, deltaMap);
 }
 
 /**

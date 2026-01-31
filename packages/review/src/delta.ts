@@ -114,19 +114,31 @@ function createDelta(
 }
 
 /**
- * Calculate complexity deltas between base and head
+ * Sort deltas by severity (errors first), then by delta magnitude (worst first)
  */
-export function calculateDeltas(
-  baseReport: ComplexityReport | null,
-  headReport: ComplexityReport,
-  changedFiles: string[]
-): ComplexityDelta[] {
-  const baseMap = buildComplexityMap(baseReport, changedFiles);
-  const headMap = buildComplexityMap(headReport, changedFiles);
+const SEVERITY_ORDER: Record<ComplexityDelta['severity'], number> = {
+  error: 0, warning: 1, new: 2, improved: 3, deleted: 4,
+};
+
+function sortDeltas(deltas: ComplexityDelta[]): ComplexityDelta[] {
+  return deltas.sort((a, b) => {
+    if (SEVERITY_ORDER[a.severity] !== SEVERITY_ORDER[b.severity]) {
+      return SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
+    }
+    return b.delta - a.delta;
+  });
+}
+
+/**
+ * Process head violations into deltas, tracking which base keys were matched
+ */
+function processHeadViolations(
+  headMap: Map<string, { complexity: number; violation: ComplexityViolation }>,
+  baseMap: Map<string, { complexity: number; violation: ComplexityViolation }>,
+): { deltas: ComplexityDelta[]; seenBaseKeys: Set<string> } {
   const seenBaseKeys = new Set<string>();
 
-  // Process head violations
-  const headDeltas = collect(Array.from(headMap.entries()))
+  const deltas = collect(Array.from(headMap.entries()))
     .map(([key, headData]) => {
       const baseData = baseMap.get(key);
       if (baseData) seenBaseKeys.add(key);
@@ -140,26 +152,29 @@ export function calculateDeltas(
     })
     .all() as ComplexityDelta[];
 
+  return { deltas, seenBaseKeys };
+}
+
+/**
+ * Calculate complexity deltas between base and head
+ */
+export function calculateDeltas(
+  baseReport: ComplexityReport | null,
+  headReport: ComplexityReport,
+  changedFiles: string[]
+): ComplexityDelta[] {
+  const baseMap = buildComplexityMap(baseReport, changedFiles);
+  const headMap = buildComplexityMap(headReport, changedFiles);
+
+  const { deltas: headDeltas, seenBaseKeys } = processHeadViolations(headMap, baseMap);
+
   // Process deleted functions (in base but not in head)
   const deletedDeltas = collect(Array.from(baseMap.entries()))
     .filter(([key]) => !seenBaseKeys.has(key))
     .map(([_, baseData]) => createDelta(baseData.violation, baseData.complexity, null, 'deleted'))
     .all() as ComplexityDelta[];
 
-  const deltas = [...headDeltas, ...deletedDeltas];
-
-  // Sort by delta (worst first), then by absolute complexity
-  deltas.sort((a, b) => {
-    // Errors first, then warnings, then new, then improved, then deleted
-    const severityOrder = { error: 0, warning: 1, new: 2, improved: 3, deleted: 4 };
-    if (severityOrder[a.severity] !== severityOrder[b.severity]) {
-      return severityOrder[a.severity] - severityOrder[b.severity];
-    }
-    // Within same severity, sort by delta (worse first)
-    return b.delta - a.delta;
-  });
-
-  return deltas;
+  return sortDeltas([...headDeltas, ...deletedDeltas]);
 }
 
 /**

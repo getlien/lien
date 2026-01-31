@@ -229,11 +229,24 @@ function createDelta(violation, baseComplexity, headComplexity, severity) {
     severity
   };
 }
-function calculateDeltas(baseReport, headReport, changedFiles) {
-  const baseMap = buildComplexityMap(baseReport, changedFiles);
-  const headMap = buildComplexityMap(headReport, changedFiles);
+var SEVERITY_ORDER = {
+  error: 0,
+  warning: 1,
+  new: 2,
+  improved: 3,
+  deleted: 4
+};
+function sortDeltas(deltas) {
+  return deltas.sort((a, b) => {
+    if (SEVERITY_ORDER[a.severity] !== SEVERITY_ORDER[b.severity]) {
+      return SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
+    }
+    return b.delta - a.delta;
+  });
+}
+function processHeadViolations(headMap, baseMap) {
   const seenBaseKeys = /* @__PURE__ */ new Set();
-  const headDeltas = collect(Array.from(headMap.entries())).map(([key, headData]) => {
+  const deltas = collect(Array.from(headMap.entries())).map(([key, headData]) => {
     const baseData = baseMap.get(key);
     if (baseData) seenBaseKeys.add(key);
     const baseComplexity = baseData?.complexity ?? null;
@@ -242,16 +255,14 @@ function calculateDeltas(baseReport, headReport, changedFiles) {
     const severity = determineSeverity(baseComplexity, headComplexity, delta, headData.violation.threshold);
     return createDelta(headData.violation, baseComplexity, headComplexity, severity);
   }).all();
+  return { deltas, seenBaseKeys };
+}
+function calculateDeltas(baseReport, headReport, changedFiles) {
+  const baseMap = buildComplexityMap(baseReport, changedFiles);
+  const headMap = buildComplexityMap(headReport, changedFiles);
+  const { deltas: headDeltas, seenBaseKeys } = processHeadViolations(headMap, baseMap);
   const deletedDeltas = collect(Array.from(baseMap.entries())).filter(([key]) => !seenBaseKeys.has(key)).map(([_, baseData]) => createDelta(baseData.violation, baseData.complexity, null, "deleted")).all();
-  const deltas = [...headDeltas, ...deletedDeltas];
-  deltas.sort((a, b) => {
-    const severityOrder = { error: 0, warning: 1, new: 2, improved: 3, deleted: 4 };
-    if (severityOrder[a.severity] !== severityOrder[b.severity]) {
-      return severityOrder[a.severity] - severityOrder[b.severity];
-    }
-    return b.delta - a.delta;
-  });
-  return deltas;
+  return sortDeltas([...headDeltas, ...deletedDeltas]);
 }
 function calculateDeltaSummary(deltas) {
   const collection = collect(deltas);
@@ -401,66 +412,77 @@ ${dependentsList ? `
 ${dependentsList}${moreNote}` : ""}${complexityNote}
 - **Review focus**: Changes here affect ${fileData.dependentCount} other file(s). Extra scrutiny recommended.`;
 }
+var LANGUAGE_NAMES = {
+  "typescript": "TypeScript",
+  "javascript": "JavaScript",
+  "php": "PHP",
+  "python": "Python",
+  "go": "Go",
+  "rust": "Rust",
+  "java": "Java",
+  "ruby": "Ruby",
+  "swift": "Swift",
+  "kotlin": "Kotlin",
+  "csharp": "C#",
+  "scala": "Scala",
+  "cpp": "C++",
+  "c": "C"
+};
+var EXTENSION_LANGUAGES = {
+  "ts": "TypeScript",
+  "tsx": "TypeScript React",
+  "js": "JavaScript",
+  "jsx": "JavaScript React",
+  "mjs": "JavaScript",
+  "cjs": "JavaScript",
+  "php": "PHP",
+  "py": "Python",
+  "go": "Go",
+  "rs": "Rust",
+  "java": "Java",
+  "rb": "Ruby",
+  "swift": "Swift",
+  "kt": "Kotlin",
+  "cs": "C#",
+  "scala": "Scala",
+  "cpp": "C++",
+  "cc": "C++",
+  "cxx": "C++",
+  "c": "C"
+};
+var FILE_TYPE_PATTERNS = [
+  { pattern: "controller", type: "Controller" },
+  { pattern: "service", type: "Service" },
+  { pattern: "component", type: "Component" },
+  { pattern: "middleware", type: "Middleware" },
+  { pattern: "handler", type: "Handler" },
+  { pattern: "util", type: "Utility" },
+  { pattern: "helper", type: "Utility" },
+  { pattern: "_test.", type: "Test" },
+  { pattern: "/model/", type: "Model" },
+  { pattern: "/models/", type: "Model" },
+  { pattern: "/repository/", type: "Repository" },
+  { pattern: "/repositories/", type: "Repository" }
+];
+function detectLanguage(filepath, violations) {
+  const languageFromViolation = violations[0]?.language;
+  if (languageFromViolation) {
+    return LANGUAGE_NAMES[languageFromViolation.toLowerCase()] || languageFromViolation;
+  }
+  const ext = filepath.split(".").pop()?.toLowerCase();
+  return ext ? EXTENSION_LANGUAGES[ext] || null : null;
+}
+function detectFileType(filepath) {
+  const pathLower = filepath.toLowerCase();
+  const match = FILE_TYPE_PATTERNS.find((p) => pathLower.includes(p.pattern));
+  return match?.type || null;
+}
 function buildFileContext(filepath, fileData) {
   const parts = [];
-  const languageFromViolation = fileData.violations[0]?.language;
-  if (languageFromViolation) {
-    const languageMap = {
-      "typescript": "TypeScript",
-      "javascript": "JavaScript",
-      "php": "PHP",
-      "python": "Python",
-      "go": "Go",
-      "rust": "Rust",
-      "java": "Java",
-      "ruby": "Ruby",
-      "swift": "Swift",
-      "kotlin": "Kotlin",
-      "csharp": "C#",
-      "scala": "Scala",
-      "cpp": "C++",
-      "c": "C"
-    };
-    const displayName = languageMap[languageFromViolation.toLowerCase()] || languageFromViolation;
-    parts.push(`Language: ${displayName}`);
-  } else {
-    const ext = filepath.split(".").pop()?.toLowerCase();
-    const languageHints = {
-      "ts": "TypeScript",
-      "tsx": "TypeScript React",
-      "js": "JavaScript",
-      "jsx": "JavaScript React",
-      "mjs": "JavaScript",
-      "cjs": "JavaScript",
-      "php": "PHP",
-      "py": "Python",
-      "go": "Go",
-      "rs": "Rust",
-      "java": "Java",
-      "rb": "Ruby",
-      "swift": "Swift",
-      "kt": "Kotlin",
-      "cs": "C#",
-      "scala": "Scala",
-      "cpp": "C++",
-      "cc": "C++",
-      "cxx": "C++",
-      "c": "C"
-    };
-    if (ext && languageHints[ext]) {
-      parts.push(`Language: ${languageHints[ext]}`);
-    }
-  }
-  const pathLower = filepath.toLowerCase();
-  if (pathLower.includes("controller")) parts.push("Type: Controller");
-  if (pathLower.includes("service")) parts.push("Type: Service");
-  if (pathLower.includes("component")) parts.push("Type: Component");
-  if (pathLower.includes("middleware")) parts.push("Type: Middleware");
-  if (pathLower.includes("handler")) parts.push("Type: Handler");
-  if (pathLower.includes("util") || pathLower.includes("helper")) parts.push("Type: Utility");
-  if (pathLower.includes("_test.") || pathLower.endsWith("_test.go")) parts.push("Type: Test");
-  if (pathLower.includes("/model/") || pathLower.includes("/models/")) parts.push("Type: Model");
-  if (pathLower.includes("/repository/") || pathLower.includes("/repositories/")) parts.push("Type: Repository");
+  const language = detectLanguage(filepath, fileData.violations);
+  if (language) parts.push(`Language: ${language}`);
+  const fileType = detectFileType(filepath);
+  if (fileType) parts.push(`Type: ${fileType}`);
   if (fileData.violations.length > 1) {
     parts.push(`${fileData.violations.length} total violations in this file`);
   }
@@ -471,46 +493,43 @@ function isNewOrWorsened(v, deltaMap) {
   const delta = deltaMap.get(createDeltaKey(v));
   return !!delta && (delta.severity === "new" || delta.delta > 0);
 }
-function buildViolationsSummary(files, deltaMap) {
-  const hasDeltaData = deltaMap.size > 0;
-  if (!hasDeltaData) {
-    return Object.entries(files).filter(([_, data]) => data.violations.length > 0).map(([filepath, data]) => {
-      const violationList = data.violations.map((v) => formatViolationLine(v, deltaMap)).join("\n");
-      const dependencyContext = buildDependencyContext(data);
-      const fileContext = buildFileContext(filepath, data);
-      return `**${filepath}** (risk: ${data.riskLevel})${fileContext}
-${violationList}${dependencyContext}`;
-    }).join("\n\n");
+function groupViolationsByFile(violations) {
+  const byFile = /* @__PURE__ */ new Map();
+  for (const v of violations) {
+    const existing = byFile.get(v.filepath) || [];
+    existing.push(v);
+    byFile.set(v.filepath, existing);
   }
-  const allViolations = Object.entries(files).filter(([_, data]) => data.violations.length > 0).flatMap(([_, data]) => data.violations);
+  return byFile;
+}
+function formatFileGroup(violations, files, deltaMap) {
+  return Array.from(groupViolationsByFile(violations).entries()).map(([filepath, vs]) => {
+    const fileData = files[filepath];
+    const violationList = vs.map((v) => formatViolationLine(v, deltaMap)).join("\n");
+    const dependencyContext = fileData ? buildDependencyContext(fileData) : "";
+    const fileContext = fileData ? buildFileContext(filepath, fileData) : "";
+    return `**${filepath}** (risk: ${fileData?.riskLevel || "unknown"})${fileContext}
+${violationList}${dependencyContext}`;
+  }).join("\n\n");
+}
+function buildViolationsSummary(files, deltaMap) {
+  if (deltaMap.size === 0) {
+    const allViolations2 = Object.values(files).flatMap((data) => data.violations);
+    return formatFileGroup(allViolations2, files, deltaMap);
+  }
+  const allViolations = Object.values(files).filter((data) => data.violations.length > 0).flatMap((data) => data.violations);
   const newViolations = allViolations.filter((v) => isNewOrWorsened(v, deltaMap));
   const preExisting = allViolations.filter((v) => !isNewOrWorsened(v, deltaMap));
-  const formatFileGroup = (violations) => {
-    const byFile = /* @__PURE__ */ new Map();
-    for (const v of violations) {
-      const existing = byFile.get(v.filepath) || [];
-      existing.push(v);
-      byFile.set(v.filepath, existing);
-    }
-    return Array.from(byFile.entries()).map(([filepath, vs]) => {
-      const fileData = files[filepath];
-      const violationList = vs.map((v) => formatViolationLine(v, deltaMap)).join("\n");
-      const dependencyContext = fileData ? buildDependencyContext(fileData) : "";
-      const fileContext = fileData ? buildFileContext(filepath, fileData) : "";
-      return `**${filepath}** (risk: ${fileData?.riskLevel || "unknown"})${fileContext}
-${violationList}${dependencyContext}`;
-    }).join("\n\n");
-  };
   const sections = [];
   if (newViolations.length > 0) {
     sections.push(`### New/Worsened Violations (introduced or worsened in this PR)
 
-${formatFileGroup(newViolations)}`);
+${formatFileGroup(newViolations, files, deltaMap)}`);
   }
   if (preExisting.length > 0) {
     sections.push(`### Pre-existing Violations (in files touched by this PR)
 
-${formatFileGroup(preExisting)}`);
+${formatFileGroup(preExisting, files, deltaMap)}`);
   }
   return sections.join("\n\n");
 }
@@ -1334,52 +1353,61 @@ function formatUncoveredLine(v, deltaMap) {
   const valueDisplay = formatComplexityValue(v.metricType || "cyclomatic", v.complexity);
   return `* \`${v.symbolName}\` in \`${v.filepath}\`: ${emoji} ${metricLabel} ${valueDisplay}${deltaStr}`;
 }
-function buildUncoveredNote(uncoveredViolations, deltaMap) {
-  if (uncoveredViolations.length === 0) return "";
-  const newOrWorsened = uncoveredViolations.filter((v) => {
+var BOY_SCOUT_LINK = "[boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)";
+function categorizeUncoveredViolations(violations, deltaMap) {
+  const newOrWorsened = violations.filter((v) => {
     const delta = deltaMap.get(createDeltaKey2(v));
-    return delta && (delta.severity === "new" || delta.severity === "warning" || delta.severity === "error") && (delta.severity === "new" || delta.delta > 0);
+    return delta && (delta.severity === "new" || delta.delta > 0);
   });
-  const preExisting = uncoveredViolations.filter((v) => {
+  const preExisting = violations.filter((v) => {
     const delta = deltaMap.get(createDeltaKey2(v));
     return !delta || delta.delta === 0;
   });
-  let result = "";
-  if (newOrWorsened.length > 0) {
-    const list = newOrWorsened.map((v) => formatUncoveredLine(v, deltaMap)).join("\n");
-    result += `
+  return { newOrWorsened, preExisting };
+}
+function buildNewWorsenedSection(violations, deltaMap) {
+  if (violations.length === 0) return "";
+  const list = violations.map((v) => formatUncoveredLine(v, deltaMap)).join("\n");
+  return `
 
-\u26A0\uFE0F **${newOrWorsened.length} new/worsened violation${newOrWorsened.length === 1 ? "" : "s"} outside diff:**
+\u26A0\uFE0F **${violations.length} new/worsened violation${violations.length === 1 ? "" : "s"} outside diff:**
 
 ${list}`;
-  }
-  if (preExisting.length > 0) {
-    const list = preExisting.map((v) => formatUncoveredLine(v, deltaMap)).join("\n");
-    result += `
+}
+function buildPreExistingSection(violations, deltaMap) {
+  if (violations.length === 0) return "";
+  const list = violations.map((v) => formatUncoveredLine(v, deltaMap)).join("\n");
+  return `
 
 <details>
-<summary>\u2139\uFE0F ${preExisting.length} pre-existing violation${preExisting.length === 1 ? "" : "s"} outside diff</summary>
+<summary>\u2139\uFE0F ${violations.length} pre-existing violation${violations.length === 1 ? "" : "s"} outside diff</summary>
 
 ${list}
 
-> *These violations existed before this PR. No action required, but consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*
+> *These violations existed before this PR. No action required, but consider the ${BOY_SCOUT_LINK}!*
 
 </details>`;
-  }
+}
+function buildFallbackUncoveredSection(violations, deltaMap) {
+  const list = violations.map((v) => formatUncoveredLine(v, deltaMap)).join("\n");
+  return `
+
+<details>
+<summary>\u26A0\uFE0F ${violations.length} violation${violations.length === 1 ? "" : "s"} outside diff (no inline comment)</summary>
+
+${list}
+
+> \u{1F4A1} *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the ${BOY_SCOUT_LINK}!*
+
+</details>`;
+}
+function buildUncoveredNote(uncoveredViolations, deltaMap) {
+  if (uncoveredViolations.length === 0) return "";
+  const { newOrWorsened, preExisting } = categorizeUncoveredViolations(uncoveredViolations, deltaMap);
   if (newOrWorsened.length === 0 && preExisting.length === 0) {
-    const list = uncoveredViolations.map((v) => formatUncoveredLine(v, deltaMap)).join("\n");
-    result += `
-
-<details>
-<summary>\u26A0\uFE0F ${uncoveredViolations.length} violation${uncoveredViolations.length === 1 ? "" : "s"} outside diff (no inline comment)</summary>
-
-${list}
-
-> \u{1F4A1} *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)!*
-
-</details>`;
+    return buildFallbackUncoveredSection(uncoveredViolations, deltaMap);
   }
-  return result;
+  return buildNewWorsenedSection(newOrWorsened, deltaMap) + buildPreExistingSection(preExisting, deltaMap);
 }
 function buildSkippedNote(skippedViolations) {
   if (skippedViolations.length === 0) return "";
