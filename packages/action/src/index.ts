@@ -13,6 +13,7 @@ import {
   type ReviewConfig,
   type ReviewSetup,
   type ReviewStyle,
+  createOctokit,
   orchestrateAnalysis,
   handleAnalysisOutputs,
   postReviewIfNeeded,
@@ -112,13 +113,14 @@ async function run(): Promise<void> {
 
     core.info(`Reviewing PR #${prContext.pullNumber}: ${prContext.title}`);
 
-    const octokit = github.getOctokit(githubToken);
+    // Use @octokit/rest directly instead of @actions/github's wrapper,
+    // because the wrapper puts paginate on the top level but pulls/issues on .rest
+    const octokit = createOctokit(githubToken);
 
     const setup: ReviewSetup = {
       config,
       prContext,
-      // @actions/github's Octokit is compatible with @octokit/rest API surface
-      octokit: octokit.rest as unknown as import('@octokit/rest').Octokit,
+      octokit,
       logger: actionsLogger,
       rootDir: process.cwd(),
     };

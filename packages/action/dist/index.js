@@ -15,6 +15,9 @@ import {
 import { Octokit } from "@octokit/rest";
 import collect2 from "collect.js";
 import collect from "collect.js";
+function createOctokit(token) {
+  return new Octokit({ auth: token });
+}
 async function getPRChangedFiles(octokit, prContext) {
   const files = [];
   let page = 1;
@@ -1689,12 +1692,11 @@ async function run() {
       return;
     }
     core.info(`Reviewing PR #${prContext.pullNumber}: ${prContext.title}`);
-    const octokit = github.getOctokit(githubToken);
+    const octokit = createOctokit(githubToken);
     const setup = {
       config,
       prContext,
-      // @actions/github's Octokit is compatible with @octokit/rest API surface
-      octokit: octokit.rest,
+      octokit,
       logger: actionsLogger,
       rootDir: process.cwd()
     };
