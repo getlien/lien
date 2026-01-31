@@ -122,6 +122,42 @@ describe('handleListFunctions', () => {
       expect(parsed.results).toHaveLength(1);
     });
 
+    it('should filter by symbolType method in content scan fallback', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([]);
+      mockVectorDB.scanWithFilter.mockResolvedValue([
+        {
+          content: 'function standalone() {}',
+          metadata: {
+            file: 'src/utils.ts',
+            symbolName: 'standalone',
+            symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'getName() { return this.name; }',
+          metadata: {
+            file: 'src/user.ts',
+            symbolName: 'getName',
+            symbolType: 'method',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions(
+        { symbolType: 'method' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(1);
+      expect(parsed.results[0].metadata.symbolName).toBe('getName');
+      expect(parsed.results[0].metadata.symbolType).toBe('method');
+    });
+
     it('should return all types when symbolType is omitted', async () => {
       mockVectorDB.querySymbols.mockResolvedValue([
         {

@@ -405,7 +405,7 @@ export async function scanWithFilter(
  */
 /** Maps query symbolType to acceptable AST symbolType values */
 const SYMBOL_TYPE_MATCHES: Record<string, Set<string>> = {
-  function: new Set(['function']),
+  function: new Set(['function', 'method']),
   method: new Set(['method']),
   class: new Set(['class']),
   interface: new Set(['interface']),
