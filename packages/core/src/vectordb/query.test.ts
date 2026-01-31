@@ -368,6 +368,95 @@ describe('VectorDB Query Operations', () => {
       expect(results[0].metadata.symbolType).toBe('interface');
     });
 
+    it('should filter by symbolType (method)', async () => {
+      const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'function standalone() {}',
+              file: 'src/test.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'standalone',
+              symbolType: 'function',
+              functionNames: ['standalone'],
+            },
+            {
+              content: 'getName() { return this.name; }',
+              file: 'src/test.ts',
+              startLine: 5,
+              endLine: 7,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'getName',
+              symbolType: 'method',
+              functionNames: ['getName'],
+            },
+          ]),
+        }),
+      };
+
+      const results = await querySymbols(mockTable, { symbolType: 'method', limit: 10 });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].metadata.symbolType).toBe('method');
+    });
+
+    it('should include methods when filtering by symbolType function', async () => {
+      const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'function standalone() {}',
+              file: 'src/test.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'standalone',
+              symbolType: 'function',
+              functionNames: ['standalone'],
+            },
+            {
+              content: 'getName() { return this.name; }',
+              file: 'src/test.ts',
+              startLine: 5,
+              endLine: 7,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'getName',
+              symbolType: 'method',
+              functionNames: ['getName'],
+            },
+            {
+              content: 'class TestClass {}',
+              file: 'src/test.ts',
+              startLine: 9,
+              endLine: 11,
+              type: 'class',
+              language: 'typescript',
+              symbolName: 'TestClass',
+              symbolType: 'class',
+              classNames: ['TestClass'],
+            },
+          ]),
+        }),
+      };
+
+      const results = await querySymbols(mockTable, { symbolType: 'function', limit: 10 });
+
+      expect(results).toHaveLength(2);
+      expect(results.map(r => r.metadata.symbolType)).toEqual(['function', 'method']);
+    });
+
     it('should filter by pattern', async () => {
       const mockTable = {
         countRows: vi.fn().mockResolvedValue(10),

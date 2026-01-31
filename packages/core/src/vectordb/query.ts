@@ -1,4 +1,4 @@
-import { SearchResult } from './types.js';
+import { SearchResult, SYMBOL_TYPE_MATCHES } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
@@ -124,10 +124,10 @@ function hasValidNumberEntries(arr: number[] | undefined): boolean {
  * Consolidates the symbol extraction logic used across query functions.
  */
 function getSymbolsForType(
-  r: DBRecord, 
-  symbolType?: 'function' | 'class' | 'interface'
+  r: DBRecord,
+  symbolType?: 'function' | 'method' | 'class' | 'interface'
 ): string[] {
-  if (symbolType === 'function') return r.functionNames || [];
+  if (symbolType === 'function' || symbolType === 'method') return r.functionNames || [];
   if (symbolType === 'class') return r.classNames || [];
   if (symbolType === 'interface') return r.interfaceNames || [];
   return [
@@ -403,16 +403,9 @@ export async function scanWithFilter(
 /**
  * Helper to check if a record matches the requested symbol type
  */
-/** Maps query symbolType to acceptable AST symbolType values */
-const SYMBOL_TYPE_MATCHES: Record<string, Set<string>> = {
-  function: new Set(['function', 'method']),
-  class: new Set(['class']),
-  interface: new Set(['interface']),
-};
-
 function matchesSymbolType(
   record: DBRecord,
-  symbolType: 'function' | 'class' | 'interface',
+  symbolType: 'function' | 'method' | 'class' | 'interface',
   symbols: string[]
 ): boolean {
   // If AST-based symbolType exists, use lookup table
@@ -427,7 +420,7 @@ function matchesSymbolType(
 interface SymbolQueryOptions {
   language?: string;
   pattern?: string;
-  symbolType?: 'function' | 'class' | 'interface';
+  symbolType?: 'function' | 'method' | 'class' | 'interface';
 }
 
 /**
@@ -486,7 +479,7 @@ export async function querySymbols(
   options: {
     language?: string;
     pattern?: string;
-    symbolType?: 'function' | 'class' | 'interface';
+    symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }
 ): Promise<SearchResult[]> {

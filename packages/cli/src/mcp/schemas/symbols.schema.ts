@@ -24,6 +24,10 @@ export const ListFunctionsSchema = z.object({
       "Examples: 'typescript', 'python', 'javascript', 'php'\n\n" +
       "If omitted, searches all languages."
     ),
+
+  symbolType: z.enum(['function', 'method', 'class', 'interface'])
+    .optional()
+    .describe("Filter by symbol type. If omitted, returns all types."),
 });
 
 /**

@@ -1,7 +1,9 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { ListFunctionsSchema } from '../schemas/index.js';
+import type { ListFunctionsInput } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
+import { SYMBOL_TYPE_MATCHES } from '@liendev/core';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
 
 interface QueryResult {
@@ -15,11 +17,11 @@ interface QueryResult {
  */
 async function performContentScan(
   vectorDB: VectorDBInterface,
-  args: { language?: string; pattern?: string },
+  args: ListFunctionsInput,
   log: LogFn
 ): Promise<QueryResult> {
   log('Falling back to content scan...');
-  
+
   let results = await vectorDB.scanWithFilter({
     language: args.language,
     limit: 200, // Fetch more, we'll filter by symbolName
@@ -31,6 +33,15 @@ async function performContentScan(
     results = results.filter(r => {
       const symbolName = r.metadata?.symbolName;
       return symbolName && regex.test(symbolName);
+    });
+  }
+
+  // Filter by symbolType if provided (using same matching logic as primary query path)
+  if (args.symbolType) {
+    const allowedTypes = SYMBOL_TYPE_MATCHES[args.symbolType];
+    results = results.filter(r => {
+      const recordType = r.metadata?.symbolType;
+      return recordType && allowedTypes?.has(recordType);
     });
   }
 
@@ -63,11 +74,12 @@ export async function handleListFunctions(
         const results = await vectorDB.querySymbols({
           language: validatedArgs.language,
           pattern: validatedArgs.pattern,
+          symbolType: validatedArgs.symbolType,
           limit: 50,
         });
 
         // Fall back if no results and filters were provided
-        if (results.length === 0 && (validatedArgs.language || validatedArgs.pattern)) {
+        if (results.length === 0 && (validatedArgs.language || validatedArgs.pattern || validatedArgs.symbolType)) {
           log('No symbol results, falling back to content scan...');
           queryResult = await performContentScan(vectorDB, validatedArgs, log);
         } else {

@@ -56,6 +56,7 @@ export { VectorDB } from './vectordb/lancedb.js';
 export { QdrantDB } from './vectordb/qdrant.js';
 export { createVectorDB } from './vectordb/factory.js';
 export type { VectorDBInterface, SearchResult } from './vectordb/types.js';
+export { SYMBOL_TYPE_MATCHES } from './vectordb/types.js';
 export { calculateRelevance } from './vectordb/relevance.js';
 export type { RelevanceCategory } from './vectordb/relevance.js';
 export { readVersionFile, writeVersionFile } from './vectordb/version.js';

@@ -23,6 +23,14 @@ export interface SearchResult {
   relevance: RelevanceCategory;
 }
 
+/** Maps symbolType filter values to the set of matching record types */
+export const SYMBOL_TYPE_MATCHES: Record<string, Set<string>> = {
+  function: new Set(['function', 'method']),
+  method: new Set(['method']),
+  class: new Set(['class']),
+  interface: new Set(['interface']),
+};
+
 export interface VectorDBInterface {
   /** Path to local storage (used for manifest and version files, even with remote backends like Qdrant) */
   readonly dbPath: string;
@@ -41,7 +49,7 @@ export interface VectorDBInterface {
   querySymbols(options: {
     language?: string;
     pattern?: string;
-    symbolType?: 'function' | 'class' | 'interface';
+    symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }): Promise<SearchResult[]>;
   clear(): Promise<void>;

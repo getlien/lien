@@ -75,6 +75,7 @@ describe('handleListFunctions', () => {
       expect(mockVectorDB.querySymbols).toHaveBeenCalledWith({
         language: undefined,
         pattern: '.*Command.*',
+        symbolType: undefined,
         limit: 50,
       });
       expect(mockVectorDB.scanWithFilter).not.toHaveBeenCalled();
@@ -82,6 +83,173 @@ describe('handleListFunctions', () => {
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.method).toBe('symbols');
       expect(parsed.results).toHaveLength(1);
+    });
+  });
+
+  describe('symbolType filter', () => {
+    it('should pass symbolType to querySymbols', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([
+        {
+          content: 'class UserService {}',
+          metadata: {
+            file: 'src/user.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'class',
+            language: 'typescript',
+            symbolName: 'UserService',
+            symbolType: 'class',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions(
+        { symbolType: 'class' },
+        mockCtx
+      );
+
+      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith({
+        language: undefined,
+        pattern: undefined,
+        symbolType: 'class',
+        limit: 50,
+      });
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.method).toBe('symbols');
+      expect(parsed.results).toHaveLength(1);
+    });
+
+    it('should filter by symbolType method in content scan fallback', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([]);
+      mockVectorDB.scanWithFilter.mockResolvedValue([
+        {
+          content: 'function standalone() {}',
+          metadata: {
+            file: 'src/utils.ts',
+            symbolName: 'standalone',
+            symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'getName() { return this.name; }',
+          metadata: {
+            file: 'src/user.ts',
+            symbolName: 'getName',
+            symbolType: 'method',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions(
+        { symbolType: 'method' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(1);
+      expect(parsed.results[0].metadata.symbolName).toBe('getName');
+      expect(parsed.results[0].metadata.symbolType).toBe('method');
+    });
+
+    it('should include methods when symbolType is function in content scan fallback', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([]);
+      mockVectorDB.scanWithFilter.mockResolvedValue([
+        {
+          content: 'function standalone() {}',
+          metadata: {
+            file: 'src/utils.ts',
+            symbolName: 'standalone',
+            symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'getName() { return this.name; }',
+          metadata: {
+            file: 'src/user.ts',
+            symbolName: 'getName',
+            symbolType: 'method',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'class UserService {}',
+          metadata: {
+            file: 'src/user.ts',
+            symbolName: 'UserService',
+            symbolType: 'class',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions(
+        { symbolType: 'function' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      // symbolType: 'function' should match both functions and methods
+      expect(parsed.results).toHaveLength(2);
+      expect(parsed.results.map((r: any) => r.metadata.symbolType)).toEqual([
+        'function',
+        'method',
+      ]);
+    });
+
+    it('should return all types when symbolType is omitted', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([
+        {
+          content: 'function helper() {}',
+          metadata: {
+            file: 'src/utils.ts',
+            startLine: 1,
+            endLine: 3,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'helper',
+            symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'class MyClass {}',
+          metadata: {
+            file: 'src/class.ts',
+            startLine: 1,
+            endLine: 5,
+            type: 'class',
+            language: 'typescript',
+            symbolName: 'MyClass',
+            symbolType: 'class',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions({}, mockCtx);
+
+      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith({
+        language: undefined,
+        pattern: undefined,
+        symbolType: undefined,
+        limit: 50,
+      });
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(2);
     });
   });
 
@@ -115,6 +283,52 @@ describe('handleListFunctions', () => {
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.method).toBe('content');
       expect(parsed.note).toContain('lien reindex');
+    });
+
+    it('should filter by symbolType in content scan fallback', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([]);
+      mockVectorDB.scanWithFilter.mockResolvedValue([
+        {
+          content: 'function helper() {}',
+          metadata: {
+            file: 'src/utils.ts',
+            symbolName: 'helper',
+            symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'class UserService {}',
+          metadata: {
+            file: 'src/user.ts',
+            symbolName: 'UserService',
+            symbolType: 'class',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'getName() { return this.name; }',
+          metadata: {
+            file: 'src/user.ts',
+            symbolName: 'getName',
+            symbolType: 'method',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions(
+        { symbolType: 'class' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.method).toBe('content');
+      expect(parsed.results).toHaveLength(1);
+      expect(parsed.results[0].metadata.symbolType).toBe('class');
     });
 
     it('should fall back to content scan when querySymbols throws', async () => {

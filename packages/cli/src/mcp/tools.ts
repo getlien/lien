@@ -98,6 +98,10 @@ Batch calls are more efficient than multiple single-file calls.`
 Examples:
 - "Show all controllers" → list_functions({ pattern: ".*Controller.*" })
 - "Find service classes" → list_functions({ pattern: ".*Service$" })
+- "List all class methods" → list_functions({ symbolType: "method" })
+- "Find standalone functions" → list_functions({ symbolType: "function" })
+
+Filter by symbol type (function, method, class, interface) to narrow results.
 
 10x faster than semantic_search for structural/architectural queries. Use semantic_search instead when searching by what code DOES.`
   ),
