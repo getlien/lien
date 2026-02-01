@@ -15,8 +15,8 @@ COPY packages/cli/package.json packages/cli/
 COPY packages/action/package.json packages/action/
 COPY packages/site/package.json packages/site/
 
-# Install dependencies for the packages we need
-RUN npm ci --workspace=packages/core --workspace=packages/review --workspace=packages/app
+# Install all workspace dependencies (core depends on hoisted packages like chalk)
+RUN npm ci
 
 # Copy source code
 COPY packages/core/ packages/core/
@@ -44,7 +44,7 @@ COPY --from=builder /app/packages/review/dist/ packages/review/dist/
 COPY --from=builder /app/packages/app/package.json packages/app/
 COPY --from=builder /app/packages/app/dist/ packages/app/dist/
 
-RUN npm ci --workspace=packages/core --workspace=packages/review --workspace=packages/app --omit=dev
+RUN npm ci --omit=dev
 
 EXPOSE 3000
 
