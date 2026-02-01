@@ -149,6 +149,9 @@ function buildDependentsResponse(
  * 
  * When the optional `symbol` parameter is provided, returns specific call sites
  * for that exported symbol instead of just file-level dependencies.
+ *
+ * Note: Symbol tracking only works for direct imports from the target file.
+ * Re-exported symbols (e.g., via barrel files or package entry points) are not tracked.
  */
 export async function handleGetDependents(
   args: unknown,
