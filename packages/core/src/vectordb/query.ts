@@ -376,13 +376,14 @@ function filterBySymbolType(records: DBRecord[], symbolType: string): DBRecord[]
 
 /**
  * Convert DB records to unscored SearchResults (for scan/scroll operations).
+ * Uses 'not_relevant' relevance to indicate results are unscored, not semantically irrelevant.
  */
 function toUnscoredSearchResults(records: DBRecord[], limit: number): SearchResult[] {
   return records.slice(0, limit).map((r: DBRecord) => ({
     content: r.content,
     metadata: buildSearchResultMetadata(r),
     score: 0,
-    relevance: calculateRelevance(0),
+    relevance: 'not_relevant' as const,
   }));
 }
 
