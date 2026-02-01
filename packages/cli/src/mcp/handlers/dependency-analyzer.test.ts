@@ -437,4 +437,53 @@ describe('findDependents - re-export chain resolution', () => {
     // Should not crash, and the malformed import should be excluded
     expect(result.dependents.find(d => d.filepath === 'src/broken.ts')).toBeUndefined();
   });
+
+  it('should find indirect symbol usage for file that also imports a different symbol directly', async () => {
+    // app.ts imports SearchResult directly from target AND VectorDB via re-export.
+    // It should appear in dependents with VectorDB usages (not skipped because it's
+    // a direct dependent for a different symbol).
+    const chunks: SearchResult[] = [
+      createChunk({
+        file: 'packages/core/src/vectordb/lancedb.ts',
+        exports: ['VectorDB', 'SearchResult'],
+      }),
+
+      // Re-exporter
+      createChunk({
+        file: 'packages/core/src/index.ts',
+        imports: ['./vectordb/lancedb.js'],
+        importedSymbols: { './vectordb/lancedb.js': ['VectorDB'] },
+        exports: ['VectorDB'],
+      }),
+
+      // File imports SearchResult directly from target + VectorDB via re-export
+      createChunk({
+        file: 'packages/cli/src/app.ts',
+        imports: ['../../core/src/vectordb/lancedb.js', '@liendev/core'],
+        importedSymbols: {
+          '../../core/src/vectordb/lancedb.js': ['SearchResult'],
+          '@liendev/core': ['VectorDB'],
+        },
+        callSites: [
+          { symbol: 'VectorDB', line: 10 },
+          { symbol: 'SearchResult', line: 15 },
+        ],
+        symbolName: 'startApp',
+      }),
+    ];
+
+    const result = await findDependents(
+      createMockDB(chunks),
+      'packages/core/src/vectordb/lancedb.ts',
+      false,
+      mockLog,
+      'VectorDB'
+    );
+
+    // app.ts should be found with VectorDB usage via the re-export chain
+    const app = result.dependents.find(d => d.filepath === 'packages/cli/src/app.ts');
+    expect(app).toBeDefined();
+    expect(app?.usages).toHaveLength(1);
+    expect(app?.usages?.[0].callerSymbol).toBe('startApp');
+  });
 });

@@ -606,7 +606,7 @@ function collectReExportedSymbolDependents(
   log(`Found ${reExporterPaths.size} re-exporter(s) for symbol "${targetSymbol}"`);
 
   const indirectChunksByFile = findIndirectSymbolDependents(
-    allChunks, targetSymbol, processedFiles, chunksByFile, reExporterPaths
+    allChunks, targetSymbol, processedFiles, reExporterPaths
   );
 
   const dependents: DependentInfo[] = [];
@@ -671,14 +671,15 @@ function findIndirectSymbolDependents(
   allChunks: SearchResult[],
   targetSymbol: string,
   processedFiles: Set<string>,
-  directDependentFiles: Map<string, SearchResult[]>,
   reExporterPaths: Set<string>
 ): Map<string, SearchResult[]> {
   const workspaceRoot = process.cwd().replace(/\\/g, '/');
   const indirectChunks = new Map<string, SearchResult[]>();
 
-  // Skip files that are direct dependents (whether or not they passed symbol import check)
-  const skipFiles = new Set([...processedFiles, ...directDependentFiles.keys()]);
+  // Only skip files already processed as direct symbol dependents (Phase 1).
+  // Don't skip all direct file-level dependents — a file may import a different symbol
+  // directly from the target AND import the target symbol through a re-export chain.
+  const skipFiles = new Set(processedFiles);
 
   for (const chunk of allChunks) {
     const filepath = getCanonicalPath(chunk.metadata.file, workspaceRoot);
@@ -691,7 +692,7 @@ function findIndirectSymbolDependents(
     // Check if the chunk imports the target symbol from a path that resolves to a re-exporter
     let matched = false;
     for (const [importPath, symbols] of Object.entries(importedSymbols)) {
-      if (symbols.includes(targetSymbol) && importsFromReExporter(importPath, reExporterPaths)) {
+      if (symbols.includes(targetSymbol) && importsFromReExporter(importPath, reExporterPaths, workspaceRoot)) {
         matched = true;
         break;
       }
@@ -722,11 +723,12 @@ function findIndirectSymbolDependents(
  * resolution which is not available during chunk-based analysis. In practice this is rare
  * since external dependencies typically aren't indexed alongside workspace packages.
  */
-function importsFromReExporter(importPath: string, reExporterPaths: Set<string>): boolean {
+function importsFromReExporter(importPath: string, reExporterPaths: Set<string>, workspaceRoot: string): boolean {
   // Strategy 1: Direct path match (handles relative imports like '../index.js')
   const cleaned = importPath.replace(/['"]/g, '').trim().replace(/\\/g, '/');
+  const normalizedImport = normalizePath(cleaned, workspaceRoot);
   for (const reExporter of reExporterPaths) {
-    if (matchesFile(normalizePath(cleaned, process.cwd().replace(/\\/g, '/')), reExporter)) {
+    if (matchesFile(normalizedImport, reExporter)) {
       return true;
     }
   }
