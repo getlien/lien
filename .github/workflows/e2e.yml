@@ -1,10 +1,9 @@
 name: E2E Tests (Real Projects)
 
 on:
-  # Run on push to main (post-merge validation)
-  push:
+  pull_request:
     branches: [main]
-  
+
   # Allow manual trigger
   workflow_dispatch:
 
@@ -14,32 +13,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-changeset:
+    name: Check for changeset
+    runs-on: ubuntu-latest
+    outputs:
+      has-changeset: ${{ github.event_name == 'workflow_dispatch' || steps.check.outputs.has-changeset }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changeset files in PR
+        id: check
+        run: |
+          if git diff --name-only origin/main...HEAD | grep -vE '^\.changeset/README\.md$' | grep -qE '^\.changeset/.+\.md$'; then
+            echo "has-changeset=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-changeset=false" >> "$GITHUB_OUTPUT"
+          fi
+
   e2e-tests:
     name: E2E Tests with Real Projects
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    
-    # Skip if commit message contains [skip e2e]
-    if: "!contains(github.event.head_commit.message, '[skip e2e]')"
-    
+    needs: check-changeset
+    if: needs.check-changeset.outputs.has-changeset == 'true'
+
     strategy:
       fail-fast: false
       matrix:
         node-version: [22.x]
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
-      
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Build Lien
         run: npm run build
 
@@ -48,7 +66,7 @@ jobs:
         env:
           # Increase Node.js memory for large projects
           NODE_OPTIONS: '--max-old-space-size=4096'
-      
+
       - name: Upload test artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -58,16 +76,15 @@ jobs:
             /tmp/lien-e2e-tests/
             packages/cli/test/e2e/
           retention-days: 7
-  
-  # Optional: Run individual language tests in parallel
+
+  # Run individual language tests in parallel
   e2e-tests-parallel:
     name: E2E - ${{ matrix.project }} (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    
-    # Only run on main branch (not PRs) to save CI time
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
+    needs: check-changeset
+    if: needs.check-changeset.outputs.has-changeset == 'true'
+
     strategy:
       fail-fast: false
       matrix:
@@ -84,20 +101,20 @@ jobs:
           - project: Monolog
             language: PHP
             script: test:e2e:php
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22.x
           cache: 'npm'
-      
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Build Lien
         run: npm run build
 
@@ -105,7 +122,7 @@ jobs:
         run: npm run ${{ matrix.script }} --workspace=packages/cli
         env:
           NODE_OPTIONS: '--max-old-space-size=4096'
-      
+
       - name: Upload test artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -114,4 +131,3 @@ jobs:
           path: |
             /tmp/lien-e2e-tests/
           retention-days: 7
-
