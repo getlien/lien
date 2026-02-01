@@ -9,29 +9,9 @@ on:
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
-  check-changeset:
-    name: Check for changesets
-    runs-on: ubuntu-latest
-    outputs:
-      has-changesets: ${{ github.event_name == 'workflow_dispatch' || steps.check.outputs.has-changesets }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check for changeset files
-        id: check
-        run: |
-          # Look for any .md files in .changeset/ besides README.md
-          if find .changeset -name '*.md' ! -name 'README.md' | grep -q .; then
-            echo "has-changesets=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has-changesets=false" >> "$GITHUB_OUTPUT"
-          fi
-
   release:
     name: Release
     runs-on: ubuntu-latest
-    needs: check-changeset
-    if: needs.check-changeset.outputs.has-changesets == 'true'
     permissions:
       contents: write       # Create releases
       pull-requests: write  # Create "Version Packages" PR
