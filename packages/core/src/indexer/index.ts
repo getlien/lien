@@ -368,15 +368,18 @@ async function tryIncrementalIndex(
  */
 async function processFileForIndexing(
   file: string,
+  rootDir: string,
   batchProcessor: ChunkBatchProcessor,
   indexConfig: IndexingConfig,
   progressTracker: { incrementFiles: () => void },
   _verbose: boolean
 ): Promise<boolean> {
   try {
+    // Resolve relative paths against rootDir for file I/O
+    const absolutePath = path.isAbsolute(file) ? file : path.join(rootDir, file);
     // Get file stats to capture actual modification time
-    const stats = await fs.stat(file);
-    const content = await fs.readFile(file, 'utf-8');
+    const stats = await fs.stat(absolutePath);
+    const content = await fs.readFile(absolutePath, 'utf-8');
 
     const chunks = chunkFile(file, content, {
       chunkSize: indexConfig.chunkSize,
@@ -393,7 +396,7 @@ async function processFileForIndexing(
     }
 
     // Compute content hash for change detection
-    const contentHash = await computeContentHash(file);
+    const contentHash = await computeContentHash(absolutePath);
 
     // Add chunks to batch processor (handles mutex internally)
     await batchProcessor.addChunks(chunks, file, stats.mtimeMs, contentHash);
@@ -521,6 +524,7 @@ async function performFullIndex(
     const filePromises = files.map(file =>
       limit(() => processFileForIndexing(
         file,
+        rootDir,
         batchProcessor,
         indexConfig,
         progressTracker,
