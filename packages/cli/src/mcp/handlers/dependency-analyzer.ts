@@ -732,7 +732,7 @@ function importsFromReExporter(importPath: string, reExporterPaths: Set<string>)
   }
 
   // Strategy 2: Package name heuristic for bare specifiers
-  // Bare specifiers don't start with '.', '/', or a drive letter
+  // Bare specifiers don't start with '.' or '/'
   if (cleaned.startsWith('.') || cleaned.startsWith('/')) {
     return false;
   }
