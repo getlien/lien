@@ -367,10 +367,13 @@ function filterByPattern(records: DBRecord[], pattern: string): DBRecord[] {
 /**
  * Filter records by symbol type using SYMBOL_TYPE_MATCHES lookup.
  */
-function filterBySymbolType(records: DBRecord[], symbolType: string): DBRecord[] {
+function filterBySymbolType(
+  records: DBRecord[],
+  symbolType: keyof typeof SYMBOL_TYPE_MATCHES
+): DBRecord[] {
   const allowedTypes = SYMBOL_TYPE_MATCHES[symbolType];
   return records.filter((r: DBRecord) =>
-    r.symbolType != null && allowedTypes?.has(r.symbolType)
+    r.symbolType != null && allowedTypes.has(r.symbolType)
   );
 }
 
