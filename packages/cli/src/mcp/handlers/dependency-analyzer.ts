@@ -510,11 +510,18 @@ export function groupDependentsByRepo(
 
 /**
  * Find usages of a specific symbol in dependent files.
- * 
+ *
  * Looks for:
  * 1. Files that import the symbol from the target file (direct or namespace import)
  * 2. Chunks within those files that have call sites for the symbol
- * 
+ *
+ * **Known Limitation - Direct Imports Only:**
+ * Symbol tracking only works for files that import directly from the target file path.
+ * Symbols accessed through re-export chains (e.g., `import { Foo } from '@scope/pkg'`
+ * where the package barrel file re-exports from the target) are not tracked. These files
+ * will still appear in file-level dependents (without the `symbol` parameter) but won't
+ * be included in symbol-specific usage counts.
+ *
  * **Known Limitation - Namespace Imports:**
  * Files with namespace imports (e.g., `import * as utils from './module'`) are included
  * in results if they have call sites matching the symbol name. However, call sites are
