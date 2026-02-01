@@ -164,9 +164,9 @@ function buildDependentsList(
   if (symbol) {
     // Validate that the target file exports this symbol
     validateSymbolExport(allChunks, normalizedTarget, normalizePathCached, symbol, filepath, log);
-    
-    // Symbol-level analysis
-    return findSymbolUsages(chunksByFile, symbol, normalizedTarget, normalizePathCached);
+
+    // Symbol-level analysis (includes re-export chain resolution)
+    return findSymbolUsages(chunksByFile, symbol, normalizedTarget, normalizePathCached, allChunks, log);
   }
   
   // File-level analysis
@@ -510,11 +510,19 @@ export function groupDependentsByRepo(
 
 /**
  * Find usages of a specific symbol in dependent files.
- * 
+ *
  * Looks for:
  * 1. Files that import the symbol from the target file (direct or namespace import)
- * 2. Chunks within those files that have call sites for the symbol
- * 
+ * 2. Files that import the symbol through re-export chains (e.g., barrel files, package entry points)
+ * 3. Chunks within those files that have call sites for the symbol
+ *
+ * **Re-export Resolution:**
+ * When a symbol is re-exported through intermediate files (e.g., `@liendev/core` re-exports
+ * `VectorDB` from `./vectordb/lancedb.ts`), direct path matching fails because the import
+ * path (`@liendev/core`) doesn't match the source file path. This function detects re-exporter
+ * files (direct dependents that also export the symbol) and finds additional consumers that
+ * import the symbol by name from any path.
+ *
  * **Known Limitation - Namespace Imports:**
  * Files with namespace imports (e.g., `import * as utils from './module'`) are included
  * in results if they have call sites matching the symbol name. However, call sites are
@@ -526,18 +534,23 @@ function findSymbolUsages(
   chunksByFile: Map<string, SearchResult[]>,
   targetSymbol: string,
   normalizedTarget: string,
-  normalizePathCached: (path: string) => string
+  normalizePathCached: (path: string) => string,
+  allChunks: SearchResult[],
+  log: (message: string, level?: 'warning') => void
 ): { dependents: DependentInfo[]; totalUsageCount: number } {
   const dependents: DependentInfo[] = [];
   let totalUsageCount = 0;
+  const processedFiles = new Set<string>();
 
+  // Phase 1: Direct dependents (files that import the symbol from the target file path)
   for (const [filepath, chunks] of chunksByFile.entries()) {
     if (!fileImportsSymbol(chunks, targetSymbol, normalizedTarget, normalizePathCached)) {
       continue;
     }
 
+    processedFiles.add(filepath);
     const usages = extractSymbolUsagesFromChunks(chunks, targetSymbol);
-    
+
     dependents.push({
       filepath,
       isTestFile: isTestFile(filepath),
@@ -547,7 +560,105 @@ function findSymbolUsages(
     totalUsageCount += usages.length;
   }
 
+  // Phase 2: Indirect dependents through re-export chains
+  // Find re-exporter files: direct dependents that re-export the target symbol
+  const reExporterPaths = findReExporterPaths(chunksByFile, targetSymbol);
+
+  if (reExporterPaths.size > 0) {
+    log(`Found ${reExporterPaths.size} re-exporter(s) for symbol "${targetSymbol}"`);
+
+    const indirectChunksByFile = findIndirectSymbolDependents(
+      allChunks, targetSymbol, processedFiles, chunksByFile
+    );
+
+    for (const [filepath, chunks] of indirectChunksByFile.entries()) {
+      processedFiles.add(filepath);
+      const usages = extractSymbolUsagesFromChunks(chunks, targetSymbol);
+
+      dependents.push({
+        filepath,
+        isTestFile: isTestFile(filepath),
+        usages: usages.length > 0 ? usages : undefined,
+      });
+
+      totalUsageCount += usages.length;
+    }
+  }
+
   return { dependents, totalUsageCount };
+}
+
+/**
+ * Find re-exporter files: direct dependents that also export the target symbol.
+ *
+ * These are typically barrel/index files or package entry points that re-export
+ * symbols from internal modules (e.g., `export { VectorDB } from './vectordb/lancedb.js'`).
+ */
+function findReExporterPaths(
+  chunksByFile: Map<string, SearchResult[]>,
+  targetSymbol: string
+): Set<string> {
+  const reExporterPaths = new Set<string>();
+
+  for (const [filepath, chunks] of chunksByFile.entries()) {
+    const exportsSymbol = chunks.some(chunk =>
+      chunk.metadata.exports?.includes(targetSymbol)
+    );
+    if (exportsSymbol) {
+      reExporterPaths.add(filepath);
+    }
+  }
+
+  return reExporterPaths;
+}
+
+/**
+ * Find files that import the target symbol indirectly through re-export chains.
+ *
+ * Scans all chunks for files that import the target symbol by name from any import path.
+ * Files already processed as direct dependents or re-exporters are excluded.
+ *
+ * This handles cases where the import path is a package name (e.g., `@liendev/core`)
+ * that can't be resolved to a file path through string matching alone.
+ */
+function findIndirectSymbolDependents(
+  allChunks: SearchResult[],
+  targetSymbol: string,
+  processedFiles: Set<string>,
+  directDependentFiles: Map<string, SearchResult[]>
+): Map<string, SearchResult[]> {
+  const workspaceRoot = process.cwd().replace(/\\/g, '/');
+  const indirectChunks = new Map<string, SearchResult[]>();
+
+  // Also skip files that are direct dependents but didn't pass the symbol import check
+  // (e.g., files that import the target file but not this specific symbol)
+  const skipFiles = new Set([...processedFiles, ...directDependentFiles.keys()]);
+
+  for (const chunk of allChunks) {
+    const filepath = getCanonicalPath(chunk.metadata.file, workspaceRoot);
+
+    if (skipFiles.has(filepath)) continue;
+
+    const importedSymbols = chunk.metadata.importedSymbols;
+    if (!importedSymbols) continue;
+
+    // Check if any import entry includes the target symbol by name
+    let importsTargetSymbol = false;
+    for (const symbols of Object.values(importedSymbols)) {
+      if (symbols.includes(targetSymbol)) {
+        importsTargetSymbol = true;
+        break;
+      }
+    }
+
+    if (importsTargetSymbol) {
+      const existing = indirectChunks.get(filepath) || [];
+      existing.push(chunk);
+      indirectChunks.set(filepath, existing);
+    }
+  }
+
+  return indirectChunks;
 }
 
 /**
