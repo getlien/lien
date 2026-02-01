@@ -769,7 +769,7 @@ export function extractExports(rootNode: Parser.SyntaxNode, language?: Supported
  * Returns array of function calls made within the node.
  * 
  * Supported languages:
- * - TypeScript/JavaScript: call_expression (foo(), obj.method())
+ * - TypeScript/JavaScript: call_expression (foo(), obj.method()), new_expression (new Foo())
  * - PHP: function_call_expression, member_call_expression, scoped_call_expression
  * - Python: call (similar to JS call_expression)
  */
@@ -786,6 +786,7 @@ export function extractCallSites(node: Parser.SyntaxNode): Array<{ symbol: strin
  */
 const CALL_EXPRESSION_TYPES = new Set([
   'call_expression',           // TypeScript/JavaScript
+  'new_expression',            // TypeScript/JavaScript: new Foo()
   'call',                      // Python
   'function_call_expression',  // PHP: helper_function()
   'member_call_expression',    // PHP: $this->method()
@@ -826,6 +827,11 @@ function extractCallSiteFromExpression(node: Parser.SyntaxNode): { symbol: strin
   if (node.type === 'call_expression') {
     return extractJSCallSite(node, line);
   }
+
+  // TypeScript/JavaScript: new_expression (new Foo(), new ns.Bar())
+  if (node.type === 'new_expression') {
+    return extractNewExpressionCallSite(node, line);
+  }
   
   // Python: call
   if (node.type === 'call') {
@@ -860,26 +866,35 @@ function extractCallSiteFromExpression(node: Parser.SyntaxNode): { symbol: strin
 }
 
 /**
+ * Resolve a JS/TS node (identifier or member_expression) to a symbol name.
+ */
+function resolveJSSymbol(node: Parser.SyntaxNode): string | null {
+  if (node.type === 'identifier') return node.text;
+  if (node.type === 'member_expression') {
+    const propertyNode = node.childForFieldName('property');
+    if (propertyNode?.type === 'property_identifier') return propertyNode.text;
+  }
+  return null;
+}
+
+/**
  * Extract call site from JavaScript/TypeScript call_expression.
  */
 function extractJSCallSite(node: Parser.SyntaxNode, line: number): { symbol: string; line: number; key: string } | null {
   const functionNode = node.childForFieldName('function');
   if (!functionNode) return null;
-  
-  // Direct function call: foo()
-  if (functionNode.type === 'identifier') {
-    return { symbol: functionNode.text, line, key: `${functionNode.text}:${line}` };
-  }
-  
-  // Member expression: foo.bar() - extract 'bar'
-  if (functionNode.type === 'member_expression') {
-    const propertyNode = functionNode.childForFieldName('property');
-    if (propertyNode?.type === 'property_identifier') {
-      return { symbol: propertyNode.text, line, key: `${propertyNode.text}:${line}` };
-    }
-  }
-  
-  return null;
+  const symbol = resolveJSSymbol(functionNode);
+  return symbol ? { symbol, line, key: `${symbol}:${line}` } : null;
+}
+
+/**
+ * Extract call site from JavaScript/TypeScript new_expression.
+ */
+function extractNewExpressionCallSite(node: Parser.SyntaxNode, line: number): { symbol: string; line: number; key: string } | null {
+  const ctorNode = node.childForFieldName('constructor');
+  if (!ctorNode) return null;
+  const symbol = resolveJSSymbol(ctorNode);
+  return symbol ? { symbol, line, key: `${symbol}:${line}` } : null;
 }
 
 /**
