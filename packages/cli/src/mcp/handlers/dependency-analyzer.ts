@@ -606,7 +606,7 @@ function collectReExportedSymbolDependents(
   log(`Found ${reExporterPaths.size} re-exporter(s) for symbol "${targetSymbol}"`);
 
   const indirectChunksByFile = findIndirectSymbolDependents(
-    allChunks, targetSymbol, processedFiles, chunksByFile
+    allChunks, targetSymbol, processedFiles, chunksByFile, reExporterPaths
   );
 
   const dependents: DependentInfo[] = [];
@@ -654,23 +654,26 @@ function findReExporterPaths(
 /**
  * Find files that import the target symbol indirectly through re-export chains.
  *
- * Scans all chunks for files that import the target symbol by name from any import path.
- * Files already processed as direct dependents or re-exporters are excluded.
+ * Scans all chunks for files that import the target symbol by name AND whose import
+ * path plausibly resolves to a known re-exporter. This prevents false positives from
+ * unrelated packages that happen to export a symbol with the same name.
  *
- * This handles cases where the import path is a package name (e.g., `@liendev/core`)
- * that can't be resolved to a file path through string matching alone.
+ * Import path verification uses two strategies:
+ * 1. Direct path matching via `matchesFile` (handles relative imports)
+ * 2. Package name heuristic: for bare specifiers like `@scope/name`, checks if the
+ *    package name component appears as a directory in any re-exporter's file path
  */
 function findIndirectSymbolDependents(
   allChunks: SearchResult[],
   targetSymbol: string,
   processedFiles: Set<string>,
-  directDependentFiles: Map<string, SearchResult[]>
+  directDependentFiles: Map<string, SearchResult[]>,
+  reExporterPaths: Set<string>
 ): Map<string, SearchResult[]> {
   const workspaceRoot = process.cwd().replace(/\\/g, '/');
   const indirectChunks = new Map<string, SearchResult[]>();
 
-  // Also skip files that are direct dependents but didn't pass the symbol import check
-  // (e.g., files that import the target file but not this specific symbol)
+  // Skip files that are direct dependents (whether or not they passed symbol import check)
   const skipFiles = new Set([...processedFiles, ...directDependentFiles.keys()]);
 
   for (const chunk of allChunks) {
@@ -681,16 +684,16 @@ function findIndirectSymbolDependents(
     const importedSymbols = chunk.metadata.importedSymbols;
     if (!importedSymbols) continue;
 
-    // Check if any import entry includes the target symbol by name
-    let importsTargetSymbol = false;
-    for (const symbols of Object.values(importedSymbols)) {
-      if (symbols.includes(targetSymbol)) {
-        importsTargetSymbol = true;
+    // Check if the chunk imports the target symbol from a path that resolves to a re-exporter
+    let matched = false;
+    for (const [importPath, symbols] of Object.entries(importedSymbols)) {
+      if (symbols.includes(targetSymbol) && importsFromReExporter(importPath, reExporterPaths)) {
+        matched = true;
         break;
       }
     }
 
-    if (importsTargetSymbol) {
+    if (matched) {
       const existing = indirectChunks.get(filepath) || [];
       existing.push(chunk);
       indirectChunks.set(filepath, existing);
@@ -698,6 +701,48 @@ function findIndirectSymbolDependents(
   }
 
   return indirectChunks;
+}
+
+/**
+ * Check if an import path plausibly resolves to one of the known re-exporter files.
+ *
+ * Uses two strategies:
+ * 1. Path matching: relative/absolute imports checked via `matchesFile`
+ * 2. Package name heuristic: bare specifiers (e.g., `@liendev/core`) are matched by
+ *    checking if the package name appears as a directory component in any re-exporter path.
+ *    For example, `@liendev/core` → package name `core` → matches `packages/core/src/index`.
+ */
+function importsFromReExporter(importPath: string, reExporterPaths: Set<string>): boolean {
+  // Strategy 1: Direct path match (handles relative imports like '../index.js')
+  const cleaned = importPath.replace(/['"]/g, '').trim().replace(/\\/g, '/');
+  for (const reExporter of reExporterPaths) {
+    if (matchesFile(normalizePath(cleaned, process.cwd().replace(/\\/g, '/')), reExporter)) {
+      return true;
+    }
+  }
+
+  // Strategy 2: Package name heuristic for bare specifiers
+  // Bare specifiers don't start with '.', '/', or a drive letter
+  if (cleaned.startsWith('.') || cleaned.startsWith('/')) {
+    return false;
+  }
+
+  // Extract package name: @scope/name → name, plain-name → plain-name
+  const packageName = cleaned.startsWith('@')
+    ? cleaned.split('/')[1]
+    : cleaned.split('/')[0];
+
+  if (!packageName) return false;
+
+  // Check if any re-exporter path contains the package name as a directory component
+  for (const reExporter of reExporterPaths) {
+    const components = reExporter.split('/');
+    if (components.includes(packageName)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**

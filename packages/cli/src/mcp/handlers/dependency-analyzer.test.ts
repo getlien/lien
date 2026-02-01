@@ -56,32 +56,29 @@ describe('findDependents - re-export chain resolution', () => {
 
   it('should find symbol usages through re-export chains', async () => {
     // Scenario:
-    // - Target: src/vectordb/lancedb.ts exports VectorDB
-    // - Re-exporter: src/index.ts imports from ./vectordb/lancedb.js and re-exports VectorDB
-    // - Consumer: src/cli/app.ts imports VectorDB from @mypackage/core (maps to src/index.ts)
-    //   and uses it
+    // - Target: packages/core/src/vectordb/lancedb.ts exports VectorDB
+    // - Re-exporter: packages/core/src/index.ts imports from target and re-exports VectorDB
+    // - Consumer: packages/cli/src/app.ts imports VectorDB from @mypackage/core
+    //   Package name "core" matches directory component in re-exporter path
     const chunks: SearchResult[] = [
-      // Target file (src/vectordb/lancedb.ts) - exports VectorDB
       createChunk({
-        file: 'src/vectordb/lancedb.ts',
+        file: 'packages/core/src/vectordb/lancedb.ts',
         content: 'export class VectorDB { ... }',
         exports: ['VectorDB'],
         symbolName: 'VectorDB',
         symbolType: 'class',
       }),
 
-      // Re-exporter (src/index.ts) - imports from target and re-exports
       createChunk({
-        file: 'src/index.ts',
+        file: 'packages/core/src/index.ts',
         content: "export { VectorDB } from './vectordb/lancedb.js';",
         imports: ['./vectordb/lancedb.js'],
         importedSymbols: { './vectordb/lancedb.js': ['VectorDB'] },
         exports: ['VectorDB'],
       }),
 
-      // Consumer via re-export (src/cli/app.ts) - imports from package name
       createChunk({
-        file: 'src/cli/app.ts',
+        file: 'packages/cli/src/app.ts',
         content: "import { VectorDB } from '@mypackage/core';\nconst db = new VectorDB();",
         imports: ['@mypackage/core'],
         importedSymbols: { '@mypackage/core': ['VectorDB'] },
@@ -92,18 +89,18 @@ describe('findDependents - re-export chain resolution', () => {
 
     const result = await findDependents(
       createMockDB(chunks),
-      'src/vectordb/lancedb.ts',
+      'packages/core/src/vectordb/lancedb.ts',
       false,
       mockLog,
       'VectorDB'
     );
 
-    // The re-exporter (src/index.ts) should be a direct dependent
-    const reExporter = result.dependents.find(d => d.filepath === 'src/index.ts');
+    // The re-exporter should be a direct dependent
+    const reExporter = result.dependents.find(d => d.filepath === 'packages/core/src/index.ts');
     expect(reExporter).toBeDefined();
 
-    // The consumer (src/cli/app.ts) should be found as an indirect dependent
-    const consumer = result.dependents.find(d => d.filepath === 'src/cli/app.ts');
+    // The consumer should be found as an indirect dependent
+    const consumer = result.dependents.find(d => d.filepath === 'packages/cli/src/app.ts');
     expect(consumer).toBeDefined();
     expect(consumer?.usages).toHaveLength(1);
     expect(consumer?.usages?.[0].callerSymbol).toBe('useDB');
@@ -113,10 +110,8 @@ describe('findDependents - re-export chain resolution', () => {
   });
 
   it('should not include indirect dependents when no re-exporters exist', async () => {
-    // Scenario: target exports VectorDB, consumer imports VectorDB from unrelated module
-    // No re-exporter exists, so the consumer should NOT be found
+    // No re-exporter exists → consumer importing same symbol name from elsewhere is excluded
     const chunks: SearchResult[] = [
-      // Target file
       createChunk({
         file: 'src/vectordb/lancedb.ts',
         exports: ['VectorDB'],
@@ -148,32 +143,80 @@ describe('findDependents - re-export chain resolution', () => {
       'VectorDB'
     );
 
-    // consumer.ts imports the target but not VectorDB specifically
-    // other.ts imports VectorDB but there's no re-exporter chain
-    // So only consumer.ts should be in dependents (file-level), but not matched for symbol
     expect(result.dependents.find(d => d.filepath === 'src/other.ts')).toBeUndefined();
   });
 
-  it('should handle multiple levels of re-export consumers', async () => {
-    // Multiple files import VectorDB through the same re-exporter
+  it('should not include files importing same-named symbol from unrelated package', async () => {
+    // Re-exporter exists, but a file imports VectorDB from a completely unrelated package.
+    // The unrelated package name ("other-db") doesn't match any re-exporter path component,
+    // so it should be excluded.
     const chunks: SearchResult[] = [
       createChunk({
-        file: 'src/vectordb/lancedb.ts',
+        file: 'packages/core/src/vectordb/lancedb.ts',
         exports: ['VectorDB'],
         symbolName: 'VectorDB',
       }),
 
-      // Re-exporter
+      // Re-exporter — triggers indirect dependent scanning
       createChunk({
-        file: 'src/index.ts',
+        file: 'packages/core/src/index.ts',
         imports: ['./vectordb/lancedb.js'],
         importedSymbols: { './vectordb/lancedb.js': ['VectorDB'] },
         exports: ['VectorDB'],
       }),
 
-      // Consumer 1
+      // Legitimate consumer via re-export (package name "core" matches re-exporter path)
       createChunk({
-        file: 'src/cli/serve.ts',
+        file: 'packages/cli/src/app.ts',
+        imports: ['@liendev/core'],
+        importedSymbols: { '@liendev/core': ['VectorDB'] },
+        callSites: [{ symbol: 'VectorDB', line: 5 }],
+        symbolName: 'startApp',
+      }),
+
+      // Unrelated consumer — imports VectorDB from a different package ("other-db")
+      // "other-db" does NOT appear as a directory component in any re-exporter path
+      createChunk({
+        file: 'packages/cli/src/migration.ts',
+        imports: ['other-db'],
+        importedSymbols: { 'other-db': ['VectorDB'] },
+        callSites: [{ symbol: 'VectorDB', line: 10 }],
+        symbolName: 'migrate',
+      }),
+    ];
+
+    const result = await findDependents(
+      createMockDB(chunks),
+      'packages/core/src/vectordb/lancedb.ts',
+      false,
+      mockLog,
+      'VectorDB'
+    );
+
+    // Legitimate consumer should be found
+    expect(result.dependents.find(d => d.filepath === 'packages/cli/src/app.ts')).toBeDefined();
+
+    // Unrelated consumer should NOT be found (import path doesn't match any re-exporter)
+    expect(result.dependents.find(d => d.filepath === 'packages/cli/src/migration.ts')).toBeUndefined();
+  });
+
+  it('should handle multiple consumers through the same re-exporter', async () => {
+    const chunks: SearchResult[] = [
+      createChunk({
+        file: 'packages/core/src/vectordb/lancedb.ts',
+        exports: ['VectorDB'],
+        symbolName: 'VectorDB',
+      }),
+
+      createChunk({
+        file: 'packages/core/src/index.ts',
+        imports: ['./vectordb/lancedb.js'],
+        importedSymbols: { './vectordb/lancedb.js': ['VectorDB'] },
+        exports: ['VectorDB'],
+      }),
+
+      createChunk({
+        file: 'packages/cli/src/serve.ts',
         content: 'const db = new VectorDB();',
         imports: ['@pkg/core'],
         importedSymbols: { '@pkg/core': ['VectorDB'] },
@@ -181,9 +224,8 @@ describe('findDependents - re-export chain resolution', () => {
         symbolName: 'startServer',
       }),
 
-      // Consumer 2
       createChunk({
-        file: 'src/cli/index-cmd.ts',
+        file: 'packages/cli/src/index-cmd.ts',
         content: 'await VectorDB.load(path);',
         imports: ['@pkg/core'],
         importedSymbols: { '@pkg/core': ['VectorDB'] },
@@ -191,9 +233,8 @@ describe('findDependents - re-export chain resolution', () => {
         symbolName: 'indexCommand',
       }),
 
-      // Consumer 3 (test file)
       createChunk({
-        file: 'test/helpers/test-db.ts',
+        file: 'packages/cli/test/helpers/test-db.ts',
         content: 'new VectorDB()',
         imports: ['@pkg/core'],
         importedSymbols: { '@pkg/core': ['VectorDB'] },
@@ -204,7 +245,7 @@ describe('findDependents - re-export chain resolution', () => {
 
     const result = await findDependents(
       createMockDB(chunks),
-      'src/vectordb/lancedb.ts',
+      'packages/core/src/vectordb/lancedb.ts',
       false,
       mockLog,
       'VectorDB'
@@ -215,30 +256,27 @@ describe('findDependents - re-export chain resolution', () => {
     expect(result.totalUsageCount).toBe(3); // 3 consumers with call sites
 
     // Test file should be identified
-    const testFile = result.dependents.find(d => d.filepath === 'test/helpers/test-db.ts');
+    const testFile = result.dependents.find(d => d.filepath.includes('test-db'));
     expect(testFile?.isTestFile).toBe(true);
   });
 
   it('should not double-count files that are both direct and indirect dependents', async () => {
-    // A file imports VectorDB directly from the target AND also from a re-exporter
-    // It should only appear once
     const chunks: SearchResult[] = [
       createChunk({
-        file: 'src/vectordb/lancedb.ts',
+        file: 'packages/core/src/vectordb/lancedb.ts',
         exports: ['VectorDB'],
       }),
 
-      // Re-exporter
       createChunk({
-        file: 'src/index.ts',
+        file: 'packages/core/src/index.ts',
         imports: ['./vectordb/lancedb.js'],
         importedSymbols: { './vectordb/lancedb.js': ['VectorDB'] },
         exports: ['VectorDB'],
       }),
 
-      // File that imports directly from the target (matches via path)
+      // File that imports directly from the target (matches via relative path)
       createChunk({
-        file: 'src/vectordb/utils.ts',
+        file: 'packages/core/src/vectordb/utils.ts',
         imports: ['./lancedb.js'],
         importedSymbols: { './lancedb.js': ['VectorDB'] },
         callSites: [{ symbol: 'VectorDB', line: 5 }],
@@ -248,33 +286,32 @@ describe('findDependents - re-export chain resolution', () => {
 
     const result = await findDependents(
       createMockDB(chunks),
-      'src/vectordb/lancedb.ts',
+      'packages/core/src/vectordb/lancedb.ts',
       false,
       mockLog,
       'VectorDB'
     );
 
-    // vectordb/utils.ts should appear once (as direct dependent)
-    const utilsEntries = result.dependents.filter(d => d.filepath === 'src/vectordb/utils.ts');
+    const utilsEntries = result.dependents.filter(d => d.filepath.includes('vectordb/utils'));
     expect(utilsEntries).toHaveLength(1);
   });
 
   it('should log re-exporter detection', async () => {
     const chunks: SearchResult[] = [
       createChunk({
-        file: 'src/vectordb/lancedb.ts',
+        file: 'packages/core/src/vectordb/lancedb.ts',
         exports: ['VectorDB'],
       }),
 
       createChunk({
-        file: 'src/index.ts',
+        file: 'packages/core/src/index.ts',
         imports: ['./vectordb/lancedb.js'],
         importedSymbols: { './vectordb/lancedb.js': ['VectorDB'] },
         exports: ['VectorDB'],
       }),
 
       createChunk({
-        file: 'src/app.ts',
+        file: 'packages/cli/src/app.ts',
         imports: ['@pkg/core'],
         importedSymbols: { '@pkg/core': ['VectorDB'] },
       }),
@@ -282,7 +319,7 @@ describe('findDependents - re-export chain resolution', () => {
 
     await findDependents(
       createMockDB(chunks),
-      'src/vectordb/lancedb.ts',
+      'packages/core/src/vectordb/lancedb.ts',
       false,
       mockLog,
       'VectorDB'
@@ -294,7 +331,6 @@ describe('findDependents - re-export chain resolution', () => {
   });
 
   it('should handle symbol usages without re-exports (direct imports only)', async () => {
-    // Basic case: no re-exports, direct imports work fine
     const chunks: SearchResult[] = [
       createChunk({
         file: 'src/utils/validate.ts',
