@@ -1,0 +1,4 @@
+veille-app.lien.dev {
+	tls /etc/ssl/certs/veille.pem /etc/ssl/certs/veille.key
+	reverse_proxy veille:3000
+}
