@@ -67,20 +67,25 @@ class Calculator {
 
       const chunks = chunkByAST('test.ts', content);
       
-      // Should have chunks for each method (not the class itself)
+      // Should have a class chunk and chunks for each method
+      const classChunk = chunks.find(c => c.metadata.symbolName === 'Calculator');
       const addMethod = chunks.find(c => c.metadata.symbolName === 'add');
       const subtractMethod = chunks.find(c => c.metadata.symbolName === 'subtract');
-      
+
+      expect(classChunk).toBeDefined();
+      expect(classChunk?.metadata.symbolType).toBe('class');
+      expect(classChunk?.metadata.type).toBe('class');
+
       expect(addMethod).toBeDefined();
       expect(addMethod?.metadata.symbolType).toBe('method');
       expect(addMethod?.metadata.parentClass).toBe('Calculator');
-      
+
       expect(subtractMethod).toBeDefined();
       expect(subtractMethod?.metadata.symbolType).toBe('method');
       expect(subtractMethod?.metadata.parentClass).toBe('Calculator');
-      
-      // Should have 2 method chunks (no class chunk)
-      expect(chunks.length).toBe(2);
+
+      // Should have 1 class chunk + 2 method chunks
+      expect(chunks.length).toBe(3);
     });
 
     it('should extract function metadata', () => {
@@ -313,18 +318,23 @@ class UserController {
 ?>`;
 
       const chunks = chunkByAST('test.php', content);
-      
+
+      // Should have a class chunk
+      const classChunk = chunks.find(c => c.metadata.symbolName === 'UserController');
+      expect(classChunk).toBeDefined();
+      expect(classChunk?.metadata.symbolType).toBe('class');
+
       // Should have chunks for each method
       const constructorChunk = chunks.find(c => c.metadata.symbolName === '__construct');
       expect(constructorChunk).toBeDefined();
       expect(constructorChunk?.metadata.symbolType).toBe('method');
       expect(constructorChunk?.metadata.parentClass).toBe('UserController');
-      
+
       const getByIdChunk = chunks.find(c => c.metadata.symbolName === 'getUserById');
       expect(getByIdChunk).toBeDefined();
       expect(getByIdChunk?.metadata.symbolType).toBe('method');
       expect(getByIdChunk?.metadata.parentClass).toBe('UserController');
-      
+
       const createChunk = chunks.find(c => c.metadata.symbolName === 'createUser');
       expect(createChunk).toBeDefined();
       expect(createChunk?.metadata.symbolType).toBe('method');

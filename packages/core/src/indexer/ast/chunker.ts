@@ -222,8 +222,9 @@ function findTopLevelNodes(
       return;
     }
     
-    // Handle containers - traverse body at increased depth
+    // Handle containers - emit the container itself AND traverse body for children
     if (traverser.shouldExtractChildren(node)) {
+      nodes.push(node);
       const body = traverser.getContainerBody(node);
       if (body) traverse(body, depth + 1);
       return;

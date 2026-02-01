@@ -31,14 +31,22 @@ class Calculator:
 `;
     
     const chunks = chunkByAST('test.py', content.trim());
-    
-    expect(chunks).toHaveLength(2);
-    expect(chunks[0].metadata.symbolName).toBe('add');
-    expect(chunks[0].metadata.symbolType).toBe('method');
-    expect(chunks[0].metadata.parentClass).toBe('Calculator');
-    expect(chunks[1].metadata.symbolName).toBe('subtract');
-    expect(chunks[1].metadata.symbolType).toBe('method');
-    expect(chunks[1].metadata.parentClass).toBe('Calculator');
+
+    expect(chunks).toHaveLength(3);
+
+    const classChunk = chunks.find(c => c.metadata.symbolName === 'Calculator');
+    expect(classChunk).toBeDefined();
+    expect(classChunk?.metadata.symbolType).toBe('class');
+
+    const addMethod = chunks.find(c => c.metadata.symbolName === 'add');
+    expect(addMethod).toBeDefined();
+    expect(addMethod?.metadata.symbolType).toBe('method');
+    expect(addMethod?.metadata.parentClass).toBe('Calculator');
+
+    const subtractMethod = chunks.find(c => c.metadata.symbolName === 'subtract');
+    expect(subtractMethod).toBeDefined();
+    expect(subtractMethod?.metadata.symbolType).toBe('method');
+    expect(subtractMethod?.metadata.parentClass).toBe('Calculator');
   });
   
   it('should handle async functions', () => {
@@ -119,7 +127,12 @@ class Person:
     
     const chunks = chunkByAST('test.py', content.trim());
     
-    expect(chunks).toHaveLength(2);
+    expect(chunks).toHaveLength(3);
+
+    const classChunk = chunks.find(c => c.metadata.symbolName === 'Person');
+    expect(classChunk).toBeDefined();
+    expect(classChunk?.metadata.symbolType).toBe('class');
+
     const initMethod = chunks.find(c => c.metadata.symbolName === '__init__');
     expect(initMethod).toBeDefined();
     expect(initMethod?.metadata.symbolType).toBe('method');
