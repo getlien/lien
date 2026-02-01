@@ -54,7 +54,6 @@ function setupWebhooks(app: App, config: AppConfig, queue: JobQueue): void {
     queue.enqueue(async () => {
       await handlePullRequest(
         payload as any,
-        octokit as any,
         token as string,
         config,
         logger,

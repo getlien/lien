@@ -2,12 +2,12 @@
  * Webhook handler — receives PR events and orchestrates clone → analyze → post review.
  */
 
-import type { Octokit } from '@octokit/rest';
 import {
   type PRContext,
   type ReviewConfig,
   type Logger,
   consoleLogger,
+  createOctokit,
   handleAnalysisOutputs,
   postReviewIfNeeded,
   runComplexityAnalysis,
@@ -72,7 +72,7 @@ function buildContexts(
  */
 async function runPRAnalysis(
   payload: PRWebhookPayload,
-  octokit: Octokit,
+  octokit: ReturnType<typeof createOctokit>,
   token: string,
   reviewConfig: ReviewConfig,
   prContext: PRContext,
@@ -127,7 +127,6 @@ async function runPRAnalysis(
  */
 export async function handlePullRequest(
   payload: PRWebhookPayload,
-  octokit: Octokit,
   token: string,
   config: AppConfig,
   logger: Logger = consoleLogger,
@@ -138,6 +137,7 @@ export async function handlePullRequest(
   }
 
   const { prContext, reviewConfig } = buildContexts(payload, config);
+  const octokit = createOctokit(token);
   logger.info(`Processing PR #${prContext.pullNumber} (${payload.action}) on ${payload.repository.full_name}`);
 
   let headClone: CloneResult | null = null;
