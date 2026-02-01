@@ -538,11 +538,33 @@ function findSymbolUsages(
   allChunks: SearchResult[],
   log: (message: string, level?: 'warning') => void
 ): { dependents: DependentInfo[]; totalUsageCount: number } {
+  // Phase 1: Direct dependents (files that import the symbol from the target file path)
+  const direct = collectDirectSymbolDependents(chunksByFile, targetSymbol, normalizedTarget, normalizePathCached);
+
+  // Phase 2: Indirect dependents through re-export chains
+  const indirect = collectReExportedSymbolDependents(
+    chunksByFile, allChunks, targetSymbol, direct.processedFiles, log
+  );
+
+  return {
+    dependents: [...direct.dependents, ...indirect.dependents],
+    totalUsageCount: direct.totalUsageCount + indirect.totalUsageCount,
+  };
+}
+
+/**
+ * Collect dependents that directly import the symbol from the target file path.
+ */
+function collectDirectSymbolDependents(
+  chunksByFile: Map<string, SearchResult[]>,
+  targetSymbol: string,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string
+): { dependents: DependentInfo[]; totalUsageCount: number; processedFiles: Set<string> } {
   const dependents: DependentInfo[] = [];
   let totalUsageCount = 0;
   const processedFiles = new Set<string>();
 
-  // Phase 1: Direct dependents (files that import the symbol from the target file path)
   for (const [filepath, chunks] of chunksByFile.entries()) {
     if (!fileImportsSymbol(chunks, targetSymbol, normalizedTarget, normalizePathCached)) {
       continue;
@@ -560,29 +582,46 @@ function findSymbolUsages(
     totalUsageCount += usages.length;
   }
 
-  // Phase 2: Indirect dependents through re-export chains
-  // Find re-exporter files: direct dependents that re-export the target symbol
+  return { dependents, totalUsageCount, processedFiles };
+}
+
+/**
+ * Collect dependents that import the symbol through re-export chains.
+ *
+ * Detects barrel/index files among direct dependents that re-export the target symbol,
+ * then finds additional consumers that import the symbol by name from any path.
+ */
+function collectReExportedSymbolDependents(
+  chunksByFile: Map<string, SearchResult[]>,
+  allChunks: SearchResult[],
+  targetSymbol: string,
+  processedFiles: Set<string>,
+  log: (message: string, level?: 'warning') => void
+): { dependents: DependentInfo[]; totalUsageCount: number } {
   const reExporterPaths = findReExporterPaths(chunksByFile, targetSymbol);
+  if (reExporterPaths.size === 0) {
+    return { dependents: [], totalUsageCount: 0 };
+  }
 
-  if (reExporterPaths.size > 0) {
-    log(`Found ${reExporterPaths.size} re-exporter(s) for symbol "${targetSymbol}"`);
+  log(`Found ${reExporterPaths.size} re-exporter(s) for symbol "${targetSymbol}"`);
 
-    const indirectChunksByFile = findIndirectSymbolDependents(
-      allChunks, targetSymbol, processedFiles, chunksByFile
-    );
+  const indirectChunksByFile = findIndirectSymbolDependents(
+    allChunks, targetSymbol, processedFiles, chunksByFile
+  );
 
-    for (const [filepath, chunks] of indirectChunksByFile.entries()) {
-      processedFiles.add(filepath);
-      const usages = extractSymbolUsagesFromChunks(chunks, targetSymbol);
+  const dependents: DependentInfo[] = [];
+  let totalUsageCount = 0;
 
-      dependents.push({
-        filepath,
-        isTestFile: isTestFile(filepath),
-        usages: usages.length > 0 ? usages : undefined,
-      });
+  for (const [filepath, chunks] of indirectChunksByFile.entries()) {
+    const usages = extractSymbolUsagesFromChunks(chunks, targetSymbol);
 
-      totalUsageCount += usages.length;
-    }
+    dependents.push({
+      filepath,
+      isTestFile: isTestFile(filepath),
+      usages: usages.length > 0 ? usages : undefined,
+    });
+
+    totalUsageCount += usages.length;
   }
 
   return { dependents, totalUsageCount };
