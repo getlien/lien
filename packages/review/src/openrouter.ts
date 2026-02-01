@@ -2,8 +2,8 @@
  * OpenRouter API client for LLM access
  */
 
-import * as core from '@actions/core';
 import type { ComplexityViolation, ComplexityReport } from '@liendev/core';
+import type { Logger } from './logger.js';
 import { buildBatchedCommentsPrompt } from './prompt.js';
 
 /**
@@ -89,19 +89,19 @@ function trackUsage(
  * Returns null if parsing fails after retry attempts
  * Exported for testing
  */
-export function parseCommentsResponse(content: string): Record<string, string> | null {
+export function parseCommentsResponse(content: string, logger: Logger): Record<string, string> | null {
   // Try extracting JSON from markdown code block first
   const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
   const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
 
-  core.info(`Parsing JSON response (${jsonStr.length} chars)`);
+  logger.info(`Parsing JSON response (${jsonStr.length} chars)`);
 
   try {
     const parsed = JSON.parse(jsonStr);
-    core.info(`Successfully parsed ${Object.keys(parsed).length} comments`);
+    logger.info(`Successfully parsed ${Object.keys(parsed).length} comments`);
     return parsed;
   } catch (parseError) {
-    core.warning(`Initial JSON parse failed: ${parseError}`);
+    logger.warning(`Initial JSON parse failed: ${parseError}`);
   }
 
   // Aggressive retry: extract any JSON object from response
@@ -109,14 +109,14 @@ export function parseCommentsResponse(content: string): Record<string, string> |
   if (objectMatch) {
     try {
       const parsed = JSON.parse(objectMatch[0]);
-      core.info(`Recovered JSON with aggressive parsing: ${Object.keys(parsed).length} comments`);
+      logger.info(`Recovered JSON with aggressive parsing: ${Object.keys(parsed).length} comments`);
       return parsed;
     } catch (retryError) {
-      core.warning(`Retry parsing also failed: ${retryError}`);
+      logger.warning(`Retry parsing also failed: ${retryError}`);
     }
   }
 
-  core.warning(`Full response content:\n${content}`);
+  logger.warning(`Full response content:\n${content}`);
   return null;
 }
 
@@ -126,9 +126,10 @@ export function parseCommentsResponse(content: string): Record<string, string> |
 export async function generateReview(
   prompt: string,
   apiKey: string,
-  model: string
+  model: string,
+  logger: Logger
 ): Promise<string> {
-  core.info(`Calling OpenRouter with model: ${model}`);
+  logger.info(`Calling OpenRouter with model: ${model}`);
 
   const response = await fetch(OPENROUTER_API_URL, {
     method: 'POST',
@@ -180,7 +181,7 @@ export async function generateReview(
   if (data.usage) {
     trackUsage(data.usage);
     const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
-    core.info(
+    logger.info(
       `Tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`
     );
   }
@@ -240,7 +241,8 @@ async function callBatchedCommentsAPI(
  */
 export function mapCommentsToViolations(
   commentsMap: Record<string, string> | null,
-  violations: ComplexityViolation[]
+  violations: ComplexityViolation[],
+  logger: Logger
 ): Map<ComplexityViolation, string> {
   const results = new Map<ComplexityViolation, string>();
   const fallbackMessage = (v: ComplexityViolation) =>
@@ -260,7 +262,7 @@ export function mapCommentsToViolations(
     if (comment) {
       results.set(violation, comment.replace(/\\n/g, '\n'));
     } else {
-      core.warning(`No comment generated for ${key}`);
+      logger.warning(`No comment generated for ${key}`);
       results.set(violation, fallbackMessage(violation));
     }
   }
@@ -270,7 +272,7 @@ export function mapCommentsToViolations(
 
 /**
  * Generate line comments for multiple violations in a single API call
- * 
+ *
  * This is more efficient than individual calls:
  * - System prompt only sent once (saves ~100 tokens per violation)
  * - AI has full context of all violations (can identify patterns)
@@ -281,13 +283,14 @@ export async function generateLineComments(
   codeSnippets: Map<string, string>,
   apiKey: string,
   model: string,
-  report: ComplexityReport
+  report: ComplexityReport,
+  logger: Logger
 ): Promise<Map<ComplexityViolation, string>> {
   if (violations.length === 0) {
     return new Map();
   }
 
-  core.info(`Generating comments for ${violations.length} violations in single batch`);
+  logger.info(`Generating comments for ${violations.length} violations in single batch`);
 
   const prompt = buildBatchedCommentsPrompt(violations, codeSnippets, report);
   const data = await callBatchedCommentsAPI(prompt, apiKey, model);
@@ -295,10 +298,9 @@ export async function generateLineComments(
   if (data.usage) {
     trackUsage(data.usage);
     const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
-    core.info(`Batch tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`);
+    logger.info(`Batch tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`);
   }
 
-  const commentsMap = parseCommentsResponse(data.choices[0].message.content);
-  return mapCommentsToViolations(commentsMap, violations);
+  const commentsMap = parseCommentsResponse(data.choices[0].message.content, logger);
+  return mapCommentsToViolations(commentsMap, violations, logger);
 }
-

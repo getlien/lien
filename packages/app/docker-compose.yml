@@ -1,0 +1,22 @@
+services:
+  veille:
+    build:
+      context: ../..
+      dockerfile: packages/app/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - GITHUB_APP_ID=${GITHUB_APP_ID}
+      - GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.0-flash-001}
+      - ALLOWED_ORG_IDS=${ALLOWED_ORG_IDS:-}
+      - PORT=3000
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          # Embedding model (~1GB) + tree-sitter + LanceDB + two git clones
+          # Sequential queue ensures only one PR analyzed at a time
+          memory: 8g

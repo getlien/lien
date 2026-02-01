@@ -7,4 +7,7 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
+  // Bundle @liendev/review into dist so the action is self-contained
+  // (GitHub Actions runs dist/index.js directly without npm install)
+  noExternal: ['@liendev/review'],
 });
