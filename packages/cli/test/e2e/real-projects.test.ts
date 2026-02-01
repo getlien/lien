@@ -5,6 +5,7 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import { execSync } from 'child_process';
+import { VectorDB, LocalEmbeddings, detectAllFrameworks } from '@liendev/core';
 
 /**
  * E2E Tests with Real Open Source Projects
@@ -241,6 +242,14 @@ if (!process.env.CI) {
 }
 
 describe('E2E: Real Open Source Projects', () => {
+  let embeddings: LocalEmbeddings;
+
+  // Initialize embeddings once for all projects (expensive operation)
+  beforeAll(async () => {
+    embeddings = new LocalEmbeddings();
+    await embeddings.initialize();
+  }, E2E_TIMEOUT);
+
   // Cleanup after all tests complete
   afterAll(async () => {
     await cleanup();
@@ -344,11 +353,10 @@ describe('E2E: Real Open Source Projects', () => {
           
           // Show detected frameworks to help debug
           try {
-            const { detectAllFrameworks } = await import('@liendev/core');
             const frameworks = await detectAllFrameworks(projectDir);
             console.error(`   Detected frameworks:`, frameworks.map(f => f.name));
           } catch (e) {
-            console.error(`   Could not read config`);
+            console.error(`   Could not detect frameworks`);
           }
           
           // Show what files exist
@@ -383,20 +391,27 @@ describe('E2E: Real Open Source Projects', () => {
         expect(hasMetadata).toBe(true);
       });
       
-      it('should support semantic search on indexed code', async () => {
-        // Note: This test would require the MCP server to be running
-        // For now, we just verify the index is queryable
-        const indexPath = getIndexPath(projectDir);
-        const indexExists = await fs.access(indexPath)
-          .then(() => true)
-          .catch(() => false);
-        
-        expect(indexExists).toBe(true);
-        
-        // Future: Add actual semantic search test via MCP
-        // const results = await searchCode(projectDir, project.sampleSearchQuery);
-        // expect(results.length).toBeGreaterThan(0);
-      });
+      it('should return relevant results for semantic search', async () => {
+        const db = await VectorDB.load(fsSync.realpathSync(projectDir));
+        const queryVector = await embeddings.embed(project.sampleSearchQuery);
+        const results = await db.search(queryVector, 5, project.sampleSearchQuery);
+
+        console.log(`🔎 Search "${project.sampleSearchQuery}" returned ${results.length} results`);
+        if (results.length > 0) {
+          console.log(`   Top result: ${results[0].metadata.file} (${results[0].relevance}, score: ${results[0].score.toFixed(3)})`);
+        }
+
+        expect(results.length).toBeGreaterThan(0);
+
+        // Top result should be at least loosely related
+        expect(['highly_relevant', 'relevant', 'loosely_related']).toContain(results[0].relevance);
+
+        // All results should have valid metadata
+        for (const result of results) {
+          expect(result.metadata.file).toBeTruthy();
+          expect(result.content).toBeTruthy();
+        }
+      }, E2E_TIMEOUT);
       
       it('should handle reindexing without errors', () => {
         console.log(`\n🔄 Reindexing ${project.name}...`);
