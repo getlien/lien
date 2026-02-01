@@ -632,6 +632,10 @@ function collectReExportedSymbolDependents(
  *
  * These are typically barrel/index files or package entry points that re-export
  * symbols from internal modules (e.g., `export { VectorDB } from './vectordb/lancedb.js'`).
+ *
+ * **Known limitation:** A file that imports from the target AND defines its own local
+ * symbol with the same name would be incorrectly identified as a re-exporter. This is
+ * extremely rare in practice due to naming conflicts at the module level.
  */
 function findReExporterPaths(
   chunksByFile: Map<string, SearchResult[]>,
@@ -711,6 +715,12 @@ function findIndirectSymbolDependents(
  * 2. Package name heuristic: bare specifiers (e.g., `@liendev/core`) are matched by
  *    checking if the package name appears as a directory component in any re-exporter path.
  *    For example, `@liendev/core` → package name `core` → matches `packages/core/src/index`.
+ *
+ * **Known limitation:** The package name heuristic cannot distinguish between different
+ * scoped packages that share the same name (e.g., `@liendev/core` vs `@unrelated/core`
+ * would both match a re-exporter at `packages/core/src/index`). This requires package.json
+ * resolution which is not available during chunk-based analysis. In practice this is rare
+ * since external dependencies typically aren't indexed alongside workspace packages.
  */
 function importsFromReExporter(importPath: string, reExporterPaths: Set<string>): boolean {
   // Strategy 1: Direct path match (handles relative imports like '../index.js')
@@ -728,9 +738,16 @@ function importsFromReExporter(importPath: string, reExporterPaths: Set<string>)
   }
 
   // Extract package name: @scope/name → name, plain-name → plain-name
-  const packageName = cleaned.startsWith('@')
-    ? cleaned.split('/')[1]
-    : cleaned.split('/')[0];
+  const parts = cleaned.split('/');
+  let packageName: string | undefined;
+
+  if (cleaned.startsWith('@')) {
+    // Scoped packages must have at least @scope/name
+    if (parts.length < 2 || !parts[1]) return false;
+    packageName = parts[1];
+  } else {
+    packageName = parts[0];
+  }
 
   if (!packageName) return false;
 

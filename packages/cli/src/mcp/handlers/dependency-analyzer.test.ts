@@ -360,4 +360,81 @@ describe('findDependents - re-export chain resolution', () => {
     expect(result.totalUsageCount).toBe(1);
     expect(result.dependents[0].filepath).toBe('src/signup.ts');
   });
+
+  it('should find consumers through re-exporter that exports multiple symbols', async () => {
+    // Re-exporter exports VectorDB alongside other symbols — should still be detected
+    const chunks: SearchResult[] = [
+      createChunk({
+        file: 'packages/core/src/vectordb/lancedb.ts',
+        exports: ['VectorDB'],
+        symbolName: 'VectorDB',
+      }),
+
+      createChunk({
+        file: 'packages/core/src/index.ts',
+        imports: ['./vectordb/lancedb.js', './embeddings/local.js'],
+        importedSymbols: {
+          './vectordb/lancedb.js': ['VectorDB'],
+          './embeddings/local.js': ['LocalEmbeddings'],
+        },
+        exports: ['VectorDB', 'LocalEmbeddings', 'SearchResult', 'Config'],
+      }),
+
+      createChunk({
+        file: 'packages/cli/src/serve.ts',
+        imports: ['@liendev/core'],
+        importedSymbols: { '@liendev/core': ['VectorDB', 'Config'] },
+        callSites: [{ symbol: 'VectorDB', line: 8 }],
+        symbolName: 'startServer',
+      }),
+    ];
+
+    const result = await findDependents(
+      createMockDB(chunks),
+      'packages/core/src/vectordb/lancedb.ts',
+      false,
+      mockLog,
+      'VectorDB'
+    );
+
+    const consumer = result.dependents.find(d => d.filepath === 'packages/cli/src/serve.ts');
+    expect(consumer).toBeDefined();
+    expect(consumer?.usages).toHaveLength(1);
+    expect(result.totalUsageCount).toBe(1);
+  });
+
+  it('should handle malformed scoped package names gracefully', async () => {
+    // Import path "@scope" without a package name should not crash
+    const chunks: SearchResult[] = [
+      createChunk({
+        file: 'packages/core/src/vectordb/lancedb.ts',
+        exports: ['VectorDB'],
+      }),
+
+      createChunk({
+        file: 'packages/core/src/index.ts',
+        imports: ['./vectordb/lancedb.js'],
+        importedSymbols: { './vectordb/lancedb.js': ['VectorDB'] },
+        exports: ['VectorDB'],
+      }),
+
+      // Malformed import path
+      createChunk({
+        file: 'src/broken.ts',
+        imports: ['@scope'],
+        importedSymbols: { '@scope': ['VectorDB'] },
+      }),
+    ];
+
+    const result = await findDependents(
+      createMockDB(chunks),
+      'packages/core/src/vectordb/lancedb.ts',
+      false,
+      mockLog,
+      'VectorDB'
+    );
+
+    // Should not crash, and the malformed import should be excluded
+    expect(result.dependents.find(d => d.filepath === 'src/broken.ts')).toBeUndefined();
+  });
 });
