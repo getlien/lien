@@ -372,6 +372,9 @@ function filterBySymbolType(
   symbolType: keyof typeof SYMBOL_TYPE_MATCHES
 ): DBRecord[] {
   const allowedTypes = SYMBOL_TYPE_MATCHES[symbolType];
+  if (!allowedTypes) {
+    return [];
+  }
   return records.filter((r: DBRecord) =>
     r.symbolType != null && allowedTypes.has(r.symbolType)
   );
