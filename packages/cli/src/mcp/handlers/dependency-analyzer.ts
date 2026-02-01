@@ -543,7 +543,7 @@ function findSymbolUsages(
 
   // Phase 2: Indirect dependents through re-export chains
   const indirect = collectReExportedSymbolDependents(
-    chunksByFile, allChunks, targetSymbol, direct.processedFiles, log
+    chunksByFile, allChunks, targetSymbol, normalizedTarget, normalizePathCached, direct.processedFiles, log
   );
 
   return {
@@ -595,10 +595,12 @@ function collectReExportedSymbolDependents(
   chunksByFile: Map<string, SearchResult[]>,
   allChunks: SearchResult[],
   targetSymbol: string,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
   processedFiles: Set<string>,
   log: (message: string, level?: 'warning') => void
 ): { dependents: DependentInfo[]; totalUsageCount: number } {
-  const reExporterPaths = findReExporterPaths(chunksByFile, targetSymbol);
+  const reExporterPaths = findReExporterPaths(chunksByFile, targetSymbol, normalizedTarget, normalizePathCached);
   if (reExporterPaths.size === 0) {
     return { dependents: [], totalUsageCount: 0 };
   }
@@ -628,18 +630,21 @@ function collectReExportedSymbolDependents(
 }
 
 /**
- * Find re-exporter files: direct dependents that also export the target symbol.
+ * Find re-exporter files: direct dependents that both import the target symbol
+ * from the target file AND export it.
  *
  * These are typically barrel/index files or package entry points that re-export
  * symbols from internal modules (e.g., `export { VectorDB } from './vectordb/lancedb.js'`).
  *
- * **Known limitation:** A file that imports from the target AND defines its own local
- * symbol with the same name would be incorrectly identified as a re-exporter. This is
- * extremely rare in practice due to naming conflicts at the module level.
+ * Verifies that the file actually imports the specific symbol (not just any symbol)
+ * from the target, to avoid false positives where a file imports a different symbol
+ * from the target but defines and exports its own unrelated symbol with the same name.
  */
 function findReExporterPaths(
   chunksByFile: Map<string, SearchResult[]>,
-  targetSymbol: string
+  targetSymbol: string,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string
 ): Set<string> {
   const reExporterPaths = new Set<string>();
 
@@ -647,7 +652,7 @@ function findReExporterPaths(
     const exportsSymbol = chunks.some(chunk =>
       chunk.metadata.exports?.includes(targetSymbol)
     );
-    if (exportsSymbol) {
+    if (exportsSymbol && fileImportsSymbol(chunks, targetSymbol, normalizedTarget, normalizePathCached)) {
       reExporterPaths.add(filepath);
     }
   }
