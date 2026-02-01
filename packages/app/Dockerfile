@@ -7,12 +7,15 @@ WORKDIR /app
 # Copy workspace root files
 COPY package.json package-lock.json ./
 
-# Copy package manifests for all workspace packages
+# Copy all workspace package manifests (npm ci needs the full workspace graph)
 COPY packages/core/package.json packages/core/
 COPY packages/review/package.json packages/review/
 COPY packages/app/package.json packages/app/
+COPY packages/cli/package.json packages/cli/
+COPY packages/action/package.json packages/action/
+COPY packages/site/package.json packages/site/
 
-# Install all dependencies
+# Install dependencies for the packages we need
 RUN npm ci --workspace=packages/core --workspace=packages/review --workspace=packages/app
 
 # Copy source code
