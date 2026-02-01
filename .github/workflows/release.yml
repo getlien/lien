@@ -9,9 +9,29 @@ on:
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
+  check-changeset:
+    name: Check for changesets
+    runs-on: ubuntu-latest
+    outputs:
+      has-changesets: ${{ github.event_name == 'workflow_dispatch' || steps.check.outputs.has-changesets }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for changeset files
+        id: check
+        run: |
+          # Look for any .md files in .changeset/ besides README.md
+          if find .changeset -name '*.md' ! -name 'README.md' | grep -q .; then
+            echo "has-changesets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-changesets=false" >> "$GITHUB_OUTPUT"
+          fi
+
   release:
     name: Release
     runs-on: ubuntu-latest
+    needs: check-changeset
+    if: needs.check-changeset.outputs.has-changesets == 'true'
     permissions:
       contents: write       # Create releases
       pull-requests: write  # Create "Version Packages" PR
@@ -23,17 +43,17 @@ jobs:
           node-version: 22
           cache: 'npm'
           # Don't set registry-url - npm will use OIDC automatically with publishConfig.provenance
-      
+
       - name: Ensure npm version supports OIDC
         run: npm install -g npm@latest
-      
+
       - name: Configure npm scope
         run: |
           echo "@liendev:registry=https://registry.npmjs.org/" >> ~/.npmrc
-      
+
       - run: npm ci
       - run: npm run build
-      
+
       - name: Create Release PR or Publish
         uses: changesets/action@v1
         with:
