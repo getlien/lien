@@ -90,15 +90,17 @@ describe('Python AST Integration', () => {
     const chunks = await chunkFile(filepath, content, { useAST: true });
     
     // Check that line numbers are sequential and non-overlapping
-    const sortedChunks = [...chunks].sort((a, b) => a.metadata.startLine - b.metadata.startLine);
-    
+    // Class chunks intentionally encompass their child method chunks, so exclude them
+    const nonClassChunks = chunks.filter(c => c.metadata.symbolType !== 'class');
+    const sortedChunks = [...nonClassChunks].sort((a, b) => a.metadata.startLine - b.metadata.startLine);
+
     for (let i = 0; i < sortedChunks.length - 1; i++) {
       const current = sortedChunks[i];
       const next = sortedChunks[i + 1];
-      
+
       // Single-line functions/methods are valid (e.g., "def add(a, b): return a + b")
       expect(current.metadata.startLine).toBeLessThanOrEqual(current.metadata.endLine);
-      
+
       // Chunks must not overlap - next chunk must start AFTER current ends
       // Using strict > ensures no two chunks share the same line
       expect(next.metadata.startLine).toBeGreaterThan(current.metadata.endLine);
