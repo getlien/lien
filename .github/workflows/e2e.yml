@@ -41,8 +41,8 @@ jobs:
         run: npm ci
       
       - name: Build Lien
-        run: npm run build --workspace=packages/cli
-      
+        run: npm run build
+
       - name: Run E2E tests
         run: npm run test:e2e --workspace=packages/cli
         env:
@@ -99,8 +99,8 @@ jobs:
         run: npm ci
       
       - name: Build Lien
-        run: npm run build --workspace=packages/cli
-      
+        run: npm run build
+
       - name: Run E2E test for ${{ matrix.project }}
         run: npm run ${{ matrix.script }} --workspace=packages/cli
         env:
