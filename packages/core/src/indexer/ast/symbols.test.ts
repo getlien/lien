@@ -377,6 +377,42 @@ function simple() {
 
       expect(callSites).toHaveLength(0);
     });
+
+    it('should extract constructor calls (new expression)', () => {
+      const content = `function createDB(dir) {
+  const db = new VectorDB(dir);
+  db.initialize();
+  return db;
+}`.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode);
+
+      expect(callSites).toContainEqual(
+        expect.objectContaining({ symbol: 'VectorDB', line: 2 })
+      );
+      expect(callSites).toContainEqual(
+        expect.objectContaining({ symbol: 'initialize', line: 3 })
+      );
+    });
+
+    it('should extract namespaced constructor calls (new ns.Foo())', () => {
+      const content = `
+function create() {
+  const instance = new ns.MyClass();
+  return instance;
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode);
+
+      expect(callSites).toContainEqual(
+        expect.objectContaining({ symbol: 'MyClass' })
+      );
+    });
   });
 
   describe('extractCallSites - PHP', () => {
