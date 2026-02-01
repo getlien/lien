@@ -48,7 +48,7 @@
     "node": ">=22.21.0"
   },
   "dependencies": {
-    "@liendev/core": "^0.19.5",
+    "@liendev/core": "*",
     "apache-arrow": "^14.0.2"
   },
   "devDependencies": {
