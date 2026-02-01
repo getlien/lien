@@ -346,6 +346,54 @@ export async function search(
 }
 
 /**
+ * Filter records by language (case-insensitive match).
+ */
+function filterByLanguage(records: DBRecord[], language: string): DBRecord[] {
+  return records.filter((r: DBRecord) =>
+    r.language && r.language.toLowerCase() === language.toLowerCase()
+  );
+}
+
+/**
+ * Filter records by regex pattern against content and file path.
+ */
+function filterByPattern(records: DBRecord[], pattern: string): DBRecord[] {
+  const regex = new RegExp(pattern, 'i');
+  return records.filter((r: DBRecord) =>
+    regex.test(r.content) || regex.test(r.file)
+  );
+}
+
+/**
+ * Filter records by symbol type using SYMBOL_TYPE_MATCHES lookup.
+ */
+function filterBySymbolType(
+  records: DBRecord[],
+  symbolType: keyof typeof SYMBOL_TYPE_MATCHES
+): DBRecord[] {
+  const allowedTypes = SYMBOL_TYPE_MATCHES[symbolType];
+  if (!allowedTypes) {
+    return [];
+  }
+  return records.filter((r: DBRecord) =>
+    r.symbolType != null && allowedTypes.has(r.symbolType)
+  );
+}
+
+/**
+ * Convert DB records to unscored SearchResults (for scan/scroll operations).
+ * Uses 'not_relevant' relevance to indicate results are unscored, not semantically irrelevant.
+ */
+function toUnscoredSearchResults(records: DBRecord[], limit: number): SearchResult[] {
+  return records.slice(0, limit).map((r: DBRecord) => ({
+    content: r.content,
+    metadata: buildSearchResultMetadata(r),
+    score: 0,
+    relevance: 'not_relevant' as const,
+  }));
+}
+
+/**
  * Scan the database with filters.
  * Scans all records to ensure complete coverage.
  */
@@ -354,6 +402,7 @@ export async function scanWithFilter(
   options: {
     language?: string;
     pattern?: string;
+    symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }
 ): Promise<SearchResult[]> {
@@ -361,7 +410,7 @@ export async function scanWithFilter(
     throw new DatabaseError('Vector database not initialized');
   }
 
-  const { language, pattern, limit = 100 } = options;
+  const { language, pattern, symbolType, limit = 100 } = options;
 
   try {
     // Get total row count to ensure we scan all records
@@ -376,25 +425,11 @@ export async function scanWithFilter(
 
     let filtered = (results as unknown as DBRecord[]).filter(isValidRecord);
 
-    if (language) {
-      filtered = filtered.filter((r: DBRecord) =>
-        r.language && r.language.toLowerCase() === language.toLowerCase()
-      );
-    }
+    if (language) filtered = filterByLanguage(filtered, language);
+    if (pattern) filtered = filterByPattern(filtered, pattern);
+    if (symbolType) filtered = filterBySymbolType(filtered, symbolType);
 
-    if (pattern) {
-      const regex = new RegExp(pattern, 'i');
-      filtered = filtered.filter((r: DBRecord) =>
-        regex.test(r.content) || regex.test(r.file)
-      );
-    }
-
-    return filtered.slice(0, limit).map((r: DBRecord) => ({
-      content: r.content,
-      metadata: buildSearchResultMetadata(r),
-      score: 0,
-      relevance: calculateRelevance(0),
-    }));
+    return toUnscoredSearchResults(filtered, limit);
   } catch (error) {
     throw wrapError(error, 'Failed to scan with filter');
   }
@@ -513,7 +548,7 @@ export async function querySymbols(
         symbols: buildLegacySymbols(r),
       },
       score: 0,
-      relevance: calculateRelevance(0),
+      relevance: 'not_relevant' as const,
     }));
   } catch (error) {
     throw wrapError(error, 'Failed to query symbols');

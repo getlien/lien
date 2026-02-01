@@ -122,6 +122,7 @@ export class VectorDB implements VectorDBInterface {
   async scanWithFilter(options: {
     language?: string;
     pattern?: string;
+    symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }): Promise<SearchResult[]> {
     if (!this.table) {

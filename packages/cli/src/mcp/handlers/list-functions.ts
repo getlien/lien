@@ -3,7 +3,6 @@ import { ListFunctionsSchema } from '../schemas/index.js';
 import type { ListFunctionsInput } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
-import { SYMBOL_TYPE_MATCHES } from '@liendev/core';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
 
 interface QueryResult {
@@ -24,6 +23,7 @@ async function performContentScan(
 
   let results = await vectorDB.scanWithFilter({
     language: args.language,
+    symbolType: args.symbolType,
     limit: 200, // Fetch more, we'll filter by symbolName
   });
 
@@ -33,15 +33,6 @@ async function performContentScan(
     results = results.filter(r => {
       const symbolName = r.metadata?.symbolName;
       return symbolName && regex.test(symbolName);
-    });
-  }
-
-  // Filter by symbolType if provided (using same matching logic as primary query path)
-  if (args.symbolType) {
-    const allowedTypes = SYMBOL_TYPE_MATCHES[args.symbolType];
-    results = results.filter(r => {
-      const recordType = r.metadata?.symbolType;
-      return recordType && allowedTypes?.has(recordType);
     });
   }
 
