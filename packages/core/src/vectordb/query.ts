@@ -545,7 +545,7 @@ export async function querySymbols(
         symbols: buildLegacySymbols(r),
       },
       score: 0,
-      relevance: calculateRelevance(0),
+      relevance: 'not_relevant' as const,
     }));
   } catch (error) {
     throw wrapError(error, 'Failed to query symbols');
