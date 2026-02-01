@@ -400,7 +400,8 @@ async function processFileForIndexing(
     progressTracker.incrementFiles();
 
     return true;
-  } catch {
+  } catch (error) {
+    console.error(`[indexer] Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`);
     progressTracker.incrementFiles();
     return false;
   }
