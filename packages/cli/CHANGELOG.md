@@ -1,5 +1,21 @@
 # @liendev/lien
 
+## 0.31.0
+
+### Minor Changes
+
+- a738d2a: feat(core): add symbolType filtering to scanWithFilter in VectorDB
+
+  fix(core): emit class chunks alongside method chunks in AST chunker
+  fix(core): add missing chalk dependency
+  fix(core): resolve file paths relative to rootDir in indexer
+  fix(core): log per-file indexing errors instead of swallowing silently
+
+### Patch Changes
+
+- Updated dependencies [a738d2a]
+  - @liendev/core@0.31.0
+
 ## 0.30.0
 
 ### Minor Changes
