@@ -145,10 +145,14 @@ export async function runComplexityAnalysis(
   try {
     // Index the codebase (no config needed - uses defaults)
     logger.info('Indexing codebase...');
-    await indexCodebase({
+    const indexResult = await indexCodebase({
       rootDir,
     });
-    logger.info('Indexing complete');
+    logger.info(`Indexing complete: ${indexResult.chunksCreated} chunks from ${indexResult.filesIndexed} files (success: ${indexResult.success})`);
+    if (!indexResult.success || indexResult.chunksCreated === 0) {
+      logger.warning(`Indexing produced no chunks for ${rootDir}`);
+      return null;
+    }
 
     // Load the vector database (uses global config or defaults to LanceDB)
     const vectorDB = await createVectorDB(rootDir);
