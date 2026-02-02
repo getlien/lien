@@ -4,7 +4,6 @@ import type { SearchResult } from '@liendev/core';
 
 describe('searchFileChunks', () => {
   const mockLog = vi.fn();
-  const mockEmbeddings = { embed: vi.fn() };
 
   function makeResult(file: string, content: string): SearchResult {
     return {
@@ -33,7 +32,7 @@ describe('searchFileChunks', () => {
 
     const ctx = {
       vectorDB: mockVectorDB as any,
-      embeddings: mockEmbeddings as any,
+      embeddings: {} as any,
       log: mockLog,
       workspaceRoot: '/project',
     };
@@ -58,7 +57,7 @@ describe('searchFileChunks', () => {
 
     const ctx = {
       vectorDB: mockVectorDB as any,
-      embeddings: mockEmbeddings as any,
+      embeddings: {} as any,
       log: mockLog,
       workspaceRoot: '/project',
     };
@@ -70,6 +69,7 @@ describe('searchFileChunks', () => {
   });
 
   it('should not call embeddings.embed', async () => {
+    const mockEmbeddings = { embed: vi.fn() };
     const mockVectorDB = {
       scanWithFilter: vi.fn().mockResolvedValue([]),
     };
@@ -99,7 +99,7 @@ describe('searchFileChunks', () => {
 
     const ctx = {
       vectorDB: mockVectorDB as any,
-      embeddings: mockEmbeddings as any,
+      embeddings: {} as any,
       log: mockLog,
       workspaceRoot: '/project',
     };

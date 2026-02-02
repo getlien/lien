@@ -109,9 +109,13 @@ class QdrantFilterBuilder {
     return this;
   }
 
+  /**
+   * Add symbol type filter with backward-compatible semantics.
+   * 'function' matches both 'function' and 'method' records because
+   * pre-AST indices stored methods under the 'function' type.
+   */
   addSymbolTypeFilter(symbolType: 'function' | 'method' | 'class' | 'interface'): this {
     if (symbolType === 'function') {
-      // Match both functions and methods for backward compatibility
       return this.addSymbolTypes(['function', 'method']);
     }
     return this.addSymbolType(symbolType);

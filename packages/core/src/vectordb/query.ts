@@ -397,16 +397,31 @@ function toUnscoredSearchResults(records: DBRecord[], limit: number): SearchResu
  * Scan the database with filters.
  * Scans all records to ensure complete coverage.
  */
+/** Escape double quotes in file paths for SQL WHERE clauses. */
+function escapeSqlString(value: string): string {
+  return value.replace(/"/g, '""');
+}
+
 /**
  * Build a SQL WHERE clause for file path filtering.
  * Single file: file = "path/to/file.ts"
  * Multiple files: file IN ("a.ts", "b.ts")
+ *
+ * @throws {DatabaseError} if file paths are empty or whitespace-only
  */
 function buildFileWhereClause(file: string | string[]): string {
   if (typeof file === 'string') {
-    return `file = "${file}"`;
+    const trimmed = file.trim();
+    if (trimmed.length === 0) {
+      throw new DatabaseError('Invalid file filter: file path must be non-empty');
+    }
+    return `file = "${escapeSqlString(trimmed)}"`;
   }
-  const escaped = file.map(f => `"${f}"`).join(', ');
+  const cleaned = file.map(f => f.trim()).filter(f => f.length > 0);
+  if (cleaned.length === 0) {
+    throw new DatabaseError('Invalid file filter: at least one non-empty file path is required');
+  }
+  const escaped = cleaned.map(f => `"${escapeSqlString(f)}"`).join(', ');
   return `file IN (${escaped})`;
 }
 
