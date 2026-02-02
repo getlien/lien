@@ -12,7 +12,6 @@ interface QueryResult {
 
 interface PaginationResult {
   paginatedResults: SearchResult[];
-  totalBeforePagination: number;
   hasMore: boolean;
   nextOffset?: number;
 }
@@ -89,7 +88,6 @@ function paginateResults(results: SearchResult[], offset: number, limit: number)
 
   return {
     paginatedResults,
-    totalBeforePagination: dedupedResults.length,
     hasMore,
     ...(hasMore ? { nextOffset: offset + limit } : {}),
   };
@@ -117,14 +115,13 @@ export async function handleListFunctions(
       const fetchLimit = limit + offset + 1;
 
       const queryResult = await queryWithFallback(vectorDB, validatedArgs, fetchLimit, log);
-      const { paginatedResults, totalBeforePagination, hasMore, nextOffset } = paginateResults(queryResult.results, offset, limit);
+      const { paginatedResults, hasMore, nextOffset } = paginateResults(queryResult.results, offset, limit);
 
-      log(`Found ${totalBeforePagination} matches using ${queryResult.method} method (returning ${paginatedResults.length})`);
+      log(`Found ${paginatedResults.length} matches using ${queryResult.method} method`);
 
       return {
         indexInfo: getIndexMetadata(),
         method: queryResult.method,
-        totalBeforePagination,
         hasMore,
         ...(nextOffset !== undefined ? { nextOffset } : {}),
         results: shapeResults(paginatedResults, 'list_functions'),

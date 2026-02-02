@@ -464,7 +464,7 @@ describe('handleListFunctions', () => {
 
       // Should be limited to 50 (default limit)
       expect(parsed.results).toHaveLength(50);
-      expect(parsed.totalBeforePagination).toBe(100);
+
       expect(parsed.hasMore).toBe(true);
       expect(parsed.nextOffset).toBe(50);
     });
@@ -579,7 +579,7 @@ describe('handleListFunctions', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(50);
-      expect(parsed.totalBeforePagination).toBe(80);
+
       expect(parsed.hasMore).toBe(true);
       expect(parsed.nextOffset).toBe(50);
     });
@@ -596,7 +596,7 @@ describe('handleListFunctions', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(10);
-      expect(parsed.totalBeforePagination).toBe(30);
+
       expect(parsed.hasMore).toBe(true);
       expect(parsed.nextOffset).toBe(10);
     });
@@ -616,7 +616,7 @@ describe('handleListFunctions', () => {
       // Results should start from offset 10 (func10..func14)
       expect(parsed.results[0].metadata.symbolName).toBe('func10');
       expect(parsed.results[4].metadata.symbolName).toBe('func14');
-      expect(parsed.totalBeforePagination).toBe(20);
+
       expect(parsed.hasMore).toBe(true);
       expect(parsed.nextOffset).toBe(15);
     });
@@ -628,7 +628,7 @@ describe('handleListFunctions', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(5);
-      expect(parsed.totalBeforePagination).toBe(5);
+
       expect(parsed.hasMore).toBe(false);
       expect(parsed.nextOffset).toBeUndefined();
     });
@@ -640,7 +640,7 @@ describe('handleListFunctions', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(0);
-      expect(parsed.totalBeforePagination).toBe(5);
+
       expect(parsed.hasMore).toBe(false);
     });
 
@@ -657,7 +657,7 @@ describe('handleListFunctions', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(10);
-      expect(parsed.totalBeforePagination).toBe(30);
+
       expect(parsed.hasMore).toBe(true);
       expect(parsed.nextOffset).toBe(15);
     });
