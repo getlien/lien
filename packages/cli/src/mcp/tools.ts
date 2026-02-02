@@ -103,7 +103,9 @@ Examples:
 
 Filter by symbol type (function, method, class, interface) to narrow results.
 
-10x faster than semantic_search for structural/architectural queries. Use semantic_search instead when searching by what code DOES.`
+10x faster than semantic_search for structural/architectural queries. Use semantic_search instead when searching by what code DOES.
+
+Results are paginated (default: 50, max: 200). Use \`offset\` to page through large result sets. Response includes \`hasMore\` and \`nextOffset\` when more results are available.`
   ),
   toMCPToolSchema(
     GetDependentsSchema,

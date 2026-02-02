@@ -10,13 +10,20 @@ interface QueryResult {
   method: 'symbols' | 'content';
 }
 
+interface PaginationResult {
+  paginatedResults: SearchResult[];
+  hasMore: boolean;
+  nextOffset?: number;
+}
+
 /**
  * Perform content scan fallback when symbol query fails or returns no results.
  * Filters by symbolName (not content) to match only actual functions/symbols.
  */
 async function performContentScan(
   vectorDB: VectorDBInterface,
-  args: ListFunctionsInput,
+  args: Pick<ListFunctionsInput, 'language' | 'pattern' | 'symbolType'>,
+  fetchLimit: number,
   log: LogFn
 ): Promise<QueryResult> {
   log('Falling back to content scan...');
@@ -24,7 +31,7 @@ async function performContentScan(
   let results = await vectorDB.scanWithFilter({
     language: args.language,
     symbolType: args.symbolType,
-    limit: 200, // Fetch more, we'll filter by symbolName
+    limit: fetchLimit,
   });
 
   // Filter by symbolName (not content) to match only actual functions/symbols
@@ -37,8 +44,52 @@ async function performContentScan(
   }
 
   return {
-    results: results.slice(0, 50),
+    results,
     method: 'content',
+  };
+}
+
+/**
+ * Query symbols with automatic fallback to content scan.
+ */
+async function queryWithFallback(
+  vectorDB: VectorDBInterface,
+  args: Pick<ListFunctionsInput, 'language' | 'pattern' | 'symbolType'>,
+  fetchLimit: number,
+  log: LogFn
+): Promise<QueryResult> {
+  try {
+    const results = await vectorDB.querySymbols({
+      language: args.language,
+      pattern: args.pattern,
+      symbolType: args.symbolType,
+      limit: fetchLimit,
+    });
+
+    if (results.length === 0 && (args.language || args.pattern || args.symbolType)) {
+      log('No symbol results, falling back to content scan...');
+      return await performContentScan(vectorDB, args, fetchLimit, log);
+    }
+
+    return { results, method: 'symbols' };
+  } catch (error) {
+    log(`Symbol query failed: ${error}`);
+    return await performContentScan(vectorDB, args, fetchLimit, log);
+  }
+}
+
+/**
+ * Deduplicate and paginate results.
+ */
+function paginateResults(results: SearchResult[], offset: number, limit: number): PaginationResult {
+  const dedupedResults = deduplicateResults(results);
+  const hasMore = dedupedResults.length > offset + limit;
+  const paginatedResults = dedupedResults.slice(offset, offset + limit);
+
+  return {
+    paginatedResults,
+    hasMore,
+    ...(hasMore ? { nextOffset: offset + limit } : {}),
   };
 }
 
@@ -58,36 +109,22 @@ export async function handleListFunctions(
       log('Listing functions with symbol metadata...');
       await checkAndReconnect();
 
-      let queryResult: QueryResult;
+      const limit = validatedArgs.limit ?? 50;
+      const offset = validatedArgs.offset ?? 0;
+      // Over-fetch by 1 to detect if more results exist beyond the requested window
+      const fetchLimit = limit + offset + 1;
 
-      try {
-        // Try symbol-based query first (v0.5.0+)
-        const results = await vectorDB.querySymbols({
-          language: validatedArgs.language,
-          pattern: validatedArgs.pattern,
-          symbolType: validatedArgs.symbolType,
-          limit: 50,
-        });
+      const queryResult = await queryWithFallback(vectorDB, validatedArgs, fetchLimit, log);
+      const { paginatedResults, hasMore, nextOffset } = paginateResults(queryResult.results, offset, limit);
 
-        // Fall back if no results and filters were provided
-        if (results.length === 0 && (validatedArgs.language || validatedArgs.pattern || validatedArgs.symbolType)) {
-          log('No symbol results, falling back to content scan...');
-          queryResult = await performContentScan(vectorDB, validatedArgs, log);
-        } else {
-          queryResult = { results, method: 'symbols' };
-        }
-      } catch (error) {
-        log(`Symbol query failed: ${error}`);
-        queryResult = await performContentScan(vectorDB, validatedArgs, log);
-      }
-
-      const dedupedResults = deduplicateResults(queryResult.results);
-      log(`Found ${dedupedResults.length} matches using ${queryResult.method} method`);
+      log(`Found ${paginatedResults.length} matches using ${queryResult.method} method`);
 
       return {
         indexInfo: getIndexMetadata(),
         method: queryResult.method,
-        results: shapeResults(dedupedResults, 'list_functions'),
+        hasMore,
+        ...(nextOffset !== undefined ? { nextOffset } : {}),
+        results: shapeResults(paginatedResults, 'list_functions'),
         note: queryResult.method === 'content'
           ? 'Using content search. Run "lien reindex" to enable faster symbol-based queries.'
           : undefined,

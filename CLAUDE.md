@@ -149,6 +149,8 @@ Follow Conventional Commits:
 
 **NEVER use `git commit --amend`** - Always create new commits.
 
+**No AI attribution in commits or PRs.** Do not add `Co-Authored-By` lines, "Generated with Claude Code" footers, or any other AI tool branding.
+
 ---
 
 ## Before EVERY Commit (MANDATORY)
