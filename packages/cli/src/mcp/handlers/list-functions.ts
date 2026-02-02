@@ -10,6 +10,13 @@ interface QueryResult {
   method: 'symbols' | 'content';
 }
 
+interface PaginationResult {
+  paginatedResults: SearchResult[];
+  totalBeforePagination: number;
+  hasMore: boolean;
+  nextOffset?: number;
+}
+
 /**
  * Perform content scan fallback when symbol query fails or returns no results.
  * Filters by symbolName (not content) to match only actual functions/symbols.
@@ -44,6 +51,52 @@ async function performContentScan(
 }
 
 /**
+ * Query symbols with automatic fallback to content scan.
+ */
+async function queryWithFallback(
+  vectorDB: VectorDBInterface,
+  args: Pick<ListFunctionsInput, 'language' | 'pattern' | 'symbolType'>,
+  fetchLimit: number,
+  log: LogFn
+): Promise<QueryResult> {
+  try {
+    const results = await vectorDB.querySymbols({
+      language: args.language,
+      pattern: args.pattern,
+      symbolType: args.symbolType,
+      limit: fetchLimit,
+    });
+
+    if (results.length === 0 && (args.language || args.pattern || args.symbolType)) {
+      log('No symbol results, falling back to content scan...');
+      return await performContentScan(vectorDB, args, fetchLimit, log);
+    }
+
+    return { results, method: 'symbols' };
+  } catch (error) {
+    log(`Symbol query failed: ${error}`);
+    return await performContentScan(vectorDB, args, fetchLimit, log);
+  }
+}
+
+/**
+ * Deduplicate and paginate results.
+ */
+function paginateResults(results: SearchResult[], offset: number, limit: number): PaginationResult {
+  const dedupedResults = deduplicateResults(results);
+  const totalBeforePagination = dedupedResults.length;
+  const paginatedResults = dedupedResults.slice(offset, offset + limit);
+  const hasMore = offset + limit < totalBeforePagination;
+
+  return {
+    paginatedResults,
+    totalBeforePagination,
+    hasMore,
+    ...(hasMore ? { nextOffset: offset + limit } : {}),
+  };
+}
+
+/**
  * Handle list_functions tool calls.
  * Fast symbol lookup by naming pattern.
  */
@@ -63,33 +116,8 @@ export async function handleListFunctions(
       const offset = validatedArgs.offset ?? 0;
       const fetchLimit = limit + offset;
 
-      let queryResult: QueryResult;
-
-      try {
-        // Try symbol-based query first (v0.5.0+)
-        const results = await vectorDB.querySymbols({
-          language: validatedArgs.language,
-          pattern: validatedArgs.pattern,
-          symbolType: validatedArgs.symbolType,
-          limit: fetchLimit,
-        });
-
-        // Fall back if no results and filters were provided
-        if (results.length === 0 && (validatedArgs.language || validatedArgs.pattern || validatedArgs.symbolType)) {
-          log('No symbol results, falling back to content scan...');
-          queryResult = await performContentScan(vectorDB, validatedArgs, fetchLimit, log);
-        } else {
-          queryResult = { results, method: 'symbols' };
-        }
-      } catch (error) {
-        log(`Symbol query failed: ${error}`);
-        queryResult = await performContentScan(vectorDB, validatedArgs, fetchLimit, log);
-      }
-
-      const dedupedResults = deduplicateResults(queryResult.results);
-      const totalBeforePagination = dedupedResults.length;
-      const paginatedResults = dedupedResults.slice(offset, offset + limit);
-      const hasMore = offset + limit < totalBeforePagination;
+      const queryResult = await queryWithFallback(vectorDB, validatedArgs, fetchLimit, log);
+      const { paginatedResults, totalBeforePagination, hasMore, nextOffset } = paginateResults(queryResult.results, offset, limit);
 
       log(`Found ${totalBeforePagination} matches using ${queryResult.method} method (returning ${paginatedResults.length})`);
 
@@ -98,7 +126,7 @@ export async function handleListFunctions(
         method: queryResult.method,
         totalBeforePagination,
         hasMore,
-        ...(hasMore ? { nextOffset: offset + limit } : {}),
+        ...(nextOffset !== undefined ? { nextOffset } : {}),
         results: shapeResults(paginatedResults, 'list_functions'),
         note: queryResult.method === 'content'
           ? 'Using content search. Run "lien reindex" to enable faster symbol-based queries.'
