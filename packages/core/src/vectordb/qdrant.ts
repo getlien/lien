@@ -109,21 +109,28 @@ class QdrantFilterBuilder {
     return this;
   }
 
-  addFile(filepath: string): this {
-    const cleaned = filepath.trim();
-    if (cleaned.length === 0) {
-      throw new Error('Invalid file: file must be a non-empty, non-whitespace string.');
+  addSymbolTypeFilter(symbolType: 'function' | 'method' | 'class' | 'interface'): this {
+    if (symbolType === 'function') {
+      // Match both functions and methods for backward compatibility
+      return this.addSymbolTypes(['function', 'method']);
     }
-    this.filter.must.push({ key: 'file', match: { value: cleaned } });
-    return this;
+    return this.addSymbolType(symbolType);
   }
 
-  addFiles(filepaths: string[]): this {
-    const cleaned = filepaths.map(f => f.trim()).filter(f => f.length > 0);
-    if (cleaned.length === 0) {
-      throw new Error('Invalid files: at least one non-empty, non-whitespace file path is required.');
+  addFileFilter(file: string | string[]): this {
+    if (typeof file === 'string') {
+      const cleaned = file.trim();
+      if (cleaned.length === 0) {
+        throw new Error('Invalid file: file must be a non-empty, non-whitespace string.');
+      }
+      this.filter.must.push({ key: 'file', match: { value: cleaned } });
+    } else {
+      const cleaned = file.map(f => f.trim()).filter(f => f.length > 0);
+      if (cleaned.length === 0) {
+        throw new Error('Invalid files: at least one non-empty, non-whitespace file path is required.');
+      }
+      this.filter.must.push({ key: 'file', match: { any: cleaned } });
     }
-    this.filter.must.push({ key: 'file', match: { any: cleaned } });
     return this;
   }
 
@@ -345,14 +352,8 @@ export class QdrantDB implements VectorDBInterface {
       builder.addLanguage(options.language);
     }
 
-    // Validate symbolType is non-empty if explicitly provided (even if empty string)
     if (options.symbolType !== undefined) {
-      if (options.symbolType === 'function') {
-        // Match both functions and methods for backward compatibility
-        builder.addSymbolTypes(['function', 'method']);
-      } else {
-        builder.addSymbolType(options.symbolType);
-      }
+      builder.addSymbolTypeFilter(options.symbolType);
     }
 
     // Validate pattern is non-empty if explicitly provided (even if empty string)
@@ -368,13 +369,8 @@ export class QdrantDB implements VectorDBInterface {
       builder.addBranch(options.branch);
     }
 
-    // File path filter: exact match on single file or IN match on multiple files
     if (options.file !== undefined) {
-      if (typeof options.file === 'string') {
-        builder.addFile(options.file);
-      } else if (options.file.length > 0) {
-        builder.addFiles(options.file);
-      }
+      builder.addFileFilter(options.file);
     }
 
     return builder.build();
