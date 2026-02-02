@@ -1,5 +1,6 @@
 import { SearchResult, SYMBOL_TYPE_MATCHES } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
+import { MAX_CHUNKS_PER_FILE } from '../constants.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
 import { classifyQueryIntent, QueryIntent } from './intent-classifier.js';
@@ -406,12 +407,6 @@ function toUnscoredSearchResults(records: DBRecord[], limit: number): SearchResu
 function escapeSqlString(value: string): string {
   return value.replace(/"/g, '""');
 }
-
-/**
- * Maximum chunks expected per file when estimating query limits.
- * Used to size the LanceDB scan when filtering by file path.
- */
-const MAX_CHUNKS_PER_FILE = 100;
 
 /**
  * Build a SQL WHERE clause for file path filtering.

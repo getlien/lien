@@ -200,6 +200,7 @@ export {
   DEFAULT_GIT_POLL_INTERVAL_MS,
   DEFAULT_DEBOUNCE_MS,
   INDEX_FORMAT_VERSION,
+  MAX_CHUNKS_PER_FILE,
 } from './constants.js';
 
 // =============================================================================

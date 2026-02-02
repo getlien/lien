@@ -3,6 +3,7 @@ import { GetFilesContextSchema } from '../schemas/index.js';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
+import { MAX_CHUNKS_PER_FILE } from '@liendev/core';
 import type { SearchResult, LocalEmbeddings, VectorDBInterface } from '@liendev/core';
 
 /**
@@ -10,12 +11,6 @@ import type { SearchResult, LocalEmbeddings, VectorDBInterface } from '@liendev/
  * Larger codebases may have incomplete results if they exceed this limit.
  */
 const SCAN_LIMIT = 10000;
-
-/**
- * Maximum chunks expected per file when estimating query limits.
- * Must match the value used in the vectordb query layer.
- */
-const MAX_CHUNKS_PER_FILE = 100;
 
 // ============================================================================
 // Types
