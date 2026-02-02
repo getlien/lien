@@ -76,7 +76,7 @@ describe('handleListFunctions', () => {
         language: undefined,
         pattern: '.*Command.*',
         symbolType: undefined,
-        limit: 50,
+        limit: 51, // 50 + 0 + 1 (over-fetch by 1 for hasMore detection)
       });
       expect(mockVectorDB.scanWithFilter).not.toHaveBeenCalled();
 
@@ -114,7 +114,7 @@ describe('handleListFunctions', () => {
         language: undefined,
         pattern: undefined,
         symbolType: 'class',
-        limit: 50,
+        limit: 51,
       });
 
       const parsed = JSON.parse(result.content![0].text);
@@ -145,7 +145,7 @@ describe('handleListFunctions', () => {
       expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
         language: undefined,
         symbolType: 'method',
-        limit: 50,
+        limit: 51,
       });
 
       const parsed = JSON.parse(result.content![0].text);
@@ -188,7 +188,7 @@ describe('handleListFunctions', () => {
       expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
         language: undefined,
         symbolType: 'function',
-        limit: 50,
+        limit: 51,
       });
 
       const parsed = JSON.parse(result.content![0].text);
@@ -237,7 +237,7 @@ describe('handleListFunctions', () => {
         language: undefined,
         pattern: undefined,
         symbolType: undefined,
-        limit: 50,
+        limit: 51,
       });
 
       const parsed = JSON.parse(result.content![0].text);
@@ -301,7 +301,7 @@ describe('handleListFunctions', () => {
       expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
         language: undefined,
         symbolType: 'class',
-        limit: 50,
+        limit: 51,
       });
 
       const parsed = JSON.parse(result.content![0].text);
@@ -589,8 +589,9 @@ describe('handleListFunctions', () => {
 
       const result = await handleListFunctions({ limit: 10 }, mockCtx);
 
+      // fetchLimit = 10 + 0 + 1 = 11
       expect(mockVectorDB.querySymbols).toHaveBeenCalledWith(
-        expect.objectContaining({ limit: 10 })
+        expect.objectContaining({ limit: 11 })
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -605,9 +606,9 @@ describe('handleListFunctions', () => {
 
       const result = await handleListFunctions({ limit: 5, offset: 10 }, mockCtx);
 
-      // fetchLimit should be limit + offset = 15
+      // fetchLimit = 5 + 10 + 1 = 16
       expect(mockVectorDB.querySymbols).toHaveBeenCalledWith(
-        expect.objectContaining({ limit: 15 })
+        expect.objectContaining({ limit: 16 })
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -649,9 +650,9 @@ describe('handleListFunctions', () => {
 
       const result = await handleListFunctions({ limit: 10, offset: 5 }, mockCtx);
 
-      // fetchLimit = 10 + 5 = 15
+      // fetchLimit = 10 + 5 + 1 = 16
       expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith(
-        expect.objectContaining({ limit: 15 })
+        expect.objectContaining({ limit: 16 })
       );
 
       const parsed = JSON.parse(result.content![0].text);

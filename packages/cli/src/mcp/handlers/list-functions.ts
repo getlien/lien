@@ -84,13 +84,12 @@ async function queryWithFallback(
  */
 function paginateResults(results: SearchResult[], offset: number, limit: number): PaginationResult {
   const dedupedResults = deduplicateResults(results);
-  const totalBeforePagination = dedupedResults.length;
+  const hasMore = dedupedResults.length > offset + limit;
   const paginatedResults = dedupedResults.slice(offset, offset + limit);
-  const hasMore = offset + limit < totalBeforePagination;
 
   return {
     paginatedResults,
-    totalBeforePagination,
+    totalBeforePagination: dedupedResults.length,
     hasMore,
     ...(hasMore ? { nextOffset: offset + limit } : {}),
   };
@@ -114,7 +113,8 @@ export async function handleListFunctions(
 
       const limit = validatedArgs.limit ?? 50;
       const offset = validatedArgs.offset ?? 0;
-      const fetchLimit = limit + offset;
+      // Over-fetch by 1 to detect if more results exist beyond the requested window
+      const fetchLimit = limit + offset + 1;
 
       const queryResult = await queryWithFallback(vectorDB, validatedArgs, fetchLimit, log);
       const { paginatedResults, totalBeforePagination, hasMore, nextOffset } = paginateResults(queryResult.results, offset, limit);
