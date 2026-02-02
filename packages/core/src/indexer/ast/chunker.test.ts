@@ -461,6 +461,32 @@ function third() {
     });
   });
 
+  describe('barrel/re-export files', () => {
+    it('should produce at least one chunk for barrel files with only re-exports', () => {
+      const content = `export { foo } from './foo';
+export { bar, baz } from './bar';
+export { default as qux } from './qux';`;
+
+      const chunks = chunkByAST('index.ts', content);
+
+      expect(chunks.length).toBeGreaterThan(0);
+      expect(chunks[0].metadata.type).toBe('block');
+      expect(chunks[0].metadata.exports).toBeDefined();
+      expect(chunks[0].metadata.exports!.length).toBeGreaterThan(0);
+      expect(chunks[0].content).toContain('export');
+    });
+
+    it('should produce a chunk for a single re-export', () => {
+      const content = `export { foo } from './foo';`;
+
+      const chunks = chunkByAST('index.ts', content);
+
+      expect(chunks.length).toBe(1);
+      expect(chunks[0].metadata.exports).toBeDefined();
+      expect(chunks[0].content).toBe("export { foo } from './foo';");
+    });
+  });
+
   describe('error handling', () => {
     it('should throw error for unsupported language', () => {
       const content = 'puts "Hello"';

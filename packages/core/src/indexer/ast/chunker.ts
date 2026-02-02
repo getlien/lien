@@ -464,9 +464,11 @@ function extractUncoveredCode(
 ): ASTChunk[] {
   const uncoveredRanges = findUncoveredRanges(coveredRanges, lines.length);
   
+  const hasExports = fileExports && fileExports.length > 0;
+
   return uncoveredRanges
     .map(range => createChunkFromRange(range, lines, filepath, language, imports, tenantContext, fileExports, importedSymbols))
-    .filter(chunk => isValidChunk(chunk, minChunkSize));
+    .filter(chunk => hasExports ? chunk.content.length > 0 : isValidChunk(chunk, minChunkSize));
 }
 
 /**
