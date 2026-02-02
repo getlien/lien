@@ -397,10 +397,21 @@ function toUnscoredSearchResults(records: DBRecord[], limit: number): SearchResu
  * Scan the database with filters.
  * Scans all records to ensure complete coverage.
  */
-/** Escape double quotes in file paths for SQL WHERE clauses. */
+/**
+ * Escape double quotes in strings for SQL WHERE clause literals.
+ * Doubles any `"` so the value is safe inside `"..."` delimiters.
+ *
+ * Example: `path"to"file.ts` → `path""to""file.ts`
+ */
 function escapeSqlString(value: string): string {
   return value.replace(/"/g, '""');
 }
+
+/**
+ * Maximum chunks expected per file when estimating query limits.
+ * Used to size the LanceDB scan when filtering by file path.
+ */
+const MAX_CHUNKS_PER_FILE = 100;
 
 /**
  * Build a SQL WHERE clause for file path filtering.
@@ -451,7 +462,7 @@ export async function scanWithFilter(
     if (file) {
       // No need to scan all rows; use a generous limit relative to expected results
       const fileCount = typeof file === 'string' ? 1 : file.length;
-      queryLimit = Math.max(fileCount * 100, 1000);
+      queryLimit = Math.max(fileCount * MAX_CHUNKS_PER_FILE, 1000);
     } else {
       // Full scan: get total row count to ensure we scan all records
       const totalRows = await table.countRows();

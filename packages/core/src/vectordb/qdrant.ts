@@ -125,13 +125,13 @@ class QdrantFilterBuilder {
     if (typeof file === 'string') {
       const cleaned = file.trim();
       if (cleaned.length === 0) {
-        throw new Error('Invalid file: file must be a non-empty, non-whitespace string.');
+        throw new Error('Invalid file filter: file path must contain non-whitespace characters.');
       }
       this.filter.must.push({ key: 'file', match: { value: cleaned } });
     } else {
       const cleaned = file.map(f => f.trim()).filter(f => f.length > 0);
       if (cleaned.length === 0) {
-        throw new Error('Invalid files: at least one non-empty, non-whitespace file path is required.');
+        throw new Error('Invalid file filter: at least one file path must contain non-whitespace characters.');
       }
       this.filter.must.push({ key: 'file', match: { any: cleaned } });
     }

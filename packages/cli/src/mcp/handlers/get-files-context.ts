@@ -11,6 +11,12 @@ import type { SearchResult, LocalEmbeddings, VectorDBInterface } from '@liendev/
  */
 const SCAN_LIMIT = 10000;
 
+/**
+ * Maximum chunks expected per file when estimating query limits.
+ * Must match the value used in the vectordb query layer.
+ */
+const MAX_CHUNKS_PER_FILE = 100;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -63,7 +69,7 @@ export async function searchFileChunks(
   // Query all chunks for all files in a single scan
   const allResults = await vectorDB.scanWithFilter({
     file: filepaths,
-    limit: filepaths.length * 100,
+    limit: filepaths.length * MAX_CHUNKS_PER_FILE,
   });
 
   // Group results by target file using canonical path matching
