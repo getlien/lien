@@ -36,7 +36,7 @@ export const ListFunctionsSchema = z.object({
       "Increase to 200 for broad exploration."
     ),
 
-  offset: z.number().int().min(0).default(0)
+  offset: z.number().int().min(0).max(10000).default(0)
     .describe(
       "Skip first N results before applying limit, equivalent to pagination offset.\n\n" +
       "Default: 0"
