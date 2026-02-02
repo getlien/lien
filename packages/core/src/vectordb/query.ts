@@ -127,13 +127,13 @@ function getSymbolsForType(
   r: DBRecord,
   symbolType?: 'function' | 'method' | 'class' | 'interface'
 ): string[] {
-  if (symbolType === 'function' || symbolType === 'method') return r.functionNames || [];
-  if (symbolType === 'class') return r.classNames || [];
-  if (symbolType === 'interface') return r.interfaceNames || [];
+  if (symbolType === 'function' || symbolType === 'method') return toPlainArray<string>(r.functionNames) || [];
+  if (symbolType === 'class') return toPlainArray<string>(r.classNames) || [];
+  if (symbolType === 'interface') return toPlainArray<string>(r.interfaceNames) || [];
   return [
-    ...(r.functionNames || []),
-    ...(r.classNames || []),
-    ...(r.interfaceNames || []),
+    ...(toPlainArray<string>(r.functionNames) || []),
+    ...(toPlainArray<string>(r.classNames) || []),
+    ...(toPlainArray<string>(r.interfaceNames) || []),
   ];
 }
 
@@ -498,10 +498,13 @@ function matchesSymbolFilter(
  * Build legacy symbols object for backwards compatibility.
  */
 function buildLegacySymbols(r: DBRecord) {
+  const functions = toPlainArray<string>(r.functionNames);
+  const classes = toPlainArray<string>(r.classNames);
+  const interfaces = toPlainArray<string>(r.interfaceNames);
   return {
-    functions: hasValidStringEntries(r.functionNames) ? r.functionNames : [],
-    classes: hasValidStringEntries(r.classNames) ? r.classNames : [],
-    interfaces: hasValidStringEntries(r.interfaceNames) ? r.interfaceNames : [],
+    functions: hasValidStringEntries(functions) ? functions! : [],
+    classes: hasValidStringEntries(classes) ? classes! : [],
+    interfaces: hasValidStringEntries(interfaces) ? interfaces! : [],
   };
 }
 

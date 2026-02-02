@@ -590,6 +590,73 @@ describe('VectorDB Query Operations', () => {
       expect(results[0].metadata.symbolType).toBe('function');
     });
 
+    it('should handle Arrow Vector array columns when filtering by symbolType', async () => {
+      // Simulate Arrow Vector objects returned by LanceDB for array columns
+      const makeArrowVector = (arr: string[]) => ({
+        length: arr.length,
+        toArray: () => arr,
+        // Arrow Vectors don't have .some(), .filter(), etc.
+      });
+
+      const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'class MyService {}',
+              file: 'src/service.ts',
+              startLine: 1,
+              endLine: 10,
+              type: 'class',
+              language: 'typescript',
+              symbolName: 'MyService',
+              symbolType: 'class',
+              functionNames: makeArrowVector(['']),
+              classNames: makeArrowVector(['MyService']),
+              interfaceNames: makeArrowVector(['']),
+            },
+            {
+              content: 'function helper() {}',
+              file: 'src/helper.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'helper',
+              symbolType: 'function',
+              functionNames: makeArrowVector(['helper']),
+              classNames: makeArrowVector(['']),
+              interfaceNames: makeArrowVector(['']),
+            },
+            {
+              // Record with empty symbolType placeholder (batch-insert)
+              content: 'const x = 1;',
+              file: 'src/const.ts',
+              startLine: 1,
+              endLine: 1,
+              type: 'block',
+              language: 'typescript',
+              symbolName: '',
+              symbolType: '',
+              functionNames: makeArrowVector(['']),
+              classNames: makeArrowVector(['']),
+              interfaceNames: makeArrowVector(['']),
+            },
+          ]),
+        }),
+      };
+
+      const classResults = await querySymbols(mockTable, { symbolType: 'class', limit: 10 });
+      expect(classResults).toHaveLength(1);
+      expect(classResults[0].metadata.symbolName).toBe('MyService');
+
+      const funcResults = await querySymbols(mockTable, { symbolType: 'function', limit: 10 });
+      expect(funcResults).toHaveLength(1);
+      expect(funcResults[0].metadata.symbolName).toBe('helper');
+    });
+
     it('should handle records with no symbolType (fallback to pre-AST symbols)', async () => {
       const mockTable = {
         countRows: vi.fn().mockResolvedValue(10),
