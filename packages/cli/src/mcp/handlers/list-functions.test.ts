@@ -24,7 +24,7 @@ describe('handleListFunctions', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    
+
     mockVectorDB = {
       querySymbols: vi.fn(),
       scanWithFilter: vi.fn(),
@@ -145,7 +145,7 @@ describe('handleListFunctions', () => {
       expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
         language: undefined,
         symbolType: 'method',
-        limit: 200,
+        limit: 50,
       });
 
       const parsed = JSON.parse(result.content![0].text);
@@ -188,7 +188,7 @@ describe('handleListFunctions', () => {
       expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
         language: undefined,
         symbolType: 'function',
-        limit: 200,
+        limit: 50,
       });
 
       const parsed = JSON.parse(result.content![0].text);
@@ -301,7 +301,7 @@ describe('handleListFunctions', () => {
       expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
         language: undefined,
         symbolType: 'class',
-        limit: 200,
+        limit: 50,
       });
 
       const parsed = JSON.parse(result.content![0].text);
@@ -379,7 +379,7 @@ describe('handleListFunctions', () => {
       );
 
       const parsed = JSON.parse(result.content![0].text);
-      
+
       // Should only include results where symbolName matches the pattern
       expect(parsed.results).toHaveLength(2);
       expect(parsed.results.map((r: any) => r.metadata.symbolName)).toEqual([
@@ -432,15 +432,15 @@ describe('handleListFunctions', () => {
       );
 
       const parsed = JSON.parse(result.content![0].text);
-      
+
       // Should only include the one with a valid symbolName that matches
       expect(parsed.results).toHaveLength(1);
       expect(parsed.results[0].metadata.symbolName).toBe('initCommand');
     });
 
-    it('should limit results to 50 items in fallback', async () => {
+    it('should limit results to default 50 items in fallback', async () => {
       mockVectorDB.querySymbols.mockResolvedValue([]);
-      
+
       // Create 100 results
       const manyResults = Array.from({ length: 100 }, (_, i) => ({
         content: `function func${i}Command() {}`,
@@ -452,7 +452,7 @@ describe('handleListFunctions', () => {
         score: 0,
         relevance: 'highly_relevant' as const,
       }));
-      
+
       mockVectorDB.scanWithFilter.mockResolvedValue(manyResults);
 
       const result = await handleListFunctions(
@@ -461,9 +461,12 @@ describe('handleListFunctions', () => {
       );
 
       const parsed = JSON.parse(result.content![0].text);
-      
-      // Should be limited to 50
+
+      // Should be limited to 50 (default limit)
       expect(parsed.results).toHaveLength(50);
+      expect(parsed.totalBeforePagination).toBe(100);
+      expect(parsed.hasMore).toBe(true);
+      expect(parsed.nextOffset).toBe(50);
     });
   });
 
@@ -499,7 +502,7 @@ describe('handleListFunctions', () => {
       );
 
       const parsed = JSON.parse(result.content![0].text);
-      
+
       // Should include all results (no pattern filtering)
       expect(parsed.results).toHaveLength(2);
     });
@@ -542,7 +545,7 @@ describe('handleListFunctions', () => {
       const result = await handleListFunctions({}, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      
+
       expect(parsed).toHaveProperty('indexInfo');
       expect(parsed.indexInfo).toEqual({
         indexVersion: 1234567890,
@@ -550,5 +553,112 @@ describe('handleListFunctions', () => {
       });
     });
   });
-});
 
+  describe('pagination', () => {
+    function makeResults(count: number): SearchResult[] {
+      return Array.from({ length: count }, (_, i) => ({
+        content: `function func${i}() {}`,
+        metadata: {
+          file: `src/file${i}.ts`,
+          startLine: 1,
+          endLine: 5,
+          type: 'function' as const,
+          language: 'typescript',
+          symbolName: `func${i}`,
+          symbolType: 'function',
+        },
+        score: 1,
+        relevance: 'highly_relevant' as const,
+      }));
+    }
+
+    it('should apply default limit of 50', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue(makeResults(80));
+
+      const result = await handleListFunctions({}, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(50);
+      expect(parsed.totalBeforePagination).toBe(80);
+      expect(parsed.hasMore).toBe(true);
+      expect(parsed.nextOffset).toBe(50);
+    });
+
+    it('should respect custom limit', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue(makeResults(30));
+
+      const result = await handleListFunctions({ limit: 10 }, mockCtx);
+
+      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith(
+        expect.objectContaining({ limit: 10 })
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(10);
+      expect(parsed.totalBeforePagination).toBe(30);
+      expect(parsed.hasMore).toBe(true);
+      expect(parsed.nextOffset).toBe(10);
+    });
+
+    it('should skip results with offset', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue(makeResults(20));
+
+      const result = await handleListFunctions({ limit: 5, offset: 10 }, mockCtx);
+
+      // fetchLimit should be limit + offset = 15
+      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith(
+        expect.objectContaining({ limit: 15 })
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(5);
+      // Results should start from offset 10 (func10..func14)
+      expect(parsed.results[0].metadata.symbolName).toBe('func10');
+      expect(parsed.results[4].metadata.symbolName).toBe('func14');
+      expect(parsed.totalBeforePagination).toBe(20);
+      expect(parsed.hasMore).toBe(true);
+      expect(parsed.nextOffset).toBe(15);
+    });
+
+    it('should return hasMore=false when all results fit', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue(makeResults(5));
+
+      const result = await handleListFunctions({ limit: 10 }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(5);
+      expect(parsed.totalBeforePagination).toBe(5);
+      expect(parsed.hasMore).toBe(false);
+      expect(parsed.nextOffset).toBeUndefined();
+    });
+
+    it('should return empty results when offset is beyond result count', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue(makeResults(5));
+
+      const result = await handleListFunctions({ limit: 10, offset: 100 }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.totalBeforePagination).toBe(5);
+      expect(parsed.hasMore).toBe(false);
+    });
+
+    it('should include pagination metadata in content scan fallback', async () => {
+      mockVectorDB.querySymbols.mockRejectedValue(new Error('fail'));
+      mockVectorDB.scanWithFilter.mockResolvedValue(makeResults(30));
+
+      const result = await handleListFunctions({ limit: 10, offset: 5 }, mockCtx);
+
+      // fetchLimit = 10 + 5 = 15
+      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith(
+        expect.objectContaining({ limit: 15 })
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(10);
+      expect(parsed.totalBeforePagination).toBe(30);
+      expect(parsed.hasMore).toBe(true);
+      expect(parsed.nextOffset).toBe(15);
+    });
+  });
+});

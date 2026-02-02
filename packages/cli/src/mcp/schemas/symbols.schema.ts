@@ -28,6 +28,19 @@ export const ListFunctionsSchema = z.object({
   symbolType: z.enum(['function', 'method', 'class', 'interface'])
     .optional()
     .describe("Filter by symbol type. If omitted, returns all types."),
+
+  limit: z.number().int().min(1).max(200).default(50)
+    .describe(
+      "Number of results to return.\n\n" +
+      "Default: 50\n" +
+      "Increase to 200 for broad exploration."
+    ),
+
+  offset: z.number().int().min(0).default(0)
+    .describe(
+      "Skip first N results before applying limit, equivalent to pagination offset.\n\n" +
+      "Default: 0"
+    ),
 });
 
 /**

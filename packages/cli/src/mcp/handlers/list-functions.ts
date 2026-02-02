@@ -16,7 +16,8 @@ interface QueryResult {
  */
 async function performContentScan(
   vectorDB: VectorDBInterface,
-  args: ListFunctionsInput,
+  args: Pick<ListFunctionsInput, 'language' | 'pattern' | 'symbolType'>,
+  fetchLimit: number,
   log: LogFn
 ): Promise<QueryResult> {
   log('Falling back to content scan...');
@@ -24,7 +25,7 @@ async function performContentScan(
   let results = await vectorDB.scanWithFilter({
     language: args.language,
     symbolType: args.symbolType,
-    limit: 200, // Fetch more, we'll filter by symbolName
+    limit: fetchLimit,
   });
 
   // Filter by symbolName (not content) to match only actual functions/symbols
@@ -37,7 +38,7 @@ async function performContentScan(
   }
 
   return {
-    results: results.slice(0, 50),
+    results,
     method: 'content',
   };
 }
@@ -58,6 +59,10 @@ export async function handleListFunctions(
       log('Listing functions with symbol metadata...');
       await checkAndReconnect();
 
+      const limit = validatedArgs.limit ?? 50;
+      const offset = validatedArgs.offset ?? 0;
+      const fetchLimit = limit + offset;
+
       let queryResult: QueryResult;
 
       try {
@@ -66,28 +71,35 @@ export async function handleListFunctions(
           language: validatedArgs.language,
           pattern: validatedArgs.pattern,
           symbolType: validatedArgs.symbolType,
-          limit: 50,
+          limit: fetchLimit,
         });
 
         // Fall back if no results and filters were provided
         if (results.length === 0 && (validatedArgs.language || validatedArgs.pattern || validatedArgs.symbolType)) {
           log('No symbol results, falling back to content scan...');
-          queryResult = await performContentScan(vectorDB, validatedArgs, log);
+          queryResult = await performContentScan(vectorDB, validatedArgs, fetchLimit, log);
         } else {
           queryResult = { results, method: 'symbols' };
         }
       } catch (error) {
         log(`Symbol query failed: ${error}`);
-        queryResult = await performContentScan(vectorDB, validatedArgs, log);
+        queryResult = await performContentScan(vectorDB, validatedArgs, fetchLimit, log);
       }
 
       const dedupedResults = deduplicateResults(queryResult.results);
-      log(`Found ${dedupedResults.length} matches using ${queryResult.method} method`);
+      const totalBeforePagination = dedupedResults.length;
+      const paginatedResults = dedupedResults.slice(offset, offset + limit);
+      const hasMore = offset + limit < totalBeforePagination;
+
+      log(`Found ${totalBeforePagination} matches using ${queryResult.method} method (returning ${paginatedResults.length})`);
 
       return {
         indexInfo: getIndexMetadata(),
         method: queryResult.method,
-        results: shapeResults(dedupedResults, 'list_functions'),
+        totalBeforePagination,
+        hasMore,
+        ...(hasMore ? { nextOffset: offset + limit } : {}),
+        results: shapeResults(paginatedResults, 'list_functions'),
         note: queryResult.method === 'content'
           ? 'Using content search. Run "lien reindex" to enable faster symbol-based queries.'
           : undefined,
