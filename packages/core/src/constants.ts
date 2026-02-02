@@ -37,6 +37,11 @@ export const DEFAULT_GIT_POLL_INTERVAL_MS = 10000; // Check every 10 seconds
 export const DEFAULT_DEBOUNCE_MS = 1000;
 
 
+// File query estimation
+// Maximum chunks expected per file when sizing scan queries.
+// Used by both the LanceDB query layer and MCP handler to avoid full table scans.
+export const MAX_CHUNKS_PER_FILE = 100;
+
 // Index format version - bump on ANY breaking change to indexing
 // Examples that require version bump:
 // - Chunking algorithm changes

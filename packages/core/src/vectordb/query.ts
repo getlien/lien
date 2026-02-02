@@ -1,5 +1,6 @@
 import { SearchResult, SYMBOL_TYPE_MATCHES } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
+import { MAX_CHUNKS_PER_FILE } from '../constants.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
 import { classifyQueryIntent, QueryIntent } from './intent-classifier.js';
@@ -397,9 +398,43 @@ function toUnscoredSearchResults(records: DBRecord[], limit: number): SearchResu
  * Scan the database with filters.
  * Scans all records to ensure complete coverage.
  */
+/**
+ * Escape double quotes in strings for SQL WHERE clause literals.
+ * Doubles any `"` so the value is safe inside `"..."` delimiters.
+ *
+ * Example: `path"to"file.ts` → `path""to""file.ts`
+ */
+function escapeSqlString(value: string): string {
+  return value.replace(/"/g, '""');
+}
+
+/**
+ * Build a SQL WHERE clause for file path filtering.
+ * Single file: file = "path/to/file.ts"
+ * Multiple files: file IN ("a.ts", "b.ts")
+ *
+ * @throws {DatabaseError} if file paths are empty or whitespace-only
+ */
+function buildFileWhereClause(file: string | string[]): string {
+  if (typeof file === 'string') {
+    const trimmed = file.trim();
+    if (trimmed.length === 0) {
+      throw new DatabaseError('Invalid file filter: file path must be non-empty');
+    }
+    return `file = "${escapeSqlString(trimmed)}"`;
+  }
+  const cleaned = file.map(f => f.trim()).filter(f => f.length > 0);
+  if (cleaned.length === 0) {
+    throw new DatabaseError('Invalid file filter: at least one non-empty file path is required');
+  }
+  const escaped = cleaned.map(f => `"${escapeSqlString(f)}"`).join(', ');
+  return `file IN (${escaped})`;
+}
+
 export async function scanWithFilter(
   table: LanceDBTable,
   options: {
+    file?: string | string[];
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
@@ -410,16 +445,28 @@ export async function scanWithFilter(
     throw new DatabaseError('Vector database not initialized');
   }
 
-  const { language, pattern, symbolType, limit = 100 } = options;
+  const { file, language, pattern, symbolType, limit = 100 } = options;
 
   try {
-    // Get total row count to ensure we scan all records
-    const totalRows = await table.countRows();
-
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
+
+    // When file filter is provided, use targeted WHERE clause instead of full scan
+    const whereClause = file ? buildFileWhereClause(file) : 'file != ""';
+
+    let queryLimit: number;
+    if (file) {
+      // No need to scan all rows; use a generous limit relative to expected results
+      const fileCount = typeof file === 'string' ? 1 : file.length;
+      queryLimit = Math.max(fileCount * MAX_CHUNKS_PER_FILE, 1000);
+    } else {
+      // Full scan: get total row count to ensure we scan all records
+      const totalRows = await table.countRows();
+      queryLimit = Math.max(totalRows, 1000);
+    }
+
     const query = table.search(zeroVector)
-      .where('file != ""')
-      .limit(Math.max(totalRows, 1000));
+      .where(whereClause)
+      .limit(queryLimit);
 
     const results = await query.toArray();
 

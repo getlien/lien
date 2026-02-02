@@ -109,6 +109,35 @@ class QdrantFilterBuilder {
     return this;
   }
 
+  /**
+   * Add symbol type filter with backward-compatible semantics.
+   * 'function' matches both 'function' and 'method' records because
+   * pre-AST indices stored methods under the 'function' type.
+   */
+  addSymbolTypeFilter(symbolType: 'function' | 'method' | 'class' | 'interface'): this {
+    if (symbolType === 'function') {
+      return this.addSymbolTypes(['function', 'method']);
+    }
+    return this.addSymbolType(symbolType);
+  }
+
+  addFileFilter(file: string | string[]): this {
+    if (typeof file === 'string') {
+      const cleaned = file.trim();
+      if (cleaned.length === 0) {
+        throw new Error('Invalid file filter: file path must contain non-whitespace characters.');
+      }
+      this.filter.must.push({ key: 'file', match: { value: cleaned } });
+    } else {
+      const cleaned = file.map(f => f.trim()).filter(f => f.length > 0);
+      if (cleaned.length === 0) {
+        throw new Error('Invalid file filter: at least one file path must contain non-whitespace characters.');
+      }
+      this.filter.must.push({ key: 'file', match: { any: cleaned } });
+    }
+    return this;
+  }
+
   addPattern(pattern: string, key: 'file' | 'symbolName' = 'file'): this {
     const cleanedPattern = pattern.trim();
     if (cleanedPattern.length === 0) {
@@ -296,6 +325,7 @@ export class QdrantDB implements VectorDBInterface {
    * @returns Qdrant filter object
    */
   private buildBaseFilter(options: {
+    file?: string | string[];
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
@@ -326,14 +356,8 @@ export class QdrantDB implements VectorDBInterface {
       builder.addLanguage(options.language);
     }
 
-    // Validate symbolType is non-empty if explicitly provided (even if empty string)
     if (options.symbolType !== undefined) {
-      if (options.symbolType === 'function') {
-        // Match both functions and methods for backward compatibility
-        builder.addSymbolTypes(['function', 'method']);
-      } else {
-        builder.addSymbolType(options.symbolType);
-      }
+      builder.addSymbolTypeFilter(options.symbolType);
     }
 
     // Validate pattern is non-empty if explicitly provided (even if empty string)
@@ -347,6 +371,10 @@ export class QdrantDB implements VectorDBInterface {
     if (options.branch !== undefined && options.includeCurrentRepo === false) {
       // addBranch will validate that branch is non-empty and non-whitespace
       builder.addBranch(options.branch);
+    }
+
+    if (options.file !== undefined) {
+      builder.addFileFilter(options.file);
     }
 
     return builder.build();
@@ -601,12 +629,14 @@ export class QdrantDB implements VectorDBInterface {
   }
 
   async scanWithFilter(options: {
+    file?: string | string[];
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }): Promise<SearchResult[]> {
     const filter = this.buildBaseFilter({
+      file: options.file,
       language: options.language,
       pattern: options.pattern,
       symbolType: options.symbolType,

@@ -249,6 +249,85 @@ describe('VectorDB Query Operations', () => {
       expect(funcResults.map(r => r.metadata.symbolType)).toEqual(['function', 'method']);
     });
 
+    it('should filter by single file path', async () => {
+      const mockTable = {
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'function foo() {}',
+              file: 'src/foo.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+            },
+            {
+              content: 'function bar() {}',
+              file: 'src/bar.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+            },
+          ]),
+        }),
+      };
+
+      const results = await scanWithFilter(mockTable, { file: 'src/foo.ts', limit: 10 });
+
+      // Verify WHERE clause uses file = "..." instead of file != ""
+      const whereCall = mockTable.search().where;
+      expect(whereCall).toHaveBeenCalledWith('file = "src/foo.ts"');
+
+      // Both records pass isValidRecord; file filtering is done by the WHERE clause in LanceDB
+      expect(results).toHaveLength(2);
+    });
+
+    it('should filter by multiple file paths', async () => {
+      const mockTable = {
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'function foo() {}',
+              file: 'src/foo.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+            },
+          ]),
+        }),
+      };
+
+      const results = await scanWithFilter(mockTable, {
+        file: ['src/foo.ts', 'src/bar.ts'],
+        limit: 10,
+      });
+
+      const whereCall = mockTable.search().where;
+      expect(whereCall).toHaveBeenCalledWith('file IN ("src/foo.ts", "src/bar.ts")');
+      expect(results).toHaveLength(1);
+    });
+
+    it('should not call countRows when file filter is provided', async () => {
+      const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([]),
+        }),
+      };
+
+      await scanWithFilter(mockTable, { file: 'src/foo.ts', limit: 10 });
+
+      expect(mockTable.countRows).not.toHaveBeenCalled();
+    });
+
     it('should filter out empty string arrays from AST metadata', async () => {
       const mockTable = {
         countRows: vi.fn().mockResolvedValue(10),
