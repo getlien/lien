@@ -44,38 +44,31 @@ type PathCache = Map<string, string>;
 
 /**
  * Search for chunks belonging to specific files.
- * 
- * Batches embedding and search operations for all filepaths at once
- * to reduce latency.
- * 
+ *
+ * Uses direct file path filtering via scanWithFilter to reliably
+ * retrieve all indexed chunks for the target files, avoiding the
+ * previous embedding-based approach which could miss chunks when
+ * file content wasn't semantically similar to the filepath string.
+ *
  * @param filepaths - Array of file paths to search for
  * @param ctx - Handler context with vectorDB and embeddings
- * @returns Map of filepath index to matching chunks
+ * @returns Array of chunk arrays, one per filepath
  */
 export async function searchFileChunks(
   filepaths: string[],
   ctx: HandlerContext
 ): Promise<SearchResult[][]> {
-  const { vectorDB, embeddings, workspaceRoot } = ctx;
-  
-  // Batch embedding calls for all filepaths at once
-  const fileEmbeddings = await Promise.all(
-    filepaths.map(fp => embeddings.embed(fp))
-  );
+  const { vectorDB, workspaceRoot } = ctx;
 
-  // Batch all initial file searches in parallel
-  const allFileSearches = await Promise.all(
-    fileEmbeddings.map((embedding, i) =>
-      vectorDB.search(embedding, 50, filepaths[i])
-    )
-  );
+  // Query all chunks for all files in a single scan
+  const allResults = await vectorDB.scanWithFilter({
+    file: filepaths,
+    limit: filepaths.length * 100,
+  });
 
-  // Filter results to only include chunks from each target file
-  // Use exact matching with getCanonicalPath to avoid false positives
-  return filepaths.map((filepath, i) => {
-    const allResults = allFileSearches[i];
+  // Group results by target file using canonical path matching
+  return filepaths.map((filepath) => {
     const targetCanonical = getCanonicalPath(filepath, workspaceRoot);
-
     return allResults.filter(r => {
       const chunkCanonical = getCanonicalPath(r.metadata.file, workspaceRoot);
       return chunkCanonical === targetCanonical;

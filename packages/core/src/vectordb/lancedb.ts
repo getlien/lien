@@ -120,6 +120,7 @@ export class VectorDB implements VectorDBInterface {
   }
   
   async scanWithFilter(options: {
+    file?: string | string[];
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';

@@ -38,6 +38,7 @@ export interface VectorDBInterface {
   insertBatch(vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
   search(queryVector: Float32Array, limit?: number, query?: string): Promise<SearchResult[]>;
   scanWithFilter(options: {
+    file?: string | string[];
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';

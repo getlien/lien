@@ -117,88 +117,78 @@ describe('get_files_context - Helper Functions', () => {
   });
 
   describe('searchFileChunks', () => {
-    it('should work with VectorDBInterface (not just concrete VectorDB)', async () => {
-      // This test verifies that HandlerContext accepts VectorDBInterface
-      // which allows both VectorDB (LanceDB) and QdrantDB implementations
+    it('should use scanWithFilter with file paths instead of embeddings', async () => {
       const mockEmbeddings = {
-        embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+        embed: vi.fn(),
       };
-      
-      // Mock VectorDBInterface with all required methods
-      const mockVectorDB = {
-        search: vi.fn().mockResolvedValue([
-          { content: 'chunk1', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0.9 },
-        ]),
-        scanWithFilter: vi.fn(),
-        getCurrentVersion: vi.fn(() => 0),
-        getVersionDate: vi.fn(() => 'Unknown'),
-        checkVersion: vi.fn(),
-        reconnect: vi.fn(),
-      };
-      
-      const ctx = {
-        vectorDB: mockVectorDB as any, // VectorDBInterface
-        embeddings: mockEmbeddings as any,
-        log: vi.fn(),
-        workspaceRoot,
-      };
-      
-      const result = await searchFileChunks(['src/auth.ts'], ctx);
-      
-      // Should work with VectorDBInterface
-      expect(result[0]).toHaveLength(1);
-      expect(mockVectorDB.search).toHaveBeenCalled();
-    });
 
-    it('should filter chunks to only matching files', async () => {
-      const mockEmbeddings = {
-        embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
-      };
-      
       const mockVectorDB = {
-        search: vi.fn().mockResolvedValue([
-          { content: 'chunk1', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0.9 },
-          { content: 'chunk2', metadata: { file: 'src/user.ts', startLine: 1, endLine: 10 }, score: 0.8 },
-          { content: 'chunk3', metadata: { file: 'src/auth.ts', startLine: 11, endLine: 20 }, score: 0.7 },
+        scanWithFilter: vi.fn().mockResolvedValue([
+          { content: 'chunk1', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0 },
         ]),
       };
-      
+
       const ctx = {
         vectorDB: mockVectorDB as any,
         embeddings: mockEmbeddings as any,
         log: vi.fn(),
         workspaceRoot,
       };
-      
+
       const result = await searchFileChunks(['src/auth.ts'], ctx);
-      
+
+      // Should use scanWithFilter, not embeddings
+      expect(result[0]).toHaveLength(1);
+      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
+        file: ['src/auth.ts'],
+        limit: 100,
+      });
+      expect(mockEmbeddings.embed).not.toHaveBeenCalled();
+    });
+
+    it('should filter chunks to only matching files', async () => {
+      const mockVectorDB = {
+        scanWithFilter: vi.fn().mockResolvedValue([
+          { content: 'chunk1', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 }, score: 0 },
+          { content: 'chunk2', metadata: { file: 'src/user.ts', startLine: 1, endLine: 10 }, score: 0 },
+          { content: 'chunk3', metadata: { file: 'src/auth.ts', startLine: 11, endLine: 20 }, score: 0 },
+        ]),
+      };
+
+      const ctx = {
+        vectorDB: mockVectorDB as any,
+        embeddings: {} as any,
+        log: vi.fn(),
+        workspaceRoot,
+      };
+
+      const result = await searchFileChunks(['src/auth.ts'], ctx);
+
       // Should only include chunks from auth.ts
       expect(result[0]).toHaveLength(2);
       expect(result[0].every(r => r.metadata.file === 'src/auth.ts')).toBe(true);
     });
-    
-    it('should batch embed multiple filepaths', async () => {
-      const mockEmbeddings = {
-        embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
-      };
-      
+
+    it('should batch query multiple filepaths in a single scanWithFilter call', async () => {
       const mockVectorDB = {
-        search: vi.fn().mockResolvedValue([]),
+        scanWithFilter: vi.fn().mockResolvedValue([]),
       };
-      
+
       const ctx = {
         vectorDB: mockVectorDB as any,
-        embeddings: mockEmbeddings as any,
+        embeddings: {} as any,
         log: vi.fn(),
         workspaceRoot,
       };
-      
+
       await searchFileChunks(['src/auth.ts', 'src/user.ts', 'src/api.ts'], ctx);
-      
-      // Should embed all 3 filepaths
-      expect(mockEmbeddings.embed).toHaveBeenCalledTimes(3);
-      // Should search for all 3 filepaths
-      expect(mockVectorDB.search).toHaveBeenCalledTimes(3);
+
+      // Should make a single scanWithFilter call with all filepaths
+      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledTimes(1);
+      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
+        file: ['src/auth.ts', 'src/user.ts', 'src/api.ts'],
+        limit: 300,
+      });
     });
   });
 

@@ -109,6 +109,24 @@ class QdrantFilterBuilder {
     return this;
   }
 
+  addFile(filepath: string): this {
+    const cleaned = filepath.trim();
+    if (cleaned.length === 0) {
+      throw new Error('Invalid file: file must be a non-empty, non-whitespace string.');
+    }
+    this.filter.must.push({ key: 'file', match: { value: cleaned } });
+    return this;
+  }
+
+  addFiles(filepaths: string[]): this {
+    const cleaned = filepaths.map(f => f.trim()).filter(f => f.length > 0);
+    if (cleaned.length === 0) {
+      throw new Error('Invalid files: at least one non-empty, non-whitespace file path is required.');
+    }
+    this.filter.must.push({ key: 'file', match: { any: cleaned } });
+    return this;
+  }
+
   addPattern(pattern: string, key: 'file' | 'symbolName' = 'file'): this {
     const cleanedPattern = pattern.trim();
     if (cleanedPattern.length === 0) {
@@ -296,6 +314,7 @@ export class QdrantDB implements VectorDBInterface {
    * @returns Qdrant filter object
    */
   private buildBaseFilter(options: {
+    file?: string | string[];
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
@@ -347,6 +366,15 @@ export class QdrantDB implements VectorDBInterface {
     if (options.branch !== undefined && options.includeCurrentRepo === false) {
       // addBranch will validate that branch is non-empty and non-whitespace
       builder.addBranch(options.branch);
+    }
+
+    // File path filter: exact match on single file or IN match on multiple files
+    if (options.file !== undefined) {
+      if (typeof options.file === 'string') {
+        builder.addFile(options.file);
+      } else if (options.file.length > 0) {
+        builder.addFiles(options.file);
+      }
     }
 
     return builder.build();
@@ -601,12 +629,14 @@ export class QdrantDB implements VectorDBInterface {
   }
 
   async scanWithFilter(options: {
+    file?: string | string[];
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }): Promise<SearchResult[]> {
     const filter = this.buildBaseFilter({
+      file: options.file,
       language: options.language,
       pattern: options.pattern,
       symbolType: options.symbolType,

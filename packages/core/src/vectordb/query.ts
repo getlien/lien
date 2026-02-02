@@ -397,9 +397,23 @@ function toUnscoredSearchResults(records: DBRecord[], limit: number): SearchResu
  * Scan the database with filters.
  * Scans all records to ensure complete coverage.
  */
+/**
+ * Build a SQL WHERE clause for file path filtering.
+ * Single file: file = "path/to/file.ts"
+ * Multiple files: file IN ("a.ts", "b.ts")
+ */
+function buildFileWhereClause(file: string | string[]): string {
+  if (typeof file === 'string') {
+    return `file = "${file}"`;
+  }
+  const escaped = file.map(f => `"${f}"`).join(', ');
+  return `file IN (${escaped})`;
+}
+
 export async function scanWithFilter(
   table: LanceDBTable,
   options: {
+    file?: string | string[];
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
@@ -410,16 +424,28 @@ export async function scanWithFilter(
     throw new DatabaseError('Vector database not initialized');
   }
 
-  const { language, pattern, symbolType, limit = 100 } = options;
+  const { file, language, pattern, symbolType, limit = 100 } = options;
 
   try {
-    // Get total row count to ensure we scan all records
-    const totalRows = await table.countRows();
-
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
+
+    // When file filter is provided, use targeted WHERE clause instead of full scan
+    const whereClause = file ? buildFileWhereClause(file) : 'file != ""';
+
+    let queryLimit: number;
+    if (file) {
+      // No need to scan all rows; use a generous limit relative to expected results
+      const fileCount = typeof file === 'string' ? 1 : file.length;
+      queryLimit = Math.max(fileCount * 100, 1000);
+    } else {
+      // Full scan: get total row count to ensure we scan all records
+      const totalRows = await table.countRows();
+      queryLimit = Math.max(totalRows, 1000);
+    }
+
     const query = table.search(zeroVector)
-      .where('file != ""')
-      .limit(Math.max(totalRows, 1000));
+      .where(whereClause)
+      .limit(queryLimit);
 
     const results = await query.toArray();
 
