@@ -5,9 +5,9 @@ import { getAllLanguages } from '../languages/registry.js';
  * Build the union set of decision point node types from all language definitions.
  * Lazily initialized on first use.
  */
-let decisionPointsCache: string[] | null = null;
+let decisionPointsCache: Set<string> | null = null;
 
-function getDecisionPoints(): string[] {
+function getDecisionPoints(): Set<string> {
   if (!decisionPointsCache) {
     const set = new Set<string>();
     for (const lang of getAllLanguages()) {
@@ -15,7 +15,7 @@ function getDecisionPoints(): string[] {
         set.add(type);
       }
     }
-    decisionPointsCache = [...set];
+    decisionPointsCache = set;
   }
   return decisionPointsCache;
 }
@@ -34,7 +34,7 @@ export function calculateComplexity(node: Parser.SyntaxNode): number {
   const decisionPoints = getDecisionPoints();
 
   function traverse(n: Parser.SyntaxNode) {
-    if (decisionPoints.includes(n.type)) {
+    if (decisionPoints.has(n.type)) {
       // For binary expressions, only count && and ||
       if (n.type === 'binary_expression') {
         const operator = n.childForFieldName('operator');

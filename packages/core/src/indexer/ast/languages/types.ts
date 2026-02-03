@@ -1,5 +1,6 @@
 import type { LanguageTraverser } from '../traversers/types.js';
 import type { LanguageExportExtractor } from '../extractors/types.js';
+import type { SupportedLanguage } from './registry.js';
 
 /**
  * Tree-sitter language grammar type.
@@ -17,7 +18,7 @@ export type TreeSitterLanguage = any;
  */
 export interface LanguageDefinition {
   /** Language identifier (e.g., 'typescript', 'python') */
-  id: string;
+  id: SupportedLanguage;
 
   /** File extensions without dots (e.g., ['ts', 'tsx']) */
   extensions: string[];

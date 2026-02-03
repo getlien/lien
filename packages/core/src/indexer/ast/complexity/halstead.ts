@@ -2,6 +2,12 @@ import type Parser from 'tree-sitter';
 import { getLanguage } from '../languages/registry.js';
 import type { SupportedLanguage } from '../languages/registry.js';
 
+/** Resolved operator sets for a given language, to avoid per-node lookups */
+interface ResolvedOperators {
+  symbols: Set<string>;
+  keywords: Set<string>;
+}
+
 /** Raw Halstead counts from AST */
 export interface HalsteadCounts {
   n1: number;  // distinct operators
@@ -82,33 +88,23 @@ const OPERAND_NODE_TYPES = new Set([
 ]);
 
 /**
- * Get the operator symbols set for a language from the registry.
+ * Resolve operator sets for a language once, to avoid repeated lookups.
  * Falls back to typescript if language not found.
  */
-function getOperatorSymbols(language: string): Set<string> {
+function resolveOperators(language: SupportedLanguage): ResolvedOperators {
   try {
-    return getLanguage(language as SupportedLanguage).complexity.operatorSymbols;
+    const def = getLanguage(language);
+    return { symbols: def.complexity.operatorSymbols, keywords: def.complexity.operatorKeywords };
   } catch {
-    return getLanguage('typescript').complexity.operatorSymbols;
-  }
-}
-
-/**
- * Get the operator keywords set for a language from the registry.
- * Falls back to typescript if language not found.
- */
-function getOperatorKeywords(language: string): Set<string> {
-  try {
-    return getLanguage(language as SupportedLanguage).complexity.operatorKeywords;
-  } catch {
-    return getLanguage('typescript').complexity.operatorKeywords;
+    const def = getLanguage('typescript');
+    return { symbols: def.complexity.operatorSymbols, keywords: def.complexity.operatorKeywords };
   }
 }
 
 /**
  * Check if a node represents an operator
  */
-function isOperator(node: Parser.SyntaxNode, language: string): boolean {
+function isOperator(node: Parser.SyntaxNode, ops: ResolvedOperators): boolean {
   const nodeType = node.type;
   const nodeText = node.text;
 
@@ -118,10 +114,7 @@ function isOperator(node: Parser.SyntaxNode, language: string): boolean {
   }
 
   // Check if it's an operator symbol or keyword
-  const symbols = getOperatorSymbols(language);
-  const keywords = getOperatorKeywords(language);
-
-  return symbols.has(nodeText) || keywords.has(nodeText);
+  return ops.symbols.has(nodeText) || ops.keywords.has(nodeText);
 }
 
 /**
@@ -172,13 +165,14 @@ function sumValues(map: Map<string, number>): number {
  * @param language - Programming language for language-specific handling
  * @returns HalsteadCounts with raw operator/operand counts
  */
-export function countHalstead(node: Parser.SyntaxNode, language: string): HalsteadCounts {
+export function countHalstead(node: Parser.SyntaxNode, language: SupportedLanguage): HalsteadCounts {
   const operators = new Map<string, number>();
   const operands = new Map<string, number>();
+  const ops = resolveOperators(language);
 
   function traverse(n: Parser.SyntaxNode): void {
     // Check if this is an operator
-    if (isOperator(n, language)) {
+    if (isOperator(n, ops)) {
       const key = getOperatorKey(n);
       operators.set(key, (operators.get(key) || 0) + 1);
     }
@@ -255,7 +249,7 @@ export function calculateHalsteadMetrics(counts: HalsteadCounts): HalsteadMetric
  * @param language - Programming language
  * @returns Calculated HalsteadMetrics
  */
-export function calculateHalstead(node: Parser.SyntaxNode, language: string): HalsteadMetrics {
+export function calculateHalstead(node: Parser.SyntaxNode, language: SupportedLanguage): HalsteadMetrics {
   const counts = countHalstead(node, language);
   return calculateHalsteadMetrics(counts);
 }

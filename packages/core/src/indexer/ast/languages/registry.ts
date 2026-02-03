@@ -35,7 +35,7 @@ const languageRegistry = new Map<string, LanguageDefinition>(
 const extensionMap = new Map<string, SupportedLanguage>();
 for (const def of definitions) {
   for (const ext of def.extensions) {
-    extensionMap.set(ext, def.id as SupportedLanguage);
+    extensionMap.set(ext, def.id);
   }
 }
 
@@ -65,6 +65,6 @@ export function detectLanguage(filePath: string): SupportedLanguage | null {
 /**
  * Get all registered language definitions.
  */
-export function getAllLanguages(): LanguageDefinition[] {
+export function getAllLanguages(): readonly LanguageDefinition[] {
   return definitions;
 }

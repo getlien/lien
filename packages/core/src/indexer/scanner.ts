@@ -215,3 +215,9 @@ export function detectFileType(filepath: string): string {
   return languageMap[ext] || 'unknown';
 }
 
+/**
+ * @deprecated Use detectFileType instead. This alias exists for backwards
+ * compatibility with deep imports.
+ */
+export const detectLanguage = detectFileType;
+
