@@ -74,8 +74,8 @@ function getChildNestingLevel(
   nonNestingTypes: Set<string>
 ): number {
   const isCondition = parent.childForFieldName('condition') === child;
-  const isElseClause = nonNestingTypes.has(child.type);
-  return (!isCondition && !isElseClause) ? currentLevel + 1 : currentLevel;
+  const isNonNestingChild = nonNestingTypes.has(child.type);
+  return (!isCondition && !isNonNestingChild) ? currentLevel + 1 : currentLevel;
 }
 
 /**

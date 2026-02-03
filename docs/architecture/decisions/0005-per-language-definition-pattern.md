@@ -47,7 +47,7 @@ Create a `languages/` folder where each language is a single definition file. Ex
 
 In the context of scaling AST support to more languages,
 facing the problem that language data was scattered across 12+ files,
-we decided for consolidating into per-language definition files with a central registry
+we decided to consolidate into per-language definition files with a central registry
 to achieve a single source of truth and reduce the cost of adding new languages,
 accepting the upfront refactoring cost.
 
