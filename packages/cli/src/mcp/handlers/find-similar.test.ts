@@ -417,6 +417,23 @@ describe('handleFindSimilar', () => {
     });
   });
 
+  describe('empty result diagnostics', () => {
+    it('should include diagnostic note when no results are found', async () => {
+      mockVectorDB.search.mockResolvedValue([]);
+
+      const result = await handleFindSimilar(
+        { code: 'async function fetchData() { return await db.find(); }' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.note).toContain('0 results');
+      expect(parsed.note).toContain('24 characters');
+      expect(parsed.note).toContain('grep');
+    });
+  });
+
   describe('filtersApplied metadata', () => {
     it('should not include filtersApplied when no filtering occurred', async () => {
       const mockResults = [

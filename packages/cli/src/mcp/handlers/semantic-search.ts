@@ -87,6 +87,10 @@ export async function handleSemanticSearch(
       // Shape metadata for context efficiency
       const shaped = shapeResults(results, 'semantic_search');
 
+      if (shaped.length === 0) {
+        notes.push('0 results. Try rephrasing as a full question (e.g. "How does X work?"), or use grep for exact string matches. If the codebase was recently updated, run "lien reindex".');
+      }
+
       // Build response
       return {
         indexInfo: getIndexMetadata(),

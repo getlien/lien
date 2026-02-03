@@ -168,6 +168,21 @@ describe('handleSemanticSearch', () => {
       expect(parsed.results).toHaveLength(0);
       expect(parsed.indexInfo).toBeDefined();
     });
+
+    it('should include diagnostic note when search returns empty results', async () => {
+      mockVectorDB.search.mockResolvedValue([]);
+
+      const result = await handleSemanticSearch(
+        { query: 'nonexistent feature' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.note).toContain('0 results');
+      expect(parsed.note).toContain('grep');
+      expect(parsed.note).toContain('lien reindex');
+    });
   });
 
   describe('cross-repo search with Qdrant', () => {

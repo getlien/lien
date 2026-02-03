@@ -470,6 +470,24 @@ describe('handleListFunctions', () => {
     });
   });
 
+  describe('empty result diagnostics', () => {
+    it('should include diagnostic note when no results are found', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([]);
+      mockVectorDB.scanWithFilter.mockResolvedValue([]);
+
+      const result = await handleListFunctions(
+        { pattern: 'nonExistentPattern' },
+        mockCtx
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.results).toHaveLength(0);
+      expect(parsed.note).toContain('0 results');
+      expect(parsed.note).toContain('semantic_search');
+      expect(parsed.note).toContain('symbolType');
+    });
+  });
+
   describe('no pattern provided', () => {
     it('should not filter by symbolName when no pattern is provided', async () => {
       mockVectorDB.querySymbols.mockResolvedValue([]);
