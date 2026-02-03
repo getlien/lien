@@ -111,6 +111,8 @@ export interface FilesContextMultiResponse {
 export interface SimilarCodeResponse {
   indexInfo: IndexMetadata;
   results: SearchResult[];
+  /** Diagnostic note when no results are found */
+  note?: string;
 }
 
 /**
