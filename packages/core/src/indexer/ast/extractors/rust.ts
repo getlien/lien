@@ -47,29 +47,33 @@ export class RustExportExtractor implements LanguageExportExtractor {
     for (let i = 0; i < rootNode.namedChildCount; i++) {
       const child = rootNode.namedChild(i);
       if (!child) continue;
-
-      // Only export items with `pub` visibility
       if (!this.hasVisibilityModifier(child)) continue;
 
-      // Handle use declarations (re-exports: `pub use foo::Bar;`)
-      if (child.type === 'use_declaration') {
-        const argument = child.childForFieldName('argument');
-        if (argument) {
-          const name = this.extractUseExportName(argument);
-          if (name) addExport(name);
-        }
-        continue;
-      }
-
-      // Handle attribute-wrapped items (e.g., #[derive(Debug)] pub struct Foo)
-      // In tree-sitter-rust, attributes are siblings, not wrappers
-      if (this.exportableTypes.has(child.type)) {
-        const nameNode = child.childForFieldName('name');
-        if (nameNode) addExport(nameNode.text);
-      }
+      this.extractExportName(child, addExport);
     }
 
     return exports;
+  }
+
+  /**
+   * Extract the export name from a pub-visible node.
+   * Handles use declarations (re-exports) and standard exportable items.
+   */
+  private extractExportName(
+    node: Parser.SyntaxNode,
+    addExport: (name: string) => void
+  ): void {
+    if (node.type === 'use_declaration') {
+      const argument = node.childForFieldName('argument');
+      const name = argument ? this.extractUseExportName(argument) : null;
+      if (name) addExport(name);
+      return;
+    }
+
+    if (this.exportableTypes.has(node.type)) {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) addExport(nameNode.text);
+    }
   }
 
   /**
