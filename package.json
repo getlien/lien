@@ -49,7 +49,7 @@
   },
   "dependencies": {
     "@liendev/core": "*",
-    "apache-arrow": "^14.0.2"
+    "apache-arrow": "^18.1.0"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8"
