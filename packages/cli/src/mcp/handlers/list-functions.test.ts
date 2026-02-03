@@ -557,14 +557,14 @@ describe('handleListFunctions', () => {
   describe('pagination', () => {
     function makeResults(count: number): SearchResult[] {
       return Array.from({ length: count }, (_, i) => ({
-        content: `function func${i}() {}`,
+        content: `f${i}(){}`,
         metadata: {
-          file: `src/file${i}.ts`,
+          file: `s/${i}.ts`,
           startLine: 1,
           endLine: 5,
           type: 'function' as const,
           language: 'typescript',
-          symbolName: `func${i}`,
+          symbolName: `f${i}`,
           symbolType: 'function',
         },
         score: 1,
@@ -613,9 +613,9 @@ describe('handleListFunctions', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(5);
-      // Results should start from offset 10 (func10..func14)
-      expect(parsed.results[0].metadata.symbolName).toBe('func10');
-      expect(parsed.results[4].metadata.symbolName).toBe('func14');
+      // Results should start from offset 10 (f10..f14)
+      expect(parsed.results[0].metadata.symbolName).toBe('f10');
+      expect(parsed.results[4].metadata.symbolName).toBe('f14');
 
       expect(parsed.hasMore).toBe(true);
       expect(parsed.nextOffset).toBe(15);

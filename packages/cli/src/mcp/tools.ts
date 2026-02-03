@@ -29,7 +29,8 @@ IMPORTANT: Phrase queries as full questions starting with "How", "Where", "What"
 Use natural language describing what the code DOES, not function names. For exact string matching, use grep instead.
 
 Returns:
-- results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature? } }
+- results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature?, enclosingSymbol? } }
+- enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
 - relevance: "highly_relevant" | "relevant" | "loosely_related" (not_relevant auto-filtered)
 - groupedByRepo?: Record<repoId, results[]> (when crossRepo=true)`
   ),
@@ -50,7 +51,8 @@ Optional filters:
 Low-relevance results (not_relevant) are automatically pruned.
 
 Returns:
-- results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, signature? } }
+- results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, signature?, enclosingSymbol? } }
+- enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
 - relevance: "highly_relevant" | "relevant" | "loosely_related" (not_relevant auto-filtered)
 - filtersApplied?: { language?, pathHint?, prunedLowRelevance: number }`
   ),
@@ -116,7 +118,8 @@ Filter by symbol type (function, method, class, interface) to narrow results.
 Results are paginated (default: 50, max: 200). Use \`offset\` to page through large result sets.
 
 Returns:
-- results[]: { content, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature? } }
+- results[]: { content, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature?, enclosingSymbol? } }
+- enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
 - method: "symbols" | "content" (query method used)
 - hasMore: boolean (more results available)
 - nextOffset?: number (offset for next page, when hasMore=true)`
