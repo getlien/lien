@@ -1,5 +1,11 @@
 # @liendev/core
 
+## 0.34.0
+
+### Minor Changes
+
+- 19ada7b: Add Rust as the 5th AST-supported language with full support for traversal, export extraction, complexity analysis, and semantic search. Also upgrades @lancedb/lancedb and apache-arrow to fix a schema mismatch error that prevented indexing.
+
 ## 0.32.0
 
 ### Minor Changes
