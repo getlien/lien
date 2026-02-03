@@ -67,48 +67,49 @@ export function wrapToolHandler<T>(
       };
       
     } catch (error) {
-      // Handle Zod validation errors
-      if (error instanceof ZodError) {
-        return {
-          isError: true,
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              error: 'Invalid parameters',
-              code: LienErrorCode.INVALID_INPUT,
-              details: error.errors.map(e => ({
-                field: e.path.join('.'),
-                message: e.message,
-              })),
-            }, null, 2),
-          }],
-        };
-      }
-      
-      // Handle known Lien errors
-      if (error instanceof LienError) {
-        return {
-          isError: true,
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify(error.toJSON(), null, 2),
-          }],
-        };
-      }
-      
-      // Handle unexpected errors
-      console.error('Unexpected error in tool handler:', error);
-      return {
-        isError: true,
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            error: error instanceof Error ? error.message : 'Unknown error',
-            code: LienErrorCode.INTERNAL_ERROR,
-          }, null, 2),
-        }],
-      };
+      return formatErrorResponse(error);
     }
+  };
+}
+
+function formatErrorResponse(error: unknown) {
+  if (error instanceof ZodError) {
+    return {
+      isError: true,
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          error: 'Invalid parameters',
+          code: LienErrorCode.INVALID_INPUT,
+          details: error.errors.map(e => ({
+            field: e.path.join('.'),
+            message: e.message,
+          })),
+        }, null, 2),
+      }],
+    };
+  }
+
+  if (error instanceof LienError) {
+    return {
+      isError: true,
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify(error.toJSON(), null, 2),
+      }],
+    };
+  }
+
+  console.error('Unexpected error in tool handler:', error);
+  return {
+    isError: true,
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({
+        error: error instanceof Error ? error.message : 'Unknown error',
+        code: LienErrorCode.INTERNAL_ERROR,
+      }, null, 2),
+    }],
   };
 }
 
