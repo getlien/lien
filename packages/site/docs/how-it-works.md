@@ -67,9 +67,10 @@ Lien indexes and understands code in:
 - TypeScript, JavaScript (JSX/TSX)
 - Python
 - PHP
+- Rust
 
 **Semantic Search** (chunking and embeddings):
-- All of the above, plus Go, Rust, Java, C/C++, Vue, Ruby, Swift, Kotlin, C#, Scala, and more!
+- All of the above, plus Go, Java, C/C++, Vue, Ruby, Swift, Kotlin, C#, Scala, and more!
 
 ## Complexity Analysis
 

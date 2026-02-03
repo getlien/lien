@@ -42,6 +42,7 @@
     "test:e2e:typescript": "vitest run test/e2e/real-projects.test.ts -t 'Zod'",
     "test:e2e:javascript": "vitest run test/e2e/real-projects.test.ts -t 'Express'",
     "test:e2e:php": "vitest run test/e2e/real-projects.test.ts -t 'Monolog'",
+    "test:e2e:rust": "vitest run test/e2e/real-projects.test.ts -t 'Anyhow'",
     "docs": "typedoc"
   },
   "keywords": [

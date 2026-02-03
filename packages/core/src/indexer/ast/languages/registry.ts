@@ -4,6 +4,7 @@ import { typescriptDefinition } from './typescript.js';
 import { javascriptDefinition } from './javascript.js';
 import { phpDefinition } from './php.js';
 import { pythonDefinition } from './python.js';
+import { rustDefinition } from './rust.js';
 
 /**
  * All registered language definitions.
@@ -14,6 +15,7 @@ const definitions: LanguageDefinition[] = [
   javascriptDefinition,
   phpDefinition,
   pythonDefinition,
+  rustDefinition,
 ];
 
 /**
@@ -21,7 +23,7 @@ const definitions: LanguageDefinition[] = [
  *
  * NOTE: This list is manually maintained and must be kept in sync with `definitions`.
  */
-export type SupportedLanguage = 'typescript' | 'javascript' | 'php' | 'python';
+export type SupportedLanguage = 'typescript' | 'javascript' | 'php' | 'python' | 'rust';
 
 /**
  * Registry keyed by language id.

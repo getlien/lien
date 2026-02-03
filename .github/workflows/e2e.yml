@@ -101,6 +101,9 @@ jobs:
           - project: Monolog
             language: PHP
             script: test:e2e:php
+          - project: Anyhow
+            language: Rust
+            script: test:e2e:rust
 
     steps:
       - name: Checkout code

@@ -95,6 +95,15 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 100,
     sampleSearchQuery: 'log message handler',
   },
+  {
+    name: 'Anyhow',
+    repo: 'https://github.com/dtolnay/anyhow.git',
+    branch: 'master',
+    language: 'rust',
+    expectedMinFiles: 5,
+    expectedMinChunks: 15,
+    sampleSearchQuery: 'error handling context',
+  },
 ];
 
 /**
