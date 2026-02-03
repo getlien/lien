@@ -1,5 +1,6 @@
 import { ZodSchema, ZodError } from 'zod';
 import { LienError, LienErrorCode } from '@liendev/core';
+import { applyResponseBudget } from './response-budget.js';
 
 /**
  * Wrap a tool handler with Zod validation and error handling.
@@ -44,8 +45,19 @@ export function wrapToolHandler<T>(
       const validated = schema.parse(args);
       
       // Execute handler with validated, typed input
-      const result = await handler(validated);
-      
+      const rawResult = await handler(validated);
+
+      // Apply response budget to prevent oversized MCP responses
+      const { result, truncation } = applyResponseBudget(rawResult);
+
+      // Append truncation note if response was truncated
+      if (truncation && typeof result === 'object' && result !== null) {
+        const obj = result as Record<string, unknown>;
+        obj.note = obj.note
+          ? `${obj.note}\n${truncation.message}`
+          : truncation.message;
+      }
+
       // Return MCP-compatible success response
       return {
         content: [{
