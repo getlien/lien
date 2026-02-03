@@ -1,7 +1,8 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { SemanticSearchSchema } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
-import type { ToolContext, MCPToolResult } from '../types.js';
+import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
+import type { VectorDBInterface, SearchResult } from '@liendev/core';
 import { QdrantDB } from '@liendev/core';
 
 /**
@@ -9,7 +10,7 @@ import { QdrantDB } from '@liendev/core';
  */
 function groupResultsByRepo(results: Array<{ metadata: { repoId?: string } }>) {
   const grouped: Record<string, typeof results> = {};
-  
+
   for (const result of results) {
     const repoId = result.metadata.repoId || 'unknown';
     if (!grouped[repoId]) {
@@ -17,8 +18,64 @@ function groupResultsByRepo(results: Array<{ metadata: { repoId?: string } }>) {
     }
     grouped[repoId].push(result);
   }
-  
+
   return grouped;
+}
+
+interface SearchParams {
+  query: string;
+  limit: number;
+  crossRepo?: boolean;
+  repoIds?: string[];
+}
+
+/**
+ * Execute the vector search, choosing cross-repo or single-repo strategy.
+ */
+async function executeSearch(
+  vectorDB: VectorDBInterface,
+  queryEmbedding: Float32Array,
+  params: SearchParams,
+  log: LogFn
+): Promise<{ results: SearchResult[]; crossRepoFallback: boolean }> {
+  const { query, limit, crossRepo, repoIds } = params;
+
+  if (crossRepo && vectorDB instanceof QdrantDB) {
+    const results = await vectorDB.searchCrossRepo(queryEmbedding, limit, { repoIds });
+    log(`Found ${results.length} results across ${Object.keys(groupResultsByRepo(results)).length} repos`);
+    return { results, crossRepoFallback: false };
+  }
+
+  if (crossRepo) {
+    log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.', 'warning');
+  }
+  const results = await vectorDB.search(queryEmbedding, limit, query);
+  log(`Found ${results.length} results`);
+  return { results, crossRepoFallback: !!crossRepo };
+}
+
+/**
+ * Deduplicate, filter irrelevant results, and collect diagnostic notes.
+ */
+function processResults(
+  rawResults: SearchResult[],
+  crossRepoFallback: boolean,
+  log: LogFn
+): { results: SearchResult[]; notes: string[] } {
+  const notes: string[] = [];
+  if (crossRepoFallback) {
+    notes.push('Cross-repo search requires Qdrant backend. Fell back to single-repo search.');
+  }
+
+  const results = deduplicateResults(rawResults);
+
+  if (results.length > 0 && results.every(r => r.relevance === 'not_relevant')) {
+    notes.push('No relevant matches found.');
+    log('Returning 0 results (all not_relevant)');
+    return { results: [], notes };
+  }
+
+  return { results, notes };
 }
 
 /**
@@ -36,58 +93,25 @@ export async function handleSemanticSearch(
     SemanticSearchSchema,
     async (validatedArgs) => {
       const { crossRepo, repoIds, query, limit } = validatedArgs;
-      
-      log(`Searching for: "${query}"${crossRepo ? ' (cross-repo)' : ''}`);
 
-      // Check if index has been updated and reconnect if needed
+      log(`Searching for: "${query}"${crossRepo ? ' (cross-repo)' : ''}`);
       await checkAndReconnect();
 
       const queryEmbedding = await embeddings.embed(query);
-      
-      // Check if cross-repo search is requested and backend supports it
-      let results;
-      let crossRepoFallback = false;
-      
-      if (crossRepo && vectorDB instanceof QdrantDB) {
-        // Cross-repo search: omit repoId filter
-        results = await vectorDB.searchCrossRepo(queryEmbedding, limit, { repoIds });
-        log(`Found ${results.length} results across ${Object.keys(groupResultsByRepo(results)).length} repos`);
-      } else {
-        // Single-repo search (existing behavior)
-        if (crossRepo) {
-          log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.');
-          crossRepoFallback = true;
-        }
-        results = await vectorDB.search(queryEmbedding, limit, query);
-        log(`Found ${results.length} results`);
-      }
+      const { results: rawResults, crossRepoFallback } = await executeSearch(
+        vectorDB, queryEmbedding, { query, limit: limit ?? 5, crossRepo, repoIds }, log
+      );
 
-      // Deduplicate results
-      results = deduplicateResults(results);
-
-      // Collect notes
-      const notes: string[] = [];
-      if (crossRepoFallback) {
-        notes.push('Cross-repo search requires Qdrant backend. Fell back to single-repo search.');
-      }
-
-      // If all results are irrelevant, return empty with a note
-      if (results.length > 0 && results.every(r => r.relevance === 'not_relevant')) {
-        notes.push('No relevant matches found.');
-        log('Returning 0 results (all not_relevant)');
-        return {
-          indexInfo: getIndexMetadata(),
-          results: [],
-          note: notes.join(' '),
-        };
-      }
+      const { results, notes } = processResults(rawResults, crossRepoFallback, log);
 
       log(`Returning ${results.length} results`);
 
-      // Shape metadata for context efficiency
       const shaped = shapeResults(results, 'semantic_search');
 
-      // Build response
+      if (shaped.length === 0) {
+        notes.push('0 results. Try rephrasing as a full question (e.g. "How does X work?"), or use grep for exact string matches. If the codebase was recently updated, run "lien reindex".');
+      }
+
       return {
         indexInfo: getIndexMetadata(),
         results: shaped,

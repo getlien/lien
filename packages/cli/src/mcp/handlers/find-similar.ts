@@ -89,6 +89,7 @@ export async function handleFindSimilar(
         indexInfo: getIndexMetadata(),
         results: shapeResults(finalResults, 'find_similar'),
         ...(hasFilters && { filtersApplied }),
+        ...(finalResults.length === 0 && { note: '0 results. Ensure the code snippet is at least 24 characters and representative of the pattern. Try grep for exact string matches.' }),
       };
     }
   )(args);
