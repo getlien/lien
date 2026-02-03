@@ -282,8 +282,12 @@ Our Mermaid diagrams follow these conventions:
 - ✅ MCP server flow explained
 - ✅ Data flow comprehensive
 
+### Per-Language Definition Pattern
+- Consolidated language-specific data into single definition files
+- Central registry replaces scattered registries
+- See [ADR-005](decisions/0005-per-language-definition-pattern.md)
+
 ### Future Updates
-- Tree-sitter parsing architecture (when implemented)
 - Multi-repo support design (when implemented)
 - Web dashboard architecture (when implemented)
 

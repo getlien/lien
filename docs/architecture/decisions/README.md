@@ -21,6 +21,7 @@ For more information, see [adr.github.io](https://adr.github.io/).
 | [ADR-002](0002-strategy-pattern-ast-traversal.md) | Use Strategy Pattern for Language-Specific AST Traversal | 2025-11-25 | Accepted |
 | [ADR-003](0003-ast-based-chunking.md) | Use AST-Based Semantic Chunking Over Line-Based Chunking | 2025-11-23 | Accepted |
 | [ADR-004](0004-test-association-detection.md) | Use Convention-Based and Import-Based Test Association Detection | 2025-11-23 | Accepted |
+| [ADR-005](0005-per-language-definition-pattern.md) | Consolidate Language Support into Per-Language Definitions | 2026-02-03 | Accepted |
 
 ## ADR Format
 

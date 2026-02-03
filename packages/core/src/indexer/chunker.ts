@@ -1,5 +1,5 @@
 import { CodeChunk } from './types.js';
-import { detectLanguage } from './scanner.js';
+import { detectFileType } from './scanner.js';
 import { extractSymbols } from './symbol-extractor.js';
 import { shouldUseAST, chunkByAST } from './ast/chunker.js';
 import { chunkLiquidFile } from './liquid-chunker.js';
@@ -70,27 +70,27 @@ function chunkByLines(
 ): CodeChunk[] {
   const lines = content.split('\n');
   const chunks: CodeChunk[] = [];
-  const language = detectLanguage(filepath);
-  
+  const fileType = detectFileType(filepath);
+
   // Handle empty files
   if (lines.length === 0 || (lines.length === 1 && lines[0].trim() === '')) {
     return chunks;
   }
-  
+
   // Chunk by lines with overlap
   for (let i = 0; i < lines.length; i += chunkSize - chunkOverlap) {
     const endLine = Math.min(i + chunkSize, lines.length);
     const chunkLines = lines.slice(i, endLine);
     const chunkContent = chunkLines.join('\n');
-    
+
     // Skip empty chunks
     if (chunkContent.trim().length === 0) {
       continue;
     }
-    
+
     // Extract symbols from the chunk
-    const symbols = extractSymbols(chunkContent, language);
-    
+    const symbols = extractSymbols(chunkContent, fileType);
+
     chunks.push({
       content: chunkContent,
       metadata: {
@@ -98,7 +98,7 @@ function chunkByLines(
         startLine: i + 1,
         endLine: endLine,
         type: 'block', // MVP: all chunks are 'block' type
-        language,
+        language: fileType,
         symbols,
         ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
         ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),

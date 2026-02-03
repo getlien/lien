@@ -144,6 +144,7 @@ graph TB
 - **File Scanner**: Scans codebase respecting .gitignore and framework boundaries
 - **Code Chunker**: Splits files using AST-based semantic chunking or line-based fallback
 - **AST Parser**: Parses code into Abstract Syntax Trees using Tree-sitter
+- **Language Registry**: Central registry of per-language definitions (grammar, traverser, extractor, complexity data)
 - **Language Traversers**: Language-specific logic for traversing AST nodes (Strategy Pattern)
 - **Symbol Extractor**: Extracts functions, classes, and interfaces from code
 - **Test Association Manager**: Links test files to source files via convention and import analysis
@@ -246,6 +247,12 @@ Non-essential features (git tracking, file watching) are optional and can be dis
 - **Benefit**: Adding new languages (Python, Go, Rust) now takes 2-3 hours instead of 2 days
 - **Details**: See [ADR-002](decisions/0002-strategy-pattern-ast-traversal.md)
 
+### Per-Language Definition Pattern
+- **Consolidated**: Scattered language data (12-16 files) into single per-language definition files
+- **Result**: Each language is one file in `languages/`. Existing modules consume from a central registry.
+- **Benefit**: Adding a new AST language requires 4 files instead of 12-16
+- **Details**: See [ADR-005](decisions/0005-per-language-definition-pattern.md)
+
 ### VectorDB Module Split
 - **Split**: Monolithic 1,119-line `lancedb.ts` into focused modules
 - **Result**: `query.ts` (571L), `batch-insert.ts` (161L), `maintenance.ts` (89L), `lancedb.ts` (267L orchestrator)
@@ -265,4 +272,5 @@ All major architectural decisions are documented in [docs/architecture/decisions
 - [ADR-002: Strategy Pattern for AST Traversal](decisions/0002-strategy-pattern-ast-traversal.md)
 - [ADR-003: AST-Based Semantic Chunking](decisions/0003-ast-based-chunking.md)
 - [ADR-004: Test Association Detection](decisions/0004-test-association-detection.md)
+- [ADR-005: Per-Language Definition Pattern](decisions/0005-per-language-definition-pattern.md)
 
