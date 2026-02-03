@@ -90,5 +90,13 @@ describe('Language Registry', () => {
       expect(a).not.toBe(b);
       expect(a).toEqual(b);
     });
+
+    it('should have no duplicate IDs or extensions', () => {
+      const all = getAllLanguages();
+      const ids = all.map(d => d.id);
+      const extensions = all.flatMap(d => d.extensions);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(new Set(extensions).size).toBe(extensions.length);
+    });
   });
 });

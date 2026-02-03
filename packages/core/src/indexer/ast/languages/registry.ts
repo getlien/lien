@@ -26,16 +26,19 @@ export type SupportedLanguage = 'typescript' | 'javascript' | 'php' | 'python';
 /**
  * Registry keyed by language id.
  */
-const languageRegistry = new Map<string, LanguageDefinition>(
-  definitions.map(def => [def.id, def])
-);
-
-/**
- * Extension-to-language lookup table built from definitions.
- */
+const languageRegistry = new Map<string, LanguageDefinition>();
 const extensionMap = new Map<string, SupportedLanguage>();
+
 for (const def of definitions) {
+  if (languageRegistry.has(def.id)) {
+    throw new Error(`Duplicate language ID in registry: ${def.id}`);
+  }
+  languageRegistry.set(def.id, def);
+
   for (const ext of def.extensions) {
+    if (extensionMap.has(ext)) {
+      throw new Error(`Duplicate extension "${ext}" registered by "${def.id}" (already claimed by "${extensionMap.get(ext)}")`);
+    }
     extensionMap.set(ext, def.id);
   }
 }
