@@ -70,10 +70,11 @@ function getLogicalOperator(node: Parser.SyntaxNode): string | null {
 function getChildNestingLevel(
   parent: Parser.SyntaxNode,
   child: Parser.SyntaxNode,
-  currentLevel: number
+  currentLevel: number,
+  nonNestingTypes: Set<string>
 ): number {
   const isCondition = parent.childForFieldName('condition') === child;
-  const isElseClause = getNonNestingTypes().has(child.type);
+  const isElseClause = nonNestingTypes.has(child.type);
   return (!isCondition && !isElseClause) ? currentLevel + 1 : currentLevel;
 }
 
@@ -102,11 +103,12 @@ function traverseLogicalChildren(
 function traverseNestingChildren(
   n: Parser.SyntaxNode,
   level: number,
+  nonNestingTypes: Set<string>,
   ctx: TraversalContext
 ): void {
   for (let i = 0; i < n.namedChildCount; i++) {
     const child = n.namedChild(i);
-    if (child) ctx.traverse(child, getChildNestingLevel(n, child, level), null);
+    if (child) ctx.traverse(child, getChildNestingLevel(n, child, level, nonNestingTypes), null);
   }
 }
 
@@ -153,7 +155,7 @@ export function calculateCognitiveComplexity(node: Parser.SyntaxNode): number {
 
     if (nestingTypes.has(n.type)) {
       complexity += 1 + nestingLevel;
-      traverseNestingChildren(n, nestingLevel, ctx);
+      traverseNestingChildren(n, nestingLevel, nonNestingTypes, ctx);
       return;
     }
 
