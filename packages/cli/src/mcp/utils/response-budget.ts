@@ -49,16 +49,20 @@ export function applyResponseBudget(
   }
 
   // Phase 2: Drop items from the end of arrays
+  let currentSize = measureSize(cloned);
   for (const arr of arrays) {
-    while (arr.length > 1 && measureSize(cloned) > maxChars) {
+    while (arr.length > 1 && currentSize > maxChars) {
       arr.pop();
+      currentSize = measureSize(cloned);
     }
   }
-  if (measureSize(cloned) <= maxChars) {
+  if (currentSize <= maxChars) {
     return buildResult(cloned, originalChars, 2);
   }
 
   // Phase 3: Truncate content to 3 lines (signature only)
+  // Note: if non-content fields (e.g. metadata) are very large, the result
+  // may still exceed maxChars — this is acceptable as a best-effort cap.
   for (const arr of arrays) {
     for (const item of arr) {
       item.content = truncateContent(item.content, 3);
@@ -97,9 +101,12 @@ function walk(
   if (Array.isArray(node)) {
     if (
       node.length > 0 &&
-      typeof node[0] === 'object' &&
-      node[0] !== null &&
-      typeof (node[0] as Record<string, unknown>).content === 'string'
+      node.every(
+        (elem) =>
+          typeof elem === 'object' &&
+          elem !== null &&
+          typeof (elem as Record<string, unknown>).content === 'string',
+      )
     ) {
       found.push(node as Array<{ content: string }>);
     }
