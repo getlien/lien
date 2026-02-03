@@ -10,4 +10,6 @@ export default defineConfig({
   // Bundle @liendev/review into dist so the action is self-contained
   // (GitHub Actions runs dist/index.js directly without npm install)
   noExternal: ['@liendev/review'],
+  // Native modules resolved at runtime via @liendev/core
+  external: ['@liendev/core', '@lancedb/lancedb', 'tree-sitter', '@xenova/transformers'],
 });
