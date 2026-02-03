@@ -33,6 +33,7 @@ export interface ToolResultMetadata {
   callSites?: Array<{ symbol: string; line: number }>;
   symbols?: { functions: string[]; classes: string[]; interfaces: string[] };
   repoId?: string;
+  enclosingSymbol?: string;
 }
 
 /**
@@ -151,6 +152,13 @@ function pickMetadata(
     if (cleaned !== null) {
       out[key] = cleaned;
     }
+  }
+
+  // Derive enclosingSymbol from parentClass + symbolName
+  if (metadata.symbolName) {
+    out['enclosingSymbol'] = metadata.parentClass
+      ? `${metadata.parentClass}.${metadata.symbolName}`
+      : metadata.symbolName;
   }
 
   return result;

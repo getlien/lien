@@ -169,6 +169,36 @@ describe('shapeResultMetadata', () => {
     const shaped = shapeResultMetadata(result, 'get_files_context');
     expect(shaped.metadata.symbols).toEqual({ functions: ['foo'], classes: [], interfaces: [] });
   });
+
+  it('derives enclosingSymbol as parentClass.symbolName for methods', () => {
+    const result = createFullResult();
+    const shaped = shapeResultMetadata(result, 'semantic_search');
+    expect(shaped.metadata.enclosingSymbol).toBe('ExampleClass.example');
+  });
+
+  it('derives enclosingSymbol as symbolName for standalone functions', () => {
+    const result = createFullResult();
+    delete (result.metadata as any).parentClass;
+    const shaped = shapeResultMetadata(result, 'semantic_search');
+    expect(shaped.metadata.enclosingSymbol).toBe('example');
+  });
+
+  it('omits enclosingSymbol for block chunks without symbolName', () => {
+    const sparse: SearchResult = {
+      content: 'const x = 1;',
+      metadata: {
+        file: 'src/x.ts',
+        startLine: 1,
+        endLine: 1,
+        type: 'block',
+        language: 'typescript',
+      },
+      score: 0.8,
+      relevance: 'loosely_related',
+    };
+    const shaped = shapeResultMetadata(sparse, 'semantic_search');
+    expect(Object.keys(shaped.metadata)).not.toContain('enclosingSymbol');
+  });
 });
 
 describe('shapeResults', () => {
