@@ -235,13 +235,25 @@ src/indexer/ast/
 ├── chunker.ts                    # Language-agnostic chunking logic
 ├── parser.ts                     # Tree-sitter parser wrapper
 ├── symbols.ts                    # Symbol extraction
-└── traversers/
-    ├── index.ts                  # Registry (maps language → traverser)
-    ├── types.ts                  # LanguageTraverser interface
-    ├── typescript.ts             # TypeScript/JavaScript implementation
-    ├── python.ts                 # Python implementation (future)
-    ├── go.ts                     # Go implementation (future)
-    └── rust.ts                   # Rust implementation (future)
+├── languages/                    # Per-language definitions (see ADR-005)
+│   ├── types.ts                  # LanguageDefinition interface
+│   ├── registry.ts               # Central registry
+│   ├── typescript.ts             # TypeScript definition
+│   ├── javascript.ts             # JavaScript definition
+│   ├── php.ts                    # PHP definition
+│   └── python.ts                 # Python definition
+├── traversers/
+│   ├── index.ts                  # Delegates to language registry
+│   ├── types.ts                  # LanguageTraverser interface
+│   ├── typescript.ts             # TypeScript/JavaScript implementation
+│   ├── php.ts                    # PHP implementation
+│   └── python.ts                 # Python implementation
+└── extractors/
+    ├── index.ts                  # Delegates to language registry
+    ├── types.ts                  # LanguageExportExtractor interface
+    ├── javascript.ts             # TypeScript/JavaScript implementation
+    ├── php.ts                    # PHP implementation
+    └── python.ts                 # Python implementation
 ```
 
 ### Key Design Decisions
@@ -301,19 +313,18 @@ No migration needed - 100% backward compatible. TypeScript and JavaScript use th
 * [PR: Language-Agnostic AST Traversal](https://github.com/getlien/lien)
 * Internal: `.wip/adding-python-ast-guide.md` - Step-by-step guide for next language
 
-## Future Languages
+## Supported Languages
 
-With this architecture in place, the following languages are ready to be added:
+| Language | Tree-sitter Package | Status |
+|----------|-------------------|--------|
+| TypeScript | tree-sitter-typescript | Supported |
+| JavaScript | tree-sitter-javascript | Supported |
+| PHP | tree-sitter-php | Supported |
+| Python | tree-sitter-python | Supported |
 
-| Language | Tree-sitter Package | Target Node Types | Est. Time |
-|----------|-------------------|-------------------|-----------|
-| Python | tree-sitter-python | function_definition, class_definition | 2-3 hours |
-| Go | tree-sitter-go | function_declaration, method_declaration | 2-3 hours |
-| Rust | tree-sitter-rust | function_item, impl_item | 2-3 hours |
-| PHP | tree-sitter-php | function_definition, class_declaration | 2-3 hours |
-| Java | tree-sitter-java | method_declaration, class_declaration | 2-3 hours |
+## Evolution: Per-Language Definitions
 
-Each language follows the same pattern, making Lien's goal of supporting 10+ languages **achievable** rather than aspirational.
+This ADR's strategy pattern was further refined by [ADR-005](0005-per-language-definition-pattern.md), which consolidated all language-specific data (grammar, traverser, extractor, complexity constants, symbol types) into single per-language definition files. The traverser classes established here remain as the AST traversal logic, but are now referenced from a central `LanguageDefinition` rather than a standalone registry.
 
 ## Notes
 

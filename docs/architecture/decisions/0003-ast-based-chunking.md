@@ -210,22 +210,16 @@ accepting the increased implementation complexity and dependency overhead.
 
 ## Implementation Details
 
-### Supported Languages (v0.13.0)
+### Supported Languages
 
 | Language | Extensions | Tree-sitter Grammar | Status |
 |----------|-----------|---------------------|--------|
-| TypeScript | .ts, .tsx | tree-sitter-typescript | ✅ Supported |
-| JavaScript | .js, .jsx, .mjs, .cjs | tree-sitter-javascript | ✅ Supported |
+| TypeScript | .ts, .tsx | tree-sitter-typescript | Supported |
+| JavaScript | .js, .jsx, .mjs, .cjs | tree-sitter-javascript | Supported |
+| PHP | .php | tree-sitter-php | Supported |
+| Python | .py | tree-sitter-python | Supported |
 
-### Future Languages (Roadmap)
-
-| Language | Extensions | Tree-sitter Grammar | Priority |
-|----------|-----------|---------------------|----------|
-| Python | .py | tree-sitter-python | High |
-| Go | .go | tree-sitter-go | High |
-| Rust | .rs | tree-sitter-rust | Medium |
-| PHP | .php | tree-sitter-php | Medium |
-| Java | .java | tree-sitter-java | Low |
+Language definitions are managed via the per-language definition pattern. See [ADR-005](decisions/0005-per-language-definition-pattern.md).
 
 ### Configuration
 

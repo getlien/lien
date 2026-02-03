@@ -20,6 +20,15 @@ packages/cli/src/
 ├── config/      # Config management & migration
 ├── frameworks/  # Framework detection (Node.js, Laravel)
 └── git/         # Git integration
+
+packages/core/src/indexer/ast/
+├── languages/   # Per-language definitions (single source of truth)
+├── traversers/  # Language-specific AST traversal classes
+├── extractors/  # Language-specific export extraction classes
+├── complexity/  # Complexity metrics (cyclomatic, cognitive, Halstead)
+├── parser.ts    # Tree-sitter parser wrapper
+├── chunker.ts   # AST-based semantic chunking
+└── symbols.ts   # Symbol extraction
 ```
 
 ---
@@ -73,6 +82,28 @@ These live in project root and are tracked in git:
 - `docs/` - Architecture and design documentation
 
 **Rule:** If it's temporary or experimental -> `.wip/`. If it's permanent -> root or `docs/`.
+
+---
+
+## Adding a New AST Language
+
+Each AST-supported language has a single definition file in `packages/core/src/indexer/ast/languages/` containing all language-specific data (grammar, traverser, extractor, complexity constants, symbol types).
+
+### Steps to add a new language (e.g., Rust):
+
+1. **Create definition**: `languages/rust.ts` with the full `LanguageDefinition`
+2. **Register it**: Import + add to `definitions` array in `languages/registry.ts`
+3. **Create traverser**: `traversers/rust.ts` (the traverser class with AST traversal logic)
+4. **Create extractor**: `extractors/rust.ts` (the export extractor class)
+
+**4 files total.** All language-specific *data* (node types, operator sets, extensions) lives in the definition file. The traverser/extractor *classes* stay in their own folders since they contain logic, not just data.
+
+### Key files:
+- `languages/types.ts` — `LanguageDefinition` interface
+- `languages/registry.ts` — Central registry (`getLanguage()`, `detectLanguage()`, `getAllLanguages()`)
+- `languages/{lang}.ts` — One per language (typescript, javascript, php, python)
+
+Complexity files, parser, symbol extraction, and traverser/extractor registries all consume from the central registry rather than maintaining their own language-specific constants.
 
 ---
 
