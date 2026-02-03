@@ -101,7 +101,7 @@ Each AST-supported language has a single definition file in `packages/core/src/i
 ### Key files:
 - `languages/types.ts` — `LanguageDefinition` interface
 - `languages/registry.ts` — Central registry (`getLanguage()`, `detectLanguage()`, `getAllLanguages()`)
-- `languages/{lang}.ts` — One per language (typescript, javascript, php, python)
+- `languages/{lang}.ts` — One per language (typescript, javascript, php, python, rust)
 
 Complexity files, parser, symbol extraction, and traverser/extractor registries all consume from the central registry rather than maintaining their own language-specific constants.
 
