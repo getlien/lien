@@ -219,7 +219,7 @@ accepting the increased implementation complexity and dependency overhead.
 | PHP | .php | tree-sitter-php | Supported |
 | Python | .py | tree-sitter-python | Supported |
 
-Language definitions are managed via the per-language definition pattern. See [ADR-005](decisions/0005-per-language-definition-pattern.md).
+Language definitions are managed via the per-language definition pattern. See [ADR-005](0005-per-language-definition-pattern.md).
 
 ### Configuration
 

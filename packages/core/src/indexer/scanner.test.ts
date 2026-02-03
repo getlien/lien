@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { detectFileType } from './scanner.js';
+import { detectFileType, detectLanguage } from './scanner.js';
 
 describe('detectFileType', () => {
+  it('should export detectLanguage as a backwards-compat alias', () => {
+    expect(detectLanguage).toBe(detectFileType);
+  });
+
   it('should detect TypeScript files', () => {
     expect(detectFileType('test.ts')).toBe('typescript');
     expect(detectFileType('Component.tsx')).toBe('typescript');
