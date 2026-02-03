@@ -1,6 +1,6 @@
 import type { SupportedLanguage } from '../types.js';
 import type { LanguageExportExtractor } from './types.js';
-import { getLanguage } from '../languages/registry.js';
+import { getLanguage, languageExists } from '../languages/registry.js';
 
 export type { LanguageExportExtractor } from './types.js';
 
@@ -21,11 +21,6 @@ export function getExtractor(language: SupportedLanguage): LanguageExportExtract
  * @param language - Programming language
  * @returns True if extractor exists
  */
-export function hasExtractor(language: SupportedLanguage): boolean {
-  try {
-    getLanguage(language);
-    return true;
-  } catch {
-    return false;
-  }
+export function hasExtractor(language: string): boolean {
+  return languageExists(language);
 }

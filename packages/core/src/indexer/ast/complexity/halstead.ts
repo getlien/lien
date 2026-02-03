@@ -89,16 +89,10 @@ const OPERAND_NODE_TYPES = new Set([
 
 /**
  * Resolve operator sets for a language once, to avoid repeated lookups.
- * Falls back to typescript if language not found.
  */
 function resolveOperators(language: SupportedLanguage): ResolvedOperators {
-  try {
-    const def = getLanguage(language);
-    return { symbols: def.complexity.operatorSymbols, keywords: def.complexity.operatorKeywords };
-  } catch {
-    const def = getLanguage('typescript');
-    return { symbols: def.complexity.operatorSymbols, keywords: def.complexity.operatorKeywords };
-  }
+  const def = getLanguage(language);
+  return { symbols: def.complexity.operatorSymbols, keywords: def.complexity.operatorKeywords };
 }
 
 /**

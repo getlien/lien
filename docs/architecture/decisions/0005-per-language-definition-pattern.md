@@ -67,7 +67,7 @@ packages/core/src/indexer/ast/languages/
 
 ```typescript
 interface LanguageDefinition {
-  id: string;
+  id: SupportedLanguage;
   extensions: string[];
   grammar: TreeSitterLanguage;
   traverser: LanguageTraverser;

@@ -63,8 +63,15 @@ export function detectLanguage(filePath: string): SupportedLanguage | null {
 }
 
 /**
+ * Check if a language is registered (non-throwing).
+ */
+export function languageExists(language: string): boolean {
+  return languageRegistry.has(language);
+}
+
+/**
  * Get all registered language definitions.
  */
 export function getAllLanguages(): readonly LanguageDefinition[] {
-  return definitions;
+  return definitions.slice();
 }
