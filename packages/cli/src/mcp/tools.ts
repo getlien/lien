@@ -28,7 +28,10 @@ IMPORTANT: Phrase queries as full questions starting with "How", "Where", "What"
 
 Use natural language describing what the code DOES, not function names. For exact string matching, use grep instead.
 
-Results include a relevance category (highly_relevant, relevant, loosely_related, not_relevant) for each match.`
+Returns:
+- results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature? } }
+- relevance: "highly_relevant" | "relevant" | "loosely_related" | "not_relevant"
+- groupedByRepo?: Record<repoId, results[]> (when crossRepo=true)`
   ),
   toMCPToolSchema(
     FindSimilarSchema,
@@ -44,7 +47,12 @@ Optional filters:
 - language: Filter by programming language (e.g., "typescript", "python")
 - pathHint: Filter by file path substring (e.g., "src/api", "components")
 
-Low-relevance results (not_relevant) are automatically pruned.`
+Low-relevance results (not_relevant) are automatically pruned.
+
+Returns:
+- results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature? } }
+- relevance: "highly_relevant" | "relevant" | "loosely_related" | "not_relevant"
+- filtersApplied?: { language?, pathHint?, prunedLowRelevance: number }`
   ),
   toMCPToolSchema(
     GetFilesContextSchema,
@@ -105,7 +113,13 @@ Filter by symbol type (function, method, class, interface) to narrow results.
 
 10x faster than semantic_search for structural/architectural queries. Use semantic_search instead when searching by what code DOES.
 
-Results are paginated (default: 50, max: 200). Use \`offset\` to page through large result sets. Response includes \`hasMore\` and \`nextOffset\` when more results are available.`
+Results are paginated (default: 50, max: 200). Use \`offset\` to page through large result sets.
+
+Returns:
+- results[]: { content, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature? } }
+- method: "symbols" | "content" (query method used)
+- hasMore: boolean (more results available)
+- nextOffset?: number (offset for next page, when hasMore=true)`
   ),
   toMCPToolSchema(
     GetDependentsSchema,
@@ -115,11 +129,15 @@ Results are paginated (default: 50, max: 200). Use \`offset\` to page through la
 - "Is this safe to delete?"
 - "What imports this module?"
 
-Returns:
-- List of files that import the target
-- Risk level (low/medium/high/critical) based on dependent count and complexity
+Example: get_dependents({ filepath: "src/utils/validate.ts" })
 
-Example: get_dependents({ filepath: "src/utils/validate.ts" })`
+Returns:
+- dependentCount / productionDependentCount / testDependentCount
+- riskLevel: "low" | "medium" | "high" | "critical"
+- dependents[]: { filepath, isTestFile, usages[]? }
+- complexityMetrics: { avgComplexity, maxComplexity, highComplexityDependents[] }
+- totalUsageCount?: number (when symbol parameter provided)
+- groupedByRepo?: Record<repoId, dependents[]> (when crossRepo=true)`
   ),
   toMCPToolSchema(
     GetComplexitySchema,
@@ -142,8 +160,11 @@ Examples:
   get_complexity({ files: ["src/auth.ts", "src/api/user.ts"] })
   get_complexity({ threshold: 15 })
 
-Returns violations with metricType ('cyclomatic', 'cognitive', 'halstead_effort',
-or 'halstead_bugs'), risk levels, and dependent counts.
-Human-readable output: "23 (needs ~23 tests)", "🧠 45", "~2h 30m", "2.27 bugs".`
+Returns:
+- summary: { filesAnalyzed, avgComplexity, maxComplexity, violationCount, bySeverity: { error, warning } }
+- violations[]: { filepath, symbolName, symbolType, complexity, metricType, threshold, severity, riskLevel, dependentCount }
+- metricType: "cyclomatic" | "cognitive" | "halstead_effort" | "halstead_bugs"
+- severity: "error" | "warning"
+- groupedByRepo?: Record<repoId, violations[]> (when crossRepo=true)`
   ),
 ];
