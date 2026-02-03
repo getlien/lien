@@ -284,7 +284,8 @@ describe('handleSemanticSearch', () => {
 
       // Should log a warning
       expect(mockLog).toHaveBeenCalledWith(
-        'Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.'
+        'Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.',
+        'warning'
       );
 
       // Should use regular search, not searchCrossRepo
@@ -409,7 +410,8 @@ describe('handleSemanticSearch', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(0);
-      expect(parsed.note).toBe('No relevant matches found.');
+      expect(parsed.note).toContain('No relevant matches found.');
+      expect(parsed.note).toContain('0 results');
       expect(parsed.indexInfo).toBeDefined();
     });
 

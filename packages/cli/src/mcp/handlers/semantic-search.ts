@@ -47,7 +47,7 @@ async function executeSearch(
   }
 
   if (crossRepo) {
-    log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.');
+    log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.', 'warning');
   }
   const results = await vectorDB.search(queryEmbedding, limit, query);
   log(`Found ${results.length} results`);
@@ -108,7 +108,7 @@ export async function handleSemanticSearch(
 
       const shaped = shapeResults(results, 'semantic_search');
 
-      if (shaped.length === 0 && rawResults.length === 0) {
+      if (shaped.length === 0) {
         notes.push('0 results. Try rephrasing as a full question (e.g. "How does X work?"), or use grep for exact string matches. If the codebase was recently updated, run "lien reindex".');
       }
 
