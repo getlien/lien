@@ -120,8 +120,10 @@ export async function handleListFunctions(
       log(`Found ${paginatedResults.length} matches using ${queryResult.method} method`);
 
       const notes: string[] = [];
-      if (paginatedResults.length === 0) {
+      if (queryResult.results.length === 0) {
         notes.push('0 results. Try a broader regex pattern (e.g. ".*") or omit the symbolType filter. Use semantic_search for behavior-based queries.');
+      } else if (paginatedResults.length === 0 && offset > 0) {
+        notes.push('No results for this page. The offset is beyond the available results; try reducing or resetting the offset to 0.');
       }
       if (queryResult.method === 'content') {
         notes.push('Using content search. Run "lien reindex" to enable faster symbol-based queries.');
