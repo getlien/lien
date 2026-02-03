@@ -175,7 +175,11 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
   });
 }
 
-export function detectLanguage(filepath: string): string {
+/**
+ * Detect broad file type from extension (includes non-AST languages like Go, Rust, Markdown, etc.).
+ * For AST-supported language detection, use the AST parser's detectLanguage instead.
+ */
+export function detectFileType(filepath: string): string {
   const ext = path.extname(filepath).toLowerCase();
   
   const languageMap: Record<string, string> = {

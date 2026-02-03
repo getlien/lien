@@ -34,7 +34,7 @@ export type { IndexingOptions, IndexingProgress, IndexingResult } from './indexe
 export { ManifestManager } from './indexer/manifest.js';
 export type { IndexManifest, FileEntry } from './indexer/manifest.js';
 export { chunkFile } from './indexer/chunker.js';
-export { scanCodebase, scanCodebaseWithFrameworks, detectLanguage } from './indexer/scanner.js';
+export { scanCodebase, scanCodebaseWithFrameworks, detectFileType, detectFileType as detectLanguage } from './indexer/scanner.js';
 export { indexSingleFile, indexMultipleFiles, normalizeToRelativePath } from './indexer/incremental.js';
 export { extractSymbols } from './indexer/symbol-extractor.js';
 export { computeContentHash, isHashAlgorithmCompatible } from './indexer/content-hash.js';

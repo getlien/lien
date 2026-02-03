@@ -1,5 +1,5 @@
 import { CodeChunk } from './types.js';
-import { detectLanguage } from './scanner.js';
+import { detectFileType } from './scanner.js';
 import { extractSymbols } from './symbol-extractor.js';
 import { shouldUseAST, chunkByAST } from './ast/chunker.js';
 import { chunkLiquidFile } from './liquid-chunker.js';
@@ -70,7 +70,7 @@ function chunkByLines(
 ): CodeChunk[] {
   const lines = content.split('\n');
   const chunks: CodeChunk[] = [];
-  const language = detectLanguage(filepath);
+  const language = detectFileType(filepath);
   
   // Handle empty files
   if (lines.length === 0 || (lines.length === 1 && lines[0].trim() === '')) {

@@ -53,15 +53,8 @@ export interface ASTChunk extends CodeChunk {
 }
 
 /**
- * Language-specific parser configuration
+ * Supported languages for AST parsing.
+ * Canonical definition lives in languages/registry.ts; re-exported here for convenience.
  */
-export interface LanguageConfig {
-  extensions: string[];
-  parserName: string;
-}
-
-/**
- * Supported languages for AST parsing
- */
-export type SupportedLanguage = 'typescript' | 'javascript' | 'php' | 'python';
+export type { SupportedLanguage } from './languages/registry.js';
 

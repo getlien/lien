@@ -2,6 +2,7 @@ import type Parser from 'tree-sitter';
 import type { SymbolInfo, SupportedLanguage } from './types.js';
 import { calculateComplexity } from './complexity/index.js';
 import { getExtractor } from './extractors/index.js';
+import { getAllLanguages } from './languages/registry.js';
 
 /**
  * Type for symbol extractor functions
@@ -782,16 +783,22 @@ export function extractCallSites(node: Parser.SyntaxNode): Array<{ symbol: strin
 }
 
 /**
- * Call expression node types by language.
+ * Call expression node types, built from all language definitions.
+ * Lazily initialized on first use.
  */
-const CALL_EXPRESSION_TYPES = new Set([
-  'call_expression',           // TypeScript/JavaScript
-  'new_expression',            // TypeScript/JavaScript: new Foo()
-  'call',                      // Python
-  'function_call_expression',  // PHP: helper_function()
-  'member_call_expression',    // PHP: $this->method()
-  'scoped_call_expression',    // PHP: User::find()
-]);
+let callExpressionTypesCache: Set<string> | null = null;
+
+function getCallExpressionTypes(): Set<string> {
+  if (!callExpressionTypesCache) {
+    callExpressionTypesCache = new Set<string>();
+    for (const lang of getAllLanguages()) {
+      for (const type of lang.symbols.callExpressionTypes) {
+        callExpressionTypesCache.add(type);
+      }
+    }
+  }
+  return callExpressionTypesCache;
+}
 
 /**
  * Recursively traverse AST to find call expressions.
@@ -801,7 +808,7 @@ function traverseForCallSites(
   callSites: Array<{ symbol: string; line: number }>,
   seen: Set<string>
 ): void {
-  if (CALL_EXPRESSION_TYPES.has(node.type)) {
+  if (getCallExpressionTypes().has(node.type)) {
     const callSite = extractCallSiteFromExpression(node);
     if (callSite && !seen.has(callSite.key)) {
       seen.add(callSite.key);
