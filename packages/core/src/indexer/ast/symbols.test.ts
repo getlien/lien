@@ -945,6 +945,135 @@ class MyClass:
     });
   });
 
+  describe('extractExports - Rust', () => {
+    it('should extract pub function exports', () => {
+      const content = `
+pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn private_helper() {}
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const exports = extractExports(parseResult.tree!.rootNode, 'rust');
+
+      expect(exports).toContain('add');
+      expect(exports).not.toContain('private_helper');
+      expect(exports).toHaveLength(1);
+    });
+
+    it('should extract pub struct, enum, and trait exports', () => {
+      const content = `
+pub struct Config {
+    pub name: String,
+}
+
+pub enum Status {
+    Active,
+    Inactive,
+}
+
+pub trait Processor {
+    fn process(&self);
+}
+
+struct PrivateStruct {}
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const exports = extractExports(parseResult.tree!.rootNode, 'rust');
+
+      expect(exports).toContain('Config');
+      expect(exports).toContain('Status');
+      expect(exports).toContain('Processor');
+      expect(exports).not.toContain('PrivateStruct');
+      expect(exports).toHaveLength(3);
+    });
+
+    it('should extract pub const, static, type, and mod exports', () => {
+      const content = `
+pub const MAX_SIZE: usize = 100;
+pub static GLOBAL: &str = "hello";
+pub type Result<T> = std::result::Result<T, Error>;
+pub mod utils;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const exports = extractExports(parseResult.tree!.rootNode, 'rust');
+
+      expect(exports).toContain('MAX_SIZE');
+      expect(exports).toContain('GLOBAL');
+      expect(exports).toContain('Result');
+      expect(exports).toContain('utils');
+      expect(exports).toHaveLength(4);
+    });
+
+    it('should extract pub use re-exports', () => {
+      const content = `
+pub use std::io::Error;
+pub use crate::config::Settings;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const exports = extractExports(parseResult.tree!.rootNode, 'rust');
+
+      expect(exports).toContain('Error');
+      expect(exports).toContain('Settings');
+      expect(exports).toHaveLength(2);
+    });
+
+    it('should not export private items', () => {
+      const content = `
+fn private_fn() {}
+struct PrivateStruct {}
+enum PrivateEnum {}
+const PRIVATE_CONST: i32 = 0;
+use std::io::Read;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const exports = extractExports(parseResult.tree!.rootNode, 'rust');
+
+      expect(exports).toHaveLength(0);
+    });
+
+    it('should handle mixed pub and private declarations', () => {
+      const content = `
+pub fn public_fn() {}
+fn private_fn() {}
+pub struct PublicStruct {}
+struct PrivateStruct {}
+pub trait PublicTrait {}
+use std::io::Read;
+pub use std::io::Write;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const exports = extractExports(parseResult.tree!.rootNode, 'rust');
+
+      expect(exports).toContain('public_fn');
+      expect(exports).toContain('PublicStruct');
+      expect(exports).toContain('PublicTrait');
+      expect(exports).toContain('Write');
+      expect(exports).not.toContain('private_fn');
+      expect(exports).not.toContain('PrivateStruct');
+      expect(exports).not.toContain('Read');
+      expect(exports).toHaveLength(4);
+    });
+
+    it('should return empty array for empty Rust file', () => {
+      const content = `
+// Just a comment
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const exports = extractExports(parseResult.tree!.rootNode, 'rust');
+
+      expect(exports).toHaveLength(0);
+    });
+  });
+
   describe('extractExports - Regression tests', () => {
     it('should still handle JavaScript/TypeScript exports correctly', () => {
       const content = `
