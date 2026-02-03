@@ -80,9 +80,10 @@ Lien is built with modern, performant tools:
 - TypeScript, JavaScript (JSX/TSX)
 - Python
 - PHP
+- Rust
 
 **Semantic Search** (chunking and embeddings):
-- All of the above, plus Vue, Liquid, Go, Rust, Java, C/C++, Ruby, Swift, Kotlin, C#, Scala, Markdown
+- All of the above, plus Vue, Liquid, Go, Java, C/C++, Ruby, Swift, Kotlin, C#, Scala, Markdown
 
 ## Next Steps
 
