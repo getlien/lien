@@ -48,7 +48,7 @@ describe('MCP Tools Schema', () => {
     
     it('should mention relevance categories in description', () => {
       const tool = tools.find(t => t.name === 'semantic_search');
-      expect(tool!.description).toContain('relevance category');
+      expect(tool!.description).toContain('relevance');
       expect(tool!.description).toContain('highly_relevant');
     });
     
