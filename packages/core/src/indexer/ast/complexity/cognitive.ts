@@ -80,8 +80,8 @@ function getChildNestingLevel(
 /**
  * Get complexity increment for nested lambda (only adds if already nested)
  */
-function getNestedLambdaIncrement(nodeType: string, nestingLevel: number): number {
-  return (getLambdaTypes().has(nodeType) && nestingLevel > 0) ? 1 : 0;
+function getNestedLambdaIncrement(nodeType: string, nestingLevel: number, lambdaTypes: Set<string>): number {
+  return (lambdaTypes.has(nodeType) && nestingLevel > 0) ? 1 : 0;
 }
 
 /** Traverse logical operator children, passing the operator type */
@@ -140,6 +140,7 @@ export function calculateCognitiveComplexity(node: Parser.SyntaxNode): number {
   const ctx: TraversalContext = { traverse };
   const nestingTypes = getNestingTypes();
   const nonNestingTypes = getNonNestingTypes();
+  const lambdaTypes = getLambdaTypes();
 
   function traverse(n: Parser.SyntaxNode, nestingLevel: number, lastLogicalOp: string | null): void {
     const logicalOp = getLogicalOperator(n);
@@ -162,7 +163,7 @@ export function calculateCognitiveComplexity(node: Parser.SyntaxNode): number {
       return;
     }
 
-    complexity += getNestedLambdaIncrement(n.type, nestingLevel);
+    complexity += getNestedLambdaIncrement(n.type, nestingLevel, lambdaTypes);
     traverseAllChildren(n, nestingLevel, ctx);
   }
 

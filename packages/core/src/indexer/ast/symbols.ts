@@ -777,8 +777,9 @@ export function extractExports(rootNode: Parser.SyntaxNode, language?: Supported
 export function extractCallSites(node: Parser.SyntaxNode): Array<{ symbol: string; line: number }> {
   const callSites: Array<{ symbol: string; line: number }> = [];
   const seen = new Set<string>();
-  
-  traverseForCallSites(node, callSites, seen);
+  const callExprTypes = getCallExpressionTypes();
+
+  traverseForCallSites(node, callSites, seen, callExprTypes);
   return callSites;
 }
 
@@ -804,22 +805,23 @@ function getCallExpressionTypes(): Set<string> {
  * Recursively traverse AST to find call expressions.
  */
 function traverseForCallSites(
-  node: Parser.SyntaxNode, 
+  node: Parser.SyntaxNode,
   callSites: Array<{ symbol: string; line: number }>,
-  seen: Set<string>
+  seen: Set<string>,
+  callExprTypes: Set<string>
 ): void {
-  if (getCallExpressionTypes().has(node.type)) {
+  if (callExprTypes.has(node.type)) {
     const callSite = extractCallSiteFromExpression(node);
     if (callSite && !seen.has(callSite.key)) {
       seen.add(callSite.key);
       callSites.push({ symbol: callSite.symbol, line: callSite.line });
     }
   }
-  
+
   // Recurse into named children to skip punctuation and other non-semantic nodes
   for (let i = 0; i < node.namedChildCount; i++) {
     const child = node.namedChild(i);
-    if (child) traverseForCallSites(child, callSites, seen);
+    if (child) traverseForCallSites(child, callSites, seen, callExprTypes);
   }
 }
 

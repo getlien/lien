@@ -18,7 +18,8 @@ const definitions: LanguageDefinition[] = [
 
 /**
  * Supported languages for AST parsing.
- * Derived from registered definitions.
+ *
+ * NOTE: This list is manually maintained and must be kept in sync with `definitions`.
  */
 export type SupportedLanguage = 'typescript' | 'javascript' | 'php' | 'python';
 
