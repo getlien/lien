@@ -30,7 +30,7 @@ Use natural language describing what the code DOES, not function names. For exac
 
 Returns:
 - results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature? } }
-- relevance: "highly_relevant" | "relevant" | "loosely_related" | "not_relevant"
+- relevance: "highly_relevant" | "relevant" | "loosely_related" (not_relevant auto-filtered)
 - groupedByRepo?: Record<repoId, results[]> (when crossRepo=true)`
   ),
   toMCPToolSchema(
@@ -50,8 +50,8 @@ Optional filters:
 Low-relevance results (not_relevant) are automatically pruned.
 
 Returns:
-- results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature? } }
-- relevance: "highly_relevant" | "relevant" | "loosely_related" | "not_relevant"
+- results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, signature? } }
+- relevance: "highly_relevant" | "relevant" | "loosely_related" (not_relevant auto-filtered)
 - filtersApplied?: { language?, pathHint?, prunedLowRelevance: number }`
   ),
   toMCPToolSchema(
@@ -135,7 +135,7 @@ Returns:
 - dependentCount / productionDependentCount / testDependentCount
 - riskLevel: "low" | "medium" | "high" | "critical"
 - dependents[]: { filepath, isTestFile, usages[]? }
-- complexityMetrics: { avgComplexity, maxComplexity, highComplexityDependents[] }
+- complexityMetrics: { averageComplexity, maxComplexity, highComplexityDependents[] }
 - totalUsageCount?: number (when symbol parameter provided)
 - groupedByRepo?: Record<repoId, dependents[]> (when crossRepo=true)`
   ),
