@@ -1,5 +1,6 @@
 import { ZodSchema, ZodError } from 'zod';
 import { LienError, LienErrorCode } from '@liendev/core';
+import { applyResponseBudget } from './response-budget.js';
 
 /**
  * Wrap a tool handler with Zod validation and error handling.
@@ -44,8 +45,19 @@ export function wrapToolHandler<T>(
       const validated = schema.parse(args);
       
       // Execute handler with validated, typed input
-      const result = await handler(validated);
-      
+      const rawResult = await handler(validated);
+
+      // Apply response budget to prevent oversized MCP responses
+      const { result, truncation } = applyResponseBudget(rawResult);
+
+      // Append truncation note if response was truncated
+      if (truncation && typeof result === 'object' && result !== null) {
+        const obj = result as Record<string, unknown>;
+        obj.note = obj.note
+          ? `${obj.note}\n${truncation.message}`
+          : truncation.message;
+      }
+
       // Return MCP-compatible success response
       return {
         content: [{
@@ -55,48 +67,49 @@ export function wrapToolHandler<T>(
       };
       
     } catch (error) {
-      // Handle Zod validation errors
-      if (error instanceof ZodError) {
-        return {
-          isError: true,
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              error: 'Invalid parameters',
-              code: LienErrorCode.INVALID_INPUT,
-              details: error.errors.map(e => ({
-                field: e.path.join('.'),
-                message: e.message,
-              })),
-            }, null, 2),
-          }],
-        };
-      }
-      
-      // Handle known Lien errors
-      if (error instanceof LienError) {
-        return {
-          isError: true,
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify(error.toJSON(), null, 2),
-          }],
-        };
-      }
-      
-      // Handle unexpected errors
-      console.error('Unexpected error in tool handler:', error);
-      return {
-        isError: true,
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            error: error instanceof Error ? error.message : 'Unknown error',
-            code: LienErrorCode.INTERNAL_ERROR,
-          }, null, 2),
-        }],
-      };
+      return formatErrorResponse(error);
     }
+  };
+}
+
+function formatErrorResponse(error: unknown) {
+  if (error instanceof ZodError) {
+    return {
+      isError: true,
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          error: 'Invalid parameters',
+          code: LienErrorCode.INVALID_INPUT,
+          details: error.errors.map(e => ({
+            field: e.path.join('.'),
+            message: e.message,
+          })),
+        }, null, 2),
+      }],
+    };
+  }
+
+  if (error instanceof LienError) {
+    return {
+      isError: true,
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify(error.toJSON(), null, 2),
+      }],
+    };
+  }
+
+  console.error('Unexpected error in tool handler:', error);
+  return {
+    isError: true,
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({
+        error: error instanceof Error ? error.message : 'Unknown error',
+        code: LienErrorCode.INTERNAL_ERROR,
+      }, null, 2),
+    }],
   };
 }
 
