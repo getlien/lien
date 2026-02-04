@@ -461,7 +461,7 @@ export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<stri
  * For "from typing import Optional as Opt", returns "Opt" (the alias).
  * 
  * The alias is always the last identifier child when there are at least two identifiers
- * (original name + alias). If fewer identifiers exist, falls back to dotted_name or first identifier.
+ * (original name + alias). If fewer identifiers exist, falls back to first identifier then dotted_name.
  */
 function extractPythonAliasedSymbol(node: Parser.SyntaxNode): string | undefined {
   const identifierChildren = node.namedChildren.filter(c => c.type === 'identifier');
@@ -473,8 +473,8 @@ function extractPythonAliasedSymbol(node: Parser.SyntaxNode): string | undefined
     return identifierChildren[identifierChildren.length - 1].text;
   }
   
-  // Fallback: prefer dotted_name, then single identifier if present
-  return dottedName?.text ?? identifierChildren[0]?.text;
+  // Fallback: prefer identifier (alias after 'as') over dotted_name (original name)
+  return identifierChildren[0]?.text ?? dottedName?.text;
 }
 
 /**
