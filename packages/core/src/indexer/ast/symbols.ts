@@ -473,8 +473,8 @@ function extractPythonAliasedSymbol(node: Parser.SyntaxNode): string | undefined
     return identifierChildren[identifierChildren.length - 1].text;
   }
   
-  // Fallback: prefer dotted_name, then single identifier if present
-  return dottedName?.text ?? identifierChildren[0]?.text;
+  // Fallback: prefer identifier (alias after 'as') over dotted_name (original name)
+  return identifierChildren[0]?.text ?? dottedName?.text;
 }
 
 /**
