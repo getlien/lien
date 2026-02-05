@@ -89,7 +89,6 @@ export class PythonTraverser implements LanguageTraverser {
  * - Classes: class User: ...
  * - Functions: def helper(): ...
  * - Async functions: async def fetch_data(): ...
- * - Re-exports: from .auth import AuthService
  */
 export class PythonExportExtractor implements LanguageExportExtractor {
   private readonly exportableTypes = new Set([
@@ -144,23 +143,22 @@ export class PythonExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
+  private findModulePathIndex(node: Parser.SyntaxNode): number {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const type = node.namedChild(i)?.type;
+      if (type === 'relative_import' || type === 'dotted_name') {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   private extractReExportNames(
     node: Parser.SyntaxNode,
     addExport: (name: string) => void
   ): void {
-    // Find module path to know where imported symbols start.
-    // Absolute: `from utils import X` → first child is dotted_name (module path)
-    // Relative: `from .auth import X` → first child is relative_import
-    let startIndex = -1;
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const type = node.namedChild(i)?.type;
-      if (type === 'relative_import' || type === 'dotted_name') {
-        startIndex = i;
-        break;
-      }
-    }
+    const startIndex = this.findModulePathIndex(node);
 
-    // Extract symbol names after the module path
     for (let i = startIndex + 1; i < node.namedChildCount; i++) {
       const child = node.namedChild(i);
       if (!child) continue;
@@ -168,12 +166,14 @@ export class PythonExportExtractor implements LanguageExportExtractor {
       if (child.type === 'dotted_name') {
         addExport(child.text);
       } else if (child.type === 'aliased_import') {
-        // Use alias for re-exports: `from .auth import Service as Auth` → 'Auth'
         const identifiers = child.namedChildren.filter(c => c.type === 'identifier');
         const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
-        const name = identifiers.length >= 2
-          ? identifiers[identifiers.length - 1].text
-          : identifiers[0]?.text ?? dottedName?.text;
+
+        const hasAlias = identifiers.length >= 2;
+        const aliasName = hasAlias ? identifiers[identifiers.length - 1].text : identifiers[0]?.text;
+        const defaultName = dottedName?.text;
+
+        const name = aliasName ?? defaultName;
         if (name) addExport(name);
       }
     }
