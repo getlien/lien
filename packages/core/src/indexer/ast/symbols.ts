@@ -294,32 +294,78 @@ function extractReturnType(node: Parser.SyntaxNode, _content: string): string | 
 }
 
 /**
+ * Extract import paths using the language-specific extractor.
+ */
+function extractImportPaths(
+  rootNode: Parser.SyntaxNode,
+  importExtractor: ReturnType<typeof getImportExtractor>
+): string[] {
+  if (!importExtractor) return [];
+
+  const imports: string[] = [];
+  const nodeTypeSet = new Set(importExtractor.importNodeTypes);
+
+  for (let i = 0; i < rootNode.namedChildCount; i++) {
+    const child = rootNode.namedChild(i);
+    if (!child || !nodeTypeSet.has(child.type)) continue;
+
+    const result = importExtractor.extractImportPath(child);
+    if (result) imports.push(result);
+  }
+
+  return imports;
+}
+
+/**
  * Extract import statements from a file.
  *
  * When a language is provided, uses the language-specific import extractor.
  * Falls back to legacy behavior for backwards compatibility.
  */
 export function extractImports(rootNode: Parser.SyntaxNode, language?: SupportedLanguage): string[] {
-  if (language) {
-    const importExtractor = getImportExtractor(language);
-    if (importExtractor) {
-      const imports: string[] = [];
-      const nodeTypeSet = new Set(importExtractor.importNodeTypes);
+  if (!language) return [];
+  return extractImportPaths(rootNode, getImportExtractor(language));
+}
 
-      for (let i = 0; i < rootNode.namedChildCount; i++) {
-        const child = rootNode.namedChild(i);
-        if (!child || !nodeTypeSet.has(child.type)) continue;
+/**
+ * Add symbols to the import map, merging with existing entries.
+ */
+function addSymbolsToMap(
+  map: Record<string, string[]>,
+  importPath: string,
+  symbols: string[]
+): void {
+  const existing = map[importPath];
+  if (existing) {
+    existing.push(...symbols);
+  } else {
+    map[importPath] = symbols;
+  }
+}
 
-        const result = importExtractor.extractImportPath(child);
-        if (result) imports.push(result);
-      }
+/**
+ * Extract symbols using the language-specific extractor.
+ */
+function extractSymbolsWithExtractor(
+  rootNode: Parser.SyntaxNode,
+  importExtractor: ReturnType<typeof getImportExtractor>
+): Record<string, string[]> {
+  if (!importExtractor) return {};
 
-      return imports;
+  const importedSymbols: Record<string, string[]> = {};
+  const nodeTypeSet = new Set(importExtractor.importNodeTypes);
+
+  for (let i = 0; i < rootNode.namedChildCount; i++) {
+    const node = rootNode.namedChild(i);
+    if (!node || !nodeTypeSet.has(node.type)) continue;
+
+    const result = importExtractor.processImportSymbols(node);
+    if (result) {
+      addSymbolsToMap(importedSymbols, result.importPath, result.symbols);
     }
   }
 
-  // Fallback: no language or no import extractor
-  return [];
+  return importedSymbols;
 }
 
 /**
@@ -331,32 +377,8 @@ export function extractImports(rootNode: Parser.SyntaxNode, language?: Supported
  * Falls back to legacy behavior for backwards compatibility.
  */
 export function extractImportedSymbols(rootNode: Parser.SyntaxNode, language?: SupportedLanguage): Record<string, string[]> {
-  if (language) {
-    const importExtractor = getImportExtractor(language);
-    if (importExtractor) {
-      const importedSymbols: Record<string, string[]> = {};
-      const nodeTypeSet = new Set(importExtractor.importNodeTypes);
-
-      for (let i = 0; i < rootNode.namedChildCount; i++) {
-        const node = rootNode.namedChild(i);
-        if (!node || !nodeTypeSet.has(node.type)) continue;
-
-        const result = importExtractor.processImportSymbols(node);
-        if (result) {
-          if (importedSymbols[result.importPath]) {
-            importedSymbols[result.importPath].push(...result.symbols);
-          } else {
-            importedSymbols[result.importPath] = result.symbols;
-          }
-        }
-      }
-
-      return importedSymbols;
-    }
-  }
-
-  // Fallback: no language or no import extractor
-  return {};
+  if (!language) return {};
+  return extractSymbolsWithExtractor(rootNode, getImportExtractor(language));
 }
 
 /**

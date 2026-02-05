@@ -209,6 +209,40 @@ function extractScopePath(node: Parser.SyntaxNode): string | null {
 }
 
 /**
+ * Extract the symbol name from a use_as_clause node.
+ * Prefers the alias if present, otherwise takes the last identifier.
+ */
+function extractUseAsClauseSymbol(node: Parser.SyntaxNode): string | null {
+  const alias = node.childForFieldName('alias');
+  if (alias) return alias.text;
+
+  // Fallback: take the last identifier
+  for (let j = node.namedChildCount - 1; j >= 0; j--) {
+    const child = node.namedChild(j);
+    if (child?.type === 'identifier') return child.text;
+  }
+  return null;
+}
+
+/**
+ * Extract the symbol name from a single use_list item.
+ */
+function extractUseListItemSymbol(item: Parser.SyntaxNode): string | null {
+  switch (item.type) {
+    case 'identifier':
+      return item.text;
+    case 'scoped_identifier':
+      return item.childForFieldName('name')?.text ?? null;
+    case 'use_as_clause':
+      return extractUseAsClauseSymbol(item);
+    case 'use_wildcard':
+      return '*';
+    default:
+      return null;
+  }
+}
+
+/**
  * Extract imported symbol names from a use_list node.
  * Handles: identifier, scoped_identifier, use_as_clause, use_wildcard
  */
@@ -219,37 +253,8 @@ function extractUseListSymbols(useList: Parser.SyntaxNode): string[] {
     const item = useList.namedChild(i);
     if (!item) continue;
 
-    switch (item.type) {
-      case 'identifier':
-        symbols.push(item.text);
-        break;
-      case 'scoped_identifier': {
-        // e.g., `sub::Specific` inside a use list — take the last segment
-        const nameNode = item.childForFieldName('name');
-        if (nameNode) symbols.push(nameNode.text);
-        break;
-      }
-      case 'use_as_clause': {
-        // e.g., `Service as Auth` — use the alias
-        const alias = item.childForFieldName('alias');
-        if (alias) {
-          symbols.push(alias.text);
-        } else {
-          // Fallback: take the last identifier
-          for (let j = item.namedChildCount - 1; j >= 0; j--) {
-            const child = item.namedChild(j);
-            if (child?.type === 'identifier') {
-              symbols.push(child.text);
-              break;
-            }
-          }
-        }
-        break;
-      }
-      case 'use_wildcard':
-        symbols.push('*');
-        break;
-    }
+    const symbol = extractUseListItemSymbol(item);
+    if (symbol) symbols.push(symbol);
   }
 
   return symbols;

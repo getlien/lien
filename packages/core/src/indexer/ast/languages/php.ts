@@ -208,24 +208,35 @@ export class PHPImportExtractor implements LanguageImportExtractor {
     return null;
   }
 
+  private extractNamespaceParts(namespaceNode: Parser.SyntaxNode): string[] {
+    const parts: string[] = [];
+    for (let k = 0; k < namespaceNode.namedChildCount; k++) {
+      const namePart = namespaceNode.namedChild(k);
+      if (namePart?.type === 'name') {
+        parts.push(namePart.text);
+      }
+    }
+    return parts;
+  }
+
+  private extractQualifiedNameParts(qualifiedName: Parser.SyntaxNode): string[] {
+    const parts: string[] = [];
+    for (let j = 0; j < qualifiedName.namedChildCount; j++) {
+      const part = qualifiedName.namedChild(j);
+      if (part?.type === 'namespace_name') {
+        parts.push(...this.extractNamespaceParts(part));
+      } else if (part?.type === 'name') {
+        parts.push(part.text);
+      }
+    }
+    return parts;
+  }
+
   private extractPHPQualifiedName(clause: Parser.SyntaxNode): string | null {
     for (let i = 0; i < clause.namedChildCount; i++) {
       const child = clause.namedChild(i);
       if (child?.type === 'qualified_name') {
-        const parts: string[] = [];
-        for (let j = 0; j < child.namedChildCount; j++) {
-          const part = child.namedChild(j);
-          if (part?.type === 'namespace_name') {
-            for (let k = 0; k < part.namedChildCount; k++) {
-              const namePart = part.namedChild(k);
-              if (namePart?.type === 'name') {
-                parts.push(namePart.text);
-              }
-            }
-          } else if (part?.type === 'name') {
-            parts.push(part.text);
-          }
-        }
+        const parts = this.extractQualifiedNameParts(child);
         return parts.join('\\');
       }
     }

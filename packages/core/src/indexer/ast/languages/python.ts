@@ -94,33 +94,34 @@ export class PythonExportExtractor implements LanguageExportExtractor {
     'async_function_definition',
   ]);
 
+  private extractExportName(node: Parser.SyntaxNode): string | null {
+    if (node.type === 'decorated_definition') {
+      const definition = node.childForFieldName('definition');
+      if (definition && this.exportableTypes.has(definition.type)) {
+        return definition.childForFieldName('name')?.text ?? null;
+      }
+      return null;
+    }
+
+    if (this.exportableTypes.has(node.type)) {
+      return node.childForFieldName('name')?.text ?? null;
+    }
+
+    return null;
+  }
+
   extractExports(rootNode: Parser.SyntaxNode): string[] {
     const exports: string[] = [];
     const seen = new Set<string>();
-
-    const addExport = (name: string) => {
-      if (name && !seen.has(name)) {
-        seen.add(name);
-        exports.push(name);
-      }
-    };
 
     for (let i = 0; i < rootNode.namedChildCount; i++) {
       const child = rootNode.namedChild(i);
       if (!child) continue;
 
-      if (child.type === 'decorated_definition') {
-        const definition = child.childForFieldName('definition');
-        if (definition && this.exportableTypes.has(definition.type)) {
-          const nameNode = definition.childForFieldName('name');
-          if (nameNode) addExport(nameNode.text);
-        }
-        continue;
-      }
-
-      if (this.exportableTypes.has(child.type)) {
-        const nameNode = child.childForFieldName('name');
-        if (nameNode) addExport(nameNode.text);
+      const name = this.extractExportName(child);
+      if (name && !seen.has(name)) {
+        seen.add(name);
+        exports.push(name);
       }
     }
 
@@ -159,6 +160,26 @@ export class PythonImportExtractor implements LanguageImportExtractor {
     return null;
   }
 
+  private processSimpleImport(child: Parser.SyntaxNode): { importPath: string; symbols: string[] } {
+    return {
+      importPath: child.text,
+      symbols: [child.text],
+    };
+  }
+
+  private processAliasedImport(child: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+    const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
+    const identifiers = child.namedChildren.filter(c => c.type === 'identifier');
+
+    const moduleName = dottedName?.text || identifiers[0]?.text;
+    const aliasName = identifiers.length >= 2
+      ? identifiers[identifiers.length - 1]?.text
+      : identifiers[0]?.text;
+
+    if (!moduleName || !aliasName) return null;
+    return { importPath: moduleName, symbols: [aliasName] };
+  }
+
   /**
    * Process Python regular import statement.
    * e.g., "import os", "import os as system"
@@ -169,30 +190,39 @@ export class PythonImportExtractor implements LanguageImportExtractor {
       if (!child) continue;
 
       if (child.type === 'dotted_name' || child.type === 'identifier') {
-        const moduleName = child.text;
-        return {
-          importPath: moduleName,
-          symbols: [moduleName],
-        };
-      } else if (child.type === 'aliased_import') {
-        const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
-        const identifiers = child.namedChildren.filter(c => c.type === 'identifier');
-
-        const moduleName = dottedName?.text || identifiers[0]?.text;
-        const aliasName = identifiers.length >= 2
-          ? identifiers[identifiers.length - 1]?.text
-          : identifiers[0]?.text;
-
-        if (moduleName && aliasName) {
-          return {
-            importPath: moduleName,
-            symbols: [aliasName],
-          };
-        }
+        return this.processSimpleImport(child);
+      }
+      if (child.type === 'aliased_import') {
+        return this.processAliasedImport(child);
       }
     }
-
     return null;
+  }
+
+  private findModulePath(node: Parser.SyntaxNode): { path: string; startIndex: number } | null {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (child?.type === 'dotted_name') {
+        return { path: child.text, startIndex: i };
+      }
+    }
+    return null;
+  }
+
+  private collectImportedSymbols(node: Parser.SyntaxNode, startIndex: number): string[] {
+    const symbols: string[] = [];
+    for (let i = startIndex + 1; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (!child) continue;
+
+      if (child.type === 'dotted_name') {
+        symbols.push(child.text);
+      } else if (child.type === 'aliased_import') {
+        const symbolName = this.extractPythonAliasedSymbol(child);
+        if (symbolName) symbols.push(symbolName);
+      }
+    }
+    return symbols;
   }
 
   /**
@@ -200,29 +230,13 @@ export class PythonImportExtractor implements LanguageImportExtractor {
    * e.g., "from utils.validate import validateEmail, validatePhone"
    */
   private processPythonFromImport(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
-    let modulePath: string | null = null;
-    const symbols: string[] = [];
+    const moduleInfo = this.findModulePath(node);
+    if (!moduleInfo) return null;
 
-    let foundModule = false;
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (!child) continue;
+    const symbols = this.collectImportedSymbols(node, moduleInfo.startIndex);
+    if (symbols.length === 0) return null;
 
-      if (child.type === 'dotted_name' && !foundModule) {
-        modulePath = child.text;
-        foundModule = true;
-      } else if (child.type === 'dotted_name' && foundModule) {
-        symbols.push(child.text);
-      } else if (child.type === 'aliased_import') {
-        const symbolName = this.extractPythonAliasedSymbol(child);
-        if (symbolName) {
-          symbols.push(symbolName);
-        }
-      }
-    }
-
-    if (!modulePath || symbols.length === 0) return null;
-    return { importPath: modulePath, symbols };
+    return { importPath: moduleInfo.path, symbols };
   }
 
   /**
