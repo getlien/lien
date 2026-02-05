@@ -167,8 +167,77 @@ def compute():
       const tree = parser.parse(code);
       const extractor = getExtractor('python');
       const exports = extractor.extractExports(tree.rootNode);
-      
+
       expect(exports).toEqual(['compute']);
+    });
+
+    it('should extract re-exports from import_from_statement', () => {
+      const code = 'from .auth import AuthService, ValidationError';
+      const tree = parser.parse(code);
+      const extractor = getExtractor('python');
+      const exports = extractor.extractExports(tree.rootNode);
+
+      expect(exports).toEqual(['AuthService', 'ValidationError']);
+    });
+
+    it('should extract aliased re-exports', () => {
+      const code = 'from .auth import AuthService as Auth';
+      const tree = parser.parse(code);
+      const extractor = getExtractor('python');
+      const exports = extractor.extractExports(tree.rootNode);
+
+      expect(exports).toEqual(['Auth']);
+    });
+
+    it('should combine declarations and re-exports', () => {
+      const code = `from .service import AuthService
+
+class UserController:
+    pass`;
+      const tree = parser.parse(code);
+      const extractor = getExtractor('python');
+      const exports = extractor.extractExports(tree.rootNode);
+
+      expect(exports).toEqual(['AuthService', 'UserController']);
+    });
+
+    it('should extract re-exports from absolute imports', () => {
+      const code = 'from utils import helper';
+      const tree = parser.parse(code);
+      const extractor = getExtractor('python');
+      const exports = extractor.extractExports(tree.rootNode);
+
+      expect(exports).toEqual(['helper']);
+    });
+
+    it('should extract re-exports from current package import', () => {
+      const code = 'from . import symbol';
+      const tree = parser.parse(code);
+      const extractor = getExtractor('python');
+      const exports = extractor.extractExports(tree.rootNode);
+
+      expect(exports).toEqual(['symbol']);
+    });
+
+    it('should ignore wildcard imports', () => {
+      const code = 'from .module import *';
+      const tree = parser.parse(code);
+      const extractor = getExtractor('python');
+      const exports = extractor.extractExports(tree.rootNode);
+
+      expect(exports).toEqual([]);
+    });
+
+    it('should deduplicate re-exports and declarations', () => {
+      const code = `from .base import Helper
+
+class Helper:
+    pass`;
+      const tree = parser.parse(code);
+      const extractor = getExtractor('python');
+      const exports = extractor.extractExports(tree.rootNode);
+
+      expect(exports).toEqual(['Helper']);
     });
   });
 });

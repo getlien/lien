@@ -8,6 +8,29 @@ import { extractSignature, extractParameters } from '../extractors/symbol-helper
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
+// SHARED HELPERS
+// =============================================================================
+
+/**
+ * Extract the effective symbol name from a Python aliased_import node.
+ * Returns the alias if present, otherwise the original name.
+ */
+function extractAliasedSymbolName(node: Parser.SyntaxNode): string | null {
+  const identifiers = node.namedChildren.filter(c => c.type === 'identifier');
+
+  if (identifiers.length >= 2) {
+    return identifiers[identifiers.length - 1].text;
+  }
+
+  if (identifiers.length === 1) {
+    return identifiers[0].text;
+  }
+
+  const dottedName = node.namedChildren.find(c => c.type === 'dotted_name');
+  return dottedName?.text ?? null;
+}
+
+// =============================================================================
 // TRAVERSER
 // =============================================================================
 
@@ -117,18 +140,60 @@ export class PythonExportExtractor implements LanguageExportExtractor {
     const exports: string[] = [];
     const seen = new Set<string>();
 
+    const addExport = (name: string) => {
+      if (name && !seen.has(name)) {
+        seen.add(name);
+        exports.push(name);
+      }
+    };
+
     for (let i = 0; i < rootNode.namedChildCount; i++) {
       const child = rootNode.namedChild(i);
       if (!child) continue;
 
       const name = this.extractExportName(child);
-      if (name && !seen.has(name)) {
-        seen.add(name);
-        exports.push(name);
+      if (name) {
+        addExport(name);
+        continue;
+      }
+
+      // Re-exports via `from .module import Symbol`
+      if (child.type === 'import_from_statement') {
+        this.extractReExportNames(child, addExport);
       }
     }
 
     return exports;
+  }
+
+  private findModulePathIndex(node: Parser.SyntaxNode): number {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const type = node.namedChild(i)?.type;
+      if (type === 'relative_import' || type === 'dotted_name') {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  private extractReExportNames(
+    node: Parser.SyntaxNode,
+    addExport: (name: string) => void
+  ): void {
+    const startIndex = this.findModulePathIndex(node);
+    if (startIndex === -1) return;
+
+    for (let i = startIndex + 1; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (!child) continue;
+
+      if (child.type === 'dotted_name') {
+        addExport(child.text);
+      } else if (child.type === 'aliased_import') {
+        const name = extractAliasedSymbolName(child);
+        if (name) addExport(name);
+      }
+    }
   }
 }
 
@@ -221,7 +286,7 @@ export class PythonImportExtractor implements LanguageImportExtractor {
       if (child.type === 'dotted_name') {
         symbols.push(child.text);
       } else if (child.type === 'aliased_import') {
-        const symbolName = this.extractPythonAliasedSymbol(child);
+        const symbolName = extractAliasedSymbolName(child);
         if (symbolName) symbols.push(symbolName);
       }
     }
@@ -242,19 +307,6 @@ export class PythonImportExtractor implements LanguageImportExtractor {
     return { importPath: moduleInfo.path, symbols };
   }
 
-  /**
-   * Extract the aliased symbol from a Python aliased_import node.
-   */
-  private extractPythonAliasedSymbol(node: Parser.SyntaxNode): string | undefined {
-    const identifierChildren = node.namedChildren.filter(c => c.type === 'identifier');
-    const dottedName = node.namedChildren.find(c => c.type === 'dotted_name');
-
-    if (identifierChildren.length >= 2) {
-      return identifierChildren[identifierChildren.length - 1].text;
-    }
-
-    return identifierChildren[0]?.text ?? dottedName?.text;
-  }
 }
 
 // =============================================================================
