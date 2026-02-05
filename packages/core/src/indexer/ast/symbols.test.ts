@@ -142,6 +142,18 @@ export { foo };
 
       expect(Object.keys(importedSymbols)).toHaveLength(0);
     });
+
+    it('should handle wildcard re-exports (export * from)', () => {
+      const content = `
+export * from './utils';
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      // Wildcard re-exports have no named specifiers, so no symbols are extracted
+      expect(Object.keys(importedSymbols)).toHaveLength(0);
+    });
   });
 
   describe('extractExports', () => {
@@ -593,6 +605,19 @@ export { other } from './b';
 
       expect(imports).toContain('./a');
       expect(imports).toContain('./b');
+    });
+
+    it('should extract wildcard re-export source paths', () => {
+      const content = `
+export * from './utils';
+export * from '../helpers';
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const imports = extractImports(parseResult.tree!.rootNode);
+
+      expect(imports).toContain('./utils');
+      expect(imports).toContain('../helpers');
     });
 
     it('should not extract export statements without source', () => {

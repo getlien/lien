@@ -356,6 +356,31 @@ describe('analyzeDependencies', () => {
       expect(dependentPaths.filter(p => p === 'src/handler.ts')).toHaveLength(1);
     });
 
+    it('should find dependents through wildcard re-exports', () => {
+      // auth.ts → index.ts (export * from) → handler.ts
+      const chunks: SearchResult[] = [
+        createChunk('src/auth.ts', [], undefined, {
+          exports: ['AuthService'],
+        }),
+        // Barrel using wildcard re-export: has import from auth.ts and exports
+        createChunk('src/index.ts', ['src/auth.ts'], undefined, {
+          exports: ['AuthService'],
+          importedSymbols: { './auth': ['AuthService'] },
+        }),
+        // Consumer imports from barrel
+        createChunk('src/handler.ts', ['src/index.ts'], undefined, {
+          importedSymbols: { './index': ['AuthService'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('src/auth.ts', chunks, workspaceRoot);
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      expect(dependentPaths).toContain('src/index.ts');
+      expect(dependentPaths).toContain('src/handler.ts');
+      expect(result.dependentCount).toBe(2);
+    });
+
     it('should behave the same when no re-exporters exist', () => {
       // No barrel files — regression test
       const chunks: SearchResult[] = [
