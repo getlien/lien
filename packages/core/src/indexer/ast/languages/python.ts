@@ -117,18 +117,65 @@ export class PythonExportExtractor implements LanguageExportExtractor {
     const exports: string[] = [];
     const seen = new Set<string>();
 
+    const addExport = (name: string) => {
+      if (name && !seen.has(name)) {
+        seen.add(name);
+        exports.push(name);
+      }
+    };
+
     for (let i = 0; i < rootNode.namedChildCount; i++) {
       const child = rootNode.namedChild(i);
       if (!child) continue;
 
       const name = this.extractExportName(child);
-      if (name && !seen.has(name)) {
-        seen.add(name);
-        exports.push(name);
+      if (name) {
+        addExport(name);
+        continue;
+      }
+
+      // Re-exports via `from .module import Symbol`
+      if (child.type === 'import_from_statement') {
+        this.extractReExportNames(child, addExport);
       }
     }
 
     return exports;
+  }
+
+  private extractReExportNames(
+    node: Parser.SyntaxNode,
+    addExport: (name: string) => void
+  ): void {
+    // Find module path to know where imported symbols start.
+    // Absolute: `from utils import X` → first child is dotted_name (module path)
+    // Relative: `from .auth import X` → first child is relative_import
+    let startIndex = -1;
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const type = node.namedChild(i)?.type;
+      if (type === 'relative_import' || type === 'dotted_name') {
+        startIndex = i;
+        break;
+      }
+    }
+
+    // Extract symbol names after the module path
+    for (let i = startIndex + 1; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (!child) continue;
+
+      if (child.type === 'dotted_name') {
+        addExport(child.text);
+      } else if (child.type === 'aliased_import') {
+        // Use alias for re-exports: `from .auth import Service as Auth` → 'Auth'
+        const identifiers = child.namedChildren.filter(c => c.type === 'identifier');
+        const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
+        const name = identifiers.length >= 2
+          ? identifiers[identifiers.length - 1].text
+          : identifiers[0]?.text ?? dottedName?.text;
+        if (name) addExport(name);
+      }
+    }
   }
 }
 
