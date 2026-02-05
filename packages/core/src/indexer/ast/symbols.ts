@@ -327,7 +327,15 @@ export function extractImports(rootNode: Parser.SyntaxNode): string[] {
         imports.push(phpImport);
       }
     }
-    
+    // Re-export statements: export { X } from './module'
+    else if (node.type === 'export_statement') {
+      const sourceNode = node.childForFieldName('source');
+      if (sourceNode) {
+        const importPath = sourceNode.text.replace(/['"]/g, '');
+        imports.push(importPath);
+      }
+    }
+
     // Only traverse top-level nodes for imports
     if (node === rootNode) {
       for (let i = 0; i < node.namedChildCount; i++) {
@@ -442,7 +450,11 @@ export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<stri
     else if (node.type === 'namespace_use_declaration') {
       result = processPHPUseDeclaration(node);
     }
-    
+    // Re-export statements: export { X } from './module'
+    else if (node.type === 'export_statement') {
+      result = processReExportStatement(node);
+    }
+
     if (result) {
       // Merge symbols if importing from the same path multiple times
       if (importedSymbols[result.importPath]) {
@@ -591,6 +603,42 @@ function processPHPUseDeclaration(node: Parser.SyntaxNode): { importPath: string
   }
   
   return null;
+}
+
+/**
+ * Process a re-export statement: export { X, Y } from './module'
+ *
+ * Extracts the source path and symbol names from export_specifier nodes.
+ * Uses the original name (not alias) since this maps to the source module's exports.
+ */
+function processReExportStatement(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  const sourceNode = node.childForFieldName('source');
+  if (!sourceNode) return null;
+
+  const importPath = sourceNode.text.replace(/['"]/g, '');
+  const symbols: string[] = [];
+
+  // Find export_clause which contains export_specifiers
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+
+    if (child.type === 'export_clause') {
+      for (let j = 0; j < child.namedChildCount; j++) {
+        const specifier = child.namedChild(j);
+        if (specifier?.type === 'export_specifier') {
+          // Use the original name (not alias) since it maps to the source module
+          const nameNode = specifier.childForFieldName('name');
+          const symbol = nameNode?.text || specifier.text;
+          if (symbol && !symbol.includes('{') && !symbol.includes('}')) {
+            symbols.push(symbol);
+          }
+        }
+      }
+    }
+  }
+
+  return symbols.length > 0 ? { importPath, symbols } : null;
 }
 
 /**

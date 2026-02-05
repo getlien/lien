@@ -6,7 +6,15 @@ import { ChunkMetadata } from './types.js';
 describe('analyzeDependencies', () => {
   const workspaceRoot = '/test/workspace';
 
-  function createChunk(file: string, imports: string[] = [], complexity?: number): SearchResult {
+  function createChunk(
+    file: string,
+    imports: string[] = [],
+    complexity?: number,
+    options?: {
+      exports?: string[];
+      importedSymbols?: Record<string, string[]>;
+    }
+  ): SearchResult {
     return {
       content: 'test content',
       metadata: {
@@ -17,6 +25,8 @@ describe('analyzeDependencies', () => {
         language: 'typescript',
         imports,
         complexity,
+        ...(options?.exports && { exports: options.exports }),
+        ...(options?.importedSymbols && { importedSymbols: options.importedSymbols }),
       } as ChunkMetadata,
       score: 1.0,
       relevance: 'highly_relevant' as const,
@@ -214,6 +224,154 @@ describe('analyzeDependencies', () => {
     expect(result.dependentCount).toBe(2);
     expect(result.riskLevel).toBe('low'); // 2 dependents = low risk by count
     expect(result.complexityMetrics).toBeUndefined(); // No complexity data
+  });
+
+  describe('barrel re-export tracking', () => {
+    it('should find transitive dependents through barrel files', () => {
+      // auth.ts → index.ts (re-exports) → handler.ts (imports from index)
+      const chunks: SearchResult[] = [
+        // Target file
+        createChunk('src/auth.ts', [], undefined, {
+          exports: ['AuthService'],
+        }),
+        // Barrel file: imports from auth.ts, exports AuthService
+        createChunk('src/index.ts', ['src/auth.ts'], undefined, {
+          exports: ['AuthService'],
+          importedSymbols: { './auth': ['AuthService'] },
+        }),
+        // Consumer: imports from index.ts (the barrel)
+        createChunk('src/handler.ts', ['src/index.ts'], undefined, {
+          importedSymbols: { './index': ['AuthService'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('src/auth.ts', chunks, workspaceRoot);
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      // Should find both the barrel file (direct) and the handler (transitive)
+      expect(dependentPaths).toContain('src/index.ts');
+      expect(dependentPaths).toContain('src/handler.ts');
+      expect(result.dependentCount).toBe(2);
+    });
+
+    it('should find dependents through chained re-exports', () => {
+      // target → barrel1 → barrel2 → consumer
+      const chunks: SearchResult[] = [
+        createChunk('src/core/validate.ts', [], undefined, {
+          exports: ['validateEmail'],
+        }),
+        // First barrel: re-exports from validate.ts
+        createChunk('src/core/index.ts', ['src/core/validate.ts'], undefined, {
+          exports: ['validateEmail'],
+          importedSymbols: { './validate': ['validateEmail'] },
+        }),
+        // Second barrel: re-exports from core/index.ts
+        createChunk('src/index.ts', ['src/core/index.ts'], undefined, {
+          exports: ['validateEmail'],
+          importedSymbols: { './core/index': ['validateEmail'] },
+        }),
+        // Consumer: imports from top-level barrel
+        createChunk('src/app.ts', ['src/index.ts'], undefined, {
+          importedSymbols: { './index': ['validateEmail'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('src/core/validate.ts', chunks, workspaceRoot);
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      expect(dependentPaths).toContain('src/core/index.ts');
+      expect(dependentPaths).toContain('src/index.ts');
+      expect(dependentPaths).toContain('src/app.ts');
+      expect(result.dependentCount).toBe(3);
+    });
+
+    it('should handle circular re-exports without infinite loops', () => {
+      // a.ts → b.ts → a.ts (circular) → c.ts imports from b.ts
+      const chunks: SearchResult[] = [
+        createChunk('src/a.ts', ['src/b.ts'], undefined, {
+          exports: ['foo'],
+          importedSymbols: { './b': ['bar'] },
+        }),
+        createChunk('src/b.ts', ['src/a.ts'], undefined, {
+          exports: ['bar'],
+          importedSymbols: { './a': ['foo'] },
+        }),
+        createChunk('src/c.ts', ['src/b.ts'], undefined, {
+          importedSymbols: { './b': ['bar'] },
+        }),
+      ];
+
+      // Should not hang — circular detection prevents infinite traversal
+      const result = analyzeDependencies('src/a.ts', chunks, workspaceRoot);
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      expect(dependentPaths).toContain('src/b.ts');
+      expect(dependentPaths).toContain('src/c.ts');
+    });
+
+    it('should not produce false positives for unrelated barrel exports', () => {
+      // barrel exports from different source, not target
+      const chunks: SearchResult[] = [
+        createChunk('src/target.ts', [], undefined, {
+          exports: ['targetFn'],
+        }),
+        // Barrel imports from OTHER file, not target
+        createChunk('src/barrel.ts', ['src/other.ts'], undefined, {
+          exports: ['otherFn'],
+          importedSymbols: { './other': ['otherFn'] },
+        }),
+        // Consumer imports from barrel
+        createChunk('src/consumer.ts', ['src/barrel.ts'], undefined, {
+          importedSymbols: { './barrel': ['otherFn'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('src/target.ts', chunks, workspaceRoot);
+
+      // Consumer should NOT be a dependent of target.ts
+      expect(result.dependentCount).toBe(0);
+    });
+
+    it('should deduplicate mixed direct and transitive dependents', () => {
+      const chunks: SearchResult[] = [
+        createChunk('src/auth.ts', [], undefined, {
+          exports: ['AuthService'],
+        }),
+        // Barrel re-exports
+        createChunk('src/index.ts', ['src/auth.ts'], undefined, {
+          exports: ['AuthService'],
+          importedSymbols: { './auth': ['AuthService'] },
+        }),
+        // Consumer imports from both auth.ts directly AND via barrel
+        createChunk('src/handler.ts', ['src/auth.ts', 'src/index.ts'], undefined, {
+          importedSymbols: { './auth': ['AuthService'], './index': ['AuthService'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('src/auth.ts', chunks, workspaceRoot);
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      expect(dependentPaths).toContain('src/handler.ts');
+      // handler.ts should appear only once, not twice
+      expect(dependentPaths.filter(p => p === 'src/handler.ts')).toHaveLength(1);
+    });
+
+    it('should behave the same when no re-exporters exist', () => {
+      // No barrel files — regression test
+      const chunks: SearchResult[] = [
+        createChunk('src/utils.ts', [], undefined, {
+          exports: ['helper'],
+        }),
+        createChunk('src/app.ts', ['src/utils.ts'], undefined, {
+          importedSymbols: { './utils': ['helper'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('src/utils.ts', chunks, workspaceRoot);
+
+      expect(result.dependentCount).toBe(1);
+      expect(result.dependents[0].filepath).toBe('src/app.ts');
+    });
   });
 });
 
