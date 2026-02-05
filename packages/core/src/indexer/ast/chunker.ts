@@ -52,8 +52,8 @@ function prepareASTContext(
 ): ASTContext {
   return {
     lines: content.split('\n'),
-    fileImports: extractImports(rootNode),
-    importedSymbols: extractImportedSymbols(rootNode),
+    fileImports: extractImports(rootNode, language),
+    importedSymbols: extractImportedSymbols(rootNode, language),
     fileExports: extractExports(rootNode, language),
     traverser: getTraverser(language),
   };

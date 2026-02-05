@@ -1,28 +1,44 @@
 /**
  * Shared path matching utilities for dependency analysis.
- * 
+ *
  * These functions handle path normalization and matching logic used by
  * dependency analysis to find reverse dependencies.
  */
 
+import { getSupportedExtensions } from '../indexer/ast/languages/registry.js';
+
+/**
+ * Build the extension-stripping regex from the language registry.
+ * Cached after first call.
+ */
+let extensionRegex: RegExp | null = null;
+
+function getExtensionRegex(): RegExp {
+  if (!extensionRegex) {
+    const extPattern = getSupportedExtensions().join('|');
+    extensionRegex = new RegExp(`\\.(${extPattern})$`);
+  }
+  return extensionRegex;
+}
+
 /**
  * Normalizes a file path for comparison.
- * 
+ *
  * - Removes quotes and trims whitespace
  * - Converts backslashes to forward slashes
- * - Strips file extensions (.ts, .tsx, .js, .jsx)
+ * - Strips file extensions for all AST-supported languages
  * - Converts absolute paths to relative (if within workspace root)
- * 
+ *
  * @param path - The path to normalize
  * @param workspaceRoot - The workspace root directory (normalized with forward slashes)
  * @returns Normalized path
  */
 export function normalizePath(path: string, workspaceRoot: string): string {
   let normalized = path.replace(/['"]/g, '').trim().replace(/\\/g, '/');
-  
-  // Normalize extensions: .ts/.tsx/.js/.jsx → all treated as equivalent
+
+  // Normalize extensions: strip all AST-supported language extensions
   // This handles TypeScript's ESM requirement of .js imports for .ts files
-  normalized = normalized.replace(/\.(ts|tsx|js|jsx)$/, '');
+  normalized = normalized.replace(getExtensionRegex(), '');
   
   // Normalize to relative path if it starts with workspace root
   if (normalized.startsWith(workspaceRoot + '/')) {

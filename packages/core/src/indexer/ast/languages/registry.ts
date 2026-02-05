@@ -81,3 +81,16 @@ export function languageExists(language: string): boolean {
 export function getAllLanguages(): readonly LanguageDefinition[] {
   return definitions.slice();
 }
+
+/**
+ * Get all file extensions supported by registered languages.
+ * Cached after first call.
+ */
+let extensionCache: string[] | null = null;
+
+export function getSupportedExtensions(): string[] {
+  if (!extensionCache) {
+    extensionCache = definitions.flatMap(d => d.extensions);
+  }
+  return extensionCache;
+}

@@ -35,13 +35,13 @@ import type Parser from 'tree-sitter';
 export interface LanguageExportExtractor {
   /**
    * Extract exported symbol names from an AST root node
-   * 
+   *
    * For JavaScript/TypeScript: Processes explicit export statements
    * For PHP/Python: Processes top-level declarations (implicitly exported)
-   * 
+   *
    * @param rootNode - AST root node (typically 'program' or similar)
    * @returns Array of exported symbol names (deduplicated)
-   * 
+   *
    * @example
    * ```typescript
    * // For: export { foo, bar }; export default App;
@@ -49,4 +49,40 @@ export interface LanguageExportExtractor {
    * ```
    */
   extractExports(rootNode: Parser.SyntaxNode): string[];
+}
+
+/**
+ * Language-specific import extraction strategy
+ *
+ * Each language has different import semantics:
+ * - JavaScript/TypeScript: import/export statements with source paths
+ * - PHP: namespace use declarations
+ * - Python: import/from...import statements with dotted paths
+ * - Rust: use declarations with crate/self/super paths
+ *
+ * This interface allows language-specific import extraction while
+ * keeping the core symbol extraction logic language-agnostic.
+ */
+export interface LanguageImportExtractor {
+  /**
+   * AST node types that represent import statements in this language.
+   * Used to identify which top-level nodes to process.
+   */
+  readonly importNodeTypes: string[];
+
+  /**
+   * Extract the import path from an import node for the imports list.
+   *
+   * @param node - AST node matching one of importNodeTypes
+   * @returns The import path string, or null to skip
+   */
+  extractImportPath(node: Parser.SyntaxNode): string | null;
+
+  /**
+   * Extract imported symbols mapped to their source path.
+   *
+   * @param node - AST node matching one of importNodeTypes
+   * @returns Object with importPath and symbols, or null to skip
+   */
+  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null;
 }

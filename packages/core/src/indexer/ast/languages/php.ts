@@ -1,7 +1,241 @@
 import PHPParser from 'tree-sitter-php';
+import type Parser from 'tree-sitter';
 import type { LanguageDefinition } from './types.js';
-import { PHPTraverser } from '../traversers/php.js';
-import { PHPExportExtractor } from '../extractors/php.js';
+import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
+import type { LanguageExportExtractor, LanguageImportExtractor } from '../extractors/types.js';
+
+// =============================================================================
+// TRAVERSER
+// =============================================================================
+
+/**
+ * PHP AST traverser
+ *
+ * Handles PHP AST node types and traversal patterns.
+ * PHP uses tree-sitter-php grammar.
+ */
+export class PHPTraverser implements LanguageTraverser {
+  targetNodeTypes = [
+    'function_definition',      // function foo() {}
+    'method_declaration',       // public function bar() {}
+  ];
+
+  containerTypes = [
+    'class_declaration',        // We extract methods, not the class itself
+    'trait_declaration',        // PHP traits
+    'interface_declaration',    // PHP interfaces (for interface methods)
+  ];
+
+  declarationTypes: string[] = [];
+
+  functionTypes = [
+    'function_definition',
+    'method_declaration',
+  ];
+
+  shouldExtractChildren(node: Parser.SyntaxNode): boolean {
+    return this.containerTypes.includes(node.type);
+  }
+
+  isDeclarationWithFunction(_node: Parser.SyntaxNode): boolean {
+    return false;
+  }
+
+  getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+    if (node.type === 'class_declaration' ||
+        node.type === 'trait_declaration' ||
+        node.type === 'interface_declaration') {
+      return node.childForFieldName('body');
+    }
+    return null;
+  }
+
+  shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
+    return node.type === 'program' ||
+           node.type === 'php' ||
+           node.type === 'declaration_list';
+  }
+
+  findParentContainerName(node: Parser.SyntaxNode): string | undefined {
+    let current = node.parent;
+    while (current) {
+      if (current.type === 'class_declaration' ||
+          current.type === 'trait_declaration') {
+        const nameNode = current.childForFieldName('name');
+        return nameNode?.text;
+      }
+      current = current.parent;
+    }
+    return undefined;
+  }
+
+  findFunctionInDeclaration(_node: Parser.SyntaxNode): DeclarationFunctionInfo {
+    return {
+      hasFunction: false,
+      functionNode: null,
+    };
+  }
+}
+
+// =============================================================================
+// EXPORT EXTRACTOR
+// =============================================================================
+
+/**
+ * PHP export extractor
+ *
+ * PHP doesn't have explicit export syntax. All top-level declarations are
+ * considered exported (accessible via `use` statements):
+ * - Classes: class User {}
+ * - Traits: trait HasTimestamps {}
+ * - Interfaces: interface Repository {}
+ * - Functions: function helper() {}
+ * - Namespaced declarations are also tracked
+ */
+export class PHPExportExtractor implements LanguageExportExtractor {
+  private readonly exportableTypes = new Set([
+    'class_declaration',
+    'trait_declaration',
+    'interface_declaration',
+    'function_definition',
+  ]);
+
+  extractExports(rootNode: Parser.SyntaxNode): string[] {
+    const exports: string[] = [];
+    const seen = new Set<string>();
+
+    for (let i = 0; i < rootNode.namedChildCount; i++) {
+      const child = rootNode.namedChild(i);
+      if (!child) continue;
+
+      const childExports = this.extractExportsFromNode(child);
+      childExports.forEach(exp => {
+        if (exp && !seen.has(exp)) {
+          seen.add(exp);
+          exports.push(exp);
+        }
+      });
+    }
+
+    return exports;
+  }
+
+  private extractExportsFromNode(node: Parser.SyntaxNode): string[] {
+    if (node.type === 'namespace_definition') {
+      return this.extractExportsFromNamespace(node);
+    }
+
+    const name = this.extractExportableDeclaration(node);
+    return name ? [name] : [];
+  }
+
+  private extractExportsFromNamespace(node: Parser.SyntaxNode): string[] {
+    const exports: string[] = [];
+    const body = node.childForFieldName('body');
+
+    if (body) {
+      for (let i = 0; i < body.namedChildCount; i++) {
+        const child = body.namedChild(i);
+        if (child) {
+          const name = this.extractExportableDeclaration(child);
+          if (name) exports.push(name);
+        }
+      }
+    }
+
+    return exports;
+  }
+
+  private extractExportableDeclaration(node: Parser.SyntaxNode): string | null {
+    if (this.exportableTypes.has(node.type)) {
+      const nameNode = node.childForFieldName('name');
+      return nameNode ? nameNode.text : null;
+    }
+
+    return null;
+  }
+}
+
+// =============================================================================
+// IMPORT EXTRACTOR
+// =============================================================================
+
+/**
+ * PHP import extractor
+ *
+ * Handles:
+ * - use App\Models\User;
+ * - use App\Services\AuthService as Auth;
+ */
+export class PHPImportExtractor implements LanguageImportExtractor {
+  readonly importNodeTypes = ['namespace_use_declaration'];
+
+  extractImportPath(node: Parser.SyntaxNode): string | null {
+    return this.extractPHPUseDeclarationPath(node);
+  }
+
+  processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const clause = node.namedChild(i);
+      if (clause?.type !== 'namespace_use_clause') continue;
+
+      const fullPath = this.extractPHPQualifiedName(clause);
+      if (!fullPath) continue;
+
+      // Check for alias (use App\Models\User as U)
+      const directNames = clause.namedChildren.filter(c => c.type === 'name');
+      let symbol: string;
+      if (directNames.length > 0) {
+        symbol = directNames[directNames.length - 1].text;
+      } else {
+        const parts = fullPath.split('\\');
+        symbol = parts[parts.length - 1];
+      }
+
+      return { importPath: fullPath, symbols: [symbol] };
+    }
+
+    return null;
+  }
+
+  private extractPHPUseDeclarationPath(node: Parser.SyntaxNode): string | null {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const clause = node.namedChild(i);
+      if (clause?.type === 'namespace_use_clause') {
+        return this.extractPHPQualifiedName(clause);
+      }
+    }
+    return null;
+  }
+
+  private extractPHPQualifiedName(clause: Parser.SyntaxNode): string | null {
+    for (let i = 0; i < clause.namedChildCount; i++) {
+      const child = clause.namedChild(i);
+      if (child?.type === 'qualified_name') {
+        const parts: string[] = [];
+        for (let j = 0; j < child.namedChildCount; j++) {
+          const part = child.namedChild(j);
+          if (part?.type === 'namespace_name') {
+            for (let k = 0; k < part.namedChildCount; k++) {
+              const namePart = part.namedChild(k);
+              if (namePart?.type === 'name') {
+                parts.push(namePart.text);
+              }
+            }
+          } else if (part?.type === 'name') {
+            parts.push(part.text);
+          }
+        }
+        return parts.join('\\');
+      }
+    }
+    return null;
+  }
+}
+
+// =============================================================================
+// LANGUAGE DEFINITION
+// =============================================================================
 
 export const phpDefinition: LanguageDefinition = {
   id: 'php',
@@ -9,6 +243,7 @@ export const phpDefinition: LanguageDefinition = {
   grammar: PHPParser.php,
   traverser: new PHPTraverser(),
   exportExtractor: new PHPExportExtractor(),
+  importExtractor: new PHPImportExtractor(),
 
   complexity: {
     decisionPoints: [

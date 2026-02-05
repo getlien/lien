@@ -214,3 +214,9 @@ export {
 // =============================================================================
 
 export { Result, Ok, Err, isOk, isErr, unwrap, unwrapOr } from './utils/result.js';
+
+// =============================================================================
+// AST LANGUAGE REGISTRY
+// =============================================================================
+
+export { getSupportedExtensions } from './indexer/ast/languages/registry.js';

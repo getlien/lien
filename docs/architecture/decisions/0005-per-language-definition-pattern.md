@@ -1,9 +1,11 @@
 # ADR-005: Consolidate Language Support into Per-Language Definitions
 
-**Status**: Accepted
+**Status**: Partially Superseded by [ADR-006](0006-consolidated-language-files-with-import-extractors.md)
 **Date**: 2026-02-03
 **Deciders**: Core Team
 **Related**: [ADR-002](0002-strategy-pattern-ast-traversal.md), [ADR-003](0003-ast-based-chunking.md)
+
+> **Note**: The file structure described in this ADR (4 files per language) has been further consolidated. See [ADR-006](0006-consolidated-language-files-with-import-extractors.md) for the current architecture (2 files per language).
 
 ## Context and Problem Statement
 

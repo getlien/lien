@@ -87,33 +87,33 @@ These live in project root and are tracked in git:
 
 ## Adding a New AST Language
 
-Each AST-supported language has a single definition file in `packages/core/src/indexer/ast/languages/` containing all language-specific data (grammar, traverser, extractor, complexity constants, symbol types).
+Each AST-supported language is a **single self-contained file** in `packages/core/src/indexer/ast/languages/` containing everything: traverser class, export extractor class, import extractor class, and the `LanguageDefinition` that wires them together.
 
-### Steps to add a new language (e.g., Rust):
+### Steps to add a new language:
 
-1. **Create definition**: `languages/rust.ts` with the full `LanguageDefinition`
+1. **Create definition**: `languages/newlang.ts` with traverser, extractors, and `LanguageDefinition`
 2. **Register it**: Import + add to `definitions` array in `languages/registry.ts`
-3. **Create traverser**: `traversers/rust.ts` (the traverser class with AST traversal logic)
-4. **Create extractor**: `extractors/rust.ts` (the export extractor class)
 
-**4 files total.** All language-specific *data* (node types, operator sets, extensions) lives in the definition file. The traverser/extractor *classes* stay in their own folders since they contain logic, not just data.
+**2 files total.** All language-specific code (traversal logic, import/export extraction, complexity constants, symbol types) lives in one file per language. Path normalization extensions are automatically derived from the registry.
 
 ### Re-export / barrel file support
 
 The dependency analyzer (`get_dependents`) tracks transitive dependents through barrel/index files. This works at the metadata level — it reads `imports`, `importedSymbols`, and `exports` from chunk metadata. The analyzer is **language-agnostic**; each language just needs to populate the metadata correctly.
 
-If the new language has a re-export pattern (e.g., Python `__init__.py`, Rust `pub use`), the **export extractor** must include re-exported symbols in the `exports` array. The import side (`imports`, `importedSymbols`) is handled by `symbols.ts`. Once both sides are populated, the re-export resolution works automatically.
+If the new language has a re-export pattern (e.g., Python `__init__.py`, Rust `pub use`), the **export extractor** must include re-exported symbols in the `exports` array. The **import extractor** handles import path extraction and symbol mapping. Once both sides are populated, the re-export resolution works automatically.
 
 | Language | Re-export pattern | Where to handle |
 |----------|------------------|-----------------|
-| TS/JS | `export { X } from './module'` | Already implemented in `symbols.ts` |
-| Python | `from .auth import X` in `__init__.py` | `extractors/python.ts` — treat imported symbols as exports |
-| Rust | `pub use crate::auth::X` | `extractors/rust.ts` — treat `pub use` as exports |
+| TS/JS | `export { X } from './module'` | Import extractor in `languages/javascript.ts` |
+| Python | `from .auth import X` in `__init__.py` | Export extractor in `languages/python.ts` |
+| Rust | `pub use crate::auth::X` | Export extractor in `languages/rust.ts` |
 
 ### Key files:
 - `languages/types.ts` — `LanguageDefinition` interface
-- `languages/registry.ts` — Central registry (`getLanguage()`, `detectLanguage()`, `getAllLanguages()`)
+- `languages/registry.ts` — Central registry (`getLanguage()`, `detectLanguage()`, `getAllLanguages()`, `getSupportedExtensions()`)
 - `languages/{lang}.ts` — One per language (typescript, javascript, php, python, rust)
+- `extractors/types.ts` — `LanguageExportExtractor` and `LanguageImportExtractor` interfaces
+- `traversers/types.ts` — `LanguageTraverser` interface
 
 Complexity files, parser, symbol extraction, and traverser/extractor registries all consume from the central registry rather than maintaining their own language-specific constants.
 

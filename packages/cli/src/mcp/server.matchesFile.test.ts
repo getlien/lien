@@ -180,6 +180,34 @@ describe('matchesFile - Path Boundary Checking', () => {
     });
   });
 
+  describe('Rust module matching', () => {
+    it('should match Rust module path to file path', () => {
+      // Rust uses `crate::auth` which gets converted to `auth`
+      expect(testMatchesFile('auth', 'src/auth.rs')).toBe(true);
+      expect(testMatchesFile('auth/middleware', 'src/auth/middleware.rs')).toBe(true);
+    });
+
+    it('should match Rust module in nested directory', () => {
+      expect(testMatchesFile('models/user', 'src/models/user.rs')).toBe(true);
+      expect(testMatchesFile('utils', 'src/utils.rs')).toBe(true);
+    });
+
+    it('should match Rust super-relative paths', () => {
+      // `super::utils` converts to `../utils`
+      expect(testMatchesFile('../utils', 'utils.rs')).toBe(true);
+    });
+
+    it('should normalize .rs extension', () => {
+      expect(testMatchesFile('auth.rs', 'src/auth.rs')).toBe(true);
+      expect(testMatchesFile('src/auth.rs', 'src/auth')).toBe(true);
+    });
+
+    it('should NOT match unrelated Rust modules', () => {
+      expect(testMatchesFile('auth', 'src/models.rs')).toBe(false);
+      expect(testMatchesFile('auth/middleware', 'src/auth/handler.rs')).toBe(false);
+    });
+  });
+
   describe('Python module matching', () => {
     it('should match Python dotted module to file path', () => {
       // Python uses dotted paths like django.http which map to django/http/*.py
