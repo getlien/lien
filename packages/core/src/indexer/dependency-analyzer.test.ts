@@ -356,8 +356,8 @@ describe('analyzeDependencies', () => {
       expect(dependentPaths.filter(p => p === 'src/handler.ts')).toHaveLength(1);
     });
 
-    it('should find dependents through wildcard re-exports', () => {
-      // auth.ts → index.ts (export * from) → handler.ts
+    it('should find dependents through barrel re-exports with imports array', () => {
+      // auth.ts → index.ts (barrel with imports + exports) → handler.ts
       const chunks: SearchResult[] = [
         createChunk('src/auth.ts', [], undefined, {
           exports: ['AuthService'],

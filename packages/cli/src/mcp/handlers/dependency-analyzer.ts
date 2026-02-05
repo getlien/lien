@@ -278,14 +278,13 @@ function findReExportedSymbols(
  * No new DB queries needed; uses the already-scanned chunks.
  */
 function buildReExportGraph(
-  allChunks: SearchResult[],
+  allChunksByFile: Map<string, SearchResult[]>,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string
 ): ReExporter[] {
-  const chunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
   const reExporters: ReExporter[] = [];
 
-  for (const [filepath, chunks] of chunksByFile.entries()) {
+  for (const [filepath, chunks] of allChunksByFile.entries()) {
     if (matchesFile(filepath, normalizedTarget)) continue;
 
     const importsFromTarget = collectImportedSymbolsFromTarget(chunks, normalizedTarget, normalizePathCached);
@@ -342,12 +341,11 @@ function findTransitiveDependents(
   importIndex: Map<string, SearchResult[]>,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string,
-  allChunks: SearchResult[],
+  allChunksByFile: Map<string, SearchResult[]>,
   existingFiles: Set<string>
 ): SearchResult[] {
   const transitiveChunks: SearchResult[] = [];
   const visited = new Set<string>([normalizedTarget, ...existingFiles]);
-  const allChunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
 
   const queue: Array<[string, number]> = [];
   for (const re of reExporters) {
@@ -542,13 +540,13 @@ function mergeTransitiveDependents(
   importIndex: Map<string, SearchResult[]>,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string,
-  allChunks: SearchResult[],
+  allChunksByFile: Map<string, SearchResult[]>,
   chunksByFile: Map<string, SearchResult[]>,
   log: (message: string, level?: 'warning') => void
 ): void {
   const existingFiles = new Set(chunksByFile.keys());
   const transitiveChunks = findTransitiveDependents(
-    reExporters, importIndex, normalizedTarget, normalizePathCached, allChunks, existingFiles
+    reExporters, importIndex, normalizedTarget, normalizePathCached, allChunksByFile, existingFiles
   );
   if (transitiveChunks.length > 0) {
     const transitiveByFile = groupChunksByFile(transitiveChunks);
@@ -587,9 +585,10 @@ export async function findDependents(
   const chunksByFile = groupChunksByFile(dependentChunks);
 
   // Find transitive dependents through re-export chains (barrel files)
-  const reExporters = buildReExportGraph(allChunks, normalizedTarget, normalizePathCached);
+  const allChunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
+  const reExporters = buildReExportGraph(allChunksByFile, normalizedTarget, normalizePathCached);
   if (reExporters.length > 0) {
-    mergeTransitiveDependents(reExporters, importIndex, normalizedTarget, normalizePathCached, allChunks, chunksByFile, log);
+    mergeTransitiveDependents(reExporters, importIndex, normalizedTarget, normalizePathCached, allChunksByFile, chunksByFile, log);
   }
 
   // Calculate metrics

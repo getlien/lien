@@ -373,14 +373,13 @@ function fileIsReExporter(
  * `importedSymbols[targetPath]` (or raw `imports`) AND `exports`.
  */
 function buildReExportGraph(
-  allChunks: SearchResult[],
+  allChunksByFile: Map<string, SearchResult[]>,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string
 ): string[] {
-  const chunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
   const reExporters: string[] = [];
 
-  for (const [filepath, chunks] of chunksByFile.entries()) {
+  for (const [filepath, chunks] of allChunksByFile.entries()) {
     if (matchesFile(filepath, normalizedTarget)) continue;
     if (fileIsReExporter(chunks, normalizedTarget, normalizePathCached)) {
       reExporters.push(filepath);
@@ -428,12 +427,11 @@ function findTransitiveDependents(
   importIndex: Map<string, SearchResult[]>,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string,
-  allChunks: SearchResult[],
+  allChunksByFile: Map<string, SearchResult[]>,
   existingFiles: Set<string>
 ): SearchResult[] {
   const transitiveChunks: SearchResult[] = [];
   const visited = new Set<string>([normalizedTarget, ...existingFiles]);
-  const allChunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
 
   const queue: Array<[string, number]> = [];
   for (const rePath of reExporterPaths) {
@@ -483,11 +481,12 @@ export function analyzeDependencies(
   const chunksByFile = groupChunksByFile(dependentChunks, workspaceRoot);
 
   // Find transitive dependents through re-export chains (barrel files)
-  const reExporterPaths = buildReExportGraph(allChunks, normalizedTarget, normalizePathCached);
+  const allChunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
+  const reExporterPaths = buildReExportGraph(allChunksByFile, normalizedTarget, normalizePathCached);
   if (reExporterPaths.length > 0) {
     const existingFiles = new Set(chunksByFile.keys());
     const transitiveChunks = findTransitiveDependents(
-      reExporterPaths, importIndex, normalizedTarget, normalizePathCached, allChunks, existingFiles
+      reExporterPaths, importIndex, normalizedTarget, normalizePathCached, allChunksByFile, existingFiles
     );
     if (transitiveChunks.length > 0) {
       const transitiveByFile = groupChunksByFile(transitiveChunks, workspaceRoot);
