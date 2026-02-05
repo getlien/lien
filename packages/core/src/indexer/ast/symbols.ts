@@ -606,6 +606,34 @@ function processPHPUseDeclaration(node: Parser.SyntaxNode): { importPath: string
 }
 
 /**
+ * Extract the original symbol name from an export_specifier node.
+ * Uses the original name (not alias) since it maps to the source module's exports.
+ */
+function extractSymbolFromSpecifier(specifier: Parser.SyntaxNode): string | undefined {
+  if (specifier.type !== 'export_specifier') return undefined;
+  const nameNode = specifier.childForFieldName('name');
+  const symbol = nameNode?.text || specifier.text;
+  if (symbol && !symbol.includes('{') && !symbol.includes('}')) {
+    return symbol;
+  }
+  return undefined;
+}
+
+/**
+ * Extract all symbol names from an export_clause node.
+ */
+function extractSymbolsFromExportClause(clause: Parser.SyntaxNode): string[] {
+  const symbols: string[] = [];
+  for (let j = 0; j < clause.namedChildCount; j++) {
+    const specifier = clause.namedChild(j);
+    if (!specifier) continue;
+    const symbol = extractSymbolFromSpecifier(specifier);
+    if (symbol) symbols.push(symbol);
+  }
+  return symbols;
+}
+
+/**
  * Process a re-export statement: export { X, Y } from './module'
  *
  * Extracts the source path and symbol names from export_specifier nodes.
@@ -618,23 +646,10 @@ function processReExportStatement(node: Parser.SyntaxNode): { importPath: string
   const importPath = sourceNode.text.replace(/['"]/g, '');
   const symbols: string[] = [];
 
-  // Find export_clause which contains export_specifiers
   for (let i = 0; i < node.namedChildCount; i++) {
     const child = node.namedChild(i);
-    if (!child) continue;
-
-    if (child.type === 'export_clause') {
-      for (let j = 0; j < child.namedChildCount; j++) {
-        const specifier = child.namedChild(j);
-        if (specifier?.type === 'export_specifier') {
-          // Use the original name (not alias) since it maps to the source module
-          const nameNode = specifier.childForFieldName('name');
-          const symbol = nameNode?.text || specifier.text;
-          if (symbol && !symbol.includes('{') && !symbol.includes('}')) {
-            symbols.push(symbol);
-          }
-        }
-      }
+    if (child?.type === 'export_clause') {
+      symbols.push(...extractSymbolsFromExportClause(child));
     }
   }
 

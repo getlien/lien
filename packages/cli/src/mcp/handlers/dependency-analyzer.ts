@@ -173,6 +173,39 @@ function fileIsReExporter(
 }
 
 /**
+ * Collect named symbols from a chunk's importedSymbols that match the target path.
+ */
+function collectNamedSymbolsFromChunk(
+  chunk: SearchResult,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  symbols: Set<string>
+): void {
+  const importedSymbols = chunk.metadata.importedSymbols;
+  if (!importedSymbols || typeof importedSymbols !== 'object') return;
+  for (const [importPath, syms] of Object.entries(importedSymbols)) {
+    if (matchesFile(normalizePathCached(importPath), normalizedTarget)) {
+      for (const sym of syms) symbols.add(sym);
+    }
+  }
+}
+
+/**
+ * Check if a chunk has raw imports matching the target path (adds '*' sentinel).
+ */
+function collectRawImportSentinel(
+  chunk: SearchResult,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  symbols: Set<string>
+): void {
+  const imports = chunk.metadata.imports || [];
+  for (const imp of imports) {
+    if (matchesFile(normalizePathCached(imp), normalizedTarget)) symbols.add('*');
+  }
+}
+
+/**
  * Collect symbols from a single chunk that are imported from the target path.
  * Adds named symbols from importedSymbols and '*' sentinel for raw imports.
  */
@@ -182,18 +215,8 @@ function collectSymbolsFromChunk(
   normalizePathCached: (path: string) => string,
   symbols: Set<string>
 ): void {
-  const importedSymbols = chunk.metadata.importedSymbols;
-  if (importedSymbols && typeof importedSymbols === 'object') {
-    for (const [importPath, syms] of Object.entries(importedSymbols)) {
-      if (matchesFile(normalizePathCached(importPath), normalizedTarget)) {
-        for (const sym of syms) symbols.add(sym);
-      }
-    }
-  }
-  const imports = chunk.metadata.imports || [];
-  for (const imp of imports) {
-    if (matchesFile(normalizePathCached(imp), normalizedTarget)) symbols.add('*');
-  }
+  collectNamedSymbolsFromChunk(chunk, normalizedTarget, normalizePathCached, symbols);
+  collectRawImportSentinel(chunk, normalizedTarget, normalizePathCached, symbols);
 }
 
 /**
