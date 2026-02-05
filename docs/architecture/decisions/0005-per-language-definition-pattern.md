@@ -128,6 +128,12 @@ Complexity functions that don't receive a language parameter (cyclomatic, cognit
 3. Create `traversers/rust.ts` (the traverser class)
 4. Create `extractors/rust.ts` (the extractor class)
 
+### Re-export / barrel file support
+
+The dependency analyzer tracks transitive dependents through barrel/re-export files (e.g., `index.ts`, Python `__init__.py`, Rust `pub use`). This works at the metadata level — the analyzer reads `imports`, `importedSymbols`, and `exports` from chunk metadata and is fully language-agnostic. No analyzer changes are needed per language.
+
+If the new language has a re-export pattern, the **export extractor** (`extractors/{lang}.ts`) must include re-exported symbols in the `exports` array. For example, Python's `__init__.py` with `from .auth import AuthService` should list `AuthService` as an export. Once `exports` and `importedSymbols` are both populated correctly, the re-export chain resolution works automatically.
+
 ## Related Decisions
 
 * [ADR-002: Strategy Pattern for AST Traversal](0002-strategy-pattern-ast-traversal.md) — Established the traverser pattern this builds on
