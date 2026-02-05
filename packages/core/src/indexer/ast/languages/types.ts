@@ -1,5 +1,5 @@
 import type { LanguageTraverser } from '../traversers/types.js';
-import type { LanguageExportExtractor, LanguageImportExtractor } from '../extractors/types.js';
+import type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from '../extractors/types.js';
 import type { SupportedLanguage } from './registry.js';
 
 /**
@@ -34,6 +34,9 @@ export interface LanguageDefinition {
 
   /** Language-specific import extractor instance (optional for backwards compatibility) */
   importExtractor?: LanguageImportExtractor;
+
+  /** Language-specific symbol extractor instance (optional for backwards compatibility) */
+  symbolExtractor?: LanguageSymbolExtractor;
 
   /** Complexity metric configuration */
   complexity: {
