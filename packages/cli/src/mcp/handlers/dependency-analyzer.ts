@@ -173,6 +173,30 @@ function fileIsReExporter(
 }
 
 /**
+ * Collect symbols from a single chunk that are imported from the target path.
+ * Adds named symbols from importedSymbols and '*' sentinel for raw imports.
+ */
+function collectSymbolsFromChunk(
+  chunk: SearchResult,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  symbols: Set<string>
+): void {
+  const importedSymbols = chunk.metadata.importedSymbols;
+  if (importedSymbols && typeof importedSymbols === 'object') {
+    for (const [importPath, syms] of Object.entries(importedSymbols)) {
+      if (matchesFile(normalizePathCached(importPath), normalizedTarget)) {
+        for (const sym of syms) symbols.add(sym);
+      }
+    }
+  }
+  const imports = chunk.metadata.imports || [];
+  for (const imp of imports) {
+    if (matchesFile(normalizePathCached(imp), normalizedTarget)) symbols.add('*');
+  }
+}
+
+/**
  * Collect symbols imported from a target path across all chunks of a file.
  * Returns a set of symbol names. Includes '*' sentinel for raw imports
  * where specific symbols are unknown.
@@ -184,18 +208,7 @@ function collectImportedSymbolsFromTarget(
 ): Set<string> {
   const symbols = new Set<string>();
   for (const chunk of chunks) {
-    const importedSymbols = chunk.metadata.importedSymbols;
-    if (importedSymbols && typeof importedSymbols === 'object') {
-      for (const [importPath, syms] of Object.entries(importedSymbols)) {
-        if (matchesFile(normalizePathCached(importPath), normalizedTarget)) {
-          for (const sym of syms) symbols.add(sym);
-        }
-      }
-    }
-    const imports = chunk.metadata.imports || [];
-    for (const imp of imports) {
-      if (matchesFile(normalizePathCached(imp), normalizedTarget)) symbols.add('*');
-    }
+    collectSymbolsFromChunk(chunk, normalizedTarget, normalizePathCached, symbols);
   }
   return symbols;
 }
@@ -266,6 +279,35 @@ function buildReExportGraph(
 }
 
 /**
+ * Process a single dependent chunk during BFS traversal.
+ * Returns the chunk if it's a new dependent, or null if already visited.
+ * If the chunk's file is itself a re-exporter, adds it to the BFS queue.
+ */
+function processTransitiveChunk(
+  chunk: SearchResult,
+  reExporterPath: string,
+  depth: number,
+  visited: Set<string>,
+  allChunksByFile: Map<string, SearchResult[]>,
+  normalizePathCached: (path: string) => string,
+  queue: Array<[string, number]>
+): SearchResult | null {
+  const chunkFile = normalizePathCached(chunk.metadata.file);
+  if (visited.has(chunkFile)) return null;
+
+  visited.add(chunkFile);
+
+  if (depth < MAX_REEXPORT_DEPTH) {
+    const fileChunks = allChunksByFile.get(chunkFile) || [];
+    if (fileIsReExporter(fileChunks, reExporterPath, normalizePathCached)) {
+      queue.push([chunkFile, depth + 1]);
+    }
+  }
+
+  return chunk;
+}
+
+/**
  * Find transitive dependents through re-export chains using BFS.
  *
  * For each re-exporter, finds files that import from it, then checks if those
@@ -297,18 +339,8 @@ function findTransitiveDependents(
     const dependentChunks = findDependentChunks(importIndex, reExporterPath);
 
     for (const chunk of dependentChunks) {
-      const chunkFile = normalizePathCached(chunk.metadata.file);
-      if (visited.has(chunkFile)) continue;
-
-      transitiveChunks.push(chunk);
-      visited.add(chunkFile);
-
-      if (depth < MAX_REEXPORT_DEPTH) {
-        const fileChunks = allChunksByFile.get(chunkFile) || [];
-        if (fileIsReExporter(fileChunks, reExporterPath, normalizePathCached)) {
-          queue.push([chunkFile, depth + 1]);
-        }
-      }
+      const result = processTransitiveChunk(chunk, reExporterPath, depth, visited, allChunksByFile, normalizePathCached, queue);
+      if (result) transitiveChunks.push(result);
     }
   }
 
@@ -463,8 +495,48 @@ function validateSymbolExport(
 }
 
 /**
+ * Merge source chunks into the target map, grouping by file path.
+ */
+function mergeChunksByFile(
+  target: Map<string, SearchResult[]>,
+  source: Map<string, SearchResult[]>
+): void {
+  for (const [fp, chunks] of source.entries()) {
+    const existing = target.get(fp);
+    if (existing) {
+      existing.push(...chunks);
+    } else {
+      target.set(fp, chunks);
+    }
+  }
+}
+
+/**
+ * Find and merge transitive dependents through re-export chains into chunksByFile.
+ */
+function mergeTransitiveDependents(
+  reExporters: ReExporter[],
+  importIndex: Map<string, SearchResult[]>,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  allChunks: SearchResult[],
+  chunksByFile: Map<string, SearchResult[]>,
+  log: (message: string, level?: 'warning') => void
+): void {
+  const existingFiles = new Set(chunksByFile.keys());
+  const transitiveChunks = findTransitiveDependents(
+    reExporters, importIndex, normalizedTarget, normalizePathCached, allChunks, existingFiles
+  );
+  if (transitiveChunks.length > 0) {
+    const transitiveByFile = groupChunksByFile(transitiveChunks);
+    mergeChunksByFile(chunksByFile, transitiveByFile);
+    log(`Found ${transitiveByFile.size} additional dependents via re-export chains`);
+  }
+}
+
+/**
  * Find all dependents of a target file.
- * 
+ *
  * @param vectorDB - Vector database to scan
  * @param filepath - Path to file to find dependents for
  * @param crossRepo - Whether to search across repos
@@ -494,22 +566,7 @@ export async function findDependents(
   // Find transitive dependents through re-export chains (barrel files)
   const reExporters = buildReExportGraph(allChunks, normalizedTarget, normalizePathCached);
   if (reExporters.length > 0) {
-    const existingFiles = new Set(chunksByFile.keys());
-    const transitiveChunks = findTransitiveDependents(
-      reExporters, importIndex, normalizedTarget, normalizePathCached, allChunks, existingFiles
-    );
-    if (transitiveChunks.length > 0) {
-      // Merge transitive chunks into chunksByFile
-      const transitiveByFile = groupChunksByFile(transitiveChunks);
-      for (const [fp, chunks] of transitiveByFile.entries()) {
-        if (chunksByFile.has(fp)) {
-          chunksByFile.get(fp)!.push(...chunks);
-        } else {
-          chunksByFile.set(fp, chunks);
-        }
-      }
-      log(`Found ${transitiveByFile.size} additional dependents via re-export chains`);
-    }
+    mergeTransitiveDependents(reExporters, importIndex, normalizedTarget, normalizePathCached, allChunks, chunksByFile, log);
   }
 
   // Calculate metrics

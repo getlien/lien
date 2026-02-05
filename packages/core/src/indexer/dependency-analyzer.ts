@@ -391,6 +391,35 @@ function buildReExportGraph(
 }
 
 /**
+ * Process a single dependent chunk during BFS traversal.
+ * Returns the chunk if it's a new dependent, or null if already visited.
+ * If the chunk's file is itself a re-exporter, adds it to the BFS queue.
+ */
+function processTransitiveChunk(
+  chunk: SearchResult,
+  reExporterPath: string,
+  depth: number,
+  visited: Set<string>,
+  allChunksByFile: Map<string, SearchResult[]>,
+  normalizePathCached: (path: string) => string,
+  queue: Array<[string, number]>
+): SearchResult | null {
+  const chunkFile = normalizePathCached(chunk.metadata.file);
+  if (visited.has(chunkFile)) return null;
+
+  visited.add(chunkFile);
+
+  if (depth < MAX_REEXPORT_DEPTH) {
+    const fileChunks = allChunksByFile.get(chunkFile) || [];
+    if (fileIsReExporter(fileChunks, reExporterPath, normalizePathCached)) {
+      queue.push([chunkFile, depth + 1]);
+    }
+  }
+
+  return chunk;
+}
+
+/**
  * Find transitive dependents through re-export chains using BFS.
  * Bounded to MAX_REEXPORT_DEPTH.
  */
@@ -419,18 +448,8 @@ function findTransitiveDependents(
     const dependentChunks = findDependentChunks(reExporterPath, importIndex);
 
     for (const chunk of dependentChunks) {
-      const chunkFile = normalizePathCached(chunk.metadata.file);
-      if (visited.has(chunkFile)) continue;
-
-      transitiveChunks.push(chunk);
-      visited.add(chunkFile);
-
-      if (depth < MAX_REEXPORT_DEPTH) {
-        const fileChunks = allChunksByFile.get(chunkFile) || [];
-        if (fileIsReExporter(fileChunks, reExporterPath, normalizePathCached)) {
-          queue.push([chunkFile, depth + 1]);
-        }
-      }
+      const result = processTransitiveChunk(chunk, reExporterPath, depth, visited, allChunksByFile, normalizePathCached, queue);
+      if (result) transitiveChunks.push(result);
     }
   }
 
