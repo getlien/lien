@@ -8,6 +8,14 @@
 import { getSupportedExtensions } from '../indexer/ast/languages/registry.js';
 
 /**
+ * Escape special regex characters in a string.
+ * This ensures extensions like "c++" don't break the regex pattern.
+ */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Build the extension-stripping regex from the language registry.
  * Cached after first call.
  */
@@ -15,7 +23,7 @@ let extensionRegex: RegExp | null = null;
 
 function getExtensionRegex(): RegExp {
   if (!extensionRegex) {
-    const extPattern = getSupportedExtensions().join('|');
+    const extPattern = getSupportedExtensions().map(escapeRegex).join('|');
     extensionRegex = new RegExp(`\\.(${extPattern})$`);
   }
   return extensionRegex;

@@ -140,8 +140,10 @@ export class RustExportExtractor implements LanguageExportExtractor {
   ): void {
     if (node.type === 'use_declaration') {
       const argument = node.childForFieldName('argument');
-      const name = argument ? this.extractUseExportName(argument) : null;
-      if (name) addExport(name);
+      if (argument) {
+        const names = this.extractUseExportNames(argument);
+        names.forEach(addExport);
+      }
       return;
     }
 
@@ -159,15 +161,30 @@ export class RustExportExtractor implements LanguageExportExtractor {
     return false;
   }
 
-  private extractUseExportName(node: Parser.SyntaxNode): string | null {
+  /**
+   * Extract exported names from a use declaration argument.
+   * Handles both simple patterns and list patterns:
+   * - `pub use crate::auth::AuthService;` -> ["AuthService"]
+   * - `pub use crate::auth::{AuthService, AuthError};` -> ["AuthService", "AuthError"]
+   */
+  private extractUseExportNames(node: Parser.SyntaxNode): string[] {
     if (node.type === 'scoped_identifier') {
       const nameNode = node.childForFieldName('name');
-      return nameNode?.text ?? null;
+      return nameNode ? [nameNode.text] : [];
     }
     if (node.type === 'identifier') {
-      return node.text;
+      return [node.text];
     }
-    return null;
+    if (node.type === 'scoped_use_list') {
+      // Find the use_list child and extract symbols
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const child = node.namedChild(i);
+        if (child?.type === 'use_list') {
+          return extractUseListSymbols(child);
+        }
+      }
+    }
+    return [];
   }
 }
 
