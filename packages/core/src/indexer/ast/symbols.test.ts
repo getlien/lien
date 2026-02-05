@@ -91,6 +91,71 @@ function hello() {
     });
   });
 
+  describe('extractImportedSymbols - Re-exports', () => {
+    it('should extract re-exported symbols with their source paths', () => {
+      const content = `
+export { validateEmail, validatePhone } from './validation';
+export { User as UserType } from './types';
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      // Re-export source paths should appear as imported symbols
+      expect(importedSymbols['./validation']).toEqual(['validateEmail', 'validatePhone']);
+      // Uses original name, not alias
+      expect(importedSymbols['./types']).toEqual(['User']);
+    });
+
+    it('should handle mixed imports and re-exports', () => {
+      const content = `
+import { foo } from './module';
+export { bar } from './other';
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      expect(importedSymbols['./module']).toEqual(['foo']);
+      expect(importedSymbols['./other']).toEqual(['bar']);
+    });
+
+    it('should handle re-export of default', () => {
+      const content = `
+export { default as utils } from './utils';
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      expect(importedSymbols['./utils']).toEqual(['default']);
+    });
+
+    it('should not include export statements without source', () => {
+      const content = `
+const foo = 1;
+export { foo };
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      expect(Object.keys(importedSymbols)).toHaveLength(0);
+    });
+
+    it('should handle wildcard re-exports (export * from)', () => {
+      const content = `
+export * from './utils';
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+
+      // Wildcard re-exports have no named specifiers, so no symbols are extracted
+      expect(Object.keys(importedSymbols)).toHaveLength(0);
+    });
+  });
+
   describe('extractExports', () => {
     it('should extract named exports', () => {
       const content = `
@@ -514,6 +579,58 @@ import * as utils from '../utils';
       expect(imports).toContain('./module');
       expect(imports).toContain('library');
       expect(imports).toContain('../utils');
+    });
+
+    it('should extract re-export source paths', () => {
+      const content = `
+export { foo } from './module';
+export { bar, baz } from '../utils';
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const imports = extractImports(parseResult.tree!.rootNode);
+
+      expect(imports).toContain('./module');
+      expect(imports).toContain('../utils');
+    });
+
+    it('should extract mixed imports and re-export paths', () => {
+      const content = `
+import { something } from './a';
+export { other } from './b';
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const imports = extractImports(parseResult.tree!.rootNode);
+
+      expect(imports).toContain('./a');
+      expect(imports).toContain('./b');
+    });
+
+    it('should extract wildcard re-export source paths', () => {
+      const content = `
+export * from './utils';
+export * from '../helpers';
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const imports = extractImports(parseResult.tree!.rootNode);
+
+      expect(imports).toContain('./utils');
+      expect(imports).toContain('../helpers');
+    });
+
+    it('should not extract export statements without source', () => {
+      const content = `
+const foo = 1;
+export { foo };
+export function bar() {}
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const imports = extractImports(parseResult.tree!.rootNode);
+
+      expect(imports).toHaveLength(0);
     });
 
     it('should extract PHP use statements', () => {

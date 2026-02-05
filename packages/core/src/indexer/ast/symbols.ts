@@ -294,50 +294,41 @@ function extractReturnType(node: Parser.SyntaxNode, _content: string): string | 
 }
 
 /**
+ * Extract the source path from a node's 'source' field, stripping quotes.
+ */
+function extractSourcePath(node: Parser.SyntaxNode): string | null {
+  const sourceNode = node.childForFieldName('source');
+  return sourceNode ? sourceNode.text.replace(/['"]/g, '') : null;
+}
+
+/**
+ * Import path extractors keyed by AST node type.
+ * Each returns the import path(s) to add, or null to skip.
+ */
+const IMPORT_PATH_EXTRACTORS: Record<string, (node: Parser.SyntaxNode) => string | null> = {
+  'import_statement': (node) => extractSourcePath(node) ?? node.text.split('\n')[0],
+  'import_from_statement': (node) => node.text.split('\n')[0],
+  'namespace_use_declaration': (node) => extractPHPUseDeclaration(node),
+  'export_statement': (node) => extractSourcePath(node),
+};
+
+/**
  * Extract import statements from a file
  */
 export function extractImports(rootNode: Parser.SyntaxNode): string[] {
   const imports: string[] = [];
-  
-  function traverse(node: Parser.SyntaxNode) {
-    // Handle import statements (shared node type between languages)
-    if (node.type === 'import_statement') {
-      // TypeScript/JavaScript: Extract just the module path from 'source' field
-      const sourceNode = node.childForFieldName('source');
-      if (sourceNode) {
-        // TS/JS import with source field
-        const importPath = sourceNode.text.replace(/['"]/g, '');
-        imports.push(importPath);
-      } else {
-        // Python import without source field (e.g., "import os")
-        const importText = node.text.split('\n')[0];
-        imports.push(importText);
-      }
-    }
-    // Python-specific: from...import statements
-    else if (node.type === 'import_from_statement') {
-      // Python: Get the entire import line (first line only)
-      const importText = node.text.split('\n')[0];
-      imports.push(importText);
-    }
-    // PHP: namespace use declarations (use App\Models\User;)
-    else if (node.type === 'namespace_use_declaration') {
-      const phpImport = extractPHPUseDeclaration(node);
-      if (phpImport) {
-        imports.push(phpImport);
-      }
-    }
-    
-    // Only traverse top-level nodes for imports
-    if (node === rootNode) {
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child) traverse(child);
-      }
+
+  for (let i = 0; i < rootNode.namedChildCount; i++) {
+    const child = rootNode.namedChild(i);
+    if (!child) continue;
+
+    const extractor = IMPORT_PATH_EXTRACTORS[child.type];
+    if (extractor) {
+      const result = extractor(child);
+      if (result) imports.push(result);
     }
   }
-  
-  traverse(rootNode);
+
   return imports;
 }
 
@@ -412,39 +403,30 @@ function extractPHPQualifiedName(clause: Parser.SyntaxNode): string | null {
  * `import './styles.css'`) are also not tracked and will not appear in
  * `importedSymbols`.
  */
+/**
+ * Symbol processors keyed by AST node type.
+ * import_statement is handled separately due to TS/JS vs Python disambiguation.
+ */
+type SymbolProcessor = (node: Parser.SyntaxNode) => { importPath: string; symbols: string[] } | null;
+
+const IMPORT_SYMBOL_PROCESSORS: Record<string, SymbolProcessor> = {
+  'import_statement': (node) => node.childForFieldName('source') ? processImportStatement(node) : processPythonImport(node),
+  'import_from_statement': processPythonFromImport,
+  'namespace_use_declaration': processPHPUseDeclaration,
+  'export_statement': processReExportStatement,
+};
+
 export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<string, string[]> {
   const importedSymbols: Record<string, string[]> = {};
-  
-  // Only process top-level import statements
+
   for (let i = 0; i < rootNode.namedChildCount; i++) {
     const node = rootNode.namedChild(i);
     if (!node) continue;
-    
-    let result: { importPath: string; symbols: string[] } | null = null;
-    
-    // TypeScript/JavaScript imports vs Python imports both use 'import_statement' type
-    // Distinguish by checking for TypeScript/JavaScript-specific structure (source field)
-    if (node.type === 'import_statement') {
-      const sourceNode = node.childForFieldName('source');
-      if (sourceNode) {
-        // TypeScript/JavaScript: has a 'source' field
-        result = processImportStatement(node);
-      } else {
-        // Python regular import: no 'source' field
-        result = processPythonImport(node);
-      }
-    }
-    // Python: from...import statements
-    else if (node.type === 'import_from_statement') {
-      result = processPythonFromImport(node);
-    }
-    // PHP: namespace use declarations
-    else if (node.type === 'namespace_use_declaration') {
-      result = processPHPUseDeclaration(node);
-    }
-    
+
+    const processor = IMPORT_SYMBOL_PROCESSORS[node.type];
+    const result = processor ? processor(node) : null;
+
     if (result) {
-      // Merge symbols if importing from the same path multiple times
       if (importedSymbols[result.importPath]) {
         importedSymbols[result.importPath].push(...result.symbols);
       } else {
@@ -452,7 +434,7 @@ export function extractImportedSymbols(rootNode: Parser.SyntaxNode): Record<stri
       }
     }
   }
-  
+
   return importedSymbols;
 }
 
@@ -591,6 +573,57 @@ function processPHPUseDeclaration(node: Parser.SyntaxNode): { importPath: string
   }
   
   return null;
+}
+
+/**
+ * Extract the original symbol name from an export_specifier node.
+ * Uses the original name (not alias) since it maps to the source module's exports.
+ */
+function extractSymbolFromSpecifier(specifier: Parser.SyntaxNode): string | undefined {
+  if (specifier.type !== 'export_specifier') return undefined;
+  const nameNode = specifier.childForFieldName('name');
+  const symbol = nameNode?.text || specifier.text;
+  if (symbol && !symbol.includes('{') && !symbol.includes('}')) {
+    return symbol;
+  }
+  return undefined;
+}
+
+/**
+ * Extract all symbol names from an export_clause node.
+ */
+function extractSymbolsFromExportClause(clause: Parser.SyntaxNode): string[] {
+  const symbols: string[] = [];
+  for (let j = 0; j < clause.namedChildCount; j++) {
+    const specifier = clause.namedChild(j);
+    if (!specifier) continue;
+    const symbol = extractSymbolFromSpecifier(specifier);
+    if (symbol) symbols.push(symbol);
+  }
+  return symbols;
+}
+
+/**
+ * Process a re-export statement: export { X, Y } from './module'
+ *
+ * Extracts the source path and symbol names from export_specifier nodes.
+ * Uses the original name (not alias) since this maps to the source module's exports.
+ */
+function processReExportStatement(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  const sourceNode = node.childForFieldName('source');
+  if (!sourceNode) return null;
+
+  const importPath = sourceNode.text.replace(/['"]/g, '');
+  const symbols: string[] = [];
+
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child?.type === 'export_clause') {
+      symbols.push(...extractSymbolsFromExportClause(child));
+    }
+  }
+
+  return symbols.length > 0 ? { importPath, symbols } : null;
 }
 
 /**

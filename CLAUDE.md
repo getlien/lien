@@ -98,6 +98,18 @@ Each AST-supported language has a single definition file in `packages/core/src/i
 
 **4 files total.** All language-specific *data* (node types, operator sets, extensions) lives in the definition file. The traverser/extractor *classes* stay in their own folders since they contain logic, not just data.
 
+### Re-export / barrel file support
+
+The dependency analyzer (`get_dependents`) tracks transitive dependents through barrel/index files. This works at the metadata level — it reads `imports`, `importedSymbols`, and `exports` from chunk metadata. The analyzer is **language-agnostic**; each language just needs to populate the metadata correctly.
+
+If the new language has a re-export pattern (e.g., Python `__init__.py`, Rust `pub use`), the **export extractor** must include re-exported symbols in the `exports` array. The import side (`imports`, `importedSymbols`) is handled by `symbols.ts`. Once both sides are populated, the re-export resolution works automatically.
+
+| Language | Re-export pattern | Where to handle |
+|----------|------------------|-----------------|
+| TS/JS | `export { X } from './module'` | Already implemented in `symbols.ts` |
+| Python | `from .auth import X` in `__init__.py` | `extractors/python.ts` — treat imported symbols as exports |
+| Rust | `pub use crate::auth::X` | `extractors/rust.ts` — treat `pub use` as exports |
+
 ### Key files:
 - `languages/types.ts` — `LanguageDefinition` interface
 - `languages/registry.ts` — Central registry (`getLanguage()`, `detectLanguage()`, `getAllLanguages()`)

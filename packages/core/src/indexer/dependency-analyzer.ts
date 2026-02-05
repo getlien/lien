@@ -286,8 +286,177 @@ function calculateRiskLevelFromCount(count: number): RiskLevel {
 }
 
 /**
+ * Maximum depth for following re-export chains.
+ * Covers real-world barrel chains (A → barrel → barrel → consumer)
+ * without risk of runaway traversal.
+ */
+const MAX_REEXPORT_DEPTH = 3;
+
+/**
+ * Check if a single chunk imports from the given source path.
+ * Checks both `importedSymbols` keys and raw `imports` array.
+ */
+export function chunkImportsFrom(
+  chunk: SearchResult,
+  sourcePath: string,
+  normalizePathCached: (path: string) => string
+): boolean {
+  const importedSymbols = chunk.metadata.importedSymbols;
+  if (importedSymbols && typeof importedSymbols === 'object') {
+    for (const importPath of Object.keys(importedSymbols)) {
+      if (matchesFile(normalizePathCached(importPath), sourcePath)) return true;
+    }
+  }
+
+  const imports = chunk.metadata.imports || [];
+  for (const imp of imports) {
+    if (matchesFile(normalizePathCached(imp), sourcePath)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a chunk has any exports.
+ */
+function chunkHasExports(chunk: SearchResult): boolean {
+  return chunk.metadata.exports != null && chunk.metadata.exports.length > 0;
+}
+
+/**
+ * Group chunks by their normalized file path.
+ */
+export function groupChunksByNormalizedPath(
+  chunks: SearchResult[],
+  normalizePathCached: (path: string) => string
+): Map<string, SearchResult[]> {
+  const grouped = new Map<string, SearchResult[]>();
+  for (const chunk of chunks) {
+    const canonical = normalizePathCached(chunk.metadata.file);
+    let list = grouped.get(canonical);
+    if (!list) {
+      list = [];
+      grouped.set(canonical, list);
+    }
+    list.push(chunk);
+  }
+  return grouped;
+}
+
+/**
+ * Check if a file (given its chunks) is a re-exporter from a source path.
+ * A re-exporter has both imports from the source and exports.
+ */
+export function fileIsReExporter(
+  chunks: SearchResult[],
+  sourcePath: string,
+  normalizePathCached: (path: string) => string
+): boolean {
+  let importsFromSource = false;
+  let hasExports = false;
+  for (const chunk of chunks) {
+    if (!importsFromSource && chunkImportsFrom(chunk, sourcePath, normalizePathCached)) {
+      importsFromSource = true;
+    }
+    if (!hasExports && chunkHasExports(chunk)) {
+      hasExports = true;
+    }
+    if (importsFromSource && hasExports) return true;
+  }
+  return false;
+}
+
+/**
+ * Build a list of files that re-export from the target file.
+ *
+ * A re-exporter is a file where a symbol appears in both
+ * `importedSymbols[targetPath]` (or raw `imports`) AND `exports`.
+ */
+function buildReExportGraph(
+  allChunksByFile: Map<string, SearchResult[]>,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string
+): string[] {
+  const reExporters: string[] = [];
+
+  for (const [filepath, chunks] of allChunksByFile.entries()) {
+    if (matchesFile(filepath, normalizedTarget)) continue;
+    if (fileIsReExporter(chunks, normalizedTarget, normalizePathCached)) {
+      reExporters.push(filepath);
+    }
+  }
+
+  return reExporters;
+}
+
+/**
+ * Process a single dependent chunk during BFS traversal.
+ * Returns the chunk if it's a new dependent, or null if already visited.
+ * If the chunk's file is itself a re-exporter, adds it to the BFS queue.
+ */
+function processTransitiveChunk(
+  chunk: SearchResult,
+  reExporterPath: string,
+  depth: number,
+  visited: Set<string>,
+  allChunksByFile: Map<string, SearchResult[]>,
+  normalizePathCached: (path: string) => string,
+  queue: Array<[string, number]>
+): SearchResult | null {
+  const chunkFile = normalizePathCached(chunk.metadata.file);
+  if (visited.has(chunkFile)) return null;
+
+  visited.add(chunkFile);
+
+  if (depth < MAX_REEXPORT_DEPTH) {
+    const fileChunks = allChunksByFile.get(chunkFile) || [];
+    if (fileIsReExporter(fileChunks, reExporterPath, normalizePathCached)) {
+      queue.push([chunkFile, depth + 1]);
+    }
+  }
+
+  return chunk;
+}
+
+/**
+ * Find transitive dependents through re-export chains using BFS.
+ * Bounded to MAX_REEXPORT_DEPTH.
+ */
+export function findTransitiveDependents(
+  reExporterPaths: string[],
+  importIndex: Map<string, SearchResult[]>,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  allChunksByFile: Map<string, SearchResult[]>,
+  existingFiles: Set<string>
+): SearchResult[] {
+  const transitiveChunks: SearchResult[] = [];
+  const visited = new Set<string>([normalizedTarget, ...existingFiles]);
+
+  const queue: Array<[string, number]> = [];
+  for (const rePath of reExporterPaths) {
+    if (!visited.has(rePath)) {
+      queue.push([rePath, 1]);
+      visited.add(rePath);
+    }
+  }
+
+  while (queue.length > 0) {
+    const [reExporterPath, depth] = queue.shift()!;
+    const dependentChunks = findDependentChunks(reExporterPath, importIndex);
+
+    for (const chunk of dependentChunks) {
+      const result = processTransitiveChunk(chunk, reExporterPath, depth, visited, allChunksByFile, normalizePathCached, queue);
+      if (result) transitiveChunks.push(result);
+    }
+  }
+
+  return transitiveChunks;
+}
+
+/**
  * Analyzes dependencies for a given file by finding all chunks that import it.
- * 
+ *
  * @param targetFilepath - The file to analyze dependencies for
  * @param allChunks - All chunks from the vector database
  * @param workspaceRoot - The workspace root directory
@@ -300,37 +469,57 @@ export function analyzeDependencies(
 ): DependencyAnalysisResult {
   // Create cached path normalizer
   const normalizePathCached = createPathNormalizer(workspaceRoot);
-  
+
   // Build import index for efficient lookup
   const importIndex = buildImportIndex(allChunks, normalizePathCached);
-  
+
   // Find all dependent chunks
   const normalizedTarget = normalizePathCached(targetFilepath);
   const dependentChunks = findDependentChunks(normalizedTarget, importIndex);
-  
+
   // Group by file for analysis
   const chunksByFile = groupChunksByFile(dependentChunks, workspaceRoot);
-  
+
+  // Find transitive dependents through re-export chains (barrel files)
+  const allChunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
+  const reExporterPaths = buildReExportGraph(allChunksByFile, normalizedTarget, normalizePathCached);
+  if (reExporterPaths.length > 0) {
+    const existingFiles = new Set(chunksByFile.keys());
+    const transitiveChunks = findTransitiveDependents(
+      reExporterPaths, importIndex, normalizedTarget, normalizePathCached, allChunksByFile, existingFiles
+    );
+    if (transitiveChunks.length > 0) {
+      const transitiveByFile = groupChunksByFile(transitiveChunks, workspaceRoot);
+      for (const [fp, chunks] of transitiveByFile.entries()) {
+        if (chunksByFile.has(fp)) {
+          chunksByFile.get(fp)!.push(...chunks);
+        } else {
+          chunksByFile.set(fp, chunks);
+        }
+      }
+    }
+  }
+
   // Calculate complexity metrics
   const fileComplexities = calculateFileComplexities(chunksByFile);
   const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
-  
+
   // Build dependents list
   const dependents = Array.from(chunksByFile.keys()).map(filepath => ({
     filepath,
     isTestFile: isTestFile(filepath),
   }));
-  
+
   // Calculate risk level
   let riskLevel = calculateRiskLevelFromCount(dependents.length);
-  
+
   // Boost risk level if complexity warrants it
   if (complexityMetrics?.complexityRiskBoost) {
     if (RISK_ORDER[complexityMetrics.complexityRiskBoost] > RISK_ORDER[riskLevel]) {
       riskLevel = complexityMetrics.complexityRiskBoost;
     }
   }
-  
+
   return {
     dependents,
     dependentCount: dependents.length,

@@ -1,6 +1,10 @@
 import type { SearchResult } from '@liendev/core';
 import { VectorDBInterface } from '@liendev/core';
 import { QdrantDB } from '@liendev/core';
+import {
+  groupChunksByNormalizedPath,
+  findTransitiveDependents,
+} from '@liendev/core';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
 
 /**
@@ -91,6 +95,168 @@ export interface DependencyAnalysisResult {
 }
 
 /**
+ * A file that re-exports symbols from another file.
+ */
+interface ReExporter {
+  filepath: string;
+  reExportedSymbols: string[];
+}
+
+/**
+ * Collect named symbols from a chunk's importedSymbols that match the target path.
+ */
+function collectNamedSymbolsFromChunk(
+  chunk: SearchResult,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  symbols: Set<string>
+): void {
+  const importedSymbols = chunk.metadata.importedSymbols;
+  if (!importedSymbols || typeof importedSymbols !== 'object') return;
+  for (const [importPath, syms] of Object.entries(importedSymbols)) {
+    if (matchesFile(normalizePathCached(importPath), normalizedTarget)) {
+      for (const sym of syms) symbols.add(sym);
+    }
+  }
+}
+
+/**
+ * Check if a chunk has raw imports matching the target path (adds '*' sentinel).
+ */
+function collectRawImportSentinel(
+  chunk: SearchResult,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  symbols: Set<string>
+): void {
+  const imports = chunk.metadata.imports || [];
+  for (const imp of imports) {
+    if (matchesFile(normalizePathCached(imp), normalizedTarget)) symbols.add('*');
+  }
+}
+
+/**
+ * Collect symbols from a single chunk that are imported from the target path.
+ * Adds named symbols from importedSymbols and '*' sentinel for raw imports.
+ */
+function collectSymbolsFromChunk(
+  chunk: SearchResult,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  symbols: Set<string>
+): void {
+  collectNamedSymbolsFromChunk(chunk, normalizedTarget, normalizePathCached, symbols);
+  collectRawImportSentinel(chunk, normalizedTarget, normalizePathCached, symbols);
+}
+
+/**
+ * Collect symbols imported from a target path across all chunks of a file.
+ * Returns a set of symbol names. Includes '*' sentinel for raw imports
+ * where specific symbols are unknown.
+ */
+function collectImportedSymbolsFromTarget(
+  chunks: SearchResult[],
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string
+): Set<string> {
+  const symbols = new Set<string>();
+  for (const chunk of chunks) {
+    collectSymbolsFromChunk(chunk, normalizedTarget, normalizePathCached, symbols);
+  }
+  return symbols;
+}
+
+/**
+ * Collect all exported symbols across all chunks of a file.
+ */
+function collectExportsFromChunks(chunks: SearchResult[]): Set<string> {
+  const allExports = new Set<string>();
+  for (const chunk of chunks) {
+    for (const exp of chunk.metadata.exports || []) allExports.add(exp);
+  }
+  return allExports;
+}
+
+/**
+ * Find which symbols are re-exported (imported from target AND exported).
+ * Handles wildcard/namespace imports by treating all exports as re-exported.
+ */
+function findReExportedSymbols(
+  importsFromTarget: Set<string>,
+  allExports: Set<string>
+): string[] {
+  if (importsFromTarget.has('*')) return [...allExports];
+
+  for (const sym of importsFromTarget) {
+    if (sym.startsWith('* as ')) return [...allExports];
+  }
+
+  const reExported: string[] = [];
+  for (const sym of importsFromTarget) {
+    if (allExports.has(sym)) reExported.push(sym);
+  }
+  return reExported;
+}
+
+/**
+ * Build a graph of re-exporter files for a given target.
+ *
+ * A re-exporter is a file where a symbol appears in both
+ * `importedSymbols[targetPath]` AND `exports`. This identifies barrel files
+ * that re-export from the target.
+ *
+ * No new DB queries needed; uses the already-scanned chunks.
+ */
+function buildReExportGraph(
+  allChunksByFile: Map<string, SearchResult[]>,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string
+): ReExporter[] {
+  const reExporters: ReExporter[] = [];
+
+  for (const [filepath, chunks] of allChunksByFile.entries()) {
+    if (matchesFile(filepath, normalizedTarget)) continue;
+
+    const importsFromTarget = collectImportedSymbolsFromTarget(chunks, normalizedTarget, normalizePathCached);
+    const allExports = collectExportsFromChunks(chunks);
+    if (importsFromTarget.size === 0 || allExports.size === 0) continue;
+
+    const reExportedSymbols = findReExportedSymbols(importsFromTarget, allExports);
+    if (reExportedSymbols.length > 0) {
+      reExporters.push({ filepath, reExportedSymbols });
+    }
+  }
+
+  return reExporters;
+}
+
+/**
+ * Check if any chunk in the file imports the target symbol from any of the
+ * given paths (direct target or re-exporter paths).
+ */
+function fileImportsSymbolFromAny(
+  chunks: SearchResult[],
+  targetSymbol: string,
+  targetPaths: string[],
+  normalizePathCached: (path: string) => string
+): boolean {
+  return chunks.some(chunk => {
+    const importedSymbols = chunk.metadata.importedSymbols;
+    if (!importedSymbols) return false;
+
+    for (const [importPath, symbols] of Object.entries(importedSymbols)) {
+      const normalizedImport = normalizePathCached(importPath);
+      const matchesAny = targetPaths.some(tp => matchesFile(normalizedImport, tp));
+      if (matchesAny) {
+        if (symbols.includes(targetSymbol)) return true;
+        if (symbols.some(s => s.startsWith('* as '))) return true;
+      }
+    }
+    return false;
+  });
+}
+
+/**
  * Scan chunks from the database.
  */
 async function scanChunks(
@@ -159,22 +325,23 @@ function buildDependentsList(
   normalizePathCached: (path: string) => string,
   allChunks: SearchResult[],
   filepath: string,
-  log: (message: string, level?: 'warning') => void
+  log: (message: string, level?: 'warning') => void,
+  reExporterPaths: string[] = []
 ): { dependents: DependentInfo[]; totalUsageCount?: number } {
   if (symbol) {
     // Validate that the target file exports this symbol
     validateSymbolExport(allChunks, normalizedTarget, normalizePathCached, symbol, filepath, log);
-    
-    // Symbol-level analysis
-    return findSymbolUsages(chunksByFile, symbol, normalizedTarget, normalizePathCached);
+
+    // Symbol-level analysis — check imports from target AND re-exporter paths
+    return findSymbolUsages(chunksByFile, symbol, normalizedTarget, normalizePathCached, reExporterPaths);
   }
-  
+
   // File-level analysis
   const dependents = Array.from(chunksByFile.keys()).map(fp => ({
     filepath: fp,
     isTestFile: isTestFile(fp),
   }));
-  
+
   return { dependents, totalUsageCount: undefined };
 }
 
@@ -211,8 +378,48 @@ function validateSymbolExport(
 }
 
 /**
+ * Merge source chunks into the target map, grouping by file path.
+ */
+function mergeChunksByFile(
+  target: Map<string, SearchResult[]>,
+  source: Map<string, SearchResult[]>
+): void {
+  for (const [fp, chunks] of source.entries()) {
+    const existing = target.get(fp);
+    if (existing) {
+      existing.push(...chunks);
+    } else {
+      target.set(fp, chunks);
+    }
+  }
+}
+
+/**
+ * Find and merge transitive dependents through re-export chains into chunksByFile.
+ */
+function mergeTransitiveDependents(
+  reExporters: ReExporter[],
+  importIndex: Map<string, SearchResult[]>,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  allChunksByFile: Map<string, SearchResult[]>,
+  chunksByFile: Map<string, SearchResult[]>,
+  log: (message: string, level?: 'warning') => void
+): void {
+  const existingFiles = new Set(chunksByFile.keys());
+  const transitiveChunks = findTransitiveDependents(
+    reExporters.map(r => r.filepath), importIndex, normalizedTarget, normalizePathCached, allChunksByFile, existingFiles
+  );
+  if (transitiveChunks.length > 0) {
+    const transitiveByFile = groupChunksByFile(transitiveChunks);
+    mergeChunksByFile(chunksByFile, transitiveByFile);
+    log(`Found ${transitiveByFile.size} additional dependents via re-export chains`);
+  }
+}
+
+/**
  * Find all dependents of a target file.
- * 
+ *
  * @param vectorDB - Vector database to scan
  * @param filepath - Path to file to find dependents for
  * @param crossRepo - Whether to search across repos
@@ -239,13 +446,21 @@ export async function findDependents(
   const dependentChunks = findDependentChunks(importIndex, normalizedTarget);
   const chunksByFile = groupChunksByFile(dependentChunks);
 
+  // Find transitive dependents through re-export chains (barrel files)
+  const allChunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
+  const reExporters = buildReExportGraph(allChunksByFile, normalizedTarget, normalizePathCached);
+  if (reExporters.length > 0) {
+    mergeTransitiveDependents(reExporters, importIndex, normalizedTarget, normalizePathCached, allChunksByFile, chunksByFile, log);
+  }
+
   // Calculate metrics
   const fileComplexities = calculateFileComplexities(chunksByFile);
   const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
 
   // Build dependents list (file-level or symbol-level)
+  const reExporterPaths = reExporters.map(re => re.filepath);
   const { dependents, totalUsageCount } = buildDependentsList(
-    chunksByFile, symbol, normalizedTarget, normalizePathCached, allChunks, filepath, log
+    chunksByFile, symbol, normalizedTarget, normalizePathCached, allChunks, filepath, log, reExporterPaths
   );
 
   // Sort dependents: production files first, then test files
@@ -512,15 +727,8 @@ export function groupDependentsByRepo(
  * Find usages of a specific symbol in dependent files.
  *
  * Looks for:
- * 1. Files that import the symbol from the target file (direct or namespace import)
+ * 1. Files that import the symbol from the target file or re-exporter paths
  * 2. Chunks within those files that have call sites for the symbol
- *
- * **Known Limitation - Direct Imports Only:**
- * Symbol tracking only works for files that import directly from the target file path.
- * Symbols accessed through re-export chains (e.g., `import { Foo } from '@scope/pkg'`
- * where the package barrel file re-exports from the target) are not tracked. These files
- * will still appear in file-level dependents (without the `symbol` parameter) but won't
- * be included in symbol-specific usage counts.
  *
  * **Known Limitation - Namespace Imports:**
  * Files with namespace imports (e.g., `import * as utils from './module'`) are included
@@ -533,13 +741,16 @@ function findSymbolUsages(
   chunksByFile: Map<string, SearchResult[]>,
   targetSymbol: string,
   normalizedTarget: string,
-  normalizePathCached: (path: string) => string
+  normalizePathCached: (path: string) => string,
+  reExporterPaths: string[] = []
 ): { dependents: DependentInfo[]; totalUsageCount: number } {
   const dependents: DependentInfo[] = [];
   let totalUsageCount = 0;
+  const allTargetPaths = [normalizedTarget, ...reExporterPaths];
 
   for (const [filepath, chunks] of chunksByFile.entries()) {
-    if (!fileImportsSymbol(chunks, targetSymbol, normalizedTarget, normalizePathCached)) {
+    // Check if file imports the symbol from either the target or any re-exporter
+    if (!fileImportsSymbolFromAny(chunks, targetSymbol, allTargetPaths, normalizePathCached)) {
       continue;
     }
 
@@ -555,52 +766,6 @@ function findSymbolUsages(
   }
 
   return { dependents, totalUsageCount };
-}
-
-/**
- * Check if any chunk in the file imports the target symbol.
- */
-function fileImportsSymbol(
-  chunks: SearchResult[],
-  targetSymbol: string,
-  normalizedTarget: string,
-  normalizePathCached: (path: string) => string
-): boolean {
-  return chunks.some(chunk => {
-    const importedSymbols = chunk.metadata.importedSymbols;
-    if (!importedSymbols) return false;
-    
-    for (const [importPath, symbols] of Object.entries(importedSymbols)) {
-      const normalizedImport = normalizePathCached(importPath);
-      if (matchesFile(normalizedImport, normalizedTarget)) {
-        // Direct symbol import
-        if (symbols.includes(targetSymbol)) return true;
-        
-        // Namespace import (e.g., import * as utils from './module')
-        // LIMITATION: Namespace imports grant access to all exports from the module.
-        // Call sites are tracked as the property name only (e.g., utils.foo() → 'foo'),
-        // not the qualified name. This means:
-        // - If file imports `* as utils from './validate'` and calls `utils.validateEmail()`
-        // - The call site is tracked as 'validateEmail' (without the 'utils.' prefix)
-        // - This will match correctly when searching for 'validateEmail' usages
-        // 
-        // POTENTIAL FALSE POSITIVES: If the same symbol name exists in multiple modules
-        // that are both imported via namespace imports, we cannot distinguish which one
-        // is being called. For example:
-        //   import * as utils from './utils';
-        //   import * as helpers from './helpers';
-        //   utils.format()  // tracked as 'format'
-        //   helpers.format()  // also tracked as 'format'
-        // Both would match when searching for 'format', even if only one is the target.
-        // In practice, this is rare due to namespace isolation in well-structured code.
-        //
-        // TODO: Track namespace aliases at call sites (e.g., 'utils.foo' instead of just 'foo')
-        //       to enable precise matching and eliminate these false positives.
-        if (symbols.some(s => s.startsWith('* as '))) return true;
-      }
-    }
-    return false;
-  });
 }
 
 /**
