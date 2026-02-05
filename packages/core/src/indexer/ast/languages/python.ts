@@ -166,17 +166,24 @@ export class PythonExportExtractor implements LanguageExportExtractor {
       if (child.type === 'dotted_name') {
         addExport(child.text);
       } else if (child.type === 'aliased_import') {
-        const identifiers = child.namedChildren.filter(c => c.type === 'identifier');
-        const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
-
-        const hasAlias = identifiers.length >= 2;
-        const aliasName = hasAlias ? identifiers[identifiers.length - 1].text : identifiers[0]?.text;
-        const defaultName = dottedName?.text;
-
-        const name = aliasName ?? defaultName;
-        if (name) addExport(name);
+        this.extractAliasedImportName(child, addExport);
       }
     }
+  }
+
+  private extractAliasedImportName(
+    node: Parser.SyntaxNode,
+    addExport: (name: string) => void
+  ): void {
+    const identifiers = node.namedChildren.filter(c => c.type === 'identifier');
+    const dottedName = node.namedChildren.find(c => c.type === 'dotted_name');
+
+    const hasAlias = identifiers.length >= 2;
+    const aliasName = hasAlias ? identifiers[identifiers.length - 1].text : identifiers[0]?.text;
+    const defaultName = dottedName?.text;
+
+    const name = aliasName ?? defaultName;
+    if (name) addExport(name);
   }
 }
 
