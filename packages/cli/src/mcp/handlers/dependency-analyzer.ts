@@ -1,6 +1,10 @@
 import type { SearchResult } from '@liendev/core';
 import { VectorDBInterface } from '@liendev/core';
 import { QdrantDB } from '@liendev/core';
+import {
+  groupChunksByNormalizedPath,
+  findTransitiveDependents,
+} from '@liendev/core';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
 
 /**
@@ -91,85 +95,11 @@ export interface DependencyAnalysisResult {
 }
 
 /**
- * Maximum depth for following re-export chains.
- * Covers real-world barrel chains (A → barrel → barrel → consumer)
- * without risk of runaway traversal.
- */
-const MAX_REEXPORT_DEPTH = 3;
-
-/**
  * A file that re-exports symbols from another file.
  */
 interface ReExporter {
   filepath: string;
   reExportedSymbols: string[];
-}
-
-/**
- * Check if a single chunk imports from the given source path.
- * Checks both `importedSymbols` keys and raw `imports` array.
- */
-function chunkImportsFrom(
-  chunk: SearchResult,
-  sourcePath: string,
-  normalizePathCached: (path: string) => string
-): boolean {
-  const importedSymbols = chunk.metadata.importedSymbols;
-  if (importedSymbols && typeof importedSymbols === 'object') {
-    for (const importPath of Object.keys(importedSymbols)) {
-      if (matchesFile(normalizePathCached(importPath), sourcePath)) return true;
-    }
-  }
-
-  const imports = chunk.metadata.imports || [];
-  for (const imp of imports) {
-    if (matchesFile(normalizePathCached(imp), sourcePath)) return true;
-  }
-
-  return false;
-}
-
-/**
- * Group chunks by their normalized file path.
- */
-function groupChunksByNormalizedPath(
-  chunks: SearchResult[],
-  normalizePathCached: (path: string) => string
-): Map<string, SearchResult[]> {
-  const grouped = new Map<string, SearchResult[]>();
-  for (const chunk of chunks) {
-    const canonical = normalizePathCached(chunk.metadata.file);
-    let list = grouped.get(canonical);
-    if (!list) {
-      list = [];
-      grouped.set(canonical, list);
-    }
-    list.push(chunk);
-  }
-  return grouped;
-}
-
-/**
- * Check if a file (given its chunks) is a re-exporter from a source path.
- * A re-exporter has both imports from the source and exports.
- */
-function fileIsReExporter(
-  chunks: SearchResult[],
-  sourcePath: string,
-  normalizePathCached: (path: string) => string
-): boolean {
-  let importsFromSource = false;
-  let hasExports = false;
-  for (const chunk of chunks) {
-    if (!importsFromSource && chunkImportsFrom(chunk, sourcePath, normalizePathCached)) {
-      importsFromSource = true;
-    }
-    if (!hasExports && chunk.metadata.exports && chunk.metadata.exports.length > 0) {
-      hasExports = true;
-    }
-    if (importsFromSource && hasExports) return true;
-  }
-  return false;
 }
 
 /**
@@ -298,74 +228,6 @@ function buildReExportGraph(
   }
 
   return reExporters;
-}
-
-/**
- * Process a single dependent chunk during BFS traversal.
- * Returns the chunk if it's a new dependent, or null if already visited.
- * If the chunk's file is itself a re-exporter, adds it to the BFS queue.
- */
-function processTransitiveChunk(
-  chunk: SearchResult,
-  reExporterPath: string,
-  depth: number,
-  visited: Set<string>,
-  allChunksByFile: Map<string, SearchResult[]>,
-  normalizePathCached: (path: string) => string,
-  queue: Array<[string, number]>
-): SearchResult | null {
-  const chunkFile = normalizePathCached(chunk.metadata.file);
-  if (visited.has(chunkFile)) return null;
-
-  visited.add(chunkFile);
-
-  if (depth < MAX_REEXPORT_DEPTH) {
-    const fileChunks = allChunksByFile.get(chunkFile) || [];
-    if (fileIsReExporter(fileChunks, reExporterPath, normalizePathCached)) {
-      queue.push([chunkFile, depth + 1]);
-    }
-  }
-
-  return chunk;
-}
-
-/**
- * Find transitive dependents through re-export chains using BFS.
- *
- * For each re-exporter, finds files that import from it, then checks if those
- * files are themselves re-exporters (for chained barrels). Bounded to
- * MAX_REEXPORT_DEPTH to prevent runaway traversal.
- */
-function findTransitiveDependents(
-  reExporters: ReExporter[],
-  importIndex: Map<string, SearchResult[]>,
-  normalizedTarget: string,
-  normalizePathCached: (path: string) => string,
-  allChunksByFile: Map<string, SearchResult[]>,
-  existingFiles: Set<string>
-): SearchResult[] {
-  const transitiveChunks: SearchResult[] = [];
-  const visited = new Set<string>([normalizedTarget, ...existingFiles]);
-
-  const queue: Array<[string, number]> = [];
-  for (const re of reExporters) {
-    if (!visited.has(re.filepath)) {
-      queue.push([re.filepath, 1]);
-      visited.add(re.filepath);
-    }
-  }
-
-  while (queue.length > 0) {
-    const [reExporterPath, depth] = queue.shift()!;
-    const dependentChunks = findDependentChunks(importIndex, reExporterPath);
-
-    for (const chunk of dependentChunks) {
-      const result = processTransitiveChunk(chunk, reExporterPath, depth, visited, allChunksByFile, normalizePathCached, queue);
-      if (result) transitiveChunks.push(result);
-    }
-  }
-
-  return transitiveChunks;
 }
 
 /**
@@ -546,7 +408,7 @@ function mergeTransitiveDependents(
 ): void {
   const existingFiles = new Set(chunksByFile.keys());
   const transitiveChunks = findTransitiveDependents(
-    reExporters, importIndex, normalizedTarget, normalizePathCached, allChunksByFile, existingFiles
+    reExporters.map(r => r.filepath), importIndex, normalizedTarget, normalizePathCached, allChunksByFile, existingFiles
   );
   if (transitiveChunks.length > 0) {
     const transitiveByFile = groupChunksByFile(transitiveChunks);

@@ -40,6 +40,10 @@ export { detectFileType as detectLanguage } from './indexer/scanner.js';
 export { indexSingleFile, indexMultipleFiles, normalizeToRelativePath } from './indexer/incremental.js';
 export { extractSymbols } from './indexer/symbol-extractor.js';
 export { computeContentHash, isHashAlgorithmCompatible } from './indexer/content-hash.js';
+export {
+  groupChunksByNormalizedPath,
+  findTransitiveDependents,
+} from './indexer/dependency-analyzer.js';
 
 // =============================================================================
 // EMBEDDINGS

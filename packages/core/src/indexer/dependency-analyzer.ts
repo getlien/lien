@@ -296,7 +296,7 @@ const MAX_REEXPORT_DEPTH = 3;
  * Check if a single chunk imports from the given source path.
  * Checks both `importedSymbols` keys and raw `imports` array.
  */
-function chunkImportsFrom(
+export function chunkImportsFrom(
   chunk: SearchResult,
   sourcePath: string,
   normalizePathCached: (path: string) => string
@@ -326,7 +326,7 @@ function chunkHasExports(chunk: SearchResult): boolean {
 /**
  * Group chunks by their normalized file path.
  */
-function groupChunksByNormalizedPath(
+export function groupChunksByNormalizedPath(
   chunks: SearchResult[],
   normalizePathCached: (path: string) => string
 ): Map<string, SearchResult[]> {
@@ -347,7 +347,7 @@ function groupChunksByNormalizedPath(
  * Check if a file (given its chunks) is a re-exporter from a source path.
  * A re-exporter has both imports from the source and exports.
  */
-function fileIsReExporter(
+export function fileIsReExporter(
   chunks: SearchResult[],
   sourcePath: string,
   normalizePathCached: (path: string) => string
@@ -422,7 +422,7 @@ function processTransitiveChunk(
  * Find transitive dependents through re-export chains using BFS.
  * Bounded to MAX_REEXPORT_DEPTH.
  */
-function findTransitiveDependents(
+export function findTransitiveDependents(
   reExporterPaths: string[],
   importIndex: Map<string, SearchResult[]>,
   normalizedTarget: string,
