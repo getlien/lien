@@ -248,9 +248,9 @@ Non-essential features (git tracking, file watching) are optional and can be dis
 - **Details**: See [ADR-002](decisions/0002-strategy-pattern-ast-traversal.md)
 
 ### Per-Language Definition Pattern
-- **Consolidated**: Scattered language data (12-16 files) into single per-language definition files
-- **Result**: Each language is one file in `languages/`. Existing modules consume from a central registry.
-- **Benefit**: Adding a new AST language requires 4 files instead of 12-16
+- **Consolidated**: Scattered language data (12-16 files) into single self-contained per-language files
+- **Result**: Each language is one file in `languages/` containing traverser, extractors, and definition. Existing modules consume from a central registry.
+- **Benefit**: Adding a new AST language requires 2 files (definition + registry entry) instead of 12-16
 - **Details**: See [ADR-005](decisions/0005-per-language-definition-pattern.md)
 
 ### VectorDB Module Split

@@ -326,6 +326,8 @@ No migration needed - 100% backward compatible. TypeScript and JavaScript use th
 
 This ADR's strategy pattern was further refined by [ADR-005](0005-per-language-definition-pattern.md), which consolidated all language-specific data (grammar, traverser, extractor, complexity constants, symbol types) into single per-language definition files. The traverser classes established here remain as the AST traversal logic, but are now referenced from a central `LanguageDefinition` rather than a standalone registry.
 
+[ADR-006](0006-consolidated-language-files-with-import-extractors.md) further consolidated the architecture by merging traverser and extractor classes directly into the language definition files, reducing the number of files per language from 4 to 2. It also added Rust support and introduced `LanguageImportExtractor` for language-specific import extraction.
+
 ## Notes
 
 This refactoring demonstrates the power of **good architecture**:

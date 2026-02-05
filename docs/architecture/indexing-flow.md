@@ -239,7 +239,7 @@ sequenceDiagram
 
 ## Chunking Strategy
 
-Lien uses **AST-based semantic chunking** for supported languages (TypeScript, JavaScript) and falls back to line-based chunking for others.
+Lien uses **AST-based semantic chunking** for supported languages (TypeScript, JavaScript, Python, PHP, Rust) and falls back to line-based chunking for others.
 
 ### AST-Based Semantic Chunking (v0.13.0+)
 
@@ -333,19 +333,25 @@ Each language has a dedicated traverser implementing the `LanguageTraverser` int
 ```mermaid
 graph LR
     CHUNKER["Chunker<br/>(language-agnostic)"]
-    REGISTRY["Traverser Registry"]
+    REGISTRY["Language Registry"]
     TS["TypeScriptTraverser"]
     JS["JavaScriptTraverser"]
-    PY["PythonTraverser<br/>(future)"]
-    
+    PY["PythonTraverser"]
+    PHP["PHPTraverser"]
+    RS["RustTraverser"]
+
     CHUNKER -->|getTraverser(language)| REGISTRY
     REGISTRY -->|typescript| TS
     REGISTRY -->|javascript| JS
     REGISTRY -->|python| PY
-    
+    REGISTRY -->|php| PHP
+    REGISTRY -->|rust| RS
+
     TS -.->|"Node types:<br/>function_declaration<br/>method_definition<br/>class_declaration"| TS
     JS -.->|"Same as TS"| JS
     PY -.->|"Node types:<br/>function_definition<br/>class_definition"| PY
+    PHP -.->|"Node types:<br/>function_definition<br/>method_declaration<br/>class_declaration"| PHP
+    RS -.->|"Node types:<br/>function_item<br/>impl_item<br/>trait_item"| RS
 ```
 
 **Traverser responsibilities:**
@@ -359,7 +365,7 @@ See [ADR-002: Strategy Pattern for AST Traversal](decisions/0002-strategy-patter
 ### Fallback to Line-Based Chunking
 
 AST chunking automatically falls back to line-based for:
-- **Unsupported languages** (Python, Go, Rust - until traversers are added)
+- **Unsupported languages** (languages without a `LanguageDefinition` in the registry)
 - **Very large files** (>1000 lines trigger Tree-sitter buffer limits)
 - **Parse errors** (malformed syntax)
 

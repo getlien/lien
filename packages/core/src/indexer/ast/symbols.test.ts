@@ -18,7 +18,7 @@ function test() {}
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'typescript');
 
       expect(importedSymbols['./module']).toEqual(['foo', 'bar']);
       expect(importedSymbols['../utils/validate']).toEqual(['validateEmail']);
@@ -31,7 +31,7 @@ import lodash from 'lodash';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'typescript');
 
       expect(importedSymbols['react']).toEqual(['React']);
       expect(importedSymbols['lodash']).toEqual(['lodash']);
@@ -44,7 +44,7 @@ import * as fs from 'fs';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'typescript');
 
       expect(importedSymbols['./utils']).toEqual(['* as utils']);
       expect(importedSymbols['fs']).toEqual(['* as fs']);
@@ -56,7 +56,7 @@ import React, { useState, useEffect } from 'react';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'typescript');
 
       // Should include both default and named imports
       expect(importedSymbols['react']).toContain('React');
@@ -70,7 +70,7 @@ import { foo as bar, baz as qux } from './module';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'typescript');
 
       // Aliases should use the local name
       expect(importedSymbols['./module']).toContain('bar');
@@ -85,7 +85,7 @@ function hello() {
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'typescript');
 
       expect(Object.keys(importedSymbols)).toHaveLength(0);
     });
@@ -99,7 +99,7 @@ export { User as UserType } from './types';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'typescript');
 
       // Re-export source paths should appear as imported symbols
       expect(importedSymbols['./validation']).toEqual(['validateEmail', 'validatePhone']);
@@ -114,7 +114,7 @@ export { bar } from './other';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'typescript');
 
       expect(importedSymbols['./module']).toEqual(['foo']);
       expect(importedSymbols['./other']).toEqual(['bar']);
@@ -126,7 +126,7 @@ export { default as utils } from './utils';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'typescript');
 
       expect(importedSymbols['./utils']).toEqual(['default']);
     });
@@ -138,7 +138,7 @@ export { foo };
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'typescript');
 
       expect(Object.keys(importedSymbols)).toHaveLength(0);
     });
@@ -149,7 +149,7 @@ export * from './utils';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'typescript');
 
       // Wildcard re-exports have no named specifiers, so no symbols are extracted
       expect(Object.keys(importedSymbols)).toHaveLength(0);
@@ -574,7 +574,7 @@ import * as utils from '../utils';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const imports = extractImports(parseResult.tree!.rootNode);
+      const imports = extractImports(parseResult.tree!.rootNode, 'typescript');
 
       expect(imports).toContain('./module');
       expect(imports).toContain('library');
@@ -588,7 +588,7 @@ export { bar, baz } from '../utils';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const imports = extractImports(parseResult.tree!.rootNode);
+      const imports = extractImports(parseResult.tree!.rootNode, 'typescript');
 
       expect(imports).toContain('./module');
       expect(imports).toContain('../utils');
@@ -601,7 +601,7 @@ export { other } from './b';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const imports = extractImports(parseResult.tree!.rootNode);
+      const imports = extractImports(parseResult.tree!.rootNode, 'typescript');
 
       expect(imports).toContain('./a');
       expect(imports).toContain('./b');
@@ -614,7 +614,7 @@ export * from '../helpers';
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const imports = extractImports(parseResult.tree!.rootNode);
+      const imports = extractImports(parseResult.tree!.rootNode, 'typescript');
 
       expect(imports).toContain('./utils');
       expect(imports).toContain('../helpers');
@@ -628,7 +628,7 @@ export function bar() {}
       `.trim();
 
       const parseResult = parseAST(content, 'typescript');
-      const imports = extractImports(parseResult.tree!.rootNode);
+      const imports = extractImports(parseResult.tree!.rootNode, 'typescript');
 
       expect(imports).toHaveLength(0);
     });
@@ -641,7 +641,7 @@ use Illuminate\\Http\\Request;
       `.trim();
 
       const parseResult = parseAST(content, 'php');
-      const imports = extractImports(parseResult.tree!.rootNode);
+      const imports = extractImports(parseResult.tree!.rootNode, 'php');
 
       expect(imports).toContain('App\\Models\\User');
       expect(imports).toContain('App\\Services\\AuthService');
@@ -656,7 +656,7 @@ from typing import Optional
       `.trim();
 
       const parseResult = parseAST(content, 'python');
-      const imports = extractImports(parseResult.tree!.rootNode);
+      const imports = extractImports(parseResult.tree!.rootNode, 'python');
 
       expect(imports).toContain('from utils.validate import validateEmail');
       expect(imports).toContain('import os');
@@ -672,7 +672,7 @@ use App\\Services\\AuthService;
       `.trim();
 
       const parseResult = parseAST(content, 'php');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'php');
 
       expect(importedSymbols['App\\Models\\User']).toEqual(['User']);
       expect(importedSymbols['App\\Services\\AuthService']).toEqual(['AuthService']);
@@ -684,7 +684,7 @@ use App\\Services\\AuthService as Auth;
       `.trim();
 
       const parseResult = parseAST(content, 'php');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'php');
 
       // Should use the alias name
       expect(importedSymbols['App\\Services\\AuthService']).toEqual(['Auth']);
@@ -696,7 +696,7 @@ use Domain\\Hobbii\\Collections\\Services\\CollectionManager;
       `.trim();
 
       const parseResult = parseAST(content, 'php');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'php');
 
       expect(importedSymbols['Domain\\Hobbii\\Collections\\Services\\CollectionManager']).toEqual(['CollectionManager']);
     });
@@ -709,7 +709,7 @@ from utils.validate import validateEmail, validatePhone
       `.trim();
 
       const parseResult = parseAST(content, 'python');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'python');
 
       expect(importedSymbols['utils.validate']).toContain('validateEmail');
       expect(importedSymbols['utils.validate']).toContain('validatePhone');
@@ -721,7 +721,7 @@ from typing import Optional as Opt
       `.trim();
 
       const parseResult = parseAST(content, 'python');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'python');
 
       // Should use the alias name
       expect(importedSymbols['typing']).toEqual(['Opt']);
@@ -734,7 +734,7 @@ from json import loads, dumps
       `.trim();
 
       const parseResult = parseAST(content, 'python');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'python');
 
       expect(importedSymbols['os']).toEqual(['path']);
       expect(importedSymbols['json']).toContain('loads');
@@ -749,7 +749,7 @@ import pathlib
       `.trim();
 
       const parseResult = parseAST(content, 'python');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'python');
 
       expect(importedSymbols['os']).toContain('os');
       expect(importedSymbols['sys']).toContain('sys');
@@ -763,7 +763,7 @@ import pandas as pd
       `.trim();
 
       const parseResult = parseAST(content, 'python');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'python');
 
       expect(importedSymbols['numpy']).toContain('np');
       expect(importedSymbols['pandas']).toContain('pd');
@@ -776,10 +776,173 @@ import xml.etree.ElementTree
       `.trim();
 
       const parseResult = parseAST(content, 'python');
-      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode);
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'python');
 
       expect(importedSymbols['os.path']).toContain('os.path');
       expect(importedSymbols['xml.etree.ElementTree']).toContain('xml.etree.ElementTree');
+    });
+  });
+
+  describe('extractImports - Rust', () => {
+    it('should extract crate-relative use paths', () => {
+      const content = `
+use crate::auth::AuthService;
+use crate::models::User;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const imports = extractImports(parseResult.tree!.rootNode, 'rust');
+
+      expect(imports).toContain('auth/AuthService');
+      expect(imports).toContain('models/User');
+    });
+
+    it('should extract self-relative use paths', () => {
+      const content = `
+use self::config::Settings;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const imports = extractImports(parseResult.tree!.rootNode, 'rust');
+
+      expect(imports).toContain('config/Settings');
+    });
+
+    it('should extract super-relative use paths', () => {
+      const content = `
+use super::utils::helper;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const imports = extractImports(parseResult.tree!.rootNode, 'rust');
+
+      expect(imports).toContain('../utils/helper');
+    });
+
+    it('should skip external crate imports', () => {
+      const content = `
+use std::io::Read;
+use serde::Serialize;
+use crate::auth::AuthService;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const imports = extractImports(parseResult.tree!.rootNode, 'rust');
+
+      // Only crate-relative import should appear
+      expect(imports).toHaveLength(1);
+      expect(imports).toContain('auth/AuthService');
+    });
+
+    it('should extract scoped use list paths', () => {
+      const content = `
+use crate::auth::{AuthService, AuthError};
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const imports = extractImports(parseResult.tree!.rootNode, 'rust');
+
+      expect(imports).toContain('auth');
+    });
+  });
+
+  describe('extractImportedSymbols - Rust', () => {
+    it('should extract simple use declaration', () => {
+      const content = `
+use crate::auth::AuthService;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'rust');
+
+      expect(importedSymbols['auth']).toEqual(['AuthService']);
+    });
+
+    it('should extract use list with multiple symbols', () => {
+      const content = `
+use crate::auth::{AuthService, AuthError};
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'rust');
+
+      expect(importedSymbols['auth']).toContain('AuthService');
+      expect(importedSymbols['auth']).toContain('AuthError');
+    });
+
+    it('should extract use as clause (alias)', () => {
+      const content = `
+use crate::auth::Service as Auth;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'rust');
+
+      expect(importedSymbols['auth']).toEqual(['Auth']);
+    });
+
+    it('should extract wildcard use', () => {
+      const content = `
+use crate::models::*;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'rust');
+
+      expect(importedSymbols['models']).toEqual(['*']);
+    });
+
+    it('should skip external crate imports', () => {
+      const content = `
+use std::io::Read;
+use serde::Serialize;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'rust');
+
+      expect(Object.keys(importedSymbols)).toHaveLength(0);
+    });
+
+    it('should extract super-relative imports', () => {
+      const content = `
+use super::utils::helper;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'rust');
+
+      expect(importedSymbols['../utils']).toEqual(['helper']);
+    });
+
+    it('should handle mixed crate and external imports', () => {
+      const content = `
+use std::io::Read;
+use crate::auth::AuthService;
+use crate::models::{User, Product};
+use serde::Serialize;
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'rust');
+
+      // Only crate-relative imports should be tracked
+      expect(importedSymbols['auth']).toEqual(['AuthService']);
+      expect(importedSymbols['models']).toContain('User');
+      expect(importedSymbols['models']).toContain('Product');
+      expect(Object.keys(importedSymbols)).toHaveLength(2);
+    });
+
+    it('should extract use list with alias inside', () => {
+      const content = `
+use crate::auth::{Service as Auth, AuthError};
+      `.trim();
+
+      const parseResult = parseAST(content, 'rust');
+      const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'rust');
+
+      expect(importedSymbols['auth']).toContain('Auth');
+      expect(importedSymbols['auth']).toContain('AuthError');
     });
   });
 

@@ -1,7 +1,6 @@
 import TypeScript from 'tree-sitter-typescript';
 import type { LanguageDefinition } from './types.js';
-import { TypeScriptTraverser } from '../traversers/typescript.js';
-import { TypeScriptExportExtractor } from '../extractors/javascript.js';
+import { TypeScriptTraverser, TypeScriptExportExtractor, TypeScriptImportExtractor } from './javascript.js';
 
 export const typescriptDefinition: LanguageDefinition = {
   id: 'typescript',
@@ -9,6 +8,7 @@ export const typescriptDefinition: LanguageDefinition = {
   grammar: TypeScript.typescript,
   traverser: new TypeScriptTraverser(),
   exportExtractor: new TypeScriptExportExtractor(),
+  importExtractor: new TypeScriptImportExtractor(),
 
   complexity: {
     decisionPoints: [
