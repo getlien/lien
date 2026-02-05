@@ -293,6 +293,80 @@ function calculateRiskLevelFromCount(count: number): RiskLevel {
 const MAX_REEXPORT_DEPTH = 3;
 
 /**
+ * Check if a single chunk imports from the given source path.
+ * Checks both `importedSymbols` keys and raw `imports` array.
+ */
+function chunkImportsFrom(
+  chunk: SearchResult,
+  sourcePath: string,
+  normalizePathCached: (path: string) => string
+): boolean {
+  const importedSymbols = chunk.metadata.importedSymbols;
+  if (importedSymbols && typeof importedSymbols === 'object') {
+    for (const importPath of Object.keys(importedSymbols)) {
+      if (matchesFile(normalizePathCached(importPath), sourcePath)) return true;
+    }
+  }
+
+  const imports = chunk.metadata.imports || [];
+  for (const imp of imports) {
+    if (matchesFile(normalizePathCached(imp), sourcePath)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if a chunk has any exports.
+ */
+function chunkHasExports(chunk: SearchResult): boolean {
+  return chunk.metadata.exports != null && chunk.metadata.exports.length > 0;
+}
+
+/**
+ * Group chunks by their normalized file path.
+ */
+function groupChunksByNormalizedPath(
+  chunks: SearchResult[],
+  normalizePathCached: (path: string) => string
+): Map<string, SearchResult[]> {
+  const grouped = new Map<string, SearchResult[]>();
+  for (const chunk of chunks) {
+    const canonical = normalizePathCached(chunk.metadata.file);
+    let list = grouped.get(canonical);
+    if (!list) {
+      list = [];
+      grouped.set(canonical, list);
+    }
+    list.push(chunk);
+  }
+  return grouped;
+}
+
+/**
+ * Check if a file (given its chunks) is a re-exporter from a source path.
+ * A re-exporter has both imports from the source and exports.
+ */
+function fileIsReExporter(
+  chunks: SearchResult[],
+  sourcePath: string,
+  normalizePathCached: (path: string) => string
+): boolean {
+  let importsFromSource = false;
+  let hasExports = false;
+  for (const chunk of chunks) {
+    if (!importsFromSource && chunkImportsFrom(chunk, sourcePath, normalizePathCached)) {
+      importsFromSource = true;
+    }
+    if (!hasExports && chunkHasExports(chunk)) {
+      hasExports = true;
+    }
+    if (importsFromSource && hasExports) return true;
+  }
+  return false;
+}
+
+/**
  * Build a list of files that re-export from the target file.
  *
  * A re-exporter is a file where a symbol appears in both
@@ -303,102 +377,17 @@ function buildReExportGraph(
   normalizedTarget: string,
   normalizePathCached: (path: string) => string
 ): string[] {
-  // Group chunks by normalized file path
-  const chunksByCanonicalFile = new Map<string, SearchResult[]>();
-  for (const chunk of allChunks) {
-    const canonical = normalizePathCached(chunk.metadata.file);
-    let list = chunksByCanonicalFile.get(canonical);
-    if (!list) {
-      list = [];
-      chunksByCanonicalFile.set(canonical, list);
-    }
-    list.push(chunk);
-  }
-
+  const chunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
   const reExporters: string[] = [];
 
-  for (const [filepath, chunks] of chunksByCanonicalFile.entries()) {
+  for (const [filepath, chunks] of chunksByFile.entries()) {
     if (matchesFile(filepath, normalizedTarget)) continue;
-
-    let importsFromTarget = false;
-    let hasExports = false;
-
-    for (const chunk of chunks) {
-      // Check importedSymbols for imports from the target
-      const importedSymbols = chunk.metadata.importedSymbols;
-      if (importedSymbols && typeof importedSymbols === 'object') {
-        for (const importPath of Object.keys(importedSymbols)) {
-          if (matchesFile(normalizePathCached(importPath), normalizedTarget)) {
-            importsFromTarget = true;
-            break;
-          }
-        }
-      }
-
-      // Also check raw imports
-      if (!importsFromTarget) {
-        const imports = chunk.metadata.imports || [];
-        for (const imp of imports) {
-          if (matchesFile(normalizePathCached(imp), normalizedTarget)) {
-            importsFromTarget = true;
-            break;
-          }
-        }
-      }
-
-      if (chunk.metadata.exports && chunk.metadata.exports.length > 0) {
-        hasExports = true;
-      }
-
-      if (importsFromTarget && hasExports) break;
-    }
-
-    if (importsFromTarget && hasExports) {
+    if (fileIsReExporter(chunks, normalizedTarget, normalizePathCached)) {
       reExporters.push(filepath);
     }
   }
 
   return reExporters;
-}
-
-/**
- * Check if a file is a re-exporter based on its chunks.
- * A file is a re-exporter if it has both imports from a source path and exports.
- */
-function isReExporter(
-  chunks: SearchResult[],
-  sourcePath: string,
-  normalizePathCached: (path: string) => string
-): boolean {
-  let importsFromSource = false;
-  let hasExports = false;
-
-  for (const chunk of chunks) {
-    const importedSymbols = chunk.metadata.importedSymbols;
-    if (importedSymbols && typeof importedSymbols === 'object') {
-      for (const importPath of Object.keys(importedSymbols)) {
-        if (matchesFile(normalizePathCached(importPath), sourcePath)) {
-          importsFromSource = true;
-          break;
-        }
-      }
-    }
-    if (!importsFromSource) {
-      const imports = chunk.metadata.imports || [];
-      for (const imp of imports) {
-        if (matchesFile(normalizePathCached(imp), sourcePath)) {
-          importsFromSource = true;
-          break;
-        }
-      }
-    }
-    if (chunk.metadata.exports && chunk.metadata.exports.length > 0) {
-      hasExports = true;
-    }
-    if (importsFromSource && hasExports) return true;
-  }
-
-  return false;
 }
 
 /**
@@ -414,25 +403,9 @@ function findTransitiveDependents(
   existingFiles: Set<string>
 ): SearchResult[] {
   const transitiveChunks: SearchResult[] = [];
-  const visited = new Set<string>();
-  visited.add(normalizedTarget);
-  for (const fp of existingFiles) {
-    visited.add(fp);
-  }
+  const visited = new Set<string>([normalizedTarget, ...existingFiles]);
+  const allChunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
 
-  // Build a lookup of all chunks by file for efficient re-exporter checking
-  const allChunksByFile = new Map<string, SearchResult[]>();
-  for (const chunk of allChunks) {
-    const canonical = normalizePathCached(chunk.metadata.file);
-    let list = allChunksByFile.get(canonical);
-    if (!list) {
-      list = [];
-      allChunksByFile.set(canonical, list);
-    }
-    list.push(chunk);
-  }
-
-  // BFS queue: [re-exporter path, depth]
   const queue: Array<[string, number]> = [];
   for (const rePath of reExporterPaths) {
     if (!visited.has(rePath)) {
@@ -443,7 +416,6 @@ function findTransitiveDependents(
 
   while (queue.length > 0) {
     const [reExporterPath, depth] = queue.shift()!;
-
     const dependentChunks = findDependentChunks(reExporterPath, importIndex);
 
     for (const chunk of dependentChunks) {
@@ -453,10 +425,9 @@ function findTransitiveDependents(
       transitiveChunks.push(chunk);
       visited.add(chunkFile);
 
-      // Check if this newly-found file is itself a re-exporter (chained barrel)
       if (depth < MAX_REEXPORT_DEPTH) {
         const fileChunks = allChunksByFile.get(chunkFile) || [];
-        if (isReExporter(fileChunks, reExporterPath, normalizePathCached)) {
+        if (fileIsReExporter(fileChunks, reExporterPath, normalizePathCached)) {
           queue.push([chunkFile, depth + 1]);
         }
       }
