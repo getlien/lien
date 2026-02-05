@@ -1,4 +1,29 @@
 import type Parser from 'tree-sitter';
+import type { SymbolInfo } from '../types.js';
+
+/**
+ * Language-specific symbol extraction strategy
+ *
+ * Each language has different AST node types for functions, classes, and methods.
+ * This interface allows language-specific symbol extraction while keeping the
+ * core chunking logic language-agnostic.
+ */
+export interface LanguageSymbolExtractor {
+  /** AST node types this extractor can handle for symbol extraction */
+  readonly symbolNodeTypes: string[];
+
+  /** Extract symbol info (name, type, signature, etc.) from an AST node */
+  extractSymbol(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null;
+
+  /** Extract symbol name and line from a call expression node */
+  extractCallSite(
+    node: Parser.SyntaxNode
+  ): { symbol: string; line: number; key: string } | null;
+}
 
 /**
  * Language-specific export extraction strategy

@@ -1,8 +1,11 @@
 import Python from 'tree-sitter-python';
 import type Parser from 'tree-sitter';
+import type { SymbolInfo } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
-import type { LanguageExportExtractor, LanguageImportExtractor } from '../extractors/types.js';
+import type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from '../extractors/types.js';
+import { extractSignature, extractParameters } from '../extractors/symbol-helpers.js';
+import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
 // TRAVERSER
@@ -255,6 +258,102 @@ export class PythonImportExtractor implements LanguageImportExtractor {
 }
 
 // =============================================================================
+// SYMBOL EXTRACTOR
+// =============================================================================
+
+/**
+ * Python symbol extractor
+ *
+ * Handles:
+ * - function_definition (def foo():)
+ * - async_function_definition (async def foo():)
+ * - class_definition (class Foo:)
+ *
+ * Call sites: call (foo(), obj.method())
+ */
+export class PythonSymbolExtractor implements LanguageSymbolExtractor {
+  readonly symbolNodeTypes = [
+    'function_definition',
+    'async_function_definition',
+    'class_definition',
+  ];
+
+  extractSymbol(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null {
+    switch (node.type) {
+      case 'function_definition':
+      case 'async_function_definition':
+        return this.extractFunctionInfo(node, content, parentClass);
+      case 'class_definition':
+        return this.extractClassInfo(node);
+      default:
+        return null;
+    }
+  }
+
+  extractCallSite(
+    node: Parser.SyntaxNode
+  ): { symbol: string; line: number; key: string } | null {
+    if (node.type !== 'call') return null;
+
+    const line = node.startPosition.row + 1;
+    const funcNode = node.childForFieldName('function');
+    if (!funcNode) return null;
+
+    // Direct function call: foo()
+    if (funcNode.type === 'identifier') {
+      return { symbol: funcNode.text, line, key: `${funcNode.text}:${line}` };
+    }
+
+    // Attribute access: obj.method() - extract 'method'
+    if (funcNode.type === 'attribute') {
+      const attrNode = funcNode.childForFieldName('attribute');
+      if (attrNode?.type === 'identifier') {
+        return { symbol: attrNode.text, line, key: `${attrNode.text}:${line}` };
+      }
+    }
+
+    return null;
+  }
+
+  private extractFunctionInfo(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: parentClass ? 'method' : 'function',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractSignature(node, content),
+      parameters: extractParameters(node, content),
+      complexity: calculateComplexity(node),
+    };
+  }
+
+  private extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: 'class',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      signature: `class ${nameNode.text}`,
+    };
+  }
+}
+
+// =============================================================================
 // LANGUAGE DEFINITION
 // =============================================================================
 
@@ -265,6 +364,7 @@ export const pythonDefinition: LanguageDefinition = {
   traverser: new PythonTraverser(),
   exportExtractor: new PythonExportExtractor(),
   importExtractor: new PythonImportExtractor(),
+  symbolExtractor: new PythonSymbolExtractor(),
 
   complexity: {
     decisionPoints: [

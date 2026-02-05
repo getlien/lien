@@ -1,8 +1,11 @@
 import Rust from 'tree-sitter-rust';
 import type Parser from 'tree-sitter';
+import type { SymbolInfo } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
-import type { LanguageExportExtractor, LanguageImportExtractor } from '../extractors/types.js';
+import type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from '../extractors/types.js';
+import { extractSignature, extractParameters, extractReturnType } from '../extractors/symbol-helpers.js';
+import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
 // TRAVERSER
@@ -454,6 +457,132 @@ export class RustImportExtractor implements LanguageImportExtractor {
 }
 
 // =============================================================================
+// SYMBOL EXTRACTOR
+// =============================================================================
+
+/**
+ * Rust symbol extractor
+ *
+ * Handles:
+ * - function_item (fn foo() {})
+ * - function_signature_item (fn foo(); in traits)
+ * - impl_item (impl Foo {}) - treated as class equivalent
+ * - trait_item (trait Foo {}) - treated as interface equivalent
+ *
+ * Call sites: call_expression (foo()), macro_invocation (println!())
+ */
+export class RustSymbolExtractor implements LanguageSymbolExtractor {
+  readonly symbolNodeTypes = [
+    'function_item',
+    'function_signature_item',
+    'impl_item',
+    'trait_item',
+  ];
+
+  extractSymbol(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null {
+    switch (node.type) {
+      case 'function_item':
+      case 'function_signature_item':
+        return this.extractFunctionInfo(node, content, parentClass);
+      case 'impl_item':
+        return this.extractImplInfo(node);
+      case 'trait_item':
+        return this.extractTraitInfo(node);
+      default:
+        return null;
+    }
+  }
+
+  extractCallSite(
+    node: Parser.SyntaxNode
+  ): { symbol: string; line: number; key: string } | null {
+    const line = node.startPosition.row + 1;
+
+    // call_expression: foo(), obj.method()
+    if (node.type === 'call_expression') {
+      const funcNode = node.childForFieldName('function');
+      if (!funcNode) return null;
+
+      if (funcNode.type === 'identifier') {
+        return { symbol: funcNode.text, line, key: `${funcNode.text}:${line}` };
+      }
+
+      // field_expression: obj.method()
+      if (funcNode.type === 'field_expression') {
+        const fieldNode = funcNode.childForFieldName('field');
+        if (fieldNode?.type === 'field_identifier') {
+          return { symbol: fieldNode.text, line, key: `${fieldNode.text}:${line}` };
+        }
+      }
+
+      return null;
+    }
+
+    // macro_invocation: println!(), vec![]
+    if (node.type === 'macro_invocation') {
+      const macroNode = node.childForFieldName('macro');
+      if (macroNode?.type === 'identifier') {
+        const symbol = `${macroNode.text}!`;
+        return { symbol, line, key: `${symbol}:${line}` };
+      }
+    }
+
+    return null;
+  }
+
+  private extractFunctionInfo(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: parentClass ? 'method' : 'function',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractSignature(node, content),
+      parameters: extractParameters(node, content),
+      returnType: extractReturnType(node, content),
+      complexity: calculateComplexity(node),
+    };
+  }
+
+  private extractImplInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+    const typeNode = node.childForFieldName('type');
+    if (!typeNode) return null;
+
+    return {
+      name: typeNode.text,
+      type: 'class',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      signature: `impl ${typeNode.text}`,
+    };
+  }
+
+  private extractTraitInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: 'interface',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      signature: `trait ${nameNode.text}`,
+    };
+  }
+}
+
+// =============================================================================
 // LANGUAGE DEFINITION
 // =============================================================================
 
@@ -464,6 +593,7 @@ export const rustDefinition: LanguageDefinition = {
   traverser: new RustTraverser(),
   exportExtractor: new RustExportExtractor(),
   importExtractor: new RustImportExtractor(),
+  symbolExtractor: new RustSymbolExtractor(),
 
   complexity: {
     decisionPoints: [

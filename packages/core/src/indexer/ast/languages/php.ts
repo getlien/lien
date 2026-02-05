@@ -1,8 +1,11 @@
 import PHPParser from 'tree-sitter-php';
 import type Parser from 'tree-sitter';
+import type { SymbolInfo } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
-import type { LanguageExportExtractor, LanguageImportExtractor } from '../extractors/types.js';
+import type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from '../extractors/types.js';
+import { extractSignature, extractParameters, extractReturnType } from '../extractors/symbol-helpers.js';
+import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
 // TRAVERSER
@@ -245,6 +248,132 @@ export class PHPImportExtractor implements LanguageImportExtractor {
 }
 
 // =============================================================================
+// SYMBOL EXTRACTOR
+// =============================================================================
+
+/**
+ * PHP symbol extractor
+ *
+ * Handles:
+ * - function_definition (function foo() {})
+ * - method_declaration (public function bar() {})
+ * - class_declaration (class Foo {})
+ *
+ * Call sites: function_call_expression, member_call_expression, scoped_call_expression
+ */
+export class PHPSymbolExtractor implements LanguageSymbolExtractor {
+  readonly symbolNodeTypes = [
+    'function_definition',
+    'method_declaration',
+    'class_declaration',
+  ];
+
+  extractSymbol(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null {
+    switch (node.type) {
+      case 'function_definition':
+        return this.extractFunctionInfo(node, content, parentClass);
+      case 'method_declaration':
+        return this.extractMethodInfo(node, content, parentClass);
+      case 'class_declaration':
+        return this.extractClassInfo(node);
+      default:
+        return null;
+    }
+  }
+
+  extractCallSite(
+    node: Parser.SyntaxNode
+  ): { symbol: string; line: number; key: string } | null {
+    const line = node.startPosition.row + 1;
+
+    // function_call_expression - helper_function()
+    if (node.type === 'function_call_expression') {
+      const funcNode = node.childForFieldName('function');
+      if (funcNode?.type === 'name') {
+        return { symbol: funcNode.text, line, key: `${funcNode.text}:${line}` };
+      }
+    }
+
+    // member_call_expression - $this->method() or $obj->method()
+    if (node.type === 'member_call_expression') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode?.type === 'name') {
+        return { symbol: nameNode.text, line, key: `${nameNode.text}:${line}` };
+      }
+    }
+
+    // scoped_call_expression - User::find() or static::method()
+    if (node.type === 'scoped_call_expression') {
+      const nameNode = node.childForFieldName('name');
+      if (nameNode?.type === 'name') {
+        return { symbol: nameNode.text, line, key: `${nameNode.text}:${line}` };
+      }
+    }
+
+    return null;
+  }
+
+  private extractFunctionInfo(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: parentClass ? 'method' : 'function',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractSignature(node, content),
+      parameters: extractParameters(node, content),
+      returnType: extractReturnType(node, content),
+      complexity: calculateComplexity(node),
+    };
+  }
+
+  private extractMethodInfo(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: 'method',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractSignature(node, content),
+      parameters: extractParameters(node, content),
+      returnType: extractReturnType(node, content),
+      complexity: calculateComplexity(node),
+    };
+  }
+
+  private extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: 'class',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      signature: `class ${nameNode.text}`,
+    };
+  }
+}
+
+// =============================================================================
 // LANGUAGE DEFINITION
 // =============================================================================
 
@@ -255,6 +384,7 @@ export const phpDefinition: LanguageDefinition = {
   traverser: new PHPTraverser(),
   exportExtractor: new PHPExportExtractor(),
   importExtractor: new PHPImportExtractor(),
+  symbolExtractor: new PHPSymbolExtractor(),
 
   complexity: {
     decisionPoints: [

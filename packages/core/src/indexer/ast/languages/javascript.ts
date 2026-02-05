@@ -1,8 +1,11 @@
 import JavaScript from 'tree-sitter-javascript';
 import type Parser from 'tree-sitter';
+import type { SymbolInfo } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
-import type { LanguageExportExtractor, LanguageImportExtractor } from '../extractors/types.js';
+import type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from '../extractors/types.js';
+import { extractSignature, extractParameters, extractReturnType } from '../extractors/symbol-helpers.js';
+import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
 // TRAVERSERS
@@ -356,6 +359,182 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
 export class TypeScriptImportExtractor extends JavaScriptImportExtractor {}
 
 // =============================================================================
+// SYMBOL EXTRACTORS
+// =============================================================================
+
+/**
+ * JavaScript/TypeScript symbol extractor
+ *
+ * Extracts symbol info from function declarations, arrow functions,
+ * method definitions, class declarations, and interface declarations.
+ *
+ * Also handles call site extraction for call_expression and new_expression.
+ */
+export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
+  readonly symbolNodeTypes = [
+    'function_declaration',
+    'function',
+    'arrow_function',
+    'function_expression',
+    'method_definition',
+    'class_declaration',
+    'interface_declaration',
+  ];
+
+  extractSymbol(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null {
+    switch (node.type) {
+      case 'function_declaration':
+      case 'function':
+        return this.extractFunctionInfo(node, content, parentClass);
+      case 'arrow_function':
+      case 'function_expression':
+        return this.extractArrowFunctionInfo(node, content, parentClass);
+      case 'method_definition':
+        return this.extractMethodInfo(node, content, parentClass);
+      case 'class_declaration':
+        return this.extractClassInfo(node);
+      case 'interface_declaration':
+        return this.extractInterfaceInfo(node);
+      default:
+        return null;
+    }
+  }
+
+  extractCallSite(
+    node: Parser.SyntaxNode
+  ): { symbol: string; line: number; key: string } | null {
+    const line = node.startPosition.row + 1;
+
+    if (node.type === 'call_expression') {
+      const functionNode = node.childForFieldName('function');
+      if (!functionNode) return null;
+      const symbol = this.resolveSymbol(functionNode);
+      return symbol ? { symbol, line, key: `${symbol}:${line}` } : null;
+    }
+
+    if (node.type === 'new_expression') {
+      const ctorNode = node.childForFieldName('constructor');
+      if (!ctorNode) return null;
+      const symbol = this.resolveSymbol(ctorNode);
+      return symbol ? { symbol, line, key: `${symbol}:${line}` } : null;
+    }
+
+    return null;
+  }
+
+  private resolveSymbol(node: Parser.SyntaxNode): string | null {
+    if (node.type === 'identifier') return node.text;
+    if (node.type === 'member_expression') {
+      const propertyNode = node.childForFieldName('property');
+      if (propertyNode?.type === 'property_identifier') return propertyNode.text;
+    }
+    return null;
+  }
+
+  private extractFunctionInfo(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: parentClass ? 'method' : 'function',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractSignature(node, content),
+      parameters: extractParameters(node, content),
+      returnType: extractReturnType(node, content),
+      complexity: calculateComplexity(node),
+    };
+  }
+
+  private extractArrowFunctionInfo(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null {
+    const parent = node.parent;
+    let name = 'anonymous';
+
+    if (parent?.type === 'variable_declarator') {
+      const nameNode = parent.childForFieldName('name');
+      name = nameNode?.text || 'anonymous';
+    }
+
+    return {
+      name,
+      type: parentClass ? 'method' : 'function',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractSignature(node, content),
+      parameters: extractParameters(node, content),
+      complexity: calculateComplexity(node),
+    };
+  }
+
+  private extractMethodInfo(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string
+  ): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: 'method',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      parentClass,
+      signature: extractSignature(node, content),
+      parameters: extractParameters(node, content),
+      returnType: extractReturnType(node, content),
+      complexity: calculateComplexity(node),
+    };
+  }
+
+  private extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: 'class',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      signature: `class ${nameNode.text}`,
+    };
+  }
+
+  private extractInterfaceInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+    const nameNode = node.childForFieldName('name');
+    if (!nameNode) return null;
+
+    return {
+      name: nameNode.text,
+      type: 'interface',
+      startLine: node.startPosition.row + 1,
+      endLine: node.endPosition.row + 1,
+      signature: `interface ${nameNode.text}`,
+    };
+  }
+}
+
+/**
+ * TypeScript uses the same symbol extraction as JavaScript
+ */
+export class TypeScriptSymbolExtractor extends JavaScriptSymbolExtractor {}
+
+// =============================================================================
 // LANGUAGE DEFINITION
 // =============================================================================
 
@@ -366,6 +545,7 @@ export const javascriptDefinition: LanguageDefinition = {
   traverser: new JavaScriptTraverser(),
   exportExtractor: new JavaScriptExportExtractor(),
   importExtractor: new JavaScriptImportExtractor(),
+  symbolExtractor: new JavaScriptSymbolExtractor(),
 
   complexity: {
     decisionPoints: [

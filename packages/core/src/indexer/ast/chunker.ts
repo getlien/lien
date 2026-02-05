@@ -318,7 +318,7 @@ function createChunk(
   
   // Extract call sites for functions and methods
   const callSites = shouldCalcComplexity
-    ? extractCallSites(node)
+    ? extractCallSites(node, language)
     : undefined;
   
   return {

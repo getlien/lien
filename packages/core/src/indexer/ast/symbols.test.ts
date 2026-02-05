@@ -304,7 +304,7 @@ function processUser(user) {
 
       const parseResult = parseAST(content, 'typescript');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'typescript');
 
       expect(callSites).toContainEqual(
         expect.objectContaining({ symbol: 'validateEmail' })
@@ -324,7 +324,7 @@ function saveUser(user) {
 
       const parseResult = parseAST(content, 'typescript');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'typescript');
 
       expect(callSites).toContainEqual(
         expect.objectContaining({ symbol: 'save' })
@@ -342,7 +342,7 @@ function saveUser(user) {
 
       const parseResult = parseAST(content, 'typescript');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'typescript');
 
       const fooCall = callSites.find(c => c.symbol === 'foo');
       const barCall = callSites.find(c => c.symbol === 'bar');
@@ -361,7 +361,7 @@ function complex() {
 
       const parseResult = parseAST(content, 'typescript');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'typescript');
 
       expect(callSites).toContainEqual(
         expect.objectContaining({ symbol: 'outer' })
@@ -384,7 +384,7 @@ function process(items) {
 
       const parseResult = parseAST(content, 'typescript');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'typescript');
 
       expect(callSites).toContainEqual(
         expect.objectContaining({ symbol: 'validate' })
@@ -403,7 +403,7 @@ function test() {
 
       const parseResult = parseAST(content, 'typescript');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'typescript');
 
       // Multiple calls to same symbol on same line should be deduplicated
       const fooCalls = callSites.filter(c => c.symbol === 'foo');
@@ -421,7 +421,7 @@ function test() {
 
       const parseResult = parseAST(content, 'typescript');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'typescript');
 
       const fooCalls = callSites.filter(c => c.symbol === 'foo');
       expect(fooCalls).toHaveLength(2);
@@ -438,7 +438,7 @@ function simple() {
 
       const parseResult = parseAST(content, 'typescript');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'typescript');
 
       expect(callSites).toHaveLength(0);
     });
@@ -452,7 +452,7 @@ function simple() {
 
       const parseResult = parseAST(content, 'typescript');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'typescript');
 
       expect(callSites).toContainEqual(
         expect.objectContaining({ symbol: 'VectorDB', line: 2 })
@@ -472,7 +472,7 @@ function create() {
 
       const parseResult = parseAST(content, 'typescript');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'typescript');
 
       expect(callSites).toContainEqual(
         expect.objectContaining({ symbol: 'MyClass' })
@@ -491,7 +491,7 @@ function process() {
 
       const parseResult = parseAST(content, 'php');
       const funcNode = parseResult.tree!.rootNode.namedChild(1)!; // Skip php_tag
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'php');
 
       expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'helper_function' }));
       expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'another_call' }));
@@ -509,7 +509,7 @@ class Controller {
 
       const parseResult = parseAST(content, 'php');
       const classNode = parseResult.tree!.rootNode.namedChild(1)!;
-      const callSites = extractCallSites(classNode);
+      const callSites = extractCallSites(classNode, 'php');
 
       expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'validate' }));
       expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'save' }));
@@ -525,7 +525,7 @@ function getData() {
 
       const parseResult = parseAST(content, 'php');
       const funcNode = parseResult.tree!.rootNode.namedChild(1)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'php');
 
       expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'find' }));
       expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'where' }));
@@ -543,7 +543,7 @@ def process():
 
       const parseResult = parseAST(content, 'python');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'python');
 
       expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'helper_function' }));
       expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'another_call' }));
@@ -558,7 +558,7 @@ def process(user):
 
       const parseResult = parseAST(content, 'python');
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
-      const callSites = extractCallSites(funcNode);
+      const callSites = extractCallSites(funcNode, 'python');
 
       expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'save' }));
       expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'validate' }));
