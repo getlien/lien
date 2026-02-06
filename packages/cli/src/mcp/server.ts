@@ -674,6 +674,22 @@ function isFileIgnored(
 }
 
 /**
+ * Filter a batch file change event, removing gitignored files from each array.
+ */
+function filterFileChangeEvent(
+  event: FileChangeEvent,
+  ignoreFilter: (relativePath: string) => boolean,
+  rootDir: string
+): FileChangeEvent {
+  return {
+    ...event,
+    added: (event.added || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter)),
+    modified: (event.modified || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter)),
+    deleted: (event.deleted || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter)),
+  };
+}
+
+/**
  * Create file change event handler.
  * Filters out gitignored files before processing to prevent
  * indexing files that should be excluded (e.g. .wip/, dist/).
@@ -697,12 +713,7 @@ function createFileChangeHandler(
     const { type } = event;
 
     if (type === 'batch') {
-      const filtered: FileChangeEvent = {
-        ...event,
-        added: (event.added || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter!)),
-        modified: (event.modified || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter!)),
-        deleted: (event.deleted || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter!)),
-      };
+      const filtered = filterFileChangeEvent(event, ignoreFilter, rootDir);
       const totalFiltered = (filtered.added!.length + filtered.modified!.length + filtered.deleted!.length);
       if (totalFiltered === 0) return;
       await handleBatchEvent(filtered, vectorDB, embeddings, verbose, log, reindexStateManager);
