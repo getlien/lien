@@ -674,7 +674,10 @@ function isFileIgnored(
 }
 
 /**
- * Filter a batch file change event, removing gitignored files from each array.
+ * Filter a batch file change event, removing gitignored files from additions
+ * and modifications. Deletions are never filtered — a previously-indexed file
+ * that gets added to .gitignore and then deleted must still be removed from
+ * the index to avoid stale entries.
  */
 function filterFileChangeEvent(
   event: FileChangeEvent,
@@ -685,7 +688,7 @@ function filterFileChangeEvent(
     ...event,
     added: (event.added || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter)),
     modified: (event.modified || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter)),
-    deleted: (event.deleted || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter)),
+    deleted: event.deleted || [],
   };
 }
 
@@ -718,7 +721,8 @@ function createFileChangeHandler(
       if (totalFiltered === 0) return;
       await handleBatchEvent(filtered, vectorDB, embeddings, verbose, log, reindexStateManager);
     } else if (type === 'unlink') {
-      if (isFileIgnored(event.filepath, rootDir, ignoreFilter)) return;
+      // Always process deletions — a previously-indexed file must be removed
+      // from the index even if it's now gitignored
       await handleUnlinkEvent(event.filepath, vectorDB, log, reindexStateManager);
     } else {
       // Fallback for single file add/change (backwards compatibility)
