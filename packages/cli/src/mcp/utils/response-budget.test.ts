@@ -72,6 +72,7 @@ describe('applyResponseBudget', () => {
 
     expect(truncation).toBeDefined();
     expect(truncation!.phase).toBeGreaterThanOrEqual(1);
+    expect(truncation!.originalItemCount).toBe(10);
     expect(JSON.stringify(result).length).toBeLessThanOrEqual(DEFAULT_BUDGET);
 
     const res = result as typeof input;
@@ -88,6 +89,9 @@ describe('applyResponseBudget', () => {
     const { result, truncation } = applyResponseBudget(input);
 
     expect(truncation).toBeDefined();
+    expect(truncation!.originalItemCount).toBe(50);
+    expect(truncation!.finalItemCount).toBeLessThan(50);
+    expect(truncation!.message).toMatch(/^Showing \d+ of 50 results \(truncated\)/);
     const res = result as typeof input;
     expect(res.results.length).toBeLessThan(50);
   });
@@ -164,7 +168,32 @@ describe('applyResponseBudget', () => {
     expect(truncation).toBeDefined();
     expect(truncation!.originalChars).toBeGreaterThan(DEFAULT_BUDGET);
     expect(truncation!.finalChars).toBeLessThanOrEqual(DEFAULT_BUDGET);
-    expect(truncation!.message).toContain('truncated');
+    expect(truncation!.originalItemCount).toBe(10);
+    expect(truncation!.finalItemCount).toBeGreaterThan(0);
+    expect(truncation!.message).toMatch(/Use narrower filters or smaller limit/);
+  });
+
+  it('Phase 1 message says "content trimmed" when no items are dropped', () => {
+    // 3 items with large content — Phase 1 truncation alone should fit
+    const input = makeResultsResponse(3, 5000);
+    expect(JSON.stringify(input).length).toBeGreaterThan(DEFAULT_BUDGET);
+
+    const { truncation } = applyResponseBudget(input);
+
+    expect(truncation).toBeDefined();
+    expect(truncation!.phase).toBe(1);
+    expect(truncation!.originalItemCount).toBe(3);
+    expect(truncation!.finalItemCount).toBe(3);
+    expect(truncation!.message).toContain('content trimmed to fit');
+  });
+
+  it('Phase 2 message says "Showing X of Y" when items are dropped', () => {
+    const input = makeResultsResponse(50, 1000);
+    const { truncation } = applyResponseBudget(input);
+
+    expect(truncation).toBeDefined();
+    expect(truncation!.finalItemCount).toBeLessThan(truncation!.originalItemCount);
+    expect(truncation!.message).toMatch(/^Showing \d+ of 50 results \(truncated\)/);
   });
 
   it('returns unchanged for non-object results', () => {
