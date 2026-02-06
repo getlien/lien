@@ -8,8 +8,7 @@ describe('createGitignoreFilter', () => {
   let testDir: string;
 
   beforeEach(async () => {
-    testDir = path.join(os.tmpdir(), 'lien-test-gitignore-' + Date.now());
-    await fs.mkdir(testDir, { recursive: true });
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-gitignore-'));
   });
 
   afterEach(async () => {

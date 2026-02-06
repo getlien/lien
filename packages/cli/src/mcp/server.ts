@@ -137,7 +137,7 @@ async function handleGitStartup(
 
   if (changedFiles && changedFiles.length > 0) {
     const isIgnored = await createGitignoreFilter(rootDir);
-    const filteredFiles = changedFiles.filter(f => !isFileIgnored(f, rootDir, isIgnored));
+    const filteredFiles = await filterGitChangedFiles(changedFiles, rootDir, isIgnored);
 
     if (filteredFiles.length === 0) {
       log('✓ Index is up to date with git state');
@@ -201,7 +201,7 @@ function createGitPollInterval(
           isIgnored = await createGitignoreFilter(rootDir);
         }
 
-        const filteredFiles = changedFiles.filter(f => !isFileIgnored(f, rootDir, isIgnored!));
+        const filteredFiles = await filterGitChangedFiles(changedFiles, rootDir, isIgnored!);
         if (filteredFiles.length === 0) return;
 
         const startTime = Date.now();
@@ -270,7 +270,7 @@ function createGitChangeHandler(
       isIgnored = await createGitignoreFilter(rootDir);
     }
 
-    const filteredFiles = changedFiles.filter(f => !isFileIgnored(f, rootDir, isIgnored!));
+    const filteredFiles = await filterGitChangedFiles(changedFiles, rootDir, isIgnored!);
     if (filteredFiles.length === 0) {
       return;
     }
@@ -675,6 +675,36 @@ function isFileIgnored(
 }
 
 /**
+ * Filter a flat list of changed files by gitignore, but preserve files that
+ * no longer exist on disk (deletions). Git handlers return a flat list without
+ * distinguishing adds from deletes — filtering deleted files would leave stale
+ * entries in the index.
+ */
+async function filterGitChangedFiles(
+  changedFiles: string[],
+  rootDir: string,
+  ignoreFilter: (relativePath: string) => boolean
+): Promise<string[]> {
+  const fs = await import('fs/promises');
+  const results: string[] = [];
+
+  for (const filepath of changedFiles) {
+    if (!isFileIgnored(filepath, rootDir, ignoreFilter)) {
+      results.push(filepath);
+      continue;
+    }
+    // Keep ignored files that no longer exist — they need cleanup from the index
+    try {
+      await fs.access(filepath);
+    } catch {
+      results.push(filepath);
+    }
+  }
+
+  return results;
+}
+
+/**
  * Filter a batch file change event, removing gitignored files from additions
  * and modifications. Deletions are never filtered — a previously-indexed file
  * that gets added to .gitignore and then deleted must still be removed from
@@ -718,8 +748,8 @@ function createFileChangeHandler(
 
     if (type === 'batch') {
       const filtered = filterFileChangeEvent(event, ignoreFilter, rootDir);
-      const totalFiltered = (filtered.added!.length + filtered.modified!.length + filtered.deleted!.length);
-      if (totalFiltered === 0) return;
+      const totalToProcess = (filtered.added!.length + filtered.modified!.length + filtered.deleted!.length);
+      if (totalToProcess === 0) return;
       await handleBatchEvent(filtered, vectorDB, embeddings, verbose, log, reindexStateManager);
     } else if (type === 'unlink') {
       // Always process deletions — a previously-indexed file must be removed
