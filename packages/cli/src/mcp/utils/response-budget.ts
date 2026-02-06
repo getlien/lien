@@ -7,6 +7,8 @@ const MAX_RESPONSE_CHARS = 12_000;
 interface TruncationInfo {
   originalChars: number;
   finalChars: number;
+  originalItemCount: number;
+  finalItemCount: number;
   phase: number;
   message: string;
 }
@@ -38,6 +40,8 @@ export function applyResponseBudget(
     return { result };
   }
 
+  const originalItemCount = arrays.reduce((sum, arr) => sum + arr.length, 0);
+
   // Phase 1: Truncate content to 10 lines
   for (const arr of arrays) {
     for (const item of arr) {
@@ -45,7 +49,7 @@ export function applyResponseBudget(
     }
   }
   if (measureSize(cloned) <= maxChars) {
-    return buildResult(cloned, originalChars, 1);
+    return buildResult(cloned, originalChars, 1, arrays, originalItemCount);
   }
 
   // Phase 2: Drop items from the end of arrays
@@ -57,7 +61,7 @@ export function applyResponseBudget(
     }
   }
   if (currentSize <= maxChars) {
-    return buildResult(cloned, originalChars, 2);
+    return buildResult(cloned, originalChars, 2, arrays, originalItemCount);
   }
 
   // Phase 3: Truncate content to 3 lines (signature only)
@@ -68,7 +72,7 @@ export function applyResponseBudget(
       item.content = truncateContent(item.content, 3);
     }
   }
-  return buildResult(cloned, originalChars, 3);
+  return buildResult(cloned, originalChars, 3, arrays, originalItemCount);
 }
 
 function truncateContent(content: string, maxLines: number): string {
@@ -122,15 +126,25 @@ function buildResult(
   cloned: unknown,
   originalChars: number,
   phase: number,
+  arrays: Array<Array<{ content: string }>>,
+  originalItemCount: number,
 ): { result: unknown; truncation: TruncationInfo } {
   const finalChars = measureSize(cloned);
+  const finalItemCount = arrays.reduce((sum, arr) => sum + arr.length, 0);
+
+  const message = finalItemCount < originalItemCount
+    ? `Showing ${finalItemCount} of ${originalItemCount} results (truncated). Use narrower filters or smaller limit for complete results.`
+    : `Showing all ${finalItemCount} results (content trimmed to fit). Use narrower filters or smaller limit for complete results.`;
+
   return {
     result: cloned,
     truncation: {
       originalChars,
       finalChars,
+      originalItemCount,
+      finalItemCount,
       phase,
-      message: `Response truncated from ${originalChars} to ${finalChars} chars (phase ${phase}/3). Use narrower filters or smaller limit for complete results.`,
+      message,
     },
   };
 }
