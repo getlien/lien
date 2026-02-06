@@ -26,14 +26,15 @@ const ALWAYS_IGNORE_PATTERNS = [
 export async function createGitignoreFilter(rootDir: string): Promise<(relativePath: string) => boolean> {
   const ig = ignore();
 
-  ig.add(ALWAYS_IGNORE_PATTERNS);
-
   try {
     const gitignoreContent = await fs.readFile(path.join(rootDir, '.gitignore'), 'utf-8');
     ig.add(gitignoreContent);
   } catch {
-    // No .gitignore — nothing to filter
+    // No .gitignore — only built-in ignore patterns will apply
   }
+
+  // Added after .gitignore so user negation rules (e.g. !node_modules/) cannot override them
+  ig.add(ALWAYS_IGNORE_PATTERNS);
 
   return (relativePath: string) => ig.ignores(relativePath);
 }

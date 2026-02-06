@@ -76,6 +76,17 @@ describe('createGitignoreFilter', () => {
     expect(isIgnored('.lien/indices/abc123')).toBe(true);
   });
 
+  it('should not allow .gitignore negations to override built-in patterns', async () => {
+    await fs.writeFile(path.join(testDir, '.gitignore'), '!node_modules/\n!.lien/\n!vendor/\n!.git/\n');
+
+    const isIgnored = await createGitignoreFilter(testDir);
+
+    expect(isIgnored('node_modules/express/index.js')).toBe(true);
+    expect(isIgnored('.lien/indices/abc123')).toBe(true);
+    expect(isIgnored('vendor/autoload.php')).toBe(true);
+    expect(isIgnored('.git/HEAD')).toBe(true);
+  });
+
   it('should handle negation patterns', async () => {
     await fs.writeFile(path.join(testDir, '.gitignore'), '*.log\n!important.log\n');
 
