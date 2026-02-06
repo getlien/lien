@@ -43,36 +43,40 @@ export function applyResponseBudget(
   const originalItemCount = arrays.reduce((sum, arr) => sum + arr.length, 0);
 
   // Phase 1: Truncate content to 10 lines
-  for (const arr of arrays) {
-    for (const item of arr) {
-      item.content = truncateContent(item.content, 10);
-    }
-  }
+  truncateArrays(arrays, 10);
   if (measureSize(cloned) <= maxChars) {
     return buildResult(cloned, originalChars, 1, arrays, originalItemCount);
   }
 
   // Phase 2: Drop items from the end of arrays
-  let currentSize = measureSize(cloned);
-  for (const arr of arrays) {
-    while (arr.length > 1 && currentSize > maxChars) {
-      arr.pop();
-      currentSize = measureSize(cloned);
-    }
-  }
-  if (currentSize <= maxChars) {
+  dropArrayItems(arrays, cloned, maxChars);
+  if (measureSize(cloned) <= maxChars) {
     return buildResult(cloned, originalChars, 2, arrays, originalItemCount);
   }
 
   // Phase 3: Truncate content to 3 lines (signature only)
   // Note: if non-content fields (e.g. metadata) are very large, the result
   // may still exceed maxChars — this is acceptable as a best-effort cap.
+  truncateArrays(arrays, 3);
+  return buildResult(cloned, originalChars, 3, arrays, originalItemCount);
+}
+
+function truncateArrays(arrays: Array<Array<{ content: string }>>, maxLines: number): void {
   for (const arr of arrays) {
     for (const item of arr) {
-      item.content = truncateContent(item.content, 3);
+      item.content = truncateContent(item.content, maxLines);
     }
   }
-  return buildResult(cloned, originalChars, 3, arrays, originalItemCount);
+}
+
+function dropArrayItems(arrays: Array<Array<{ content: string }>>, root: unknown, maxChars: number): void {
+  let currentSize = measureSize(root);
+  for (const arr of arrays) {
+    while (arr.length > 1 && currentSize > maxChars) {
+      arr.pop();
+      currentSize = measureSize(root);
+    }
+  }
 }
 
 function truncateContent(content: string, maxLines: number): string {
