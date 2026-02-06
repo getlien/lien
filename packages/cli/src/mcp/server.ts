@@ -730,7 +730,7 @@ function filterFileChangeEvent(
 /**
  * Create file change event handler.
  * Filters out gitignored files before processing to prevent
- * indexing files that should be excluded (e.g. .wip/, dist/).
+ * indexing files that should be excluded according to .gitignore.
  */
 function createFileChangeHandler(
   rootDir: string,
