@@ -124,6 +124,7 @@ async function handleAutoIndexing(
  * Caller should catch and log but NOT call failReindex() again (already handled here).
  */
 async function handleGitStartup(
+  rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
@@ -135,7 +136,6 @@ async function handleGitStartup(
   const changedFiles = await gitTracker.initialize();
 
   if (changedFiles && changedFiles.length > 0) {
-    const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
     const isIgnored = await createGitignoreFilter(rootDir);
     const filteredFiles = changedFiles.filter(f => !isFileIgnored(f, rootDir, isIgnored));
 
@@ -172,6 +172,7 @@ async function handleGitStartup(
  * should not crash the server - just log and continue polling.
  */
 function createGitPollInterval(
+  rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
@@ -179,7 +180,6 @@ function createGitPollInterval(
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): NodeJS.Timeout {
-  const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
   let isIgnored: ((relativePath: string) => boolean) | null = null;
 
   return setInterval(async () => {
@@ -230,6 +230,7 @@ function createGitPollInterval(
  * Filters out gitignored files before indexing.
  */
 function createGitChangeHandler(
+  rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
@@ -237,7 +238,6 @@ function createGitChangeHandler(
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): () => Promise<void> {
-  const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
   let isIgnored: ((relativePath: string) => boolean) | null = null;
   let gitReindexInProgress = false;
   let lastGitReindexTime = 0;
@@ -325,7 +325,7 @@ async function setupGitDetection(
 
   // Check for git changes on startup
   try {
-    await handleGitStartup(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
+    await handleGitStartup(rootDir, gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
   } catch (error) {
     // handleGitStartup already calls failReindex() before re-throwing, no need to call again
     log(`Failed to check git state on startup: ${error}`, 'warning');
@@ -334,6 +334,7 @@ async function setupGitDetection(
   // If file watcher is available, use event-driven detection
   if (fileWatcher) {
     const gitChangeHandler = createGitChangeHandler(
+      rootDir,
       gitTracker,
       vectorDB,
       embeddings,
@@ -350,7 +351,7 @@ async function setupGitDetection(
   // Fallback to polling if no file watcher (--no-watch mode)
   const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
   log(`✓ Git detection enabled (polling fallback every ${pollIntervalSeconds}s)`);
-  const gitPollInterval = createGitPollInterval(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
+  const gitPollInterval = createGitPollInterval(rootDir, gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
   return { gitTracker, gitPollInterval };
 }
 
@@ -698,13 +699,13 @@ function filterFileChangeEvent(
  * indexing files that should be excluded (e.g. .wip/, dist/).
  */
 function createFileChangeHandler(
+  rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): FileChangeHandler {
-  const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
   let ignoreFilter: ((relativePath: string) => boolean) | null = null;
 
   return async (event) => {
@@ -755,7 +756,7 @@ async function setupFileWatching(
   const fileWatcher = new FileWatcher(rootDir);
 
   try {
-    const handler = createFileChangeHandler(vectorDB, embeddings, verbose, log, reindexStateManager);
+    const handler = createFileChangeHandler(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager);
     await fileWatcher.start(handler);
     log(`✓ File watching enabled (watching ${fileWatcher.getWatchedFiles().length} files)`);
     return fileWatcher;
