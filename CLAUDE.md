@@ -33,29 +33,41 @@ packages/core/src/indexer/ast/
 
 ---
 
-## Lien MCP Tools
+## Lien MCP Tools — MANDATORY Usage
 
-Semantic search tools that complement grep. Use Lien for discovery and understanding, grep for exact matches.
+Lien provides semantic code search via MCP. These tools are **not optional** — they MUST be used as described below. Using grep/glob when a Lien tool is appropriate is a violation of this project's workflow.
 
-### Tool Quick Reference
+### MANDATORY: Before Editing Any File
 
-| Tool | Use for |
+**You MUST run `get_files_context` before using the Edit tool on any file. No exceptions.**
+
+- Check `testAssociations` to know which tests to run after your change
+- Review `imports`, `exports`, and `callSites` to understand the file's role
+- Use batch mode when editing multiple files: `get_files_context({ filepaths: ["file1.ts", "file2.ts"] })`
+
+### MANDATORY: Before Modifying Any Exported Symbol
+
+**You MUST run `get_dependents` before renaming, removing, or changing the signature of any exported function, class, or interface.**
+
+- Check `dependentCount` and `riskLevel` to understand impact
+- Use the `symbol` parameter for precise usage tracking: `get_dependents({ filepath: "...", symbol: "MyFunction" })`
+- If `riskLevel` is "high" or "critical", list affected dependents to the user before proceeding
+
+### MANDATORY: For Discovery Questions
+
+**When asked "where is X?", "how does X work?", or any question about understanding the codebase, you MUST use `semantic_search` BEFORE falling back to grep/glob.**
+
+- `semantic_search` finds code by meaning — grep finds exact strings
+- Use `semantic_search` for: "Where is authentication handled?", "How does indexing work?", "What handles file watching?"
+- Use grep/glob ONLY for: exact symbol names, literal strings, config keys, TODOs
+
+### When to Use Other Tools
+
+| Tool | Trigger |
 |------|---------|
-| `semantic_search` | "Where/how is X implemented?" - natural language queries |
-| `get_files_context` | Before editing - shows test associations and dependencies |
-| `list_functions` | Find symbols by pattern (e.g., `.*Controller.*`) |
-| `get_dependents` | Impact analysis - "What breaks if I change this?" |
-| `get_complexity` | Tech debt hotspots |
-| `find_similar` | Find similar code patterns |
-
-### Before Editing Files
-
-Always run `get_files_context` first to check `testAssociations`.
-
-### Lien vs grep
-
-- **Lien**: "Where is authentication handled?" (meaning-based)
-- **grep**: `validateEmail` (exact string match)
+| `list_functions` | Finding symbols by pattern (e.g., "show me all Service classes", "find all handlers") |
+| `get_complexity` | Before refactoring — check if the target is already a complexity hotspot |
+| `find_similar` | Before adding new code — check for existing similar patterns to stay consistent |
 
 ---
 
