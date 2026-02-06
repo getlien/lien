@@ -137,7 +137,7 @@ async function handleGitStartup(
   if (changedFiles && changedFiles.length > 0) {
     const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
     const isIgnored = await createGitignoreFilter(rootDir);
-    const filteredFiles = changedFiles.filter(f => !isIgnored(normalizeToRelativePath(f, rootDir)));
+    const filteredFiles = changedFiles.filter(f => !isFileIgnored(f, rootDir, isIgnored));
 
     if (filteredFiles.length === 0) {
       log('✓ Index is up to date with git state');
@@ -201,7 +201,7 @@ function createGitPollInterval(
           isIgnored = await createGitignoreFilter(rootDir);
         }
 
-        const filteredFiles = changedFiles.filter(f => !isIgnored!(normalizeToRelativePath(f, rootDir)));
+        const filteredFiles = changedFiles.filter(f => !isFileIgnored(f, rootDir, isIgnored!));
         if (filteredFiles.length === 0) return;
 
         const startTime = Date.now();
@@ -270,7 +270,7 @@ function createGitChangeHandler(
       isIgnored = await createGitignoreFilter(rootDir);
     }
 
-    const filteredFiles = changedFiles.filter(f => !isIgnored!(normalizeToRelativePath(f, rootDir)));
+    const filteredFiles = changedFiles.filter(f => !isFileIgnored(f, rootDir, isIgnored!));
     if (filteredFiles.length === 0) {
       return;
     }
@@ -663,6 +663,17 @@ async function handleUnlinkEvent(
 }
 
 /**
+ * Check if a file should be excluded based on gitignore rules.
+ */
+function isFileIgnored(
+  filepath: string,
+  rootDir: string,
+  isIgnored: (relativePath: string) => boolean
+): boolean {
+  return isIgnored(normalizeToRelativePath(filepath, rootDir));
+}
+
+/**
  * Create file change event handler.
  * Filters out gitignored files before processing to prevent
  * indexing files that should be excluded (e.g. .wip/, dist/).
@@ -675,12 +686,12 @@ function createFileChangeHandler(
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): FileChangeHandler {
   const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
-  let isIgnored: ((relativePath: string) => boolean) | null = null;
+  let ignoreFilter: ((relativePath: string) => boolean) | null = null;
 
   return async (event) => {
     // Lazy-init gitignore filter on first event
-    if (!isIgnored) {
-      isIgnored = await createGitignoreFilter(rootDir);
+    if (!ignoreFilter) {
+      ignoreFilter = await createGitignoreFilter(rootDir);
     }
 
     const { type } = event;
@@ -688,19 +699,19 @@ function createFileChangeHandler(
     if (type === 'batch') {
       const filtered: FileChangeEvent = {
         ...event,
-        added: (event.added || []).filter(f => !isIgnored!(normalizeToRelativePath(f, rootDir))),
-        modified: (event.modified || []).filter(f => !isIgnored!(normalizeToRelativePath(f, rootDir))),
-        deleted: (event.deleted || []).filter(f => !isIgnored!(normalizeToRelativePath(f, rootDir))),
+        added: (event.added || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter!)),
+        modified: (event.modified || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter!)),
+        deleted: (event.deleted || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter!)),
       };
       const totalFiltered = (filtered.added!.length + filtered.modified!.length + filtered.deleted!.length);
       if (totalFiltered === 0) return;
       await handleBatchEvent(filtered, vectorDB, embeddings, verbose, log, reindexStateManager);
     } else if (type === 'unlink') {
-      if (isIgnored(normalizeToRelativePath(event.filepath, rootDir))) return;
+      if (isFileIgnored(event.filepath, rootDir, ignoreFilter)) return;
       await handleUnlinkEvent(event.filepath, vectorDB, log, reindexStateManager);
     } else {
       // Fallback for single file add/change (backwards compatibility)
-      if (isIgnored(normalizeToRelativePath(event.filepath, rootDir))) return;
+      if (isFileIgnored(event.filepath, rootDir, ignoreFilter)) return;
       await handleSingleFileChange(event.filepath, type, vectorDB, embeddings, verbose, log, reindexStateManager);
     }
   };
