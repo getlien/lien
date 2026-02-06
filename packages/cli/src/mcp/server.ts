@@ -693,11 +693,15 @@ async function filterGitChangedFiles(
       results.push(filepath);
       continue;
     }
-    // Keep ignored files that no longer exist — they need cleanup from the index
+    // Keep ignored files that no longer exist — they need cleanup from the index.
+    // Only treat ENOENT as non-existence; other errors (e.g. EACCES) mean the
+    // file exists but is unreadable and should stay filtered.
     try {
       await fs.access(filepath);
-    } catch {
-      results.push(filepath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        results.push(filepath);
+      }
     }
   }
 

@@ -36,5 +36,9 @@ export async function createGitignoreFilter(rootDir: string): Promise<(relativeP
   // Added after .gitignore so user negation rules (e.g. !node_modules/) cannot override them
   ig.add(ALWAYS_IGNORE_PATTERNS);
 
-  return (relativePath: string) => ig.ignores(relativePath);
+  return (relativePath: string) => {
+    // Normalize to POSIX separators — the ignore library expects forward slashes
+    const normalized = relativePath.replace(/\\/g, '/');
+    return ig.ignores(normalized);
+  };
 }
