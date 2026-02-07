@@ -47,12 +47,13 @@ describe('createGitignoreFilter', () => {
 
     // User-defined patterns are not applied
     expect(isIgnored('.wip/report.md')).toBe(false);
-    expect(isIgnored('dist/index.js')).toBe(false);
     expect(isIgnored('src/index.ts')).toBe(false);
 
     // Built-in patterns still apply
     expect(isIgnored('node_modules/foo/index.js')).toBe(true);
     expect(isIgnored('.lien/indices/abc')).toBe(true);
+    expect(isIgnored('dist/index.js')).toBe(true);
+    expect(isIgnored('build/main.js')).toBe(true);
   });
 
   it('should handle comments and blank lines in .gitignore', async () => {
@@ -65,7 +66,7 @@ describe('createGitignoreFilter', () => {
     expect(isIgnored('src/index.ts')).toBe(false);
   });
 
-  it('should always ignore node_modules, vendor, .git, and .lien', async () => {
+  it('should always ignore node_modules, vendor, .git, .lien, dist, build, and minified assets', async () => {
     const isIgnored = await createGitignoreFilter(testDir);
 
     expect(isIgnored('node_modules/express/index.js')).toBe(true);
@@ -73,6 +74,10 @@ describe('createGitignoreFilter', () => {
     expect(isIgnored('vendor/autoload.php')).toBe(true);
     expect(isIgnored('.git/HEAD')).toBe(true);
     expect(isIgnored('.lien/indices/abc123')).toBe(true);
+    expect(isIgnored('dist/bundle.js')).toBe(true);
+    expect(isIgnored('build/output.js')).toBe(true);
+    expect(isIgnored('lib/app.min.js')).toBe(true);
+    expect(isIgnored('styles/main.min.css')).toBe(true);
   });
 
   it('should not allow .gitignore negations to override built-in patterns', async () => {

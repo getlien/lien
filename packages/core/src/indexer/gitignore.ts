@@ -13,12 +13,21 @@ const ALWAYS_IGNORE_PATTERNS = [
   '.git/**',
   '**/.git/**',
   '.lien/**',
+  'dist/**',
+  '**/dist/**',
+  'build/**',
+  '**/build/**',
+  '*.min.js',
+  '**/*.min.js',
+  '*.min.css',
+  '**/*.min.css',
 ];
 
 /**
  * Create a filter function that checks if a file path is gitignored.
  * Loads .gitignore from rootDir and applies built-in exclusions (node_modules,
- * vendor, .git, .lien) to match the full scan behavior in scanner.ts.
+ * vendor, .git, .lien, dist, build, minified assets) to match the full scan
+ * behavior in scanner.ts.
  *
  * @param rootDir - Project root directory containing .gitignore
  * @returns Function that returns true if a relative path is ignored
