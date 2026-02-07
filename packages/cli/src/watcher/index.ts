@@ -253,14 +253,10 @@ export class FileWatcher {
     // ALWAYS_IGNORE_PATTERNS (.git/** is ignored on the main watcher).
     // Normalize to POSIX separators so glob patterns work on Windows.
     const gitPaths = [
-      path.join(this.rootDir, '.git/HEAD'),
-      path.join(this.rootDir, '.git/index'),
-      path.join(this.rootDir, '.git/refs/**'),
-      path.join(this.rootDir, '.git/MERGE_HEAD'),
-      path.join(this.rootDir, '.git/REBASE_HEAD'),
-      path.join(this.rootDir, '.git/CHERRY_PICK_HEAD'),
-      path.join(this.rootDir, '.git/logs/refs/stash'),
-    ].map(p => p.replace(/\\/g, '/'));
+      'HEAD', 'index', 'refs/**',
+      'MERGE_HEAD', 'REBASE_HEAD', 'CHERRY_PICK_HEAD',
+      'logs/refs/stash',
+    ].map(p => path.join(this.rootDir, '.git', p).replace(/\\/g, '/'));
 
     this.gitWatcher = chokidar.watch(gitPaths, {
       persistent: true,
