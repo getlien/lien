@@ -1,5 +1,6 @@
-import ignore from 'ignore';
+import ignore, { type Ignore } from 'ignore';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 
 /**
@@ -24,31 +25,118 @@ export const ALWAYS_IGNORE_PATTERNS = [
   '**/*.min.css',
 ];
 
+/** Directories to skip during .gitignore discovery (no useful .gitignore inside) */
+const SKIP_DIRS = new Set([
+  'node_modules',
+  'vendor',
+  '.git',
+  '.lien',
+  'dist',
+  'build',
+]);
+
+/** Whether a directory entry should be traversed during .gitignore discovery */
+function shouldTraverseDir(entry: fsSync.Dirent): boolean {
+  if (!entry.isDirectory() || entry.isSymbolicLink()) return false;
+  if (SKIP_DIRS.has(entry.name)) return false;
+  // Skip hidden dirs except .github
+  if (entry.name.startsWith('.') && entry.name !== '.github') return false;
+  return true;
+}
+
+/** Read .gitignore content from a directory, or null if not present */
+async function readGitignore(absDir: string, entries: fsSync.Dirent[]): Promise<string | null> {
+  if (!entries.some(e => e.name === '.gitignore' && e.isFile())) return null;
+  try {
+    return await fs.readFile(path.join(absDir, '.gitignore'), 'utf-8');
+  } catch {
+    return null; // Race condition or permission issue
+  }
+}
+
+/**
+ * Walk the directory tree from rootDir, collecting .gitignore contents.
+ * Skips SKIP_DIRS and symlinked directories to avoid cycles.
+ *
+ * @returns Map of relative dir path ('' for root, 'packages/app' etc.) to .gitignore content
+ */
+async function discoverGitignoreFiles(rootDir: string): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const queue: string[] = [''];
+  let head = 0;
+
+  while (head < queue.length) {
+    const relDir = queue[head++];
+    const absDir = relDir ? path.join(rootDir, relDir) : rootDir;
+
+    let entries: fsSync.Dirent[];
+    try {
+      entries = await fs.readdir(absDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    const content = await readGitignore(absDir, entries);
+    if (content !== null) {
+      result.set(relDir, content);
+    }
+
+    for (const entry of entries) {
+      if (!shouldTraverseDir(entry)) continue;
+      const childRel = relDir ? `${relDir}/${entry.name}` : entry.name;
+      queue.push(childRel);
+    }
+  }
+
+  return result;
+}
+
+/** Check if a path matches a scoped .gitignore (root or nested) */
+function matchesScopedIgnore(normalized: string, prefix: string, ig: Ignore): boolean {
+  if (prefix === '') return ig.ignores(normalized);
+
+  const prefixWithSlash = prefix + '/';
+  if (!normalized.startsWith(prefixWithSlash)) return false;
+  const scopedPath = normalized.slice(prefixWithSlash.length);
+  return scopedPath !== '' && ig.ignores(scopedPath);
+}
+
 /**
  * Create a filter function that checks if a file path is gitignored.
- * Loads .gitignore from rootDir and applies built-in exclusions (node_modules,
+ * Discovers .gitignore files throughout the directory tree and applies
+ * each at its appropriate scope, plus built-in exclusions (node_modules,
  * vendor, .git, .lien, dist, build, minified assets) to match the full scan
  * behavior in scanner.ts.
  *
- * @param rootDir - Project root directory containing .gitignore
+ * Limitation: scoped evaluation is OR across .gitignore files, so a nested
+ * .gitignore cannot un-ignore a pattern from a parent. Cross-scope negation
+ * (e.g., root ignores `*.log`, child un-ignores `!important.log`) is not
+ * supported. Nested .gitignore files in practice almost always ADD patterns.
+ *
+ * @param rootDir - Project root directory
  * @returns Function that returns true if a relative path is ignored
  */
 export async function createGitignoreFilter(rootDir: string): Promise<(relativePath: string) => boolean> {
-  const ig = ignore();
+  // Always-ignore patterns in a separate instance (cannot be negated)
+  const alwaysIg = ignore();
+  alwaysIg.add(ALWAYS_IGNORE_PATTERNS);
 
-  try {
-    const gitignoreContent = await fs.readFile(path.join(rootDir, '.gitignore'), 'utf-8');
-    ig.add(gitignoreContent);
-  } catch {
-    // No .gitignore — only built-in ignore patterns will apply
+  // Discover all .gitignore files and build scoped ignore instances
+  const gitignoreMap = await discoverGitignoreFiles(rootDir);
+  const scopedIgnores: Array<{ prefix: string; ig: Ignore }> = [];
+
+  for (const [relDir, content] of gitignoreMap) {
+    const ig = ignore();
+    ig.add(content);
+    scopedIgnores.push({ prefix: relDir, ig });
   }
 
-  // Added after .gitignore so user negation rules (e.g. !node_modules/) cannot override them
-  ig.add(ALWAYS_IGNORE_PATTERNS);
+  // Sort by prefix length (root first) for consistent evaluation
+  scopedIgnores.sort((a, b) => a.prefix.length - b.prefix.length);
 
   return (relativePath: string) => {
-    // Normalize to POSIX separators — the ignore library expects forward slashes
     const normalized = relativePath.replace(/\\/g, '/');
-    return ig.ignores(normalized);
+    if (alwaysIg.ignores(normalized)) return true;
+    return scopedIgnores.some(({ prefix, ig }) => matchesScopedIgnore(normalized, prefix, ig));
   };
 }

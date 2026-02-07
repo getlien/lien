@@ -200,6 +200,11 @@ function createGitPollInterval(
           return;
         }
 
+        // Invalidate filter when .gitignore files change
+        if (changedFiles.some(isGitignoreFile)) {
+          isIgnored = null;
+        }
+
         // Lazy-init gitignore filter
         if (!isIgnored) {
           isIgnored = await createGitignoreFilter(rootDir);
@@ -234,6 +239,27 @@ function createGitPollInterval(
  * Handles cooldown and concurrent operation prevention.
  * Filters out gitignored files before indexing.
  */
+/** Check if a git reindex should be skipped due to concurrency or cooldown */
+function shouldSkipGitReindex(
+  gitReindexInProgress: boolean,
+  lastGitReindexTime: number,
+  cooldownMs: number,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
+  log: LogFn
+): boolean {
+  const { inProgress: globalInProgress } = reindexStateManager.getState();
+  if (gitReindexInProgress || globalInProgress) {
+    log('Git reindex already in progress, skipping', 'debug');
+    return true;
+  }
+  const timeSinceLastReindex = Date.now() - lastGitReindexTime;
+  if (timeSinceLastReindex < cooldownMs) {
+    log(`Git change ignored (cooldown: ${cooldownMs - timeSinceLastReindex}ms remaining)`, 'debug');
+    return true;
+  }
+  return false;
+}
+
 function createGitChangeHandler(
   rootDir: string,
   gitTracker: GitStateTracker,
@@ -250,17 +276,7 @@ function createGitChangeHandler(
   const GIT_REINDEX_COOLDOWN_MS = 5000; // 5 second cooldown
 
   return async () => {
-    // Prevent concurrent git reindex operations (check both local and global state)
-    const { inProgress: globalInProgress } = reindexStateManager.getState();
-    if (gitReindexInProgress || globalInProgress) {
-      log('Git reindex already in progress, skipping', 'debug');
-      return;
-    }
-
-    // Cooldown check - don't reindex again too soon
-    const timeSinceLastReindex = Date.now() - lastGitReindexTime;
-    if (timeSinceLastReindex < GIT_REINDEX_COOLDOWN_MS) {
-      log(`Git change ignored (cooldown: ${GIT_REINDEX_COOLDOWN_MS - timeSinceLastReindex}ms remaining)`, 'debug');
+    if (shouldSkipGitReindex(gitReindexInProgress, lastGitReindexTime, GIT_REINDEX_COOLDOWN_MS, reindexStateManager, log)) {
       return;
     }
 
@@ -269,6 +285,11 @@ function createGitChangeHandler(
 
     if (!changedFiles || changedFiles.length === 0) {
       return;
+    }
+
+    // Invalidate filter when .gitignore files change
+    if (changedFiles.some(isGitignoreFile)) {
+      isIgnored = null;
     }
 
     // Lazy-init gitignore filter
@@ -735,6 +756,21 @@ function filterFileChangeEvent(
   };
 }
 
+/** Check if a filepath is a .gitignore file (basename match, not suffix) */
+function isGitignoreFile(filepath: string): boolean {
+  const name = filepath.split('/').pop() ?? filepath.split('\\').pop() ?? filepath;
+  return name === '.gitignore';
+}
+
+/** Check if an event includes a .gitignore file change */
+function hasGitignoreChange(event: FileChangeEvent): boolean {
+  if (event.type === 'batch') {
+    const allFiles = [...(event.added || []), ...(event.modified || []), ...(event.deleted || [])];
+    return allFiles.some(isGitignoreFile);
+  }
+  return event.filepath ? isGitignoreFile(event.filepath) : false;
+}
+
 /**
  * Create file change event handler.
  * Filters out gitignored files before processing to prevent
@@ -751,7 +787,12 @@ function createFileChangeHandler(
   let ignoreFilter: ((relativePath: string) => boolean) | null = null;
 
   return async (event) => {
-    // Lazy-init gitignore filter on first event
+    // Invalidate filter when a .gitignore file changes so nested patterns take effect
+    if (hasGitignoreChange(event)) {
+      ignoreFilter = null;
+    }
+
+    // Lazy-init gitignore filter on first event (or after invalidation)
     if (!ignoreFilter) {
       ignoreFilter = await createGitignoreFilter(rootDir);
     }
@@ -1039,4 +1080,4 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
 }
 
 /** @internal — exported for testing only */
-export const _testing = { handleGitStartup, createGitPollInterval, createGitChangeHandler };
+export const _testing = { handleGitStartup, createGitPollInterval, createGitChangeHandler, isGitignoreFile, hasGitignoreChange };
