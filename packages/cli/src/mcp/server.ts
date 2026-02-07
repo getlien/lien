@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
+import fs from 'fs/promises';
 import {
   LocalEmbeddings,
   GitStateTracker,
@@ -17,6 +18,7 @@ import {
   VectorDBInterface,
   computeContentHash,
   normalizeToRelativePath,
+  createGitignoreFilter,
 } from '@liendev/core';
 import { FileWatcher, type FileChangeHandler, type FileChangeEvent } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
@@ -117,11 +119,13 @@ async function handleAutoIndexing(
 
 /**
  * Handle git changes detected on startup.
- * 
+ * Filters out gitignored files before indexing.
+ *
  * **Error Handling:** Calls failReindex() before re-throwing to ensure proper cleanup.
  * Caller should catch and log but NOT call failReindex() again (already handled here).
  */
 async function handleGitStartup(
+  rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
@@ -133,12 +137,20 @@ async function handleGitStartup(
   const changedFiles = await gitTracker.initialize();
 
   if (changedFiles && changedFiles.length > 0) {
+    const isIgnored = await createGitignoreFilter(rootDir);
+    const filteredFiles = await filterGitChangedFiles(changedFiles, rootDir, isIgnored);
+
+    if (filteredFiles.length === 0) {
+      log('✓ Index is up to date with git state');
+      return;
+    }
+
     const startTime = Date.now();
-    reindexStateManager.startReindex(changedFiles);
-    log(`🌿 Git changes detected: ${changedFiles.length} files changed`);
-    
+    reindexStateManager.startReindex(filteredFiles);
+    log(`🌿 Git changes detected: ${filteredFiles.length} files changed`);
+
     try {
-      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose: false });
+      const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, { verbose: false });
       const duration = Date.now() - startTime;
       reindexStateManager.completeReindex(duration);
       log(`✓ Reindexed ${count} files in ${duration}ms`);
@@ -154,12 +166,14 @@ async function handleGitStartup(
 /**
  * Create background polling interval for git changes.
  * Uses reindexStateManager to track and prevent concurrent operations.
- * 
+ * Filters out gitignored files before indexing.
+ *
  * **Error Handling:** Background poll errors are caught and logged as warnings (non-fatal).
  * This differs from handleGitStartup() which re-throws (fatal). Background failures
  * should not crash the server - just log and continue polling.
  */
 function createGitPollInterval(
+  rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
@@ -167,6 +181,8 @@ function createGitPollInterval(
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): NodeJS.Timeout {
+  let isIgnored: ((relativePath: string) => boolean) | null = null;
+
   return setInterval(async () => {
     try {
       const changedFiles = await gitTracker.detectChanges();
@@ -180,13 +196,21 @@ function createGitPollInterval(
           );
           return;
         }
-        
+
+        // Lazy-init gitignore filter
+        if (!isIgnored) {
+          isIgnored = await createGitignoreFilter(rootDir);
+        }
+
+        const filteredFiles = await filterGitChangedFiles(changedFiles, rootDir, isIgnored!);
+        if (filteredFiles.length === 0) return;
+
         const startTime = Date.now();
-        reindexStateManager.startReindex(changedFiles);
-        log(`🌿 Git change detected: ${changedFiles.length} files changed`);
-        
+        reindexStateManager.startReindex(filteredFiles);
+        log(`🌿 Git change detected: ${filteredFiles.length} files changed`);
+
         try {
-          const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose: false });
+          const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, { verbose: false });
           const duration = Date.now() - startTime;
           reindexStateManager.completeReindex(duration);
           log(`✓ Background reindex complete: ${count} files in ${duration}ms`);
@@ -204,8 +228,10 @@ function createGitPollInterval(
 /**
  * Create a git change handler for event-driven detection.
  * Handles cooldown and concurrent operation prevention.
+ * Filters out gitignored files before indexing.
  */
 function createGitChangeHandler(
+  rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
@@ -213,10 +239,11 @@ function createGitChangeHandler(
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): () => Promise<void> {
+  let isIgnored: ((relativePath: string) => boolean) | null = null;
   let gitReindexInProgress = false;
   let lastGitReindexTime = 0;
   const GIT_REINDEX_COOLDOWN_MS = 5000; // 5 second cooldown
-  
+
   return async () => {
     // Prevent concurrent git reindex operations (check both local and global state)
     const { inProgress: globalInProgress } = reindexStateManager.getState();
@@ -224,28 +251,38 @@ function createGitChangeHandler(
       log('Git reindex already in progress, skipping', 'debug');
       return;
     }
-    
+
     // Cooldown check - don't reindex again too soon
     const timeSinceLastReindex = Date.now() - lastGitReindexTime;
     if (timeSinceLastReindex < GIT_REINDEX_COOLDOWN_MS) {
       log(`Git change ignored (cooldown: ${GIT_REINDEX_COOLDOWN_MS - timeSinceLastReindex}ms remaining)`, 'debug');
       return;
     }
-    
+
     log('🌿 Git change detected (event-driven)');
     const changedFiles = await gitTracker.detectChanges();
-    
+
     if (!changedFiles || changedFiles.length === 0) {
       return;
     }
-    
+
+    // Lazy-init gitignore filter
+    if (!isIgnored) {
+      isIgnored = await createGitignoreFilter(rootDir);
+    }
+
+    const filteredFiles = await filterGitChangedFiles(changedFiles, rootDir, isIgnored!);
+    if (filteredFiles.length === 0) {
+      return;
+    }
+
     gitReindexInProgress = true;
     const startTime = Date.now();
-    reindexStateManager.startReindex(changedFiles);
-    log(`Reindexing ${changedFiles.length} files from git change`);
-    
+    reindexStateManager.startReindex(filteredFiles);
+    log(`Reindexing ${filteredFiles.length} files from git change`);
+
     try {
-      const count = await indexMultipleFiles(changedFiles, vectorDB, embeddings, { verbose: false });
+      const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, { verbose: false });
       const duration = Date.now() - startTime;
       reindexStateManager.completeReindex(duration);
       log(`✓ Reindexed ${count} files in ${duration}ms`);
@@ -289,7 +326,7 @@ async function setupGitDetection(
 
   // Check for git changes on startup
   try {
-    await handleGitStartup(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
+    await handleGitStartup(rootDir, gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
   } catch (error) {
     // handleGitStartup already calls failReindex() before re-throwing, no need to call again
     log(`Failed to check git state on startup: ${error}`, 'warning');
@@ -298,6 +335,7 @@ async function setupGitDetection(
   // If file watcher is available, use event-driven detection
   if (fileWatcher) {
     const gitChangeHandler = createGitChangeHandler(
+      rootDir,
       gitTracker,
       vectorDB,
       embeddings,
@@ -314,7 +352,7 @@ async function setupGitDetection(
   // Fallback to polling if no file watcher (--no-watch mode)
   const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
   log(`✓ Git detection enabled (polling fallback every ${pollIntervalSeconds}s)`);
-  const gitPollInterval = createGitPollInterval(gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
+  const gitPollInterval = createGitPollInterval(rootDir, gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
   return { gitTracker, gitPollInterval };
 }
 
@@ -627,24 +665,103 @@ async function handleUnlinkEvent(
 }
 
 /**
- * Create file change event handler
+ * Check if a file should be excluded based on gitignore rules.
+ */
+function isFileIgnored(
+  filepath: string,
+  rootDir: string,
+  isIgnored: (relativePath: string) => boolean
+): boolean {
+  return isIgnored(normalizeToRelativePath(filepath, rootDir));
+}
+
+/**
+ * Filter a flat list of changed files by gitignore, but preserve files that
+ * no longer exist on disk (deletions). Git handlers return a flat list without
+ * distinguishing adds from deletes — filtering deleted files would leave stale
+ * entries in the index.
+ */
+async function filterGitChangedFiles(
+  changedFiles: string[],
+  rootDir: string,
+  ignoreFilter: (relativePath: string) => boolean
+): Promise<string[]> {
+  const results: string[] = [];
+
+  for (const filepath of changedFiles) {
+    if (!isFileIgnored(filepath, rootDir, ignoreFilter)) {
+      results.push(filepath);
+      continue;
+    }
+    // Keep ignored files that no longer exist — they need cleanup from the index.
+    // Only treat ENOENT as non-existence; other errors (e.g. EACCES) mean the
+    // file exists but is unreadable and should stay filtered.
+    try {
+      await fs.access(filepath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        results.push(filepath);
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Filter a batch file change event, removing gitignored files from additions
+ * and modifications. Deletions are never filtered — a previously-indexed file
+ * that gets added to .gitignore and then deleted must still be removed from
+ * the index to avoid stale entries.
+ */
+function filterFileChangeEvent(
+  event: FileChangeEvent,
+  ignoreFilter: (relativePath: string) => boolean,
+  rootDir: string
+): FileChangeEvent {
+  return {
+    ...event,
+    added: (event.added || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter)),
+    modified: (event.modified || []).filter(f => !isFileIgnored(f, rootDir, ignoreFilter)),
+    deleted: event.deleted || [],
+  };
+}
+
+/**
+ * Create file change event handler.
+ * Filters out gitignored files before processing to prevent
+ * indexing files that should be excluded according to .gitignore.
  */
 function createFileChangeHandler(
+  rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): FileChangeHandler {
+  let ignoreFilter: ((relativePath: string) => boolean) | null = null;
+
   return async (event) => {
+    // Lazy-init gitignore filter on first event
+    if (!ignoreFilter) {
+      ignoreFilter = await createGitignoreFilter(rootDir);
+    }
+
     const { type } = event;
 
     if (type === 'batch') {
-      await handleBatchEvent(event, vectorDB, embeddings, verbose, log, reindexStateManager);
+      const filtered = filterFileChangeEvent(event, ignoreFilter, rootDir);
+      const totalToProcess = (filtered.added!.length + filtered.modified!.length + filtered.deleted!.length);
+      if (totalToProcess === 0) return;
+      await handleBatchEvent(filtered, vectorDB, embeddings, verbose, log, reindexStateManager);
     } else if (type === 'unlink') {
+      // Always process deletions — a previously-indexed file must be removed
+      // from the index even if it's now gitignored
       await handleUnlinkEvent(event.filepath, vectorDB, log, reindexStateManager);
     } else {
       // Fallback for single file add/change (backwards compatibility)
+      if (isFileIgnored(event.filepath, rootDir, ignoreFilter)) return;
       await handleSingleFileChange(event.filepath, type, vectorDB, embeddings, verbose, log, reindexStateManager);
     }
   };
@@ -673,7 +790,7 @@ async function setupFileWatching(
   const fileWatcher = new FileWatcher(rootDir);
 
   try {
-    const handler = createFileChangeHandler(vectorDB, embeddings, verbose, log, reindexStateManager);
+    const handler = createFileChangeHandler(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager);
     await fileWatcher.start(handler);
     log(`✓ File watching enabled (watching ${fileWatcher.getWatchedFiles().length} files)`);
     return fileWatcher;

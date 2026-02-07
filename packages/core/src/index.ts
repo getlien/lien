@@ -38,6 +38,7 @@ export { scanCodebase, scanCodebaseWithFrameworks, detectFileType } from './inde
 /** @deprecated Use {@link detectFileType} instead. */
 export { detectFileType as detectLanguage } from './indexer/scanner.js';
 export { indexSingleFile, indexMultipleFiles, normalizeToRelativePath } from './indexer/incremental.js';
+export { createGitignoreFilter, ALWAYS_IGNORE_PATTERNS } from './indexer/gitignore.js';
 export { extractSymbols } from './indexer/symbol-extractor.js';
 export { computeContentHash, isHashAlgorithmCompatible } from './indexer/content-hash.js';
 export {
