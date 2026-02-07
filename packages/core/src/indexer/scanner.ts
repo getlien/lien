@@ -7,6 +7,21 @@ import { LienConfig, FrameworkInstance } from '../config/schema.js';
 import { ALWAYS_IGNORE_PATTERNS } from './gitignore.js';
 
 /**
+ * Load .gitignore from the given paths (first match wins) and return an ignore instance.
+ */
+async function loadGitignore(...dirs: string[]): Promise<ReturnType<typeof ignore>> {
+  for (const dir of dirs) {
+    try {
+      const content = await fs.readFile(path.join(dir, '.gitignore'), 'utf-8');
+      return ignore().add(content);
+    } catch {
+      // Try next path
+    }
+  }
+  return ignore();
+}
+
+/**
  * Scan codebase using framework-aware configuration
  * @param rootDir - Project root directory
  * @param config - Lien configuration with frameworks
@@ -41,26 +56,8 @@ async function scanFramework(
   framework: FrameworkInstance
 ): Promise<string[]> {
   const frameworkPath = path.join(rootDir, framework.path);
-  
-  // Load .gitignore from framework path
-  const gitignorePath = path.join(frameworkPath, '.gitignore');
-  let ig = ignore();
-  
-  try {
-    const gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
-    ig = ignore().add(gitignoreContent);
-  } catch (e) {
-    // No .gitignore in framework path, try root
-    const rootGitignorePath = path.join(rootDir, '.gitignore');
-    try {
-      const gitignoreContent = await fs.readFile(rootGitignorePath, 'utf-8');
-      ig = ignore().add(gitignoreContent);
-    } catch (e) {
-      // No .gitignore at all, that's fine
-    }
-  }
-  
-  // Add framework-specific exclusions and always-ignored patterns
+
+  const ig = await loadGitignore(frameworkPath, rootDir);
   ig.add([
     ...ALWAYS_IGNORE_PATTERNS,
     ...framework.config.exclude,
@@ -106,18 +103,7 @@ async function scanFramework(
 export async function scanCodebase(options: ScanOptions): Promise<string[]> {
   const { rootDir, includePatterns = [], excludePatterns = [] } = options;
   
-  // Load .gitignore
-  const gitignorePath = path.join(rootDir, '.gitignore');
-  let ig = ignore();
-  
-  try {
-    const gitignoreContent = await fs.readFile(gitignorePath, 'utf-8');
-    ig = ignore().add(gitignoreContent);
-  } catch (e) {
-    // No .gitignore, that's fine
-  }
-  
-  // Add default exclusions (including always-ignored patterns)
+  const ig = await loadGitignore(rootDir);
   ig.add([
     ...ALWAYS_IGNORE_PATTERNS,
     ...excludePatterns,
