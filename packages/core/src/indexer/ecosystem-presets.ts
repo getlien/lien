@@ -112,6 +112,116 @@ export const ECOSYSTEM_PRESETS: EcosystemPreset[] = [
       'public/build/**',
     ],
   },
+  {
+    name: 'ruby',
+    markerFiles: ['Gemfile'],
+    excludePatterns: [
+      'tmp/**',
+      '**/tmp/**',
+      '.bundle/**',
+      '**/.bundle/**',
+      'vendor/bundle/**',
+      '**/vendor/bundle/**',
+      'log/**',
+      '**/log/**',
+      'coverage/**',
+      '**/coverage/**',
+      'public/assets/**',
+      '**/public/assets/**',
+      'public/packs/**',
+      '**/public/packs/**',
+    ],
+  },
+  {
+    name: 'rails',
+    markerFiles: ['bin/rails'],
+    excludePatterns: [
+      'db/migrate/**',
+      'db/seeds/**',
+      'storage/**',
+      '**/storage/**',
+      'tmp/**',
+      '**/tmp/**',
+      'log/**',
+      '**/log/**',
+      'public/assets/**',
+      '**/public/assets/**',
+      'public/packs/**',
+      '**/public/packs/**',
+    ],
+  },
+  {
+    name: 'rust',
+    markerFiles: ['Cargo.toml'],
+    excludePatterns: [
+      'target/**',
+      '**/target/**',
+    ],
+  },
+  {
+    name: 'jvm',
+    markerFiles: ['pom.xml', 'build.gradle', 'build.gradle.kts'],
+    excludePatterns: [
+      '.gradle/**',
+      '**/.gradle/**',
+      'target/**',
+      '**/target/**',
+      'out/**',
+      '**/out/**',
+      '.idea/**',
+      '**/.idea/**',
+      '*.class',
+      '**/*.class',
+    ],
+  },
+  {
+    name: 'swift',
+    markerFiles: ['Package.swift', '*.xcodeproj', '*.xcworkspace'],
+    excludePatterns: [
+      '.build/**',
+      '**/.build/**',
+      'DerivedData/**',
+      '**/DerivedData/**',
+      '*.xcodeproj/**',
+      '**/*.xcodeproj/**',
+      'Pods/**',
+      '**/Pods/**',
+    ],
+  },
+  {
+    name: 'dotnet',
+    markerFiles: ['*.csproj', '*.sln'],
+    excludePatterns: [
+      'bin/**',
+      '**/bin/**',
+      'obj/**',
+      '**/obj/**',
+      'packages/**',
+      '**/packages/**',
+      '.vs/**',
+      '**/.vs/**',
+    ],
+  },
+  {
+    name: 'django',
+    markerFiles: ['manage.py'],
+    excludePatterns: [
+      'staticfiles/**',
+      '**/staticfiles/**',
+      'media/**',
+      '**/media/**',
+      '*.sqlite3',
+      '**/*.sqlite3',
+    ],
+  },
+  {
+    name: 'astro',
+    markerFiles: ['astro.config.*'],
+    excludePatterns: [
+      '.astro/**',
+      '**/.astro/**',
+    ],
+  },
 ];
 
 /** Directories to skip when scanning for marker files in subdirectories */
@@ -119,11 +229,27 @@ const SKIP_DIRS = new Set([
   'node_modules', 'vendor', '.git', '.lien', 'dist', 'build',
   '.next', '.nuxt', '.vite', '.turbo', 'venv', '.venv',
   '__pycache__', '.tox', 'coverage', '.cache',
+  'target', '.gradle', '.idea', 'out',
+  'DerivedData', 'Pods', '.build',
+  'obj', '.vs',
+  'tmp', 'log', '.bundle',
+  '.astro',
 ]);
+
+/** Convert a simple glob pattern (e.g. `*.csproj`) to a RegExp */
+function matchSimpleGlob(pattern: string): RegExp {
+  const escaped = pattern.replace(/\./g, '\\.').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`);
+}
 
 /** Check if a marker file exists in a directory */
 async function hasMarkerFile(dir: string, marker: string): Promise<boolean> {
   try {
+    if (marker.includes('*')) {
+      const entries = await fs.readdir(dir);
+      const re = matchSimpleGlob(marker);
+      return entries.some(entry => re.test(entry));
+    }
     await fs.access(path.join(dir, marker));
     return true;
   } catch {
