@@ -4,19 +4,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { ScanOptions } from './types.js';
 import { LienConfig, FrameworkInstance } from '../config/schema.js';
-
-/**
- * Patterns that should ALWAYS be ignored, regardless of user configuration.
- * These are fundamental exclusions that should never be indexed.
- */
-const ALWAYS_IGNORE_PATTERNS = [
-  '**/node_modules/**',
-  'node_modules/**',
-  '**/vendor/**',
-  'vendor/**',
-  '.git/**',
-  '**/.git/**',
-];
+import { ALWAYS_IGNORE_PATTERNS } from './gitignore.js';
 
 /**
  * Scan codebase using framework-aware configuration
@@ -76,7 +64,6 @@ async function scanFramework(
   ig.add([
     ...ALWAYS_IGNORE_PATTERNS,
     ...framework.config.exclude,
-    '.lien/**',
   ]);
   
   // Combine always-ignored patterns with framework exclusions for glob
@@ -133,11 +120,6 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
   // Add default exclusions (including always-ignored patterns)
   ig.add([
     ...ALWAYS_IGNORE_PATTERNS,
-    'dist/**',
-    'build/**',
-    '*.min.js',
-    '*.min.css',
-    '.lien/**',
     ...excludePatterns,
   ]);
   

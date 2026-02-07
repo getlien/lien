@@ -3,9 +3,10 @@ import fs from 'fs/promises';
 import path from 'path';
 
 /**
- * Patterns that should always be ignored, matching the full scan behavior in scanner.ts.
+ * Patterns that should always be ignored regardless of user configuration.
+ * Single source of truth — imported by scanner.ts and used by createGitignoreFilter.
  */
-const ALWAYS_IGNORE_PATTERNS = [
+export const ALWAYS_IGNORE_PATTERNS = [
   'node_modules/**',
   '**/node_modules/**',
   'vendor/**',
