@@ -5,7 +5,6 @@ import os from 'os';
 import chokidar from 'chokidar';
 import { FileWatcher, FileChangeEvent } from './index.js';
 import { ALWAYS_IGNORE_PATTERNS } from '@liendev/core';
-import type { FrameworkDetector, DetectionResult } from '@liendev/core';
 
 describe('FileWatcher', () => {
   let testDir: string;
@@ -308,23 +307,14 @@ describe('FileWatcher', () => {
       vi.restoreAllMocks();
     });
 
-    async function mockFramework(name: string, include: string[], exclude: string[]) {
+    async function mockEcosystems(ecosystems: string[], excludePatterns: string[]) {
       const coreModule = await import('@liendev/core');
-      const mockResult: DetectionResult = {
-        detected: true, name, path: '.', confidence: 'high', evidence: ['test'],
-      };
-      const mockDetector: FrameworkDetector = {
-        name,
-        detect: vi.fn<(r: string, p: string) => Promise<DetectionResult>>().mockResolvedValue(mockResult),
-        generateConfig: vi.fn().mockResolvedValue({ include, exclude }),
-      };
-      vi.spyOn(coreModule, 'detectAllFrameworks').mockResolvedValue([mockResult]);
-      vi.spyOn(coreModule, 'getFrameworkDetector').mockReturnValue(mockDetector);
+      vi.spyOn(coreModule, 'detectEcosystems').mockResolvedValue(ecosystems);
+      vi.spyOn(coreModule, 'getEcosystemExcludePatterns').mockReturnValue(excludePatterns);
     }
 
-    it('should pass ALWAYS_IGNORE_PATTERNS to chokidar when no frameworks detected', async () => {
-      const coreModule = await import('@liendev/core');
-      vi.spyOn(coreModule, 'detectAllFrameworks').mockResolvedValue([]);
+    it('should pass ALWAYS_IGNORE_PATTERNS to chokidar when no ecosystems detected', async () => {
+      await mockEcosystems([], []);
 
       const watchSpy = vi.spyOn(chokidar, 'watch');
       const handler = vi.fn();
@@ -339,9 +329,9 @@ describe('FileWatcher', () => {
       }
     });
 
-    it('should merge ALWAYS_IGNORE_PATTERNS with framework excludes', async () => {
-      const frameworkExclude = 'storage/**';
-      await mockFramework('laravel', ['**/*.php'], [frameworkExclude]);
+    it('should merge ALWAYS_IGNORE_PATTERNS with ecosystem excludes', async () => {
+      const ecosystemExclude = 'storage/**';
+      await mockEcosystems(['php'], [ecosystemExclude]);
 
       const watchSpy = vi.spyOn(chokidar, 'watch');
       const fw = new FileWatcher(testDir);
@@ -354,14 +344,14 @@ describe('FileWatcher', () => {
       for (const pattern of ALWAYS_IGNORE_PATTERNS) {
         expect(ignored).toContain(pattern);
       }
-      expect(ignored).toContain(frameworkExclude);
+      expect(ignored).toContain(ecosystemExclude);
 
       await fw.stop();
     });
 
     it('should deduplicate overlapping patterns', async () => {
       const duplicatePattern = '**/node_modules/**';
-      await mockFramework('node', ['**/*.ts'], [duplicatePattern, 'coverage/**']);
+      await mockEcosystems(['nodejs'], [duplicatePattern, 'coverage/**']);
 
       const watchSpy = vi.spyOn(chokidar, 'watch');
       const fw = new FileWatcher(testDir);

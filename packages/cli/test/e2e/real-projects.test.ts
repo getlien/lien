@@ -5,7 +5,7 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import { execSync } from 'child_process';
-import { VectorDB, LocalEmbeddings, detectAllFrameworks } from '@liendev/core';
+import { VectorDB, LocalEmbeddings } from '@liendev/core';
 
 /**
  * E2E Tests with Real Open Source Projects
@@ -359,14 +359,6 @@ describe('E2E: Real Open Source Projects', () => {
           console.error(`❌ No files indexed for ${project.name}!`);
           console.error(`   Project directory: ${projectDir}`);
           console.error(`   Check project structure and include patterns in config`);
-          
-          // Show detected frameworks to help debug
-          try {
-            const frameworks = await detectAllFrameworks(projectDir);
-            console.error(`   Detected frameworks:`, frameworks.map(f => f.name));
-          } catch (e) {
-            console.error(`   Could not detect frameworks`);
-          }
           
           // Show what files exist
           try {
