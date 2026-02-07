@@ -323,6 +323,9 @@ describe('FileWatcher', () => {
     }
 
     it('should pass ALWAYS_IGNORE_PATTERNS to chokidar when no frameworks detected', async () => {
+      const coreModule = await import('@liendev/core');
+      vi.spyOn(coreModule, 'detectAllFrameworks').mockResolvedValue([]);
+
       const watchSpy = vi.spyOn(chokidar, 'watch');
       const handler = vi.fn();
       await watcher.start(handler);

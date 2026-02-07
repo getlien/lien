@@ -241,10 +241,17 @@ export class FileWatcher {
       throw new Error('Cannot watch git - watcher not started');
     }
 
+    // Close existing git watcher if watchGit() is called again
+    if (this.gitWatcher) {
+      this.gitWatcher.close();
+      this.gitWatcher = null;
+    }
+
     this.gitChangeHandler = onGitChange;
 
     // Use a separate watcher for .git paths so they aren't blocked by
-    // ALWAYS_IGNORE_PATTERNS (.git/** is ignored on the main watcher)
+    // ALWAYS_IGNORE_PATTERNS (.git/** is ignored on the main watcher).
+    // Normalize to POSIX separators so glob patterns work on Windows.
     const gitPaths = [
       path.join(this.rootDir, '.git/HEAD'),
       path.join(this.rootDir, '.git/index'),
@@ -253,7 +260,7 @@ export class FileWatcher {
       path.join(this.rootDir, '.git/REBASE_HEAD'),
       path.join(this.rootDir, '.git/CHERRY_PICK_HEAD'),
       path.join(this.rootDir, '.git/logs/refs/stash'),
-    ];
+    ].map(p => p.replace(/\\/g, '/'));
 
     this.gitWatcher = chokidar.watch(gitPaths, {
       persistent: true,
@@ -263,7 +270,18 @@ export class FileWatcher {
     this.gitWatcher
       .on('add', () => this.handleGitChange())
       .on('change', () => this.handleGitChange())
-      .on('unlink', () => this.handleGitChange());
+      .on('unlink', () => this.handleGitChange())
+      .on('error', (error) => {
+        try {
+          const message =
+            '[FileWatcher] Git watcher error: ' +
+            (error instanceof Error ? error.stack || error.message : String(error)) +
+            '\n';
+          process.stderr.write(message);
+        } catch {
+          // Swallow logging failures
+        }
+      });
   }
   
   /**
@@ -279,11 +297,16 @@ export class FileWatcher {
    * Handle git-related file changes with debouncing
    */
   private handleGitChange(): void {
+    // Ignore events arriving during/after shutdown
+    if (!this.gitChangeHandler) {
+      return;
+    }
+
     // Debounce git changes (commits touch multiple .git files)
     if (this.gitChangeTimer) {
       clearTimeout(this.gitChangeTimer);
     }
-    
+
     this.gitChangeTimer = setTimeout(async () => {
       try {
         await this.gitChangeHandler?.();
@@ -522,39 +545,41 @@ export class FileWatcher {
       return;
     }
     
+    // Close git watcher first to stop events before clearing handlers
+    if (this.gitWatcher) {
+      await this.gitWatcher.close();
+      this.gitWatcher = null;
+    }
+
     // Prevent new changes from being queued during shutdown
     const handler = this.onChangeHandler;
     this.onChangeHandler = null;
-    this.gitChangeHandler = null; // Also clear git handler
-    
+    this.gitChangeHandler = null;
+
     // Clear git timer
     if (this.gitChangeTimer) {
       clearTimeout(this.gitChangeTimer);
       this.gitChangeTimer = null;
     }
-    
+
     // Wait for any in-progress batch to complete before flushing final changes
     // This prevents race conditions where handleBatchComplete() tries to start a new timer
     while (this.batchInProgress) {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    
+
     // Clear any pending batch timer
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
     }
-    
+
     // Flush any pending changes before stopping
     if (handler && this.pendingChanges.size > 0) {
       await this.flushFinalBatch(handler);
     }
-    
-    // Close watchers
-    if (this.gitWatcher) {
-      await this.gitWatcher.close();
-      this.gitWatcher = null;
-    }
+
+    // Close main watcher
     await this.watcher.close();
     this.watcher = null;
   }
