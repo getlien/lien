@@ -63,9 +63,10 @@ async function readGitignore(absDir: string, entries: fsSync.Dirent[]): Promise<
 async function discoverGitignoreFiles(rootDir: string): Promise<Map<string, string>> {
   const result = new Map<string, string>();
   const queue: string[] = [''];
+  let head = 0;
 
-  while (queue.length > 0) {
-    const relDir = queue.shift()!;
+  while (head < queue.length) {
+    const relDir = queue[head++];
     const absDir = relDir ? path.join(rootDir, relDir) : rootDir;
 
     let entries: fsSync.Dirent[];
@@ -106,6 +107,11 @@ function matchesScopedIgnore(normalized: string, prefix: string, ig: Ignore): bo
  * each at its appropriate scope, plus built-in exclusions (node_modules,
  * vendor, .git, .lien, dist, build, minified assets) to match the full scan
  * behavior in scanner.ts.
+ *
+ * Limitation: scoped evaluation is OR across .gitignore files, so a nested
+ * .gitignore cannot un-ignore a pattern from a parent. Cross-scope negation
+ * (e.g., root ignores `*.log`, child un-ignores `!important.log`) is not
+ * supported. Nested .gitignore files in practice almost always ADD patterns.
  *
  * @param rootDir - Project root directory
  * @returns Function that returns true if a relative path is ignored

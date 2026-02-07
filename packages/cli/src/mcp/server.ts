@@ -200,6 +200,11 @@ function createGitPollInterval(
           return;
         }
 
+        // Invalidate filter when .gitignore files change
+        if (changedFiles.some(isGitignoreFile)) {
+          isIgnored = null;
+        }
+
         // Lazy-init gitignore filter
         if (!isIgnored) {
           isIgnored = await createGitignoreFilter(rootDir);
@@ -269,6 +274,11 @@ function createGitChangeHandler(
 
     if (!changedFiles || changedFiles.length === 0) {
       return;
+    }
+
+    // Invalidate filter when .gitignore files change
+    if (changedFiles.some(isGitignoreFile)) {
+      isIgnored = null;
     }
 
     // Lazy-init gitignore filter
@@ -735,13 +745,19 @@ function filterFileChangeEvent(
   };
 }
 
+/** Check if a filepath is a .gitignore file (basename match, not suffix) */
+function isGitignoreFile(filepath: string): boolean {
+  const name = filepath.split('/').pop() ?? filepath.split('\\').pop() ?? filepath;
+  return name === '.gitignore';
+}
+
 /** Check if an event includes a .gitignore file change */
 function hasGitignoreChange(event: FileChangeEvent): boolean {
   if (event.type === 'batch') {
     const allFiles = [...(event.added || []), ...(event.modified || []), ...(event.deleted || [])];
-    return allFiles.some(f => f.endsWith('.gitignore'));
+    return allFiles.some(isGitignoreFile);
   }
-  return event.filepath?.endsWith('.gitignore') ?? false;
+  return event.filepath ? isGitignoreFile(event.filepath) : false;
 }
 
 /**
@@ -1053,4 +1069,4 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
 }
 
 /** @internal — exported for testing only */
-export const _testing = { handleGitStartup, createGitPollInterval, createGitChangeHandler };
+export const _testing = { handleGitStartup, createGitPollInterval, createGitChangeHandler, isGitignoreFile, hasGitignoreChange };
