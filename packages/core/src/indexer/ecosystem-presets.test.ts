@@ -62,6 +62,90 @@ describe('ecosystem-presets', () => {
       expect(result).toContain('laravel');
     });
 
+    it('should detect ruby by Gemfile', async () => {
+      await fs.writeFile(path.join(testDir, 'Gemfile'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('ruby');
+    });
+
+    it('should detect rails by bin/rails', async () => {
+      await fs.mkdir(path.join(testDir, 'bin'), { recursive: true });
+      await fs.writeFile(path.join(testDir, 'bin', 'rails'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('rails');
+    });
+
+    it('should detect ruby and rails together', async () => {
+      await fs.writeFile(path.join(testDir, 'Gemfile'), '');
+      await fs.mkdir(path.join(testDir, 'bin'), { recursive: true });
+      await fs.writeFile(path.join(testDir, 'bin', 'rails'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('ruby');
+      expect(result).toContain('rails');
+    });
+
+    it('should detect rust by Cargo.toml', async () => {
+      await fs.writeFile(path.join(testDir, 'Cargo.toml'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('rust');
+    });
+
+    it('should detect jvm by pom.xml', async () => {
+      await fs.writeFile(path.join(testDir, 'pom.xml'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('jvm');
+    });
+
+    it('should detect jvm by build.gradle', async () => {
+      await fs.writeFile(path.join(testDir, 'build.gradle'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('jvm');
+    });
+
+    it('should detect django by manage.py', async () => {
+      await fs.writeFile(path.join(testDir, 'manage.py'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('django');
+    });
+
+    it('should detect dotnet by *.csproj glob marker', async () => {
+      await fs.writeFile(path.join(testDir, 'MyApp.csproj'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('dotnet');
+    });
+
+    it('should detect dotnet by *.sln glob marker', async () => {
+      await fs.writeFile(path.join(testDir, 'MyApp.sln'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('dotnet');
+    });
+
+    it('should detect swift by Package.swift', async () => {
+      await fs.writeFile(path.join(testDir, 'Package.swift'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('swift');
+    });
+
+    it('should detect swift by *.xcodeproj glob marker', async () => {
+      await fs.mkdir(path.join(testDir, 'MyApp.xcodeproj'));
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('swift');
+    });
+
+    it('should detect astro by astro.config.mjs', async () => {
+      await fs.writeFile(path.join(testDir, 'astro.config.mjs'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('astro');
+    });
+
+    it('should not match glob markers against unrelated files', async () => {
+      await fs.writeFile(path.join(testDir, 'notes.txt'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).not.toContain('dotnet');
+      expect(result).not.toContain('swift');
+      expect(result).not.toContain('astro');
+    });
+
     it('should detect multiple ecosystems simultaneously', async () => {
       await fs.writeFile(path.join(testDir, 'package.json'), '{}');
       await fs.writeFile(path.join(testDir, 'requirements.txt'), '');
@@ -143,6 +227,54 @@ describe('ecosystem-presets', () => {
       expect(patterns).toContain('database/migrations/**');
     });
 
+    it('should return ruby exclude patterns', () => {
+      const patterns = getEcosystemExcludePatterns(['ruby']);
+      expect(patterns).toContain('tmp/**');
+      expect(patterns).toContain('.bundle/**');
+    });
+
+    it('should return rails exclude patterns', () => {
+      const patterns = getEcosystemExcludePatterns(['rails']);
+      expect(patterns).toContain('db/migrate/**');
+      expect(patterns).toContain('**/db/migrate/**');
+      expect(patterns).toContain('**/db/seeds/**');
+      expect(patterns).toContain('storage/**');
+    });
+
+    it('should return rust exclude patterns', () => {
+      const patterns = getEcosystemExcludePatterns(['rust']);
+      expect(patterns).toContain('target/**');
+    });
+
+    it('should return jvm exclude patterns', () => {
+      const patterns = getEcosystemExcludePatterns(['jvm']);
+      expect(patterns).toContain('.gradle/**');
+      expect(patterns).toContain('.idea/**');
+    });
+
+    it('should return swift exclude patterns', () => {
+      const patterns = getEcosystemExcludePatterns(['swift']);
+      expect(patterns).toContain('DerivedData/**');
+      expect(patterns).toContain('Pods/**');
+    });
+
+    it('should return dotnet exclude patterns', () => {
+      const patterns = getEcosystemExcludePatterns(['dotnet']);
+      expect(patterns).toContain('bin/**');
+      expect(patterns).toContain('obj/**');
+    });
+
+    it('should return django exclude patterns', () => {
+      const patterns = getEcosystemExcludePatterns(['django']);
+      expect(patterns).toContain('staticfiles/**');
+      expect(patterns).toContain('*.sqlite3');
+    });
+
+    it('should return astro exclude patterns', () => {
+      const patterns = getEcosystemExcludePatterns(['astro']);
+      expect(patterns).toContain('.astro/**');
+    });
+
     it('should merge and deduplicate patterns from multiple ecosystems', () => {
       const patterns = getEcosystemExcludePatterns(['php', 'laravel']);
       // Both have public/build/** — should appear once
@@ -165,12 +297,20 @@ describe('ecosystem-presets', () => {
   });
 
   describe('ECOSYSTEM_PRESETS', () => {
-    it('should have presets for nodejs, python, php, and laravel', () => {
+    it('should have presets for all supported ecosystems', () => {
       const names = ECOSYSTEM_PRESETS.map(p => p.name);
       expect(names).toContain('nodejs');
       expect(names).toContain('python');
       expect(names).toContain('php');
       expect(names).toContain('laravel');
+      expect(names).toContain('ruby');
+      expect(names).toContain('rails');
+      expect(names).toContain('rust');
+      expect(names).toContain('jvm');
+      expect(names).toContain('swift');
+      expect(names).toContain('dotnet');
+      expect(names).toContain('django');
+      expect(names).toContain('astro');
     });
 
     it('should have at least one marker file per preset', () => {
