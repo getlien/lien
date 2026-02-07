@@ -239,6 +239,27 @@ function createGitPollInterval(
  * Handles cooldown and concurrent operation prevention.
  * Filters out gitignored files before indexing.
  */
+/** Check if a git reindex should be skipped due to concurrency or cooldown */
+function shouldSkipGitReindex(
+  gitReindexInProgress: boolean,
+  lastGitReindexTime: number,
+  cooldownMs: number,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
+  log: LogFn
+): boolean {
+  const { inProgress: globalInProgress } = reindexStateManager.getState();
+  if (gitReindexInProgress || globalInProgress) {
+    log('Git reindex already in progress, skipping', 'debug');
+    return true;
+  }
+  const timeSinceLastReindex = Date.now() - lastGitReindexTime;
+  if (timeSinceLastReindex < cooldownMs) {
+    log(`Git change ignored (cooldown: ${cooldownMs - timeSinceLastReindex}ms remaining)`, 'debug');
+    return true;
+  }
+  return false;
+}
+
 function createGitChangeHandler(
   rootDir: string,
   gitTracker: GitStateTracker,
@@ -255,17 +276,7 @@ function createGitChangeHandler(
   const GIT_REINDEX_COOLDOWN_MS = 5000; // 5 second cooldown
 
   return async () => {
-    // Prevent concurrent git reindex operations (check both local and global state)
-    const { inProgress: globalInProgress } = reindexStateManager.getState();
-    if (gitReindexInProgress || globalInProgress) {
-      log('Git reindex already in progress, skipping', 'debug');
-      return;
-    }
-
-    // Cooldown check - don't reindex again too soon
-    const timeSinceLastReindex = Date.now() - lastGitReindexTime;
-    if (timeSinceLastReindex < GIT_REINDEX_COOLDOWN_MS) {
-      log(`Git change ignored (cooldown: ${GIT_REINDEX_COOLDOWN_MS - timeSinceLastReindex}ms remaining)`, 'debug');
+    if (shouldSkipGitReindex(gitReindexInProgress, lastGitReindexTime, GIT_REINDEX_COOLDOWN_MS, reindexStateManager, log)) {
       return;
     }
 
