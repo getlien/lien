@@ -114,28 +114,52 @@ export const ECOSYSTEM_PRESETS: EcosystemPreset[] = [
   },
 ];
 
+/** Directories to skip when scanning for marker files in subdirectories */
+const SKIP_DIRS = new Set([
+  'node_modules', 'vendor', '.git', '.lien', 'dist', 'build',
+  '.next', '.nuxt', '.vite', '.turbo', 'venv', '.venv',
+  '__pycache__', '.tox', 'coverage', '.cache',
+]);
+
 /**
  * Detect which ecosystems are present in a project by checking for marker files.
+ * Checks rootDir and immediate subdirectories (depth 1) for monorepo support.
  *
  * @param rootDir - Project root directory
  * @returns Array of matched ecosystem names
  */
 export async function detectEcosystems(rootDir: string): Promise<string[]> {
-  const matched: string[] = [];
+  const matched = new Set<string>();
 
-  for (const preset of ECOSYSTEM_PRESETS) {
-    for (const marker of preset.markerFiles) {
-      try {
-        await fs.access(path.join(rootDir, marker));
-        matched.push(preset.name);
-        break; // One marker is enough per preset
-      } catch {
-        // Marker not found, try next
+  // Collect search dirs: rootDir + immediate subdirectories (for monorepo support)
+  const searchDirs = [rootDir];
+  try {
+    const entries = await fs.readdir(rootDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) {
+        searchDirs.push(path.join(rootDir, entry.name));
+      }
+    }
+  } catch {
+    // Can't read subdirs, just check root
+  }
+
+  for (const dir of searchDirs) {
+    for (const preset of ECOSYSTEM_PRESETS) {
+      if (matched.has(preset.name)) continue; // Already detected
+      for (const marker of preset.markerFiles) {
+        try {
+          await fs.access(path.join(dir, marker));
+          matched.add(preset.name);
+          break; // One marker is enough per preset
+        } catch {
+          // Marker not found, try next
+        }
       }
     }
   }
 
-  return matched;
+  return [...matched];
 }
 
 /**

@@ -78,6 +78,34 @@ describe('ecosystem-presets', () => {
       expect(result).toContain('laravel');
     });
 
+    it('should detect ecosystems in immediate subdirectories (monorepo)', async () => {
+      await fs.mkdir(path.join(testDir, 'backend'));
+      await fs.writeFile(path.join(testDir, 'backend', 'composer.json'), '{}');
+      await fs.writeFile(path.join(testDir, 'backend', 'artisan'), '');
+      await fs.mkdir(path.join(testDir, 'ml-service'));
+      await fs.writeFile(path.join(testDir, 'ml-service', 'requirements.txt'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('php');
+      expect(result).toContain('laravel');
+      expect(result).toContain('python');
+    });
+
+    it('should not scan into ignored subdirectories', async () => {
+      await fs.mkdir(path.join(testDir, 'node_modules'));
+      await fs.writeFile(path.join(testDir, 'node_modules', 'composer.json'), '{}');
+      const result = await detectEcosystems(testDir);
+      expect(result).not.toContain('php');
+    });
+
+    it('should combine root and subdirectory detections', async () => {
+      await fs.writeFile(path.join(testDir, 'package.json'), '{}');
+      await fs.mkdir(path.join(testDir, 'api'));
+      await fs.writeFile(path.join(testDir, 'api', 'requirements.txt'), '');
+      const result = await detectEcosystems(testDir);
+      expect(result).toContain('nodejs');
+      expect(result).toContain('python');
+    });
+
     it('should return empty array when no markers found', async () => {
       const result = await detectEcosystems(testDir);
       expect(result).toEqual([]);
