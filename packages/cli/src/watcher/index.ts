@@ -243,7 +243,7 @@ export class FileWatcher {
 
     // Close existing git watcher if watchGit() is called again
     if (this.gitWatcher) {
-      this.gitWatcher.close();
+      void this.gitWatcher.close();
       this.gitWatcher = null;
     }
 
@@ -290,7 +290,8 @@ export class FileWatcher {
   private isGitChange(filepath: string): boolean {
     // Normalize path separators for cross-platform
     const normalized = filepath.replace(/\\/g, '/');
-    return normalized.includes('.git/');
+    // Match .git as a path segment to avoid false positives (e.g. widgets.git/)
+    return normalized.startsWith('.git/') || normalized.includes('/.git/');
   }
   
   /**
