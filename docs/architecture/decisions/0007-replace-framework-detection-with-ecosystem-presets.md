@@ -50,7 +50,7 @@ In the context of simplifying the file scanning pipeline, facing the problem tha
 The new module (`packages/core/src/indexer/ecosystem-presets.ts`) exports:
 
 - `ECOSYSTEM_PRESETS` — Static array of `{ name, markerFiles, excludePatterns }`
-- `detectEcosystems(rootDir)` — Checks for marker files, returns matched names
+- `detectEcosystems(rootDir)` — Checks for marker files at root and immediate subdirectories (depth 1), returns matched names
 - `getEcosystemExcludePatterns(names)` — Merges exclude patterns (deduplicated)
 
 Presets: `nodejs`, `python`, `php`, `laravel`.
@@ -69,7 +69,7 @@ Presets: `nodejs`, `python`, `php`, `laravel`.
 ### Negative
 
 - **No per-framework include patterns** — The old system could specify different include patterns per framework (e.g., `**/*.php` for Laravel). The new system uses universal include patterns for all ecosystems, covering all supported extensions including `.liquid`.
-- **No monorepo sub-path scanning** — The old system could scan different frameworks at different paths within a monorepo. The new system scans from root with ecosystem-specific excludes. This is sufficient for the current use case.
+- **Shallower monorepo scanning** — The old system recursively scanned for framework markers at any depth. The new system checks root + immediate subdirectories (depth 1), which covers the common monorepo layout (e.g., `backend/composer.json`, `ml-service/requirements.txt`) but not deeply nested markers. Per-framework path isolation (scanning different sections with different include patterns) is no longer supported; all code is scanned with universal include patterns.
 - **Shopify detector removed** — The Shopify-specific detector is not replicated as an ecosystem preset. `.liquid` files are still indexed via the universal include glob (`**/*.liquid`). Shopify JSON templates (`templates/**/*.json`) are not included — general JSON indexing is out of scope.
 
 ### Neutral
@@ -82,7 +82,7 @@ Presets: `nodejs`, `python`, `php`, `laravel`.
 
 - `npm run typecheck` — zero errors
 - `npm run build` — compiles successfully
-- `npm test -w @liendev/core` — 725 tests pass (40 qdrant failures are pre-existing, require running server)
+- `npm test -w @liendev/core` — 728 tests pass (40 qdrant failures are pre-existing, require running server)
 - Watcher tests (24) — all pass with updated ecosystem mocks
 - Dogfooded on lien repo: 234 files scanned, 218 indexed, zero excluded-file leaks
 - Dogfooded ecosystem detection on Node.js, Python, PHP, Laravel, and mixed projects
