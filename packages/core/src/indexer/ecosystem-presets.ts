@@ -237,7 +237,7 @@ const SKIP_DIRS = new Set([
 ]);
 
 /** Convert a simple glob pattern (e.g. `*.csproj`) to a RegExp */
-function matchSimpleGlob(pattern: string): RegExp {
+function simpleGlobToRegExp(pattern: string): RegExp {
   const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
   return new RegExp(`^${escaped}$`);
 }
@@ -255,7 +255,7 @@ async function hasMarkerFile(
         entries = await fs.readdir(dir);
         dirEntryCache.set(dir, entries);
       }
-      const re = matchSimpleGlob(marker);
+      const re = simpleGlobToRegExp(marker);
       return entries.some(entry => re.test(entry));
     }
     await fs.access(path.join(dir, marker));
