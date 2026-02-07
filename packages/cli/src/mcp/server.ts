@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
+import fs from 'fs/promises';
 import {
   LocalEmbeddings,
   GitStateTracker,
@@ -685,7 +686,6 @@ async function filterGitChangedFiles(
   rootDir: string,
   ignoreFilter: (relativePath: string) => boolean
 ): Promise<string[]> {
-  const fs = await import('fs/promises');
   const results: string[] = [];
 
   for (const filepath of changedFiles) {
