@@ -238,7 +238,7 @@ const SKIP_DIRS = new Set([
 
 /** Convert a simple glob pattern (e.g. `*.csproj`) to a RegExp */
 function matchSimpleGlob(pattern: string): RegExp {
-  const escaped = pattern.replace(/\./g, '\\.').replace(/\*/g, '.*');
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
   return new RegExp(`^${escaped}$`);
 }
 
