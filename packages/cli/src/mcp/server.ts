@@ -751,7 +751,17 @@ function createFileChangeHandler(
   let ignoreFilter: ((relativePath: string) => boolean) | null = null;
 
   return async (event) => {
-    // Lazy-init gitignore filter on first event
+    // Invalidate filter when a .gitignore file changes so nested patterns take effect
+    if (event.type === 'batch') {
+      const allFiles = [...(event.added || []), ...(event.modified || []), ...(event.deleted || [])];
+      if (allFiles.some(f => f.endsWith('.gitignore'))) {
+        ignoreFilter = null;
+      }
+    } else if (event.filepath?.endsWith('.gitignore')) {
+      ignoreFilter = null;
+    }
+
+    // Lazy-init gitignore filter on first event (or after invalidation)
     if (!ignoreFilter) {
       ignoreFilter = await createGitignoreFilter(rootDir);
     }
