@@ -1,6 +1,6 @@
 import chokidar from 'chokidar';
 import path from 'path';
-import { detectAllFrameworks, getFrameworkDetector } from '@liendev/core';
+import { detectAllFrameworks, getFrameworkDetector, ALWAYS_IGNORE_PATTERNS } from '@liendev/core';
 import type { FrameworkConfig } from '@liendev/core';
 
 /**
@@ -100,7 +100,8 @@ export class FileWatcher {
           return this.getDefaultPatterns();
         }
         
-        return { include: includePatterns, exclude: excludePatterns };
+        const mergedExcludes = [...new Set([...ALWAYS_IGNORE_PATTERNS, ...excludePatterns])];
+        return { include: includePatterns, exclude: mergedExcludes };
       } else {
         // No frameworks detected - use default patterns
         return this.getDefaultPatterns();
@@ -117,13 +118,7 @@ export class FileWatcher {
   private getDefaultPatterns(): WatchPatterns {
     return {
       include: ['**/*'],
-      exclude: [
-        '**/node_modules/**',
-        '**/vendor/**',
-        '**/dist/**',
-        '**/build/**',
-        '**/.git/**',
-      ],
+      exclude: [...ALWAYS_IGNORE_PATTERNS],
     };
   }
   
