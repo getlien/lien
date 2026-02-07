@@ -5,6 +5,7 @@ import os from 'os';
 import chokidar from 'chokidar';
 import { FileWatcher, FileChangeEvent } from './index.js';
 import { ALWAYS_IGNORE_PATTERNS } from '@liendev/core';
+import type { FrameworkDetector, DetectionResult } from '@liendev/core';
 
 describe('FileWatcher', () => {
   let testDir: string;
@@ -309,16 +310,16 @@ describe('FileWatcher', () => {
 
     async function mockFramework(name: string, include: string[], exclude: string[]) {
       const coreModule = await import('@liendev/core');
-      vi.spyOn(coreModule, 'detectAllFrameworks').mockResolvedValue([
-        { detected: true, name, path: '.', confidence: 'high' as const, evidence: ['test'] },
-      ]);
-      vi.spyOn(coreModule, 'getFrameworkDetector').mockReturnValue({
+      const mockResult: DetectionResult = {
+        detected: true, name, path: '.', confidence: 'high', evidence: ['test'],
+      };
+      const mockDetector: FrameworkDetector = {
         name,
-        detect: vi.fn().mockResolvedValue({
-          detected: true, name, path: '.', confidence: 'high' as const, evidence: [],
-        }),
+        detect: vi.fn<(r: string, p: string) => Promise<DetectionResult>>().mockResolvedValue(mockResult),
         generateConfig: vi.fn().mockResolvedValue({ include, exclude }),
-      } as any);
+      };
+      vi.spyOn(coreModule, 'detectAllFrameworks').mockResolvedValue([mockResult]);
+      vi.spyOn(coreModule, 'getFrameworkDetector').mockReturnValue(mockDetector);
     }
 
     it('should pass ALWAYS_IGNORE_PATTERNS to chokidar when no frameworks detected', async () => {

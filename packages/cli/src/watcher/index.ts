@@ -58,6 +58,7 @@ export class FileWatcher {
   private firstChangeTimestamp: number | null = null; // Track when batch started
   
   // Git watching state
+  private gitWatcher: chokidar.FSWatcher | null = null;
   private gitChangeTimer: NodeJS.Timeout | null = null;
   private gitChangeHandler: (() => void | Promise<void>) | null = null;
   private readonly GIT_DEBOUNCE_MS = 1000; // Git operations touch multiple files
@@ -239,26 +240,30 @@ export class FileWatcher {
     if (!this.watcher) {
       throw new Error('Cannot watch git - watcher not started');
     }
-    
+
     this.gitChangeHandler = onGitChange;
-    
-    // Add .git paths to watcher
-    // These files change during various git operations:
-    // - HEAD: checkout, commit, rebase
-    // - index: staging changes
-    // - refs/**:  commits, branch creation, remote updates
-    // - MERGE_HEAD, REBASE_HEAD, etc.: in-progress operations
-    this.watcher.add([
+
+    // Use a separate watcher for .git paths so they aren't blocked by
+    // ALWAYS_IGNORE_PATTERNS (.git/** is ignored on the main watcher)
+    const gitPaths = [
       path.join(this.rootDir, '.git/HEAD'),
       path.join(this.rootDir, '.git/index'),
       path.join(this.rootDir, '.git/refs/**'),
       path.join(this.rootDir, '.git/MERGE_HEAD'),
       path.join(this.rootDir, '.git/REBASE_HEAD'),
       path.join(this.rootDir, '.git/CHERRY_PICK_HEAD'),
-      path.join(this.rootDir, '.git/logs/refs/stash'),  // git stash operations
-    ]);
-    
-    // Git watching enabled (logged via MCP server log, not console)
+      path.join(this.rootDir, '.git/logs/refs/stash'),
+    ];
+
+    this.gitWatcher = chokidar.watch(gitPaths, {
+      persistent: true,
+      ignoreInitial: true,
+    });
+
+    this.gitWatcher
+      .on('add', () => this.handleGitChange())
+      .on('change', () => this.handleGitChange())
+      .on('unlink', () => this.handleGitChange());
   }
   
   /**
@@ -298,10 +303,10 @@ export class FileWatcher {
    * before starting a new batch to prevent race conditions.
    */
   private handleChange(type: 'add' | 'change' | 'unlink', filepath: string): void {
-    // Check if this is a git-related change
-    if (this.gitChangeHandler && this.isGitChange(filepath)) {
-      this.handleGitChange();
-      return; // Don't treat as regular file change
+    // Never treat .git changes as regular file changes — git events
+    // are handled by the separate gitWatcher via watchGit()
+    if (this.isGitChange(filepath)) {
+      return;
     }
     
     // Prevent queuing events during shutdown (handler is null after stop())
@@ -545,7 +550,11 @@ export class FileWatcher {
       await this.flushFinalBatch(handler);
     }
     
-    // Close watcher
+    // Close watchers
+    if (this.gitWatcher) {
+      await this.gitWatcher.close();
+      this.gitWatcher = null;
+    }
     await this.watcher.close();
     this.watcher = null;
   }
