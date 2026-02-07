@@ -303,6 +303,24 @@ describe('FileWatcher', () => {
   });
   
   describe('ignore patterns', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    async function mockFramework(name: string, include: string[], exclude: string[]) {
+      const coreModule = await import('@liendev/core');
+      vi.spyOn(coreModule, 'detectAllFrameworks').mockResolvedValue([
+        { detected: true, name, path: '.', confidence: 'high' as const, evidence: ['test'] },
+      ]);
+      vi.spyOn(coreModule, 'getFrameworkDetector').mockReturnValue({
+        name,
+        detect: vi.fn().mockResolvedValue({
+          detected: true, name, path: '.', confidence: 'high' as const, evidence: [],
+        }),
+        generateConfig: vi.fn().mockResolvedValue({ include, exclude }),
+      } as any);
+    }
+
     it('should pass ALWAYS_IGNORE_PATTERNS to chokidar when no frameworks detected', async () => {
       const watchSpy = vi.spyOn(chokidar, 'watch');
       const handler = vi.fn();
@@ -312,98 +330,46 @@ describe('FileWatcher', () => {
       const options = watchSpy.mock.calls[0][1] as chokidar.WatchOptions;
       const ignored = options.ignored as string[];
 
-      // Every pattern in ALWAYS_IGNORE_PATTERNS should be present
       for (const pattern of ALWAYS_IGNORE_PATTERNS) {
         expect(ignored).toContain(pattern);
       }
-
-      watchSpy.mockRestore();
     });
 
     it('should merge ALWAYS_IGNORE_PATTERNS with framework excludes', async () => {
-      // Mock detectAllFrameworks to return a framework with its own exclude patterns
       const frameworkExclude = 'storage/**';
-      const coreModule = await import('@liendev/core');
-      const detectSpy = vi.spyOn(
-        coreModule,
-        'detectAllFrameworks',
-      ).mockResolvedValue([
-        { detected: true, name: 'laravel', path: testDir, confidence: 'high', evidence: ['test'] },
-      ]);
-      const detectorSpy = vi.spyOn(
-        coreModule,
-        'getFrameworkDetector',
-      ).mockReturnValue({
-        name: 'laravel',
-        detect: vi.fn() as any,
-        generateConfig: vi.fn().mockResolvedValue({
-          include: ['**/*.php'],
-          exclude: [frameworkExclude],
-        }),
-      });
+      await mockFramework('laravel', ['**/*.php'], [frameworkExclude]);
 
       const watchSpy = vi.spyOn(chokidar, 'watch');
-      const handler = vi.fn();
-
-      // Create a fresh watcher so it picks up the mocks
       const fw = new FileWatcher(testDir);
-      await fw.start(handler);
+      await fw.start(vi.fn());
 
       expect(watchSpy).toHaveBeenCalledOnce();
       const options = watchSpy.mock.calls[0][1] as chokidar.WatchOptions;
       const ignored = options.ignored as string[];
 
-      // Should contain both ALWAYS_IGNORE_PATTERNS and the framework exclude
       for (const pattern of ALWAYS_IGNORE_PATTERNS) {
         expect(ignored).toContain(pattern);
       }
       expect(ignored).toContain(frameworkExclude);
 
       await fw.stop();
-      watchSpy.mockRestore();
-      detectSpy.mockRestore();
-      detectorSpy.mockRestore();
     });
 
     it('should deduplicate overlapping patterns', async () => {
-      // Mock framework that returns a pattern already in ALWAYS_IGNORE_PATTERNS
       const duplicatePattern = '**/node_modules/**';
-      const coreModule = await import('@liendev/core');
-      const detectSpy = vi.spyOn(
-        coreModule,
-        'detectAllFrameworks',
-      ).mockResolvedValue([
-        { detected: true, name: 'node', path: testDir, confidence: 'high', evidence: ['test'] },
-      ]);
-      const detectorSpy = vi.spyOn(
-        coreModule,
-        'getFrameworkDetector',
-      ).mockReturnValue({
-        name: 'node',
-        detect: vi.fn() as any,
-        generateConfig: vi.fn().mockResolvedValue({
-          include: ['**/*.ts'],
-          exclude: [duplicatePattern, 'coverage/**'],
-        }),
-      });
+      await mockFramework('node', ['**/*.ts'], [duplicatePattern, 'coverage/**']);
 
       const watchSpy = vi.spyOn(chokidar, 'watch');
-      const handler = vi.fn();
-
       const fw = new FileWatcher(testDir);
-      await fw.start(handler);
+      await fw.start(vi.fn());
 
       const options = watchSpy.mock.calls[0][1] as chokidar.WatchOptions;
       const ignored = options.ignored as string[];
 
-      // The duplicate pattern should appear only once
       const count = ignored.filter(p => p === duplicatePattern).length;
       expect(count).toBe(1);
 
       await fw.stop();
-      watchSpy.mockRestore();
-      detectSpy.mockRestore();
-      detectorSpy.mockRestore();
     });
   });
 
