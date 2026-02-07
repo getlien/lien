@@ -1037,3 +1037,6 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
 
   await setupAndConnectServer(server, toolContext, log, versionCheckInterval, reindexStateManager, { rootDir, verbose, watch });
 }
+
+/** @internal — exported for testing only */
+export const _testing = { handleGitStartup, createGitPollInterval, createGitChangeHandler };
