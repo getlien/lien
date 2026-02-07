@@ -121,6 +121,32 @@ const SKIP_DIRS = new Set([
   '__pycache__', '.tox', 'coverage', '.cache',
 ]);
 
+/** Check if a marker file exists in a directory */
+async function hasMarkerFile(dir: string, marker: string): Promise<boolean> {
+  try {
+    await fs.access(path.join(dir, marker));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Get rootDir + immediate subdirectories, skipping known artifact dirs */
+async function getSearchDirs(rootDir: string): Promise<string[]> {
+  const dirs = [rootDir];
+  try {
+    const entries = await fs.readdir(rootDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) {
+        dirs.push(path.join(rootDir, entry.name));
+      }
+    }
+  } catch {
+    // Can't read subdirs, just check root
+  }
+  return dirs;
+}
+
 /**
  * Detect which ecosystems are present in a project by checking for marker files.
  * Checks rootDir and immediate subdirectories (depth 1) for monorepo support.
@@ -130,30 +156,15 @@ const SKIP_DIRS = new Set([
  */
 export async function detectEcosystems(rootDir: string): Promise<string[]> {
   const matched = new Set<string>();
-
-  // Collect search dirs: rootDir + immediate subdirectories (for monorepo support)
-  const searchDirs = [rootDir];
-  try {
-    const entries = await fs.readdir(rootDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) {
-        searchDirs.push(path.join(rootDir, entry.name));
-      }
-    }
-  } catch {
-    // Can't read subdirs, just check root
-  }
+  const searchDirs = await getSearchDirs(rootDir);
 
   for (const dir of searchDirs) {
     for (const preset of ECOSYSTEM_PRESETS) {
-      if (matched.has(preset.name)) continue; // Already detected
+      if (matched.has(preset.name)) continue;
       for (const marker of preset.markerFiles) {
-        try {
-          await fs.access(path.join(dir, marker));
+        if (await hasMarkerFile(dir, marker)) {
           matched.add(preset.name);
-          break; // One marker is enough per preset
-        } catch {
-          // Marker not found, try next
+          break;
         }
       }
     }
