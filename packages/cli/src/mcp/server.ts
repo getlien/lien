@@ -131,7 +131,8 @@ async function handleGitStartup(
   embeddings: LocalEmbeddings,
   _verbose: boolean | undefined,
   log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
+  checkAndReconnect: () => Promise<void>
 ): Promise<void> {
   log('Checking for git changes...');
   const changedFiles = await gitTracker.initialize();
@@ -150,6 +151,7 @@ async function handleGitStartup(
     log(`🌿 Git changes detected: ${filteredFiles.length} files changed`);
 
     try {
+      await checkAndReconnect();
       const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, { verbose: false });
       const duration = Date.now() - startTime;
       reindexStateManager.completeReindex(duration);
@@ -179,7 +181,8 @@ function createGitPollInterval(
   embeddings: LocalEmbeddings,
   _verbose: boolean | undefined,
   log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
+  checkAndReconnect: () => Promise<void>
 ): NodeJS.Timeout {
   let isIgnored: ((relativePath: string) => boolean) | null = null;
 
@@ -210,6 +213,7 @@ function createGitPollInterval(
         log(`🌿 Git change detected: ${filteredFiles.length} files changed`);
 
         try {
+          await checkAndReconnect();
           const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, { verbose: false });
           const duration = Date.now() - startTime;
           reindexStateManager.completeReindex(duration);
@@ -237,7 +241,8 @@ function createGitChangeHandler(
   embeddings: LocalEmbeddings,
   _verbose: boolean | undefined,
   log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
+  checkAndReconnect: () => Promise<void>
 ): () => Promise<void> {
   let isIgnored: ((relativePath: string) => boolean) | null = null;
   let gitReindexInProgress = false;
@@ -282,6 +287,7 @@ function createGitChangeHandler(
     log(`Reindexing ${filteredFiles.length} files from git change`);
 
     try {
+      await checkAndReconnect();
       const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, { verbose: false });
       const duration = Date.now() - startTime;
       reindexStateManager.completeReindex(duration);
@@ -307,7 +313,8 @@ async function setupGitDetection(
   verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
-  fileWatcher: FileWatcher | null
+  fileWatcher: FileWatcher | null,
+  checkAndReconnect: () => Promise<void>
 ): Promise<{ gitTracker: GitStateTracker | null; gitPollInterval: NodeJS.Timeout | null }> {
   const gitAvailable = await isGitAvailable();
   const isRepo = await isGitRepo(rootDir);
@@ -326,7 +333,7 @@ async function setupGitDetection(
 
   // Check for git changes on startup
   try {
-    await handleGitStartup(rootDir, gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
+    await handleGitStartup(rootDir, gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager, checkAndReconnect);
   } catch (error) {
     // handleGitStartup already calls failReindex() before re-throwing, no need to call again
     log(`Failed to check git state on startup: ${error}`, 'warning');
@@ -341,7 +348,8 @@ async function setupGitDetection(
       embeddings,
       verbose,
       log,
-      reindexStateManager
+      reindexStateManager,
+      checkAndReconnect
     );
     fileWatcher.watchGit(gitChangeHandler);
     
@@ -352,7 +360,7 @@ async function setupGitDetection(
   // Fallback to polling if no file watcher (--no-watch mode)
   const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
   log(`✓ Git detection enabled (polling fallback every ${pollIntervalSeconds}s)`);
-  const gitPollInterval = createGitPollInterval(rootDir, gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager);
+  const gitPollInterval = createGitPollInterval(rootDir, gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager, checkAndReconnect);
   return { gitTracker, gitPollInterval };
 }
 
@@ -981,7 +989,7 @@ async function setupAndConnectServer(
   const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log, reindexStateManager);
   
   // Setup git detection (will use event-driven approach if fileWatcher is available)
-  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager, fileWatcher);
+  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager, fileWatcher, toolContext.checkAndReconnect);
 
   // Setup cleanup handlers
   const cleanup = setupCleanupHandlers(versionCheckInterval, gitPollInterval, fileWatcher, log);
