@@ -131,7 +131,7 @@ export async function scanFilesToIndex(rootDir: string): Promise<string[]> {
   return scanCodebase({
     rootDir,
     includePatterns: [
-      '**/*.{ts,tsx,js,jsx,mjs,cjs,vue,py,php,go,rs,java,kt,swift,rb,cs}',
+      '**/*.{ts,tsx,js,jsx,mjs,cjs,vue,py,php,go,rs,java,kt,swift,rb,cs,liquid}',
       '**/*.md',
       '**/*.mdx',
     ],

@@ -68,9 +68,9 @@ Presets: `nodejs`, `python`, `php`, `laravel`.
 
 ### Negative
 
-- **No per-framework include patterns** — The old system could specify different include patterns per framework (e.g., `**/*.php` for Laravel, `**/*.liquid` for Shopify). The new system uses universal include patterns for all ecosystems. In practice this was not a meaningful difference since the universal patterns already covered all supported extensions.
+- **No per-framework include patterns** — The old system could specify different include patterns per framework (e.g., `**/*.php` for Laravel). The new system uses universal include patterns for all ecosystems, covering all supported extensions including `.liquid`.
 - **No monorepo sub-path scanning** — The old system could scan different frameworks at different paths within a monorepo. The new system scans from root with ecosystem-specific excludes. This is sufficient for the current use case.
-- **Shopify detector removed** — The Shopify-specific detector (`.liquid` files, theme structure) is not replicated as an ecosystem preset. Shopify themes are still indexed via the universal `*.liquid` include pattern.
+- **Shopify detector removed** — The Shopify-specific detector is not replicated as an ecosystem preset. `.liquid` files are still indexed via the universal include glob (`**/*.liquid`). Shopify JSON templates (`templates/**/*.json`) are not included — general JSON indexing is out of scope.
 
 ### Neutral
 
