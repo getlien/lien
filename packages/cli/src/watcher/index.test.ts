@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import chokidar from 'chokidar';
 import { FileWatcher, FileChangeEvent } from './index.js';
+import { ALWAYS_IGNORE_PATTERNS } from '@liendev/core';
+import type { FrameworkDetector, DetectionResult } from '@liendev/core';
 
 describe('FileWatcher', () => {
   let testDir: string;
@@ -300,6 +303,80 @@ describe('FileWatcher', () => {
     });
   });
   
+  describe('ignore patterns', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    async function mockFramework(name: string, include: string[], exclude: string[]) {
+      const coreModule = await import('@liendev/core');
+      const mockResult: DetectionResult = {
+        detected: true, name, path: '.', confidence: 'high', evidence: ['test'],
+      };
+      const mockDetector: FrameworkDetector = {
+        name,
+        detect: vi.fn<(r: string, p: string) => Promise<DetectionResult>>().mockResolvedValue(mockResult),
+        generateConfig: vi.fn().mockResolvedValue({ include, exclude }),
+      };
+      vi.spyOn(coreModule, 'detectAllFrameworks').mockResolvedValue([mockResult]);
+      vi.spyOn(coreModule, 'getFrameworkDetector').mockReturnValue(mockDetector);
+    }
+
+    it('should pass ALWAYS_IGNORE_PATTERNS to chokidar when no frameworks detected', async () => {
+      const coreModule = await import('@liendev/core');
+      vi.spyOn(coreModule, 'detectAllFrameworks').mockResolvedValue([]);
+
+      const watchSpy = vi.spyOn(chokidar, 'watch');
+      const handler = vi.fn();
+      await watcher.start(handler);
+
+      expect(watchSpy).toHaveBeenCalledOnce();
+      const options = watchSpy.mock.calls[0][1] as chokidar.WatchOptions;
+      const ignored = options.ignored as string[];
+
+      for (const pattern of ALWAYS_IGNORE_PATTERNS) {
+        expect(ignored).toContain(pattern);
+      }
+    });
+
+    it('should merge ALWAYS_IGNORE_PATTERNS with framework excludes', async () => {
+      const frameworkExclude = 'storage/**';
+      await mockFramework('laravel', ['**/*.php'], [frameworkExclude]);
+
+      const watchSpy = vi.spyOn(chokidar, 'watch');
+      const fw = new FileWatcher(testDir);
+      await fw.start(vi.fn());
+
+      expect(watchSpy).toHaveBeenCalledOnce();
+      const options = watchSpy.mock.calls[0][1] as chokidar.WatchOptions;
+      const ignored = options.ignored as string[];
+
+      for (const pattern of ALWAYS_IGNORE_PATTERNS) {
+        expect(ignored).toContain(pattern);
+      }
+      expect(ignored).toContain(frameworkExclude);
+
+      await fw.stop();
+    });
+
+    it('should deduplicate overlapping patterns', async () => {
+      const duplicatePattern = '**/node_modules/**';
+      await mockFramework('node', ['**/*.ts'], [duplicatePattern, 'coverage/**']);
+
+      const watchSpy = vi.spyOn(chokidar, 'watch');
+      const fw = new FileWatcher(testDir);
+      await fw.start(vi.fn());
+
+      const options = watchSpy.mock.calls[0][1] as chokidar.WatchOptions;
+      const ignored = options.ignored as string[];
+
+      const count = ignored.filter(p => p === duplicatePattern).length;
+      expect(count).toBe(1);
+
+      await fw.stop();
+    });
+  });
+
   describe('watchGit - Stage 3: Event-Driven Git Detection', () => {
     it('should throw error if watcher not started', () => {
       const gitHandler = vi.fn();

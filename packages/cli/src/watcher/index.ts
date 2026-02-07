@@ -1,6 +1,6 @@
 import chokidar from 'chokidar';
 import path from 'path';
-import { detectAllFrameworks, getFrameworkDetector } from '@liendev/core';
+import { detectAllFrameworks, getFrameworkDetector, ALWAYS_IGNORE_PATTERNS } from '@liendev/core';
 import type { FrameworkConfig } from '@liendev/core';
 
 /**
@@ -58,6 +58,7 @@ export class FileWatcher {
   private firstChangeTimestamp: number | null = null; // Track when batch started
   
   // Git watching state
+  private gitWatcher: chokidar.FSWatcher | null = null;
   private gitChangeTimer: NodeJS.Timeout | null = null;
   private gitChangeHandler: (() => void | Promise<void>) | null = null;
   private readonly GIT_DEBOUNCE_MS = 1000; // Git operations touch multiple files
@@ -100,7 +101,8 @@ export class FileWatcher {
           return this.getDefaultPatterns();
         }
         
-        return { include: includePatterns, exclude: excludePatterns };
+        const mergedExcludes = [...new Set([...ALWAYS_IGNORE_PATTERNS, ...excludePatterns])];
+        return { include: includePatterns, exclude: mergedExcludes };
       } else {
         // No frameworks detected - use default patterns
         return this.getDefaultPatterns();
@@ -117,13 +119,7 @@ export class FileWatcher {
   private getDefaultPatterns(): WatchPatterns {
     return {
       include: ['**/*'],
-      exclude: [
-        '**/node_modules/**',
-        '**/vendor/**',
-        '**/dist/**',
-        '**/build/**',
-        '**/.git/**',
-      ],
+      exclude: [...ALWAYS_IGNORE_PATTERNS],
     };
   }
   
@@ -244,26 +240,44 @@ export class FileWatcher {
     if (!this.watcher) {
       throw new Error('Cannot watch git - watcher not started');
     }
-    
+
+    // Close existing git watcher if watchGit() is called again
+    if (this.gitWatcher) {
+      void this.gitWatcher.close().catch(() => {});
+      this.gitWatcher = null;
+    }
+
     this.gitChangeHandler = onGitChange;
-    
-    // Add .git paths to watcher
-    // These files change during various git operations:
-    // - HEAD: checkout, commit, rebase
-    // - index: staging changes
-    // - refs/**:  commits, branch creation, remote updates
-    // - MERGE_HEAD, REBASE_HEAD, etc.: in-progress operations
-    this.watcher.add([
-      path.join(this.rootDir, '.git/HEAD'),
-      path.join(this.rootDir, '.git/index'),
-      path.join(this.rootDir, '.git/refs/**'),
-      path.join(this.rootDir, '.git/MERGE_HEAD'),
-      path.join(this.rootDir, '.git/REBASE_HEAD'),
-      path.join(this.rootDir, '.git/CHERRY_PICK_HEAD'),
-      path.join(this.rootDir, '.git/logs/refs/stash'),  // git stash operations
-    ]);
-    
-    // Git watching enabled (logged via MCP server log, not console)
+
+    // Use a separate watcher for .git paths so they aren't blocked by
+    // ALWAYS_IGNORE_PATTERNS (.git/** is ignored on the main watcher).
+    // Normalize to POSIX separators so glob patterns work on Windows.
+    const gitPaths = [
+      'HEAD', 'index', 'refs/**',
+      'MERGE_HEAD', 'REBASE_HEAD', 'CHERRY_PICK_HEAD',
+      'logs/refs/stash',
+    ].map(p => path.join(this.rootDir, '.git', p).replace(/\\/g, '/'));
+
+    this.gitWatcher = chokidar.watch(gitPaths, {
+      persistent: true,
+      ignoreInitial: true,
+    });
+
+    this.gitWatcher
+      .on('add', () => this.handleGitChange())
+      .on('change', () => this.handleGitChange())
+      .on('unlink', () => this.handleGitChange())
+      .on('error', (error) => {
+        try {
+          const message =
+            '[FileWatcher] Git watcher error: ' +
+            (error instanceof Error ? error.stack || error.message : String(error)) +
+            '\n';
+          process.stderr.write(message);
+        } catch {
+          // Swallow logging failures
+        }
+      });
   }
   
   /**
@@ -272,18 +286,24 @@ export class FileWatcher {
   private isGitChange(filepath: string): boolean {
     // Normalize path separators for cross-platform
     const normalized = filepath.replace(/\\/g, '/');
-    return normalized.includes('.git/');
+    // Match .git as a path segment to avoid false positives (e.g. widgets.git/)
+    return normalized.startsWith('.git/') || normalized.includes('/.git/');
   }
   
   /**
    * Handle git-related file changes with debouncing
    */
   private handleGitChange(): void {
+    // Ignore events arriving during/after shutdown
+    if (!this.gitChangeHandler) {
+      return;
+    }
+
     // Debounce git changes (commits touch multiple .git files)
     if (this.gitChangeTimer) {
       clearTimeout(this.gitChangeTimer);
     }
-    
+
     this.gitChangeTimer = setTimeout(async () => {
       try {
         await this.gitChangeHandler?.();
@@ -303,10 +323,10 @@ export class FileWatcher {
    * before starting a new batch to prevent race conditions.
    */
   private handleChange(type: 'add' | 'change' | 'unlink', filepath: string): void {
-    // Check if this is a git-related change
-    if (this.gitChangeHandler && this.isGitChange(filepath)) {
-      this.handleGitChange();
-      return; // Don't treat as regular file change
+    // Never treat .git changes as regular file changes — git events
+    // are handled by the separate gitWatcher via watchGit()
+    if (this.isGitChange(filepath)) {
+      return;
     }
     
     // Prevent queuing events during shutdown (handler is null after stop())
@@ -522,35 +542,45 @@ export class FileWatcher {
       return;
     }
     
+    // Close git watcher first to stop events before clearing handlers
+    if (this.gitWatcher) {
+      try {
+        await this.gitWatcher.close();
+      } catch {
+        // Ignore close errors — continue cleanup
+      }
+      this.gitWatcher = null;
+    }
+
     // Prevent new changes from being queued during shutdown
     const handler = this.onChangeHandler;
     this.onChangeHandler = null;
-    this.gitChangeHandler = null; // Also clear git handler
-    
+    this.gitChangeHandler = null;
+
     // Clear git timer
     if (this.gitChangeTimer) {
       clearTimeout(this.gitChangeTimer);
       this.gitChangeTimer = null;
     }
-    
+
     // Wait for any in-progress batch to complete before flushing final changes
     // This prevents race conditions where handleBatchComplete() tries to start a new timer
     while (this.batchInProgress) {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    
+
     // Clear any pending batch timer
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
     }
-    
+
     // Flush any pending changes before stopping
     if (handler && this.pendingChanges.size > 0) {
       await this.flushFinalBatch(handler);
     }
-    
-    // Close watcher
+
+    // Close main watcher
     await this.watcher.close();
     this.watcher = null;
   }
