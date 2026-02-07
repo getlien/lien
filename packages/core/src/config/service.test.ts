@@ -117,7 +117,6 @@ describe('ConfigService', () => {
       const config = await service.load(testDir);
       
       // Migration removed - just merges with defaults
-      expect(config.frameworks).toBeDefined();
       // Old indexing field is ignored, uses defaults
       expect(config.core.chunkSize).toBe(defaultConfig.core.chunkSize);
     });
@@ -286,41 +285,6 @@ describe('ConfigService', () => {
       expect(result.warnings.some(w => w.includes('very large'))).toBe(true);
     });
     
-    it('should reject absolute framework path', () => {
-      const invalidConfig: LienConfig = {
-        ...defaultConfig,
-        frameworks: [{
-          name: 'test',
-          path: '/absolute/path', // Must be relative
-          enabled: true,
-          config: {
-            include: [],
-            exclude: [],
-          },
-        }],
-      };
-      
-      const result = service.validate(invalidConfig);
-      
-      expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('must be relative'))).toBe(true);
-    });
-    
-    it('should reject framework without required fields', () => {
-      const invalidConfig: LienConfig = {
-        ...defaultConfig,
-        frameworks: [{
-          name: 'test',
-          // Missing path, enabled, config
-        } as any],
-      };
-      
-      const result = service.validate(invalidConfig);
-      
-      expect(result.valid).toBe(false);
-      expect(result.errors.length).toBeGreaterThan(0);
-    });
-    
     it('should warn about legacy config format', () => {
       const legacyConfig: LegacyLienConfig = {
         version: '0.2.0',
@@ -462,8 +426,7 @@ describe('ConfigService', () => {
       
       // Load config - migration removed, just merges with defaults
       const config = await service.load(testDir);
-      
-      expect(config.frameworks).toBeDefined();
+
       // Migration removed - old indexing field ignored, uses defaults for core settings
       expect(config.core.chunkSize).toBe(defaultConfig.core.chunkSize);
       expect(config.mcp.port).toBe(7200);

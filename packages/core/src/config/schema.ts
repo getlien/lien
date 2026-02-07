@@ -71,7 +71,8 @@ export interface LienConfig {
       orgId: string;      // Organization identifier for multi-tenant isolation
     };
   };
-  frameworks: FrameworkInstance[];
+  /** @deprecated Frameworks are replaced by ecosystem presets. Kept for old config compat. */
+  frameworks?: FrameworkInstance[];
 }
 
 /**
@@ -111,7 +112,7 @@ export interface LegacyLienConfig {
 export function isLegacyConfig(
   config: LienConfig | LegacyLienConfig
 ): config is LegacyLienConfig {
-  return 'indexing' in config && !('frameworks' in config);
+  return 'indexing' in config && !('core' in config);
 }
 
 /**
@@ -122,7 +123,7 @@ export function isLegacyConfig(
 export function isModernConfig(
   config: LienConfig | LegacyLienConfig
 ): config is LienConfig {
-  return 'frameworks' in config;
+  return 'core' in config;
 }
 
 /**
@@ -163,6 +164,5 @@ export const defaultConfig: LienConfig = {
     },
   },
   storage: undefined, // Defaults to LanceDB (backward compatible)
-  frameworks: [], // Will be populated by lien init via framework detection
 };
 

@@ -34,7 +34,7 @@ export type { IndexingOptions, IndexingProgress, IndexingResult } from './indexe
 export { ManifestManager } from './indexer/manifest.js';
 export type { IndexManifest, FileEntry } from './indexer/manifest.js';
 export { chunkFile } from './indexer/chunker.js';
-export { scanCodebase, scanCodebaseWithFrameworks, detectFileType } from './indexer/scanner.js';
+export { scanCodebase, detectFileType } from './indexer/scanner.js';
 /** @deprecated Use {@link detectFileType} instead. */
 export { detectFileType as detectLanguage } from './indexer/scanner.js';
 export { indexSingleFile, indexMultipleFiles, normalizeToRelativePath } from './indexer/incremental.js';
@@ -45,6 +45,12 @@ export {
   groupChunksByNormalizedPath,
   findTransitiveDependents,
 } from './indexer/dependency-analyzer.js';
+export {
+  detectEcosystems,
+  getEcosystemExcludePatterns,
+  ECOSYSTEM_PRESETS,
+} from './indexer/ecosystem-presets.js';
+export type { EcosystemPreset } from './indexer/ecosystem-presets.js';
 
 // =============================================================================
 // EMBEDDINGS
@@ -132,24 +138,11 @@ export { GitStateTracker } from './git/tracker.js';
 export type { GitState } from './git/tracker.js';
 
 // =============================================================================
-// FRAMEWORK DETECTION
+// FRAMEWORK DETECTION (DEPRECATED - replaced by ecosystem presets)
 // =============================================================================
-
-export {
-  groupByConfidence,
-  selectByPriority,
-  resolveFrameworkConflicts,
-  runAllDetectors,
-  detectAllFrameworks,
-  getDetectionSummary,
-} from './frameworks/detector-service.js';
-export type { DetectionWithPriority, GroupedDetections } from './frameworks/detector-service.js';
-export { frameworkDetectors, registerFramework, getFrameworkDetector } from './frameworks/registry.js';
-export type { FrameworkDetector, DetectionResult, DetectionOptions } from './frameworks/types.js';
-export { laravelDetector } from './frameworks/laravel/detector.js';
-export { nodejsDetector } from './frameworks/nodejs/detector.js';
-export { phpDetector } from './frameworks/php/detector.js';
-export { shopifyDetector } from './frameworks/shopify/detector.js';
+// These types are kept for backward compatibility with old configs.
+// The framework detection system has been removed.
+// Use detectEcosystems() and getEcosystemExcludePatterns() instead.
 
 // =============================================================================
 // ERRORS

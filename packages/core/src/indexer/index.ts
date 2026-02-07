@@ -12,10 +12,8 @@ import fs from 'fs/promises';
 import pLimit from 'p-limit';
 import path from 'path';
 import crypto from 'crypto';
-import { scanCodebase, scanCodebaseWithFrameworks } from './scanner.js';
-import { detectAllFrameworks } from '../frameworks/detector-service.js';
-import { getFrameworkDetector } from '../frameworks/registry.js';
-import type { FrameworkConfig } from '../config/schema.js';
+import { scanCodebase } from './scanner.js';
+import { detectEcosystems, getEcosystemExcludePatterns } from './ecosystem-presets.js';
 import type { LienConfig } from '../config/schema.js';
 import type { ProgressTracker } from './progress-tracker.js';
 import {
@@ -125,70 +123,20 @@ function getIndexingConfig(rootDir: string): IndexingConfig {
   };
 }
 
-/** Scan files by auto-detecting frameworks */
+/** Scan files by auto-detecting ecosystem presets */
 export async function scanFilesToIndex(rootDir: string): Promise<string[]> {
-  // Auto-detect frameworks
-  const detectedFrameworks = await detectAllFrameworks(rootDir);
-  
-  if (detectedFrameworks.length > 0) {
-    // Convert detected frameworks to FrameworkInstance format for scanner
-    const frameworks = await Promise.all(
-      detectedFrameworks.map(async (detection) => {
-        const detector = getFrameworkDetector(detection.name);
-        if (!detector) {
-          throw new Error(`Framework detector not found: ${detection.name}`);
-        }
-        const config = await detector.generateConfig(rootDir, detection.path);
-        
-        return {
-          name: detection.name,
-          path: detection.path,
-          enabled: true,
-          config: config as FrameworkConfig,
-        };
-      })
-    );
-    
-    // Create a minimal config object for scanCodebaseWithFrameworks
-    const tempConfig: LienConfig = {
-      core: {
-        chunkSize: DEFAULT_CHUNK_SIZE,
-        chunkOverlap: DEFAULT_CHUNK_OVERLAP,
-        concurrency: DEFAULT_CONCURRENCY,
-        embeddingBatchSize: DEFAULT_EMBEDDING_BATCH_SIZE,
-      },
-      chunking: {
-        useAST: true,
-        astFallback: 'line-based',
-      },
-      mcp: {
-        port: 7133,
-        transport: 'stdio',
-        autoIndexOnFirstRun: true,
-      },
-      gitDetection: {
-        enabled: true,
-        pollIntervalMs: 10000,
-      },
-      fileWatching: {
-        enabled: true,
-        debounceMs: 1000,
-      },
-      frameworks,
-    };
-    
-    return scanCodebaseWithFrameworks(rootDir, tempConfig);
-  }
-  
-  // Fallback: scan common code files if no frameworks detected
-    return scanCodebase({
-      rootDir,
-      includePatterns: [
-        '**/*.{ts,tsx,js,jsx,py,php,go,rs,java,kt,swift,rb,cs}',
-        '**/*.md',
-        '**/*.mdx',
-      ],
-    });
+  const ecosystems = await detectEcosystems(rootDir);
+  const ecosystemExcludes = getEcosystemExcludePatterns(ecosystems);
+
+  return scanCodebase({
+    rootDir,
+    includePatterns: [
+      '**/*.{ts,tsx,js,jsx,mjs,cjs,vue,py,php,go,rs,java,kt,swift,rb,cs}',
+      '**/*.md',
+      '**/*.mdx',
+    ],
+    excludePatterns: ecosystemExcludes,
+  });
 }
 
 /**

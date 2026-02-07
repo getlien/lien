@@ -38,7 +38,7 @@ export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>)
         ...(user.complexity.thresholds || {}),
       },
     } : defaults.complexity,
-    frameworks: user.frameworks ?? defaults.frameworks,
+    frameworks: user.frameworks ?? defaults.frameworks,  // Kept for backward compat with old configs
   };
 }
 

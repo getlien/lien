@@ -153,7 +153,7 @@ export class ConfigService {
     } else if (isLegacyConfig(cfg as LienConfig | LegacyLienConfig)) {
       this.validateLegacyConfig(cfg as LegacyLienConfig, errors, warnings);
     } else {
-      errors.push('Configuration format not recognized. Must have either "frameworks" or "indexing" field');
+      errors.push('Configuration format not recognized. Must have either "core" or "indexing" field');
     }
     
     return {
@@ -192,11 +192,6 @@ export class ConfigService {
     // Validate file watching settings if present
     if (config.fileWatching) {
       this.validateFileWatchingConfig(config.fileWatching, errors, warnings);
-    }
-    
-    // Validate frameworks if present
-    if (config.frameworks) {
-      this.validateFrameworks(config.frameworks, errors, warnings);
     }
     
     return {
@@ -248,13 +243,6 @@ export class ConfigService {
       return;
     }
     this.validateFileWatchingConfig(config.fileWatching, errors, warnings);
-    
-    // Validate frameworks
-    if (!config.frameworks) {
-      errors.push('Missing required field: frameworks');
-      return;
-    }
-    this.validateFrameworks(config.frameworks, errors, warnings);
   }
   
   /**
@@ -409,90 +397,6 @@ export class ConfigService {
     }
   }
   
-  /**
-   * Validate frameworks configuration
-   */
-  private validateFrameworks(
-    frameworks: unknown[],
-    errors: string[],
-    warnings: string[]
-  ): void {
-    if (!Array.isArray(frameworks)) {
-      errors.push('frameworks must be an array');
-      return;
-    }
-    
-    frameworks.forEach((framework, index) => {
-      if (!framework || typeof framework !== 'object') {
-        errors.push(`frameworks[${index}] must be an object`);
-        return;
-      }
-      
-      const fw = framework as Partial<any>;
-      
-      // Validate required fields
-      if (!fw.name) {
-        errors.push(`frameworks[${index}] missing required field: name`);
-      }
-      
-      if (fw.path === undefined) {
-        errors.push(`frameworks[${index}] missing required field: path`);
-      } else if (typeof fw.path !== 'string') {
-        errors.push(`frameworks[${index}].path must be a string`);
-      } else if (path.isAbsolute(fw.path)) {
-        errors.push(`frameworks[${index}].path must be relative, got: ${fw.path}`);
-      }
-      
-      if (fw.enabled === undefined) {
-        errors.push(`frameworks[${index}] missing required field: enabled`);
-      } else if (typeof fw.enabled !== 'boolean') {
-        errors.push(`frameworks[${index}].enabled must be a boolean`);
-      }
-      
-      if (!fw.config) {
-        errors.push(`frameworks[${index}] missing required field: config`);
-      } else {
-        this.validateFrameworkConfig(fw.config, `frameworks[${index}].config`, errors, warnings);
-      }
-    });
-  }
-  
-  /**
-   * Validate framework-specific configuration
-   */
-  private validateFrameworkConfig(
-    config: any,
-    prefix: string,
-    errors: string[],
-    _warnings: string[]
-  ): void {
-    if (!config || typeof config !== 'object') {
-      errors.push(`${prefix} must be an object`);
-      return;
-    }
-    
-    // Validate include patterns
-    if (!Array.isArray(config.include)) {
-      errors.push(`${prefix}.include must be an array`);
-    } else {
-      config.include.forEach((pattern: unknown, i: number) => {
-        if (typeof pattern !== 'string') {
-          errors.push(`${prefix}.include[${i}] must be a string`);
-        }
-      });
-    }
-    
-    // Validate exclude patterns
-    if (!Array.isArray(config.exclude)) {
-      errors.push(`${prefix}.exclude must be an array`);
-    } else {
-      config.exclude.forEach((pattern: unknown, i: number) => {
-        if (typeof pattern !== 'string') {
-          errors.push(`${prefix}.exclude[${i}] must be a string`);
-        }
-      });
-    }
-  }
 }
 
 // Export a singleton instance for convenience

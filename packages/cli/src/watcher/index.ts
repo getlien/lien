@@ -1,7 +1,6 @@
 import chokidar from 'chokidar';
 import path from 'path';
-import { detectAllFrameworks, getFrameworkDetector, ALWAYS_IGNORE_PATTERNS } from '@liendev/core';
-import type { FrameworkConfig } from '@liendev/core';
+import { detectEcosystems, getEcosystemExcludePatterns, ALWAYS_IGNORE_PATTERNS } from '@liendev/core';
 
 /**
  * File change event emitted by the watcher.
@@ -68,47 +67,15 @@ export class FileWatcher {
   }
   
   /**
-   * Detect watch patterns from frameworks or use defaults.
+   * Detect watch patterns from ecosystem presets or use defaults.
    */
   private async getWatchPatterns(): Promise<WatchPatterns> {
     try {
-      const detectedFrameworks = await detectAllFrameworks(this.rootDir);
-      
-      if (detectedFrameworks.length > 0) {
-        // Convert detected frameworks to get their config
-        const frameworks = await Promise.all(
-          detectedFrameworks.map(async (detection) => {
-            const detector = getFrameworkDetector(detection.name);
-            if (!detector) {
-              return null;
-            }
-            const config = await detector.generateConfig(this.rootDir, detection.path);
-            return {
-              name: detection.name,
-              path: detection.path,
-              enabled: true,
-              config: config as FrameworkConfig,
-            };
-          })
-        );
-        
-        const validFrameworks = frameworks.filter(f => f !== null);
-        const includePatterns = validFrameworks.flatMap(f => f!.config.include);
-        const excludePatterns = validFrameworks.flatMap(f => f!.config.exclude);
-        
-        // Fallback: if no patterns, use defaults
-        if (includePatterns.length === 0) {
-          return this.getDefaultPatterns();
-        }
-        
-        const mergedExcludes = [...new Set([...ALWAYS_IGNORE_PATTERNS, ...excludePatterns])];
-        return { include: includePatterns, exclude: mergedExcludes };
-      } else {
-        // No frameworks detected - use default patterns
-        return this.getDefaultPatterns();
-      }
-    } catch (error) {
-      // Fallback to defaults if detection fails
+      const ecosystems = await detectEcosystems(this.rootDir);
+      const ecosystemExcludes = getEcosystemExcludePatterns(ecosystems);
+      const mergedExcludes = [...new Set([...ALWAYS_IGNORE_PATTERNS, ...ecosystemExcludes])];
+      return { include: ['**/*'], exclude: mergedExcludes };
+    } catch {
       return this.getDefaultPatterns();
     }
   }
