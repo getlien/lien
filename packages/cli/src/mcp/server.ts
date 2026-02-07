@@ -735,6 +735,15 @@ function filterFileChangeEvent(
   };
 }
 
+/** Check if an event includes a .gitignore file change */
+function hasGitignoreChange(event: FileChangeEvent): boolean {
+  if (event.type === 'batch') {
+    const allFiles = [...(event.added || []), ...(event.modified || []), ...(event.deleted || [])];
+    return allFiles.some(f => f.endsWith('.gitignore'));
+  }
+  return event.filepath?.endsWith('.gitignore') ?? false;
+}
+
 /**
  * Create file change event handler.
  * Filters out gitignored files before processing to prevent
@@ -752,12 +761,7 @@ function createFileChangeHandler(
 
   return async (event) => {
     // Invalidate filter when a .gitignore file changes so nested patterns take effect
-    if (event.type === 'batch') {
-      const allFiles = [...(event.added || []), ...(event.modified || []), ...(event.deleted || [])];
-      if (allFiles.some(f => f.endsWith('.gitignore'))) {
-        ignoreFilter = null;
-      }
-    } else if (event.filepath?.endsWith('.gitignore')) {
+    if (hasGitignoreChange(event)) {
       ignoreFilter = null;
     }
 

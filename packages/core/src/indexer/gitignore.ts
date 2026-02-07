@@ -35,6 +35,25 @@ const SKIP_DIRS = new Set([
   'build',
 ]);
 
+/** Whether a directory entry should be traversed during .gitignore discovery */
+function shouldTraverseDir(entry: fsSync.Dirent): boolean {
+  if (!entry.isDirectory() || entry.isSymbolicLink()) return false;
+  if (SKIP_DIRS.has(entry.name)) return false;
+  // Skip hidden dirs except .github
+  if (entry.name.startsWith('.') && entry.name !== '.github') return false;
+  return true;
+}
+
+/** Read .gitignore content from a directory, or null if not present */
+async function readGitignore(absDir: string, entries: fsSync.Dirent[]): Promise<string | null> {
+  if (!entries.some(e => e.name === '.gitignore' && e.isFile())) return null;
+  try {
+    return await fs.readFile(path.join(absDir, '.gitignore'), 'utf-8');
+  } catch {
+    return null; // Race condition or permission issue
+  }
+}
+
 /**
  * Walk the directory tree from rootDir, collecting .gitignore contents.
  * Skips SKIP_DIRS and symlinked directories to avoid cycles.
@@ -56,32 +75,29 @@ async function discoverGitignoreFiles(rootDir: string): Promise<Map<string, stri
       continue;
     }
 
-    // Check for .gitignore in this directory
-    const hasGitignore = entries.some(e => e.name === '.gitignore' && e.isFile());
-    if (hasGitignore) {
-      try {
-        const content = await fs.readFile(path.join(absDir, '.gitignore'), 'utf-8');
-        result.set(relDir, content);
-      } catch {
-        // Race condition or permission issue — skip
-      }
+    const content = await readGitignore(absDir, entries);
+    if (content !== null) {
+      result.set(relDir, content);
     }
 
-    // Queue subdirectories (skip SKIP_DIRS and symlinks)
     for (const entry of entries) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || SKIP_DIRS.has(entry.name)) {
-        continue;
-      }
-      // Also skip hidden dirs (except those we care about)
-      if (entry.name.startsWith('.') && entry.name !== '.github') {
-        continue;
-      }
+      if (!shouldTraverseDir(entry)) continue;
       const childRel = relDir ? `${relDir}/${entry.name}` : entry.name;
       queue.push(childRel);
     }
   }
 
   return result;
+}
+
+/** Check if a path matches a scoped .gitignore (root or nested) */
+function matchesScopedIgnore(normalized: string, prefix: string, ig: Ignore): boolean {
+  if (prefix === '') return ig.ignores(normalized);
+
+  const prefixWithSlash = prefix + '/';
+  if (!normalized.startsWith(prefixWithSlash)) return false;
+  const scopedPath = normalized.slice(prefixWithSlash.length);
+  return scopedPath !== '' && ig.ignores(scopedPath);
 }
 
 /**
@@ -113,27 +129,8 @@ export async function createGitignoreFilter(rootDir: string): Promise<(relativeP
   scopedIgnores.sort((a, b) => a.prefix.length - b.prefix.length);
 
   return (relativePath: string) => {
-    // Normalize to POSIX separators — the ignore library expects forward slashes
     const normalized = relativePath.replace(/\\/g, '/');
-
-    // Always-ignore patterns checked first (not overridable)
     if (alwaysIg.ignores(normalized)) return true;
-
-    // Check each scoped .gitignore
-    for (const { prefix, ig } of scopedIgnores) {
-      if (prefix === '') {
-        // Root .gitignore applies to full path
-        if (ig.ignores(normalized)) return true;
-      } else {
-        // Nested .gitignore: only applies if path is within that directory
-        const prefixWithSlash = prefix + '/';
-        if (normalized.startsWith(prefixWithSlash)) {
-          const scopedPath = normalized.slice(prefixWithSlash.length);
-          if (scopedPath && ig.ignores(scopedPath)) return true;
-        }
-      }
-    }
-
-    return false;
+    return scopedIgnores.some(({ prefix, ig }) => matchesScopedIgnore(normalized, prefix, ig));
   };
 }
