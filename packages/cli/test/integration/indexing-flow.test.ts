@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createTestDir, cleanupTestDir, createTestFile } from '../helpers/test-db.js';
-import { MockEmbeddings } from '../helpers/mock-embeddings.js';
+import { createTestDir, cleanupTestDir, createTestFile, MockEmbeddings } from '@liendev/core/test';
 import { VectorDB, scanCodebase, chunkFile } from '@liendev/core';
 import fs from 'fs/promises';
 
