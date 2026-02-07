@@ -243,7 +243,7 @@ export class FileWatcher {
 
     // Close existing git watcher if watchGit() is called again
     if (this.gitWatcher) {
-      void this.gitWatcher.close();
+      void this.gitWatcher.close().catch(() => {});
       this.gitWatcher = null;
     }
 
@@ -548,7 +548,11 @@ export class FileWatcher {
     
     // Close git watcher first to stop events before clearing handlers
     if (this.gitWatcher) {
-      await this.gitWatcher.close();
+      try {
+        await this.gitWatcher.close();
+      } catch {
+        // Ignore close errors — continue cleanup
+      }
       this.gitWatcher = null;
     }
 
