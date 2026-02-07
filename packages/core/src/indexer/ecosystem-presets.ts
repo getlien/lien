@@ -120,8 +120,6 @@ export const ECOSYSTEM_PRESETS: EcosystemPreset[] = [
       '**/tmp/**',
       '.bundle/**',
       '**/.bundle/**',
-      'vendor/bundle/**',
-      '**/vendor/bundle/**',
       'log/**',
       '**/log/**',
       'coverage/**',
@@ -137,7 +135,9 @@ export const ECOSYSTEM_PRESETS: EcosystemPreset[] = [
     markerFiles: ['bin/rails'],
     excludePatterns: [
       'db/migrate/**',
+      '**/db/migrate/**',
       'db/seeds/**',
+      '**/db/seeds/**',
       'storage/**',
       '**/storage/**',
       'tmp/**',
@@ -242,11 +242,19 @@ function matchSimpleGlob(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
-/** Check if a marker file exists in a directory */
-async function hasMarkerFile(dir: string, marker: string): Promise<boolean> {
+/** Check if a marker file exists in a directory, using cached readdir for glob markers */
+async function hasMarkerFile(
+  dir: string,
+  marker: string,
+  dirEntryCache: Map<string, string[]>,
+): Promise<boolean> {
   try {
     if (marker.includes('*')) {
-      const entries = await fs.readdir(dir);
+      let entries = dirEntryCache.get(dir);
+      if (!entries) {
+        entries = await fs.readdir(dir);
+        dirEntryCache.set(dir, entries);
+      }
       const re = matchSimpleGlob(marker);
       return entries.some(entry => re.test(entry));
     }
@@ -283,12 +291,13 @@ async function getSearchDirs(rootDir: string): Promise<string[]> {
 export async function detectEcosystems(rootDir: string): Promise<string[]> {
   const matched = new Set<string>();
   const searchDirs = await getSearchDirs(rootDir);
+  const dirEntryCache = new Map<string, string[]>();
 
   for (const dir of searchDirs) {
     for (const preset of ECOSYSTEM_PRESETS) {
       if (matched.has(preset.name)) continue;
       for (const marker of preset.markerFiles) {
-        if (await hasMarkerFile(dir, marker)) {
+        if (await hasMarkerFile(dir, marker, dirEntryCache)) {
           matched.add(preset.name);
           break;
         }

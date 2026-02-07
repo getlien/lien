@@ -236,6 +236,8 @@ describe('ecosystem-presets', () => {
     it('should return rails exclude patterns', () => {
       const patterns = getEcosystemExcludePatterns(['rails']);
       expect(patterns).toContain('db/migrate/**');
+      expect(patterns).toContain('**/db/migrate/**');
+      expect(patterns).toContain('**/db/seeds/**');
       expect(patterns).toContain('storage/**');
     });
 
