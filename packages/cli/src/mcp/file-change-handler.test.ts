@@ -38,7 +38,6 @@ vi.mock('fs/promises', () => ({
 }));
 
 import {
-  getRootDirFromDbPath,
   isFileIgnored,
   isGitignoreFile,
   createFileChangeHandler,
@@ -57,18 +56,6 @@ function createMockVectorDB(dbPath = '/project/.lien/indices/abc') {
 function createMockEmbeddings() {
   return {} as any;
 }
-
-describe('getRootDirFromDbPath', () => {
-  it('should resolve 3 levels up from dbPath', () => {
-    const result = getRootDirFromDbPath('/project/.lien/indices/abc');
-    expect(result).toBe('/project');
-  });
-
-  it('should resolve nested project roots correctly', () => {
-    const result = getRootDirFromDbPath('/home/user/code/myapp/.lien/indices/def');
-    expect(result).toBe('/home/user/code/myapp');
-  });
-});
 
 describe('isFileIgnored', () => {
   it('should return true when the filter says the file is ignored', () => {
