@@ -67,9 +67,41 @@ async function handleBatchDeletions(
 }
 
 /**
- * Handle single file change (reindex one file)
+ * Check if a changed file can skip reindexing based on content hash.
+ * Returns true if the file should be skipped (content unchanged).
+ */
+async function canSkipReindex(
+  filepath: string,
+  rootDir: string,
+  vectorDB: VectorDBInterface,
+  log: LogFn
+): Promise<boolean> {
+  const manifest = new ManifestManager(vectorDB.dbPath);
+  const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+
+  const manifestData = await manifest.load();
+  const existingEntry = manifestData?.files[normalizedPath];
+
+  const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
+
+  if (!shouldReindex && newMtime !== undefined && existingEntry) {
+    const skipped = await manifest.transaction(async (data) => {
+      const entry = data.files[normalizedPath];
+      if (entry) {
+        entry.lastModified = newMtime;
+        return true;
+      }
+      return false;
+    });
+    return !!skipped;
+  }
+
+  return false;
+}
+
+/**
+ * Handle single file change (reindex one file).
  * Uses content hash to skip reindexing if file content hasn't actually changed.
- * Uses atomic manifest operations to prevent race conditions.
  */
 async function handleSingleFileChange(
   filepath: string,
@@ -82,36 +114,10 @@ async function handleSingleFileChange(
 ): Promise<void> {
   const action = type === 'add' ? 'added' : 'changed';
 
-  // For 'change' events, check content hash to avoid unnecessary reindexing
   if (type === 'change') {
-    const manifest = new ManifestManager(vectorDB.dbPath);
-    const normalizedPath = normalizeToRelativePath(filepath, rootDir);
-
     try {
-      // Step 1: Read existing entry without triggering a manifest write
-      const manifestData = await manifest.load();
-      const existingEntry = manifestData?.files[normalizedPath];
-
-      // Step 2: Perform file I/O outside of any transaction to avoid holding the lock
-      const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
-
-      // Step 3: If content hasn't changed, update mtime in a short transaction
-      if (!shouldReindex && newMtime !== undefined && existingEntry) {
-        const skipReindex = await manifest.transaction(async (manifestData) => {
-          const entry = manifestData.files[normalizedPath];
-          if (entry) {
-            entry.lastModified = newMtime;
-            return true; // Skip reindex
-          }
-          return false; // No entry to update, proceed with reindex
-        });
-
-        if (skipReindex) {
-          return;
-        }
-      }
+      if (await canSkipReindex(filepath, rootDir, vectorDB, log)) return;
     } catch (error) {
-      // If transaction fails, log warning and proceed with reindex
       log(`Content hash check failed, will reindex: ${error}`, 'warning');
     }
   }
@@ -163,10 +169,60 @@ async function shouldReindexFile(
   return { shouldReindex: true };
 }
 
+interface FileCheckResult {
+  filepath: string;
+  normalizedPath: string;
+  shouldReindex: boolean;
+  newMtime?: number;
+}
+
+/**
+ * Check each modified file against the manifest to determine if reindexing is needed.
+ */
+async function checkFilesAgainstManifest(
+  files: string[],
+  rootDir: string,
+  manifestFiles: Record<string, { contentHash?: string; lastModified: number }>,
+  log: LogFn
+): Promise<FileCheckResult[]> {
+  const results: FileCheckResult[] = [];
+
+  for (const filepath of files) {
+    const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+    const existingEntry = manifestFiles[normalizedPath];
+    const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
+    results.push({ filepath, normalizedPath, shouldReindex, newMtime });
+  }
+
+  return results;
+}
+
+/**
+ * Batch-update manifest mtimes for files whose content hasn't changed.
+ */
+async function updateUnchangedMtimes(
+  manifest: ManifestManager,
+  results: FileCheckResult[]
+): Promise<void> {
+  const hasUpdates = results.some(r => !r.shouldReindex && r.newMtime !== undefined);
+  if (!hasUpdates) return;
+
+  await manifest.transaction(async (data) => {
+    for (const result of results) {
+      if (!result.shouldReindex && result.newMtime !== undefined) {
+        const entry = data.files[result.normalizedPath];
+        if (entry) {
+          entry.lastModified = result.newMtime;
+        }
+      }
+    }
+    return null;
+  });
+}
+
 /**
  * Filter modified files based on content hash, updating manifest for unchanged files.
  * Returns array of files that need reindexing.
- * Uses atomic manifest operations to prevent race conditions.
  */
 async function filterModifiedFilesByHash(
   modifiedFiles: string[],
@@ -174,60 +230,15 @@ async function filterModifiedFilesByHash(
   vectorDB: VectorDBInterface,
   log: LogFn
 ): Promise<string[]> {
-  if (modifiedFiles.length === 0) {
-    return [];
-  }
+  if (modifiedFiles.length === 0) return [];
 
   const manifest = new ManifestManager(vectorDB.dbPath);
-
-  // Step 1: Read manifest entries without triggering a write
   const manifestData = await manifest.load();
+  if (!manifestData) return modifiedFiles;
 
-  if (!manifestData) {
-    // No manifest - all files need reindexing
-    return modifiedFiles;
-  }
+  const checkResults = await checkFilesAgainstManifest(modifiedFiles, rootDir, manifestData.files, log);
+  await updateUnchangedMtimes(manifest, checkResults);
 
-  // Step 2: Check all files outside of any transaction (file I/O here)
-  interface FileCheckResult {
-    filepath: string;
-    normalizedPath: string;
-    shouldReindex: boolean;
-    newMtime?: number;
-  }
-
-  const checkResults: FileCheckResult[] = [];
-
-  for (const filepath of modifiedFiles) {
-    const normalizedPath = normalizeToRelativePath(filepath, rootDir);
-    const existingEntry = manifestData.files[normalizedPath];
-    const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
-
-    checkResults.push({
-      filepath,
-      normalizedPath,
-      shouldReindex,
-      newMtime,
-    });
-  }
-
-  // Step 3: Update all mtimes in a single short transaction (skip if nothing to update)
-  const hasMtimeUpdates = checkResults.some(r => !r.shouldReindex && r.newMtime !== undefined);
-  if (hasMtimeUpdates) {
-    await manifest.transaction(async (data) => {
-      for (const result of checkResults) {
-        if (!result.shouldReindex && result.newMtime !== undefined) {
-          const entry = data.files[result.normalizedPath];
-          if (entry) {
-            entry.lastModified = result.newMtime;
-          }
-        }
-      }
-      return null;
-    });
-  }
-
-  // Return only files that need reindexing
   return checkResults.filter(r => r.shouldReindex).map(r => r.filepath);
 }
 

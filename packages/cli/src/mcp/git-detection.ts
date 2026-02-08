@@ -156,9 +156,66 @@ function shouldSkipGitReindex(
 }
 
 /**
+ * Detect and filter git changes, refreshing gitignore filter as needed.
+ * Returns filtered files ready for reindexing, or null if nothing to do.
+ */
+async function detectAndFilterGitChanges(
+  gitTracker: GitStateTracker,
+  rootDir: string,
+  getIgnoreFilter: () => ((relativePath: string) => boolean) | null,
+  setIgnoreFilter: (f: ((relativePath: string) => boolean) | null) => void,
+  log: LogFn
+): Promise<string[] | null> {
+  log('🌿 Git change detected (event-driven)');
+  const changedFiles = await gitTracker.detectChanges();
+
+  if (!changedFiles || changedFiles.length === 0) return null;
+
+  if (changedFiles.some(isGitignoreFile)) {
+    setIgnoreFilter(null);
+  }
+
+  let filter = getIgnoreFilter();
+  if (!filter) {
+    filter = await createGitignoreFilter(rootDir);
+    setIgnoreFilter(filter);
+  }
+
+  const filteredFiles = await filterGitChangedFiles(changedFiles, rootDir, filter);
+  return filteredFiles.length > 0 ? filteredFiles : null;
+}
+
+/**
+ * Execute git reindex with state tracking.
+ */
+async function executeGitReindex(
+  filteredFiles: string[],
+  vectorDB: VectorDBInterface,
+  embeddings: LocalEmbeddings,
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
+  checkAndReconnect: () => Promise<void>,
+  log: LogFn
+): Promise<void> {
+  const startTime = Date.now();
+  reindexStateManager.startReindex(filteredFiles);
+  log(`Reindexing ${filteredFiles.length} files from git change`);
+
+  try {
+    await checkAndReconnect();
+    const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, { verbose: false });
+    const duration = Date.now() - startTime;
+    reindexStateManager.completeReindex(duration);
+    log(`✓ Reindexed ${count} files in ${duration}ms`);
+  } catch (error) {
+    reindexStateManager.failReindex();
+    log(`Git reindex failed: ${error}`, 'warning');
+    throw error;
+  }
+}
+
+/**
  * Create a git change handler for event-driven detection.
  * Handles cooldown and concurrent operation prevention.
- * Filters out gitignored files before indexing.
  */
 function createGitChangeHandler(
   rootDir: string,
@@ -175,57 +232,27 @@ function createGitChangeHandler(
   const GIT_REINDEX_COOLDOWN_MS = 5000; // 5 second cooldown
 
   return async () => {
+    if (shouldSkipGitReindex(gitReindexInProgress, lastGitReindexTime, GIT_REINDEX_COOLDOWN_MS, reindexStateManager, log)) {
+      return;
+    }
+
+    gitReindexInProgress = true;
     try {
-      if (shouldSkipGitReindex(gitReindexInProgress, lastGitReindexTime, GIT_REINDEX_COOLDOWN_MS, reindexStateManager, log)) {
-        return;
-      }
+      const filteredFiles = await detectAndFilterGitChanges(
+        gitTracker, rootDir,
+        () => isIgnored,
+        (f) => { isIgnored = f; },
+        log
+      );
 
-      // Set in-flight flag immediately to prevent overlapping invocations
-      gitReindexInProgress = true;
+      if (!filteredFiles) return;
 
-      log('🌿 Git change detected (event-driven)');
-      const changedFiles = await gitTracker.detectChanges();
-
-      if (!changedFiles || changedFiles.length === 0) {
-        gitReindexInProgress = false;
-        return;
-      }
-
-      // Invalidate filter when .gitignore files change
-      if (changedFiles.some(isGitignoreFile)) {
-        isIgnored = null;
-      }
-
-      // Lazy-init gitignore filter
-      if (!isIgnored) {
-        isIgnored = await createGitignoreFilter(rootDir);
-      }
-
-      const filteredFiles = await filterGitChangedFiles(changedFiles, rootDir, isIgnored!);
-      if (filteredFiles.length === 0) {
-        gitReindexInProgress = false;
-        return;
-      }
-
-      const startTime = Date.now();
-      reindexStateManager.startReindex(filteredFiles);
-      log(`Reindexing ${filteredFiles.length} files from git change`);
-
-      try {
-        await checkAndReconnect();
-        const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, { verbose: false });
-        const duration = Date.now() - startTime;
-        reindexStateManager.completeReindex(duration);
-        log(`✓ Reindexed ${count} files in ${duration}ms`);
-        lastGitReindexTime = Date.now();
-      } catch (error) {
-        reindexStateManager.failReindex();
-        log(`Git reindex failed: ${error}`, 'warning');
-      } finally {
-        gitReindexInProgress = false;
-      }
+      await executeGitReindex(filteredFiles, vectorDB, embeddings, reindexStateManager, checkAndReconnect, log);
+      lastGitReindexTime = Date.now();
     } catch (error) {
       log(`Git change handler failed: ${error}`, 'warning');
+    } finally {
+      gitReindexInProgress = false;
     }
   };
 }
