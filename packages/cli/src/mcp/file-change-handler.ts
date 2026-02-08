@@ -86,7 +86,7 @@ async function handleSingleFileChange(
       const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
 
       // Step 3: If content hasn't changed, update mtime in a short transaction
-      if (!shouldReindex && newMtime && existingEntry) {
+      if (!shouldReindex && newMtime !== undefined && existingEntry) {
         const skipReindex = await manifest.transaction(async (manifestData) => {
           const entry = manifestData.files[normalizedPath];
           if (entry) {
@@ -204,11 +204,11 @@ async function filterModifiedFilesByHash(
   }
 
   // Step 3: Update all mtimes in a single short transaction (skip if nothing to update)
-  const hasMtimeUpdates = checkResults.some(r => !r.shouldReindex && r.newMtime);
+  const hasMtimeUpdates = checkResults.some(r => !r.shouldReindex && r.newMtime !== undefined);
   if (hasMtimeUpdates) {
     await manifest.transaction(async (data) => {
       for (const result of checkResults) {
-        if (!result.shouldReindex && result.newMtime) {
+        if (!result.shouldReindex && result.newMtime !== undefined) {
           const entry = data.files[result.normalizedPath];
           if (entry) {
             entry.lastModified = result.newMtime;
