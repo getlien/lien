@@ -203,18 +203,21 @@ async function filterModifiedFilesByHash(
     });
   }
 
-  // Step 3: Update all mtimes in a single short transaction
-  await manifest.transaction(async (data) => {
-    for (const result of checkResults) {
-      if (!result.shouldReindex && result.newMtime) {
-        const entry = data.files[result.normalizedPath];
-        if (entry) {
-          entry.lastModified = result.newMtime;
+  // Step 3: Update all mtimes in a single short transaction (skip if nothing to update)
+  const hasMtimeUpdates = checkResults.some(r => !r.shouldReindex && r.newMtime);
+  if (hasMtimeUpdates) {
+    await manifest.transaction(async (data) => {
+      for (const result of checkResults) {
+        if (!result.shouldReindex && result.newMtime) {
+          const entry = data.files[result.normalizedPath];
+          if (entry) {
+            entry.lastModified = result.newMtime;
+          }
         }
       }
-    }
-    return null; // No return value needed, manifest is mutated in place
-  });
+      return null;
+    });
+  }
 
   // Return only files that need reindexing
   return checkResults.filter(r => r.shouldReindex).map(r => r.filepath);

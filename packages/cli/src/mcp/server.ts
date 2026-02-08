@@ -133,9 +133,6 @@ async function setupFileWatching(
 function setupTransport(log: LogFn): StdioServerTransport {
   const transport = new StdioServerTransport();
 
-  transport.onclose = () => {
-    log('Transport closed');
-  };
   transport.onerror = (error) => {
     log(`Transport error: ${error}`);
   };

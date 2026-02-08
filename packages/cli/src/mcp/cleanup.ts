@@ -11,10 +11,13 @@ export function setupCleanupHandlers(
   log: LogFn
 ): () => Promise<void> {
   return async () => {
-    log('Shutting down MCP server...');
-    clearInterval(versionCheckInterval);
-    if (gitPollInterval) clearInterval(gitPollInterval);
-    if (fileWatcher) await fileWatcher.stop();
-    process.exit(0);
+    try {
+      log('Shutting down MCP server...');
+      clearInterval(versionCheckInterval);
+      if (gitPollInterval) clearInterval(gitPollInterval);
+      if (fileWatcher) await fileWatcher.stop();
+    } finally {
+      process.exit(0);
+    }
   };
 }
