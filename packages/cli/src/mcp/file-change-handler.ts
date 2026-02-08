@@ -410,23 +410,23 @@ export function createFileChangeHandler(
       ignoreFilter = await createGitignoreFilter(rootDir);
     }
 
-    // Ensure we're using the latest index version before any DB operations
-    await checkAndReconnect();
-
     const { type } = event;
 
     if (type === 'batch') {
       const filtered = filterFileChangeEvent(event, ignoreFilter, rootDir);
       const totalToProcess = (filtered.added!.length + filtered.modified!.length + filtered.deleted!.length);
       if (totalToProcess === 0) return;
+      await checkAndReconnect();
       await handleBatchEvent(filtered, vectorDB, embeddings, verbose, log, reindexStateManager);
     } else if (type === 'unlink') {
       // Always process deletions — a previously-indexed file must be removed
       // from the index even if it's now gitignored
+      await checkAndReconnect();
       await handleUnlinkEvent(event.filepath, vectorDB, log, reindexStateManager);
     } else {
       // Fallback for single file add/change (backwards compatibility)
       if (isFileIgnored(event.filepath, rootDir, ignoreFilter)) return;
+      await checkAndReconnect();
       await handleSingleFileChange(event.filepath, type, vectorDB, embeddings, verbose, log, reindexStateManager);
     }
   };

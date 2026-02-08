@@ -135,7 +135,7 @@ function setupTransport(log: LogFn): StdioServerTransport {
   const transport = new StdioServerTransport();
 
   transport.onerror = (error) => {
-    log(`Transport error: ${error}`);
+    log(`Transport error: ${error}`, 'warning');
   };
 
   return transport;
