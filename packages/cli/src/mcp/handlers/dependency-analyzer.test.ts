@@ -33,7 +33,7 @@ function createChunk(
       ...overrides,
     },
     score: 0,
-    relevance: 'highly_relevant' as const,
+    relevance: 'not_relevant' as const,
   };
 }
 
@@ -376,13 +376,9 @@ describe('findDependents', () => {
 
   describe('hitLimit', () => {
     it('should set hitLimit to true when scanWithFilter returns exactly SCAN_LIMIT chunks', async () => {
-      // SCAN_LIMIT is 10000 in the source
-      const chunks = Array.from({ length: 10000 }, (_, i) =>
-        createChunk(`src/file${i}.ts`, {
-          startLine: 1,
-          endLine: 10,
-        })
-      );
+      // SCAN_LIMIT is 10000 in the source; only .length matters here
+      const minimalChunk = createChunk('src/filler.ts');
+      const chunks = Array(10000).fill(minimalChunk);
       mockDB.scanWithFilter.mockResolvedValue(chunks);
 
       const result = await findDependents(
