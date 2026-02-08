@@ -26,7 +26,6 @@ async function handleGitStartup(
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>
@@ -76,14 +75,16 @@ function createGitPollInterval(
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>
 ): NodeJS.Timeout {
   let isIgnored: ((relativePath: string) => boolean) | null = null;
+  let pollInProgress = false;
 
   return setInterval(async () => {
+    if (pollInProgress) return;
+    pollInProgress = true;
     try {
       const changedFiles = await gitTracker.detectChanges();
       if (changedFiles && changedFiles.length > 0) {
@@ -127,6 +128,8 @@ function createGitPollInterval(
       }
     } catch (error) {
       log(`Git detection check failed: ${error}`, 'warning');
+    } finally {
+      pollInProgress = false;
     }
   }, DEFAULT_GIT_POLL_INTERVAL_MS);
 }
@@ -162,7 +165,6 @@ function createGitChangeHandler(
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>
@@ -173,49 +175,53 @@ function createGitChangeHandler(
   const GIT_REINDEX_COOLDOWN_MS = 5000; // 5 second cooldown
 
   return async () => {
-    if (shouldSkipGitReindex(gitReindexInProgress, lastGitReindexTime, GIT_REINDEX_COOLDOWN_MS, reindexStateManager, log)) {
-      return;
-    }
-
-    log('🌿 Git change detected (event-driven)');
-    const changedFiles = await gitTracker.detectChanges();
-
-    if (!changedFiles || changedFiles.length === 0) {
-      return;
-    }
-
-    // Invalidate filter when .gitignore files change
-    if (changedFiles.some(isGitignoreFile)) {
-      isIgnored = null;
-    }
-
-    // Lazy-init gitignore filter
-    if (!isIgnored) {
-      isIgnored = await createGitignoreFilter(rootDir);
-    }
-
-    const filteredFiles = await filterGitChangedFiles(changedFiles, rootDir, isIgnored!);
-    if (filteredFiles.length === 0) {
-      return;
-    }
-
-    gitReindexInProgress = true;
-    const startTime = Date.now();
-    reindexStateManager.startReindex(filteredFiles);
-    log(`Reindexing ${filteredFiles.length} files from git change`);
-
     try {
-      await checkAndReconnect();
-      const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, { verbose: false });
-      const duration = Date.now() - startTime;
-      reindexStateManager.completeReindex(duration);
-      log(`✓ Reindexed ${count} files in ${duration}ms`);
-      lastGitReindexTime = Date.now();
+      if (shouldSkipGitReindex(gitReindexInProgress, lastGitReindexTime, GIT_REINDEX_COOLDOWN_MS, reindexStateManager, log)) {
+        return;
+      }
+
+      log('🌿 Git change detected (event-driven)');
+      const changedFiles = await gitTracker.detectChanges();
+
+      if (!changedFiles || changedFiles.length === 0) {
+        return;
+      }
+
+      // Invalidate filter when .gitignore files change
+      if (changedFiles.some(isGitignoreFile)) {
+        isIgnored = null;
+      }
+
+      // Lazy-init gitignore filter
+      if (!isIgnored) {
+        isIgnored = await createGitignoreFilter(rootDir);
+      }
+
+      const filteredFiles = await filterGitChangedFiles(changedFiles, rootDir, isIgnored!);
+      if (filteredFiles.length === 0) {
+        return;
+      }
+
+      gitReindexInProgress = true;
+      const startTime = Date.now();
+      reindexStateManager.startReindex(filteredFiles);
+      log(`Reindexing ${filteredFiles.length} files from git change`);
+
+      try {
+        await checkAndReconnect();
+        const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, { verbose: false });
+        const duration = Date.now() - startTime;
+        reindexStateManager.completeReindex(duration);
+        log(`✓ Reindexed ${count} files in ${duration}ms`);
+        lastGitReindexTime = Date.now();
+      } catch (error) {
+        reindexStateManager.failReindex();
+        log(`Git reindex failed: ${error}`, 'warning');
+      } finally {
+        gitReindexInProgress = false;
+      }
     } catch (error) {
-      reindexStateManager.failReindex();
-      log(`Git reindex failed: ${error}`, 'warning');
-    } finally {
-      gitReindexInProgress = false;
+      log(`Git change handler failed: ${error}`, 'warning');
     }
   };
 }
@@ -228,7 +234,6 @@ async function setupGitDetection(
   rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   fileWatcher: FileWatcher | null,
@@ -251,7 +256,7 @@ async function setupGitDetection(
 
   // Check for git changes on startup
   try {
-    await handleGitStartup(rootDir, gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager, checkAndReconnect);
+    await handleGitStartup(rootDir, gitTracker, vectorDB, embeddings, log, reindexStateManager, checkAndReconnect);
   } catch (error) {
     // handleGitStartup already calls failReindex() before re-throwing, no need to call again
     log(`Failed to check git state on startup: ${error}`, 'warning');
@@ -264,7 +269,6 @@ async function setupGitDetection(
       gitTracker,
       vectorDB,
       embeddings,
-      verbose,
       log,
       reindexStateManager,
       checkAndReconnect
@@ -278,7 +282,7 @@ async function setupGitDetection(
   // Fallback to polling if no file watcher (--no-watch mode)
   const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
   log(`✓ Git detection enabled (polling fallback every ${pollIntervalSeconds}s)`);
-  const gitPollInterval = createGitPollInterval(rootDir, gitTracker, vectorDB, embeddings, verbose, log, reindexStateManager, checkAndReconnect);
+  const gitPollInterval = createGitPollInterval(rootDir, gitTracker, vectorDB, embeddings, log, reindexStateManager, checkAndReconnect);
   return { gitTracker, gitPollInterval };
 }
 

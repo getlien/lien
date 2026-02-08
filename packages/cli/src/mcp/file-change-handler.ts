@@ -54,6 +54,29 @@ async function handleFileDeletion(
 }
 
 /**
+ * Handle batch deletions with a shared ManifestManager instance.
+ * Avoids creating a new ManifestManager per deletion.
+ */
+async function handleBatchDeletions(
+  deletedFiles: string[],
+  vectorDB: VectorDBInterface,
+  log: LogFn
+): Promise<void> {
+  const manifest = new ManifestManager(vectorDB.dbPath);
+
+  for (const filepath of deletedFiles) {
+    log(`🗑️  File deleted: ${filepath}`);
+    try {
+      await vectorDB.deleteByFile(filepath);
+      await manifest.removeFile(filepath);
+      log(`✓ Removed ${filepath} from index`);
+    } catch (error) {
+      log(`Failed to remove ${filepath}: ${error}`, 'warning');
+    }
+  }
+}
+
+/**
  * Handle single file change (reindex one file)
  * Uses content hash to skip reindexing if file content hasn't actually changed.
  * Uses atomic manifest operations to prevent race conditions.
@@ -63,7 +86,6 @@ async function handleSingleFileChange(
   type: 'add' | 'change',
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
@@ -262,19 +284,16 @@ async function executeReindexOperations(
   embeddings: LocalEmbeddings,
   log: LogFn
 ): Promise<void> {
+  const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
   const operations: Promise<unknown>[] = [];
 
   if (filesToIndex.length > 0) {
     log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
-    operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose: false }));
+    operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose: false, rootDir }));
   }
 
   if (deletedFiles.length > 0) {
-    operations.push(
-      Promise.all(
-        deletedFiles.map((deleted: string) => handleFileDeletion(deleted, vectorDB, log))
-      )
-    );
+    operations.push(handleBatchDeletions(deletedFiles, vectorDB, log));
   }
 
   await Promise.all(operations);
@@ -288,7 +307,6 @@ async function handleBatchEvent(
   event: FileChangeEvent,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  _verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
@@ -370,7 +388,7 @@ function filterFileChangeEvent(
 
 /** Check if a filepath is a .gitignore file (basename match, not suffix) */
 export function isGitignoreFile(filepath: string): boolean {
-  const name = filepath.split('/').pop() ?? filepath.split('\\').pop() ?? filepath;
+  const name = filepath.split(/[/\\]/).pop() ?? filepath;
   return name === '.gitignore';
 }
 
@@ -392,7 +410,6 @@ export function createFileChangeHandler(
   rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>
@@ -417,7 +434,7 @@ export function createFileChangeHandler(
       const totalToProcess = (filtered.added!.length + filtered.modified!.length + filtered.deleted!.length);
       if (totalToProcess === 0) return;
       await checkAndReconnect();
-      await handleBatchEvent(filtered, vectorDB, embeddings, verbose, log, reindexStateManager);
+      await handleBatchEvent(filtered, vectorDB, embeddings, log, reindexStateManager);
     } else if (type === 'unlink') {
       // Always process deletions — a previously-indexed file must be removed
       // from the index even if it's now gitignored
@@ -427,7 +444,7 @@ export function createFileChangeHandler(
       // Fallback for single file add/change (backwards compatibility)
       if (isFileIgnored(event.filepath, rootDir, ignoreFilter)) return;
       await checkAndReconnect();
-      await handleSingleFileChange(event.filepath, type, vectorDB, embeddings, verbose, log, reindexStateManager);
+      await handleSingleFileChange(event.filepath, type, vectorDB, embeddings, log, reindexStateManager);
     }
   };
 }

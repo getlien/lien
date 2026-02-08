@@ -79,7 +79,6 @@ describe('Background git reindex reconnect guard', () => {
         gitTracker,
         createMockVectorDB(),
         createMockEmbeddings(),
-        false,
         log,
         reindexStateManager,
         checkAndReconnect
@@ -98,7 +97,6 @@ describe('Background git reindex reconnect guard', () => {
         gitTracker,
         createMockVectorDB(),
         createMockEmbeddings(),
-        false,
         log,
         reindexStateManager,
         checkAndReconnect
@@ -119,7 +117,6 @@ describe('Background git reindex reconnect guard', () => {
         gitTracker,
         createMockVectorDB(),
         createMockEmbeddings(),
-        false,
         log,
         reindexStateManager,
         checkAndReconnect
@@ -143,7 +140,6 @@ describe('Background git reindex reconnect guard', () => {
         gitTracker,
         createMockVectorDB(),
         createMockEmbeddings(),
-        false,
         log,
         reindexStateManager,
         checkAndReconnect
@@ -164,7 +160,6 @@ describe('Background git reindex reconnect guard', () => {
         gitTracker,
         createMockVectorDB(),
         createMockEmbeddings(),
-        false,
         log,
         reindexStateManager,
         checkAndReconnect

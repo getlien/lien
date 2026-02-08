@@ -103,7 +103,6 @@ async function setupFileWatching(
   rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: LocalEmbeddings,
-  verbose: boolean | undefined,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>
@@ -118,7 +117,7 @@ async function setupFileWatching(
   const fileWatcher = new FileWatcher(rootDir);
 
   try {
-    const handler = createFileChangeHandler(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager, checkAndReconnect);
+    const handler = createFileChangeHandler(rootDir, vectorDB, embeddings, log, reindexStateManager, checkAndReconnect);
     await fileWatcher.start(handler);
     log(`✓ File watching enabled (watching ${fileWatcher.getWatchedFiles().length} files)`);
     return fileWatcher;
@@ -238,11 +237,6 @@ async function initializeComponents(
   try {
     const result = await initializeDatabase(rootDir, earlyLog);
 
-    // Verify vectorDB has required methods
-    if (!result.vectorDB || typeof result.vectorDB.initialize !== 'function') {
-      throw new Error(`Invalid vectorDB instance: ${result.vectorDB?.constructor?.name || 'undefined'}. Missing initialize method.`);
-    }
-
     return result;
   } catch (error) {
     console.error(`Failed to initialize: ${error}`);
@@ -273,9 +267,9 @@ async function setupAndConnectServer(
   log: LogFn,
   versionCheckInterval: NodeJS.Timeout,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
-  options: { rootDir: string; verbose: boolean | undefined; watch: boolean | undefined }
+  options: { rootDir: string; watch: boolean | undefined }
 ): Promise<void> {
-  const { rootDir, verbose, watch } = options;
+  const { rootDir, watch } = options;
   const { vectorDB, embeddings } = toolContext;
 
   // Register all MCP handlers
@@ -285,13 +279,13 @@ async function setupAndConnectServer(
   await handleAutoIndexing(vectorDB, rootDir, log);
 
   // Setup file watching first (needed for event-driven git detection)
-  const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log, reindexStateManager, toolContext.checkAndReconnect);
+  const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, log, reindexStateManager, toolContext.checkAndReconnect);
 
   // Setup git detection (will use event-driven approach if fileWatcher is available)
-  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager, fileWatcher, toolContext.checkAndReconnect);
+  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, log, reindexStateManager, fileWatcher, toolContext.checkAndReconnect);
 
   // Setup cleanup handlers
-  const cleanup = setupCleanupHandlers(versionCheckInterval, gitPollInterval, fileWatcher, log);
+  const cleanup = setupCleanupHandlers(server, versionCheckInterval, gitPollInterval, fileWatcher, log);
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
 
@@ -334,5 +328,5 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     getReindexState: () => reindexStateManager.getState(),
   };
 
-  await setupAndConnectServer(server, toolContext, log, versionCheckInterval, reindexStateManager, { rootDir, verbose, watch });
+  await setupAndConnectServer(server, toolContext, log, versionCheckInterval, reindexStateManager, { rootDir, watch });
 }
