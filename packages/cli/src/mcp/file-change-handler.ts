@@ -394,7 +394,8 @@ export function createFileChangeHandler(
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
   log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
+  checkAndReconnect: () => Promise<void>
 ): FileChangeHandler {
   let ignoreFilter: ((relativePath: string) => boolean) | null = null;
 
@@ -408,6 +409,9 @@ export function createFileChangeHandler(
     if (!ignoreFilter) {
       ignoreFilter = await createGitignoreFilter(rootDir);
     }
+
+    // Ensure we're using the latest index version before any DB operations
+    await checkAndReconnect();
 
     const { type } = event;
 

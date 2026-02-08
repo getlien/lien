@@ -105,7 +105,8 @@ async function setupFileWatching(
   embeddings: LocalEmbeddings,
   verbose: boolean | undefined,
   log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
+  checkAndReconnect: () => Promise<void>
 ): Promise<FileWatcher | null> {
   // Enable by default, or use --watch flag
   const fileWatchingEnabled = watch !== undefined ? watch : true;
@@ -117,7 +118,7 @@ async function setupFileWatching(
   const fileWatcher = new FileWatcher(rootDir);
 
   try {
-    const handler = createFileChangeHandler(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager);
+    const handler = createFileChangeHandler(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager, checkAndReconnect);
     await fileWatcher.start(handler);
     log(`✓ File watching enabled (watching ${fileWatcher.getWatchedFiles().length} files)`);
     return fileWatcher;
@@ -284,7 +285,7 @@ async function setupAndConnectServer(
   await handleAutoIndexing(vectorDB, rootDir, log);
 
   // Setup file watching first (needed for event-driven git detection)
-  const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log, reindexStateManager);
+  const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, verbose, log, reindexStateManager, toolContext.checkAndReconnect);
 
   // Setup git detection (will use event-driven approach if fileWatcher is available)
   const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, verbose, log, reindexStateManager, fileWatcher, toolContext.checkAndReconnect);
