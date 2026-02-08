@@ -143,15 +143,17 @@ export async function runComplexityAnalysis(
   }
 
   try {
-    // Index the codebase with force: true to ensure a clean full index.
-    // Without force, incremental indexing can produce 0 chunks when a
-    // previous indexCodebase() call (e.g. base branch in delta tracking)
-    // left a stale manifest in the shared vector DB.
+    // Try incremental indexing first, then fall back to force if it produces
+    // 0 chunks (can happen when a prior indexCodebase() call — e.g. base
+    // branch in delta tracking — left a stale manifest in the shared DB).
     logger.info('Indexing codebase...');
-    const indexResult = await indexCodebase({
-      rootDir,
-      force: true,
-    });
+    let indexResult = await indexCodebase({ rootDir });
+
+    if (indexResult.success && indexResult.chunksCreated === 0) {
+      logger.info('Incremental index produced 0 chunks, retrying with force...');
+      indexResult = await indexCodebase({ rootDir, force: true });
+    }
+
     logger.info(`Indexing complete: ${indexResult.chunksCreated} chunks from ${indexResult.filesIndexed} files (success: ${indexResult.success})`);
     if (!indexResult.success || indexResult.chunksCreated === 0) {
       logger.warning(`Indexing produced no chunks for ${rootDir}`);
