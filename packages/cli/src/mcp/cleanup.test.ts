@@ -31,14 +31,16 @@ describe('setupCleanupHandlers', () => {
   });
 
   it('should return an async function', () => {
+    const interval = setInterval(() => {}, 99999);
     const cleanup = setupCleanupHandlers(
       createMockServer(),
-      setInterval(() => {}, 99999),
+      interval,
       null,
       null,
       log
     );
     expect(typeof cleanup).toBe('function');
+    clearInterval(interval);
   });
 
   it('should clear the versionCheckInterval when called', async () => {
