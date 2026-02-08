@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { _testing } from './server.js';
+import { _testing } from './file-change-handler.js';
 import type { FileChangeEvent } from '../watcher/index.js';
 
 const { isGitignoreFile, hasGitignoreChange } = _testing;
