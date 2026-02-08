@@ -4,6 +4,17 @@ import { QdrantDB } from '@liendev/core';
 import { findDependents, groupDependentsByRepo } from './dependency-analyzer.js';
 
 /**
+ * Helper to create a mock async generator that yields a single page of items.
+ */
+function mockAsyncGenerator<T>(items: T[]): AsyncGenerator<T[]> {
+  return (async function*() {
+    if (items.length > 0) {
+      yield items;
+    }
+  })();
+}
+
+/**
  * Helper to create a mock SearchResult chunk with sensible defaults.
  */
 function createChunk(
@@ -39,7 +50,7 @@ function createChunk(
 
 describe('findDependents', () => {
   let mockDB: {
-    scanWithFilter: ReturnType<typeof vi.fn>;
+    scanPaginated: ReturnType<typeof vi.fn>;
     scanCrossRepo: ReturnType<typeof vi.fn>;
   };
   let mockLog: ReturnType<typeof vi.fn<(message: string, level?: 'warning') => void>>;
@@ -47,7 +58,7 @@ describe('findDependents', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDB = {
-      scanWithFilter: vi.fn().mockResolvedValue([]),
+      scanPaginated: vi.fn().mockReturnValue(mockAsyncGenerator([])),
       scanCrossRepo: vi.fn().mockResolvedValue([]),
     };
     mockLog = vi.fn<(message: string, level?: 'warning') => void>();
@@ -55,10 +66,10 @@ describe('findDependents', () => {
 
   describe('direct dependencies via imports array', () => {
     it('should find a file that imports the target via imports array', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
         createChunk('src/target.ts', { exports: ['doStuff'] }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -72,13 +83,13 @@ describe('findDependents', () => {
     });
 
     it('should not include the target file itself as a dependent', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', {
           imports: ['src/other.ts'],
           exports: ['foo'],
         }),
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -95,12 +106,12 @@ describe('findDependents', () => {
 
   describe('importedSymbols-based dependencies', () => {
     it('should find a file via importedSymbols keys', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/consumer.ts', {
           importedSymbols: { './target': ['Foo', 'Bar'] },
         }),
         createChunk('src/target.ts', { exports: ['Foo', 'Bar'] }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -116,10 +127,10 @@ describe('findDependents', () => {
 
   describe('fuzzy path matching', () => {
     it('should match relative imports like ./utils to src/utils.ts', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/consumer.ts', { imports: ['./utils'] }),
         createChunk('src/utils.ts', { exports: ['helper'] }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -138,7 +149,7 @@ describe('findDependents', () => {
       // target.ts exports Foo
       // index.ts imports from target.ts and re-exports Foo
       // consumer.ts imports from index.ts
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['Foo'] }),
         createChunk('src/index.ts', {
           imports: ['src/target.ts'],
@@ -149,7 +160,7 @@ describe('findDependents', () => {
           imports: ['src/index.ts'],
           importedSymbols: { 'src/index': ['Foo'] },
         }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -166,7 +177,7 @@ describe('findDependents', () => {
 
   describe('symbol-level search', () => {
     it('should only return files that import the specific symbol', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['Foo', 'Bar'] }),
         createChunk('src/uses-foo.ts', {
           imports: ['src/target.ts'],
@@ -184,7 +195,7 @@ describe('findDependents', () => {
           startLine: 1,
           endLine: 10,
         }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -211,10 +222,10 @@ describe('findDependents', () => {
       // Override content for snippet extraction: line 3 - startLine 1 = index 2
       chunk.content = 'function handleRequest() {\n  const data = prepare();\n  doWork(data);\n  return data;\n}';
 
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['doWork'] }),
         chunk,
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -236,13 +247,13 @@ describe('findDependents', () => {
 
   describe('symbol validation warning', () => {
     it('should log a warning when target does not export the symbol', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['Foo'] }),
         createChunk('src/consumer.ts', {
           imports: ['src/target.ts'],
           importedSymbols: { 'src/target': ['Bar'] },
         }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -264,7 +275,7 @@ describe('findDependents', () => {
 
   describe('complexity metrics', () => {
     it('should calculate correct file and overall complexity metrics', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['util'] }),
         createChunk('src/complex-a.ts', {
           imports: ['src/target.ts'],
@@ -280,7 +291,7 @@ describe('findDependents', () => {
           imports: ['src/target.ts'],
           complexity: 3,
         }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -304,10 +315,10 @@ describe('findDependents', () => {
     });
 
     it('should return zero metrics when no chunks have complexity data', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['util'] }),
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -325,12 +336,12 @@ describe('findDependents', () => {
 
   describe('production vs test split', () => {
     it('should correctly identify test files and split counts', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['util'] }),
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
         createChunk('src/__tests__/consumer.test.ts', { imports: ['src/target.ts'] }),
         createChunk('test/integration.ts', { imports: ['src/target.ts'] }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -347,12 +358,12 @@ describe('findDependents', () => {
 
   describe('sort order', () => {
     it('should sort production files before test files', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['util'] }),
         createChunk('src/__tests__/a.test.ts', { imports: ['src/target.ts'] }),
         createChunk('src/prod-consumer.ts', { imports: ['src/target.ts'] }),
         createChunk('test/b.spec.ts', { imports: ['src/target.ts'] }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -375,31 +386,11 @@ describe('findDependents', () => {
   });
 
   describe('hitLimit', () => {
-    it('should set hitLimit to true when scanWithFilter returns exactly SCAN_LIMIT chunks', async () => {
-      // SCAN_LIMIT is 10000 in the source; only .length matters here
-      const minimalChunk = createChunk('src/filler.ts');
-      const chunks = Array(10000).fill(minimalChunk);
-      mockDB.scanWithFilter.mockResolvedValue(chunks);
-
-      const result = await findDependents(
-        mockDB as any,
-        'src/target.ts',
-        false,
-        mockLog
-      );
-
-      expect(result.hitLimit).toBe(true);
-      expect(mockLog).toHaveBeenCalledWith(
-        expect.stringContaining('limit reached'),
-        'warning'
-      );
-    });
-
-    it('should set hitLimit to false when fewer than SCAN_LIMIT chunks returned', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+    it('should always set hitLimit to false with paginated scanning', async () => {
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['foo'] }),
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -414,10 +405,10 @@ describe('findDependents', () => {
 
   describe('no dependents', () => {
     it('should return empty dependents with low-risk metrics when nothing imports target', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['foo'] }),
         createChunk('src/unrelated.ts', { imports: ['src/other.ts'] }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -435,7 +426,7 @@ describe('findDependents', () => {
 
   describe('circular dependency chains', () => {
     it('should handle A -> B -> A without infinite loops', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/a.ts', {
           imports: ['src/b.ts'],
           exports: ['fnA'],
@@ -444,7 +435,7 @@ describe('findDependents', () => {
           imports: ['src/a.ts'],
           exports: ['fnB'],
         }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -461,11 +452,11 @@ describe('findDependents', () => {
 
   describe('files with no imports or exports', () => {
     it('should ignore chunks with no imports and no exports', async () => {
-      mockDB.scanWithFilter.mockResolvedValue([
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['foo'] }),
         createChunk('src/standalone.ts'), // no imports, no exports
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
-      ]);
+      ]));
 
       const result = await findDependents(
         mockDB as any,
@@ -482,7 +473,7 @@ describe('findDependents', () => {
   describe('cross-repo with QdrantDB', () => {
     it('should call scanCrossRepo when vectorDB is QdrantDB and crossRepo=true', async () => {
       const mockQdrantDB: any = {
-        scanWithFilter: vi.fn().mockResolvedValue([]),
+        scanPaginated: vi.fn().mockReturnValue(mockAsyncGenerator([])),
         scanCrossRepo: vi.fn().mockResolvedValue([]),
       };
       Object.setPrototypeOf(mockQdrantDB, QdrantDB.prototype);
@@ -494,13 +485,13 @@ describe('findDependents', () => {
         mockLog
       );
 
-      expect(mockQdrantDB.scanCrossRepo).toHaveBeenCalledWith({ limit: 10000 });
-      expect(mockQdrantDB.scanWithFilter).not.toHaveBeenCalled();
+      expect(mockQdrantDB.scanCrossRepo).toHaveBeenCalledWith({});
+      expect(mockQdrantDB.scanPaginated).not.toHaveBeenCalled();
     });
   });
 
   describe('cross-repo fallback for non-QdrantDB', () => {
-    it('should log warning and use scanWithFilter when vectorDB is not QdrantDB', async () => {
+    it('should log warning and use scanPaginated when vectorDB is not QdrantDB', async () => {
       await findDependents(
         mockDB as any,
         'src/target.ts',
@@ -512,7 +503,7 @@ describe('findDependents', () => {
         expect.stringContaining('crossRepo=true requires Qdrant backend'),
         'warning'
       );
-      expect(mockDB.scanWithFilter).toHaveBeenCalledWith({ limit: 10000 });
+      expect(mockDB.scanPaginated).toHaveBeenCalled();
       expect(mockDB.scanCrossRepo).not.toHaveBeenCalled();
     });
   });

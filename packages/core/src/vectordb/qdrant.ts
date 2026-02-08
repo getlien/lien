@@ -658,6 +658,37 @@ export class QdrantDB implements VectorDBInterface {
     });
   }
 
+  async *scanPaginated(options: {
+    pageSize?: number;
+    filter?: string;
+  } = {}): AsyncGenerator<SearchResult[]> {
+    if (!this.initialized) {
+      throw new DatabaseError('Qdrant database not initialized');
+    }
+
+    const pageSize = options.pageSize || 1000;
+    const filter = this.buildBaseFilter({ includeCurrentRepo: true });
+    let offset: string | number | undefined;
+
+    while (true) {
+      const results = await this.client.scroll(this.collectionName, {
+        filter,
+        limit: pageSize,
+        with_payload: true,
+        with_vector: false,
+        ...(offset !== undefined && { offset }),
+      });
+
+      const page = this.mapScrollResults(results);
+      if (page.length > 0) {
+        yield page;
+      }
+
+      offset = results.next_page_offset as string | number | undefined;
+      if (!offset || (results.points || []).length < pageSize) break;
+    }
+  }
+
   /**
    * Scan with filter across all repos in the organization (cross-repo).
    *

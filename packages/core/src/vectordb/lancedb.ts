@@ -147,7 +147,17 @@ export class VectorDB implements VectorDBInterface {
     }
     return queryOps.scanAll(this.table, options);
   }
-  
+
+  async *scanPaginated(options: {
+    pageSize?: number;
+    filter?: string;
+  } = {}): AsyncGenerator<SearchResult[]> {
+    if (!this.table) {
+      throw new DatabaseError('Vector database not initialized');
+    }
+    yield* queryOps.scanPaginated(this.table, options);
+  }
+
   async querySymbols(options: {
     language?: string;
     pattern?: string;

@@ -2,16 +2,9 @@ import type { SearchResult } from '@liendev/core';
 import { VectorDBInterface } from '@liendev/core';
 import { QdrantDB } from '@liendev/core';
 import {
-  groupChunksByNormalizedPath,
   findTransitiveDependents,
 } from '@liendev/core';
 import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
-
-/**
- * Maximum number of chunks to scan for dependency analysis.
- * Larger codebases may have incomplete results if they exceed this limit.
- */
-const SCAN_LIMIT = 10000;
 
 /**
  * Complexity metrics for a single dependent file.
@@ -257,30 +250,92 @@ function fileImportsSymbolFromAny(
 }
 
 /**
- * Scan chunks from the database.
+ * Add a chunk to the import index.
  */
-async function scanChunks(
-  vectorDB: VectorDBInterface,
-  crossRepo: boolean,
-  log: (message: string, level?: 'warning') => void
-): Promise<{ allChunks: SearchResult[]; hitLimit: boolean }> {
-  let allChunks: SearchResult[];
-  
-  if (crossRepo && vectorDB instanceof QdrantDB) {
-    allChunks = await vectorDB.scanCrossRepo({ limit: SCAN_LIMIT });
-  } else {
-    if (crossRepo) {
-      log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.', 'warning');
+function addChunkToImportIndex(
+  chunk: SearchResult,
+  normalizePathCached: (path: string) => string,
+  importIndex: Map<string, SearchResult[]>
+): void {
+  const imports = chunk.metadata.imports || [];
+  for (const imp of imports) {
+    const normalizedImport = normalizePathCached(imp);
+    if (!importIndex.has(normalizedImport)) {
+      importIndex.set(normalizedImport, []);
     }
-    allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
+    importIndex.get(normalizedImport)!.push(chunk);
   }
 
-  const hitLimit = allChunks.length === SCAN_LIMIT;
-  if (hitLimit) {
-    log(`Scanned ${SCAN_LIMIT} chunks (limit reached). Results may be incomplete.`, 'warning');
+  const importedSymbols = chunk.metadata.importedSymbols;
+  if (importedSymbols && typeof importedSymbols === 'object') {
+    for (const modulePath of Object.keys(importedSymbols)) {
+      const normalizedImport = normalizePathCached(modulePath);
+      if (!importIndex.has(normalizedImport)) {
+        importIndex.set(normalizedImport, []);
+      }
+      importIndex.get(normalizedImport)!.push(chunk);
+    }
   }
-  
-  return { allChunks, hitLimit };
+}
+
+/**
+ * Add a chunk to the file grouping map.
+ */
+function addChunkToFileMap(
+  chunk: SearchResult,
+  normalizePathCached: (path: string) => string,
+  fileMap: Map<string, SearchResult[]>
+): void {
+  const canonical = normalizePathCached(chunk.metadata.file);
+  if (!fileMap.has(canonical)) {
+    fileMap.set(canonical, []);
+  }
+  fileMap.get(canonical)!.push(chunk);
+}
+
+/**
+ * Scan chunks from the database using paginated iteration.
+ * Builds import index and file groupings incrementally to avoid loading all chunks at once.
+ */
+async function scanChunksPaginated(
+  vectorDB: VectorDBInterface,
+  crossRepo: boolean,
+  log: (message: string, level?: 'warning') => void,
+  normalizePathCached: (path: string) => string
+): Promise<{
+  importIndex: Map<string, SearchResult[]>;
+  allChunksByFile: Map<string, SearchResult[]>;
+  totalChunks: number;
+}> {
+  const importIndex = new Map<string, SearchResult[]>();
+  const allChunksByFile = new Map<string, SearchResult[]>();
+  let totalChunks = 0;
+
+  // Cross-repo with Qdrant: fall back to bulk scan (scanCrossRepo doesn't have paginated variant)
+  if (crossRepo && vectorDB instanceof QdrantDB) {
+    const allChunks = await vectorDB.scanCrossRepo({});
+    totalChunks = allChunks.length;
+    for (const chunk of allChunks) {
+      addChunkToImportIndex(chunk, normalizePathCached, importIndex);
+      addChunkToFileMap(chunk, normalizePathCached, allChunksByFile);
+    }
+    return { importIndex, allChunksByFile, totalChunks };
+  }
+
+  if (crossRepo) {
+    log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.', 'warning');
+  }
+
+  // Paginated scan: build indexes incrementally
+  for await (const page of vectorDB.scanPaginated({ pageSize: 1000 })) {
+    totalChunks += page.length;
+    for (const chunk of page) {
+      addChunkToImportIndex(chunk, normalizePathCached, importIndex);
+      addChunkToFileMap(chunk, normalizePathCached, allChunksByFile);
+    }
+  }
+
+  return { importIndex, allChunksByFile, totalChunks };
 }
 
 /**
@@ -433,21 +488,21 @@ export async function findDependents(
   log: (message: string, level?: 'warning') => void,
   symbol?: string
 ): Promise<DependencyAnalysisResult> {
-  // Scan chunks from database
-  const { allChunks, hitLimit } = await scanChunks(vectorDB, crossRepo, log);
-  log(`Scanning ${allChunks.length} chunks for imports...`);
-
-  // Setup path normalization
+  // Setup path normalization (needed for paginated scan)
   const normalizePathCached = createPathNormalizer();
   const normalizedTarget = normalizePathCached(filepath);
-  
+
+  // Paginated scan: builds import index and file groupings incrementally
+  const { importIndex, allChunksByFile, totalChunks } = await scanChunksPaginated(
+    vectorDB, crossRepo, log, normalizePathCached
+  );
+  log(`Scanned ${totalChunks} chunks for imports...`);
+
   // Find dependent chunks and group by file
-  const importIndex = buildImportIndex(allChunks, normalizePathCached);
   const dependentChunks = findDependentChunks(importIndex, normalizedTarget);
   const chunksByFile = groupChunksByFile(dependentChunks);
 
   // Find transitive dependents through re-export chains (barrel files)
-  const allChunksByFile = groupChunksByNormalizedPath(allChunks, normalizePathCached);
   const reExporters = buildReExportGraph(allChunksByFile, normalizedTarget, normalizePathCached);
   if (reExporters.length > 0) {
     mergeTransitiveDependents(reExporters, importIndex, normalizedTarget, normalizePathCached, allChunksByFile, chunksByFile, log);
@@ -458,6 +513,7 @@ export async function findDependents(
   const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
 
   // Build dependents list (file-level or symbol-level)
+  const allChunks = Array.from(allChunksByFile.values()).flat();
   const reExporterPaths = reExporters.map(re => re.filepath);
   const { dependents, totalUsageCount } = buildDependentsList(
     chunksByFile, symbol, normalizedTarget, normalizePathCached, allChunks, filepath, log, reExporterPaths
@@ -480,51 +536,10 @@ export async function findDependents(
     chunksByFile,
     fileComplexities,
     complexityMetrics,
-    hitLimit,
+    hitLimit: false,
     allChunks,
     totalUsageCount,
   };
-}
-
-/**
- * Build import-to-chunk index for O(n) instead of O(n*m) lookup.
- * 
- * Uses both:
- * - `imports` array (raw import statements for TS/JS)
- * - `importedSymbols` keys (parsed module paths for Python/PHP)
- */
-function buildImportIndex(
-  allChunks: SearchResult[],
-  normalizePathCached: (path: string) => string
-): Map<string, SearchResult[]> {
-  const importIndex = new Map<string, SearchResult[]>();
-
-  const addToIndex = (importPath: string, chunk: SearchResult) => {
-    const normalizedImport = normalizePathCached(importPath);
-    if (!importIndex.has(normalizedImport)) {
-      importIndex.set(normalizedImport, []);
-    }
-    importIndex.get(normalizedImport)!.push(chunk);
-  };
-
-  for (const chunk of allChunks) {
-    // Index raw imports (TS/JS style: "./utils/logger")
-    const imports = chunk.metadata.imports || [];
-    for (const imp of imports) {
-      addToIndex(imp, chunk);
-    }
-    
-    // Index importedSymbols keys (Python/PHP style: "django.http", "App\Models\User")
-    // This provides the parsed module paths that match file paths better
-    const importedSymbols = chunk.metadata.importedSymbols;
-    if (importedSymbols && typeof importedSymbols === 'object') {
-      for (const modulePath of Object.keys(importedSymbols)) {
-        addToIndex(modulePath, chunk);
-      }
-    }
-  }
-
-  return importIndex;
 }
 
 /**
