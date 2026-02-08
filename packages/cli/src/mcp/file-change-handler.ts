@@ -47,6 +47,7 @@ async function handleBatchDeletions(
   log: LogFn
 ): Promise<void> {
   const manifest = new ManifestManager(vectorDB.dbPath);
+  const failures: string[] = [];
 
   for (const filepath of deletedFiles) {
     log(`🗑️  File deleted: ${filepath}`);
@@ -56,7 +57,12 @@ async function handleBatchDeletions(
       log(`✓ Removed ${filepath} from index`);
     } catch (error) {
       log(`Failed to remove ${filepath}: ${error}`, 'warning');
+      failures.push(filepath);
     }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`Failed to delete ${failures.length} file(s): ${failures.join(', ')}`);
   }
 }
 

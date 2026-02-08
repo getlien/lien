@@ -180,10 +180,14 @@ function createGitChangeHandler(
         return;
       }
 
+      // Set in-flight flag immediately to prevent overlapping invocations
+      gitReindexInProgress = true;
+
       log('🌿 Git change detected (event-driven)');
       const changedFiles = await gitTracker.detectChanges();
 
       if (!changedFiles || changedFiles.length === 0) {
+        gitReindexInProgress = false;
         return;
       }
 
@@ -199,10 +203,10 @@ function createGitChangeHandler(
 
       const filteredFiles = await filterGitChangedFiles(changedFiles, rootDir, isIgnored!);
       if (filteredFiles.length === 0) {
+        gitReindexInProgress = false;
         return;
       }
 
-      gitReindexInProgress = true;
       const startTime = Date.now();
       reindexStateManager.startReindex(filteredFiles);
       log(`Reindexing ${filteredFiles.length} files from git change`);
