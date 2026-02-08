@@ -1,4 +1,4 @@
-import { FileWatcher } from '../watcher/index.js';
+import type { FileWatcher } from '../watcher/index.js';
 import type { LogFn } from './types.js';
 
 /**

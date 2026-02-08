@@ -10,7 +10,7 @@ import {
   LocalEmbeddings,
 } from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
-import { createReindexStateManager } from './reindex-state-manager.js';
+import type { createReindexStateManager } from './reindex-state-manager.js';
 import type { LogFn } from './types.js';
 import { isFileIgnored, isGitignoreFile } from './file-change-handler.js';
 
