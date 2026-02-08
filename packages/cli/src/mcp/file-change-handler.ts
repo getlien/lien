@@ -78,10 +78,9 @@ async function handleSingleFileChange(
     const normalizedPath = normalizeToRelativePath(filepath, rootDir);
 
     try {
-      // Step 1: Read existing entry in a fast transaction (no file I/O)
-      const existingEntry = await manifest.transaction(async (manifestData) => {
-        return manifestData.files[normalizedPath];
-      });
+      // Step 1: Read existing entry without triggering a manifest write
+      const manifestData = await manifest.load();
+      const existingEntry = manifestData?.files[normalizedPath];
 
       // Step 2: Perform file I/O outside of any transaction to avoid holding the lock
       const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
@@ -173,8 +172,8 @@ async function filterModifiedFilesByHash(
   // Derive rootDir from dbPath using helper function
   const rootDir = getRootDirFromDbPath(vectorDB.dbPath);
 
-  // Step 1: Read manifest entries in a fast transaction (no file I/O)
-  const manifestData = await manifest.transaction(async (data) => data);
+  // Step 1: Read manifest entries without triggering a write
+  const manifestData = await manifest.load();
 
   if (!manifestData) {
     // No manifest - all files need reindexing
