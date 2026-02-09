@@ -689,6 +689,8 @@ export class QdrantDB implements VectorDBInterface {
    * Internal paginated scroll helper. Both scanAll and scanPaginated delegate here
    * to keep scroll logic, error handling, and termination in one place.
    */
+  // Note: filter uses `any` to match buildBaseFilter/executeScrollQuery return type.
+  // The local QdrantFilter interface doesn't fully align with the @qdrant/js-client-rest SDK types.
   private async *scrollPaginated(filter: any, pageSize: number): AsyncGenerator<SearchResult[]> {
     let offset: string | number | undefined;
 
