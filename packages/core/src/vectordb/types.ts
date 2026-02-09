@@ -59,9 +59,9 @@ export interface VectorDBInterface {
   updateFile(filepath: string, vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
   hasData(): Promise<boolean>;
   checkVersion(): Promise<boolean>;
+  /** Scan all chunks using cursor-based pagination. Yields pages to avoid loading everything into memory. */
   scanPaginated(options?: {
     pageSize?: number;
-    filter?: string;
   }): AsyncGenerator<SearchResult[]>;
   reconnect(): Promise<void>;
   getCurrentVersion(): number;

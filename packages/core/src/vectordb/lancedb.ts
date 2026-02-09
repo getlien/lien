@@ -150,7 +150,6 @@ export class VectorDB implements VectorDBInterface {
 
   async *scanPaginated(options: {
     pageSize?: number;
-    filter?: string;
   } = {}): AsyncGenerator<SearchResult[]> {
     if (!this.table) {
       throw new DatabaseError('Vector database not initialized');

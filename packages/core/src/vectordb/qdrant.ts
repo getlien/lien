@@ -651,18 +651,21 @@ export class QdrantDB implements VectorDBInterface {
     language?: string;
     pattern?: string;
   } = {}): Promise<SearchResult[]> {
-    // Use scanWithFilter with a high limit to get all chunks
-    return this.scanWithFilter({
-      ...options,
-      limit: 100000, // High limit for "all" chunks
-    });
+    // Collect all pages from scanPaginated to avoid arbitrary limit caps
+    const allResults: SearchResult[] = [];
+    for await (const page of this.scanPaginated()) {
+      for (const result of page) {
+        // Apply language/pattern filters if specified
+        if (options.language && result.metadata.language !== options.language) continue;
+        if (options.pattern && !result.metadata.file?.match(options.pattern)) continue;
+        allResults.push(result);
+      }
+    }
+    return allResults;
   }
 
   async *scanPaginated(options: {
     pageSize?: number;
-    // Note: `filter` is accepted for interface compatibility but ignored by Qdrant.
-    // Qdrant uses its own filter built from buildBaseFilter() instead of SQL WHERE clauses.
-    filter?: string;
   } = {}): AsyncGenerator<SearchResult[]> {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');

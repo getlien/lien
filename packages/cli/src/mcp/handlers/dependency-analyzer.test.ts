@@ -386,7 +386,7 @@ describe('findDependents', () => {
   });
 
   describe('hitLimit', () => {
-    it('should always set hitLimit to false with paginated scanning', async () => {
+    it('should set hitLimit to false for single-repo paginated scanning', async () => {
       mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([
         createChunk('src/target.ts', { exports: ['foo'] }),
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
