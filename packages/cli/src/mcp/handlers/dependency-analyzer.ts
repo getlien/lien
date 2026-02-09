@@ -384,14 +384,14 @@ function buildDependentsList(
   symbol: string | undefined,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string,
-  allChunks: SearchResult[],
+  targetFileChunks: SearchResult[],
   filepath: string,
   log: (message: string, level?: 'warning') => void,
   reExporterPaths: string[] = []
 ): { dependents: DependentInfo[]; totalUsageCount?: number } {
   if (symbol) {
     // Validate that the target file exports this symbol
-    validateSymbolExport(allChunks, normalizedTarget, normalizePathCached, symbol, filepath, log);
+    validateSymbolExport(targetFileChunks, symbol, filepath, log);
 
     // Symbol-level analysis — check imports from target AND re-exporter paths
     return findSymbolUsages(chunksByFile, symbol, normalizedTarget, normalizePathCached, reExporterPaths);
@@ -420,20 +420,16 @@ function buildDependentsList(
  * which may reveal re-exports, dynamic exports, or help diagnose indexing issues.
  */
 function validateSymbolExport(
-  allChunks: SearchResult[],
-  normalizedTarget: string,
-  normalizePathCached: (path: string) => string,
+  targetFileChunks: SearchResult[],
   symbol: string,
   filepath: string,
   log: (message: string, level?: 'warning') => void
 ): void {
-  const targetFileExportsSymbol = allChunks.some(chunk => {
-    const chunkFile = normalizePathCached(chunk.metadata.file);
-    return matchesFile(chunkFile, normalizedTarget) && 
-           chunk.metadata.exports?.includes(symbol);
-  });
-  
-  if (!targetFileExportsSymbol) {
+  const exportsSymbol = targetFileChunks.some(chunk =>
+    chunk.metadata.exports?.includes(symbol)
+  );
+
+  if (!exportsSymbol) {
     log(`Warning: Symbol "${symbol}" not found in exports of ${filepath}`, 'warning');
   }
 }
@@ -519,10 +515,11 @@ export async function findDependents(
   const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
 
   // Build dependents list (file-level or symbol-level)
-  const allChunks = symbol ? Array.from(allChunksByFile.values()).flat() : [];
+  // Only need target file chunks for symbol export validation — avoid flattening all chunks
+  const targetFileChunks = symbol ? (allChunksByFile.get(normalizedTarget) ?? []) : [];
   const reExporterPaths = reExporters.map(re => re.filepath);
   const { dependents, totalUsageCount } = buildDependentsList(
-    chunksByFile, symbol, normalizedTarget, normalizePathCached, allChunks, filepath, log, reExporterPaths
+    chunksByFile, symbol, normalizedTarget, normalizePathCached, targetFileChunks, filepath, log, reExporterPaths
   );
 
   // Sort dependents: production files first, then test files
@@ -534,6 +531,9 @@ export async function findDependents(
   // Calculate test/production split
   const testDependentCount = dependents.filter(f => f.isTestFile).length;
   const productionDependentCount = dependents.length - testDependentCount;
+
+  // Only flatten all chunks when needed for cross-repo grouping (groupDependentsByRepo)
+  const allChunks = crossRepo ? Array.from(allChunksByFile.values()).flat() : [];
 
   return {
     dependents,

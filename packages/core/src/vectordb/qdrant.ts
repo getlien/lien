@@ -664,31 +664,9 @@ export class QdrantDB implements VectorDBInterface {
     });
 
     const allResults: SearchResult[] = [];
-    let offset: string | number | undefined;
-
-    while (true) {
-      let results;
-      try {
-        results = await this.client.scroll(this.collectionName, {
-          filter,
-          limit: 1000,
-          with_payload: true,
-          with_vector: false,
-          ...(offset !== undefined && { offset }),
-        });
-      } catch (error) {
-        throw new DatabaseError(
-          `Failed to scan all chunks in Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-          { collectionName: this.collectionName }
-        );
-      }
-
-      allResults.push(...this.mapScrollResults(results));
-
-      offset = results.next_page_offset as string | number | undefined;
-      if (offset == null) break;
+    for await (const page of this.scrollPaginated(filter, 1000)) {
+      allResults.push(...page);
     }
-
     return allResults;
   }
 
@@ -704,6 +682,14 @@ export class QdrantDB implements VectorDBInterface {
       throw new DatabaseError('pageSize must be a positive number');
     }
     const filter = this.buildBaseFilter({ includeCurrentRepo: true });
+    yield* this.scrollPaginated(filter, pageSize);
+  }
+
+  /**
+   * Internal paginated scroll helper. Both scanAll and scanPaginated delegate here
+   * to keep scroll logic, error handling, and termination in one place.
+   */
+  private async *scrollPaginated(filter: any, pageSize: number): AsyncGenerator<SearchResult[]> {
     let offset: string | number | undefined;
 
     while (true) {
@@ -718,7 +704,7 @@ export class QdrantDB implements VectorDBInterface {
         });
       } catch (error) {
         throw new DatabaseError(
-          `Failed to scan paginated chunks from Qdrant: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to scroll Qdrant collection: ${error instanceof Error ? error.message : String(error)}`,
           { originalError: error }
         );
       }

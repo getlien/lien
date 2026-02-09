@@ -1115,7 +1115,7 @@ describe('QdrantDB.scanPaginated (unit)', () => {
     mockScroll.mockRejectedValueOnce(new Error('connection refused'));
 
     const gen = db.scanPaginated();
-    await expect(gen.next()).rejects.toThrow('Failed to scan paginated chunks from Qdrant');
+    await expect(gen.next()).rejects.toThrow('Failed to scroll Qdrant collection');
   });
 
   it('should throw DatabaseError for invalid pageSize', async () => {
