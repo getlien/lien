@@ -24,7 +24,7 @@ import {
 } from '../constants.js';
 import { chunkFile } from './chunker.js';
 import { computeContentHash } from './content-hash.js';
-import { LocalEmbeddings } from '../embeddings/local.js';
+import { WorkerEmbeddings } from '../embeddings/worker-embeddings.js';
 import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { ManifestManager } from './manifest.js';
@@ -266,11 +266,11 @@ async function tryIncrementalIndex(
   });
   
   // Initialize embeddings for incremental update
-  const embeddings = options.embeddings ?? new LocalEmbeddings();
+  const embeddings = options.embeddings ?? new WorkerEmbeddings();
   if (!options.embeddings) {
     await embeddings.initialize();
   }
-  
+
   // Process changes
   await handleDeletions(changes.deleted, vectorDB, manifest);
   const indexedCount = await handleUpdates(
@@ -439,7 +439,7 @@ async function performFullIndex(
     filesTotal: files.length,
   });
   
-  const embeddings = options.embeddings ?? new LocalEmbeddings();
+  const embeddings = options.embeddings ?? new WorkerEmbeddings();
   if (!options.embeddings) {
     await embeddings.initialize();
   }

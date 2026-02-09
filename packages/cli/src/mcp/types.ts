@@ -1,4 +1,4 @@
-import type { SearchResult, VectorDBInterface, LocalEmbeddings } from '@liendev/core';
+import type { SearchResult, VectorDBInterface, EmbeddingService } from '@liendev/core';
 import type { ReindexState } from './reindex-state-manager.js';
 
 /**
@@ -20,7 +20,7 @@ export interface ToolContext {
   /** Vector database instance for queries */
   vectorDB: VectorDBInterface;
   /** Embeddings instance for generating vectors */
-  embeddings: LocalEmbeddings;
+  embeddings: EmbeddingService;
   /** Workspace root directory */
   rootDir: string;
   /** Logging function (logs via MCP notifications with proper levels) */
