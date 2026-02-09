@@ -49,42 +49,49 @@ export class WorkerEmbeddings implements EmbeddingService {
     try {
       const workerPath = resolveWorkerPath();
       this.worker = new Worker(workerPath);
-
-      await new Promise<void>((resolve, reject) => {
-        const onMessage = (message: WorkerResponse) => {
-          if (message.type === 'ready') {
-            this.worker!.off('message', onMessage);
-            this.worker!.off('error', onError);
-            this.setupMessageHandler();
-            this.initialized = true;
-            resolve();
-            return;
-          }
-          if (message.type === 'error' && message.id === -1) {
-            this.worker!.off('message', onMessage);
-            this.worker!.off('error', onError);
-            reject(new EmbeddingError(`Worker init failed: ${message.error}`));
-          }
-        };
-
-        const onError = (error: Error) => {
-          this.worker!.off('message', onMessage);
-          this.worker!.off('error', onError);
-          reject(wrapError(error, 'Worker thread error during initialization'));
-        };
-
-        this.worker!.on('message', onMessage);
-        this.worker!.on('error', onError);
-        this.worker!.postMessage({ type: 'init' });
-      });
+      await this.waitForWorkerReady();
+      this.setupMessageHandler();
+      this.initialized = true;
     } catch (error: unknown) {
-      this.initPromise = null;
-      this.worker?.terminate();
-      this.worker = null;
+      this.cleanupWorker();
       throw error instanceof EmbeddingError
         ? error
         : wrapError(error, 'Failed to start embedding worker');
     }
+  }
+
+  private waitForWorkerReady(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        this.worker!.off('message', onMessage);
+        this.worker!.off('error', onError);
+      };
+
+      const onMessage = (message: WorkerResponse) => {
+        if (message.type === 'ready') {
+          cleanup();
+          resolve();
+        } else if (message.type === 'error' && message.id === -1) {
+          cleanup();
+          reject(new EmbeddingError(`Worker init failed: ${message.error}`));
+        }
+      };
+
+      const onError = (error: Error) => {
+        cleanup();
+        reject(wrapError(error, 'Worker thread error during initialization'));
+      };
+
+      this.worker!.on('message', onMessage);
+      this.worker!.on('error', onError);
+      this.worker!.postMessage({ type: 'init' });
+    });
+  }
+
+  private cleanupWorker(): void {
+    this.initPromise = null;
+    this.worker?.terminate();
+    this.worker = null;
   }
 
   private setupMessageHandler(): void {

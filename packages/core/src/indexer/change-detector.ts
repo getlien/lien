@@ -199,33 +199,15 @@ async function getAllFiles(rootDir: string): Promise<string[]> {
 }
 
 /**
- * Detects changes by comparing file modification times
+ * Gather file modification times concurrently.
  */
-async function mtimeBasedDetection(
-  rootDir: string,
-  savedManifest: IndexManifest
-): Promise<ChangeDetectionResult> {
-  const added: string[] = [];
-  const modified: string[] = [];
-  const deleted: string[] = [];
-  
-  // Get all current files (already normalized to relative paths by getAllFiles)
-  const currentFiles = await getAllFiles(rootDir);
-  const currentFileSet = new Set(currentFiles);
-  
-  // Build a normalized map of manifest files for comparison
-  // This handles cases where manifest has absolute paths (from tests or legacy data)
-  const normalizedManifestFiles = new Map<string, typeof savedManifest.files[string]>();
-  for (const [filepath, entry] of Object.entries(savedManifest.files)) {
-    const normalizedPath = normalizeToRelativePath(filepath, rootDir);
-    normalizedManifestFiles.set(normalizedPath, entry);
-  }
-  
-  // Get mtimes for all current files concurrently (stat is I/O-bound)
-  // Note: need to construct absolute path for fs.stat since currentFiles are relative
+async function gatherFileStats(
+  files: string[],
+  rootDir: string
+): Promise<Map<string, number>> {
   const limit = pLimit(DEFAULT_STAT_CONCURRENCY);
   const statResults = await Promise.all(
-    currentFiles.map(filepath => limit(async () => {
+    files.map(filepath => limit(async () => {
       try {
         const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
         const stats = await fs.stat(absolutePath);
@@ -242,32 +224,67 @@ async function mtimeBasedDetection(
       fileStats.set(result.filepath, result.mtime);
     }
   }
-  
-  // Check for new and modified files
+  return fileStats;
+}
+
+/**
+ * Build a normalized map of manifest file paths for comparison.
+ * Handles cases where manifest has absolute paths (from tests or legacy data).
+ */
+function buildNormalizedManifestMap(
+  savedManifest: IndexManifest,
+  rootDir: string
+): Map<string, IndexManifest['files'][string]> {
+  const normalized = new Map<string, IndexManifest['files'][string]>();
+  for (const [filepath, entry] of Object.entries(savedManifest.files)) {
+    normalized.set(normalizeToRelativePath(filepath, rootDir), entry);
+  }
+  return normalized;
+}
+
+/**
+ * Classify files as added, modified, or deleted by comparing mtimes.
+ */
+function classifyByMtime(
+  fileStats: Map<string, number>,
+  manifestFiles: Map<string, IndexManifest['files'][string]>,
+  currentFileSet: Set<string>
+): { added: string[]; modified: string[]; deleted: string[] } {
+  const added: string[] = [];
+  const modified: string[] = [];
+  const deleted: string[] = [];
+
   for (const [filepath, mtime] of fileStats) {
-    const entry = normalizedManifestFiles.get(filepath);
-    
+    const entry = manifestFiles.get(filepath);
     if (!entry) {
-      // New file
       added.push(filepath);
     } else if (entry.lastModified < mtime) {
-      // File modified since last index
       modified.push(filepath);
     }
   }
-  
-  // Check for deleted files (use normalized manifest paths)
-  for (const normalizedPath of normalizedManifestFiles.keys()) {
+
+  for (const normalizedPath of manifestFiles.keys()) {
     if (!currentFileSet.has(normalizedPath)) {
       deleted.push(normalizedPath);
     }
   }
-  
-  return {
-    added,
-    modified,
-    deleted,
-    reason: 'mtime',
-  };
+
+  return { added, modified, deleted };
+}
+
+/**
+ * Detects changes by comparing file modification times
+ */
+async function mtimeBasedDetection(
+  rootDir: string,
+  savedManifest: IndexManifest
+): Promise<ChangeDetectionResult> {
+  const currentFiles = await getAllFiles(rootDir);
+  const currentFileSet = new Set(currentFiles);
+  const fileStats = await gatherFileStats(currentFiles, rootDir);
+  const manifestFiles = buildNormalizedManifestMap(savedManifest, rootDir);
+  const { added, modified, deleted } = classifyByMtime(fileStats, manifestFiles, currentFileSet);
+
+  return { added, modified, deleted, reason: 'mtime' };
 }
 
