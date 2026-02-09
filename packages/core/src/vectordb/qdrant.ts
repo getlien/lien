@@ -660,6 +660,8 @@ export class QdrantDB implements VectorDBInterface {
 
   async *scanPaginated(options: {
     pageSize?: number;
+    // Note: `filter` is accepted for interface compatibility but ignored by Qdrant.
+    // Qdrant uses its own filter built from buildBaseFilter() instead of SQL WHERE clauses.
     filter?: string;
   } = {}): AsyncGenerator<SearchResult[]> {
     if (!this.initialized) {
@@ -671,13 +673,21 @@ export class QdrantDB implements VectorDBInterface {
     let offset: string | number | undefined;
 
     while (true) {
-      const results = await this.client.scroll(this.collectionName, {
-        filter,
-        limit: pageSize,
-        with_payload: true,
-        with_vector: false,
-        ...(offset !== undefined && { offset }),
-      });
+      let results;
+      try {
+        results = await this.client.scroll(this.collectionName, {
+          filter,
+          limit: pageSize,
+          with_payload: true,
+          with_vector: false,
+          ...(offset !== undefined && { offset }),
+        });
+      } catch (error) {
+        throw new DatabaseError(
+          `Failed to scan paginated chunks from Qdrant: ${error instanceof Error ? error.message : String(error)}`,
+          { originalError: error }
+        );
+      }
 
       const page = this.mapScrollResults(results);
       if (page.length > 0) {
@@ -685,7 +695,7 @@ export class QdrantDB implements VectorDBInterface {
       }
 
       offset = results.next_page_offset as string | number | undefined;
-      if (!offset || (results.points || []).length < pageSize) break;
+      if (offset == null || (results.points || []).length < pageSize) break;
     }
   }
 

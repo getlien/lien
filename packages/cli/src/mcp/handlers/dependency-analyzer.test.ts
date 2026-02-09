@@ -485,7 +485,7 @@ describe('findDependents', () => {
         mockLog
       );
 
-      expect(mockQdrantDB.scanCrossRepo).toHaveBeenCalledWith({});
+      expect(mockQdrantDB.scanCrossRepo).toHaveBeenCalledWith({ limit: 100000 });
       expect(mockQdrantDB.scanPaginated).not.toHaveBeenCalled();
     });
   });

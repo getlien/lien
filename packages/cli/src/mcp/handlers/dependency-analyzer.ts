@@ -306,6 +306,7 @@ async function scanChunksPaginated(
   importIndex: Map<string, SearchResult[]>;
   allChunksByFile: Map<string, SearchResult[]>;
   totalChunks: number;
+  hitLimit: boolean;
 }> {
   const importIndex = new Map<string, SearchResult[]>();
   const allChunksByFile = new Map<string, SearchResult[]>();
@@ -313,13 +314,18 @@ async function scanChunksPaginated(
 
   // Cross-repo with Qdrant: fall back to bulk scan (scanCrossRepo doesn't have paginated variant)
   if (crossRepo && vectorDB instanceof QdrantDB) {
-    const allChunks = await vectorDB.scanCrossRepo({});
+    const CROSS_REPO_LIMIT = 100000;
+    const allChunks = await vectorDB.scanCrossRepo({ limit: CROSS_REPO_LIMIT });
     totalChunks = allChunks.length;
+    const hitLimit = totalChunks >= CROSS_REPO_LIMIT;
+    if (hitLimit) {
+      log(`Warning: cross-repo scan hit ${CROSS_REPO_LIMIT} chunk limit. Results may be incomplete.`, 'warning');
+    }
     for (const chunk of allChunks) {
       addChunkToImportIndex(chunk, normalizePathCached, importIndex);
       addChunkToFileMap(chunk, normalizePathCached, allChunksByFile);
     }
-    return { importIndex, allChunksByFile, totalChunks };
+    return { importIndex, allChunksByFile, totalChunks, hitLimit };
   }
 
   if (crossRepo) {
@@ -335,7 +341,7 @@ async function scanChunksPaginated(
     }
   }
 
-  return { importIndex, allChunksByFile, totalChunks };
+  return { importIndex, allChunksByFile, totalChunks, hitLimit: false };
 }
 
 /**
@@ -493,7 +499,7 @@ export async function findDependents(
   const normalizedTarget = normalizePathCached(filepath);
 
   // Paginated scan: builds import index and file groupings incrementally
-  const { importIndex, allChunksByFile, totalChunks } = await scanChunksPaginated(
+  const { importIndex, allChunksByFile, totalChunks, hitLimit } = await scanChunksPaginated(
     vectorDB, crossRepo, log, normalizePathCached
   );
   log(`Scanned ${totalChunks} chunks for imports...`);
@@ -536,7 +542,7 @@ export async function findDependents(
     chunksByFile,
     fileComplexities,
     complexityMetrics,
-    hitLimit: false,
+    hitLimit,
     allChunks,
     totalUsageCount,
   };

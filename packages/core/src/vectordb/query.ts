@@ -650,15 +650,23 @@ export async function* scanPaginated(
   }
 
   const pageSize = options.pageSize || 1000;
+  if (pageSize <= 0) {
+    throw new DatabaseError('pageSize must be a positive number');
+  }
   const whereClause = options.filter || 'file != ""';
   let offset = 0;
 
   while (true) {
-    const results = await table.query()
-      .where(whereClause)
-      .limit(pageSize)
-      .offset(offset)
-      .toArray();
+    let results: Record<string, unknown>[];
+    try {
+      results = await table.query()
+        .where(whereClause)
+        .limit(pageSize)
+        .offset(offset)
+        .toArray();
+    } catch (error) {
+      throw wrapError(error, 'Failed to scan paginated chunks', { offset, pageSize });
+    }
 
     if (results.length === 0) break;
 
