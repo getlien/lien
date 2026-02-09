@@ -649,7 +649,7 @@ export async function* scanPaginated(
     throw new DatabaseError('Vector database not initialized');
   }
 
-  const pageSize = options.pageSize || 1000;
+  const pageSize = options.pageSize ?? 1000;
   if (pageSize <= 0) {
     throw new DatabaseError('pageSize must be a positive number');
   }

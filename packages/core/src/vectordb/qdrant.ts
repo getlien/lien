@@ -668,7 +668,10 @@ export class QdrantDB implements VectorDBInterface {
       throw new DatabaseError('Qdrant database not initialized');
     }
 
-    const pageSize = options.pageSize || 1000;
+    const pageSize = options.pageSize ?? 1000;
+    if (pageSize <= 0) {
+      throw new DatabaseError('pageSize must be a positive number');
+    }
     const filter = this.buildBaseFilter({ includeCurrentRepo: true });
     let offset: string | number | undefined;
 

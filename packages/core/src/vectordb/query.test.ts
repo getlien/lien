@@ -964,9 +964,9 @@ describe('VectorDB Query Operations', () => {
       }
 
       // invalidPage has 1 result (length === pageSize), so pagination continues
-      // but the invalid records are filtered out, so that page is not yielded
-      // validPage has 1 result but length < pageSize would not apply (1 === 1),
-      // so it breaks after yielding
+      // but the invalid records are filtered out, so that page is not yielded.
+      // validPage also has 1 result (length === pageSize), so the loop advances
+      // offset and queries again, getting an empty page which breaks the loop.
       expect(pages).toHaveLength(1);
       expect(pages[0][0].content).toBe('fn a() {}');
     });
