@@ -651,16 +651,44 @@ export class QdrantDB implements VectorDBInterface {
     language?: string;
     pattern?: string;
   } = {}): Promise<SearchResult[]> {
-    // Collect all pages from scanPaginated to avoid arbitrary limit caps
-    const allResults: SearchResult[] = [];
-    for await (const page of this.scanPaginated()) {
-      for (const result of page) {
-        // Apply language/pattern filters if specified
-        if (options.language && result.metadata.language !== options.language) continue;
-        if (options.pattern && !result.metadata.file?.match(options.pattern)) continue;
-        allResults.push(result);
-      }
+    if (!this.initialized) {
+      throw new DatabaseError('Qdrant database not initialized');
     }
+
+    // Use server-side filtering via buildBaseFilter + paginated scroll to avoid arbitrary caps
+    const filter = this.buildBaseFilter({
+      includeCurrentRepo: true,
+      language: options.language,
+      pattern: options.pattern,
+      patternKey: 'file',
+    });
+
+    const allResults: SearchResult[] = [];
+    let offset: string | number | undefined;
+
+    while (true) {
+      let results;
+      try {
+        results = await this.client.scroll(this.collectionName, {
+          filter,
+          limit: 1000,
+          with_payload: true,
+          with_vector: false,
+          ...(offset !== undefined && { offset }),
+        });
+      } catch (error) {
+        throw new DatabaseError(
+          `Failed to scan all chunks in Qdrant: ${error instanceof Error ? error.message : String(error)}`,
+          { collectionName: this.collectionName }
+        );
+      }
+
+      allResults.push(...this.mapScrollResults(results));
+
+      offset = results.next_page_offset as string | number | undefined;
+      if (offset == null || (results.points || []).length < 1000) break;
+    }
+
     return allResults;
   }
 
