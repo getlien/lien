@@ -123,5 +123,10 @@ export class CachedEmbeddings implements EmbeddingService {
   has(text: string): boolean {
     return this.cache.has(text);
   }
+
+  async dispose(): Promise<void> {
+    this.cache.clear();
+    await this.underlying.dispose();
+  }
 }
 

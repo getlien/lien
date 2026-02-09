@@ -6,7 +6,7 @@ import { EmbeddingError, wrapError } from '../errors/index.js';
 
 interface WorkerResponse {
   type: 'ready' | 'result' | 'error';
-  vectors?: number[][];
+  vectors?: Float32Array[];
   error?: string;
   id?: number;
 }
@@ -14,10 +14,12 @@ interface WorkerResponse {
 function resolveWorkerPath(): string {
   const thisFile = fileURLToPath(import.meta.url);
   const thisDir = dirname(thisFile);
+  // Normalize backslashes for Windows compatibility
+  const normalized = thisDir.replace(/\\/g, '/');
   // When running from compiled dist/, worker.js is a sibling
   // When running from src/ (vitest), resolve to the compiled dist/ output
-  if (thisDir.includes('/src/')) {
-    return resolve(thisDir.replace('/src/', '/dist/'), 'worker.js');
+  if (normalized.includes('/src/')) {
+    return resolve(normalized.replace('/src/', '/dist/'), 'worker.js');
   }
   return resolve(thisDir, 'worker.js');
 }
@@ -104,8 +106,7 @@ export class WorkerEmbeddings implements EmbeddingService {
       this.pendingRequests.delete(message.id);
 
       if (message.type === 'result' && message.vectors) {
-        const float32Arrays = message.vectors.map(v => new Float32Array(v));
-        pending.resolve(float32Arrays);
+        pending.resolve(message.vectors);
       } else if (message.type === 'error') {
         pending.reject(new EmbeddingError(`Worker embedding failed: ${message.error}`));
       }

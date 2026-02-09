@@ -399,34 +399,39 @@ export async function indexMultipleFiles(
   // Batch manifest updates for performance
   const manifestEntries: Array<{ filepath: string; chunkCount: number; mtime: number; contentHash: string }> = [];
 
-  // Phase 1: Process files concurrently (read, chunk, embed)
+  // Process files with bounded concurrency, applying each result to the DB as it completes.
+  // This avoids collecting all embeddings in memory before writing.
   const limit = pLimit(DEFAULT_CONCURRENCY);
-  const fileResults = await Promise.all(
-    filepaths.map(filepath => limit(async () => {
+  const writeQueue: Promise<void>[] = [];
+  let writeChain = Promise.resolve();
+
+  for (const filepath of filepaths) {
+    const task = limit(async () => {
       const normalizedPath = normalizeToRelativePath(filepath);
-      return {
-        normalizedPath,
-        result: await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir),
-      };
-    }))
-  );
+      const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir);
 
-  // Phase 2: Apply results sequentially to vector DB (safe for concurrent-unfriendly DBs)
-  for (const { normalizedPath, result } of fileResults) {
-    if (isOk(result)) {
-      const { filepath: storedPath, result: processResult, mtime, contentHash } = result.value;
+      // Chain DB writes sequentially (safe for concurrent-unfriendly DBs)
+      writeChain = writeChain.then(async () => {
+        if (isOk(result)) {
+          const { filepath: storedPath, result: processResult, mtime, contentHash } = result.value;
 
-      if (processResult === null) {
-        await handleEmptyFile(storedPath, mtime, contentHash, vectorDB);
-      } else {
-        await handleNonEmptyFile(storedPath, processResult, mtime, contentHash, vectorDB, verbose || false, manifestEntries);
-      }
-      processedCount++;
-    } else {
-      await handleFileNotFound(normalizedPath, result.error, vectorDB, verbose || false);
-      processedCount++;
-    }
+          if (processResult === null) {
+            await handleEmptyFile(storedPath, mtime, contentHash, vectorDB);
+          } else {
+            await handleNonEmptyFile(storedPath, processResult, mtime, contentHash, vectorDB, verbose || false, manifestEntries);
+          }
+          processedCount++;
+        } else {
+          await handleFileNotFound(normalizedPath, result.error, vectorDB, verbose || false);
+          processedCount++;
+        }
+      });
+    });
+    writeQueue.push(task);
   }
+
+  await Promise.all(writeQueue);
+  await writeChain;
   
   // Batch update manifest at the end (much faster than updating after each file)
   if (manifestEntries.length > 0) {

@@ -236,6 +236,9 @@ for (const project of projects) {
     embeddings,  // Reuse warm embeddings
   });
 }
+
+// Terminate the worker thread when done
+await embeddings.dispose();
 ```
 
 ### Custom Embedding Service
@@ -245,14 +248,16 @@ Implement `EmbeddingService` interface for custom embeddings:
 ```typescript
 interface EmbeddingService {
   initialize(): Promise<void>;
-  embed(texts: string[]): Promise<number[][]>;
-  getDimension(): number;
+  embed(text: string): Promise<Float32Array>;
+  embedBatch(texts: string[]): Promise<Float32Array[]>;
+  dispose(): Promise<void>;
 }
 
 class CustomEmbeddings implements EmbeddingService {
   async initialize() { /* ... */ }
-  async embed(texts: string[]) { /* ... */ }
-  getDimension() { return 768; }
+  async embed(text: string) { /* ... */ }
+  async embedBatch(texts: string[]) { /* ... */ }
+  async dispose() { /* ... */ }
 }
 
 await indexCodebase({

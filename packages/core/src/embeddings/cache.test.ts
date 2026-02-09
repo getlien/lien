@@ -23,6 +23,10 @@ class MockEmbeddingService implements EmbeddingService {
     this.embedBatchCallCount++;
     return Promise.all(texts.map(text => this.embed(text)));
   }
+
+  async dispose(): Promise<void> {
+    // No-op for mock
+  }
 }
 
 describe('CachedEmbeddings', () => {

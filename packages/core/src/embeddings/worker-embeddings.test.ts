@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { WorkerEmbeddings } from './worker-embeddings.js';
 import { LocalEmbeddings } from './local.js';
+import { EMBEDDING_DIMENSIONS } from '../constants.js';
 
 const DOWNLOAD_TIMEOUT = 60000;
 
@@ -44,7 +45,7 @@ describe('WorkerEmbeddings', () => {
       const embedding = await embeddings.embed('Hello world');
 
       expect(embedding).toBeInstanceOf(Float32Array);
-      expect(embedding.length).toBe(384);
+      expect(embedding.length).toBe(EMBEDDING_DIMENSIONS);
     });
 
     it('should generate consistent embeddings for same text', async () => {
@@ -65,7 +66,7 @@ describe('WorkerEmbeddings', () => {
       const embedding = await embeddings.embed('');
 
       expect(embedding).toBeInstanceOf(Float32Array);
-      expect(embedding.length).toBe(384);
+      expect(embedding.length).toBe(EMBEDDING_DIMENSIONS);
     });
 
     it('should produce normalized embeddings', async () => {
@@ -92,7 +93,7 @@ describe('WorkerEmbeddings', () => {
       expect(results).toHaveLength(3);
       results.forEach(emb => {
         expect(emb).toBeInstanceOf(Float32Array);
-        expect(emb.length).toBe(384);
+        expect(emb.length).toBe(EMBEDDING_DIMENSIONS);
       });
     });
 
