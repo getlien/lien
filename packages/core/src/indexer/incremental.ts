@@ -1,16 +1,18 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
+import pLimit from 'p-limit';
 import { chunkFile } from './chunker.js';
 import { EmbeddingService } from '../embeddings/types.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
 import {
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_CONCURRENCY,
+  EMBEDDING_MICRO_BATCH_SIZE,
 } from '../constants.js';
 import { ManifestManager } from './manifest.js';
 import { computeContentHash } from './content-hash.js';
-import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
 import { CodeChunk } from './types.js';
 import { Result, Ok, Err, isOk } from '../utils/result.js';
 
@@ -369,14 +371,15 @@ async function handleFileNotFound(
 
 /**
  * Indexes multiple files incrementally.
- * Processes files sequentially for simplicity and reliability.
- * 
+ * Phase 1: Process files concurrently (read, chunk, embed) with p-limit.
+ * Phase 2: Apply results sequentially to vector DB (safe for concurrent-unfriendly DBs).
+ *
  * Uses Result type for explicit error handling, making it easier to test
  * and reason about failure modes.
- * 
+ *
  * Note: This function counts both successfully indexed files AND successfully
  * handled deletions (files that don't exist but were removed from the index).
- * 
+ *
  * @param filepaths - Array of absolute file paths to index
  * @param vectorDB - Initialized VectorDB instance
  * @param embeddings - Initialized embeddings service
@@ -392,18 +395,27 @@ export async function indexMultipleFiles(
 ): Promise<number> {
   const { verbose, rootDir } = options;
   let processedCount = 0;
-  
+
   // Batch manifest updates for performance
   const manifestEntries: Array<{ filepath: string; chunkCount: number; mtime: number; contentHash: string }> = [];
-  
-  // Process each file sequentially (simple and reliable)
-  for (const filepath of filepaths) {
-    const normalizedPath = normalizeToRelativePath(filepath);
-    const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir);
-    
+
+  // Phase 1: Process files concurrently (read, chunk, embed)
+  const limit = pLimit(DEFAULT_CONCURRENCY);
+  const fileResults = await Promise.all(
+    filepaths.map(filepath => limit(async () => {
+      const normalizedPath = normalizeToRelativePath(filepath);
+      return {
+        normalizedPath,
+        result: await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir),
+      };
+    }))
+  );
+
+  // Phase 2: Apply results sequentially to vector DB (safe for concurrent-unfriendly DBs)
+  for (const { normalizedPath, result } of fileResults) {
     if (isOk(result)) {
       const { filepath: storedPath, result: processResult, mtime, contentHash } = result.value;
-      
+
       if (processResult === null) {
         await handleEmptyFile(storedPath, mtime, contentHash, vectorDB);
       } else {

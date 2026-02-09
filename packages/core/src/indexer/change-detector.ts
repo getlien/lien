@@ -1,11 +1,13 @@
 import fs from 'fs/promises';
 import path from 'path';
+import pLimit from 'p-limit';
 import type { VectorDBInterface } from '../vectordb/types.js';
 import { ManifestManager, IndexManifest } from './manifest.js';
 // scanFilesToIndex is imported from index.ts to avoid circular dependency
 import { GitStateTracker } from '../git/tracker.js';
 import { isGitAvailable, isGitRepo, getChangedFiles } from '../git/utils.js';
 import { normalizeToRelativePath } from './incremental.js';
+import { DEFAULT_STAT_CONCURRENCY } from '../constants.js';
 
 /**
  * Result of change detection, categorized by type of change
@@ -219,19 +221,25 @@ async function mtimeBasedDetection(
     normalizedManifestFiles.set(normalizedPath, entry);
   }
   
-  // Get mtimes for all current files
+  // Get mtimes for all current files concurrently (stat is I/O-bound)
   // Note: need to construct absolute path for fs.stat since currentFiles are relative
+  const limit = pLimit(DEFAULT_STAT_CONCURRENCY);
+  const statResults = await Promise.all(
+    currentFiles.map(filepath => limit(async () => {
+      try {
+        const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
+        const stats = await fs.stat(absolutePath);
+        return { filepath, mtime: stats.mtimeMs } as const;
+      } catch {
+        return null;
+      }
+    }))
+  );
+
   const fileStats = new Map<string, number>();
-  
-  for (const filepath of currentFiles) {
-    try {
-      // Construct absolute path for filesystem access (use path.join for cross-platform)
-      const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
-      const stats = await fs.stat(absolutePath);
-      fileStats.set(filepath, stats.mtimeMs);
-    } catch {
-      // Ignore files we can't stat
-      continue;
+  for (const result of statResults) {
+    if (result) {
+      fileStats.set(result.filepath, result.mtime);
     }
   }
   

@@ -9,6 +9,7 @@ export const DEFAULT_CHUNK_OVERLAP = 10;
 
 // Concurrency and batching
 export const DEFAULT_CONCURRENCY = 4;
+export const DEFAULT_STAT_CONCURRENCY = 32; // Higher concurrency for I/O-bound stat calls
 export const DEFAULT_EMBEDDING_BATCH_SIZE = 50;
 
 // Micro-batching for event loop yielding
