@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { search, scanWithFilter, querySymbols, scanPaginated } from './query.js';
-import { SearchResult } from './types.js';
+import type { SearchResult } from './types.js';
 import { DatabaseError } from '../errors/index.js';
 
 describe('VectorDB Query Operations', () => {

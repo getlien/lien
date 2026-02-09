@@ -148,6 +148,10 @@ export class VectorDB implements VectorDBInterface {
     return queryOps.scanAll(this.table, options);
   }
 
+  /**
+   * Scan all chunks using paginated queries.
+   * Yields pages of SearchResult[] to avoid loading everything into memory.
+   */
   async *scanPaginated(options: {
     pageSize?: number;
   } = {}): AsyncGenerator<SearchResult[]> {

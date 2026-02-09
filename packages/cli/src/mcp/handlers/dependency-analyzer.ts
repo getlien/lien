@@ -329,7 +329,7 @@ async function scanChunksPaginated(
   }
 
   if (crossRepo) {
-    log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.', 'warning');
+    log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo paginated scan.', 'warning');
   }
 
   // Paginated scan: build indexes incrementally
@@ -519,7 +519,7 @@ export async function findDependents(
   const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
 
   // Build dependents list (file-level or symbol-level)
-  const allChunks = Array.from(allChunksByFile.values()).flat();
+  const allChunks = symbol ? Array.from(allChunksByFile.values()).flat() : [];
   const reExporterPaths = reExporters.map(re => re.filepath);
   const { dependents, totalUsageCount } = buildDependentsList(
     chunksByFile, symbol, normalizedTarget, normalizePathCached, allChunks, filepath, log, reExporterPaths

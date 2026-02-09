@@ -686,7 +686,7 @@ export class QdrantDB implements VectorDBInterface {
       allResults.push(...this.mapScrollResults(results));
 
       offset = results.next_page_offset as string | number | undefined;
-      if (offset == null || (results.points || []).length < 1000) break;
+      if (offset == null) break;
     }
 
     return allResults;
@@ -729,7 +729,7 @@ export class QdrantDB implements VectorDBInterface {
       }
 
       offset = results.next_page_offset as string | number | undefined;
-      if (offset == null || (results.points || []).length < pageSize) break;
+      if (offset == null) break;
     }
   }
 

@@ -3,7 +3,7 @@ import { QdrantDB, validateFilterOptions } from './qdrant.js';
 import { DatabaseError } from '../errors/index.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { writeVersionFile } from './version.js';
-import { SearchResult } from './types.js';
+import type { SearchResult } from './types.js';
 import fs from 'fs/promises';
 
 /**
