@@ -531,7 +531,7 @@ async function performFullIndex(
  * });
  * 
  * // With pre-initialized embeddings (warm worker)
- * const embeddings = new LocalEmbeddings();
+ * const embeddings = new WorkerEmbeddings();
  * await embeddings.initialize();
  * const result = await indexCodebase({ embeddings });
  * ```

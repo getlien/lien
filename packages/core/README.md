@@ -223,10 +223,10 @@ const changed = await getChangedFiles('./my-project');
 Keep embeddings loaded between requests for better performance:
 
 ```typescript
-import { LocalEmbeddings, indexCodebase } from '@liendev/core';
+import { WorkerEmbeddings, indexCodebase } from '@liendev/core';
 
-// Initialize once
-const embeddings = new LocalEmbeddings();
+// Initialize once (runs ONNX inference in a worker thread)
+const embeddings = new WorkerEmbeddings();
 await embeddings.initialize();
 
 // Reuse across multiple indexing operations
