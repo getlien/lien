@@ -651,11 +651,74 @@ export class QdrantDB implements VectorDBInterface {
     language?: string;
     pattern?: string;
   } = {}): Promise<SearchResult[]> {
-    // Use scanWithFilter with a high limit to get all chunks
-    return this.scanWithFilter({
-      ...options,
-      limit: 100000, // High limit for "all" chunks
+    if (!this.initialized) {
+      throw new DatabaseError('Qdrant database not initialized');
+    }
+
+    // Use server-side filtering via buildBaseFilter + paginated scroll to avoid arbitrary caps
+    const filter = this.buildBaseFilter({
+      includeCurrentRepo: true,
+      language: options.language,
+      pattern: options.pattern,
+      patternKey: 'file',
     });
+
+    const allResults: SearchResult[] = [];
+    for await (const page of this.scrollPaginated(filter, 1000)) {
+      allResults.push(...page);
+    }
+    return allResults;
+  }
+
+  async *scanPaginated(options: {
+    pageSize?: number;
+  } = {}): AsyncGenerator<SearchResult[]> {
+    if (!this.initialized) {
+      throw new DatabaseError('Qdrant database not initialized');
+    }
+
+    const pageSize = options.pageSize ?? 1000;
+    if (pageSize <= 0) {
+      throw new DatabaseError('pageSize must be a positive number');
+    }
+    const filter = this.buildBaseFilter({ includeCurrentRepo: true });
+    yield* this.scrollPaginated(filter, pageSize);
+  }
+
+  /**
+   * Internal paginated scroll helper. Both scanAll and scanPaginated delegate here
+   * to keep scroll logic, error handling, and termination in one place.
+   */
+  // Note: filter uses `any` to match buildBaseFilter/executeScrollQuery return type.
+  // The local QdrantFilter interface doesn't fully align with the @qdrant/js-client-rest SDK types.
+  private async *scrollPaginated(filter: any, pageSize: number): AsyncGenerator<SearchResult[]> {
+    let offset: string | number | undefined;
+
+    while (true) {
+      let results;
+      try {
+        results = await this.client.scroll(this.collectionName, {
+          filter,
+          limit: pageSize,
+          with_payload: true,
+          with_vector: false,
+          ...(offset !== undefined && { offset }),
+        });
+      } catch (error) {
+        throw new DatabaseError(
+          `Failed to scroll Qdrant collection: ${error instanceof Error ? error.message : String(error)}`,
+          { originalError: error }
+        );
+      }
+
+      const page = this.mapScrollResults(results);
+      if (page.length > 0) {
+        yield page;
+      }
+
+      offset = results.next_page_offset as string | number | undefined;
+      if (offset == null) break;
+    }
   }
 
   /**

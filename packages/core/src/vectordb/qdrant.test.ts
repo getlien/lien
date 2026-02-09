@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { QdrantDB, validateFilterOptions } from './qdrant.js';
+import { DatabaseError } from '../errors/index.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { writeVersionFile } from './version.js';
+import type { SearchResult } from './types.js';
 import fs from 'fs/promises';
 
 /**
@@ -1006,6 +1008,121 @@ describe('QdrantDB', () => {
         });
       }).not.toThrow();
     });
+  });
+});
+
+/**
+ * Unit tests for scanPaginated that don't require a running Qdrant instance.
+ * These mock the internal client to test pagination logic in isolation.
+ */
+describe('QdrantDB.scanPaginated (unit)', () => {
+  function createMockedDB() {
+    const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+    const mockScroll = vi.fn();
+    (db as any).initialized = true;
+    (db as any).client = { scroll: mockScroll };
+    (db as any).collectionName = 'test_collection';
+    return { db, mockScroll };
+  }
+
+  function makePoint(id: number, file: string, content: string) {
+    return {
+      id,
+      payload: {
+        content,
+        file,
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        language: 'typescript',
+      },
+    };
+  }
+
+  it('should yield multiple pages using next_page_offset', async () => {
+    const { db, mockScroll } = createMockedDB();
+
+    mockScroll
+      .mockResolvedValueOnce({
+        points: [makePoint(1, 'a.ts', 'fn a()'), makePoint(2, 'b.ts', 'fn b()')],
+        next_page_offset: 3,
+      })
+      .mockResolvedValueOnce({
+        points: [makePoint(3, 'c.ts', 'fn c()')],
+        next_page_offset: null,
+      });
+
+    const pages: SearchResult[][] = [];
+    for await (const page of db.scanPaginated({ pageSize: 2 })) {
+      pages.push(page);
+    }
+
+    expect(pages).toHaveLength(2);
+    expect(pages[0]).toHaveLength(2);
+    expect(pages[1]).toHaveLength(1);
+    expect(pages[1][0].content).toBe('fn c()');
+  });
+
+  it('should stop when next_page_offset is null', async () => {
+    const { db, mockScroll } = createMockedDB();
+
+    mockScroll.mockResolvedValueOnce({
+      points: [makePoint(1, 'a.ts', 'fn a()')],
+      next_page_offset: null,
+    });
+
+    const pages: SearchResult[][] = [];
+    for await (const page of db.scanPaginated({ pageSize: 10 })) {
+      pages.push(page);
+    }
+
+    expect(pages).toHaveLength(1);
+    expect(mockScroll).toHaveBeenCalledTimes(1);
+  });
+
+  it('should handle numeric offset 0 without stopping early', async () => {
+    const { db, mockScroll } = createMockedDB();
+
+    mockScroll
+      .mockResolvedValueOnce({
+        points: [makePoint(1, 'a.ts', 'fn a()')],
+        next_page_offset: 0, // falsy but valid
+      })
+      .mockResolvedValueOnce({
+        points: [makePoint(2, 'b.ts', 'fn b()')],
+        next_page_offset: null,
+      });
+
+    const pages: SearchResult[][] = [];
+    for await (const page of db.scanPaginated({ pageSize: 1 })) {
+      pages.push(page);
+    }
+
+    expect(pages).toHaveLength(2);
+    expect(mockScroll).toHaveBeenCalledTimes(2);
+  });
+
+  it('should throw DatabaseError when not initialized', async () => {
+    const db = new QdrantDB(QDRANT_URL, undefined, TEST_ORG_ID, TEST_PROJECT_ROOT, TEST_BRANCH, TEST_COMMIT_SHA);
+    (db as any).initialized = false;
+
+    const gen = db.scanPaginated();
+    await expect(gen.next()).rejects.toThrow(DatabaseError);
+  });
+
+  it('should wrap scroll errors in DatabaseError', async () => {
+    const { db, mockScroll } = createMockedDB();
+    mockScroll.mockRejectedValueOnce(new Error('connection refused'));
+
+    const gen = db.scanPaginated();
+    await expect(gen.next()).rejects.toThrow('Failed to scroll Qdrant collection');
+  });
+
+  it('should throw DatabaseError for invalid pageSize', async () => {
+    const { db } = createMockedDB();
+
+    const gen = db.scanPaginated({ pageSize: 0 });
+    await expect(gen.next()).rejects.toThrow('pageSize must be a positive number');
   });
 });
 

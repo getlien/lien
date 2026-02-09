@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { search, scanWithFilter, querySymbols } from './query.js';
+import { search, scanWithFilter, querySymbols, scanPaginated } from './query.js';
+import type { SearchResult } from './types.js';
 import { DatabaseError } from '../errors/index.js';
 
 describe('VectorDB Query Operations', () => {
@@ -835,6 +836,139 @@ describe('VectorDB Query Operations', () => {
 
       expect(results).toHaveLength(1);
       expect(results[0].metadata.file).toBe('src/test.ts');
+    });
+  });
+
+  describe('scanPaginated', () => {
+    it('should yield pages of results', async () => {
+      const page1 = [
+        { content: 'fn a() {}', file: 'a.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
+        { content: 'fn b() {}', file: 'b.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
+      ];
+      const mockTable = {
+        query: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          offset: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn()
+            .mockResolvedValueOnce(page1)
+            .mockResolvedValueOnce([]),
+        }),
+      };
+
+      const pages: SearchResult[][] = [];
+      for await (const page of scanPaginated(mockTable, { pageSize: 2 })) {
+        pages.push(page);
+      }
+
+      expect(pages).toHaveLength(1);
+      expect(pages[0]).toHaveLength(2);
+      expect(pages[0][0].content).toBe('fn a() {}');
+      expect(pages[0][0].score).toBe(0);
+      expect(pages[0][0].relevance).toBe('not_relevant');
+    });
+
+    it('should paginate across multiple pages', async () => {
+      const page1 = [
+        { content: 'fn a() {}', file: 'a.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
+        { content: 'fn b() {}', file: 'b.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
+      ];
+      const page2 = [
+        { content: 'fn c() {}', file: 'c.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
+      ];
+      const mockTable = {
+        query: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          offset: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn()
+            .mockResolvedValueOnce(page1)
+            .mockResolvedValueOnce(page2),
+        }),
+      };
+
+      const pages: SearchResult[][] = [];
+      for await (const page of scanPaginated(mockTable, { pageSize: 2 })) {
+        pages.push(page);
+      }
+
+      expect(pages).toHaveLength(2);
+      expect(pages[0]).toHaveLength(2);
+      expect(pages[1]).toHaveLength(1);
+    });
+
+    it('should stop when empty page is returned', async () => {
+      const mockTable = {
+        query: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          offset: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValueOnce([]),
+        }),
+      };
+
+      const pages: SearchResult[][] = [];
+      for await (const page of scanPaginated(mockTable)) {
+        pages.push(page);
+      }
+
+      expect(pages).toHaveLength(0);
+    });
+
+    it('should throw DatabaseError if table is null', async () => {
+      const gen = scanPaginated(null);
+      await expect(gen.next()).rejects.toThrow(DatabaseError);
+    });
+
+    it('should use custom filter when provided', async () => {
+      const mockQueryBuilder = {
+        where: vi.fn().mockReturnThis(),
+        offset: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        toArray: vi.fn().mockResolvedValueOnce([]),
+      };
+      const mockTable = {
+        query: vi.fn().mockReturnValue(mockQueryBuilder),
+      };
+
+      const pages: SearchResult[][] = [];
+      for await (const page of scanPaginated(mockTable, { filter: 'language = "typescript"' })) {
+        pages.push(page);
+      }
+
+      expect(mockQueryBuilder.where).toHaveBeenCalledWith('language = "typescript"');
+    });
+
+    it('should skip pages where all records are invalid', async () => {
+      const invalidPage = [
+        { content: '', file: '', startLine: 1, endLine: 1, type: 'block', language: 'typescript' },
+      ];
+      const validPage = [
+        { content: 'fn a() {}', file: 'a.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
+      ];
+      const mockTable = {
+        query: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          offset: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn()
+            .mockResolvedValueOnce(invalidPage)
+            .mockResolvedValueOnce(validPage)
+            .mockResolvedValueOnce([]),
+        }),
+      };
+
+      const pages: SearchResult[][] = [];
+      for await (const page of scanPaginated(mockTable, { pageSize: 1 })) {
+        pages.push(page);
+      }
+
+      // invalidPage has 1 result (length === pageSize), so pagination continues
+      // but the invalid records are filtered out, so that page is not yielded.
+      // validPage also has 1 result (length === pageSize), so the loop advances
+      // offset and queries again, getting an empty page which breaks the loop.
+      expect(pages).toHaveLength(1);
+      expect(pages[0][0].content).toBe('fn a() {}');
     });
   });
 });

@@ -633,3 +633,57 @@ export async function scanAll(
     throw wrapError(error, 'Failed to scan all chunks');
   }
 }
+
+/**
+ * Scan all chunks using paginated queries.
+ * Yields pages of SearchResult[] to avoid loading everything into memory.
+ */
+export async function* scanPaginated(
+  table: LanceDBTable,
+  options: {
+    pageSize?: number;
+    filter?: string;
+  } = {}
+): AsyncGenerator<SearchResult[]> {
+  if (!table) {
+    throw new DatabaseError('Vector database not initialized');
+  }
+
+  const pageSize = options.pageSize ?? 1000;
+  if (pageSize <= 0) {
+    throw new DatabaseError('pageSize must be a positive number');
+  }
+  const whereClause = options.filter || 'file != ""';
+  let offset = 0;
+
+  while (true) {
+    let results: Record<string, unknown>[];
+    try {
+      results = await table.query()
+        .where(whereClause)
+        .limit(pageSize)
+        .offset(offset)
+        .toArray();
+    } catch (error) {
+      throw wrapError(error, 'Failed to scan paginated chunks', { offset, pageSize });
+    }
+
+    if (results.length === 0) break;
+
+    const page = (results as unknown as DBRecord[])
+      .filter(isValidRecord)
+      .map((r: DBRecord) => ({
+        content: r.content,
+        metadata: buildSearchResultMetadata(r),
+        score: 0,
+        relevance: 'not_relevant' as const,
+      }));
+
+    if (page.length > 0) {
+      yield page;
+    }
+
+    if (results.length < pageSize) break;
+    offset += pageSize;
+  }
+}
