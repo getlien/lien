@@ -11,5 +11,5 @@ export default defineConfig({
   // Native modules (@liendev/core, lancedb, tree-sitter) stay external
   // and are installed via npm ci in the CI workflow (ai-review.yml).
   noExternal: ['@liendev/review'],
-  external: ['@liendev/core', '@lancedb/lancedb', 'tree-sitter', '@xenova/transformers'],
+  external: ['@liendev/core', '@lancedb/lancedb', 'tree-sitter', '@huggingface/transformers'],
 });

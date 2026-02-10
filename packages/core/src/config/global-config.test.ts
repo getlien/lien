@@ -195,17 +195,17 @@ describe('loadGlobalConfig', () => {
   describe('Precedence order', () => {
     it('should prefer environment variables over config file', async () => {
       process.env.LIEN_BACKEND = 'lancedb';
-      
+
       // Mock config file with different backend
-      vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ 
+      vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({
         backend: 'qdrant',
         qdrant: { url: 'http://localhost:6333' }
       }));
-      
+
       const config = await loadGlobalConfig();
-      
-      // Should use env var, not config file
-      expect(config).toEqual({ backend: 'lancedb' });
+
+      // Env var overrides backend, but file config's qdrant section is preserved
+      expect(config.backend).toBe('lancedb');
     });
   });
 });

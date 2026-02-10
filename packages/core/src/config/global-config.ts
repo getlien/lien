@@ -28,6 +28,9 @@ export interface GlobalConfig {
     apiKey?: string;
     // orgId is auto-detected from git remote - not in config!
   };
+  embeddings?: {
+    device?: 'cpu' | 'gpu';
+  };
 }
 
 /**
@@ -35,43 +38,59 @@ export interface GlobalConfig {
  */
 function loadConfigFromEnv(): GlobalConfig | null {
   const backendEnv = process.env.LIEN_BACKEND;
-  if (!backendEnv) {
+  const deviceEnv = process.env.LIEN_EMBEDDING_DEVICE;
+
+  if (!backendEnv && !deviceEnv) {
     return null;
   }
-  
-  // Validate backend value
-  const validBackends = ['lancedb', 'qdrant'] as const;
-  if (!validBackends.includes(backendEnv as any)) {
-    throw new ConfigValidationError(
-      `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` +
-      `Valid values: 'lancedb' or 'qdrant'`,
-      '<environment>'
-    );
-  }
-  
-  const backend = backendEnv as 'lancedb' | 'qdrant';
-  
-  if (backend === 'qdrant') {
-    const url = process.env.LIEN_QDRANT_URL;
-    if (!url) {
-      // Fail fast with clear error instead of returning incomplete config
+
+  const config: GlobalConfig = {};
+
+  // Handle backend env var
+  if (backendEnv) {
+    const validBackends = ['lancedb', 'qdrant'] as const;
+    if (!validBackends.includes(backendEnv as any)) {
       throw new ConfigValidationError(
-        'Qdrant backend requires LIEN_QDRANT_URL environment variable.\n' +
-        'Set it with: export LIEN_QDRANT_URL=http://localhost:6333',
+        `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` +
+        `Valid values: 'lancedb' or 'qdrant'`,
         '<environment>'
       );
     }
-    
-    return {
-      backend: 'qdrant',
-      qdrant: {
+
+    config.backend = backendEnv as 'lancedb' | 'qdrant';
+
+    if (config.backend === 'qdrant') {
+      const url = process.env.LIEN_QDRANT_URL;
+      if (!url) {
+        throw new ConfigValidationError(
+          'Qdrant backend requires LIEN_QDRANT_URL environment variable.\n' +
+          'Set it with: export LIEN_QDRANT_URL=http://localhost:6333',
+          '<environment>'
+        );
+      }
+
+      config.qdrant = {
         url,
         apiKey: process.env.LIEN_QDRANT_API_KEY,
-      },
-    };
+      };
+    }
   }
-  
-  return { backend };
+
+  // Handle embedding device env var
+  if (deviceEnv) {
+    const validDevices = ['cpu', 'gpu'] as const;
+    const normalized = deviceEnv.toLowerCase().trim();
+    if (!validDevices.includes(normalized as any)) {
+      throw new ConfigValidationError(
+        `Invalid LIEN_EMBEDDING_DEVICE environment variable: "${deviceEnv}"\n` +
+        `Valid values: 'cpu' or 'gpu'`,
+        '<environment>'
+      );
+    }
+    config.embeddings = { device: normalized as 'cpu' | 'gpu' };
+  }
+
+  return config;
 }
 
 /**
@@ -139,28 +158,78 @@ function parseConfigFile(content: string, configPath: string): GlobalConfig {
  * @returns Global configuration
  */
 export async function loadGlobalConfig(): Promise<GlobalConfig> {
-  // 1. Check environment variables first
-  const envConfig = loadConfigFromEnv();
-  if (envConfig) {
-    return envConfig;
-  }
-  
-  // 2. Check global config file
+  // 1. Load config file as base
+  let fileConfig: GlobalConfig = {};
   const configPath = path.join(os.homedir(), '.lien', 'config.json');
   try {
     const content = await fs.readFile(configPath, 'utf-8');
-    const config = parseConfigFile(content, configPath);
-    validateConfig(config, configPath);
-    return config;
+    fileConfig = parseConfigFile(content, configPath);
+    validateConfig(fileConfig, configPath);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      // File doesn't exist - use defaults (this is normal)
-      return { backend: 'lancedb' };
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
     }
-    
-    // Re-throw all other errors (validation errors, JSON parse errors, etc.)
-    throw error;
   }
+
+  // 2. Overlay environment variables (highest precedence)
+  const envConfig = loadConfigFromEnv();
+  if (envConfig) {
+    const merged: GlobalConfig = { ...fileConfig, ...envConfig };
+    if (fileConfig.qdrant || envConfig.qdrant) {
+      merged.qdrant = { ...fileConfig.qdrant, ...envConfig.qdrant } as GlobalConfig['qdrant'];
+    }
+    if (fileConfig.embeddings || envConfig.embeddings) {
+      merged.embeddings = { ...fileConfig.embeddings, ...envConfig.embeddings };
+    }
+    return merged;
+  }
+
+  // 3. Apply defaults if no config found at all
+  if (!fileConfig.backend) {
+    fileConfig.backend = 'lancedb';
+  }
+  return fileConfig;
+}
+
+/**
+ * Save global configuration to ~/.lien/config.json.
+ * Creates the directory if it doesn't exist.
+ */
+export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
+  const configDir = path.join(os.homedir(), '.lien');
+  const configPath = path.join(configDir, 'config.json');
+
+  await fs.mkdir(configDir, { recursive: true });
+  await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+}
+
+/**
+ * Load existing global config, deep-merge a partial update, and save.
+ */
+export async function mergeGlobalConfig(partial: Partial<GlobalConfig>): Promise<GlobalConfig> {
+  const configPath = path.join(os.homedir(), '.lien', 'config.json');
+
+  let existing: GlobalConfig = {};
+  try {
+    const content = await fs.readFile(configPath, 'utf-8');
+    existing = parseConfigFile(content, configPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  // Deep merge: spread nested objects
+  const merged: GlobalConfig = { ...existing, ...partial };
+  if (existing.qdrant || partial.qdrant) {
+    merged.qdrant = { ...existing.qdrant, ...partial.qdrant } as GlobalConfig['qdrant'];
+  }
+  if (existing.embeddings || partial.embeddings) {
+    merged.embeddings = { ...existing.embeddings, ...partial.embeddings };
+  }
+
+  await saveGlobalConfig(merged);
+  return merged;
 }
 
 /**
