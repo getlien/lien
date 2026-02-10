@@ -24,7 +24,7 @@ import {
 } from '../constants.js';
 import { chunkFile } from './chunker.js';
 import { computeContentHash } from './content-hash.js';
-import { LocalEmbeddings } from '../embeddings/local.js';
+import { WorkerEmbeddings } from '../embeddings/worker-embeddings.js';
 import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { ManifestManager } from './manifest.js';
@@ -266,39 +266,46 @@ async function tryIncrementalIndex(
   });
   
   // Initialize embeddings for incremental update
-  const embeddings = options.embeddings ?? new LocalEmbeddings();
-  if (!options.embeddings) {
+  const ownEmbeddings = !options.embeddings;
+  const embeddings = options.embeddings ?? new WorkerEmbeddings();
+  if (ownEmbeddings) {
     await embeddings.initialize();
   }
-  
-  // Process changes
-  await handleDeletions(changes.deleted, vectorDB, manifest);
-  const indexedCount = await handleUpdates(
-    changes.added,
-    changes.modified,
-    vectorDB,
-    embeddings,
-    options,
-    rootDir
-  );
-  
-  // Update git state
-  await updateGitState(rootDir, vectorDB, manifest);
-  
-  options.onProgress?.({
-    phase: 'complete',
-    message: `Updated ${indexedCount} file${indexedCount !== 1 ? 's' : ''}, removed ${totalDeleted}`,
-    filesTotal: totalChanges + totalDeleted,
-    filesProcessed: indexedCount + totalDeleted,
-  });
-  
-  return {
-    success: true,
-    filesIndexed: indexedCount,
-    chunksCreated: 0, // Not tracked in incremental mode
-    durationMs: Date.now() - startTime,
-    incremental: true,
-  };
+
+  try {
+    // Process changes
+    await handleDeletions(changes.deleted, vectorDB, manifest);
+    const indexedCount = await handleUpdates(
+      changes.added,
+      changes.modified,
+      vectorDB,
+      embeddings,
+      options,
+      rootDir
+    );
+
+    // Update git state
+    await updateGitState(rootDir, vectorDB, manifest);
+
+    options.onProgress?.({
+      phase: 'complete',
+      message: `Updated ${indexedCount} file${indexedCount !== 1 ? 's' : ''}, removed ${totalDeleted}`,
+      filesTotal: totalChanges + totalDeleted,
+      filesProcessed: indexedCount + totalDeleted,
+    });
+
+    return {
+      success: true,
+      filesIndexed: indexedCount,
+      chunksCreated: 0, // Not tracked in incremental mode
+      durationMs: Date.now() - startTime,
+      incremental: true,
+    };
+  } finally {
+    if (ownEmbeddings) {
+      await embeddings.dispose();
+    }
+  }
 }
 
 /**
@@ -439,8 +446,9 @@ async function performFullIndex(
     filesTotal: files.length,
   });
   
-  const embeddings = options.embeddings ?? new LocalEmbeddings();
-  if (!options.embeddings) {
+  const ownEmbeddings = !options.embeddings;
+  const embeddings = options.embeddings ?? new WorkerEmbeddings();
+  if (ownEmbeddings) {
     await embeddings.initialize();
   }
 
@@ -452,8 +460,8 @@ async function performFullIndex(
     embeddingBatchSize: indexConfig.embeddingBatchSize,
   }, progressTracker);
 
-  options.onProgress?.({ 
-    phase: 'indexing', 
+  options.onProgress?.({
+    phase: 'indexing',
     message: `Processing ${files.length} files...`,
     filesTotal: files.length,
     filesProcessed: 0,
@@ -484,6 +492,10 @@ async function performFullIndex(
       incremental: false,
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    if (ownEmbeddings) {
+      await embeddings.dispose();
+    }
   }
 
   // 6. Save results
@@ -491,8 +503,8 @@ async function performFullIndex(
   await saveIndexResults(batchProcessor, vectorDB, rootDir);
 
   const { processedChunks } = batchProcessor.getResults();
-  options.onProgress?.({ 
-    phase: 'complete', 
+  options.onProgress?.({
+    phase: 'complete',
     message: 'Indexing complete',
     filesTotal: files.length,
     filesProcessed: progressTracker.getProcessedCount(),
@@ -531,7 +543,7 @@ async function performFullIndex(
  * });
  * 
  * // With pre-initialized embeddings (warm worker)
- * const embeddings = new LocalEmbeddings();
+ * const embeddings = new WorkerEmbeddings();
  * await embeddings.initialize();
  * const result = await indexCodebase({ embeddings });
  * ```

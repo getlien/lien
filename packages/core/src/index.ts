@@ -57,6 +57,7 @@ export type { EcosystemPreset } from './indexer/ecosystem-presets.js';
 // =============================================================================
 
 export { LocalEmbeddings } from './embeddings/local.js';
+export { WorkerEmbeddings } from './embeddings/worker-embeddings.js';
 export { CachedEmbeddings } from './embeddings/cache.js';
 export type { EmbeddingService } from './embeddings/types.js';
 export { EMBEDDING_DIMENSION, EMBEDDING_DIMENSIONS } from './embeddings/types.js';

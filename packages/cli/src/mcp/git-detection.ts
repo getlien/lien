@@ -7,7 +7,7 @@ import {
   DEFAULT_GIT_POLL_INTERVAL_MS,
   createGitignoreFilter,
   VectorDBInterface,
-  LocalEmbeddings,
+  EmbeddingService,
 } from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
 import type { createReindexStateManager } from './reindex-state-manager.js';
@@ -25,7 +25,7 @@ async function handleGitStartup(
   rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
+  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>
@@ -74,7 +74,7 @@ function createGitPollInterval(
   rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
+  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>
@@ -191,7 +191,7 @@ async function detectAndFilterGitChanges(
 async function executeGitReindex(
   filteredFiles: string[],
   vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
+  embeddings: EmbeddingService,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>,
   log: LogFn
@@ -221,7 +221,7 @@ function createGitChangeHandler(
   rootDir: string,
   gitTracker: GitStateTracker,
   vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
+  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>
@@ -264,7 +264,7 @@ function createGitChangeHandler(
 async function setupGitDetection(
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
+  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   fileWatcher: FileWatcher | null,

@@ -1,16 +1,18 @@
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
+import pLimit from 'p-limit';
 import { chunkFile } from './chunker.js';
 import { EmbeddingService } from '../embeddings/types.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
 import {
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_CONCURRENCY,
+  EMBEDDING_MICRO_BATCH_SIZE,
 } from '../constants.js';
 import { ManifestManager } from './manifest.js';
 import { computeContentHash } from './content-hash.js';
-import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
 import { CodeChunk } from './types.js';
 import { Result, Ok, Err, isOk } from '../utils/result.js';
 
@@ -369,18 +371,20 @@ async function handleFileNotFound(
 
 /**
  * Indexes multiple files incrementally.
- * Processes files sequentially for simplicity and reliability.
- * 
+ * Files are processed concurrently (read, chunk, embed) with p-limit, and each
+ * file's vector DB updates are enqueued for writing as soon as its processing
+ * completes. This creates a pipelined flow where DB writes are ordered safely
+ * for concurrent-unfriendly DBs, without waiting for all files to finish first.
+ *
  * Uses Result type for explicit error handling, making it easier to test
  * and reason about failure modes.
- * 
+ *
  * Note: This function counts both successfully indexed files AND successfully
  * handled deletions (files that don't exist but were removed from the index).
- * 
+ *
  * @param filepaths - Array of absolute file paths to index
  * @param vectorDB - Initialized VectorDB instance
  * @param embeddings - Initialized embeddings service
- * @param config - Lien configuration
  * @param options - Optional settings
  * @returns Number of successfully processed files (indexed or deleted)
  */
@@ -392,29 +396,48 @@ export async function indexMultipleFiles(
 ): Promise<number> {
   const { verbose, rootDir } = options;
   let processedCount = 0;
-  
+
   // Batch manifest updates for performance
   const manifestEntries: Array<{ filepath: string; chunkCount: number; mtime: number; contentHash: string }> = [];
-  
-  // Process each file sequentially (simple and reliable)
+
+  // Process files with bounded concurrency, applying each result to the DB as it completes.
+  // This avoids collecting all embeddings in memory before writing.
+  const limit = pLimit(DEFAULT_CONCURRENCY);
+  const writeQueue: Promise<void>[] = [];
+  let writeChain = Promise.resolve();
+
   for (const filepath of filepaths) {
-    const normalizedPath = normalizeToRelativePath(filepath);
-    const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir);
-    
-    if (isOk(result)) {
-      const { filepath: storedPath, result: processResult, mtime, contentHash } = result.value;
-      
-      if (processResult === null) {
-        await handleEmptyFile(storedPath, mtime, contentHash, vectorDB);
-      } else {
-        await handleNonEmptyFile(storedPath, processResult, mtime, contentHash, vectorDB, verbose || false, manifestEntries);
-      }
-      processedCount++;
-    } else {
-      await handleFileNotFound(normalizedPath, result.error, vectorDB, verbose || false);
-      processedCount++;
-    }
+    const task = limit(async () => {
+      const normalizedPath = normalizeToRelativePath(filepath);
+      const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir);
+
+      // Chain DB writes sequentially (safe for concurrent-unfriendly DBs).
+      // Catch errors per-write so one failure doesn't break the chain.
+      writeChain = writeChain.then(async () => {
+        try {
+          if (isOk(result)) {
+            const { filepath: storedPath, result: processResult, mtime, contentHash } = result.value;
+
+            if (processResult === null) {
+              await handleEmptyFile(storedPath, mtime, contentHash, vectorDB);
+            } else {
+              await handleNonEmptyFile(storedPath, processResult, mtime, contentHash, vectorDB, verbose || false, manifestEntries);
+            }
+            processedCount++;
+          } else {
+            await handleFileNotFound(normalizedPath, result.error, vectorDB, verbose || false);
+            processedCount++;
+          }
+        } catch (error) {
+          console.error(`[Lien] DB write failed for ${normalizedPath}: ${error}`);
+        }
+      });
+    });
+    writeQueue.push(task);
   }
+
+  await Promise.all(writeQueue);
+  await writeChain;
   
   // Batch update manifest at the end (much faster than updating after each file)
   if (manifestEntries.length > 0) {

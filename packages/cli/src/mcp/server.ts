@@ -4,7 +4,8 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import {
-  LocalEmbeddings,
+  WorkerEmbeddings,
+  EmbeddingService,
   VERSION_CHECK_INTERVAL_MS,
   createVectorDB,
   VectorDBInterface,
@@ -42,8 +43,8 @@ export interface MCPServerOptions {
 async function initializeDatabase(
   rootDir: string,
   log: LogFn
-): Promise<{ embeddings: LocalEmbeddings; vectorDB: VectorDBInterface }> {
-  const embeddings = new LocalEmbeddings();
+): Promise<{ embeddings: EmbeddingService; vectorDB: VectorDBInterface }> {
+  const embeddings = new WorkerEmbeddings();
 
   // Create vector DB using global config (auto-detects backend and orgId)
   log('Creating vector database...');
@@ -102,7 +103,7 @@ async function setupFileWatching(
   watch: boolean | undefined,
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
+  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>
@@ -233,7 +234,7 @@ function createMCPLog(server: Server, verbose: boolean | undefined): LogFn {
 async function initializeComponents(
   rootDir: string,
   earlyLog: LogFn
-): Promise<{ embeddings: LocalEmbeddings; vectorDB: VectorDBInterface }> {
+): Promise<{ embeddings: EmbeddingService; vectorDB: VectorDBInterface }> {
   try {
     const result = await initializeDatabase(rootDir, earlyLog);
 
