@@ -2,7 +2,6 @@ import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/tran
 import { EmbeddingService } from './types.js';
 import { EmbeddingError, wrapError } from '../errors/index.js';
 import { DEFAULT_EMBEDDING_MODEL } from '../constants.js';
-import { resolveEmbeddingDevice, type EmbeddingDevice } from './device.js';
 
 // Configure transformers.js to cache models locally
 env.allowRemoteModels = true;
@@ -12,19 +11,6 @@ export class LocalEmbeddings implements EmbeddingService {
   private extractor: FeatureExtractionPipeline | null = null;
   private readonly modelName = DEFAULT_EMBEDDING_MODEL;
   private initPromise: Promise<void> | null = null;
-
-  private async createPipeline(device: EmbeddingDevice): Promise<FeatureExtractionPipeline> {
-    if (device === 'webgpu') {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- v3 pipeline overloads produce TS2590
-        return await (pipeline as any)('feature-extraction', this.modelName, { device: 'webgpu' });
-      } catch {
-        // WebGPU unavailable — fall back to CPU silently
-      }
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- v3 pipeline overloads produce TS2590
-    return await (pipeline as any)('feature-extraction', this.modelName);
-  }
 
   async initialize(): Promise<void> {
     // Prevent multiple simultaneous initializations
@@ -38,8 +24,8 @@ export class LocalEmbeddings implements EmbeddingService {
 
     this.initPromise = (async () => {
       try {
-        const device = resolveEmbeddingDevice();
-        this.extractor = await this.createPipeline(device);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- v3 pipeline overloads produce TS2590
+        this.extractor = await (pipeline as any)('feature-extraction', this.modelName);
       } catch (error: unknown) {
         this.initPromise = null;
         throw wrapError(error, 'Failed to initialize embedding model');

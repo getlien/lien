@@ -15,10 +15,6 @@ const ALLOWED_KEYS: Record<string, { values: readonly string[]; description: str
     values: ['lancedb', 'qdrant'],
     description: 'Vector database backend',
   },
-  'embeddings.device': {
-    values: ['cpu', 'gpu'],
-    description: 'Embedding computation device',
-  },
   'qdrant.url': {
     values: [],
     description: 'Qdrant server URL',
@@ -45,8 +41,6 @@ function buildPartialConfig(key: string, value: string): Partial<GlobalConfig> {
   switch (key) {
     case 'backend':
       return { backend: value as GlobalConfig['backend'] };
-    case 'embeddings.device':
-      return { embeddings: { device: value as 'cpu' | 'gpu' } };
     case 'qdrant.url':
       return { qdrant: { url: value } };
     case 'qdrant.apiKey':

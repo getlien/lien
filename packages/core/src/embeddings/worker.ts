@@ -1,26 +1,12 @@
 import { parentPort } from 'worker_threads';
 import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
 import { DEFAULT_EMBEDDING_MODEL } from '../constants.js';
-import { resolveEmbeddingDevice, type EmbeddingDevice } from './device.js';
 
 env.allowRemoteModels = true;
 env.allowLocalModels = true;
 
 let extractor: FeatureExtractionPipeline | null = null;
 let processing: Promise<void> = Promise.resolve();
-
-async function createPipeline(device: EmbeddingDevice): Promise<FeatureExtractionPipeline> {
-  if (device === 'webgpu') {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- v3 pipeline overloads produce TS2590
-      return await (pipeline as any)('feature-extraction', DEFAULT_EMBEDDING_MODEL, { device: 'webgpu' });
-    } catch {
-      // WebGPU unavailable — fall back to CPU silently
-    }
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- v3 pipeline overloads produce TS2590
-  return await (pipeline as any)('feature-extraction', DEFAULT_EMBEDDING_MODEL);
-}
 
 interface InitMessage {
   type: 'init';
@@ -60,8 +46,8 @@ async function handleEmbed(texts: string[], id: number): Promise<void> {
 parentPort!.on('message', async (message: WorkerMessage) => {
   if (message.type === 'init') {
     try {
-      const device = resolveEmbeddingDevice();
-      extractor = await createPipeline(device);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- v3 pipeline overloads produce TS2590
+      extractor = await (pipeline as any)('feature-extraction', DEFAULT_EMBEDDING_MODEL);
       parentPort!.postMessage({ type: 'ready' });
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
