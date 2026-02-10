@@ -15,12 +15,40 @@ If Lien is working well for you, skip this page! Configuration is only needed fo
 
 ## Global Configuration
 
-Create `~/.lien/config.json` for settings that apply to all projects:
+Global settings live in `~/.lien/config.json` and control the vector database backend. You can manage them via the CLI:
+
+```bash
+lien config set backend qdrant
+lien config set qdrant.url http://localhost:6333
+lien config get backend
+lien config list
+```
+
+Or edit the file directly:
 
 ```json
 {
   "backend": "lancedb",
-  "indexing": {
+  "qdrant": {
+    "url": "http://localhost:6333",
+    "apiKey": "your-api-key"
+  }
+}
+```
+
+| Key | Values | Description |
+|-----|--------|-------------|
+| `backend` | `lancedb` (default), `qdrant` | Vector database backend |
+| `qdrant.url` | any URL | Qdrant server URL |
+| `qdrant.apiKey` | any string | Qdrant API key |
+
+## Per-Project Configuration
+
+Per-project settings live in `.lien.config.json` in your project root. Most users don't need this — Lien works with sensible defaults.
+
+```json
+{
+  "core": {
     "concurrency": 4,
     "embeddingBatchSize": 50
   },
@@ -50,9 +78,9 @@ export LIEN_QDRANT_API_KEY=your-api-key
 export LIEN_HOME=/custom/path
 ```
 
-## Auto-Detected Frameworks
+## Auto-Detected Ecosystems
 
-Lien automatically detects and configures these frameworks:
+Lien automatically detects your project type via **ecosystem presets** and applies appropriate include/exclude patterns:
 
 ### Node.js/TypeScript
 
@@ -78,19 +106,17 @@ Detected via `config/settings_schema.json`. Indexes:
 
 ### Monorepos
 
-Lien automatically detects multiple frameworks in monorepos. For example, a repo with both `package.json` and `backend/composer.json` will index both Node.js and Laravel code with appropriate patterns.
+Lien automatically detects multiple ecosystems in monorepos. For example, a repo with both `package.json` and `backend/composer.json` will index both Node.js and Laravel code with appropriate patterns.
 
 ## Indexing Options
 
-These options go in `~/.lien/config.json`:
+These options go in the per-project `.lien.config.json` under the `core` key:
 
 ```json
 {
-  "indexing": {
+  "core": {
     "concurrency": 4,
-    "embeddingBatchSize": 50,
-    "indexTests": true,
-    "useImportAnalysis": true
+    "embeddingBatchSize": 50
   }
 }
 ```
@@ -99,8 +125,6 @@ These options go in `~/.lien/config.json`:
 |--------|---------|-------------|
 | `concurrency` | 4 | Files processed in parallel. Use 6-8 for 8+ cores. |
 | `embeddingBatchSize` | 50 | Chunks per embedding batch. Reduce to 25 for <8GB RAM. |
-| `indexTests` | true | Index test files and detect test associations |
-| `useImportAnalysis` | true | Enable import-based test detection (more accurate) |
 
 ## Complexity Analysis
 
@@ -141,7 +165,7 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 
 ## Performance Tuning
 
-All settings go in `~/.lien/config.json`:
+These settings go in per-project `.lien.config.json` under the `core` key:
 
 | Use Case | `concurrency` | `embeddingBatchSize` |
 |----------|---------------|---------------------|
@@ -176,13 +200,14 @@ export LIEN_QDRANT_API_KEY=your-api-key
 The `orgId` is automatically extracted from your git remote URL. Cross-repo search requires all repos to share the same `orgId`.
 :::
 
-## Migrating from Config Files
+## Migrating from Old Config Files
 
-If you have an existing `.lien.config.json` from older versions, you can safely delete it. Lien now uses:
+If you have an existing `.lien.config.json` with a `frameworks` array from older versions, the `frameworks` field is deprecated. Lien now uses:
 
-1. **Auto-detection** for frameworks and patterns
-2. **Global config** at `~/.lien/config.json` for advanced settings
-3. **Environment variables** for Qdrant configuration
+1. **Ecosystem presets** for auto-detecting project type and patterns
+2. **Global config** at `~/.lien/config.json` for backend selection (managed via `lien config`)
+3. **Per-project config** at `.lien.config.json` for indexing/chunking tuning (optional)
+4. **Environment variables** for Qdrant configuration
 
 Your indices will continue to work—no need to re-index.
 

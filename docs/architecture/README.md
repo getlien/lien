@@ -8,11 +8,11 @@ Welcome to the Lien architecture documentation. This directory contains comprehe
 **High-level component architecture**
 
 A bird's-eye view of Lien's architecture showing:
-- CLI layer and commands
-- MCP server and tools
-- Core services (indexer, scanner, chunker, etc.)
-- Data layer (embeddings, vector database)
-- Optional services (git tracking, file watching)
+- CLI layer and commands (including `lien config` and `lien complexity`)
+- MCP server and all six tools
+- Core services (indexer, scanner, chunker, complexity analyzer, manifest manager, etc.)
+- Data layer (embeddings, VectorDB factory with LanceDB + Qdrant backends)
+- Optional services (git tracking, file watching, ecosystem presets)
 - External dependencies
 
 **Read this first** to understand the overall system structure.
@@ -69,7 +69,7 @@ Comprehensive sequence diagrams showing:
 
 Detailed diagrams of:
 - Server initialization sequence
-- Tool request handling (semantic_search, find_similar, get_file_context, list_functions)
+- Tool request handling (semantic_search, find_similar, get_files_context, list_functions, get_dependents, get_complexity)
 - Background update monitoring
 - Version checking and reconnection
 - Error handling
@@ -86,16 +86,15 @@ Detailed diagrams of:
 ---
 
 ### ⚙️ [Configuration System](./config-system.md)
-**Config loading, validation, and migration**
+**Global config and per-project config management**
 
-Documentation of ConfigService and configuration management:
-- Configuration architecture
-- Config migration from v0.2.0 to v0.3.0
-- Validation rules and error handling
-- ConfigService API
-- Schema evolution
+Documentation of Lien's two-layer configuration:
+- Global configuration (`GlobalConfig`) for backend choice and Qdrant settings
+- Per-project configuration (`ConfigService`) for indexing, chunking, MCP settings
+- `lien config` CLI (set/get/list)
+- Legacy config migration and validation rules
 
-**Read this** to understand configuration management and the new ConfigService.
+**Read this** to understand configuration management.
 
 **Key diagrams:**
 - Configuration architecture graph
@@ -145,6 +144,8 @@ Explains how Lien links test files to source files:
 | Configuration | [Configuration System](./config-system.md) |
 | Test associations | [Test Association](./test-association.md) |
 | File watching & git tracking | [MCP Server Flow](./mcp-server-flow.md) → Background monitoring |
+| Dependency analysis (`get_dependents`) | [MCP Server Flow](./mcp-server-flow.md) → Available MCP Tools |
+| Complexity analysis (`get_complexity`) | [MCP Server Flow](./mcp-server-flow.md) → Available MCP Tools |
 
 ### For Debugging
 
@@ -178,8 +179,8 @@ All processing happens locally. No cloud services required. Your code never leav
 - **Language:** TypeScript (ESM modules)
 - **CLI Framework:** Commander.js
 - **MCP Protocol:** @modelcontextprotocol/sdk
-- **Vector Database:** LanceDB
-- **Embeddings:** transformers.js (all-MiniLM-L6-v2, runs locally)
+- **Vector Database:** LanceDB (default) or Qdrant (optional, for cross-repo search)
+- **Embeddings:** @huggingface/transformers v4 (all-MiniLM-L6-v2, worker thread)
 - **Testing:** Vitest
 - **Build:** tsup
 
@@ -187,19 +188,37 @@ All processing happens locally. No cloud services required. Your code never leav
 
 ```
 packages/cli/src/
-├── cli/              # CLI commands (init, index, serve, status)
-├── mcp/              # MCP server and tools
+├── cli/              # CLI commands (init, index, serve, status, config, complexity)
+├── mcp/              # MCP server, tools, and handlers
+│   ├── handlers/     # Tool handlers (semantic-search, find-similar, get-files-context, etc.)
+│   ├── schemas/      # Zod schemas for tool input validation
+│   └── utils/        # Response budgeting, metadata shaping, path matching
 ├── indexer/          # File scanning, chunking, test associations
 ├── embeddings/       # Local embedding generation with cache
 ├── vectordb/         # LanceDB integration
-├── config/           # Configuration management (NEW: ConfigService)
-├── frameworks/       # Framework detection (Node.js, Laravel)
+├── config/           # Per-project configuration (ConfigService)
 ├── git/              # Git state tracking
-├── watcher/          # File watching
+├── watcher/          # File watching (uses ecosystem presets for patterns)
 ├── types/            # Shared TypeScript types
 ├── utils/            # Utilities (banner, etc.)
 ├── errors/           # Custom error classes
 └── constants.ts      # Centralized constants
+
+packages/core/src/
+├── config/           # GlobalConfig + per-project ConfigService + schema
+├── indexer/          # Scanner, chunker, manifest, ecosystem presets, dependency analyzer
+│   └── ast/          # AST parser, chunker, symbols, complexity metrics
+│       ├── languages/  # Per-language definitions (JS, TS, Python, PHP, Rust)
+│       ├── traversers/ # Language-specific AST traversal
+│       ├── extractors/ # Import/export/symbol extraction
+│       └── complexity/ # Cyclomatic, cognitive, Halstead analyzers
+├── insights/         # Complexity analyzer and formatters (text, JSON, SARIF)
+├── vectordb/         # VectorDB factory, LanceDB, Qdrant, query, batch-insert, maintenance
+├── embeddings/       # WorkerEmbeddings (transformers.js in worker thread)
+├── git/              # Git tracker and utilities
+├── errors/           # Error codes and classes
+├── types/            # Shared types (CodeChunk, etc.)
+└── utils/            # Result type, versioning, path matching
 ```
 
 ## 🚀 Performance Characteristics
@@ -221,8 +240,11 @@ packages/cli/src/
 - **Concurrent operations:** Configurable (default: 4)
 - **Memory:** ~500MB with model loaded
 
+### Current Scaling
+- **Multi-repo search**: Supported via Qdrant backend with `crossRepo=true` on search tools
+- **VectorDB factory**: Switch between LanceDB (local) and Qdrant (remote) via global config
+
 ### Future Scaling
-- Multi-repo support (planned)
 - Cloud sync option (planned)
 - Team collaboration features (planned)
 
@@ -261,7 +283,17 @@ Our Mermaid diagrams follow these conventions:
 
 ## 🔄 Version History
 
-### v0.8.1 (Current)
+### v0.34.0 (Current)
+- ✅ Docs updated to match current state of codebase
+- ✅ Six MCP tools documented (`get_dependents`, `get_complexity` added)
+- ✅ Ecosystem presets replace framework detection (ADR-007)
+- ✅ Qdrant backend and VectorDB factory pattern
+- ✅ Global configuration system (`lien config`)
+- ✅ Complexity analyzer and `lien complexity` CLI
+- ✅ Embedding backend simplified to WorkerEmbeddings only (ADR-008)
+- ✅ ADR-006, ADR-007, ADR-008 added
+
+### v0.8.1
 - ✅ Markdown file support for documentation search
 - ✅ CONCEPTUAL query improvements
 
@@ -288,7 +320,6 @@ Our Mermaid diagrams follow these conventions:
 - See [ADR-005](decisions/0005-per-language-definition-pattern.md)
 
 ### Future Updates
-- Multi-repo support design (when implemented)
 - Web dashboard architecture (when implemented)
 
 ## 📧 Questions?
@@ -301,7 +332,7 @@ If something in the architecture is unclear:
 
 ---
 
-**Last Updated:** November 19, 2025  
-**Maintained By:** Lien contributors  
-**Status:** ✅ Complete and up-to-date
+**Last Updated:** February 10, 2026
+**Maintained By:** Lien contributors
+**Status:** ✅ Complete and up-to-date (v0.34.0)
 

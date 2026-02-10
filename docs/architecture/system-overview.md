@@ -12,19 +12,24 @@ graph TB
         INDEX[lien index]
         SERVE[lien serve]
         STATUS[lien status]
+        CONFIGCMD[lien config]
+        COMPLX[lien complexity]
     end
-    
+
     subgraph "MCP Server Layer"
         MCP[MCP Server]
         TOOLS[MCP Tools]
         SEMANTIC[semantic_search]
         SIMILAR[find_similar]
-        CONTEXT[get_file_context]
+        CONTEXT[get_files_context]
         LIST[list_functions]
+        DEPENDENTS[get_dependents]
+        COMPLEXITY[get_complexity]
     end
-    
+
     subgraph "Core Services"
         CONFIG[ConfigService]
+        GLOBALCONFIG[GlobalConfig]
         INDEXER[Indexer]
         SCANNER[File Scanner]
         CHUNKER[Code Chunker]
@@ -32,51 +37,60 @@ graph TB
         TRAVERSER[Language Traversers]
         SYMBOLS[Symbol Extractor]
         TESTASSOC[Test Association Manager]
+        MANIFEST[Manifest Manager]
+        COMPLEXANALYZER[Complexity Analyzer]
     end
-    
+
     subgraph "Data Layer"
         EMBEDDINGS[Embeddings Service]
-        VECTORDB[Vector Database]
+        VECTORDB[VectorDB Factory]
         QUERY[Query Operations]
         BATCHINS[Batch Insert]
         MAINT[Maintenance Ops]
         CACHE[Embedding Cache]
     end
-    
+
     subgraph "Optional Services"
         GIT[Git State Tracker]
         WATCHER[File Watcher]
-        FRAMEWORK[Framework Detector]
+        ECOSYSTEM[Ecosystem Presets]
     end
-    
+
     subgraph "External Dependencies"
         TRANSFORMERS[transformers.js]
         LANCEDB[LanceDB]
+        QDRANT[Qdrant]
         GITCMD[Git CLI]
     end
-    
+
     %% CLI to Core
     CLI --> CONFIG
     INIT --> CONFIG
-    INIT --> FRAMEWORK
+    INIT --> ECOSYSTEM
     INDEX --> INDEXER
     SERVE --> MCP
     STATUS --> CONFIG
     STATUS --> VECTORDB
-    
+    CONFIGCMD --> GLOBALCONFIG
+    COMPLX --> COMPLEXANALYZER
+
     %% MCP to Core
     MCP --> TOOLS
     TOOLS --> SEMANTIC
     TOOLS --> SIMILAR
     TOOLS --> CONTEXT
     TOOLS --> LIST
+    TOOLS --> DEPENDENTS
+    TOOLS --> COMPLEXITY
     SEMANTIC --> EMBEDDINGS
     SEMANTIC --> VECTORDB
     SIMILAR --> EMBEDDINGS
     SIMILAR --> VECTORDB
     CONTEXT --> VECTORDB
     LIST --> VECTORDB
-    
+    DEPENDENTS --> VECTORDB
+    COMPLEXITY --> VECTORDB
+
     %% Core Services Relationships
     INDEXER --> CONFIG
     INDEXER --> SCANNER
@@ -85,10 +99,12 @@ graph TB
     INDEXER --> TESTASSOC
     INDEXER --> EMBEDDINGS
     INDEXER --> VECTORDB
-    SCANNER --> FRAMEWORK
+    INDEXER --> MANIFEST
+    INDEXER --> COMPLEXANALYZER
+    SCANNER --> ECOSYSTEM
     CHUNKER --> AST
     AST --> TRAVERSER
-    
+
     %% Data Layer
     EMBEDDINGS --> CACHE
     EMBEDDINGS --> TRANSFORMERS
@@ -96,15 +112,18 @@ graph TB
     VECTORDB --> BATCHINS
     VECTORDB --> MAINT
     QUERY --> LANCEDB
+    QUERY --> QDRANT
     BATCHINS --> LANCEDB
+    BATCHINS --> QDRANT
     MAINT --> LANCEDB
-    
+    MAINT --> QDRANT
+
     %% Optional Services
     MCP --> GIT
     MCP --> WATCHER
     GIT --> GITCMD
     WATCHER --> INDEXER
-    
+
     %% Styling
     classDef cliClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
     classDef mcpClass fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
@@ -112,42 +131,49 @@ graph TB
     classDef dataClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
     classDef optionalClass fill:#fce4ec,stroke:#880e4f,stroke-width:2px
     classDef externalClass fill:#f5f5f5,stroke:#424242,stroke-width:2px
-    
-    class CLI,INIT,INDEX,SERVE,STATUS cliClass
-    class MCP,TOOLS,SEMANTIC,SIMILAR,CONTEXT,LIST mcpClass
-    class CONFIG,INDEXER,SCANNER,CHUNKER,AST,TRAVERSER,SYMBOLS,TESTASSOC coreClass
+
+    class CLI,INIT,INDEX,SERVE,STATUS,CONFIGCMD,COMPLX cliClass
+    class MCP,TOOLS,SEMANTIC,SIMILAR,CONTEXT,LIST,DEPENDENTS,COMPLEXITY mcpClass
+    class CONFIG,GLOBALCONFIG,INDEXER,SCANNER,CHUNKER,AST,TRAVERSER,SYMBOLS,TESTASSOC,MANIFEST,COMPLEXANALYZER coreClass
     class EMBEDDINGS,VECTORDB,QUERY,BATCHINS,MAINT,CACHE dataClass
-    class GIT,WATCHER,FRAMEWORK optionalClass
-    class TRANSFORMERS,LANCEDB,GITCMD externalClass
+    class GIT,WATCHER,ECOSYSTEM optionalClass
+    class TRANSFORMERS,LANCEDB,QDRANT,GITCMD externalClass
 ```
 
 ## Component Descriptions
 
 ### CLI Layer
 - **CLI Commands**: Entry points for user interaction via command line
-- **lien init**: Initializes configuration and detects frameworks
+- **lien init**: Initializes configuration and detects ecosystem presets
 - **lien index**: Indexes the codebase into the vector database
 - **lien serve**: Starts the MCP server for AI assistant integration
 - **lien status**: Shows current index status and configuration
+- **lien config**: Manages global configuration (`set`, `get`, `list`)
+- **lien complexity**: Runs complexity analysis on the codebase
 
 ### MCP Server Layer
 - **MCP Server**: Implements Model Context Protocol for AI assistant communication
-- **MCP Tools**: Four semantic search tools exposed to AI assistants
+- **MCP Tools**: Six tools exposed to AI assistants
   - `semantic_search`: Natural language code search
-  - `find_similar`: Find similar code patterns
-  - `get_file_context`: Get full file context with test associations
-  - `list_functions`: List functions/classes by pattern
+  - `find_similar`: Find structurally similar code patterns
+  - `get_files_context`: Get file context with dependencies and test associations (supports batch)
+  - `list_functions`: Fast symbol lookup by naming pattern
+  - `get_dependents`: Reverse dependency lookup for impact analysis
+  - `get_complexity`: Complexity analysis for files or the entire codebase
 
 ### Core Services
-- **ConfigService**: Manages configuration loading, saving, validation, and migration
+- **ConfigService**: Manages per-project configuration loading, saving, and validation
+- **GlobalConfig**: Manages global settings (`~/.lien/config.json`) — backend choice and Qdrant connection
 - **Indexer**: Orchestrates the indexing workflow
-- **File Scanner**: Scans codebase respecting .gitignore and framework boundaries
+- **File Scanner**: Scans codebase respecting .gitignore and ecosystem preset boundaries
 - **Code Chunker**: Splits files using AST-based semantic chunking or line-based fallback
 - **AST Parser**: Parses code into Abstract Syntax Trees using Tree-sitter
 - **Language Registry**: Central registry of per-language definitions (grammar, traverser, extractor, complexity data)
 - **Language Traversers**: Language-specific logic for traversing AST nodes (Strategy Pattern)
 - **Symbol Extractor**: Extracts functions, classes, and interfaces from code
 - **Test Association Manager**: Links test files to source files via convention and import analysis
+- **Manifest Manager**: Tracks indexed file metadata for incremental updates
+- **Complexity Analyzer**: Computes cyclomatic, cognitive, and Halstead complexity metrics per function
 
 ### Data Layer
 - **Embeddings Service**: Generates semantic embeddings from code
@@ -160,19 +186,20 @@ graph TB
 ### Optional Services
 - **Git State Tracker**: Monitors repository changes for incremental indexing
 - **File Watcher**: Real-time file change detection (opt-in)
-- **Framework Detector**: Identifies Node.js, Laravel, and other frameworks
+- **Ecosystem Presets**: Auto-detects project type (Node.js, PHP/Laravel, Python, Rust) and applies include/exclude patterns (replaces former Framework Detector — see [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md))
 
 ### External Dependencies
-- **transformers.js**: Local embedding generation (all-MiniLM-L6-v2 model)
-- **LanceDB**: Vector database for semantic search
+- **transformers.js**: Local embedding generation (all-MiniLM-L6-v2 model, runs in worker thread — see [ADR-008](decisions/0008-keep-transformers-js-worker-embeddings.md))
+- **LanceDB**: Default vector database for semantic search (local, zero-config)
+- **Qdrant**: Optional vector database backend for cross-repo search and team use
 - **Git CLI**: For repository state tracking
 
 ## Data Flow
 
 The system follows a clear data flow pattern:
 
-1. **Configuration** → Read by all services for settings
-2. **Files** → Scanner → Chunker → Embeddings → Vector DB
+1. **Configuration** → Read by all services for settings (per-project via ConfigService, global via GlobalConfig)
+2. **Files** → Scanner → Chunker → Complexity Metrics → Embeddings → Vector DB
 3. **Query** → Embeddings → Vector DB → Search Results
 4. **Git Changes** → Git Tracker → Incremental Indexer → Vector DB
 
@@ -208,8 +235,8 @@ Non-essential features (git tracking, file watching) are optional and can be dis
 - **Language**: TypeScript (ESM)
 - **CLI**: Commander.js
 - **MCP**: @modelcontextprotocol/sdk
-- **Vector DB**: LanceDB (vectordb package)
-- **Embeddings**: transformers.js (all-MiniLM-L6-v2)
+- **Vector DB**: LanceDB (default, local) or Qdrant (optional, for cross-repo search)
+- **Embeddings**: @huggingface/transformers v4 (all-MiniLM-L6-v2, worker thread)
 - **Testing**: Vitest
 - **Build**: tsup
 
@@ -226,15 +253,34 @@ Non-essential features (git tracking, file watching) are optional and can be dis
 ### Current Limits
 - Single machine, single process
 - Embeddings generated locally (no API calls)
-- Vector database stored on local disk
+- Vector database stored on local disk (LanceDB) or remote (Qdrant)
+
+### Current Scaling Options
+- **Multi-repo search**: Supported via Qdrant backend with `crossRepo=true` on search tools
+- **VectorDB factory pattern**: Switch between LanceDB (local) and Qdrant (remote) via `lien config set backend qdrant`
 
 ### Future Scaling Options
 - Multiple embedding models
 - Cloud sync (optional)
-- Multi-repo support
 - Team collaboration features
 
-## Recent Architectural Improvements (v0.13.0-v0.14.0)
+## Recent Architectural Improvements
+
+### Ecosystem Presets (Replaced Framework Detection)
+- **Replaced**: Rigid per-framework detection with lightweight ecosystem presets
+- **Benefit**: Zero-config auto-detection of project type; simpler codebase without framework-specific code
+- **Details**: See [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md)
+
+### Embedding Backend Simplification
+- **Decision**: Keep transformers.js WorkerEmbeddings as sole embedding backend
+- **Removed**: Unused `embeddings.device` config option (cpu/gpu)
+- **Benefit**: Simpler config, worker thread isolation, no external API dependencies
+- **Details**: See [ADR-008](decisions/0008-keep-transformers-js-worker-embeddings.md)
+
+### Consolidated Language Files with Import Extractors
+- **Added**: Import extractors alongside export extractors in per-language files
+- **Benefit**: Enables dependency analysis (`get_dependents`) and re-export resolution
+- **Details**: See [ADR-006](decisions/0006-consolidated-language-files-with-import-extractors.md)
 
 ### AST-Based Semantic Chunking
 - **Replaced**: Line-based chunking with fixed overlap
@@ -273,4 +319,7 @@ All major architectural decisions are documented in [docs/architecture/decisions
 - [ADR-003: AST-Based Semantic Chunking](decisions/0003-ast-based-chunking.md)
 - [ADR-004: Test Association Detection](decisions/0004-test-association-detection.md)
 - [ADR-005: Per-Language Definition Pattern](decisions/0005-per-language-definition-pattern.md)
+- [ADR-006: Consolidated Language Files with Import Extractors](decisions/0006-consolidated-language-files-with-import-extractors.md)
+- [ADR-007: Replace Framework Detection with Ecosystem Presets](decisions/0007-replace-framework-detection-with-ecosystem-presets.md)
+- [ADR-008: Keep transformers.js WorkerEmbeddings as Sole Embedding Backend](decisions/0008-keep-transformers-js-worker-embeddings.md)
 

@@ -20,7 +20,7 @@ lien init [options]
 
 Lien uses a **config-less approach** with sensible defaults:
 
-1. Auto-detects frameworks (Node.js, Laravel, Shopify, etc.)
+1. Auto-detects ecosystem presets (Node.js, Laravel, Python, Rust, Shopify, etc.)
 2. No per-project config file needed!
 
 ### Examples
@@ -124,7 +124,7 @@ lien serve [options]
 
 ### Behavior
 
-1. Auto-detects project structure and frameworks
+1. Auto-detects project structure via ecosystem presets
 2. Checks if index exists (auto-indexes if missing)
 3. Starts MCP server on stdio transport
 4. Listens for tool requests from Cursor
@@ -227,6 +227,46 @@ Frameworks:
     - 134 files
     - 478 chunks
 ```
+
+## lien config
+
+Manage global configuration settings.
+
+```bash
+lien config <command> [key] [value]
+```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `set <key> <value>` | Set a configuration value |
+| `get <key>` | Read a configuration value |
+| `list` | Show all configuration values |
+
+### Allowed Keys
+
+| Key | Values | Description |
+|-----|--------|-------------|
+| `backend` | `lancedb`, `qdrant` | Vector database backend |
+| `qdrant.url` | any URL | Qdrant server URL |
+| `qdrant.apiKey` | any string | Qdrant API key (set `qdrant.url` first) |
+
+### Examples
+
+```bash
+# Switch to Qdrant backend for cross-repo search
+lien config set backend qdrant
+lien config set qdrant.url http://localhost:6333
+
+# Check current backend
+lien config get backend
+
+# Show all settings
+lien config list
+```
+
+Config is stored in `~/.lien/config.json`. Environment variables (`LIEN_BACKEND`, `LIEN_QDRANT_URL`, `LIEN_QDRANT_API_KEY`) take precedence over the config file.
 
 ## lien complexity
 
@@ -434,6 +474,7 @@ Commands:
   index [options]    Index your codebase
   serve [options]    Start MCP server
   status             Show indexing status
+  config             Manage global configuration
   complexity         Analyze code complexity
   help [command]     display help for command
 ```

@@ -533,8 +533,8 @@ All search results include test association metadata:
 
 1. **Start broad**: Use `semantic_search` with higher limit (10-15) for exploration
 2. **Be specific**: More specific queries return more relevant results
-3. **Use context**: Check related files with `get_file_context` before editing
-4. **Chain tools**: search → get context → make changes is a powerful pattern
+3. **Use context**: Check related files with `get_files_context` before editing
+4. **Chain tools**: search → get context → check dependents → make changes is a powerful pattern
 
 ## Error Handling
 

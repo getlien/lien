@@ -11,7 +11,7 @@ When you run `lien index`, Lien scans your codebase and breaks it down into mana
 Each code chunk is converted into a **vector embedding** - a mathematical representation that captures its semantic meaning. This happens entirely on your machine using a local ML model (all-MiniLM-L6-v2). No external API calls, no cloud services.
 
 ### 3. 💾 Storage
-These embeddings are stored in a local vector database (LanceDB) in `~/.lien/indices/`. Think of it as a semantic index of your entire codebase that enables lightning-fast searches.
+These embeddings are stored in a vector database — LanceDB locally in `~/.lien/indices/`, or optionally in Qdrant for cross-repo search. Think of it as a semantic index of your entire codebase that enables lightning-fast searches.
 
 ### 4. 🎯 Search
 When you ask your AI assistant a question like "how does authentication work?", Lien:
@@ -41,23 +41,25 @@ Everything runs locally:
 
 Lien is built with modern, performant tools:
 - **TypeScript** for type-safe development
-- **transformers.js** for local embeddings
-- **LanceDB** for vector storage
+- **@huggingface/transformers** for local embeddings (runs in worker thread)
+- **LanceDB** for local vector storage (default), **Qdrant** for cross-repo search (optional)
 - **Model Context Protocol (MCP)** for AI assistant integration (Cursor, Claude Code, etc.)
 
 ## Want to Learn More?
 
 For detailed technical architecture, flow diagrams, and implementation details, see the [Architecture Documentation on GitHub](https://github.com/getlien/lien/tree/main/docs/architecture).
 
-## Framework-Aware & Monorepo Support
+## Ecosystem-Aware & Monorepo Support
 
-Lien automatically detects your project structure:
+Lien automatically detects your project type via **ecosystem presets**:
 - **Node.js/TypeScript** - via package.json
 - **Laravel/PHP** - via composer.json
+- **Python** - via pyproject.toml, setup.py, requirements.txt
+- **Rust** - via Cargo.toml
 - **Shopify Themes** - via config/settings_schema.json
-- **Monorepos** - Multiple frameworks in one repo (e.g., Node.js frontend + Laravel backend)
+- **Monorepos** - Multiple ecosystems in one repo (e.g., Node.js frontend + Laravel backend)
 
-Each framework gets appropriate test patterns, file exclusions, and indexing strategies!
+Each ecosystem preset applies appropriate file exclusions and indexing patterns!
 
 ## Supported Languages
 

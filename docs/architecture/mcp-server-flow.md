@@ -8,7 +8,7 @@ This document details how the MCP (Model Context Protocol) server initializes, h
 sequenceDiagram
     actor User
     participant CLI as CLI (lien serve)
-    participant Config as ConfigService
+    participant Config as GlobalConfig + ConfigService
     participant Embeddings as Embedding Service
     participant VectorDB as Vector Database
     participant MCP as MCP Server
@@ -21,12 +21,12 @@ sequenceDiagram
     CLI->>CLI: Show banner
     
     Note over CLI,Config: Phase 1: Configuration
-    CLI->>Config: load(rootDir)
-    Config-->>CLI: LienConfig
+    CLI->>Config: loadGlobalConfig() + ConfigService.load(rootDir)
+    Config-->>CLI: GlobalConfig + LienConfig
     
     Note over CLI,Embeddings: Phase 2: Initialize Services
     CLI->>Embeddings: initialize()
-    Note right of Embeddings: Downloads model if first run<br/>(~50MB, cached in ~/.cache)
+    Note right of Embeddings: WorkerEmbeddings runs in worker thread<br/>Downloads model if first run (~50MB, cached)
     Embeddings->>Embeddings: Load all-MiniLM-L6-v2
     Embeddings-->>CLI: Ready (takes 3-5s)
     
@@ -86,8 +86,21 @@ sequenceDiagram
     AI->>Stdio: Connect to MCP server
     Stdio-->>AI: Connection established
     AI->>MCP: List available tools
-    MCP-->>AI: [semantic_search, find_similar, get_file_context, list_functions]
+    MCP-->>AI: [semantic_search, find_similar, get_files_context, list_functions, get_dependents, get_complexity]
 ```
+
+### Available MCP Tools
+
+The server exposes six tools to AI assistants:
+
+| Tool | Description |
+|------|-------------|
+| `semantic_search` | Natural language code search by meaning |
+| `find_similar` | Find structurally similar code patterns |
+| `get_files_context` | Get file context with dependencies and test associations (supports batch) |
+| `list_functions` | Fast symbol lookup by naming pattern |
+| `get_dependents` | Reverse dependency lookup for impact analysis |
+| `get_complexity` | Complexity analysis (cyclomatic, cognitive, Halstead) for files or codebase |
 
 ## Tool Request Handling
 
@@ -152,7 +165,7 @@ sequenceDiagram
     AI->>AI: Present to user
 ```
 
-### get_file_context Tool
+### get_files_context Tool
 
 ```mermaid
 sequenceDiagram
@@ -161,7 +174,7 @@ sequenceDiagram
     participant VectorDB as Vector Database
     participant Embeddings as Embedding Service
     
-    AI->>MCP: Tool Call: get_file_context
+    AI->>MCP: Tool Call: get_files_context
     Note right of AI: {<br/>  filepath: "src/auth.ts",<br/>  includeRelated: true<br/>}
     
     Note over MCP: Validate Parameters
