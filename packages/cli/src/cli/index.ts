@@ -7,6 +7,7 @@ import { statusCommand } from './status.js';
 import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
 import { complexityCommand } from './complexity.js';
+import { configSetCommand, configGetCommand, configListCommand } from './config.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -67,4 +68,23 @@ program
   .option('--cognitive-threshold <n>', 'Override cognitive complexity threshold only')
   .option('--fail-on <severity>', 'Exit 1 if violations: error, warning')
   .action(complexityCommand);
+
+const configCmd = program
+  .command('config')
+  .description('Manage global configuration (~/.lien/config.json)');
+
+configCmd
+  .command('set <key> <value>')
+  .description('Set a global config value')
+  .action(configSetCommand);
+
+configCmd
+  .command('get <key>')
+  .description('Get a config value')
+  .action(configGetCommand);
+
+configCmd
+  .command('list')
+  .description('Show all current config')
+  .action(configListCommand);
 

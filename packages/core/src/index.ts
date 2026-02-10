@@ -84,6 +84,13 @@ export { formatReport, formatTextReport, formatJsonReport, formatSarifReport } f
 export type { OutputFormat } from './insights/formatters/index.js';
 
 // =============================================================================
+// GLOBAL CONFIGURATION
+// =============================================================================
+
+export { loadGlobalConfig, saveGlobalConfig, mergeGlobalConfig, ConfigValidationError } from './config/global-config.js';
+export type { GlobalConfig } from './config/global-config.js';
+
+// =============================================================================
 // CONFIGURATION (DEPRECATED - kept for backward compatibility)
 // =============================================================================
 // Note: Per-project config is no longer required. Lien now uses:

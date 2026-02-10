@@ -1,7 +1,8 @@
-import { pipeline, env, type FeatureExtractionPipeline } from '@xenova/transformers';
+import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
 import { EmbeddingService } from './types.js';
 import { EmbeddingError, wrapError } from '../errors/index.js';
 import { DEFAULT_EMBEDDING_MODEL } from '../constants.js';
+import { resolveEmbeddingDevice, type EmbeddingDevice } from './device.js';
 
 // Configure transformers.js to cache models locally
 env.allowRemoteModels = true;
@@ -11,27 +12,38 @@ export class LocalEmbeddings implements EmbeddingService {
   private extractor: FeatureExtractionPipeline | null = null;
   private readonly modelName = DEFAULT_EMBEDDING_MODEL;
   private initPromise: Promise<void> | null = null;
-  
+
+  private async createPipeline(device: EmbeddingDevice): Promise<FeatureExtractionPipeline> {
+    if (device === 'webgpu') {
+      try {
+        return await pipeline('feature-extraction', this.modelName, { device: 'webgpu' }) as FeatureExtractionPipeline;
+      } catch {
+        // WebGPU unavailable — fall back to CPU silently
+      }
+    }
+    return await pipeline('feature-extraction', this.modelName) as FeatureExtractionPipeline;
+  }
+
   async initialize(): Promise<void> {
     // Prevent multiple simultaneous initializations
     if (this.initPromise) {
       return this.initPromise;
     }
-    
+
     if (this.extractor) {
       return;
     }
-    
+
     this.initPromise = (async () => {
       try {
-        // This downloads ~100MB on first run, then caches in ~/.cache/huggingface
-        this.extractor = await pipeline('feature-extraction', this.modelName) as FeatureExtractionPipeline;
+        const device = resolveEmbeddingDevice();
+        this.extractor = await this.createPipeline(device);
       } catch (error: unknown) {
         this.initPromise = null;
         throw wrapError(error, 'Failed to initialize embedding model');
       }
     })();
-    
+
     return this.initPromise;
   }
   
