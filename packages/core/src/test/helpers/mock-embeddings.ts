@@ -36,6 +36,10 @@ export class MockEmbeddings implements EmbeddingService {
 
     return Promise.all(texts.map(text => this.embed(text)));
   }
+
+  async dispose(): Promise<void> {
+    this.initialized = false;
+  }
 }
 
 /**

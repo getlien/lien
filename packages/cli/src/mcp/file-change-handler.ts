@@ -7,7 +7,7 @@ import {
   normalizeToRelativePath,
   createGitignoreFilter,
   VectorDBInterface,
-  LocalEmbeddings,
+  EmbeddingService,
 } from '@liendev/core';
 import type { FileChangeHandler, FileChangeEvent } from '../watcher/index.js';
 import type { createReindexStateManager } from './reindex-state-manager.js';
@@ -108,7 +108,7 @@ async function handleSingleFileChange(
   type: 'add' | 'change',
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
+  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
@@ -280,7 +280,7 @@ async function executeReindexOperations(
   deletedFiles: string[],
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
+  embeddings: EmbeddingService,
   log: LogFn
 ): Promise<void> {
   const operations: Promise<unknown>[] = [];
@@ -305,7 +305,7 @@ async function handleBatchEvent(
   event: FileChangeEvent,
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
+  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>
 ): Promise<void> {
@@ -408,7 +408,7 @@ function hasGitignoreChange(event: FileChangeEvent): boolean {
 export function createFileChangeHandler(
   rootDir: string,
   vectorDB: VectorDBInterface,
-  embeddings: LocalEmbeddings,
+  embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
   checkAndReconnect: () => Promise<void>

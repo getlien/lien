@@ -72,5 +72,10 @@ export class LocalEmbeddings implements EmbeddingService {
       throw wrapError(error, 'Failed to generate batch embeddings', { batchSize: texts.length });
     }
   }
+
+  async dispose(): Promise<void> {
+    this.extractor = null;
+    this.initPromise = null;
+  }
 }
 

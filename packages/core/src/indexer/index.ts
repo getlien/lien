@@ -26,7 +26,7 @@ import {
 } from '../constants.js';
 import { chunkFile } from './chunker.js';
 import { computeContentHash } from './content-hash.js';
-import { LocalEmbeddings } from '../embeddings/local.js';
+import { WorkerEmbeddings } from '../embeddings/worker-embeddings.js';
 import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { ManifestManager } from './manifest.js';
@@ -270,8 +270,9 @@ async function tryIncrementalIndex(
   });
   
   // Initialize embeddings for incremental update
-  const embeddings = options.embeddings ?? new LocalEmbeddings();
-  if (!options.embeddings) {
+  const ownEmbeddings = !options.embeddings;
+  const embeddings = options.embeddings ?? new WorkerEmbeddings();
+  if (ownEmbeddings) {
     await embeddings.initialize();
   }
 
@@ -315,6 +316,9 @@ async function tryIncrementalIndex(
     };
   } finally {
     await cache.dispose();
+    if (ownEmbeddings) {
+      await embeddings.dispose();
+    }
   }
 }
 
@@ -456,8 +460,9 @@ async function performFullIndex(
     filesTotal: files.length,
   });
   
-  const embeddings = options.embeddings ?? new LocalEmbeddings();
-  if (!options.embeddings) {
+  const ownEmbeddings = !options.embeddings;
+  const embeddings = options.embeddings ?? new WorkerEmbeddings();
+  if (ownEmbeddings) {
     await embeddings.initialize();
   }
 
@@ -512,6 +517,9 @@ async function performFullIndex(
     };
   } finally {
     await cache.dispose();
+    if (ownEmbeddings) {
+      await embeddings.dispose();
+    }
   }
 
   // 6. Save results
@@ -559,7 +567,7 @@ async function performFullIndex(
  * });
  * 
  * // With pre-initialized embeddings (warm worker)
- * const embeddings = new LocalEmbeddings();
+ * const embeddings = new WorkerEmbeddings();
  * await embeddings.initialize();
  * const result = await indexCodebase({ embeddings });
  * ```

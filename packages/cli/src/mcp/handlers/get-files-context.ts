@@ -4,7 +4,7 @@ import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../uti
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import { MAX_CHUNKS_PER_FILE } from '@liendev/core';
-import type { SearchResult, LocalEmbeddings, VectorDBInterface } from '@liendev/core';
+import type { SearchResult, EmbeddingService, VectorDBInterface } from '@liendev/core';
 
 /**
  * Maximum number of chunks to scan for test association analysis.
@@ -25,7 +25,7 @@ interface ValidatedArgs {
 /** Context for helper functions (subset of ToolContext) */
 interface HandlerContext {
   vectorDB: VectorDBInterface;
-  embeddings: LocalEmbeddings;
+  embeddings: EmbeddingService;
   log: LogFn;
   workspaceRoot: string;
 }

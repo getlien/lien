@@ -1,11 +1,13 @@
 import fs from 'fs/promises';
 import path from 'path';
+import pLimit from 'p-limit';
 import type { VectorDBInterface } from '../vectordb/types.js';
 import { ManifestManager, IndexManifest } from './manifest.js';
 // scanFilesToIndex is imported from index.ts to avoid circular dependency
 import { GitStateTracker } from '../git/tracker.js';
 import { isGitAvailable, isGitRepo, getChangedFiles } from '../git/utils.js';
 import { normalizeToRelativePath } from './incremental.js';
+import { DEFAULT_STAT_CONCURRENCY } from '../constants.js';
 
 /**
  * Result of change detection, categorized by type of change
@@ -197,69 +199,86 @@ async function getAllFiles(rootDir: string): Promise<string[]> {
 }
 
 /**
+ * Gather file modification times concurrently.
+ */
+async function gatherFileStats(
+  files: string[],
+  rootDir: string
+): Promise<Map<string, number>> {
+  const limit = pLimit(DEFAULT_STAT_CONCURRENCY);
+  const fileStats = new Map<string, number>();
+  await Promise.all(
+    files.map(filepath => limit(async () => {
+      try {
+        const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
+        const stats = await fs.stat(absolutePath);
+        fileStats.set(filepath, stats.mtimeMs);
+      } catch {
+        // File not accessible - skip
+      }
+    }))
+  );
+  return fileStats;
+}
+
+/**
+ * Build a normalized map of manifest file paths for comparison.
+ * Handles cases where manifest has absolute paths (from tests or legacy data).
+ */
+function buildNormalizedManifestMap(
+  savedManifest: IndexManifest,
+  rootDir: string
+): Map<string, IndexManifest['files'][string]> {
+  const normalized = new Map<string, IndexManifest['files'][string]>();
+  for (const [filepath, entry] of Object.entries(savedManifest.files)) {
+    normalized.set(normalizeToRelativePath(filepath, rootDir), entry);
+  }
+  return normalized;
+}
+
+/**
+ * Classify files as added, modified, or deleted by comparing mtimes.
+ */
+function classifyByMtime(
+  fileStats: Map<string, number>,
+  manifestFiles: Map<string, IndexManifest['files'][string]>,
+  currentFileSet: Set<string>
+): { added: string[]; modified: string[]; deleted: string[] } {
+  const added: string[] = [];
+  const modified: string[] = [];
+  const deleted: string[] = [];
+
+  for (const [filepath, mtime] of fileStats) {
+    const entry = manifestFiles.get(filepath);
+    if (!entry) {
+      added.push(filepath);
+    } else if (entry.lastModified < mtime) {
+      modified.push(filepath);
+    }
+  }
+
+  for (const normalizedPath of manifestFiles.keys()) {
+    if (!currentFileSet.has(normalizedPath)) {
+      deleted.push(normalizedPath);
+    }
+  }
+
+  return { added, modified, deleted };
+}
+
+/**
  * Detects changes by comparing file modification times
  */
 async function mtimeBasedDetection(
   rootDir: string,
   savedManifest: IndexManifest
 ): Promise<ChangeDetectionResult> {
-  const added: string[] = [];
-  const modified: string[] = [];
-  const deleted: string[] = [];
-  
-  // Get all current files (already normalized to relative paths by getAllFiles)
   const currentFiles = await getAllFiles(rootDir);
   const currentFileSet = new Set(currentFiles);
-  
-  // Build a normalized map of manifest files for comparison
-  // This handles cases where manifest has absolute paths (from tests or legacy data)
-  const normalizedManifestFiles = new Map<string, typeof savedManifest.files[string]>();
-  for (const [filepath, entry] of Object.entries(savedManifest.files)) {
-    const normalizedPath = normalizeToRelativePath(filepath, rootDir);
-    normalizedManifestFiles.set(normalizedPath, entry);
-  }
-  
-  // Get mtimes for all current files
-  // Note: need to construct absolute path for fs.stat since currentFiles are relative
-  const fileStats = new Map<string, number>();
-  
-  for (const filepath of currentFiles) {
-    try {
-      // Construct absolute path for filesystem access (use path.join for cross-platform)
-      const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
-      const stats = await fs.stat(absolutePath);
-      fileStats.set(filepath, stats.mtimeMs);
-    } catch {
-      // Ignore files we can't stat
-      continue;
-    }
-  }
-  
-  // Check for new and modified files
-  for (const [filepath, mtime] of fileStats) {
-    const entry = normalizedManifestFiles.get(filepath);
-    
-    if (!entry) {
-      // New file
-      added.push(filepath);
-    } else if (entry.lastModified < mtime) {
-      // File modified since last index
-      modified.push(filepath);
-    }
-  }
-  
-  // Check for deleted files (use normalized manifest paths)
-  for (const normalizedPath of normalizedManifestFiles.keys()) {
-    if (!currentFileSet.has(normalizedPath)) {
-      deleted.push(normalizedPath);
-    }
-  }
-  
-  return {
-    added,
-    modified,
-    deleted,
-    reason: 'mtime',
-  };
+  const fileStats = await gatherFileStats(currentFiles, rootDir);
+  const manifestFiles = buildNormalizedManifestMap(savedManifest, rootDir);
+  const { added, modified, deleted } = classifyByMtime(fileStats, manifestFiles, currentFileSet);
+
+  return { added, modified, deleted, reason: 'mtime' };
 }
 
