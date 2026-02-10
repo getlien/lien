@@ -58,7 +58,7 @@ export class PersistentEmbeddingCache {
     this.dirty = false;
     this._hitCount = 0;
     this._missCount = 0;
-    this.allocatedSlots = INITIAL_ALLOCATED_SLOTS;
+    this.allocatedSlots = Math.min(INITIAL_ALLOCATED_SLOTS, this.maxEntries);
     this.data = Buffer.alloc(this.allocatedSlots * this.bytesPerVector);
   }
 
@@ -70,8 +70,9 @@ export class PersistentEmbeddingCache {
       const indexData = await fs.readFile(indexPath, 'utf-8');
       const index: CacheIndex = JSON.parse(indexData);
 
-      // Clear cache if model name mismatches
-      if (index.modelName !== this.modelName || index.dimensions !== this.dimensions) {
+      // Clear cache if version, model name, or dimensions mismatch
+      if (index.version !== 1 || index.modelName !== this.modelName || index.dimensions !== this.dimensions) {
+        await this.deleteFiles();
         this.clear();
         return;
       }
@@ -134,6 +135,10 @@ export class PersistentEmbeddingCache {
   }
 
   set(hash: string, embedding: Float32Array): void {
+    if (embedding.length !== this.dimensions) {
+      throw new Error(`Embedding dimension mismatch: expected ${this.dimensions}, got ${embedding.length}`);
+    }
+
     // If already exists, update in place
     const existing = this.entries.get(hash);
     if (existing) {
@@ -228,8 +233,13 @@ export class PersistentEmbeddingCache {
     this.freeSlots = [];
     this.nextSlot = 0;
     this.dirty = false;
-    this.allocatedSlots = INITIAL_ALLOCATED_SLOTS;
+    this.allocatedSlots = Math.min(INITIAL_ALLOCATED_SLOTS, this.maxEntries);
     this.data = Buffer.alloc(this.allocatedSlots * this.bytesPerVector);
+  }
+
+  private async deleteFiles(): Promise<void> {
+    try { await fs.unlink(this.cachePath + '.json'); } catch { /* ignore */ }
+    try { await fs.unlink(this.cachePath + '.bin'); } catch { /* ignore */ }
   }
 
   private writeVector(slot: number, embedding: Float32Array): void {
