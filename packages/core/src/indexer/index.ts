@@ -223,6 +223,27 @@ async function handleUpdates(
 }
 
 /**
+ * Create, initialize, and dispose a persistent embedding cache around an operation.
+ * Centralizes cache lifecycle to avoid duplicated init/dispose patterns.
+ */
+async function withEmbeddingCache<T>(
+  dbPath: string,
+  operation: (cache: PersistentEmbeddingCache) => Promise<T>
+): Promise<T> {
+  const cache = new PersistentEmbeddingCache({
+    cachePath: path.join(dbPath, 'embedding-cache'),
+    maxEntries: DEFAULT_EMBEDDING_CACHE_MAX_ENTRIES,
+    modelName: DEFAULT_EMBEDDING_MODEL,
+  });
+  await cache.initialize();
+  try {
+    return await operation(cache);
+  } finally {
+    await cache.dispose();
+  }
+}
+
+/**
  * Try incremental indexing if a manifest exists.
  * Returns result if incremental completed, null if full index needed.
  */
@@ -276,46 +297,37 @@ async function tryIncrementalIndex(
     await embeddings.initialize();
   }
 
-  // Initialize persistent embedding cache
-  const cache = new PersistentEmbeddingCache({
-    cachePath: path.join(vectorDB.dbPath, 'embedding-cache'),
-    maxEntries: DEFAULT_EMBEDDING_CACHE_MAX_ENTRIES,
-    modelName: DEFAULT_EMBEDDING_MODEL,
-  });
-  await cache.initialize();
-
   try {
-    // Process changes
-    await handleDeletions(changes.deleted, vectorDB, manifest);
-    const indexedCount = await handleUpdates(
-      changes.added,
-      changes.modified,
-      vectorDB,
-      embeddings,
-      options,
-      rootDir,
-      cache
-    );
+    return await withEmbeddingCache(vectorDB.dbPath, async (cache) => {
+      await handleDeletions(changes.deleted, vectorDB, manifest);
+      const indexedCount = await handleUpdates(
+        changes.added,
+        changes.modified,
+        vectorDB,
+        embeddings,
+        options,
+        rootDir,
+        cache
+      );
 
-    // Update git state
-    await updateGitState(rootDir, vectorDB, manifest);
+      await updateGitState(rootDir, vectorDB, manifest);
 
-    options.onProgress?.({
-      phase: 'complete',
-      message: `Updated ${indexedCount} file${indexedCount !== 1 ? 's' : ''}, removed ${totalDeleted}`,
-      filesTotal: totalChanges + totalDeleted,
-      filesProcessed: indexedCount + totalDeleted,
+      options.onProgress?.({
+        phase: 'complete',
+        message: `Updated ${indexedCount} file${indexedCount !== 1 ? 's' : ''}, removed ${totalDeleted}`,
+        filesTotal: totalChanges + totalDeleted,
+        filesProcessed: indexedCount + totalDeleted,
+      });
+
+      return {
+        success: true,
+        filesIndexed: indexedCount,
+        chunksCreated: 0, // Not tracked in incremental mode
+        durationMs: Date.now() - startTime,
+        incremental: true,
+      };
     });
-
-    return {
-      success: true,
-      filesIndexed: indexedCount,
-      chunksCreated: 0, // Not tracked in incremental mode
-      durationMs: Date.now() - startTime,
-      incremental: true,
-    };
   } finally {
-    await cache.dispose();
     if (ownEmbeddings) {
       await embeddings.dispose();
     }
@@ -454,12 +466,12 @@ async function performFullIndex(
   }
 
   // 3. Initialize embeddings
-  options.onProgress?.({ 
-    phase: 'embedding', 
+  options.onProgress?.({
+    phase: 'embedding',
     message: 'Loading embedding model...',
     filesTotal: files.length,
   });
-  
+
   const ownEmbeddings = !options.embeddings;
   const embeddings = options.embeddings ?? new WorkerEmbeddings();
   if (ownEmbeddings) {
@@ -470,42 +482,53 @@ async function performFullIndex(
   const indexConfig = getIndexingConfig(rootDir);
   const progressTracker = createProgressTracker(files, options.onProgress);
 
-  // Initialize persistent embedding cache
-  const cache = new PersistentEmbeddingCache({
-    cachePath: path.join(vectorDB.dbPath, 'embedding-cache'),
-    maxEntries: DEFAULT_EMBEDDING_CACHE_MAX_ENTRIES,
-    modelName: DEFAULT_EMBEDDING_MODEL,
-  });
-  await cache.initialize();
-
-  const batchProcessor = new ChunkBatchProcessor(vectorDB, embeddings, {
-    batchThreshold: 100,
-    embeddingBatchSize: indexConfig.embeddingBatchSize,
-  }, progressTracker, cache);
-
-  options.onProgress?.({
-    phase: 'indexing',
-    message: `Processing ${files.length} files...`,
-    filesTotal: files.length,
-    filesProcessed: 0,
-  });
-
   try {
-    // 5. Process files with concurrency limit
-    const limit = pLimit(indexConfig.concurrency);
-    const filePromises = files.map(file =>
-      limit(() => processFileForIndexing(
-        file,
-        rootDir,
-        batchProcessor,
-        indexConfig,
-        progressTracker,
-        options.verbose ?? false
-      ))
-    );
+    // 5. Process files with embedding cache
+    const batchProcessor = await withEmbeddingCache(vectorDB.dbPath, async (cache) => {
+      const bp = new ChunkBatchProcessor(vectorDB, embeddings, {
+        batchThreshold: 100,
+        embeddingBatchSize: indexConfig.embeddingBatchSize,
+      }, progressTracker, cache);
 
-    await Promise.all(filePromises);
-    await batchProcessor.flush();
+      options.onProgress?.({
+        phase: 'indexing',
+        message: `Processing ${files.length} files...`,
+        filesTotal: files.length,
+        filesProcessed: 0,
+      });
+
+      const limit = pLimit(indexConfig.concurrency);
+      const filePromises = files.map(file =>
+        limit(() => processFileForIndexing(
+          file, rootDir, bp, indexConfig, progressTracker, options.verbose ?? false
+        ))
+      );
+
+      await Promise.all(filePromises);
+      await bp.flush();
+      return bp;
+    });
+
+    // 6. Save results
+    options.onProgress?.({ phase: 'saving', message: 'Saving index manifest...' });
+    await saveIndexResults(batchProcessor, vectorDB, rootDir);
+
+    const { processedChunks } = batchProcessor.getResults();
+    options.onProgress?.({
+      phase: 'complete',
+      message: 'Indexing complete',
+      filesTotal: files.length,
+      filesProcessed: progressTracker.getProcessedCount(),
+      chunksProcessed: processedChunks,
+    });
+
+    return {
+      success: true,
+      filesIndexed: progressTracker.getProcessedCount(),
+      chunksCreated: processedChunks,
+      durationMs: Date.now() - startTime,
+      incremental: false,
+    };
   } catch (error) {
     return {
       success: false,
@@ -516,32 +539,10 @@ async function performFullIndex(
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
-    await cache.dispose();
     if (ownEmbeddings) {
       await embeddings.dispose();
     }
   }
-
-  // 6. Save results
-  options.onProgress?.({ phase: 'saving', message: 'Saving index manifest...' });
-  await saveIndexResults(batchProcessor, vectorDB, rootDir);
-
-  const { processedChunks } = batchProcessor.getResults();
-  options.onProgress?.({
-    phase: 'complete',
-    message: 'Indexing complete',
-    filesTotal: files.length,
-    filesProcessed: progressTracker.getProcessedCount(),
-    chunksProcessed: processedChunks,
-  });
-
-  return {
-    success: true,
-    filesIndexed: progressTracker.getProcessedCount(),
-    chunksCreated: processedChunks,
-    durationMs: Date.now() - startTime,
-    incremental: false,
-  };
 }
 
 /**
