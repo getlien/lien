@@ -16,12 +16,14 @@ export class LocalEmbeddings implements EmbeddingService {
   private async createPipeline(device: EmbeddingDevice): Promise<FeatureExtractionPipeline> {
     if (device === 'webgpu') {
       try {
-        return await pipeline('feature-extraction', this.modelName, { device: 'webgpu' }) as FeatureExtractionPipeline;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- v3 pipeline overloads produce TS2590
+        return await (pipeline as any)('feature-extraction', this.modelName, { device: 'webgpu' });
       } catch {
         // WebGPU unavailable — fall back to CPU silently
       }
     }
-    return await pipeline('feature-extraction', this.modelName) as FeatureExtractionPipeline;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- v3 pipeline overloads produce TS2590
+    return await (pipeline as any)('feature-extraction', this.modelName);
   }
 
   async initialize(): Promise<void> {

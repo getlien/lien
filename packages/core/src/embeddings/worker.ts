@@ -12,12 +12,14 @@ let processing: Promise<void> = Promise.resolve();
 async function createPipeline(device: EmbeddingDevice): Promise<FeatureExtractionPipeline> {
   if (device === 'webgpu') {
     try {
-      return await pipeline('feature-extraction', DEFAULT_EMBEDDING_MODEL, { device: 'webgpu' }) as FeatureExtractionPipeline;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- v3 pipeline overloads produce TS2590
+      return await (pipeline as any)('feature-extraction', DEFAULT_EMBEDDING_MODEL, { device: 'webgpu' });
     } catch {
       // WebGPU unavailable — fall back to CPU silently
     }
   }
-  return await pipeline('feature-extraction', DEFAULT_EMBEDDING_MODEL) as FeatureExtractionPipeline;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- v3 pipeline overloads produce TS2590
+  return await (pipeline as any)('feature-extraction', DEFAULT_EMBEDDING_MODEL);
 }
 
 interface InitMessage {
