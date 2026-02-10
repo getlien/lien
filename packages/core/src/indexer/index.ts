@@ -238,17 +238,20 @@ async function withIndexingServices<T>(
     await embeddings.initialize();
   }
 
-  const cache = new PersistentEmbeddingCache({
-    cachePath: path.join(vectorDB.dbPath, 'embedding-cache'),
-    maxEntries: DEFAULT_EMBEDDING_CACHE_MAX_ENTRIES,
-    modelName: DEFAULT_EMBEDDING_MODEL,
-  });
-  await cache.initialize();
-
   try {
-    return await operation(embeddings, cache);
+    const cache = new PersistentEmbeddingCache({
+      cachePath: path.join(vectorDB.dbPath, 'embedding-cache'),
+      maxEntries: DEFAULT_EMBEDDING_CACHE_MAX_ENTRIES,
+      modelName: DEFAULT_EMBEDDING_MODEL,
+    });
+    await cache.initialize();
+
+    try {
+      return await operation(embeddings, cache);
+    } finally {
+      await cache.dispose();
+    }
   } finally {
-    await cache.dispose();
     if (ownEmbeddings) {
       await embeddings.dispose();
     }

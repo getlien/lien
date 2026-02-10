@@ -106,7 +106,8 @@ export class PersistentEmbeddingCache {
 
       this.dirty = false;
     } catch {
-      // Files don't exist or are corrupted — start fresh
+      // Files don't exist or are corrupted — delete stale files and start fresh
+      await this.deleteFiles();
       this.clear();
     }
   }
@@ -192,14 +193,14 @@ export class PersistentEmbeddingCache {
     const indexTmp = indexPath + '.tmp';
     const dataTmp = dataPath + '.tmp';
 
-    // Write atomically: write to .tmp then rename
-    await fs.writeFile(indexTmp, JSON.stringify(index), 'utf-8');
-    await fs.rename(indexTmp, indexPath);
-
-    // Only write the used portion of the buffer
+    // Write .bin first, then .json — if crash between renames,
+    // stale index won't point at new data (safe direction)
     const usedBytes = this.nextSlot * this.bytesPerVector;
     await fs.writeFile(dataTmp, this.data.subarray(0, usedBytes));
     await fs.rename(dataTmp, dataPath);
+
+    await fs.writeFile(indexTmp, JSON.stringify(index), 'utf-8');
+    await fs.rename(indexTmp, indexPath);
 
     this.dirty = false;
   }
