@@ -411,20 +411,25 @@ export async function indexMultipleFiles(
       const normalizedPath = normalizeToRelativePath(filepath);
       const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir);
 
-      // Chain DB writes sequentially (safe for concurrent-unfriendly DBs)
+      // Chain DB writes sequentially (safe for concurrent-unfriendly DBs).
+      // Catch errors per-write so one failure doesn't break the chain.
       writeChain = writeChain.then(async () => {
-        if (isOk(result)) {
-          const { filepath: storedPath, result: processResult, mtime, contentHash } = result.value;
+        try {
+          if (isOk(result)) {
+            const { filepath: storedPath, result: processResult, mtime, contentHash } = result.value;
 
-          if (processResult === null) {
-            await handleEmptyFile(storedPath, mtime, contentHash, vectorDB);
+            if (processResult === null) {
+              await handleEmptyFile(storedPath, mtime, contentHash, vectorDB);
+            } else {
+              await handleNonEmptyFile(storedPath, processResult, mtime, contentHash, vectorDB, verbose || false, manifestEntries);
+            }
+            processedCount++;
           } else {
-            await handleNonEmptyFile(storedPath, processResult, mtime, contentHash, vectorDB, verbose || false, manifestEntries);
+            await handleFileNotFound(normalizedPath, result.error, vectorDB, verbose || false);
+            processedCount++;
           }
-          processedCount++;
-        } else {
-          await handleFileNotFound(normalizedPath, result.error, vectorDB, verbose || false);
-          processedCount++;
+        } catch (error) {
+          console.error(`[Lien] DB write failed for ${normalizedPath}: ${error}`);
         }
       });
     });
