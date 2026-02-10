@@ -63,53 +63,61 @@ export class PersistentEmbeddingCache {
   }
 
   async initialize(): Promise<void> {
-    const indexPath = this.cachePath + '.json';
-    const dataPath = this.cachePath + '.bin';
-
     try {
-      const indexData = await fs.readFile(indexPath, 'utf-8');
-      const index: CacheIndex = JSON.parse(indexData);
+      const { index, binData } = await this.loadCacheFiles();
 
-      // Clear cache if version, model name, or dimensions mismatch
-      if (index.version !== 1 || index.modelName !== this.modelName || index.dimensions !== this.dimensions) {
-        await this.deleteFiles();
-        this.clear();
+      if (!this.isValidCache(index)) {
+        await this.resetCache();
         return;
       }
 
-      // Restore entries
-      this.entries = new Map(Object.entries(index.entries));
-      this.nextSlot = index.nextSlot;
-      this.freeSlots = index.freeSlots;
-
-      // Find max access counter to resume from
-      this.accessCounter = 0;
-      for (const entry of this.entries.values()) {
-        if (entry.lastAccess > this.accessCounter) {
-          this.accessCounter = entry.lastAccess;
-        }
-      }
-
-      // Load binary data
-      const binData = await fs.readFile(dataPath);
-      this.allocatedSlots = Math.max(
-        INITIAL_ALLOCATED_SLOTS,
-        this.nextSlot,
-        this.entries.size
-      );
-      // Ensure allocated slots can hold at least what we need
-      while (this.allocatedSlots < this.nextSlot) {
-        this.allocatedSlots *= 2;
-      }
-      this.data = Buffer.alloc(this.allocatedSlots * this.bytesPerVector);
-      binData.copy(this.data, 0, 0, Math.min(binData.length, this.data.length));
-
-      this.dirty = false;
+      this.restoreFromDisk(index, binData);
     } catch {
-      // Files don't exist or are corrupted — delete stale files and start fresh
-      await this.deleteFiles();
-      this.clear();
+      await this.resetCache();
     }
+  }
+
+  private async loadCacheFiles(): Promise<{ index: CacheIndex; binData: Buffer }> {
+    const [indexData, binData] = await Promise.all([
+      fs.readFile(this.cachePath + '.json', 'utf-8'),
+      fs.readFile(this.cachePath + '.bin'),
+    ]);
+    return { index: JSON.parse(indexData), binData };
+  }
+
+  private isValidCache(index: CacheIndex): boolean {
+    return index.version === 1 &&
+      index.modelName === this.modelName &&
+      index.dimensions === this.dimensions;
+  }
+
+  private restoreFromDisk(index: CacheIndex, binData: Buffer): void {
+    this.entries = new Map(Object.entries(index.entries));
+    this.nextSlot = index.nextSlot;
+    this.freeSlots = index.freeSlots;
+
+    // Resume access counter from highest stored value
+    this.accessCounter = 0;
+    for (const entry of this.entries.values()) {
+      if (entry.lastAccess > this.accessCounter) {
+        this.accessCounter = entry.lastAccess;
+      }
+    }
+
+    // Allocate buffer and copy stored vectors
+    this.allocatedSlots = Math.max(INITIAL_ALLOCATED_SLOTS, this.nextSlot, this.entries.size);
+    while (this.allocatedSlots < this.nextSlot) {
+      this.allocatedSlots *= 2;
+    }
+    this.data = Buffer.alloc(this.allocatedSlots * this.bytesPerVector);
+    binData.copy(this.data, 0, 0, Math.min(binData.length, this.data.length));
+
+    this.dirty = false;
+  }
+
+  private async resetCache(): Promise<void> {
+    await this.deleteFiles();
+    this.clear();
   }
 
   computeHash(text: string): string {
