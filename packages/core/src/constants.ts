@@ -53,3 +53,7 @@ export const MAX_CHUNKS_PER_FILE = 100;
 // v3: Added cognitiveComplexity field to schema
 // v4: Added Halstead metrics (volume, difficulty, effort, bugs)
 export const INDEX_FORMAT_VERSION = 4;
+
+// Persistent embedding cache
+// At 384 dimensions (Float32), 50K entries ≈ 73 MB buffer + ~4 MB JSON index
+export const DEFAULT_EMBEDDING_CACHE_MAX_ENTRIES = 50_000;

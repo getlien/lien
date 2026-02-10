@@ -3,34 +3,88 @@ name: Veille Code Review
 on:
   pull_request:
     types: [opened, synchronize]
+  push:
+    branches: [main]
 
-# Cancel previous runs on same PR to save resources
+# Cancel previous runs on same PR/branch to save resources
 concurrency:
-  group: veille-review-${{ github.event.pull_request.number }}
+  group: veille-review-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  review:
+  # Warm the Lien index cache on main so PR runs can restore it
+  warm-cache:
     runs-on: ubuntu-latest
-    # Only run if PR is not from a fork (secrets not available in forks)
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    
+    if: github.event_name == 'push'
+
     permissions:
       contents: read
-      pull-requests: write
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Need full history for delta tracking
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: 'npm'
-      
+
+      - name: Cache builds
+        id: cache-build
+        uses: actions/cache@v4
+        with:
+          path: |
+            packages/core/dist
+            node_modules
+            packages/*/node_modules
+          key: lien-build-v5-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/*/package.json', 'packages/*/tsconfig.json', 'packages/core/src/**/*', 'packages/review/src/**/*', 'packages/action/src/**/*') }}
+
+      - name: Cache Lien index
+        uses: actions/cache@v4
+        with:
+          path: .lien
+          key: lien-index-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            lien-index-${{ runner.os }}-
+
+      - name: Install dependencies
+        if: steps.cache-build.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Build Core
+        if: steps.cache-build.outputs.cache-hit != 'true'
+        run: npm run build -w @liendev/core
+
+      - name: Build and run indexer
+        run: |
+          node --input-type=module -e "
+            import { indexCodebase } from '@liendev/core';
+            const result = await indexCodebase({ rootDir: process.cwd() });
+            console.log('Index result:', JSON.stringify(result, null, 2));
+          "
+
+  review:
+    runs-on: ubuntu-latest
+    # Only run on PRs, not on push to main
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for delta tracking
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
       # Cache node_modules and built packages
       - name: Cache builds
         id: cache-build
@@ -43,12 +97,21 @@ jobs:
             node_modules
             packages/*/node_modules
           key: lien-build-v5-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/*/package.json', 'packages/*/tsconfig.json', 'packages/core/src/**/*', 'packages/review/src/**/*', 'packages/action/src/**/*') }}
-      
+
+      # Cache Lien index and embedding cache across runs
+      - name: Cache Lien index
+        uses: actions/cache@v4
+        with:
+          path: .lien
+          key: lien-index-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+          restore-keys: |
+            lien-index-${{ runner.os }}-
+
       # Always install deps if not cached - native modules need to be present
       - name: Install dependencies
         if: steps.cache-build.outputs.cache-hit != 'true'
         run: npm ci
-      
+
       - name: Build Core (required by Review)
         if: steps.cache-build.outputs.cache-hit != 'true'
         run: npm run build -w @liendev/core
@@ -60,12 +123,12 @@ jobs:
       - name: Build Action
         if: steps.cache-build.outputs.cache-hit != 'true'
         run: npm run build -w @liendev/action
-      
+
       - name: Ensure dist/package.json is ESM
         run: |
           echo '{"type":"module"}' > packages/action/dist/package.json
           cat packages/action/dist/package.json
-      
+
       # Install @liendev/core into node_modules so action can import it
       # This is how CLI works - core is a dependency installed via npm
       - name: Install @liendev/core for action
@@ -73,7 +136,7 @@ jobs:
           npm install ./packages/core
           # Verify it works with ESM import (not just require)
           node --input-type=module -e "import * as c from '@liendev/core'; console.log('Core ESM import works! Exports:', Object.keys(c).slice(0,5).join(', '), '...')"
-      
+
       - name: Run AI Code Review
         env:
           ACTIONS_STEP_DEBUG: true
@@ -85,4 +148,3 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           enable_delta_tracking: true  # Automatic base vs head comparison
           review_style: 'summary'
-

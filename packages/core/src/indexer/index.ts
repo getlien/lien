@@ -21,6 +21,8 @@ import {
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CONCURRENCY,
   DEFAULT_EMBEDDING_BATCH_SIZE,
+  DEFAULT_EMBEDDING_CACHE_MAX_ENTRIES,
+  DEFAULT_EMBEDDING_MODEL,
 } from '../constants.js';
 import { chunkFile } from './chunker.js';
 import { computeContentHash } from './content-hash.js';
@@ -36,6 +38,7 @@ import { indexMultipleFiles } from './incremental.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import { ChunkBatchProcessor } from './chunk-batch-processor.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
+import { PersistentEmbeddingCache } from '../embeddings/persistent-cache.js';
 
 /**
  * Options for indexing a codebase
@@ -200,19 +203,20 @@ async function handleUpdates(
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
   options: IndexingOptions,
-  rootDir: string
+  rootDir: string,
+  cache?: PersistentEmbeddingCache
 ): Promise<number> {
   const filesToIndex = [...addedFiles, ...modifiedFiles];
-  
+
   if (filesToIndex.length === 0) {
     return 0;
   }
-  
+
   const count = await indexMultipleFiles(
     filesToIndex,
     vectorDB,
     embeddings,
-    { verbose: options.verbose, rootDir }
+    { verbose: options.verbose, rootDir, cache }
   );
   
   await writeVersionFile(vectorDB.dbPath);
@@ -220,12 +224,14 @@ async function handleUpdates(
 }
 
 /**
- * Manage embedding service lifecycle around an operation.
- * Handles init/dispose when no pre-initialized service is provided.
+ * Manage embedding service and persistent cache lifecycle around an operation.
+ * Handles init/dispose for both services, so callers only provide the work.
  */
-async function withEmbeddings<T>(
+async function withIndexingServices<T>(
+  vectorDB: VectorDBInterface,
   preInitialized: EmbeddingService | undefined,
-  operation: (embeddings: EmbeddingService) => Promise<T>
+  verbose: boolean,
+  operation: (embeddings: EmbeddingService, cache: PersistentEmbeddingCache) => Promise<T>
 ): Promise<T> {
   const ownEmbeddings = !preInitialized;
   const embeddings = preInitialized ?? new WorkerEmbeddings();
@@ -234,7 +240,31 @@ async function withEmbeddings<T>(
   }
 
   try {
-    return await operation(embeddings);
+    const cache = new PersistentEmbeddingCache({
+      cachePath: path.join(vectorDB.dbPath, 'embedding-cache'),
+      maxEntries: DEFAULT_EMBEDDING_CACHE_MAX_ENTRIES,
+      modelName: DEFAULT_EMBEDDING_MODEL,
+    });
+    await cache.initialize();
+
+    try {
+      return await operation(embeddings, cache);
+    } finally {
+      if (verbose) {
+        const total = cache.hitCount + cache.missCount;
+        if (total > 0) {
+          const hitRate = ((cache.hitCount / total) * 100).toFixed(1);
+          console.log(`[Lien] Embedding cache: ${cache.hitCount} hits, ${cache.missCount} misses (${hitRate}% hit rate)`);
+        }
+      }
+      try {
+        await cache.dispose();
+      } catch (error) {
+        if (verbose) {
+          console.error(`[Lien] Warning: cache flush failed: ${error}`);
+        }
+      }
+    }
   } finally {
     if (ownEmbeddings) {
       await embeddings.dispose();
@@ -334,7 +364,7 @@ async function tryIncrementalIndex(
     message: `Detected ${totalChanges} files to index, ${totalDeleted} to remove`,
   });
 
-  return await withEmbeddings(options.embeddings, async (embeddings) => {
+  return await withIndexingServices(vectorDB, options.embeddings, options.verbose ?? false, async (embeddings, cache) => {
     await handleDeletions(changes.deleted, vectorDB, manifest);
     const indexedCount = await handleUpdates(
       changes.added,
@@ -342,7 +372,8 @@ async function tryIncrementalIndex(
       vectorDB,
       embeddings,
       options,
-      rootDir
+      rootDir,
+      cache
     );
 
     await updateGitState(rootDir, vectorDB, manifest);
@@ -475,6 +506,7 @@ async function batchProcessFiles(
   rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
+  cache: PersistentEmbeddingCache,
   progressTracker: ProgressTracker,
   verbose: boolean
 ): Promise<ChunkBatchProcessor> {
@@ -483,7 +515,7 @@ async function batchProcessFiles(
   const bp = new ChunkBatchProcessor(vectorDB, embeddings, {
     batchThreshold: 100,
     embeddingBatchSize: indexConfig.embeddingBatchSize,
-  }, progressTracker);
+  }, progressTracker, cache);
 
   const limit = pLimit(indexConfig.concurrency);
   await Promise.all(
@@ -541,8 +573,8 @@ async function performFullIndex(
       filesProcessed: 0,
     });
 
-    const batchProcessor = await withEmbeddings(options.embeddings,
-      (embeddings) => batchProcessFiles(files, rootDir, vectorDB, embeddings, progressTracker, options.verbose ?? false)
+    const batchProcessor = await withIndexingServices(vectorDB, options.embeddings, options.verbose ?? false,
+      (embeddings, cache) => batchProcessFiles(files, rootDir, vectorDB, embeddings, cache, progressTracker, options.verbose ?? false)
     );
 
     // 4. Save results

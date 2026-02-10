@@ -15,6 +15,7 @@ import { ManifestManager } from './manifest.js';
 import { computeContentHash } from './content-hash.js';
 import { CodeChunk } from './types.js';
 import { Result, Ok, Err, isOk } from '../utils/result.js';
+import { PersistentEmbeddingCache, embedBatchWithCache } from '../embeddings/persistent-cache.js';
 
 /**
  * Extract repository identifier from project root.
@@ -64,6 +65,7 @@ export function normalizeToRelativePath(filepath: string, rootDir?: string): str
 export interface IncrementalIndexOptions {
   verbose?: boolean;
   rootDir?: string; // Root directory for extracting repoId
+  cache?: PersistentEmbeddingCache;
 }
 
 /**
@@ -104,7 +106,8 @@ async function processFileContent(
   content: string,
   embeddings: EmbeddingService,
   verbose: boolean,
-  rootDir?: string
+  rootDir?: string,
+  cache?: PersistentEmbeddingCache
 ): Promise<ProcessFileResult | null> {
   // Use defaults for all chunk settings
   const chunkSize = DEFAULT_CHUNK_SIZE;
@@ -142,7 +145,9 @@ async function processFileContent(
   
   for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
     const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
-    const microResults = await embeddings.embedBatch(microBatch);
+    const microResults = cache
+      ? await embedBatchWithCache(microBatch, embeddings, cache)
+      : await embeddings.embedBatch(microBatch);
     vectors.push(...microResults);
     
     // Yield to event loop for responsiveness
@@ -202,7 +207,7 @@ export async function indexSingleFile(
     const content = await fs.readFile(filepath, 'utf-8');
     
     // Process file content (chunking + embeddings) - use normalized path for storage
-    const result = await processFileContent(normalizedPath, content, embeddings, verbose || false, rootDir);
+    const result = await processFileContent(normalizedPath, content, embeddings, verbose || false, rootDir, options.cache);
     
     // Get actual file mtime and compute content hash for manifest
     const stats = await fs.stat(filepath);
@@ -258,16 +263,17 @@ async function processSingleFileForIndexing(
   normalizedPath: string,
   embeddings: EmbeddingService,
   verbose: boolean,
-  rootDir?: string
+  rootDir?: string,
+  cache?: PersistentEmbeddingCache
 ): Promise<Result<FileProcessResult, string>> {
   try {
     // Read file stats and content using original path (for filesystem access)
     const stats = await fs.stat(filepath);
     const content = await fs.readFile(filepath, 'utf-8');
     const contentHash = await computeContentHash(filepath);
-    
+
     // Process content using normalized path (for storage)
-    const result = await processFileContent(normalizedPath, content, embeddings, verbose, rootDir);
+    const result = await processFileContent(normalizedPath, content, embeddings, verbose, rootDir, cache);
     
     return Ok({
       filepath: normalizedPath,  // Store normalized path
@@ -433,7 +439,7 @@ export async function indexMultipleFiles(
   for (const filepath of filepaths) {
     const task = limit(async () => {
       const normalizedPath = normalizeToRelativePath(filepath);
-      const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir);
+      const result = await processSingleFileForIndexing(filepath, normalizedPath, embeddings, verbose || false, rootDir, options.cache);
 
       // Chain DB writes sequentially (safe for concurrent-unfriendly DBs).
       // Catch errors per-write so one failure doesn't break the chain.

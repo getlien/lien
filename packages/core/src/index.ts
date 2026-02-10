@@ -59,6 +59,7 @@ export type { EcosystemPreset } from './indexer/ecosystem-presets.js';
 export { LocalEmbeddings } from './embeddings/local.js';
 export { WorkerEmbeddings } from './embeddings/worker-embeddings.js';
 export { CachedEmbeddings } from './embeddings/cache.js';
+export { PersistentEmbeddingCache, embedBatchWithCache, computeEmbeddingHash } from './embeddings/persistent-cache.js';
 export type { EmbeddingService } from './embeddings/types.js';
 export { EMBEDDING_DIMENSION, EMBEDDING_DIMENSIONS } from './embeddings/types.js';
 
@@ -202,6 +203,7 @@ export {
   DEFAULT_DEBOUNCE_MS,
   INDEX_FORMAT_VERSION,
   MAX_CHUNKS_PER_FILE,
+  DEFAULT_EMBEDDING_CACHE_MAX_ENTRIES,
 } from './constants.js';
 
 // =============================================================================

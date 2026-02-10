@@ -18,6 +18,7 @@ import type { EmbeddingService } from '../embeddings/types.js';
 import type { ProgressTracker } from './progress-tracker.js';
 import type { CodeChunk } from './types.js';
 import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
+import { PersistentEmbeddingCache, embedBatchWithCache } from '../embeddings/persistent-cache.js';
 
 /** A chunk with its content ready for embedding */
 export interface ChunkWithContent {
@@ -47,13 +48,16 @@ export interface FileIndexEntry {
  */
 export async function processEmbeddingMicroBatches(
   texts: string[],
-  embeddings: EmbeddingService
+  embeddings: EmbeddingService,
+  cache?: PersistentEmbeddingCache
 ): Promise<Float32Array[]> {
   const results: Float32Array[] = [];
-  
+
   for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
     const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
-    const microResults = await embeddings.embedBatch(microBatch);
+    const microResults = cache
+      ? await embedBatchWithCache(microBatch, embeddings, cache)
+      : await embeddings.embedBatch(microBatch);
     results.push(...microResults);
     
     // Yield to event loop for UI responsiveness
@@ -94,7 +98,8 @@ export class ChunkBatchProcessor {
     private readonly vectorDB: VectorDBInterface,
     private readonly embeddings: EmbeddingService,
     private readonly config: BatchProcessorConfig,
-    private readonly progressTracker: ProgressTracker
+    private readonly progressTracker: ProgressTracker,
+    private readonly cache?: PersistentEmbeddingCache
   ) {}
 
   /**
@@ -213,7 +218,7 @@ export class ChunkBatchProcessor {
 
         // Generate embeddings
         this.progressTracker.setMessage?.('Generating embeddings...');
-        const embeddingVectors = await processEmbeddingMicroBatches(texts, this.embeddings);
+        const embeddingVectors = await processEmbeddingMicroBatches(texts, this.embeddings, this.cache);
         this.processedChunkCount += batch.length;
 
         // Insert into vector database
