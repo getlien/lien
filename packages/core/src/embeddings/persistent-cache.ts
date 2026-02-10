@@ -215,13 +215,7 @@ export class PersistentEmbeddingCache {
 
   async dispose(): Promise<void> {
     await this.flush();
-    this.entries.clear();
-    this.data = Buffer.alloc(0);
-    this.freeSlots = [];
-    this.nextSlot = 0;
-    this.accessCounter = 0;
-    this.allocatedSlots = 0;
-    this.dirty = false;
+    this.clear();
   }
 
   get size(): number {

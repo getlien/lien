@@ -207,7 +207,7 @@ export async function indexSingleFile(
     const content = await fs.readFile(filepath, 'utf-8');
     
     // Process file content (chunking + embeddings) - use normalized path for storage
-    const result = await processFileContent(normalizedPath, content, embeddings, verbose || false, rootDir);
+    const result = await processFileContent(normalizedPath, content, embeddings, verbose || false, rootDir, options.cache);
     
     // Get actual file mtime and compute content hash for manifest
     const stats = await fs.stat(filepath);
