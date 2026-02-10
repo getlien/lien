@@ -257,7 +257,13 @@ async function withIndexingServices<T>(
           console.log(`[Lien] Embedding cache: ${cache.hitCount} hits, ${cache.missCount} misses (${hitRate}% hit rate)`);
         }
       }
-      await cache.dispose();
+      try {
+        await cache.dispose();
+      } catch (error) {
+        if (verbose) {
+          console.error(`[Lien] Warning: cache flush failed: ${error}`);
+        }
+      }
     }
   } finally {
     if (ownEmbeddings) {

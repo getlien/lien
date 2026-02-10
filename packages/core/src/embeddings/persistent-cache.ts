@@ -121,10 +121,17 @@ export class PersistentEmbeddingCache {
       }
     }
 
-    // Allocate buffer and copy stored vectors
-    this.allocatedSlots = Math.max(INITIAL_ALLOCATED_SLOTS, this.nextSlot, this.entries.size);
+    // Allocate buffer and copy stored vectors (cap at maxEntries like constructor/clear)
+    this.allocatedSlots = Math.min(
+      Math.max(INITIAL_ALLOCATED_SLOTS, this.nextSlot, this.entries.size),
+      this.maxEntries
+    );
     while (this.allocatedSlots < this.nextSlot) {
-      this.allocatedSlots *= 2;
+      this.allocatedSlots = Math.min(this.allocatedSlots * 2, this.maxEntries);
+      if (this.allocatedSlots < this.nextSlot) {
+        this.allocatedSlots = this.nextSlot;
+        break;
+      }
     }
     this.data = Buffer.alloc(this.allocatedSlots * this.bytesPerVector);
     binData.copy(this.data, 0, 0, requiredBytes);
