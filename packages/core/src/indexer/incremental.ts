@@ -376,6 +376,30 @@ async function handleFileNotFound(
 }
 
 /**
+ * Apply a single file's processing result to the vector DB.
+ * Handles success (empty/non-empty) and failure (file not found) cases.
+ */
+async function applyFileResult(
+  result: Result<FileProcessResult, string>,
+  normalizedPath: string,
+  vectorDB: VectorDBInterface,
+  verbose: boolean,
+  manifestEntries: Array<{ filepath: string; chunkCount: number; mtime: number; contentHash: string }>
+): Promise<void> {
+  if (isOk(result)) {
+    const { filepath: storedPath, result: processResult, mtime, contentHash } = result.value;
+
+    if (processResult === null) {
+      await handleEmptyFile(storedPath, mtime, contentHash, vectorDB);
+    } else {
+      await handleNonEmptyFile(storedPath, processResult, mtime, contentHash, vectorDB, verbose, manifestEntries);
+    }
+  } else {
+    await handleFileNotFound(normalizedPath, result.error, vectorDB, verbose);
+  }
+}
+
+/**
  * Indexes multiple files incrementally.
  * Files are processed concurrently (read, chunk, embed) with p-limit, and each
  * file's vector DB updates are enqueued for writing as soon as its processing
@@ -421,19 +445,8 @@ export async function indexMultipleFiles(
       // Catch errors per-write so one failure doesn't break the chain.
       writeChain = writeChain.then(async () => {
         try {
-          if (isOk(result)) {
-            const { filepath: storedPath, result: processResult, mtime, contentHash } = result.value;
-
-            if (processResult === null) {
-              await handleEmptyFile(storedPath, mtime, contentHash, vectorDB);
-            } else {
-              await handleNonEmptyFile(storedPath, processResult, mtime, contentHash, vectorDB, verbose || false, manifestEntries);
-            }
-            processedCount++;
-          } else {
-            await handleFileNotFound(normalizedPath, result.error, vectorDB, verbose || false);
-            processedCount++;
-          }
+          await applyFileResult(result, normalizedPath, vectorDB, verbose || false, manifestEntries);
+          processedCount++;
         } catch (error) {
           console.error(`[Lien] DB write failed for ${normalizedPath}: ${error}`);
         }

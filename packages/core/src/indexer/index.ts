@@ -223,23 +223,34 @@ async function handleUpdates(
 }
 
 /**
- * Create, initialize, and dispose a persistent embedding cache around an operation.
- * Centralizes cache lifecycle to avoid duplicated init/dispose patterns.
+ * Manage embedding service and persistent cache lifecycle around an operation.
+ * Handles init/dispose for both services, so callers only provide the work.
  */
-async function withEmbeddingCache<T>(
-  dbPath: string,
-  operation: (cache: PersistentEmbeddingCache) => Promise<T>
+async function withIndexingServices<T>(
+  vectorDB: VectorDBInterface,
+  preInitialized: EmbeddingService | undefined,
+  operation: (embeddings: EmbeddingService, cache: PersistentEmbeddingCache) => Promise<T>
 ): Promise<T> {
+  const ownEmbeddings = !preInitialized;
+  const embeddings = preInitialized ?? new WorkerEmbeddings();
+  if (ownEmbeddings) {
+    await embeddings.initialize();
+  }
+
   const cache = new PersistentEmbeddingCache({
-    cachePath: path.join(dbPath, 'embedding-cache'),
+    cachePath: path.join(vectorDB.dbPath, 'embedding-cache'),
     maxEntries: DEFAULT_EMBEDDING_CACHE_MAX_ENTRIES,
     modelName: DEFAULT_EMBEDDING_MODEL,
   });
   await cache.initialize();
+
   try {
-    return await operation(cache);
+    return await operation(embeddings, cache);
   } finally {
     await cache.dispose();
+    if (ownEmbeddings) {
+      await embeddings.dispose();
+    }
   }
 }
 
@@ -289,49 +300,36 @@ async function tryIncrementalIndex(
     phase: 'embedding',
     message: `Detected ${totalChanges} files to index, ${totalDeleted} to remove`,
   });
-  
-  // Initialize embeddings for incremental update
-  const ownEmbeddings = !options.embeddings;
-  const embeddings = options.embeddings ?? new WorkerEmbeddings();
-  if (ownEmbeddings) {
-    await embeddings.initialize();
-  }
 
-  try {
-    return await withEmbeddingCache(vectorDB.dbPath, async (cache) => {
-      await handleDeletions(changes.deleted, vectorDB, manifest);
-      const indexedCount = await handleUpdates(
-        changes.added,
-        changes.modified,
-        vectorDB,
-        embeddings,
-        options,
-        rootDir,
-        cache
-      );
+  return await withIndexingServices(vectorDB, options.embeddings, async (embeddings, cache) => {
+    await handleDeletions(changes.deleted, vectorDB, manifest);
+    const indexedCount = await handleUpdates(
+      changes.added,
+      changes.modified,
+      vectorDB,
+      embeddings,
+      options,
+      rootDir,
+      cache
+    );
 
-      await updateGitState(rootDir, vectorDB, manifest);
+    await updateGitState(rootDir, vectorDB, manifest);
 
-      options.onProgress?.({
-        phase: 'complete',
-        message: `Updated ${indexedCount} file${indexedCount !== 1 ? 's' : ''}, removed ${totalDeleted}`,
-        filesTotal: totalChanges + totalDeleted,
-        filesProcessed: indexedCount + totalDeleted,
-      });
-
-      return {
-        success: true,
-        filesIndexed: indexedCount,
-        chunksCreated: 0, // Not tracked in incremental mode
-        durationMs: Date.now() - startTime,
-        incremental: true,
-      };
+    options.onProgress?.({
+      phase: 'complete',
+      message: `Updated ${indexedCount} file${indexedCount !== 1 ? 's' : ''}, removed ${totalDeleted}`,
+      filesTotal: totalChanges + totalDeleted,
+      filesProcessed: indexedCount + totalDeleted,
     });
-  } finally {
-    if (ownEmbeddings) {
-      await embeddings.dispose();
-    }
-  }
+
+    return {
+      success: true,
+      filesIndexed: indexedCount,
+      chunksCreated: 0, // Not tracked in incremental mode
+      durationMs: Date.now() - startTime,
+      incremental: true,
+    };
+  });
 }
 
 /**
@@ -465,26 +463,19 @@ async function performFullIndex(
     };
   }
 
-  // 3. Initialize embeddings
+  // 3-4. Setup processing infrastructure
   options.onProgress?.({
     phase: 'embedding',
     message: 'Loading embedding model...',
     filesTotal: files.length,
   });
 
-  const ownEmbeddings = !options.embeddings;
-  const embeddings = options.embeddings ?? new WorkerEmbeddings();
-  if (ownEmbeddings) {
-    await embeddings.initialize();
-  }
-
-  // 4. Setup processing infrastructure
   const indexConfig = getIndexingConfig(rootDir);
   const progressTracker = createProgressTracker(files, options.onProgress);
 
   try {
-    // 5. Process files with embedding cache
-    const batchProcessor = await withEmbeddingCache(vectorDB.dbPath, async (cache) => {
+    // 5. Process files with managed embedding + cache services
+    const batchProcessor = await withIndexingServices(vectorDB, options.embeddings, async (embeddings, cache) => {
       const bp = new ChunkBatchProcessor(vectorDB, embeddings, {
         batchThreshold: 100,
         embeddingBatchSize: indexConfig.embeddingBatchSize,
@@ -538,10 +529,6 @@ async function performFullIndex(
       incremental: false,
       error: error instanceof Error ? error.message : String(error),
     };
-  } finally {
-    if (ownEmbeddings) {
-      await embeddings.dispose();
-    }
   }
 }
 
