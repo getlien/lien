@@ -230,6 +230,7 @@ async function handleUpdates(
 async function withIndexingServices<T>(
   vectorDB: VectorDBInterface,
   preInitialized: EmbeddingService | undefined,
+  verbose: boolean,
   operation: (embeddings: EmbeddingService, cache: PersistentEmbeddingCache) => Promise<T>
 ): Promise<T> {
   const ownEmbeddings = !preInitialized;
@@ -249,10 +250,12 @@ async function withIndexingServices<T>(
     try {
       return await operation(embeddings, cache);
     } finally {
-      const total = cache.hitCount + cache.missCount;
-      if (total > 0) {
-        const hitRate = ((cache.hitCount / total) * 100).toFixed(1);
-        console.log(`[Lien] Embedding cache: ${cache.hitCount} hits, ${cache.missCount} misses (${hitRate}% hit rate)`);
+      if (verbose) {
+        const total = cache.hitCount + cache.missCount;
+        if (total > 0) {
+          const hitRate = ((cache.hitCount / total) * 100).toFixed(1);
+          console.log(`[Lien] Embedding cache: ${cache.hitCount} hits, ${cache.missCount} misses (${hitRate}% hit rate)`);
+        }
       }
       await cache.dispose();
     }
@@ -329,12 +332,33 @@ async function tryIncrementalIndex(
     };
   }
 
+  // Fast path: deletions-only — no need to initialize embeddings or cache
+  if (totalChanges === 0 && totalDeleted > 0) {
+    await handleDeletions(changes.deleted, vectorDB, manifest);
+    await updateGitState(rootDir, vectorDB, manifest);
+
+    options.onProgress?.({
+      phase: 'complete',
+      message: `Updated 0 files, removed ${totalDeleted}`,
+      filesTotal: totalDeleted,
+      filesProcessed: totalDeleted,
+    });
+
+    return {
+      success: true,
+      filesIndexed: 0,
+      chunksCreated: 0,
+      durationMs: Date.now() - startTime,
+      incremental: true,
+    };
+  }
+
   options.onProgress?.({
     phase: 'embedding',
     message: `Detected ${totalChanges} files to index, ${totalDeleted} to remove`,
   });
 
-  return await withIndexingServices(vectorDB, options.embeddings, async (embeddings, cache) => {
+  return await withIndexingServices(vectorDB, options.embeddings, options.verbose ?? false, async (embeddings, cache) => {
     await handleDeletions(changes.deleted, vectorDB, manifest);
     const indexedCount = await handleUpdates(
       changes.added,
@@ -543,7 +567,7 @@ async function performFullIndex(
       filesProcessed: 0,
     });
 
-    const batchProcessor = await withIndexingServices(vectorDB, options.embeddings,
+    const batchProcessor = await withIndexingServices(vectorDB, options.embeddings, options.verbose ?? false,
       (embeddings, cache) => batchProcessFiles(files, rootDir, vectorDB, embeddings, cache, progressTracker, options.verbose ?? false)
     );
 

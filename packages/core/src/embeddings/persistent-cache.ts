@@ -149,12 +149,10 @@ export class PersistentEmbeddingCache {
     entry.lastAccess = ++this.accessCounter;
     this.metaDirty = true;
 
+    // Read via Float32Array view over the buffer, then copy for immutability
     const offset = entry.slot * this.bytesPerVector;
-    const result = new Float32Array(this.dimensions);
-    for (let i = 0; i < this.dimensions; i++) {
-      result[i] = this.data.readFloatLE(offset + i * 4);
-    }
-    return result;
+    const view = new Float32Array(this.data.buffer, this.data.byteOffset + offset, this.dimensions);
+    return new Float32Array(view);
   }
 
   set(hash: string, embedding: Float32Array): void {
