@@ -28,9 +28,6 @@ export interface GlobalConfig {
     apiKey?: string;
     // orgId is auto-detected from git remote - not in config!
   };
-  embeddings?: {
-    device?: 'cpu' | 'gpu';
-  };
 }
 
 /**
@@ -38,56 +35,38 @@ export interface GlobalConfig {
  */
 function loadConfigFromEnv(): GlobalConfig | null {
   const backendEnv = process.env.LIEN_BACKEND;
-  const deviceEnv = process.env.LIEN_EMBEDDING_DEVICE;
 
-  if (!backendEnv && !deviceEnv) {
+  if (!backendEnv) {
     return null;
   }
 
   const config: GlobalConfig = {};
 
-  // Handle backend env var
-  if (backendEnv) {
-    const validBackends = ['lancedb', 'qdrant'] as const;
-    if (!validBackends.includes(backendEnv as any)) {
-      throw new ConfigValidationError(
-        `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` +
-        `Valid values: 'lancedb' or 'qdrant'`,
-        '<environment>'
-      );
-    }
-
-    config.backend = backendEnv as 'lancedb' | 'qdrant';
-
-    if (config.backend === 'qdrant') {
-      const url = process.env.LIEN_QDRANT_URL;
-      if (!url) {
-        throw new ConfigValidationError(
-          'Qdrant backend requires LIEN_QDRANT_URL environment variable.\n' +
-          'Set it with: export LIEN_QDRANT_URL=http://localhost:6333',
-          '<environment>'
-        );
-      }
-
-      config.qdrant = {
-        url,
-        apiKey: process.env.LIEN_QDRANT_API_KEY,
-      };
-    }
+  const validBackends = ['lancedb', 'qdrant'] as const;
+  if (!validBackends.includes(backendEnv as any)) {
+    throw new ConfigValidationError(
+      `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` +
+      `Valid values: 'lancedb' or 'qdrant'`,
+      '<environment>'
+    );
   }
 
-  // Handle embedding device env var
-  if (deviceEnv) {
-    const validDevices = ['cpu', 'gpu'] as const;
-    const normalized = deviceEnv.toLowerCase().trim();
-    if (!validDevices.includes(normalized as any)) {
+  config.backend = backendEnv as 'lancedb' | 'qdrant';
+
+  if (config.backend === 'qdrant') {
+    const url = process.env.LIEN_QDRANT_URL;
+    if (!url) {
       throw new ConfigValidationError(
-        `Invalid LIEN_EMBEDDING_DEVICE environment variable: "${deviceEnv}"\n` +
-        `Valid values: 'cpu' or 'gpu'`,
+        'Qdrant backend requires LIEN_QDRANT_URL environment variable.\n' +
+        'Set it with: export LIEN_QDRANT_URL=http://localhost:6333',
         '<environment>'
       );
     }
-    config.embeddings = { device: normalized as 'cpu' | 'gpu' };
+
+    config.qdrant = {
+      url,
+      apiKey: process.env.LIEN_QDRANT_API_KEY,
+    };
   }
 
   return config;
@@ -178,9 +157,6 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
     if (fileConfig.qdrant || envConfig.qdrant) {
       merged.qdrant = { ...fileConfig.qdrant, ...envConfig.qdrant } as GlobalConfig['qdrant'];
     }
-    if (fileConfig.embeddings || envConfig.embeddings) {
-      merged.embeddings = { ...fileConfig.embeddings, ...envConfig.embeddings };
-    }
     return merged;
   }
 
@@ -223,9 +199,6 @@ export async function mergeGlobalConfig(partial: Partial<GlobalConfig>): Promise
   const merged: GlobalConfig = { ...existing, ...partial };
   if (existing.qdrant || partial.qdrant) {
     merged.qdrant = { ...existing.qdrant, ...partial.qdrant } as GlobalConfig['qdrant'];
-  }
-  if (existing.embeddings || partial.embeddings) {
-    merged.embeddings = { ...existing.embeddings, ...partial.embeddings };
   }
 
   await saveGlobalConfig(merged);

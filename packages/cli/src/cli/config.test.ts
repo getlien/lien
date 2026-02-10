@@ -32,26 +32,12 @@ describe('config command', () => {
       expect(mockMergeGlobalConfig).toHaveBeenCalledWith({ backend: 'qdrant' });
     });
 
-    it('should set embeddings.device to gpu', async () => {
-      await configSetCommand('embeddings.device', 'gpu');
-      expect(mockMergeGlobalConfig).toHaveBeenCalledWith({ embeddings: { device: 'gpu' } });
-    });
-
-    it('should set embeddings.device to cpu', async () => {
-      await configSetCommand('embeddings.device', 'cpu');
-      expect(mockMergeGlobalConfig).toHaveBeenCalledWith({ embeddings: { device: 'cpu' } });
-    });
-
     it('should reject unknown keys', async () => {
       await expect(configSetCommand('unknown.key', 'value')).rejects.toThrow('process.exit');
     });
 
     it('should reject invalid values for constrained keys', async () => {
       await expect(configSetCommand('backend', 'invalid')).rejects.toThrow('process.exit');
-    });
-
-    it('should reject invalid embeddings.device values', async () => {
-      await expect(configSetCommand('embeddings.device', 'tpu')).rejects.toThrow('process.exit');
     });
 
     it('should allow free-form values for qdrant.url', async () => {
@@ -69,7 +55,7 @@ describe('config command', () => {
 
     it('should display (not set) for missing values', async () => {
       mockLoadGlobalConfig.mockResolvedValue({ backend: 'lancedb' });
-      await configGetCommand('embeddings.device');
+      await configGetCommand('qdrant.url');
       expect(console.log).toHaveBeenCalledWith(expect.stringContaining('not set'));
     });
 
@@ -82,12 +68,10 @@ describe('config command', () => {
     it('should list all config keys', async () => {
       mockLoadGlobalConfig.mockResolvedValue({
         backend: 'lancedb',
-        embeddings: { device: 'gpu' },
       });
 
       await configListCommand();
       expect(console.log).toHaveBeenCalledWith(expect.stringContaining('backend'));
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('embeddings.device'));
     });
   });
 });
