@@ -249,6 +249,11 @@ async function withIndexingServices<T>(
     try {
       return await operation(embeddings, cache);
     } finally {
+      const total = cache.hitCount + cache.missCount;
+      if (total > 0) {
+        const hitRate = ((cache.hitCount / total) * 100).toFixed(1);
+        console.log(`[Lien] Embedding cache: ${cache.hitCount} hits, ${cache.missCount} misses (${hitRate}% hit rate)`);
+      }
       await cache.dispose();
     }
   } finally {

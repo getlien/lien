@@ -27,13 +27,23 @@ interface CacheIndex {
 const DEFAULT_MAX_ENTRIES = 50000;
 const INITIAL_ALLOCATED_SLOTS = 1000;
 
+/**
+ * Compute a content hash for embedding cache lookup.
+ * Uses SHA-256 truncated to 16 hex chars (64 bits) — collision probability
+ * is negligible at 50K entries (~7e-11).
+ */
+export function computeEmbeddingHash(text: string): string {
+  return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+}
+
 export class PersistentEmbeddingCache {
   private entries: Map<string, { slot: number; lastAccess: number }>;
   private accessCounter: number;
   private data: Buffer;
   private freeSlots: number[];
   private nextSlot: number;
-  private dirty: boolean;
+  private dataDirty: boolean;  // Vectors written — need to flush .bin
+  private metaDirty: boolean;  // Access counters changed — need to flush .json only
   private _hitCount: number;
   private _missCount: number;
   private allocatedSlots: number;
@@ -55,7 +65,8 @@ export class PersistentEmbeddingCache {
     this.accessCounter = 0;
     this.freeSlots = [];
     this.nextSlot = 0;
-    this.dirty = false;
+    this.dataDirty = false;
+    this.metaDirty = false;
     this._hitCount = 0;
     this._missCount = 0;
     this.allocatedSlots = Math.min(INITIAL_ALLOCATED_SLOTS, this.maxEntries);
@@ -92,6 +103,12 @@ export class PersistentEmbeddingCache {
   }
 
   private restoreFromDisk(index: CacheIndex, binData: Buffer): void {
+    // Validate bin file isn't truncated — a truncated file would serve garbage vectors
+    const requiredBytes = index.nextSlot * this.bytesPerVector;
+    if (binData.length < requiredBytes) {
+      throw new Error(`Cache data file truncated: expected ${requiredBytes} bytes, got ${binData.length}`);
+    }
+
     this.entries = new Map(Object.entries(index.entries));
     this.nextSlot = index.nextSlot;
     this.freeSlots = index.freeSlots;
@@ -110,18 +127,15 @@ export class PersistentEmbeddingCache {
       this.allocatedSlots *= 2;
     }
     this.data = Buffer.alloc(this.allocatedSlots * this.bytesPerVector);
-    binData.copy(this.data, 0, 0, Math.min(binData.length, this.data.length));
+    binData.copy(this.data, 0, 0, requiredBytes);
 
-    this.dirty = false;
+    this.dataDirty = false;
+    this.metaDirty = false;
   }
 
   private async resetCache(): Promise<void> {
     await this.deleteFiles();
     this.clear();
-  }
-
-  computeHash(text: string): string {
-    return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
   }
 
   get(hash: string): Float32Array | undefined {
@@ -133,7 +147,7 @@ export class PersistentEmbeddingCache {
 
     this._hitCount++;
     entry.lastAccess = ++this.accessCounter;
-    this.dirty = true;
+    this.metaDirty = true;
 
     const offset = entry.slot * this.bytesPerVector;
     const result = new Float32Array(this.dimensions);
@@ -153,7 +167,7 @@ export class PersistentEmbeddingCache {
     if (existing) {
       existing.lastAccess = ++this.accessCounter;
       this.writeVector(existing.slot, embedding);
-      this.dirty = true;
+      this.dataDirty = true;
       return;
     }
 
@@ -175,11 +189,11 @@ export class PersistentEmbeddingCache {
 
     this.entries.set(hash, { slot, lastAccess: ++this.accessCounter });
     this.writeVector(slot, embedding);
-    this.dirty = true;
+    this.dataDirty = true;
   }
 
   async flush(): Promise<void> {
-    if (!this.dirty && this.entries.size === 0) {
+    if (!this.dataDirty && !this.metaDirty) {
       return;
     }
 
@@ -187,6 +201,18 @@ export class PersistentEmbeddingCache {
     const dir = path.dirname(this.cachePath);
     await fs.mkdir(dir, { recursive: true });
 
+    const indexPath = this.cachePath + '.json';
+    const dataPath = this.cachePath + '.bin';
+
+    // Only write .bin when vector data changed (not on read-only access updates)
+    if (this.dataDirty) {
+      const dataTmp = dataPath + '.tmp';
+      const usedBytes = this.nextSlot * this.bytesPerVector;
+      await fs.writeFile(dataTmp, this.data.subarray(0, usedBytes));
+      await fs.rename(dataTmp, dataPath);
+    }
+
+    // Always write .json when anything changed (access counters or entries)
     const index: CacheIndex = {
       version: 1,
       modelName: this.modelName,
@@ -195,22 +221,12 @@ export class PersistentEmbeddingCache {
       nextSlot: this.nextSlot,
       freeSlots: this.freeSlots,
     };
-
-    const indexPath = this.cachePath + '.json';
-    const dataPath = this.cachePath + '.bin';
     const indexTmp = indexPath + '.tmp';
-    const dataTmp = dataPath + '.tmp';
-
-    // Write .bin first, then .json — if crash between renames,
-    // stale index won't point at new data (safe direction)
-    const usedBytes = this.nextSlot * this.bytesPerVector;
-    await fs.writeFile(dataTmp, this.data.subarray(0, usedBytes));
-    await fs.rename(dataTmp, dataPath);
-
     await fs.writeFile(indexTmp, JSON.stringify(index), 'utf-8');
     await fs.rename(indexTmp, indexPath);
 
-    this.dirty = false;
+    this.dataDirty = false;
+    this.metaDirty = false;
   }
 
   async dispose(): Promise<void> {
@@ -235,7 +251,8 @@ export class PersistentEmbeddingCache {
     this.accessCounter = 0;
     this.freeSlots = [];
     this.nextSlot = 0;
-    this.dirty = false;
+    this.dataDirty = false;
+    this.metaDirty = false;
     this.allocatedSlots = Math.min(INITIAL_ALLOCATED_SLOTS, this.maxEntries);
     this.data = Buffer.alloc(this.allocatedSlots * this.bytesPerVector);
   }
@@ -305,7 +322,7 @@ export async function embedBatchWithCache(
   const results: Float32Array[] = new Array(texts.length);
   const uncachedTexts: string[] = [];
   const uncachedIndices: number[] = [];
-  const hashes = texts.map(t => cache.computeHash(t));
+  const hashes = texts.map(t => computeEmbeddingHash(t));
 
   // Check cache
   for (let i = 0; i < texts.length; i++) {

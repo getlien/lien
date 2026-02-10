@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { PersistentEmbeddingCache, embedBatchWithCache } from './persistent-cache.js';
+import { writeFile } from 'fs/promises';
+import { PersistentEmbeddingCache, embedBatchWithCache, computeEmbeddingHash } from './persistent-cache.js';
 import { EmbeddingService } from './types.js';
 
 class MockEmbeddingService implements EmbeddingService {
@@ -49,30 +50,21 @@ describe('PersistentEmbeddingCache', () => {
     return vec;
   }
 
-  describe('computeHash', () => {
-    it('should return consistent hash for same input', async () => {
-      const cache = new PersistentEmbeddingCache({ cachePath });
-      await cache.initialize();
-
-      const hash1 = cache.computeHash('hello world');
-      const hash2 = cache.computeHash('hello world');
+  describe('computeEmbeddingHash', () => {
+    it('should return consistent hash for same input', () => {
+      const hash1 = computeEmbeddingHash('hello world');
+      const hash2 = computeEmbeddingHash('hello world');
       expect(hash1).toBe(hash2);
     });
 
-    it('should return different hashes for different inputs', async () => {
-      const cache = new PersistentEmbeddingCache({ cachePath });
-      await cache.initialize();
-
-      const hash1 = cache.computeHash('hello world');
-      const hash2 = cache.computeHash('goodbye world');
+    it('should return different hashes for different inputs', () => {
+      const hash1 = computeEmbeddingHash('hello world');
+      const hash2 = computeEmbeddingHash('goodbye world');
       expect(hash1).not.toBe(hash2);
     });
 
-    it('should return 16 character hex string', async () => {
-      const cache = new PersistentEmbeddingCache({ cachePath });
-      await cache.initialize();
-
-      const hash = cache.computeHash('test');
+    it('should return 16 character hex string', () => {
+      const hash = computeEmbeddingHash('test');
       expect(hash).toHaveLength(16);
       expect(hash).toMatch(/^[0-9a-f]{16}$/);
     });
@@ -92,7 +84,7 @@ describe('PersistentEmbeddingCache', () => {
       await cache.initialize();
 
       const vec = makeVector(0.5);
-      const hash = cache.computeHash('test text');
+      const hash = computeEmbeddingHash('test text');
       cache.set(hash, vec);
 
       const result = cache.get(hash);
@@ -107,7 +99,7 @@ describe('PersistentEmbeddingCache', () => {
       const cache = new PersistentEmbeddingCache({ cachePath });
       await cache.initialize();
 
-      const hash = cache.computeHash('test');
+      const hash = computeEmbeddingHash('test');
       cache.set(hash, makeVector(1.0));
 
       expect(cache.hitCount).toBe(0);
@@ -128,7 +120,7 @@ describe('PersistentEmbeddingCache', () => {
       const cache = new PersistentEmbeddingCache({ cachePath });
       await cache.initialize();
 
-      const hash = cache.computeHash('test');
+      const hash = computeEmbeddingHash('test');
       cache.set(hash, makeVector(1.0));
       cache.set(hash, makeVector(2.0));
 
@@ -200,8 +192,8 @@ describe('PersistentEmbeddingCache', () => {
       const mockService = new MockEmbeddingService();
 
       // Pre-cache some texts
-      const hash1 = cache.computeHash('cached text 1');
-      const hash2 = cache.computeHash('cached text 2');
+      const hash1 = computeEmbeddingHash('cached text 1');
+      const hash2 = computeEmbeddingHash('cached text 2');
       cache.set(hash1, makeVector(0.1));
       cache.set(hash2, makeVector(0.2));
 
@@ -243,7 +235,7 @@ describe('PersistentEmbeddingCache', () => {
       const mockService = new MockEmbeddingService();
 
       // Pre-cache everything
-      const hash = cache.computeHash('only text');
+      const hash = computeEmbeddingHash('only text');
       cache.set(hash, makeVector(0.42));
 
       const results = await embedBatchWithCache(['only text'], mockService, cache);
@@ -259,8 +251,8 @@ describe('PersistentEmbeddingCache', () => {
       const cache1 = new PersistentEmbeddingCache({ cachePath });
       await cache1.initialize();
 
-      const hash1 = cache1.computeHash('text1');
-      const hash2 = cache1.computeHash('text2');
+      const hash1 = computeEmbeddingHash('text1');
+      const hash2 = computeEmbeddingHash('text2');
       cache1.set(hash1, makeVector(1.0));
       cache1.set(hash2, makeVector(2.0));
       await cache1.flush();
@@ -312,7 +304,7 @@ describe('PersistentEmbeddingCache', () => {
         modelName: 'model-A',
       });
       await cache1.initialize();
-      cache1.set(cache1.computeHash('test'), makeVector(1.0));
+      cache1.set(computeEmbeddingHash('test'), makeVector(1.0));
       await cache1.flush();
 
       // Re-initialize with model B
@@ -323,7 +315,7 @@ describe('PersistentEmbeddingCache', () => {
       await cache2.initialize();
 
       expect(cache2.size).toBe(0);
-      expect(cache2.get(cache2.computeHash('test'))).toBeUndefined();
+      expect(cache2.get(computeEmbeddingHash('test'))).toBeUndefined();
     });
 
     it('should keep cache when model name matches', async () => {
@@ -332,7 +324,7 @@ describe('PersistentEmbeddingCache', () => {
         modelName: 'model-A',
       });
       await cache1.initialize();
-      const hash = cache1.computeHash('test');
+      const hash = computeEmbeddingHash('test');
       cache1.set(hash, makeVector(1.0));
       await cache1.flush();
 
@@ -376,7 +368,7 @@ describe('PersistentEmbeddingCache', () => {
       const cache = new PersistentEmbeddingCache({ cachePath });
       await cache.initialize();
 
-      cache.set(cache.computeHash('test'), makeVector(1.0));
+      cache.set(computeEmbeddingHash('test'), makeVector(1.0));
       expect(cache.size).toBe(1);
 
       await cache.dispose();
@@ -387,11 +379,171 @@ describe('PersistentEmbeddingCache', () => {
       const cache = new PersistentEmbeddingCache({ cachePath });
       await cache.initialize();
 
-      cache.set(cache.computeHash('test'), makeVector(1.0));
+      cache.set(computeEmbeddingHash('test'), makeVector(1.0));
       await cache.dispose();
 
       // Flush after dispose should be idempotent
       await expect(cache.flush()).resolves.not.toThrow();
+    });
+  });
+
+  describe('dimension validation', () => {
+    it('should throw on dimension mismatch in set()', async () => {
+      const cache = new PersistentEmbeddingCache({ cachePath, dimensions: 384 });
+      await cache.initialize();
+
+      const wrongDims = new Float32Array(128);
+      wrongDims.fill(1.0);
+
+      expect(() => cache.set('hash1', wrongDims)).toThrow('Embedding dimension mismatch: expected 384, got 128');
+    });
+  });
+
+  describe('corrupt file recovery', () => {
+    it('should recover from truncated .bin file', async () => {
+      // Create a valid cache and flush
+      const cache1 = new PersistentEmbeddingCache({ cachePath });
+      await cache1.initialize();
+      cache1.set(computeEmbeddingHash('text1'), makeVector(1.0));
+      cache1.set(computeEmbeddingHash('text2'), makeVector(2.0));
+      await cache1.flush();
+
+      // Truncate the .bin file
+      await writeFile(cachePath + '.bin', Buffer.alloc(10));
+
+      // Should recover gracefully (fall back to empty cache)
+      const cache2 = new PersistentEmbeddingCache({ cachePath });
+      await cache2.initialize();
+      expect(cache2.size).toBe(0);
+    });
+
+    it('should recover from corrupt .json file', async () => {
+      // Write garbage JSON
+      await writeFile(cachePath + '.json', 'not valid json', 'utf-8');
+      await writeFile(cachePath + '.bin', Buffer.alloc(100));
+
+      const cache = new PersistentEmbeddingCache({ cachePath });
+      await cache.initialize();
+      expect(cache.size).toBe(0);
+    });
+
+    it('should recover from missing .bin file with valid .json', async () => {
+      // Write valid JSON but no .bin file
+      const index = {
+        version: 1,
+        modelName: 'default',
+        dimensions: 384,
+        entries: { 'abc123': { slot: 0, lastAccess: 1 } },
+        nextSlot: 1,
+        freeSlots: [],
+      };
+      await writeFile(cachePath + '.json', JSON.stringify(index), 'utf-8');
+
+      const cache = new PersistentEmbeddingCache({ cachePath });
+      await cache.initialize();
+      expect(cache.size).toBe(0);
+    });
+  });
+
+  describe('buffer growth', () => {
+    it('should grow buffer beyond initial allocation', async () => {
+      // INITIAL_ALLOCATED_SLOTS is 1000, so adding 1001+ entries triggers growth
+      // Use small dimensions to keep test fast
+      const cache = new PersistentEmbeddingCache({
+        cachePath,
+        maxEntries: 2000,
+        dimensions: 4,
+      });
+      await cache.initialize();
+
+      // Add more entries than initial allocation
+      for (let i = 0; i < 1100; i++) {
+        const vec = new Float32Array(4);
+        vec.fill(i / 1000);
+        cache.set(`h${i}`, vec);
+      }
+
+      expect(cache.size).toBe(1100);
+
+      // Verify first and last entries are valid
+      const first = cache.get('h0');
+      expect(first).toBeDefined();
+      expect(first![0]).toBeCloseTo(0);
+
+      const last = cache.get('h1099');
+      expect(last).toBeDefined();
+      expect(last![0]).toBeCloseTo(1.099);
+    });
+  });
+
+  describe('free slot reuse', () => {
+    it('should reuse evicted slots for new entries', async () => {
+      const cache = new PersistentEmbeddingCache({
+        cachePath,
+        maxEntries: 3,
+        dimensions: 4,
+      });
+      await cache.initialize();
+
+      // Fill cache
+      for (let i = 0; i < 3; i++) {
+        const vec = new Float32Array(4);
+        vec.fill(i + 1);
+        cache.set(`h${i}`, vec);
+      }
+      expect(cache.size).toBe(3);
+
+      // Evict h0 by adding h3
+      const vec3 = new Float32Array(4);
+      vec3.fill(10);
+      cache.set('h3', vec3);
+      expect(cache.size).toBe(3);
+      expect(cache.get('h0')).toBeUndefined();
+
+      // h3 should have reused h0's slot — verify it reads correctly
+      const result = cache.get('h3');
+      expect(result).toBeDefined();
+      expect(result![0]).toBeCloseTo(10);
+
+      // Flush and reload to verify slot reuse persists
+      await cache.flush();
+      const cache2 = new PersistentEmbeddingCache({
+        cachePath,
+        maxEntries: 3,
+        dimensions: 4,
+      });
+      await cache2.initialize();
+      expect(cache2.size).toBe(3);
+
+      const reloaded = cache2.get('h3');
+      expect(reloaded).toBeDefined();
+      expect(reloaded![0]).toBeCloseTo(10);
+    });
+  });
+
+  describe('flush optimization', () => {
+    it('should not write .bin on read-only access', async () => {
+      const cache = new PersistentEmbeddingCache({ cachePath });
+      await cache.initialize();
+
+      // Write data and flush
+      cache.set(computeEmbeddingHash('test'), makeVector(1.0));
+      await cache.flush();
+
+      // Record .bin modification time
+      const { stat } = await import('fs/promises');
+      const binStatBefore = await stat(cachePath + '.bin');
+
+      // Wait a bit to ensure mtime would differ
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Read-only access (only updates access counters)
+      cache.get(computeEmbeddingHash('test'));
+      await cache.flush();
+
+      // .bin should NOT have been rewritten
+      const binStatAfter = await stat(cachePath + '.bin');
+      expect(binStatAfter.mtimeMs).toBe(binStatBefore.mtimeMs);
     });
   });
 });
