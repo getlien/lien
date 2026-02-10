@@ -43,6 +43,15 @@ jobs:
             node_modules
             packages/*/node_modules
           key: lien-build-v5-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/*/package.json', 'packages/*/tsconfig.json', 'packages/core/src/**/*', 'packages/review/src/**/*', 'packages/action/src/**/*') }}
+
+      # Cache Lien index and embedding cache across runs
+      - name: Cache Lien index
+        uses: actions/cache@v4
+        with:
+          path: .lien
+          key: lien-index-${{ runner.os }}-${{ github.event.pull_request.base.sha }}
+          restore-keys: |
+            lien-index-${{ runner.os }}-
       
       # Always install deps if not cached - native modules need to be present
       - name: Install dependencies
