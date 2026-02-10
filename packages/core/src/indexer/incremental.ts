@@ -371,8 +371,10 @@ async function handleFileNotFound(
 
 /**
  * Indexes multiple files incrementally.
- * Phase 1: Process files concurrently (read, chunk, embed) with p-limit.
- * Phase 2: Apply results sequentially to vector DB (safe for concurrent-unfriendly DBs).
+ * Files are processed concurrently (read, chunk, embed) with p-limit, and each
+ * file's vector DB updates are enqueued for writing as soon as its processing
+ * completes. This creates a pipelined flow where DB writes are ordered safely
+ * for concurrent-unfriendly DBs, without waiting for all files to finish first.
  *
  * Uses Result type for explicit error handling, making it easier to test
  * and reason about failure modes.
@@ -383,7 +385,6 @@ async function handleFileNotFound(
  * @param filepaths - Array of absolute file paths to index
  * @param vectorDB - Initialized VectorDB instance
  * @param embeddings - Initialized embeddings service
- * @param config - Lien configuration
  * @param options - Optional settings
  * @returns Number of successfully processed files (indexed or deleted)
  */

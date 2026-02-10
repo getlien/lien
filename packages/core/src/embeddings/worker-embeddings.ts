@@ -120,11 +120,9 @@ export class WorkerEmbeddings implements EmbeddingService {
     });
 
     this.worker!.on('exit', (code: number) => {
-      if (code !== 0) {
-        for (const [id, pending] of this.pendingRequests) {
-          pending.reject(new EmbeddingError(`Worker exited with code ${code}`));
-          this.pendingRequests.delete(id);
-        }
+      for (const [id, pending] of this.pendingRequests) {
+        pending.reject(new EmbeddingError(`Worker exited with code ${code}`));
+        this.pendingRequests.delete(id);
       }
       this.initialized = false;
       this.initPromise = null;
@@ -152,7 +150,12 @@ export class WorkerEmbeddings implements EmbeddingService {
 
     return new Promise<Float32Array[]>((resolve, reject) => {
       this.pendingRequests.set(id, { resolve, reject });
-      this.worker!.postMessage({ type: 'embed', texts, id });
+      try {
+        this.worker!.postMessage({ type: 'embed', texts, id });
+      } catch (error) {
+        this.pendingRequests.delete(id);
+        reject(wrapError(error as Error, 'Failed to post message to embedding worker'));
+      }
     });
   }
 

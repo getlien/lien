@@ -206,24 +206,18 @@ async function gatherFileStats(
   rootDir: string
 ): Promise<Map<string, number>> {
   const limit = pLimit(DEFAULT_STAT_CONCURRENCY);
-  const statResults = await Promise.all(
+  const fileStats = new Map<string, number>();
+  await Promise.all(
     files.map(filepath => limit(async () => {
       try {
         const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
         const stats = await fs.stat(absolutePath);
-        return { filepath, mtime: stats.mtimeMs } as const;
+        fileStats.set(filepath, stats.mtimeMs);
       } catch {
-        return null;
+        // File not accessible - skip
       }
     }))
   );
-
-  const fileStats = new Map<string, number>();
-  for (const result of statResults) {
-    if (result) {
-      fileStats.set(result.filepath, result.mtime);
-    }
-  }
   return fileStats;
 }
 
