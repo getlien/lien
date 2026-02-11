@@ -284,11 +284,11 @@ async function analyzeBaseBranch(
   rootDir: string,
   logger: Logger,
 ): Promise<ComplexityReport | null> {
+  // Capture original HEAD before any checkout so we can always restore it
+  const originalHead = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim();
+
   try {
     logger.info(`Checking out base branch at ${baseSha.substring(0, 7)}...`);
-
-    // Save current HEAD
-    const currentHead = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim();
 
     // Checkout base branch
     assertValidSha(baseSha, 'baseSha');
@@ -300,7 +300,7 @@ async function analyzeBaseBranch(
     const baseReport = await runComplexityAnalysis(filesToAnalyze, threshold, rootDir, logger);
 
     // Restore HEAD
-    execFileSync('git', ['checkout', '--force', currentHead], { stdio: 'pipe' });
+    execFileSync('git', ['checkout', '--force', originalHead], { stdio: 'pipe' });
     logger.info('Restored to HEAD');
 
     if (baseReport) {
@@ -310,10 +310,9 @@ async function analyzeBaseBranch(
     return baseReport;
   } catch (error) {
     logger.warning(`Failed to analyze base branch: ${error}`);
-    // Attempt to restore HEAD even if analysis failed
+    // Attempt to restore original HEAD even if analysis failed
     try {
-      const currentHead = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim();
-      execFileSync('git', ['checkout', '--force', currentHead], { stdio: 'pipe' });
+      execFileSync('git', ['checkout', '--force', originalHead], { stdio: 'pipe' });
     } catch (restoreError) {
       logger.warning(`Failed to restore HEAD: ${restoreError}`);
     }
