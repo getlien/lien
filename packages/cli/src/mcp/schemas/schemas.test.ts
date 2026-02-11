@@ -71,9 +71,7 @@ describe('SemanticSearchSchema', () => {
 
   it('should reject too-long repoIds element', () => {
     const longRepoId = 'a'.repeat(256);
-    expect(() =>
-      SemanticSearchSchema.parse({ query: 'test', repoIds: [longRepoId] }),
-    ).toThrow();
+    expect(() => SemanticSearchSchema.parse({ query: 'test', repoIds: [longRepoId] })).toThrow();
   });
 });
 
