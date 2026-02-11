@@ -14,6 +14,8 @@ Search your codebase using natural language queries.
 |-----------|------|----------|---------|-------------|
 | `query` | string | Yes | - | Natural language search query |
 | `limit` | number | No | 5 | Maximum number of results to return |
+| `crossRepo` | boolean | No | false | Search across all repos in the organization (requires Qdrant backend) |
+| `repoIds` | string[] | No | - | Filter to specific repos when `crossRepo=true` |
 
 ### Usage
 
@@ -41,6 +43,8 @@ Find code that handles JWT token validation
   ]
 }
 ```
+
+When `crossRepo=true` with Qdrant, the response also includes a `groupedByRepo` field that organizes results by repository.
 
 ### Best Practices
 
@@ -219,6 +223,9 @@ List functions, classes, and interfaces by name pattern.
 |-----------|------|----------|---------|-------------|
 | `pattern` | string | No | - | Regex pattern to match symbol names |
 | `language` | string | No | - | Filter by language (e.g., "typescript", "python") |
+| `symbolType` | enum | No | - | Filter by symbol type: `function`, `method`, `class`, or `interface` |
+| `limit` | number | No | 50 | Number of results to return (max 200) |
+| `offset` | number | No | 0 | Skip first N results for pagination |
 
 ### Usage
 
@@ -234,15 +241,21 @@ Show all TypeScript classes
 
 ```json
 {
-  "symbols": [
+  "results": [
     {
-      "name": "UserController",
-      "type": "class",
-      "file": "src/controllers/UserController.ts",
-      "line": 10,
-      "language": "typescript"
+      "content": "...",
+      "metadata": {
+        "symbolName": "UserController",
+        "symbolType": "class",
+        "file": "src/controllers/UserController.ts",
+        "startLine": 10,
+        "language": "typescript"
+      }
     }
-  ]
+  ],
+  "method": "symbols",
+  "hasMore": true,
+  "nextOffset": 50
 }
 ```
 
@@ -269,6 +282,8 @@ Find all files that depend on a given file (reverse dependency lookup). Essentia
 |-----------|------|----------|---------|-------------|
 | `filepath` | string | Yes | - | Path to file (relative to project root) |
 | `depth` | number | No | 1 | Dependency depth (currently only 1 supported) |
+| `symbol` | string | No | - | Specific exported symbol to find usages of (returns call sites instead of just importing files) |
+| `crossRepo` | boolean | No | false | Find dependents across all repos (requires Qdrant backend) |
 
 ### Usage
 
@@ -286,6 +301,8 @@ Is it safe to change this file?
 {
   "filepath": "src/utils/validate.ts",
   "dependentCount": 12,
+  "productionDependentCount": 9,
+  "testDependentCount": 3,
   "riskLevel": "medium",
   "dependents": [
     { "filepath": "src/api/users.ts", "isTestFile": false },
@@ -303,6 +320,10 @@ Is it safe to change this file?
   }
 }
 ```
+
+When `symbol` is provided, the response also includes `totalUsageCount` (number of tracked call sites across all files) and each dependent may include a `usages` array with `callerSymbol`, `line`, and `snippet` fields.
+
+When `crossRepo=true` with Qdrant, the response includes a `groupedByRepo` field.
 
 ### Risk Levels
 
@@ -340,6 +361,8 @@ Analyze code complexity for tech debt identification and refactoring prioritizat
 | `files` | string[] | No | - | Specific files to analyze (analyzes all if omitted) |
 | `top` | number | No | 10 | Return top N most complex functions |
 | `threshold` | number | No | config | Only return functions above this complexity |
+| `crossRepo` | boolean | No | false | Analyze across all repos in the organization (requires Qdrant backend) |
+| `repoIds` | string[] | No | - | Filter to specific repos when `crossRepo=true` |
 
 ### Usage
 
