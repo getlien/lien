@@ -5,7 +5,7 @@
  * that could cause catastrophic backtracking.
  */
 
-const REDOS_PATTERN = /\([^)]*[+*?}]\)\s*[+*?{]/;
+const REDOS_PATTERN = /\([^)]*(?:[+*?]|\{)\)\s*(?:[+*?]|\{)/;
 
 export function safeRegex(pattern: string): RegExp | null {
   if (REDOS_PATTERN.test(pattern)) {
