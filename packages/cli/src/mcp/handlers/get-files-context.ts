@@ -1,9 +1,8 @@
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetFilesContextSchema } from '../schemas/index.js';
-import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
-import { MAX_CHUNKS_PER_FILE } from '@liendev/core';
+import { normalizePath, matchesFile, getCanonicalPath, isTestFile, MAX_CHUNKS_PER_FILE } from '@liendev/core';
 import type { SearchResult, EmbeddingService, VectorDBInterface } from '@liendev/core';
 
 /**

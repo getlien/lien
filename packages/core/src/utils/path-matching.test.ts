@@ -1,21 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { normalizePath, matchesFile } from './utils/path-matching.js';
+import { normalizePath, matchesFile, isTestFile } from './path-matching.js';
 
 /**
  * Test cases for path matching logic in get_dependents tool.
- * 
+ *
  * Ensures path matching respects component boundaries to avoid false positives:
  * - "src/logger" should NOT match "src/logger-utils" ✓
  * - "logger" should NOT match "some-logger-package" ✓
  * - Matches occur only at proper boundaries (/, .)
- * 
+ *
  * Covers extension normalization (.ts vs .js), relative imports,
  * and various edge cases for robust dependency detection.
  */
 describe('matchesFile - Path Boundary Checking', () => {
   // Test helper: normalize paths without workspace root (not needed for unit tests)
   const normalize = (path: string): string => normalizePath(path, '/fake/workspace');
-  
+
   const testMatchesFile = (importPath: string, targetPath: string): boolean => {
     const normalizedImport = normalize(importPath);
     const normalizedTarget = normalize(targetPath);
@@ -44,7 +44,7 @@ describe('matchesFile - Path Boundary Checking', () => {
       expect(testMatchesFile('./schemas/index.js', 'packages/cli/src/mcp/schemas/index.ts')).toBe(true);
       expect(testMatchesFile('../schemas/index', 'src/mcp/schemas/index')).toBe(true);
     });
-    
+
     it('should match the exact dogfooding scenario', () => {
       // After normalization (extension stripped):
       // import: ./schemas/index.js → ./schemas/index
@@ -140,7 +140,7 @@ describe('matchesFile - Path Boundary Checking', () => {
   describe('test file boundary checking', () => {
     it('should NOT match test files when searching for source file', () => {
       // After normalization: logger.test.ts → logger.test, logger.ts → logger
-      // "logger" should NOT match "logger.test" 
+      // "logger" should NOT match "logger.test"
       expect(testMatchesFile('logger', 'logger.test')).toBe(false);
       expect(testMatchesFile('src/logger', 'src/logger.test')).toBe(false);
       expect(testMatchesFile('utils/validator', 'utils/validator.spec')).toBe(false);
@@ -242,6 +242,17 @@ describe('matchesFile - Path Boundary Checking', () => {
       expect(testMatchesFile('src/models/user', 'src/models/product.py')).toBe(false);
     });
 
+    it('should NOT apply Python matching to relative imports with dots', () => {
+      // Relative paths starting with . should not trigger Python module matching
+      expect(testMatchesFile('./utils.helper', 'utils/helper.py')).toBe(false);
+      expect(testMatchesFile('../models.user', 'models/user.py')).toBe(false);
+    });
+
+    it('should NOT apply Python matching to file paths with dots', () => {
+      // Paths containing slashes are file paths, not Python modules
+      expect(testMatchesFile('src/utils.helper', 'utils/helper.py')).toBe(false);
+    });
+
     it('should handle single-level Python modules', () => {
       // Single module without dots should still work if it's part of the path
       expect(testMatchesFile('django.utils', 'django/utils/__init__.py')).toBe(true);
@@ -250,3 +261,96 @@ describe('matchesFile - Path Boundary Checking', () => {
   });
 });
 
+/**
+ * Test cases for test file detection.
+ *
+ * Bug: Simple string matching produced false positives:
+ * - "contest.ts" matched ".test." ❌
+ * - "latest/config.ts" matched "/test/" ❌
+ * - "protest.ts" matched ".test." ❌
+ *
+ * Fix: Use precise regex patterns
+ */
+describe('isTestFile - Precise Test Detection', () => {
+
+  describe('should correctly identify test files', () => {
+    it('should match .test. files', () => {
+      expect(isTestFile('src/auth.test.ts')).toBe(true);
+      expect(isTestFile('components/Button.test.tsx')).toBe(true);
+      expect(isTestFile('utils/validator.test.js')).toBe(true);
+    });
+
+    it('should match .spec. files', () => {
+      expect(isTestFile('src/auth.spec.ts')).toBe(true);
+      expect(isTestFile('e2e/login.spec.js')).toBe(true);
+      expect(isTestFile('components/Button.spec.tsx')).toBe(true);
+    });
+
+    it('should match files in test/ directories', () => {
+      expect(isTestFile('test/auth.ts')).toBe(true);
+      expect(isTestFile('src/test/helper.ts')).toBe(true);
+      expect(isTestFile('packages/cli/test/fixtures.ts')).toBe(true);
+    });
+
+    it('should match files in tests/ directories', () => {
+      expect(isTestFile('tests/auth.ts')).toBe(true);
+      expect(isTestFile('src/tests/helper.ts')).toBe(true);
+    });
+
+    it('should match files in __tests__/ directories', () => {
+      expect(isTestFile('__tests__/auth.ts')).toBe(true);
+      expect(isTestFile('src/__tests__/helper.ts')).toBe(true);
+    });
+
+    it('should match Windows paths', () => {
+      expect(isTestFile('src\\auth.test.ts')).toBe(true);
+      expect(isTestFile('test\\helper.ts')).toBe(true);
+      expect(isTestFile('src\\__tests__\\utils.ts')).toBe(true);
+    });
+  });
+
+  describe('should NOT match false positives (the bug)', () => {
+    it('should NOT match files with "test" in the name', () => {
+      expect(isTestFile('contest.ts')).toBe(false);
+      expect(isTestFile('manifest.json')).toBe(false);
+      expect(isTestFile('attest.js')).toBe(false);
+      expect(isTestFile('protest-handler.ts')).toBe(false);
+    });
+
+    it('should NOT match directories with "test" in the path', () => {
+      expect(isTestFile('latest/config.ts')).toBe(false);
+      expect(isTestFile('greatest/helper.js')).toBe(false);
+      expect(isTestFile('fastest-route/index.ts')).toBe(false);
+    });
+
+    it('should NOT match files where test is not a path component', () => {
+      expect(isTestFile('mytest.ts')).toBe(false);
+      expect(isTestFile('testing.js')).toBe(false);
+      expect(isTestFile('testimonial.tsx')).toBe(false);
+    });
+
+    it('should NOT match regular source files', () => {
+      expect(isTestFile('src/auth.ts')).toBe(false);
+      expect(isTestFile('components/Button.tsx')).toBe(false);
+      expect(isTestFile('utils/validator.js')).toBe(false);
+      expect(isTestFile('index.ts')).toBe(false);
+    });
+  });
+
+  describe('edge cases', () => {
+    it('should handle files at root level', () => {
+      expect(isTestFile('auth.test.ts')).toBe(true);
+      expect(isTestFile('auth.ts')).toBe(false);
+    });
+
+    it('should handle deeply nested test files', () => {
+      expect(isTestFile('packages/cli/src/mcp/tools.test.ts')).toBe(true);
+      expect(isTestFile('a/b/c/d/e/test/helper.ts')).toBe(true);
+    });
+
+    it('should handle mixed separators', () => {
+      expect(isTestFile('src/test\\helper.ts')).toBe(true);
+      expect(isTestFile('src\\auth.test.ts')).toBe(true);
+    });
+  });
+});

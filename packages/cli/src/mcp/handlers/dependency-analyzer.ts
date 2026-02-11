@@ -1,10 +1,13 @@
 import type { SearchResult } from '@liendev/core';
-import { VectorDBInterface } from '@liendev/core';
-import { QdrantDB } from '@liendev/core';
 import {
+  VectorDBInterface,
+  QdrantDB,
   findTransitiveDependents,
+  normalizePath,
+  matchesFile,
+  getCanonicalPath,
+  isTestFile,
 } from '@liendev/core';
-import { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '../utils/path-matching.js';
 
 /**
  * Complexity metrics for a single dependent file.
