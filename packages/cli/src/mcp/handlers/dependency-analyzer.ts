@@ -529,55 +529,51 @@ function mergeTransitiveDependents(
  * @param indexVersion - Optional: index version for cache lookup. When provided and matching
  *   the cached version, the expensive scanChunksPaginated call is skipped.
  */
-export async function findDependents(
+/**
+ * Get scan results from cache or perform a fresh paginated scan.
+ */
+async function getOrScanChunks(
   vectorDB: VectorDBInterface,
-  filepath: string,
   crossRepo: boolean,
   log: (message: string, level?: 'warning') => void,
-  symbol?: string,
+  normalizePathCached: (path: string) => string,
   indexVersion?: number,
-): Promise<DependencyAnalysisResult> {
-  // Setup path normalization (needed for paginated scan)
-  const normalizePathCached = createPathNormalizer();
-  const normalizedTarget = normalizePathCached(filepath);
-
-  let importIndex: Map<string, SearchResult[]>;
-  let allChunksByFile: Map<string, SearchResult[]>;
-  let totalChunks: number;
-  let hitLimit: boolean;
-
-  // Use cached scan results if the index version and crossRepo mode match
+): Promise<{
+  importIndex: Map<string, SearchResult[]>;
+  allChunksByFile: Map<string, SearchResult[]>;
+  totalChunks: number;
+  hitLimit: boolean;
+}> {
   if (
     indexVersion !== undefined &&
     scanCache !== null &&
     scanCache.indexVersion === indexVersion &&
     scanCache.crossRepo === crossRepo
   ) {
-    importIndex = scanCache.importIndex;
-    allChunksByFile = scanCache.allChunksByFile;
-    totalChunks = scanCache.totalChunks;
-    hitLimit = scanCache.hitLimit;
-    log(`Using cached import index (${totalChunks} chunks, version ${indexVersion})`);
-  } else {
-    // Paginated scan: builds import index and file groupings incrementally
-    const scanResult = await scanChunksPaginated(vectorDB, crossRepo, log, normalizePathCached);
-    importIndex = scanResult.importIndex;
-    allChunksByFile = scanResult.allChunksByFile;
-    totalChunks = scanResult.totalChunks;
-    hitLimit = scanResult.hitLimit;
-
-    // Cache the scan results if indexVersion is provided
-    if (indexVersion !== undefined) {
-      scanCache = { indexVersion, crossRepo, importIndex, allChunksByFile, totalChunks, hitLimit };
-    }
-    log(`Scanned ${totalChunks} chunks for imports...`);
+    log(`Using cached import index (${scanCache.totalChunks} chunks, version ${indexVersion})`);
+    return scanCache;
   }
 
-  // Find dependent chunks and group by file
-  const dependentChunks = findDependentChunks(importIndex, normalizedTarget);
-  const chunksByFile = groupChunksByFile(dependentChunks);
+  const scanResult = await scanChunksPaginated(vectorDB, crossRepo, log, normalizePathCached);
 
-  // Find transitive dependents through re-export chains (barrel files)
+  if (indexVersion !== undefined) {
+    scanCache = { indexVersion, crossRepo, ...scanResult };
+  }
+  log(`Scanned ${scanResult.totalChunks} chunks for imports...`);
+  return scanResult;
+}
+
+/**
+ * Find and merge transitive dependents from re-export chains (barrel files).
+ */
+function resolveTransitiveDependents(
+  allChunksByFile: Map<string, SearchResult[]>,
+  normalizedTarget: string,
+  normalizePathCached: (path: string) => string,
+  importIndex: Map<string, SearchResult[]>,
+  chunksByFile: Map<string, SearchResult[]>,
+  log: (message: string, level?: 'warning') => void,
+): ReExporter[] {
   const reExporters = buildReExportGraph(allChunksByFile, normalizedTarget, normalizePathCached);
   if (reExporters.length > 0) {
     mergeTransitiveDependents(
@@ -590,6 +586,41 @@ export async function findDependents(
       log,
     );
   }
+  return reExporters;
+}
+
+export async function findDependents(
+  vectorDB: VectorDBInterface,
+  filepath: string,
+  crossRepo: boolean,
+  log: (message: string, level?: 'warning') => void,
+  symbol?: string,
+  indexVersion?: number,
+): Promise<DependencyAnalysisResult> {
+  const normalizePathCached = createPathNormalizer();
+  const normalizedTarget = normalizePathCached(filepath);
+
+  const { importIndex, allChunksByFile, hitLimit } = await getOrScanChunks(
+    vectorDB,
+    crossRepo,
+    log,
+    normalizePathCached,
+    indexVersion,
+  );
+
+  // Find dependent chunks and group by file
+  const dependentChunks = findDependentChunks(importIndex, normalizedTarget);
+  const chunksByFile = groupChunksByFile(dependentChunks);
+
+  // Find transitive dependents through re-export chains (barrel files)
+  const reExporters = resolveTransitiveDependents(
+    allChunksByFile,
+    normalizedTarget,
+    normalizePathCached,
+    importIndex,
+    chunksByFile,
+    log,
+  );
 
   // Calculate metrics
   const fileComplexities = calculateFileComplexities(chunksByFile);
