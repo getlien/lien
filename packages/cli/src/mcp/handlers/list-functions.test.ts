@@ -463,7 +463,7 @@ describe('handleListFunctions', () => {
       expect(parsed.results[0].metadata.symbolName).toBe('helper');
     });
 
-    it('should return unfiltered results for ReDoS pattern', async () => {
+    it('should return only symbolName results for ReDoS pattern', async () => {
       mockVectorDB.querySymbols.mockResolvedValue([]);
       mockVectorDB.scanWithFilter.mockResolvedValue([
         {
@@ -472,6 +472,14 @@ describe('handleListFunctions', () => {
             file: 'src/alpha.ts',
             symbolName: 'alpha',
             symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: '// a random block without symbolName',
+          metadata: {
+            file: 'src/block.ts',
           },
           score: 0,
           relevance: 'highly_relevant',
@@ -491,8 +499,9 @@ describe('handleListFunctions', () => {
       const result = await handleListFunctions({ pattern: '(a+)+$' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      // ReDoS pattern should be rejected, returning all results unfiltered
+      // ReDoS pattern rejected — still filters to entries with symbolName
       expect(parsed.results).toHaveLength(2);
+      expect(parsed.results.map((r: any) => r.metadata.symbolName)).toEqual(['alpha', 'beta']);
     });
   });
 

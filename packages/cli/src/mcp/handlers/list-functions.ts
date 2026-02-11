@@ -43,6 +43,9 @@ async function performContentScan(
         const symbolName = r.metadata?.symbolName;
         return symbolName && regex.test(symbolName);
       });
+    } else {
+      // Invalid/unsafe pattern — still filter to entries with a symbolName
+      results = results.filter(r => !!r.metadata?.symbolName);
     }
   }
 
