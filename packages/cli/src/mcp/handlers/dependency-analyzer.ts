@@ -291,7 +291,16 @@ function addChunkToFileMap(
   if (!fileMap.has(canonical)) {
     fileMap.set(canonical, []);
   }
-  fileMap.get(canonical)!.push(chunk);
+  const existing = fileMap.get(canonical)!;
+  // Skip duplicate chunks (same line range) from abs/relative path variants
+  const isDuplicate = existing.some(
+    c =>
+      c.metadata.startLine === chunk.metadata.startLine &&
+      c.metadata.endLine === chunk.metadata.endLine,
+  );
+  if (!isDuplicate) {
+    existing.push(chunk);
+  }
 }
 
 /**

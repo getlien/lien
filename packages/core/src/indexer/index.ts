@@ -32,7 +32,7 @@ import { isGitAvailable, isGitRepo } from '../git/utils.js';
 import { GitStateTracker } from '../git/tracker.js';
 import { detectChanges } from './change-detector.js';
 import type { ChangeDetectionResult } from './change-detector.js';
-import { indexMultipleFiles } from './incremental.js';
+import { indexMultipleFiles, normalizeToRelativePath } from './incremental.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import { ChunkBatchProcessor } from './chunk-batch-processor.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
@@ -375,11 +375,13 @@ async function processFileForIndexing(
   try {
     // Resolve relative paths against rootDir for file I/O
     const absolutePath = path.isAbsolute(file) ? file : path.join(rootDir, file);
+    // Normalize to relative path for consistent storage in the index
+    const relativePath = normalizeToRelativePath(file, rootDir);
     // Get file stats to capture actual modification time
     const stats = await fs.stat(absolutePath);
     const content = await fs.readFile(absolutePath, 'utf-8');
 
-    const chunks = chunkFile(file, content, {
+    const chunks = chunkFile(relativePath, content, {
       chunkSize: indexConfig.chunkSize,
       chunkOverlap: indexConfig.chunkOverlap,
       useAST: indexConfig.useAST,
@@ -397,7 +399,7 @@ async function processFileForIndexing(
     const contentHash = await computeContentHash(absolutePath);
 
     // Add chunks to batch processor (handles mutex internally)
-    await batchProcessor.addChunks(chunks, file, stats.mtimeMs, contentHash);
+    await batchProcessor.addChunks(chunks, relativePath, stats.mtimeMs, contentHash);
     progressTracker.incrementFiles();
 
     return true;
