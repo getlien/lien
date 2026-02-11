@@ -440,7 +440,7 @@ describe('handleListFunctions', () => {
   });
 
   describe('invalid and ReDoS regex patterns', () => {
-    it('should return unfiltered results for invalid regex pattern', async () => {
+    it('should filter to symbolName entries for invalid regex pattern', async () => {
       mockVectorDB.querySymbols.mockResolvedValue([]);
       mockVectorDB.scanWithFilter.mockResolvedValue([
         {
@@ -453,12 +453,20 @@ describe('handleListFunctions', () => {
           score: 0,
           relevance: 'highly_relevant',
         },
+        {
+          content: '// block without symbolName',
+          metadata: {
+            file: 'src/block.ts',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
       ]);
 
       const result = await handleListFunctions({ pattern: '[unterminated' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      // Invalid regex should be skipped, returning all results unfiltered
+      // Invalid regex rejected — still filters to entries with symbolName
       expect(parsed.results).toHaveLength(1);
       expect(parsed.results[0].metadata.symbolName).toBe('helper');
     });
