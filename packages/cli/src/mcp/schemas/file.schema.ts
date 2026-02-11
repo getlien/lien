@@ -9,9 +9,9 @@ import { z } from 'zod';
 export const GetFilesContextSchema = z.object({
   filepaths: z
     .union([
-      z.string().min(1, 'Filepath cannot be empty'),
+      z.string().min(1, 'Filepath cannot be empty').max(1000),
       z
-        .array(z.string().min(1, 'Filepath cannot be empty'))
+        .array(z.string().min(1, 'Filepath cannot be empty').max(1000))
         .min(1, 'Array must contain at least one filepath')
         .max(50, 'Maximum 50 files per request'),
     ])

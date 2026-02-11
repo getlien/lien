@@ -11,6 +11,7 @@ import {
   FilenameBoostingStrategy,
   FileTypeBoostingStrategy,
 } from './boosting/index.js';
+import { safeRegex } from '../utils/safe-regex.js';
 
 // TODO: Replace with proper type from lancedb-types.ts
 // Currently using 'any' because tests use incomplete mocks that don't satisfy full LanceDB interface
@@ -371,7 +372,8 @@ function filterByLanguage(records: DBRecord[], language: string): DBRecord[] {
  * Filter records by regex pattern against content and file path.
  */
 function filterByPattern(records: DBRecord[], pattern: string): DBRecord[] {
-  const regex = new RegExp(pattern, 'i');
+  const regex = safeRegex(pattern);
+  if (!regex) return records;
   return records.filter((r: DBRecord) => regex.test(r.content) || regex.test(r.file));
 }
 
@@ -534,9 +536,11 @@ function matchesSymbolFilter(
 
   // Pattern filter (if provided)
   if (pattern) {
-    const regex = new RegExp(pattern, 'i');
-    const nameMatches = symbols.some((s: string) => regex.test(s)) || regex.test(astSymbolName);
-    if (!nameMatches) return false;
+    const regex = safeRegex(pattern);
+    if (regex) {
+      const nameMatches = symbols.some((s: string) => regex.test(s)) || regex.test(astSymbolName);
+      if (!nameMatches) return false;
+    }
   }
 
   // Symbol type filter (if provided)

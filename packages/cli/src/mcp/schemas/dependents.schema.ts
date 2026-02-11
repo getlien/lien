@@ -17,6 +17,7 @@ export const GetDependentsSchema = z.object({
   filepath: z
     .string()
     .min(1, 'Filepath cannot be empty')
+    .max(1000)
     .describe(
       'Path to file to find dependents for (relative to workspace root).\n\n' +
         "Example: 'src/utils/validate.ts'\n\n" +
@@ -28,6 +29,7 @@ export const GetDependentsSchema = z.object({
   symbol: z
     .string()
     .min(1, 'Symbol cannot be an empty string')
+    .max(500)
     .optional()
     .describe(
       'Optional: specific exported symbol to find usages of.\n\n' +

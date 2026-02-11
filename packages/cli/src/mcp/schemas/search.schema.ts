@@ -45,7 +45,7 @@ export const SemanticSearchSchema = z.object({
     ),
 
   repoIds: z
-    .array(z.string())
+    .array(z.string().max(255))
     .optional()
     .describe(
       'Optional: Filter to specific repos when crossRepo=true.\n\n' +

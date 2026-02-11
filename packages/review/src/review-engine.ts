@@ -4,7 +4,7 @@
  */
 
 import * as fs from 'fs';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import collect from 'collect.js';
 import {
   indexCodebase,
@@ -44,6 +44,7 @@ import {
   formatThresholdValue,
 } from './prompt.js';
 import { formatDeltaValue } from './format.js';
+import { assertValidSha } from './git-utils.js';
 import {
   calculateDeltas,
   calculateDeltaSummary,
@@ -287,10 +288,11 @@ async function analyzeBaseBranch(
     logger.info(`Checking out base branch at ${baseSha.substring(0, 7)}...`);
 
     // Save current HEAD
-    const currentHead = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
+    const currentHead = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim();
 
     // Checkout base branch
-    execSync(`git checkout --force ${baseSha}`, { stdio: 'pipe' });
+    assertValidSha(baseSha, 'baseSha');
+    execFileSync('git', ['checkout', '--force', baseSha], { stdio: 'pipe' });
     logger.info('Base branch checked out');
 
     // Analyze base
@@ -298,7 +300,7 @@ async function analyzeBaseBranch(
     const baseReport = await runComplexityAnalysis(filesToAnalyze, threshold, rootDir, logger);
 
     // Restore HEAD
-    execSync(`git checkout --force ${currentHead}`, { stdio: 'pipe' });
+    execFileSync('git', ['checkout', '--force', currentHead], { stdio: 'pipe' });
     logger.info('Restored to HEAD');
 
     if (baseReport) {
@@ -310,8 +312,8 @@ async function analyzeBaseBranch(
     logger.warning(`Failed to analyze base branch: ${error}`);
     // Attempt to restore HEAD even if analysis failed
     try {
-      const currentHead = execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
-      execSync(`git checkout --force ${currentHead}`, { stdio: 'pipe' });
+      const currentHead = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim();
+      execFileSync('git', ['checkout', '--force', currentHead], { stdio: 'pipe' });
     } catch (restoreError) {
       logger.warning(`Failed to restore HEAD: ${restoreError}`);
     }

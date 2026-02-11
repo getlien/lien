@@ -3,6 +3,7 @@ import { ListFunctionsSchema } from '../schemas/index.js';
 import type { ListFunctionsInput } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
+import { safeRegex } from '@liendev/core';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
 
 interface QueryResult {
@@ -36,11 +37,13 @@ async function performContentScan(
 
   // Filter by symbolName (not content) to match only actual functions/symbols
   if (args.pattern) {
-    const regex = new RegExp(args.pattern, 'i');
-    results = results.filter(r => {
-      const symbolName = r.metadata?.symbolName;
-      return symbolName && regex.test(symbolName);
-    });
+    const regex = safeRegex(args.pattern);
+    if (regex) {
+      results = results.filter(r => {
+        const symbolName = r.metadata?.symbolName;
+        return symbolName && regex.test(symbolName);
+      });
+    }
   }
 
   return {

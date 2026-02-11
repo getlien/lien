@@ -68,6 +68,13 @@ describe('SemanticSearchSchema', () => {
     const result = SemanticSearchSchema.parse({ query: 'test', limit: 50 });
     expect(result.limit).toBe(50);
   });
+
+  it('should reject too-long repoIds element', () => {
+    const longRepoId = 'a'.repeat(256);
+    expect(() =>
+      SemanticSearchSchema.parse({ query: 'test', repoIds: [longRepoId] }),
+    ).toThrow();
+  });
 });
 
 describe('FindSimilarSchema', () => {
@@ -159,6 +166,27 @@ describe('FindSimilarSchema', () => {
       }),
     ).toThrow('Path hint cannot be empty');
   });
+
+  it('should reject too-long code snippet', () => {
+    const longCode = 'a'.repeat(50001);
+    expect(() => FindSimilarSchema.parse({ code: longCode })).toThrow(
+      'Code snippet too long (max 50000 characters)',
+    );
+  });
+
+  it('should reject too-long language', () => {
+    const longLang = 'a'.repeat(51);
+    expect(() =>
+      FindSimilarSchema.parse({ code: 'const x = 1; return x + 2;', language: longLang }),
+    ).toThrow();
+  });
+
+  it('should reject too-long pathHint', () => {
+    const longPath = 'a'.repeat(501);
+    expect(() =>
+      FindSimilarSchema.parse({ code: 'const x = 1; return x + 2;', pathHint: longPath }),
+    ).toThrow();
+  });
 });
 
 describe('GetFilesContextSchema', () => {
@@ -220,6 +248,16 @@ describe('GetFilesContextSchema', () => {
     });
     expect(invalid.success).toBe(false);
   });
+
+  it('should reject too-long filepath (string variant)', () => {
+    const longPath = 'a'.repeat(1001);
+    expect(() => GetFilesContextSchema.parse({ filepaths: longPath })).toThrow();
+  });
+
+  it('should reject too-long filepath (array variant)', () => {
+    const longPath = 'a'.repeat(1001);
+    expect(() => GetFilesContextSchema.parse({ filepaths: [longPath] })).toThrow();
+  });
 });
 
 describe('ListFunctionsSchema', () => {
@@ -270,6 +308,16 @@ describe('ListFunctionsSchema', () => {
       const result = ListFunctionsSchema.parse({ language });
       expect(result.language).toBe(language);
     });
+  });
+
+  it('should reject too-long pattern', () => {
+    const longPattern = 'a'.repeat(201);
+    expect(() => ListFunctionsSchema.parse({ pattern: longPattern })).toThrow();
+  });
+
+  it('should reject too-long language', () => {
+    const longLang = 'a'.repeat(51);
+    expect(() => ListFunctionsSchema.parse({ language: longLang })).toThrow();
   });
 });
 
@@ -341,6 +389,18 @@ describe('GetDependentsSchema', () => {
         filepath: 'test.ts',
         depth: 1.5,
       }),
+    ).toThrow();
+  });
+
+  it('should reject too-long filepath', () => {
+    const longPath = 'a'.repeat(1001);
+    expect(() => GetDependentsSchema.parse({ filepath: longPath })).toThrow();
+  });
+
+  it('should reject too-long symbol', () => {
+    const longSymbol = 'a'.repeat(501);
+    expect(() =>
+      GetDependentsSchema.parse({ filepath: 'src/test.ts', symbol: longSymbol }),
     ).toThrow();
   });
 });
@@ -420,5 +480,15 @@ describe('GetComplexitySchema', () => {
   it('should accept minimum valid threshold', () => {
     const result = GetComplexitySchema.parse({ threshold: 1 });
     expect(result.threshold).toBe(1);
+  });
+
+  it('should reject too-long files element', () => {
+    const longPath = 'a'.repeat(1001);
+    expect(() => GetComplexitySchema.parse({ files: [longPath] })).toThrow();
+  });
+
+  it('should reject too-long repoIds element', () => {
+    const longRepoId = 'a'.repeat(256);
+    expect(() => GetComplexitySchema.parse({ repoIds: [longRepoId] })).toThrow();
   });
 });
