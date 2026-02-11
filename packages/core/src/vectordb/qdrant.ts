@@ -9,6 +9,7 @@ import { calculateRelevance } from './relevance.js';
 import { DatabaseError } from '../errors/index.js';
 import { readVersionFile } from './version.js';
 import { QdrantPayloadMapper } from './qdrant-payload-mapper.js';
+import { extractRepoId } from '../utils/repo-id.js';
 
 /**
  * Qdrant filter types for stronger type-safety when constructing filters.
@@ -238,7 +239,7 @@ export class QdrantDB implements VectorDBInterface {
       apiKey, // Optional, required for Qdrant Cloud
     });
     this.orgId = orgId;
-    this.repoId = this.extractRepoId(projectRoot);
+    this.repoId = extractRepoId(projectRoot);
     this.branch = branch;
     this.commitSha = commitSha;
     // Collection naming: one per org
@@ -257,16 +258,6 @@ export class QdrantDB implements VectorDBInterface {
     const projectName = path.basename(projectRoot);
     const pathHash = crypto.createHash('md5').update(projectRoot).digest('hex').substring(0, 8);
     this.dbPath = path.join(os.homedir(), '.lien', 'indices', `${projectName}-${pathHash}`);
-  }
-
-  /**
-   * Extract repository identifier from project root.
-   * Uses project name + path hash for stable, unique identification.
-   */
-  private extractRepoId(projectRoot: string): string {
-    const projectName = path.basename(projectRoot);
-    const pathHash = crypto.createHash('md5').update(projectRoot).digest('hex').substring(0, 8);
-    return `${projectName}-${pathHash}`;
   }
 
   /**

@@ -2,12 +2,12 @@ import chalk from 'chalk';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import crypto from 'crypto';
 import {
   isGitRepo,
   getCurrentBranch,
   getCurrentCommit,
   readVersionFile,
+  extractRepoId,
   DEFAULT_CONCURRENCY,
   DEFAULT_EMBEDDING_BATCH_SIZE,
   DEFAULT_CHUNK_SIZE,
@@ -18,12 +18,9 @@ import { showCompactBanner } from '../utils/banner.js';
 
 export async function statusCommand() {
   const rootDir = process.cwd();
-  const projectName = path.basename(rootDir);
+  const repoId = extractRepoId(rootDir);
 
-  // Use same hashing logic as VectorDB to show correct path
-  const pathHash = crypto.createHash('md5').update(rootDir).digest('hex').substring(0, 8);
-
-  const indexPath = path.join(os.homedir(), '.lien', 'indices', `${projectName}-${pathHash}`);
+  const indexPath = path.join(os.homedir(), '.lien', 'indices', repoId);
 
   showCompactBanner();
   console.log(chalk.bold('Status\n'));

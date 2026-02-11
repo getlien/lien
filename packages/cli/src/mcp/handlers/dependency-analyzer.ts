@@ -49,6 +49,25 @@ const COMPLEXITY_THRESHOLDS = {
 type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
 /**
+ * Cached scan results to avoid re-scanning when the index hasn't changed.
+ * Keyed by indexVersion — when the index is rebuilt, the version changes
+ * and the cache is invalidated automatically.
+ */
+let scanCache: {
+  indexVersion: number;
+  importIndex: Map<string, SearchResult[]>;
+  allChunksByFile: Map<string, SearchResult[]>;
+  totalChunks: number;
+} | null = null;
+
+/**
+ * Clear the dependency scan cache. Exported for testing.
+ */
+export function clearDependencyCache(): void {
+  scanCache = null;
+}
+
+/**
  * A single usage of a symbol (call site).
  */
 export interface SymbolUsage {
@@ -505,6 +524,8 @@ function mergeTransitiveDependents(
  * @param crossRepo - Whether to search across repos
  * @param log - Logging function
  * @param symbol - Optional: specific symbol to find usages of
+ * @param indexVersion - Optional: index version for cache lookup. When provided and matching
+ *   the cached version, the expensive scanChunksPaginated call is skipped.
  */
 export async function findDependents(
   vectorDB: VectorDBInterface,
@@ -512,19 +533,38 @@ export async function findDependents(
   crossRepo: boolean,
   log: (message: string, level?: 'warning') => void,
   symbol?: string,
+  indexVersion?: number,
 ): Promise<DependencyAnalysisResult> {
   // Setup path normalization (needed for paginated scan)
   const normalizePathCached = createPathNormalizer();
   const normalizedTarget = normalizePathCached(filepath);
 
-  // Paginated scan: builds import index and file groupings incrementally
-  const { importIndex, allChunksByFile, totalChunks, hitLimit } = await scanChunksPaginated(
-    vectorDB,
-    crossRepo,
-    log,
-    normalizePathCached,
-  );
-  log(`Scanned ${totalChunks} chunks for imports...`);
+  let importIndex: Map<string, SearchResult[]>;
+  let allChunksByFile: Map<string, SearchResult[]>;
+  let totalChunks: number;
+  let hitLimit: boolean;
+
+  // Use cached scan results if the index version matches
+  if (indexVersion !== undefined && scanCache !== null && scanCache.indexVersion === indexVersion) {
+    importIndex = scanCache.importIndex;
+    allChunksByFile = scanCache.allChunksByFile;
+    totalChunks = scanCache.totalChunks;
+    hitLimit = false;
+    log(`Using cached import index (${totalChunks} chunks, version ${indexVersion})`);
+  } else {
+    // Paginated scan: builds import index and file groupings incrementally
+    const scanResult = await scanChunksPaginated(vectorDB, crossRepo, log, normalizePathCached);
+    importIndex = scanResult.importIndex;
+    allChunksByFile = scanResult.allChunksByFile;
+    totalChunks = scanResult.totalChunks;
+    hitLimit = scanResult.hitLimit;
+
+    // Cache the scan results if indexVersion is provided
+    if (indexVersion !== undefined) {
+      scanCache = { indexVersion, importIndex, allChunksByFile, totalChunks };
+    }
+    log(`Scanned ${totalChunks} chunks for imports...`);
+  }
 
   // Find dependent chunks and group by file
   const dependentChunks = findDependentChunks(importIndex, normalizedTarget);

@@ -1,15 +1,10 @@
 import fs from 'fs/promises';
 import path from 'path';
+import type { LanceDBConnection, LanceDBTable } from './lancedb-types.js';
 import type { ChunkMetadata } from '../indexer/types.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { writeVersionFile } from './version.js';
 import { insertBatch } from './batch-insert.js';
-
-// TODO: Replace with proper types from lancedb-types.ts
-// Currently using 'any' because tests use incomplete mocks that don't satisfy full LanceDB interface
-// Proper types: Awaited<ReturnType<typeof lancedb.connect>> and Awaited<ReturnType<Connection['openTable']>>
-type LanceDBConnection = any;
-type LanceDBTable = any;
 
 /**
  * Clear all data from the vector database.
@@ -94,10 +89,11 @@ export async function updateFile(
     // 2. Insert new chunks (if any)
     let updatedTable = table;
     if (vectors.length > 0) {
-      updatedTable = await insertBatch(db, table, tableName, vectors, metadatas, contents);
-      if (!updatedTable) {
+      const result = await insertBatch(db, table, tableName, vectors, metadatas, contents);
+      if (!result) {
         throw new DatabaseError('insertBatch unexpectedly returned null');
       }
+      updatedTable = result;
     }
 
     // 3. Update version file to trigger MCP reconnection

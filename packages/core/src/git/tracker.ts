@@ -98,48 +98,16 @@ export class GitStateTracker {
         return null;
       }
 
-      // Check if state changed
-      const branchChanged = previousState.branch !== this.currentState.branch;
-      const commitChanged = previousState.commit !== this.currentState.commit;
-
-      if (!branchChanged && !commitChanged) {
-        // No changes
-        return null;
-      }
-
-      // State changed - get list of changed files
-      let changedFiles: string[] = [];
-
-      if (branchChanged) {
-        // Branch changed - compare current branch with previous branch
-        try {
-          changedFiles = await getChangedFiles(
-            this.rootDir,
-            previousState.branch,
-            this.currentState.branch,
-          );
-        } catch (error) {
-          // If branches diverged too much or don't exist, fall back to commit diff
-          console.error(`[Lien] Branch diff failed, using commit diff: ${error}`);
-          changedFiles = await getChangedFilesBetweenCommits(
-            this.rootDir,
-            previousState.commit,
-            this.currentState.commit,
-          );
-        }
-      } else if (commitChanged) {
-        // Same branch, different commit
-        changedFiles = await getChangedFilesBetweenCommits(
-          this.rootDir,
-          previousState.commit,
-          this.currentState.commit,
-        );
-      }
+      // Get list of changed files between previous and current state
+      const changedFiles = await this.getChangedFilesForStateChange(
+        previousState,
+        this.currentState,
+      );
 
       // Save new state
       await this.saveState(this.currentState);
 
-      return changedFiles;
+      return changedFiles.length > 0 ? changedFiles : null;
     } catch (error) {
       console.error(`[Lien] Failed to initialize git tracker: ${error}`);
       return null;
@@ -170,53 +138,57 @@ export class GitStateTracker {
         return null;
       }
 
-      // Check if state changed
-      const branchChanged = this.currentState.branch !== newState.branch;
-      const commitChanged = this.currentState.commit !== newState.commit;
-
-      if (!branchChanged && !commitChanged) {
-        // No changes
-        return null;
-      }
-
-      // State changed - get list of changed files
-      let changedFiles: string[] = [];
-
-      if (branchChanged) {
-        // Branch changed
-        try {
-          changedFiles = await getChangedFiles(
-            this.rootDir,
-            this.currentState.branch,
-            newState.branch,
-          );
-        } catch (error) {
-          // Fall back to commit diff
-          console.error(`[Lien] Branch diff failed, using commit diff: ${error}`);
-          changedFiles = await getChangedFilesBetweenCommits(
-            this.rootDir,
-            this.currentState.commit,
-            newState.commit,
-          );
-        }
-      } else if (commitChanged) {
-        // Same branch, different commit
-        changedFiles = await getChangedFilesBetweenCommits(
-          this.rootDir,
-          this.currentState.commit,
-          newState.commit,
-        );
-      }
+      // Get list of changed files between current and new state
+      const changedFiles = await this.getChangedFilesForStateChange(
+        this.currentState,
+        newState,
+      );
 
       // Update current state
       this.currentState = newState;
       await this.saveState(newState);
 
-      return changedFiles;
+      return changedFiles.length > 0 ? changedFiles : null;
     } catch (error) {
       console.error(`[Lien] Failed to detect git changes: ${error}`);
       return null;
     }
+  }
+
+  /**
+   * Gets the list of changed files between two git states.
+   * Tries branch diff first, falls back to commit diff if branches diverged.
+   */
+  private async getChangedFilesForStateChange(
+    oldState: GitState,
+    newState: GitState,
+  ): Promise<string[]> {
+    const branchChanged = oldState.branch !== newState.branch;
+    const commitChanged = oldState.commit !== newState.commit;
+
+    if (!branchChanged && !commitChanged) {
+      return [];
+    }
+
+    if (branchChanged) {
+      try {
+        return await getChangedFiles(this.rootDir, oldState.branch, newState.branch);
+      } catch (error) {
+        console.error(`[Lien] Branch diff failed, using commit diff: ${error}`);
+        return await getChangedFilesBetweenCommits(
+          this.rootDir,
+          oldState.commit,
+          newState.commit,
+        );
+      }
+    }
+
+    // Same branch, different commit
+    return await getChangedFilesBetweenCommits(
+      this.rootDir,
+      oldState.commit,
+      newState.commit,
+    );
   }
 
   /**

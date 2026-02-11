@@ -139,6 +139,7 @@ describe('handleGetDependents', () => {
         false, // crossRepo default
         mockLog,
         undefined, // symbol default
+        1234567890, // indexVersion from mock
       );
     });
 
@@ -314,6 +315,7 @@ describe('handleGetDependents', () => {
         true,
         mockLog,
         undefined,
+        1234567890,
       );
     });
 
@@ -391,6 +393,7 @@ describe('handleGetDependents', () => {
         true,
         mockLog,
         undefined,
+        1234567890,
       );
     });
   });
@@ -592,6 +595,7 @@ describe('handleGetDependents', () => {
         false,
         mockLog,
         'validateEmail',
+        1234567890,
       );
     });
 
