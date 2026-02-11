@@ -18,7 +18,7 @@ Lien connects AI coding assistants like Cursor and Claude Code to your codebase 
 - 🎯 **MCP Integration** - Works seamlessly with Cursor, Claude Code, and other MCP-compatible tools
 - ⚡ **Fast** - Sub-500ms queries, minutes to index large codebases
 - 🆓 **Free Forever** - No API costs, no subscriptions, no usage limits
-- 📦 **Framework-Aware** - Auto-detects Node.js, Laravel, Shopify; supports 15+ languages
+- 📦 **Framework-Aware** - Auto-detects Node.js, Laravel, and more; supports 15+ languages
 - 🏗️ **Monorepo Support** - Index multiple frameworks in one repository
 - 📊 **Complexity Analysis** - Human-friendly metrics: test paths, mental load, time to understand
 - 🔍 **Impact Analysis** - Find all dependents before refactoring with risk assessment
@@ -109,7 +109,7 @@ Lien tracks code complexity with intuitive outputs:
 
 TypeScript • JavaScript • Vue • Python • PHP • Liquid • Go • Rust • Java • C/C++ • Ruby • Swift • Kotlin • C# • Scala • Markdown
 
-**Frameworks:** Node.js, Laravel, Shopify (Liquid themes)
+**Frameworks:** Node.js, Laravel
 
 ## Contributing
 

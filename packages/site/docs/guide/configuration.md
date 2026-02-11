@@ -97,12 +97,9 @@ Detected via `composer.json`. Indexes:
 - Excludes: `vendor`, `storage`, `bootstrap/cache`
 - Test patterns: `tests/**/*Test.php`
 
-### Shopify (Liquid)
+### Liquid
 
-Detected via `config/settings_schema.json`. Indexes:
-- `layout/**/*.liquid`, `sections/**/*.liquid`, `snippets/**/*.liquid`
-- `templates/**/*.liquid`, `blocks/**/*.liquid`
-- Config JSON files
+Liquid (`.liquid`) files are indexed via the default scan pattern—no ecosystem preset or auto-detection is required. They work out of the box alongside all other supported file types.
 
 ### Monorepos
 

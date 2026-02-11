@@ -56,7 +56,7 @@ Lien automatically detects your project type via **ecosystem presets**:
 - **Laravel/PHP** - via composer.json
 - **Python** - via pyproject.toml, setup.py, requirements.txt
 - **Rust** - via Cargo.toml
-- **Shopify Themes** - via config/settings_schema.json
+- **Liquid** - `.liquid` files indexed via default scan pattern (no auto-detection needed)
 - **Monorepos** - Multiple ecosystems in one repo (e.g., Node.js frontend + Laravel backend)
 
 Each ecosystem preset applies appropriate file exclusions and indexing patterns!

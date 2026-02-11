@@ -26,7 +26,7 @@ Integrate with Cursor, Claude Code, and other MCP-compatible tools to give AI as
 Automatically detects and adapts to your project structure:
 - **Node.js/TypeScript**: Package.json detection, Jest/Vitest/Mocha support
 - **Laravel/PHP**: Composer detection, blade templates, frontend assets
-- **Shopify**: Liquid theme detection, hybrid themes with Vue/React
+- **Liquid**: `.liquid` files are indexed via the default scan pattern (no auto-detection needed)
 - **Monorepo**: Multiple frameworks in one repository
 
 ## How Does It Work?
