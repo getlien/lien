@@ -19,11 +19,12 @@ const definitions: LanguageDefinition[] = [
 ];
 
 /**
- * Supported languages for AST parsing.
- *
- * NOTE: This list is manually maintained and must be kept in sync with `definitions`.
+ * Canonical list of supported language IDs.
+ * SupportedLanguage type is derived from this array.
+ * To add a new language: add its ID here, then add its definition to `definitions` below.
  */
-export type SupportedLanguage = 'typescript' | 'javascript' | 'php' | 'python' | 'rust';
+export const LANGUAGE_IDS = ['typescript', 'javascript', 'php', 'python', 'rust'] as const;
+export type SupportedLanguage = (typeof LANGUAGE_IDS)[number];
 
 /**
  * Registry keyed by language id.
@@ -42,6 +43,17 @@ for (const def of definitions) {
       throw new Error(`Duplicate extension "${ext}" registered by "${def.id}" (already claimed by "${extensionMap.get(ext)}")`);
     }
     extensionMap.set(ext, def.id);
+  }
+}
+
+// Validate LANGUAGE_IDS has no duplicates and every ID has a definition
+if (new Set(LANGUAGE_IDS).size !== LANGUAGE_IDS.length) {
+  const dupes = [...new Set(LANGUAGE_IDS.filter((id, i) => LANGUAGE_IDS.indexOf(id) !== i))];
+  throw new Error(`LANGUAGE_IDS contains duplicate entries: ${dupes.join(', ')}`);
+}
+for (const id of LANGUAGE_IDS) {
+  if (!languageRegistry.has(id)) {
+    throw new Error(`Language "${id}" is in LANGUAGE_IDS but has no definition in the registry`);
   }
 }
 
