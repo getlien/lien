@@ -3,7 +3,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import chokidar from 'chokidar';
-import { FileWatcher, FileChangeEvent } from './index.js';
+import type { FileChangeEvent } from './index.js';
+import { FileWatcher } from './index.js';
 import { ALWAYS_IGNORE_PATTERNS } from '@liendev/core';
 
 describe('FileWatcher', () => {

@@ -1,8 +1,9 @@
 import type { VectorDBInterface } from '../vectordb/types.js';
-import { ComplexityViolation, ComplexityReport, FileComplexityData, RISK_ORDER, RiskLevel, HalsteadDetails } from './types.js';
-import { ChunkMetadata } from '../indexer/types.js';
+import type { ComplexityViolation, ComplexityReport, FileComplexityData, RiskLevel, HalsteadDetails } from './types.js';
+import { RISK_ORDER } from './types.js';
+import type { ChunkMetadata } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
-import { SearchResult } from '../vectordb/types.js';
+import type { SearchResult } from '../vectordb/types.js';
 
 /**
  * Hardcoded severity multipliers:

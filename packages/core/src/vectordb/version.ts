@@ -33,7 +33,7 @@ export async function readVersionFile(indexPath: string): Promise<number> {
     const content = await fs.readFile(versionFilePath, 'utf-8');
     const timestamp = parseInt(content.trim(), 10);
     return isNaN(timestamp) ? 0 : timestamp;
-  } catch (error) {
+  } catch {
     // File doesn't exist or can't be read - treat as version 0
     return 0;
   }

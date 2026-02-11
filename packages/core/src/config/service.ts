@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { LienConfig, LegacyLienConfig, defaultConfig, isLegacyConfig, isModernConfig } from './schema.js';
+import type { LienConfig, LegacyLienConfig } from './schema.js';
+import { defaultConfig, isLegacyConfig, isModernConfig } from './schema.js';
 import { deepMergeConfig } from './merge.js';
 import { ConfigError, wrapError } from '../errors/index.js';
 

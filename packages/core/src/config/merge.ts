@@ -1,4 +1,4 @@
-import { LienConfig } from './schema.js';
+import type { LienConfig } from './schema.js';
 
 /**
  * Deep merges user config with defaults, preserving user customizations.

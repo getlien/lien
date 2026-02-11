@@ -2,7 +2,7 @@ import { glob } from 'glob';
 import ignore from 'ignore';
 import fs from 'fs/promises';
 import path from 'path';
-import { ScanOptions } from './types.js';
+import type { ScanOptions } from './types.js';
 import { ALWAYS_IGNORE_PATTERNS } from './gitignore.js';
 
 /**

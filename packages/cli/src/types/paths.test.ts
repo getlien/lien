@@ -155,9 +155,9 @@ describe('Path Type System', () => {
       
       // These types should be distinct at compile time
       // @ts-expect-error - Cannot assign RelativePath to AbsolutePath
-      const invalid1: AbsolutePath = relPath;
+      const _invalid1: AbsolutePath = relPath;
       // @ts-expect-error - Cannot assign AbsolutePath to RelativePath
-      const invalid2: RelativePath = absPath;
+      const _invalid2: RelativePath = absPath;
       
       // But both are still strings at runtime
       expect(typeof relPath).toBe('string');

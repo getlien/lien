@@ -1,5 +1,5 @@
 import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
-import { EmbeddingService } from './types.js';
+import type { EmbeddingService } from './types.js';
 import { EmbeddingError, wrapError } from '../errors/index.js';
 import { DEFAULT_EMBEDDING_MODEL } from '../constants.js';
 

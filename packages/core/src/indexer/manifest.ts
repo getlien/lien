@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { INDEX_FORMAT_VERSION } from '../constants.js';
-import { GitState } from '../git/tracker.js';
+import type { GitState } from '../git/tracker.js';
 import { getPackageVersion } from '../utils/version.js';
 import { computeContentHash, isHashAlgorithmCompatible } from './content-hash.js';
 
@@ -349,7 +349,7 @@ export class ManifestManager {
       
       const hashCompatible = isHashAlgorithmCompatible(manifest.hashAlgorithm);
       const changedFiles: string[] = [];
-      let skippedByHash = 0;
+      let _skippedByHash = 0;
       let manifestNeedsUpdate = false;
       
       for (const [filepath, mtime] of currentFiles) {
@@ -365,7 +365,7 @@ export class ManifestManager {
         if (needsReindex) {
           changedFiles.push(filepath);
         } else if (mtimeUpdated) {
-          skippedByHash++;
+          _skippedByHash++;
           manifestNeedsUpdate = true;
         }
       }

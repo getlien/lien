@@ -1,13 +1,12 @@
 import fs from 'fs/promises';
+import type { VectorDBInterface, EmbeddingService } from '@liendev/core';
 import {
   indexMultipleFiles,
   indexSingleFile,
   ManifestManager,
   computeContentHash,
   normalizeToRelativePath,
-  createGitignoreFilter,
-  VectorDBInterface,
-  EmbeddingService,
+  createGitignoreFilter
 } from '@liendev/core';
 import type { FileChangeHandler, FileChangeEvent } from '../watcher/index.js';
 import type { createReindexStateManager } from './reindex-state-manager.js';

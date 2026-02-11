@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CachedEmbeddings } from './cache.js';
-import { EmbeddingService } from './types.js';
+import type { EmbeddingService } from './types.js';
 
 // Mock embedding service for testing
 class MockEmbeddingService implements EmbeddingService {

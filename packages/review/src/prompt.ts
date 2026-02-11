@@ -864,7 +864,7 @@ Format as a single cohesive comment without headers. Be direct and specific to T
  */
 export function buildLineSummaryComment(
   report: ComplexityReport,
-  prContext: PRContext
+  _prContext: PRContext
 ): string {
   const { summary } = report;
   const emoji = summary.bySeverity.error > 0 ? '🔴' : '🟡';

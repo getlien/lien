@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { ChunkMetadata } from '../indexer/types.js';
+import type { ChunkMetadata } from '../indexer/types.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { writeVersionFile } from './version.js';
 import { insertBatch } from './batch-insert.js';

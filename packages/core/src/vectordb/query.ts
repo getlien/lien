@@ -1,4 +1,5 @@
-import { SearchResult, SYMBOL_TYPE_MATCHES } from './types.js';
+import type { SearchResult } from './types.js';
+import { SYMBOL_TYPE_MATCHES } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { MAX_CHUNKS_PER_FILE } from '../constants.js';
 import { DatabaseError, wrapError } from '../errors/index.js';

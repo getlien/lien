@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { insertBatch } from './batch-insert.js';
 import { DatabaseError } from '../errors/index.js';
-import { ChunkMetadata } from '../indexer/types.js';
+import type { ChunkMetadata } from '../indexer/types.js';
 import { VECTOR_DB_MAX_BATCH_SIZE, VECTOR_DB_MIN_BATCH_SIZE } from '../constants.js';
 
 // Helper to create mock metadata
@@ -392,11 +392,11 @@ describe('batch-insert', () => {
       });
 
       it('should continue processing after partial batch failures with splits', async () => {
-        let callCount = 0;
+        let _callCount = 0;
         const mockTable = { add: vi.fn().mockResolvedValue(undefined) };
         const mockDb = {
           createTable: vi.fn().mockImplementation((_name, records) => {
-            callCount++;
+            _callCount++;
             // Fail on larger batches, succeed on smaller ones
             if (records.length > VECTOR_DB_MIN_BATCH_SIZE * 2) {
               throw new Error('Batch too large');

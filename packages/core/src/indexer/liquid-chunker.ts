@@ -34,7 +34,7 @@ function extractSchemaName(schemaContent: string): string | undefined {
   try {
     // Remove Liquid tags to isolate JSON content
     // Replace {% schema %} and {% endschema %} (with optional whitespace control)
-    let jsonContent = schemaContent
+    const jsonContent = schemaContent
       .replace(/\{%-?\s*schema\s*-?%\}/g, '')
       .replace(/\{%-?\s*endschema\s*-?%\}/g, '')
       .trim();
@@ -43,7 +43,7 @@ function extractSchemaName(schemaContent: string): string | undefined {
     const schema = JSON.parse(jsonContent);
     // Ensure name is a string before returning
     return typeof schema.name === 'string' ? schema.name : undefined;
-  } catch (error) {
+  } catch {
     // Invalid JSON - return undefined
     // This is acceptable: schema blocks with invalid JSON won't have names extracted
   }

@@ -274,7 +274,7 @@ export class FileWatcher {
     this.gitChangeTimer = setTimeout(async () => {
       try {
         await this.gitChangeHandler?.();
-      } catch (error) {
+      } catch {
         // Error handled by git change handler, silent here to avoid MCP protocol interference
       }
       this.gitChangeTimer = null;
@@ -425,7 +425,7 @@ export class FileWatcher {
         // Sync handler - mark as complete and check for accumulated changes
         this.handleBatchComplete();
       }
-    } catch (error) {
+    } catch {
       // Error handling batch change - logged by MCP server handler
       // Silent here to avoid MCP protocol interference
       // handleBatchComplete() will reset batchInProgress and check for accumulated changes
@@ -495,7 +495,7 @@ export class FileWatcher {
         modified,
         deleted,
       });
-    } catch (error) {
+    } catch {
       // Error flushing final batch during shutdown (silent to avoid MCP protocol interference)
       // The handler itself logs errors appropriately
     }

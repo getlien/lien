@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import pLimit from 'p-limit';
 import { chunkFile } from './chunker.js';
-import { EmbeddingService } from '../embeddings/types.js';
+import type { EmbeddingService } from '../embeddings/types.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
 import {
   DEFAULT_CHUNK_SIZE,
@@ -13,8 +13,9 @@ import {
 } from '../constants.js';
 import { ManifestManager } from './manifest.js';
 import { computeContentHash } from './content-hash.js';
-import { CodeChunk } from './types.js';
-import { Result, Ok, Err, isOk } from '../utils/result.js';
+import type { CodeChunk } from './types.js';
+import type { Result } from '../utils/result.js';
+import { Ok, Err, isOk } from '../utils/result.js';
 
 /**
  * Extract repository identifier from project root.
