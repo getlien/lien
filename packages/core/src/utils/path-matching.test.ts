@@ -242,6 +242,17 @@ describe('matchesFile - Path Boundary Checking', () => {
       expect(testMatchesFile('src/models/user', 'src/models/product.py')).toBe(false);
     });
 
+    it('should NOT apply Python matching to relative imports with dots', () => {
+      // Relative paths starting with . should not trigger Python module matching
+      expect(testMatchesFile('./utils.helper', 'utils/helper.py')).toBe(false);
+      expect(testMatchesFile('../models.user', 'models/user.py')).toBe(false);
+    });
+
+    it('should NOT apply Python matching to file paths with dots', () => {
+      // Paths containing slashes are file paths, not Python modules
+      expect(testMatchesFile('src/utils.helper', 'utils/helper.py')).toBe(false);
+    });
+
     it('should handle single-level Python modules', () => {
       // Single module without dots should still work if it's part of the path
       expect(testMatchesFile('django.utils', 'django/utils/__init__.py')).toBe(true);

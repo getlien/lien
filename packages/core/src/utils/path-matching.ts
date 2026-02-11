@@ -61,7 +61,7 @@ export function normalizePath(path: string, workspaceRoot: string): string {
 /**
  * Checks if a pattern matches at path component boundaries.
  *
- * Ensures matches occur at proper boundaries (/, .) to avoid false positives like:
+ * Ensures matches occur at proper path boundaries (/) to avoid false positives like:
  * - "logger" matching "logger-utils" ❌
  * - "src/logger" matching "src/logger-service" ❌
  *
@@ -191,8 +191,9 @@ function matchesWithSourcePrefix(moduleAsPath: string, targetWithoutPy: string):
  * @returns True if the Python module matches the file path
  */
 function matchesPythonModule(importPath: string, targetPath: string): boolean {
-  // Only apply if the import contains dots (Python module syntax)
-  if (!importPath.includes('.')) {
+  // Only apply to Python-style dotted module identifiers (e.g., django.http.response)
+  // Excludes file paths (contain /), relative imports (start with .), and npm-style packages (lodash.get)
+  if (!/^[A-Za-z_]\w*(\.[A-Za-z_]\w*)+$/.test(importPath)) {
     return false;
   }
 
