@@ -2,7 +2,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import pLimit from 'p-limit';
 import type { VectorDBInterface } from '../vectordb/types.js';
-import { ManifestManager, IndexManifest } from './manifest.js';
+import type { IndexManifest } from './manifest.js';
+import { ManifestManager } from './manifest.js';
 // scanFilesToIndex is imported from index.ts to avoid circular dependency
 import { GitStateTracker } from '../git/tracker.js';
 import { isGitAvailable, isGitRepo, getChangedFiles } from '../git/utils.js';

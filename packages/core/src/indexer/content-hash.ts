@@ -34,7 +34,7 @@ export async function computeContentHash(filepath: string): Promise<string> {
     // For normal files, hash entire content (read as binary to support all file types)
     const content = await fs.readFile(filepath);
     return crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
-  } catch (err) {
+  } catch {
     // If file can't be read, return empty hash (will trigger reindex)
     // Common cases: file deleted, permission denied, file handle issues
     return '';

@@ -1,15 +1,16 @@
 import fs from 'fs/promises';
+import type {
+  VectorDBInterface,
+  EmbeddingService} from '@liendev/core';
 import {
   GitStateTracker,
   indexMultipleFiles,
   isGitAvailable,
   isGitRepo,
   DEFAULT_GIT_POLL_INTERVAL_MS,
-  createGitignoreFilter,
-  VectorDBInterface,
-  EmbeddingService,
+  createGitignoreFilter
 } from '@liendev/core';
-import { FileWatcher } from '../watcher/index.js';
+import type { FileWatcher } from '../watcher/index.js';
 import type { createReindexStateManager } from './reindex-state-manager.js';
 import type { LogFn } from './types.js';
 import { isFileIgnored, isGitignoreFile } from './file-change-handler.js';

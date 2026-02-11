@@ -30,6 +30,9 @@ jobs:
       - name: Build Core (required by CLI)
         run: npm run build -w @liendev/core
       
+      - name: Lint
+        run: npm run lint
+
       - name: Type check
         run: npm run typecheck --workspace=packages/cli
       

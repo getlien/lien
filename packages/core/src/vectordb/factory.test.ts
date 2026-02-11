@@ -20,12 +20,12 @@ vi.mock('./qdrant.js', () => ({
     dbPath = '/test/path';
     async initialize() {}
     constructor(
-      url: string,
-      apiKey: string | undefined,
-      orgId: string,
-      projectRoot: string,
-      branch: string,
-      commitSha: string
+      _url: string,
+      _apiKey: string | undefined,
+      _orgId: string,
+      _projectRoot: string,
+      _branch: string,
+      _commitSha: string
     ) {
       // Mock constructor accepts same parameters as real QdrantDB
     }

@@ -45,7 +45,7 @@ export async function statusCommand() {
     try {
       const files = await fs.readdir(indexPath, { recursive: true });
       console.log(chalk.dim('Index files:'), files.length);
-    } catch (e) {
+    } catch {
       // Ignore
     }
     
@@ -61,7 +61,7 @@ export async function statusCommand() {
     } catch {
       // Ignore
     }
-  } catch (error) {
+  } catch {
     console.log(chalk.dim('Index status:'), chalk.yellow('✗ Not indexed'));
     console.log(chalk.yellow('\nRun'), chalk.bold('lien index'), chalk.yellow('to index your codebase'));
   }

@@ -1,5 +1,5 @@
-import { ChunkMetadata } from '../indexer/types.js';
-import { RelevanceCategory } from './relevance.js';
+import type { ChunkMetadata } from '../indexer/types.js';
+import type { RelevanceCategory } from './relevance.js';
 
 export interface SearchResult {
   content: string;

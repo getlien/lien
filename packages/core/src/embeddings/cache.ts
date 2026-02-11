@@ -1,4 +1,4 @@
-import { EmbeddingService } from './types.js';
+import type { EmbeddingService } from './types.js';
 
 /**
  * LRU cache for embeddings with configurable max size.

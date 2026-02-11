@@ -17,7 +17,7 @@ describe('version file utilities', () => {
     // Cleanup
     try {
       await fs.rm(testDir, { recursive: true, force: true });
-    } catch (error) {
+    } catch {
       // Ignore cleanup errors
     }
   });

@@ -2,8 +2,8 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 import crypto from 'crypto';
 import path from 'path';
 import os from 'os';
-import { SearchResult, VectorDBInterface } from './types.js';
-import { ChunkMetadata } from '../indexer/types.js';
+import type { SearchResult, VectorDBInterface } from './types.js';
+import type { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { calculateRelevance } from './relevance.js';
 import { DatabaseError } from '../errors/index.js';
@@ -956,7 +956,7 @@ export class QdrantDB implements VectorDBInterface {
       }
       
       return false;
-    } catch (error) {
+    } catch {
       // If we can't read version file, don't reconnect
       return false;
     }

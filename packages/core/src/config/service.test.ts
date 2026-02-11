@@ -2,17 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { fileURLToPath } from 'url';
 import { ConfigService } from './service.js';
-import { LienConfig, LegacyLienConfig, defaultConfig } from './schema.js';
+import type { LienConfig, LegacyLienConfig} from './schema.js';
+import { defaultConfig } from './schema.js';
 import { ConfigError } from '../errors/index.js';
-
-// Get current version from package.json dynamically
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const packageJson = JSON.parse(
-  await fs.readFile(path.join(__dirname, '../../package.json'), 'utf-8')
-);
-const CURRENT_VERSION = packageJson.version;
 
 describe('ConfigService', () => {
   let service: ConfigService;

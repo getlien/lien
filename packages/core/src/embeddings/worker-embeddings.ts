@@ -1,7 +1,7 @@
 import { Worker } from 'worker_threads';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
-import { EmbeddingService } from './types.js';
+import type { EmbeddingService } from './types.js';
 import { EmbeddingError, wrapError } from '../errors/index.js';
 
 interface WorkerResponse {

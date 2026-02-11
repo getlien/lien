@@ -25,7 +25,7 @@ export default tseslint.config(
         'warn',
         { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
       ],
-      eqeqeq: 'error',
+      eqeqeq: ['error', 'always', { null: 'ignore' }],
       'no-console': ['warn', { allow: ['warn', 'error'] }],
     },
   },

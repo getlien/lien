@@ -1,6 +1,6 @@
-import type { SearchResult } from '@liendev/core';
+import type { SearchResult ,
+  VectorDBInterface} from '@liendev/core';
 import {
-  VectorDBInterface,
   QdrantDB,
   findTransitiveDependents,
   normalizePath,
@@ -48,9 +48,7 @@ const COMPLEXITY_THRESHOLDS = {
   MEDIUM_MAX: 15,                // Occasional branching
 } as const;
 
-/** Risk level ordering for comparison */
-const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
-type RiskLevel = keyof typeof RISK_ORDER;
+type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
 /**
  * A single usage of a symbol (call site).

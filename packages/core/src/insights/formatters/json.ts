@@ -1,4 +1,4 @@
-import { ComplexityReport } from '../types.js';
+import type { ComplexityReport } from '../types.js';
 
 /**
  * Format complexity report as JSON for consumption by GitHub Action.

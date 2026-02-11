@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { analyzeDependencies, COMPLEXITY_THRESHOLDS } from './dependency-analyzer.js';
-import { SearchResult } from '../vectordb/types.js';
-import { ChunkMetadata } from './types.js';
+import type { SearchResult } from '../vectordb/types.js';
+import type { ChunkMetadata } from './types.js';
 
 describe('analyzeDependencies', () => {
   const workspaceRoot = '/test/workspace';

@@ -2,8 +2,8 @@ import * as lancedb from '@lancedb/lancedb';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import { SearchResult, VectorDBInterface } from './types.js';
-import { ChunkMetadata } from '../indexer/types.js';
+import type { SearchResult, VectorDBInterface } from './types.js';
+import type { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { readVersionFile } from './version.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
@@ -232,7 +232,7 @@ export class VectorDB implements VectorDBInterface {
       }
       
       return false;
-    } catch (error) {
+    } catch {
       // If we can't read version file, don't reconnect
       return false;
     }

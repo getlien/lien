@@ -1,6 +1,7 @@
-import { SearchResult } from '../vectordb/types.js';
+import type { SearchResult } from '../vectordb/types.js';
 import { normalizePath, getCanonicalPath, matchesFile, isTestFile } from '../utils/path-matching.js';
-import { RISK_ORDER, RiskLevel } from '../insights/types.js';
+import type { RiskLevel } from '../insights/types.js';
+import { RISK_ORDER } from '../insights/types.js';
 
 /**
  * Risk level thresholds for dependent count.

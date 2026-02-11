@@ -75,7 +75,7 @@ function mergePendingFiles(pendingFiles: string[], newFiles: string[]): void {
 }
 
 export function createReindexStateManager() {
-  let state: ReindexState = {
+  const state: ReindexState = {
     inProgress: false,
     pendingFiles: [],
     lastReindexTimestamp: null,

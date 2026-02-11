@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { ComplexityReport, ComplexityViolation, FileComplexityData } from '../types.js';
+import type { ComplexityReport, ComplexityViolation, FileComplexityData } from '../types.js';
 
 /**
  * Violation with associated file path for rendering

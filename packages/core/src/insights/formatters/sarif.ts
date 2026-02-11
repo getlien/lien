@@ -1,4 +1,4 @@
-import { ComplexityReport } from '../types.js';
+import type { ComplexityReport } from '../types.js';
 
 /**
  * SARIF (Static Analysis Results Interchange Format) 2.1.0

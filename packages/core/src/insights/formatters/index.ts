@@ -1,4 +1,4 @@
-import { ComplexityReport } from '../types.js';
+import type { ComplexityReport } from '../types.js';
 import { formatTextReport } from './text.js';
 import { formatJsonReport } from './json.js';
 import { formatSarifReport } from './sarif.js';

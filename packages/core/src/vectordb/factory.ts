@@ -1,7 +1,8 @@
-import { VectorDBInterface } from './types.js';
+import type { VectorDBInterface } from './types.js';
 import { VectorDB } from './lancedb.js';
 import { QdrantDB } from './qdrant.js';
-import { loadGlobalConfig, extractOrgIdFromGit, GlobalConfig, ConfigValidationError } from '../config/global-config.js';
+import type { GlobalConfig} from '../config/global-config.js';
+import { loadGlobalConfig, extractOrgIdFromGit, ConfigValidationError } from '../config/global-config.js';
 import { getCurrentBranch, getCurrentCommit } from '../git/utils.js';
 
 /**

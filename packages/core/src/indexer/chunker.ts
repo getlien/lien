@@ -1,4 +1,4 @@
-import { CodeChunk } from './types.js';
+import type { CodeChunk } from './types.js';
 import { detectFileType } from './scanner.js';
 import { extractSymbols } from './symbol-extractor.js';
 import { shouldUseAST, chunkByAST } from './ast/chunker.js';

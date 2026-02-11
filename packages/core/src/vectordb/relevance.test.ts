@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { calculateRelevance, RelevanceCategory } from './relevance.js';
+import type { RelevanceCategory } from './relevance.js';
+import { calculateRelevance } from './relevance.js';
 
 describe('calculateRelevance', () => {
   describe('highly_relevant category', () => {
