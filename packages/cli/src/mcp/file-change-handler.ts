@@ -6,7 +6,7 @@ import {
   ManifestManager,
   computeContentHash,
   normalizeToRelativePath,
-  createGitignoreFilter
+  createGitignoreFilter,
 } from '@liendev/core';
 import type { FileChangeHandler, FileChangeEvent } from '../watcher/index.js';
 import type { createReindexStateManager } from './reindex-state-manager.js';
@@ -19,7 +19,7 @@ import type { LogFn } from './types.js';
 async function handleFileDeletion(
   filepath: string,
   vectorDB: VectorDBInterface,
-  log: LogFn
+  log: LogFn,
 ): Promise<void> {
   log(`🗑️  File deleted: ${filepath}`);
 
@@ -43,7 +43,7 @@ async function handleFileDeletion(
 async function handleBatchDeletions(
   deletedFiles: string[],
   vectorDB: VectorDBInterface,
-  log: LogFn
+  log: LogFn,
 ): Promise<void> {
   const manifest = new ManifestManager(vectorDB.dbPath);
   const failures: string[] = [];
@@ -73,7 +73,7 @@ async function canSkipReindex(
   filepath: string,
   rootDir: string,
   vectorDB: VectorDBInterface,
-  log: LogFn
+  log: LogFn,
 ): Promise<boolean> {
   const manifest = new ManifestManager(vectorDB.dbPath);
   const normalizedPath = normalizeToRelativePath(filepath, rootDir);
@@ -84,7 +84,7 @@ async function canSkipReindex(
   const { shouldReindex, newMtime } = await shouldReindexFile(filepath, existingEntry, log);
 
   if (!shouldReindex && newMtime !== undefined && existingEntry) {
-    const skipped = await manifest.transaction(async (data) => {
+    const skipped = await manifest.transaction(async data => {
       const entry = data.files[normalizedPath];
       if (entry) {
         entry.lastModified = newMtime;
@@ -109,7 +109,7 @@ async function handleSingleFileChange(
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
   log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
 ): Promise<void> {
   const action = type === 'add' ? 'added' : 'changed';
 
@@ -142,7 +142,7 @@ async function handleSingleFileChange(
 async function shouldReindexFile(
   filepath: string,
   existingEntry: { contentHash?: string; lastModified: number } | undefined,
-  log: LogFn
+  log: LogFn,
 ): Promise<{ shouldReindex: boolean; newMtime?: number }> {
   // No existing entry or no hash - reindex to be safe
   if (!existingEntry?.contentHash) {
@@ -182,7 +182,7 @@ async function checkFilesAgainstManifest(
   files: string[],
   rootDir: string,
   manifestFiles: Record<string, { contentHash?: string; lastModified: number }>,
-  log: LogFn
+  log: LogFn,
 ): Promise<FileCheckResult[]> {
   const results: FileCheckResult[] = [];
 
@@ -201,12 +201,12 @@ async function checkFilesAgainstManifest(
  */
 async function updateUnchangedMtimes(
   manifest: ManifestManager,
-  results: FileCheckResult[]
+  results: FileCheckResult[],
 ): Promise<void> {
   const hasUpdates = results.some(r => !r.shouldReindex && r.newMtime !== undefined);
   if (!hasUpdates) return;
 
-  await manifest.transaction(async (data) => {
+  await manifest.transaction(async data => {
     for (const result of results) {
       if (!result.shouldReindex && result.newMtime !== undefined) {
         const entry = data.files[result.normalizedPath];
@@ -227,7 +227,7 @@ async function filterModifiedFilesByHash(
   modifiedFiles: string[],
   rootDir: string,
   vectorDB: VectorDBInterface,
-  log: LogFn
+  log: LogFn,
 ): Promise<string[]> {
   if (modifiedFiles.length === 0) return [];
 
@@ -235,7 +235,12 @@ async function filterModifiedFilesByHash(
   const manifestData = await manifest.load();
   if (!manifestData) return modifiedFiles;
 
-  const checkResults = await checkFilesAgainstManifest(modifiedFiles, rootDir, manifestData.files, log);
+  const checkResults = await checkFilesAgainstManifest(
+    modifiedFiles,
+    rootDir,
+    manifestData.files,
+    log,
+  );
   await updateUnchangedMtimes(manifest, checkResults);
 
   return checkResults.filter(r => r.shouldReindex).map(r => r.filepath);
@@ -249,7 +254,7 @@ async function prepareFilesForReindexing(
   event: FileChangeEvent,
   rootDir: string,
   vectorDB: VectorDBInterface,
-  log: LogFn
+  log: LogFn,
 ): Promise<{ filesToIndex: string[]; deletedFiles: string[] }> {
   const addedFiles = event.added || [];
   const modifiedFiles = event.modified || [];
@@ -280,13 +285,15 @@ async function executeReindexOperations(
   rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
-  log: LogFn
+  log: LogFn,
 ): Promise<void> {
   const operations: Promise<unknown>[] = [];
 
   if (filesToIndex.length > 0) {
     log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
-    operations.push(indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose: false, rootDir }));
+    operations.push(
+      indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose: false, rootDir }),
+    );
   }
 
   if (deletedFiles.length > 0) {
@@ -306,10 +313,15 @@ async function handleBatchEvent(
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
   log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
 ): Promise<void> {
   // Prepare files for reindexing
-  const { filesToIndex, deletedFiles } = await prepareFilesForReindexing(event, rootDir, vectorDB, log);
+  const { filesToIndex, deletedFiles } = await prepareFilesForReindexing(
+    event,
+    rootDir,
+    vectorDB,
+    log,
+  );
   const allFiles = [...filesToIndex, ...deletedFiles];
 
   if (allFiles.length === 0) {
@@ -325,7 +337,9 @@ async function handleBatchEvent(
 
     const duration = Date.now() - startTime;
     reindexStateManager.completeReindex(duration);
-    log(`✓ Processed ${filesToIndex.length} file(s) + ${deletedFiles.length} deletion(s) in ${duration}ms`);
+    log(
+      `✓ Processed ${filesToIndex.length} file(s) + ${deletedFiles.length} deletion(s) in ${duration}ms`,
+    );
   } catch (error) {
     reindexStateManager.failReindex();
     log(`Batch reindex failed: ${error}`, 'warning');
@@ -339,7 +353,7 @@ async function handleUnlinkEvent(
   filepath: string,
   vectorDB: VectorDBInterface,
   log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
 ): Promise<void> {
   const startTime = Date.now();
   reindexStateManager.startReindex([filepath]);
@@ -360,7 +374,7 @@ async function handleUnlinkEvent(
 export function isFileIgnored(
   filepath: string,
   rootDir: string,
-  isIgnored: (relativePath: string) => boolean
+  isIgnored: (relativePath: string) => boolean,
 ): boolean {
   return isIgnored(normalizeToRelativePath(filepath, rootDir));
 }
@@ -374,7 +388,7 @@ export function isFileIgnored(
 function filterFileChangeEvent(
   event: FileChangeEvent,
   ignoreFilter: (relativePath: string) => boolean,
-  rootDir: string
+  rootDir: string,
 ): FileChangeEvent {
   return {
     ...event,
@@ -410,11 +424,11 @@ export function createFileChangeHandler(
   embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
-  checkAndReconnect: () => Promise<void>
+  checkAndReconnect: () => Promise<void>,
 ): FileChangeHandler {
   let ignoreFilter: ((relativePath: string) => boolean) | null = null;
 
-  return async (event) => {
+  return async event => {
     // Invalidate filter when a .gitignore file changes so nested patterns take effect
     if (hasGitignoreChange(event)) {
       ignoreFilter = null;
@@ -429,7 +443,8 @@ export function createFileChangeHandler(
 
     if (type === 'batch') {
       const filtered = filterFileChangeEvent(event, ignoreFilter, rootDir);
-      const totalToProcess = (filtered.added!.length + filtered.modified!.length + filtered.deleted!.length);
+      const totalToProcess =
+        filtered.added!.length + filtered.modified!.length + filtered.deleted!.length;
       if (totalToProcess === 0) return;
       await checkAndReconnect();
       await handleBatchEvent(filtered, rootDir, vectorDB, embeddings, log, reindexStateManager);
@@ -442,7 +457,15 @@ export function createFileChangeHandler(
       // Fallback for single file add/change (backwards compatibility)
       if (isFileIgnored(event.filepath, rootDir, ignoreFilter)) return;
       await checkAndReconnect();
-      await handleSingleFileChange(event.filepath, type, rootDir, vectorDB, embeddings, log, reindexStateManager);
+      await handleSingleFileChange(
+        event.filepath,
+        type,
+        rootDir,
+        vectorDB,
+        embeddings,
+        log,
+        reindexStateManager,
+      );
     }
   };
 }

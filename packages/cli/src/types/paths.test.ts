@@ -22,14 +22,14 @@ describe('Path Type System', () => {
 
     it('should reject Unix absolute paths', () => {
       expect(() => toRelativePath('/absolute/path')).toThrow(
-        'Expected relative path, got absolute: /absolute/path'
+        'Expected relative path, got absolute: /absolute/path',
       );
       expect(() => toRelativePath('/usr/local/bin')).toThrow();
     });
 
     it('should reject Windows absolute paths', () => {
       expect(() => toRelativePath('C:\\Windows\\System32')).toThrow(
-        'Expected relative path, got absolute: C:\\Windows\\System32'
+        'Expected relative path, got absolute: C:\\Windows\\System32',
       );
       expect(() => toRelativePath('D:\\Projects')).toThrow();
     });
@@ -49,7 +49,7 @@ describe('Path Type System', () => {
 
     it('should reject relative paths', () => {
       expect(() => toAbsolutePath('src/index.ts')).toThrow(
-        'Expected absolute path, got relative: src/index.ts'
+        'Expected absolute path, got relative: src/index.ts',
       );
       expect(() => toAbsolutePath('.')).toThrow();
       expect(() => toAbsolutePath('../parent')).toThrow();
@@ -60,7 +60,7 @@ describe('Path Type System', () => {
     it('should convert absolute to relative (Unix)', () => {
       const rootDir = toAbsolutePath('/project/root');
       const absPath = toAbsolutePath('/project/root/src/index.ts');
-      
+
       const result = makeRelative(absPath, rootDir);
       expect(result).toBe('src/index.ts');
     });
@@ -68,7 +68,7 @@ describe('Path Type System', () => {
     it('should handle nested paths', () => {
       const rootDir = toAbsolutePath('/home/user/project');
       const absPath = toAbsolutePath('/home/user/project/packages/cli/src/index.ts');
-      
+
       const result = makeRelative(absPath, rootDir);
       expect(result).toBe('packages/cli/src/index.ts');
     });
@@ -76,7 +76,7 @@ describe('Path Type System', () => {
     it('should handle root directory itself', () => {
       const rootDir = toAbsolutePath('/project');
       const absPath = toAbsolutePath('/project');
-      
+
       const result = makeRelative(absPath, rootDir);
       expect(result).toBe('');
     });
@@ -86,7 +86,7 @@ describe('Path Type System', () => {
     it('should convert relative to absolute (Unix)', () => {
       const rootDir = toAbsolutePath('/project/root');
       const relPath = toRelativePath('src/index.ts');
-      
+
       const result = makeAbsolute(relPath, rootDir);
       expect(result).toBe('/project/root/src/index.ts');
     });
@@ -94,7 +94,7 @@ describe('Path Type System', () => {
     it('should handle nested paths', () => {
       const rootDir = toAbsolutePath('/home/user/project');
       const relPath = toRelativePath('packages/cli/src/index.ts');
-      
+
       const result = makeAbsolute(relPath, rootDir);
       expect(result).toBe('/home/user/project/packages/cli/src/index.ts');
     });
@@ -102,7 +102,7 @@ describe('Path Type System', () => {
     it('should handle current directory', () => {
       const rootDir = toAbsolutePath('/project');
       const relPath = toRelativePath('.');
-      
+
       const result = makeAbsolute(relPath, rootDir);
       expect(result).toBe('/project');
     });
@@ -152,13 +152,13 @@ describe('Path Type System', () => {
     it('should enforce type distinction between RelativePath and AbsolutePath', () => {
       const relPath: RelativePath = toRelativePath('src/index.ts');
       const absPath: AbsolutePath = toAbsolutePath('/absolute/path');
-      
+
       // These types should be distinct at compile time
       // @ts-expect-error - Cannot assign RelativePath to AbsolutePath
       const _invalid1: AbsolutePath = relPath;
       // @ts-expect-error - Cannot assign AbsolutePath to RelativePath
       const _invalid2: RelativePath = absPath;
-      
+
       // But both are still strings at runtime
       expect(typeof relPath).toBe('string');
       expect(typeof absPath).toBe('string');
@@ -169,22 +169,21 @@ describe('Path Type System', () => {
     it('should maintain path integrity through conversions', () => {
       const rootDir = toAbsolutePath('/project/root');
       const originalRel = toRelativePath('src/components/Button.tsx');
-      
+
       // Convert: relative → absolute → relative
       const absolute = makeAbsolute(originalRel, rootDir);
       const backToRelative = makeRelative(absolute, rootDir);
-      
+
       expect(backToRelative).toBe(originalRel);
     });
 
     it('should handle paths with dots', () => {
       const rootDir = toAbsolutePath('/project');
       const relPath = toRelativePath('./src/index.ts');
-      
+
       const absPath = makeAbsolute(relPath, rootDir);
       // path.join normalizes './' away
       expect(absPath).toBe('/project/src/index.ts');
     });
   });
 });
-

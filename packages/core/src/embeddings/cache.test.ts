@@ -75,7 +75,7 @@ describe('CachedEmbeddings', () => {
       // query6 should still be cached (most recent)
       await cachedService.embed('query6');
       expect(mockService.embedCallCount).toBe(1); // No additional call
-      
+
       // query3, 4, 5 should still be cached
       await cachedService.embed('query3');
       expect(mockService.embedCallCount).toBe(1);
@@ -206,4 +206,3 @@ describe('CachedEmbeddings', () => {
     });
   });
 });
-

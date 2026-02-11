@@ -117,8 +117,10 @@ export function matchesFile(normalizedImport: string, normalizedTarget: string):
   // Strategy 3: Handle relative imports (./logger vs src/utils/logger)
   // Remove leading ./ and ../ from import
   const cleanedImport = normalizedImport.replace(/^(\.\.?\/)+/, '');
-  if (matchesAtBoundary(cleanedImport, normalizedTarget) ||
-      matchesAtBoundary(normalizedTarget, cleanedImport)) {
+  if (
+    matchesAtBoundary(cleanedImport, normalizedTarget) ||
+    matchesAtBoundary(normalizedTarget, cleanedImport)
+  ) {
     return true;
   }
 
@@ -141,9 +143,11 @@ export function matchesFile(normalizedImport: string, normalizedTarget: string):
  * Check if target exactly matches the module path (handles __init__.py)
  */
 function matchesDirectPythonModule(moduleAsPath: string, targetWithoutPy: string): boolean {
-  return targetWithoutPy === moduleAsPath ||
-         targetWithoutPy === moduleAsPath + '/__init__' ||
-         targetWithoutPy.replace(/\/__init__$/, '') === moduleAsPath;
+  return (
+    targetWithoutPy === moduleAsPath ||
+    targetWithoutPy === moduleAsPath + '/__init__' ||
+    targetWithoutPy.replace(/\/__init__$/, '') === moduleAsPath
+  );
 }
 
 /**
@@ -157,8 +161,10 @@ function matchesParentPythonPackage(moduleAsPath: string, targetWithoutPy: strin
  * Check if module path appears as a suffix in the target path
  */
 function matchesSuffixPythonModule(moduleAsPath: string, targetWithoutPy: string): boolean {
-  return targetWithoutPy.endsWith('/' + moduleAsPath) ||
-         targetWithoutPy.endsWith('/' + moduleAsPath + '/__init__');
+  return (
+    targetWithoutPy.endsWith('/' + moduleAsPath) ||
+    targetWithoutPy.endsWith('/' + moduleAsPath + '/__init__')
+  );
 }
 
 /**
@@ -204,10 +210,12 @@ function matchesPythonModule(importPath: string, targetPath: string): boolean {
   const targetWithoutPy = targetPath.replace(/\.py$/, '');
 
   // Try matching strategies in order of specificity
-  return matchesDirectPythonModule(moduleAsPath, targetWithoutPy) ||
-         matchesParentPythonPackage(moduleAsPath, targetWithoutPy) ||
-         matchesSuffixPythonModule(moduleAsPath, targetWithoutPy) ||
-         matchesWithSourcePrefix(moduleAsPath, targetWithoutPy);
+  return (
+    matchesDirectPythonModule(moduleAsPath, targetWithoutPy) ||
+    matchesParentPythonPackage(moduleAsPath, targetWithoutPy) ||
+    matchesSuffixPythonModule(moduleAsPath, targetWithoutPy) ||
+    matchesWithSourcePrefix(moduleAsPath, targetWithoutPy)
+  );
 }
 
 /**
@@ -282,6 +290,7 @@ export function getCanonicalPath(filepath: string, workspaceRoot: string): strin
  * @returns True if the file is a test file
  */
 export function isTestFile(filepath: string): boolean {
-  return /\.(test|spec)\.[^/]+$/.test(filepath) ||
-         /(^|[/\\])(test|tests|__tests__)[/\\]/.test(filepath);
+  return (
+    /\.(test|spec)\.[^/]+$/.test(filepath) || /(^|[/\\])(test|tests|__tests__)[/\\]/.test(filepath)
+  );
 }

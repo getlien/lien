@@ -69,7 +69,11 @@ function truncateArrays(arrays: Array<Array<{ content: string }>>, maxLines: num
   }
 }
 
-function dropArrayItems(arrays: Array<Array<{ content: string }>>, root: unknown, maxChars: number): void {
+function dropArrayItems(
+  arrays: Array<Array<{ content: string }>>,
+  root: unknown,
+  maxChars: number,
+): void {
   let currentSize = measureSize(root);
   for (const arr of arrays) {
     while (arr.length > 1 && currentSize > maxChars) {
@@ -100,17 +104,14 @@ function findContentArrays(obj: unknown): Array<Array<{ content: string }>> {
   return found;
 }
 
-function walk(
-  node: unknown,
-  found: Array<Array<{ content: string }>>,
-): void {
+function walk(node: unknown, found: Array<Array<{ content: string }>>): void {
   if (node === null || typeof node !== 'object') return;
 
   if (Array.isArray(node)) {
     if (
       node.length > 0 &&
       node.every(
-        (elem) =>
+        elem =>
           typeof elem === 'object' &&
           elem !== null &&
           typeof (elem as Record<string, unknown>).content === 'string',
@@ -136,9 +137,10 @@ function buildResult(
   const finalChars = measureSize(cloned);
   const finalItemCount = arrays.reduce((sum, arr) => sum + arr.length, 0);
 
-  const message = finalItemCount < originalItemCount
-    ? `Showing ${finalItemCount} of ${originalItemCount} results (truncated). Use narrower filters or smaller limit for complete results.`
-    : `Showing all ${finalItemCount} results (content trimmed to fit). Use narrower filters or smaller limit for complete results.`;
+  const message =
+    finalItemCount < originalItemCount
+      ? `Showing ${finalItemCount} of ${originalItemCount} results (truncated). Use narrower filters or smaller limit for complete results.`
+      : `Showing all ${finalItemCount} results (content trimmed to fit). Use narrower filters or smaller limit for complete results.`;
 
   return {
     result: cloned,

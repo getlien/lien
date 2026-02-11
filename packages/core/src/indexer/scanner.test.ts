@@ -121,4 +121,3 @@ describe('detectFileType', () => {
     expect(detectFileType('./components/Button.tsx')).toBe('typescript');
   });
 });
-

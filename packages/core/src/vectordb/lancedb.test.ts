@@ -95,68 +95,68 @@ describe('VectorDB - scanWithFilter', () => {
 
   it('should filter by language', async () => {
     const results = await db.scanWithFilter({ language: 'typescript' });
-    
+
     expect(results.length).toBe(2);
     expect(results.every(r => r.metadata.language === 'typescript')).toBe(true);
   });
 
   it('should filter by pattern', async () => {
     const results = await db.scanWithFilter({ pattern: '.*Service' });
-    
+
     expect(results.length).toBe(2);
     expect(results.some(r => r.metadata.file.includes('UserService'))).toBe(true);
     expect(results.some(r => r.metadata.file.includes('DataService'))).toBe(true);
   });
 
   it('should combine language and pattern filters', async () => {
-    const results = await db.scanWithFilter({ 
+    const results = await db.scanWithFilter({
       language: 'typescript',
-      pattern: '.*Service'
+      pattern: '.*Service',
     });
-    
+
     expect(results.length).toBe(1);
     expect(results[0].metadata.file).toContain('UserService');
     expect(results[0].metadata.language).toBe('typescript');
   });
 
   it('should return empty array when no matches', async () => {
-    const results = await db.scanWithFilter({ 
+    const results = await db.scanWithFilter({
       language: 'typescript',
-      pattern: 'nonexistent'
+      pattern: 'nonexistent',
     });
-    
+
     expect(results.length).toBe(0);
   });
 
   it('should respect limit parameter', async () => {
     const results = await db.scanWithFilter({ limit: 2 });
-    
+
     expect(results.length).toBeLessThanOrEqual(2);
   });
 
   it('should filter out empty content', async () => {
     const results = await db.scanWithFilter({});
-    
+
     expect(results.every(r => r.content && r.content.trim().length > 0)).toBe(true);
   });
 
   it('should match pattern in file path', async () => {
     const results = await db.scanWithFilter({ pattern: 'users' });
-    
+
     expect(results.length).toBeGreaterThan(0);
     expect(results.some(r => r.metadata.file.includes('users'))).toBe(true);
   });
 
   it('should be case insensitive for pattern matching', async () => {
     const results = await db.scanWithFilter({ pattern: 'userservice' });
-    
+
     expect(results.length).toBeGreaterThan(0);
     expect(results.some(r => r.metadata.file.includes('UserService'))).toBe(true);
   });
 
   it('should return all metadata fields', async () => {
     const results = await db.scanWithFilter({ language: 'typescript', limit: 1 });
-    
+
     expect(results.length).toBe(1);
     const result = results[0];
     expect(result.metadata).toHaveProperty('file');
@@ -165,21 +165,25 @@ describe('VectorDB - scanWithFilter', () => {
     expect(result.metadata).toHaveProperty('type');
     expect(result.metadata).toHaveProperty('language');
   });
-  
+
   it('should include relevance field in results', async () => {
     const results = await db.scanWithFilter({ language: 'typescript' });
-    
+
     expect(results.length).toBeGreaterThan(0);
     results.forEach(result => {
       expect(result).toHaveProperty('relevance');
-      expect(['highly_relevant', 'relevant', 'loosely_related', 'not_relevant']).toContain(result.relevance);
+      expect(['highly_relevant', 'relevant', 'loosely_related', 'not_relevant']).toContain(
+        result.relevance,
+      );
     });
   });
 
   it('should throw error if database not initialized', async () => {
     const uninitializedDb = new VectorDB(testDir);
-    
-    await expect(uninitializedDb.scanWithFilter({})).rejects.toThrow('Vector database not initialized');
+
+    await expect(uninitializedDb.scanWithFilter({})).rejects.toThrow(
+      'Vector database not initialized',
+    );
   });
 });
 
@@ -218,7 +222,7 @@ describe('VectorDB - Batch Insert Retry Logic', () => {
     const contents = Array.from({ length: batchSize }, (_, i) => `function test${i}() {}`);
 
     await expect(db.insertBatch(vectors, metadatas, contents)).resolves.not.toThrow();
-    
+
     // Verify data was inserted (specify higher limit)
     const results = await db.scanWithFilter({ limit: batchSize });
     expect(results.length).toBe(batchSize);
@@ -243,7 +247,7 @@ describe('VectorDB - Batch Insert Retry Logic', () => {
 
     // Should automatically split into multiple batches
     await expect(db.insertBatch(vectors, metadatas, contents)).resolves.not.toThrow();
-    
+
     // Verify all data was inserted (specify higher limit)
     const results = await db.scanWithFilter({ limit: batchSize + 100 });
     expect(results.length).toBe(batchSize);
@@ -267,7 +271,7 @@ describe('VectorDB - Batch Insert Retry Logic', () => {
     const contents = Array.from({ length: batchSize }, (_, i) => `function test${i}() {}`);
 
     await expect(db.insertBatch(vectors, metadatas, contents)).resolves.not.toThrow();
-    
+
     const results = await db.scanWithFilter({ limit: batchSize + 100 });
     expect(results.length).toBe(batchSize);
   });
@@ -275,29 +279,31 @@ describe('VectorDB - Batch Insert Retry Logic', () => {
   it('should handle empty batch gracefully', async () => {
     // Should not throw when inserting empty batch
     await expect(db.insertBatch([], [], [])).resolves.not.toThrow();
-    
+
     // Note: table won't be created if no data inserted, so we can't scan
     // This test just verifies that empty batch doesn't cause errors
   });
 
   it('should handle single record batch', async () => {
     const vectors = [new Float32Array(384).fill(0.1)];
-    const metadatas = [{
-      file: 'single.ts',
-      startLine: 1,
-      endLine: 10,
-      type: 'function' as const,
-      language: 'typescript',
-      isTest: false,
-      relatedTests: [],
-      relatedSources: [],
-      testFramework: '',
-      detectionMethod: 'convention' as const,
-    }];
+    const metadatas = [
+      {
+        file: 'single.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function' as const,
+        language: 'typescript',
+        isTest: false,
+        relatedTests: [],
+        relatedSources: [],
+        testFramework: '',
+        detectionMethod: 'convention' as const,
+      },
+    ];
     const contents = ['function single() {}'];
 
     await expect(db.insertBatch(vectors, metadatas, contents)).resolves.not.toThrow();
-    
+
     const results = await db.scanWithFilter({ limit: 10 });
     expect(results.length).toBe(1);
     expect(results[0].metadata.file).toBe('single.ts');
@@ -321,7 +327,7 @@ describe('VectorDB - Batch Insert Retry Logic', () => {
     const contents = Array.from({ length: batchSize }, (_, i) => `function test${i}() {}`);
 
     await expect(db.insertBatch(vectors, metadatas, contents)).resolves.not.toThrow();
-    
+
     const results = await db.scanWithFilter({ limit: batchSize + 10 });
     expect(results.length).toBe(batchSize);
   });
@@ -345,13 +351,16 @@ describe('VectorDB - Batch Insert Retry Logic', () => {
       testFramework: '',
       detectionMethod: 'convention' as const,
     }));
-    const contents = Array.from({ length: batchSize }, (_, i) => `function test${i}() { return ${i}; }`);
+    const contents = Array.from(
+      { length: batchSize },
+      (_, i) => `function test${i}() { return ${i}; }`,
+    );
 
     await db.insertBatch(vectors, metadatas, contents);
-    
+
     const results = await db.scanWithFilter({ limit: batchSize + 100 });
     expect(results.length).toBe(batchSize);
-    
+
     // Verify data integrity - check a sample
     const sample = results.find(r => r.metadata.file === 'test500.ts');
     expect(sample).toBeDefined();
@@ -380,9 +389,8 @@ describe('VectorDB - Batch Insert Retry Logic', () => {
 
     // Should complete without stack overflow
     await expect(db.insertBatch(vectors, metadatas, contents)).resolves.not.toThrow();
-    
+
     const results = await db.scanWithFilter({ limit: batchSize + 100 });
     expect(results.length).toBe(batchSize);
   });
 });
-

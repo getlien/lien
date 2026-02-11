@@ -1,13 +1,13 @@
 /**
  * Reindex state manager for tracking file reindexing operations.
  * Handles concurrent reindex operations by tracking active operation count.
- * 
+ *
  * **Error Handling Strategy:**
  * - Operations MUST call either completeReindex() or failReindex() in all code paths
  * - Use try/catch/finally blocks to ensure cleanup even if operations crash
  * - If an operation fails to call complete/fail, activeOperations will never decrement
  *   and state becomes permanently stuck with inProgress=true
- * 
+ *
  * **Stuck State Recovery:**
  * - If inProgress remains true for > 5 minutes, a health check logs a warning
  * - This indicates an operation crashed without cleanup
@@ -17,7 +17,7 @@
 
 /**
  * State tracking for file reindexing operations.
- * 
+ *
  * @property inProgress - Whether any reindex operation is currently active
  * @property pendingFiles - Array of files queued for reindexing. For concurrent operations,
  *                          this represents the union of all files from all active operations.
@@ -45,19 +45,19 @@ function checkForStuckState(
   inProgress: boolean,
   lastStateChangeTimestamp: number,
   activeOperations: number,
-  pendingFilesCount: number
+  pendingFilesCount: number,
 ): void {
   if (!inProgress) return;
-  
+
   const STUCK_STATE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
   const stuckDuration = Date.now() - lastStateChangeTimestamp;
-  
+
   if (stuckDuration > STUCK_STATE_THRESHOLD_MS) {
     console.warn(
       `[Lien] HEALTH CHECK: Reindex stuck in progress for ${Math.round(stuckDuration / 1000)}s. ` +
-      `This indicates an operation crashed without cleanup. ` +
-      `Active operations: ${activeOperations}, Pending files: ${pendingFilesCount}. ` +
-      `Consider using resetIfStuck() to recover.`
+        `This indicates an operation crashed without cleanup. ` +
+        `Active operations: ${activeOperations}, Pending files: ${pendingFilesCount}. ` +
+        `Consider using resetIfStuck() to recover.`,
     );
   }
 }
@@ -81,7 +81,7 @@ export function createReindexStateManager() {
     lastReindexTimestamp: null,
     lastReindexDurationMs: null,
   };
-  
+
   // Track number of concurrent reindex operations
   let activeOperations = 0;
   let lastStateChangeTimestamp = Date.now();
@@ -96,39 +96,39 @@ export function createReindexStateManager() {
         state.inProgress,
         lastStateChangeTimestamp,
         activeOperations,
-        state.pendingFiles.length
+        state.pendingFiles.length,
       );
       return { ...state, pendingFiles: [...state.pendingFiles] };
     },
-    
+
     /**
      * Start a new reindex operation.
-     * 
+     *
      * **Important**: Silently ignores empty or null file arrays without incrementing
      * activeOperations. This is intentional - if there's no work to do, no operation
      * is started. Callers should check for empty arrays before calling if they need
      * to track "attempted" operations.
-     * 
+     *
      * @param files - Array of file paths to reindex. Empty/null arrays are ignored.
      */
     startReindex: (files: string[]) => {
       if (!files || files.length === 0) {
         return; // No work to do, don't increment operation counter
       }
-      
+
       activeOperations += 1;
       state.inProgress = true;
       lastStateChangeTimestamp = Date.now();
-      
+
       mergePendingFiles(state.pendingFiles, files);
     },
-    
+
     /**
      * Mark a reindex operation as complete.
-     * 
+     *
      * Logs a warning if called without a matching startReindex.
      * Only clears state when all concurrent operations finish.
-     * 
+     *
      * @param durationMs - Duration of the reindex operation in milliseconds
      */
     completeReindex: (durationMs: number) => {
@@ -136,9 +136,9 @@ export function createReindexStateManager() {
         console.warn('[Lien] completeReindex called without matching startReindex');
         return;
       }
-      
+
       activeOperations -= 1;
-      
+
       // Only mark complete when all operations finish
       if (activeOperations === 0) {
         state.inProgress = false;
@@ -148,10 +148,10 @@ export function createReindexStateManager() {
         lastStateChangeTimestamp = Date.now();
       }
     },
-    
+
     /**
      * Mark a reindex operation as failed.
-     * 
+     *
      * Logs a warning if called without a matching startReindex.
      * Only clears state when all concurrent operations finish/fail.
      */
@@ -160,9 +160,9 @@ export function createReindexStateManager() {
         console.warn('[Lien] failReindex called without matching startReindex');
         return;
       }
-      
+
       activeOperations -= 1;
-      
+
       // Only clear when all operations complete/fail
       if (activeOperations === 0) {
         state.inProgress = false;
@@ -170,23 +170,23 @@ export function createReindexStateManager() {
         lastStateChangeTimestamp = Date.now();
       }
     },
-    
+
     /**
      * Manually reset state if it's stuck.
-     * 
+     *
      * **WARNING**: Only use this if you're certain operations have crashed without cleanup.
      * This will forcibly clear the inProgress flag and reset activeOperations counter.
-     * 
+     *
      * Use this when getState() health check detects stuck state and you've verified
      * no legitimate operations are running.
-     * 
+     *
      * @returns true if state was reset, false if state was already clean
      */
     resetIfStuck: (): boolean => {
       if (state.inProgress && activeOperations > 0) {
         console.warn(
           `[Lien] Manually resetting stuck reindex state. ` +
-          `Active operations: ${activeOperations}, Pending files: ${state.pendingFiles.length}`
+            `Active operations: ${activeOperations}, Pending files: ${state.pendingFiles.length}`,
         );
         activeOperations = 0;
         state.inProgress = false;

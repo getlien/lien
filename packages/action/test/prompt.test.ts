@@ -85,7 +85,10 @@ describe('prompt', () => {
   describe('buildReviewPrompt', () => {
     it('should build a prompt with PR context', () => {
       const codeSnippets = new Map<string, string>();
-      codeSnippets.set('src/utils.ts::processData', 'function processData() { /* complex code */ }');
+      codeSnippets.set(
+        'src/utils.ts::processData',
+        'function processData() { /* complex code */ }',
+      );
 
       const prompt = buildReviewPrompt(mockReport, mockPRContext, codeSnippets);
 
@@ -271,14 +274,30 @@ describe('prompt', () => {
     it('should include cyclomatic example when violations are mostly cyclomatic', () => {
       const violations = [
         {
-          filepath: 'src/test.ts', startLine: 1, endLine: 20, symbolName: 'func1',
-          symbolType: 'function', language: 'typescript', complexity: 20, threshold: 15,
-          severity: 'error', message: 'Too complex', metricType: 'cyclomatic',
+          filepath: 'src/test.ts',
+          startLine: 1,
+          endLine: 20,
+          symbolName: 'func1',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 20,
+          threshold: 15,
+          severity: 'error',
+          message: 'Too complex',
+          metricType: 'cyclomatic',
         },
         {
-          filepath: 'src/test.ts', startLine: 21, endLine: 40, symbolName: 'func2',
-          symbolType: 'function', language: 'typescript', complexity: 18, threshold: 15,
-          severity: 'warning', message: 'Too complex', metricType: 'cyclomatic',
+          filepath: 'src/test.ts',
+          startLine: 21,
+          endLine: 40,
+          symbolName: 'func2',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 18,
+          threshold: 15,
+          severity: 'warning',
+          message: 'Too complex',
+          metricType: 'cyclomatic',
         },
       ];
 
@@ -292,14 +311,30 @@ describe('prompt', () => {
     it('should include cognitive example when violations are mostly cognitive', () => {
       const violations = [
         {
-          filepath: 'src/test.ts', startLine: 1, endLine: 20, symbolName: 'func1',
-          symbolType: 'function', language: 'typescript', complexity: 25, threshold: 15,
-          severity: 'error', message: 'Too complex', metricType: 'cognitive',
+          filepath: 'src/test.ts',
+          startLine: 1,
+          endLine: 20,
+          symbolName: 'func1',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 25,
+          threshold: 15,
+          severity: 'error',
+          message: 'Too complex',
+          metricType: 'cognitive',
         },
         {
-          filepath: 'src/test.ts', startLine: 21, endLine: 40, symbolName: 'func2',
-          symbolType: 'function', language: 'typescript', complexity: 20, threshold: 15,
-          severity: 'warning', message: 'Too complex', metricType: 'cognitive',
+          filepath: 'src/test.ts',
+          startLine: 21,
+          endLine: 40,
+          symbolName: 'func2',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 20,
+          threshold: 15,
+          severity: 'warning',
+          message: 'Too complex',
+          metricType: 'cognitive',
         },
       ];
 
@@ -313,19 +348,43 @@ describe('prompt', () => {
     it('should pick most common metric when multiple types exist', () => {
       const violations = [
         {
-          filepath: 'src/test.ts', startLine: 1, endLine: 20, symbolName: 'func1',
-          symbolType: 'function', language: 'typescript', complexity: 20, threshold: 15,
-          severity: 'error', message: 'Too complex', metricType: 'cognitive',
+          filepath: 'src/test.ts',
+          startLine: 1,
+          endLine: 20,
+          symbolName: 'func1',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 20,
+          threshold: 15,
+          severity: 'error',
+          message: 'Too complex',
+          metricType: 'cognitive',
         },
         {
-          filepath: 'src/test.ts', startLine: 21, endLine: 40, symbolName: 'func2',
-          symbolType: 'function', language: 'typescript', complexity: 18, threshold: 15,
-          severity: 'warning', message: 'Too complex', metricType: 'cognitive',
+          filepath: 'src/test.ts',
+          startLine: 21,
+          endLine: 40,
+          symbolName: 'func2',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 18,
+          threshold: 15,
+          severity: 'warning',
+          message: 'Too complex',
+          metricType: 'cognitive',
         },
         {
-          filepath: 'src/test.ts', startLine: 41, endLine: 60, symbolName: 'func3',
-          symbolType: 'function', language: 'typescript', complexity: 16, threshold: 15,
-          severity: 'warning', message: 'Too complex', metricType: 'cyclomatic',
+          filepath: 'src/test.ts',
+          startLine: 41,
+          endLine: 60,
+          symbolName: 'func3',
+          symbolType: 'function',
+          language: 'typescript',
+          complexity: 16,
+          threshold: 15,
+          severity: 'warning',
+          message: 'Too complex',
+          metricType: 'cyclomatic',
         },
       ];
 
@@ -341,7 +400,12 @@ describe('prompt', () => {
   describe('buildDescriptionBadge', () => {
     it('should show improved when complexity reduced even with pre-existing violations', () => {
       const deltaSummary: DeltaSummary = {
-        totalDelta: -15, improved: 2, degraded: 0, newFunctions: 0, deletedFunctions: 1, unchanged: 0,
+        totalDelta: -15,
+        improved: 2,
+        degraded: 0,
+        newFunctions: 0,
+        deletedFunctions: 1,
+        unchanged: 0,
       };
 
       const badge = buildDescriptionBadge(mockReport, deltaSummary, null);
@@ -360,7 +424,13 @@ describe('prompt', () => {
 
     it('should show good when no violations and no delta change', () => {
       const cleanReport: ComplexityReport = {
-        summary: { filesAnalyzed: 5, totalViolations: 0, bySeverity: { error: 0, warning: 0 }, avgComplexity: 5.0, maxComplexity: 8 },
+        summary: {
+          filesAnalyzed: 5,
+          totalViolations: 0,
+          bySeverity: { error: 0, warning: 0 },
+          avgComplexity: 5.0,
+          maxComplexity: 8,
+        },
         files: {},
       };
 
@@ -389,8 +459,30 @@ describe('prompt', () => {
 
     it('should show "No new complexity" when all violations are pre-existing (delta=0)', () => {
       const deltas: ComplexityDelta[] = [
-        { filepath: 'a.ts', symbolName: 'fn1', symbolType: 'function', startLine: 1, metricType: 'cyclomatic', baseComplexity: 20, headComplexity: 20, delta: 0, threshold: 15, severity: 'warning' },
-        { filepath: 'a.ts', symbolName: 'fn2', symbolType: 'function', startLine: 10, metricType: 'cognitive', baseComplexity: 18, headComplexity: 18, delta: 0, threshold: 15, severity: 'warning' },
+        {
+          filepath: 'a.ts',
+          symbolName: 'fn1',
+          symbolType: 'function',
+          startLine: 1,
+          metricType: 'cyclomatic',
+          baseComplexity: 20,
+          headComplexity: 20,
+          delta: 0,
+          threshold: 15,
+          severity: 'warning',
+        },
+        {
+          filepath: 'a.ts',
+          symbolName: 'fn2',
+          symbolType: 'function',
+          startLine: 10,
+          metricType: 'cognitive',
+          baseComplexity: 18,
+          headComplexity: 18,
+          delta: 0,
+          threshold: 15,
+          severity: 'warning',
+        },
       ];
       const header = buildHeaderLine(2, deltas);
       expect(header).toContain('No new complexity introduced.');
@@ -399,8 +491,30 @@ describe('prompt', () => {
 
     it('should show new count when PR introduces new violations', () => {
       const deltas: ComplexityDelta[] = [
-        { filepath: 'a.ts', symbolName: 'fn1', symbolType: 'function', startLine: 1, metricType: 'cyclomatic', baseComplexity: null, headComplexity: 20, delta: 20, threshold: 15, severity: 'new' },
-        { filepath: 'a.ts', symbolName: 'fn2', symbolType: 'function', startLine: 10, metricType: 'cognitive', baseComplexity: 18, headComplexity: 18, delta: 0, threshold: 15, severity: 'warning' },
+        {
+          filepath: 'a.ts',
+          symbolName: 'fn1',
+          symbolType: 'function',
+          startLine: 1,
+          metricType: 'cyclomatic',
+          baseComplexity: null,
+          headComplexity: 20,
+          delta: 20,
+          threshold: 15,
+          severity: 'new',
+        },
+        {
+          filepath: 'a.ts',
+          symbolName: 'fn2',
+          symbolType: 'function',
+          startLine: 10,
+          metricType: 'cognitive',
+          baseComplexity: 18,
+          headComplexity: 18,
+          delta: 0,
+          threshold: 15,
+          severity: 'warning',
+        },
       ];
       const header = buildHeaderLine(2, deltas);
       expect(header).toContain('1 new issue spotted in this PR.');
@@ -409,8 +523,30 @@ describe('prompt', () => {
 
     it('should count worsened violations as new', () => {
       const deltas: ComplexityDelta[] = [
-        { filepath: 'a.ts', symbolName: 'fn1', symbolType: 'function', startLine: 1, metricType: 'cyclomatic', baseComplexity: 16, headComplexity: 25, delta: 9, threshold: 15, severity: 'warning' },
-        { filepath: 'a.ts', symbolName: 'fn2', symbolType: 'function', startLine: 10, metricType: 'cognitive', baseComplexity: 12, headComplexity: 18, delta: 6, threshold: 15, severity: 'error' },
+        {
+          filepath: 'a.ts',
+          symbolName: 'fn1',
+          symbolType: 'function',
+          startLine: 1,
+          metricType: 'cyclomatic',
+          baseComplexity: 16,
+          headComplexity: 25,
+          delta: 9,
+          threshold: 15,
+          severity: 'warning',
+        },
+        {
+          filepath: 'a.ts',
+          symbolName: 'fn2',
+          symbolType: 'function',
+          startLine: 10,
+          metricType: 'cognitive',
+          baseComplexity: 12,
+          headComplexity: 18,
+          delta: 6,
+          threshold: 15,
+          severity: 'error',
+        },
       ];
       const header = buildHeaderLine(2, deltas);
       expect(header).toContain('2 new issues spotted in this PR.');
@@ -419,8 +555,30 @@ describe('prompt', () => {
 
     it('should note improved functions', () => {
       const deltas: ComplexityDelta[] = [
-        { filepath: 'a.ts', symbolName: 'fn1', symbolType: 'function', startLine: 1, metricType: 'cyclomatic', baseComplexity: 25, headComplexity: 18, delta: -7, threshold: 15, severity: 'improved' },
-        { filepath: 'a.ts', symbolName: 'fn2', symbolType: 'function', startLine: 10, metricType: 'cognitive', baseComplexity: 18, headComplexity: 18, delta: 0, threshold: 15, severity: 'warning' },
+        {
+          filepath: 'a.ts',
+          symbolName: 'fn1',
+          symbolType: 'function',
+          startLine: 1,
+          metricType: 'cyclomatic',
+          baseComplexity: 25,
+          headComplexity: 18,
+          delta: -7,
+          threshold: 15,
+          severity: 'improved',
+        },
+        {
+          filepath: 'a.ts',
+          symbolName: 'fn2',
+          symbolType: 'function',
+          startLine: 10,
+          metricType: 'cognitive',
+          baseComplexity: 18,
+          headComplexity: 18,
+          delta: 0,
+          threshold: 15,
+          severity: 'warning',
+        },
       ];
       const header = buildHeaderLine(2, deltas);
       expect(header).toContain('No new complexity introduced.');
@@ -432,9 +590,42 @@ describe('prompt', () => {
   describe('formatReviewComment with new/pre-existing separation', () => {
     it('should show new vs pre-existing header when deltas provided', () => {
       const deltas: ComplexityDelta[] = [
-        { filepath: 'src/utils.ts', symbolName: 'processData', symbolType: 'function', startLine: 10, metricType: 'cyclomatic', baseComplexity: 20, headComplexity: 23, delta: 3, threshold: 15, severity: 'warning' },
-        { filepath: 'src/utils.ts', symbolName: 'validateInput', symbolType: 'function', startLine: 60, metricType: 'cyclomatic', baseComplexity: 12, headComplexity: 12, delta: 0, threshold: 15, severity: 'warning' },
-        { filepath: 'src/handler.ts', symbolName: 'handleRequest', symbolType: 'function', startLine: 5, metricType: 'cyclomatic', baseComplexity: 11, headComplexity: 11, delta: 0, threshold: 15, severity: 'warning' },
+        {
+          filepath: 'src/utils.ts',
+          symbolName: 'processData',
+          symbolType: 'function',
+          startLine: 10,
+          metricType: 'cyclomatic',
+          baseComplexity: 20,
+          headComplexity: 23,
+          delta: 3,
+          threshold: 15,
+          severity: 'warning',
+        },
+        {
+          filepath: 'src/utils.ts',
+          symbolName: 'validateInput',
+          symbolType: 'function',
+          startLine: 60,
+          metricType: 'cyclomatic',
+          baseComplexity: 12,
+          headComplexity: 12,
+          delta: 0,
+          threshold: 15,
+          severity: 'warning',
+        },
+        {
+          filepath: 'src/handler.ts',
+          symbolName: 'handleRequest',
+          symbolType: 'function',
+          startLine: 5,
+          metricType: 'cyclomatic',
+          baseComplexity: 11,
+          headComplexity: 11,
+          delta: 0,
+          threshold: 15,
+          severity: 'warning',
+        },
       ];
       const comment = formatReviewComment('Review', mockReport, false, undefined, deltas);
       expect(comment).toContain('1 new issue spotted in this PR.');
@@ -443,7 +634,18 @@ describe('prompt', () => {
 
     it('should show "No new complexity" when all deltas are zero', () => {
       const deltas: ComplexityDelta[] = [
-        { filepath: 'src/utils.ts', symbolName: 'processData', symbolType: 'function', startLine: 10, metricType: 'cyclomatic', baseComplexity: 23, headComplexity: 23, delta: 0, threshold: 15, severity: 'warning' },
+        {
+          filepath: 'src/utils.ts',
+          symbolName: 'processData',
+          symbolType: 'function',
+          startLine: 10,
+          metricType: 'cyclomatic',
+          baseComplexity: 23,
+          headComplexity: 23,
+          delta: 0,
+          threshold: 15,
+          severity: 'warning',
+        },
       ];
       const reportOneViolation: ComplexityReport = {
         ...mockReport,
@@ -480,8 +682,30 @@ describe('prompt', () => {
         },
       };
       const deltas: ComplexityDelta[] = [
-        { filepath: 'src/utils.ts', symbolName: 'processData', symbolType: 'function', startLine: 10, metricType: 'cyclomatic', baseComplexity: null, headComplexity: 23, delta: 23, threshold: 15, severity: 'new' },
-        { filepath: 'src/handler.ts', symbolName: 'handleRequest', symbolType: 'function', startLine: 5, metricType: 'cyclomatic', baseComplexity: 11, headComplexity: 11, delta: 0, threshold: 15, severity: 'warning' },
+        {
+          filepath: 'src/utils.ts',
+          symbolName: 'processData',
+          symbolType: 'function',
+          startLine: 10,
+          metricType: 'cyclomatic',
+          baseComplexity: null,
+          headComplexity: 23,
+          delta: 23,
+          threshold: 15,
+          severity: 'new',
+        },
+        {
+          filepath: 'src/handler.ts',
+          symbolName: 'handleRequest',
+          symbolType: 'function',
+          startLine: 5,
+          metricType: 'cyclomatic',
+          baseComplexity: 11,
+          headComplexity: 11,
+          delta: 0,
+          threshold: 15,
+          severity: 'warning',
+        },
       ];
       const prompt = buildReviewPrompt(reportWithMetrics, mockPRContext, new Map(), deltas);
       expect(prompt).toContain('New/Worsened Violations');

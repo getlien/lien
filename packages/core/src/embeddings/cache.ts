@@ -3,7 +3,7 @@ import type { EmbeddingService } from './types.js';
 /**
  * LRU cache for embeddings with configurable max size.
  * Wraps any EmbeddingService to add caching functionality.
- * 
+ *
  * Benefits:
  * - Faster repeated searches
  * - Reduced CPU usage
@@ -129,4 +129,3 @@ export class CachedEmbeddings implements EmbeddingService {
     await this.underlying.dispose();
   }
 }
-

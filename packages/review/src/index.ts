@@ -84,7 +84,4 @@ export {
 } from './delta.js';
 
 // Formatting utilities
-export {
-  formatTime,
-  formatDeltaValue,
-} from './format.js';
+export { formatTime, formatDeltaValue } from './format.js';

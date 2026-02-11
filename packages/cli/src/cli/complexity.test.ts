@@ -27,10 +27,10 @@ describe('complexityCommand', () => {
     // Mock VectorDB instance methods
     mockVectorDB = {
       initialize: vi.fn().mockResolvedValue(undefined),
-      scanWithFilter: vi.fn(),  // Used for index existence check
-      scanAll: vi.fn(),         // Used for actual analysis
+      scanWithFilter: vi.fn(), // Used for index existence check
+      scanAll: vi.fn(), // Used for actual analysis
     };
-    
+
     // Mock VectorDB constructor to return our mock instance
     (coreModule.VectorDB as any) = class {
       constructor() {
@@ -41,7 +41,7 @@ describe('complexityCommand', () => {
     // Spy on console
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    
+
     // Spy on process.exit - don't make it throw, just track calls
     processExitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
       // Don't throw, just prevent actual exit
@@ -113,7 +113,7 @@ describe('complexityCommand', () => {
 
     expect(consoleLogSpy).toHaveBeenCalled();
     const output = consoleLogSpy.mock.calls[0][0];
-    
+
     // Should be valid JSON
     expect(() => JSON.parse(output)).not.toThrow();
     const parsed = JSON.parse(output);
@@ -150,7 +150,7 @@ describe('complexityCommand', () => {
 
     expect(consoleLogSpy).toHaveBeenCalled();
     const output = consoleLogSpy.mock.calls[0][0];
-    
+
     // Should be valid JSON with SARIF structure
     expect(() => JSON.parse(output)).not.toThrow();
     const parsed = JSON.parse(output);
@@ -203,7 +203,7 @@ describe('complexityCommand', () => {
 
     const output = consoleLogSpy.mock.calls[0][0];
     const parsed = JSON.parse(output);
-    
+
     // Should only include file1
     expect(parsed.files['src/file1.ts']).toBeDefined();
     expect(parsed.files['src/file2.ts']).toBeUndefined();
@@ -335,7 +335,7 @@ describe('complexityCommand', () => {
     expect(consoleLogSpy).toHaveBeenCalled();
     const output = consoleLogSpy.mock.calls[0][0];
     const parsed = JSON.parse(output);
-    
+
     expect(parsed.summary.totalViolations).toBe(0);
   });
 
@@ -356,7 +356,7 @@ describe('complexityCommand', () => {
     });
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Invalid --fail-on value "critical"')
+      expect.stringContaining('Invalid --fail-on value "critical"'),
     );
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
@@ -367,14 +367,14 @@ describe('complexityCommand', () => {
     });
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Invalid --format value "xml"')
+      expect.stringContaining('Invalid --format value "xml"'),
     );
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
 
   it('should warn about threshold flags (not supported)', async () => {
     const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    
+
     // Mock index check and actual scan
     mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]);
     mockVectorDB.scanAll.mockResolvedValue([]);
@@ -385,9 +385,9 @@ describe('complexityCommand', () => {
     });
 
     expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Threshold overrides via CLI flags are not supported')
+      expect.stringContaining('Threshold overrides via CLI flags are not supported'),
     );
-    
+
     consoleWarnSpy.mockRestore();
   });
 
@@ -402,4 +402,3 @@ describe('complexityCommand', () => {
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
 });
-

@@ -1,5 +1,11 @@
 import type { VectorDBInterface } from '../vectordb/types.js';
-import type { ComplexityViolation, ComplexityReport, FileComplexityData, RiskLevel, HalsteadDetails } from './types.js';
+import type {
+  ComplexityViolation,
+  ComplexityReport,
+  FileComplexityData,
+  RiskLevel,
+  HalsteadDetails,
+} from './types.js';
 import { RISK_ORDER } from './types.js';
 import type { ChunkMetadata } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
@@ -24,9 +30,7 @@ export class ComplexityAnalyzer {
     estimatedBugs: 1.5,
   };
 
-  constructor(
-    private vectorDB: VectorDBInterface
-  ) {}
+  constructor(private vectorDB: VectorDBInterface) {}
 
   /**
    * Analyze complexity of codebase or specific files
@@ -38,7 +42,7 @@ export class ComplexityAnalyzer {
   async analyze(
     files?: string[],
     crossRepo?: boolean,
-    repoIds?: string[]
+    repoIds?: string[],
   ): Promise<ComplexityReport> {
     // 1. Get all chunks from index
     // For cross-repo with QdrantDB, use scanCrossRepo
@@ -57,21 +61,21 @@ export class ComplexityAnalyzer {
     } else {
       allChunks = await this.vectorDB.scanAll();
     }
-    
+
     // 2. Filter to specified files if provided
-    const chunks = files 
+    const chunks = files
       ? allChunks.filter(c => this.matchesAnyFile(c.metadata.file, files))
       : allChunks;
-    
+
     // 3. Find violations from filtered chunks
     const violations = this.findViolations(chunks);
-    
+
     // 4. Build report - pass filtered chunks for file list, but keep violations from those files
     const report = this.buildReport(violations, chunks);
-    
+
     // 5. Enrich files with violations with dependency data
     this.enrichWithDependencies(report, allChunks as SearchResult[]);
-    
+
     return report;
   }
 
@@ -84,7 +88,7 @@ export class ComplexityAnalyzer {
     // Convert to forward slashes first
     const normalized = filepath.replace(/\\/g, '/');
     const normalizedRoot = workspaceRoot.replace(/\\/g, '/');
-    
+
     // Convert absolute paths to relative
     if (normalized.startsWith(normalizedRoot + '/')) {
       return normalized.slice(normalizedRoot.length + 1);
@@ -106,8 +110,10 @@ export class ComplexityAnalyzer {
     return targetFiles.some(target => {
       const normalizedTarget = target.replace(/\\/g, '/');
       // Exact match or target is a suffix of the chunk file
-      return normalizedChunkFile === normalizedTarget || 
-             normalizedChunkFile.endsWith('/' + normalizedTarget);
+      return (
+        normalizedChunkFile === normalizedTarget ||
+        normalizedChunkFile.endsWith('/' + normalizedTarget)
+      );
     });
   }
 
@@ -118,7 +124,7 @@ export class ComplexityAnalyzer {
     metadata: ChunkMetadata,
     complexity: number,
     baseThreshold: number,
-    metricType: ComplexityViolation['metricType']
+    metricType: ComplexityViolation['metricType'],
   ): ComplexityViolation | null {
     const warningThreshold = baseThreshold * SEVERITY.warning;
     const errorThreshold = baseThreshold * SEVERITY.error;
@@ -127,11 +133,12 @@ export class ComplexityAnalyzer {
 
     const violationSeverity = complexity >= errorThreshold ? 'error' : 'warning';
     const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
-    
+
     // Human-friendly messages
-    const message = metricType === 'cyclomatic'
-      ? `Needs ~${complexity} test cases for full coverage (threshold: ${Math.round(effectiveThreshold)})`
-      : `Mental load ${complexity} exceeds threshold ${Math.round(effectiveThreshold)} (hard to follow)`;
+    const message =
+      metricType === 'cyclomatic'
+        ? `Needs ~${complexity} test cases for full coverage (threshold: ${Math.round(effectiveThreshold)})`
+        : `Mental load ${complexity} exceeds threshold ${Math.round(effectiveThreshold)} (hard to follow)`;
 
     return {
       filepath: metadata.file,
@@ -153,21 +160,21 @@ export class ComplexityAnalyzer {
    * Handles potential index duplicates by tracking file+line ranges.
    */
   private getUniqueFunctionChunks(
-    chunks: Array<{ content: string; metadata: ChunkMetadata }>
+    chunks: Array<{ content: string; metadata: ChunkMetadata }>,
   ): ChunkMetadata[] {
     const seen = new Set<string>();
     const result: ChunkMetadata[] = [];
-    
+
     for (const { metadata } of chunks) {
       if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method') continue;
-      
+
       const key = `${metadata.file}:${metadata.startLine}-${metadata.endLine}`;
       if (seen.has(key)) continue;
-      
+
       seen.add(key);
       result.push(metadata);
     }
-    
+
     return result;
   }
 
@@ -199,7 +206,7 @@ export class ComplexityAnalyzer {
     metadata: ChunkMetadata,
     metricValue: number,
     threshold: number,
-    metricType: 'halstead_effort' | 'halstead_bugs'
+    metricType: 'halstead_effort' | 'halstead_bugs',
   ): ComplexityViolation | null {
     const warningThreshold = threshold * SEVERITY.warning;
     const errorThreshold = threshold * SEVERITY.error;
@@ -208,7 +215,7 @@ export class ComplexityAnalyzer {
 
     const violationSeverity = metricValue >= errorThreshold ? 'error' : 'warning';
     const effectiveThreshold = violationSeverity === 'error' ? errorThreshold : warningThreshold;
-    
+
     // For effort, show time in minutes; for bugs, show decimal with 2 places
     let message: string;
     if (metricType === 'halstead_effort') {
@@ -262,34 +269,59 @@ export class ComplexityAnalyzer {
    */
   private checkChunkComplexity(
     metadata: ChunkMetadata,
-    thresholds: { testPaths: number; mentalLoad: number; halsteadEffort?: number; estimatedBugs?: number }
+    thresholds: {
+      testPaths: number;
+      mentalLoad: number;
+      halsteadEffort?: number;
+      estimatedBugs?: number;
+    },
   ): ComplexityViolation[] {
     const violations: ComplexityViolation[] = [];
-    
+
     // Check test paths (cyclomatic complexity)
     if (metadata.complexity) {
-      const v = this.createViolation(metadata, metadata.complexity, thresholds.testPaths, 'cyclomatic');
+      const v = this.createViolation(
+        metadata,
+        metadata.complexity,
+        thresholds.testPaths,
+        'cyclomatic',
+      );
       if (v) violations.push(v);
     }
-    
+
     // Check mental load (cognitive complexity)
     if (metadata.cognitiveComplexity) {
-      const v = this.createViolation(metadata, metadata.cognitiveComplexity, thresholds.mentalLoad, 'cognitive');
+      const v = this.createViolation(
+        metadata,
+        metadata.cognitiveComplexity,
+        thresholds.mentalLoad,
+        'cognitive',
+      );
       if (v) violations.push(v);
     }
-    
+
     // Check time to understand (Halstead effort)
     if (thresholds.halsteadEffort && metadata.halsteadEffort) {
-      const v = this.createHalsteadViolation(metadata, metadata.halsteadEffort, thresholds.halsteadEffort, 'halstead_effort');
+      const v = this.createHalsteadViolation(
+        metadata,
+        metadata.halsteadEffort,
+        thresholds.halsteadEffort,
+        'halstead_effort',
+      );
       if (v) violations.push(v);
     }
-    
+
     // Check estimated bugs
     if (thresholds.estimatedBugs && metadata.halsteadBugs) {
-      const v = this.createHalsteadViolation(metadata, metadata.halsteadBugs, thresholds.estimatedBugs, 'halstead_bugs');
+      const v = this.createHalsteadViolation(
+        metadata,
+        metadata.halsteadBugs,
+        thresholds.estimatedBugs,
+        'halstead_bugs',
+      );
       if (v) violations.push(v);
     }
-    
+
     return violations;
   }
 
@@ -307,21 +339,21 @@ export class ComplexityAnalyzer {
    * Find all complexity violations based on thresholds.
    * Checks cyclomatic, cognitive, and Halstead complexity.
    */
-  private findViolations(chunks: Array<{ content: string; metadata: ChunkMetadata }>): ComplexityViolation[] {
+  private findViolations(
+    chunks: Array<{ content: string; metadata: ChunkMetadata }>,
+  ): ComplexityViolation[] {
     // Convert timeToUnderstandMinutes to effort internally
     const halsteadEffort = this.minutesToEffort(this.thresholds.timeToUnderstandMinutes);
-    
-    const thresholds = { 
-      testPaths: this.thresholds.testPaths, 
-      mentalLoad: this.thresholds.mentalLoad, 
+
+    const thresholds = {
+      testPaths: this.thresholds.testPaths,
+      mentalLoad: this.thresholds.mentalLoad,
       halsteadEffort, // Converted from minutes to effort internally
       estimatedBugs: this.thresholds.estimatedBugs,
     };
     const functionChunks = this.getUniqueFunctionChunks(chunks);
-    
-    return functionChunks.flatMap(metadata => 
-      this.checkChunkComplexity(metadata, thresholds)
-    );
+
+    return functionChunks.flatMap(metadata => this.checkChunkComplexity(metadata, thresholds));
   }
 
   /**
@@ -329,7 +361,7 @@ export class ComplexityAnalyzer {
    */
   private buildReport(
     violations: ComplexityViolation[],
-    allChunks: Array<{ content: string; metadata: ChunkMetadata }>
+    allChunks: Array<{ content: string; metadata: ChunkMetadata }>,
   ): ComplexityReport {
     // Normalize violation filepaths and group by normalized path
     const fileViolationsMap = new Map<string, ComplexityViolation[]>();
@@ -366,13 +398,12 @@ export class ComplexityAnalyzer {
       .filter(c => c.metadata.complexity !== undefined && c.metadata.complexity > 0)
       .map(c => c.metadata.complexity!);
 
-    const avgComplexity = complexityValues.length > 0
-      ? complexityValues.reduce((sum, val) => sum + val, 0) / complexityValues.length
-      : 0;
+    const avgComplexity =
+      complexityValues.length > 0
+        ? complexityValues.reduce((sum, val) => sum + val, 0) / complexityValues.length
+        : 0;
 
-    const maxComplexity = complexityValues.length > 0
-      ? Math.max(...complexityValues)
-      : 0;
+    const maxComplexity = complexityValues.length > 0 ? Math.max(...complexityValues) : 0;
 
     return {
       summary: {
@@ -407,10 +438,7 @@ export class ComplexityAnalyzer {
    * - List of dependent files (who imports this?)
    * - Boosted risk level based on dependents + complexity
    */
-  private enrichWithDependencies(
-    report: ComplexityReport,
-    allChunks: SearchResult[]
-  ): void {
+  private enrichWithDependencies(report: ComplexityReport, allChunks: SearchResult[]): void {
     const workspaceRoot = process.cwd();
 
     // Only enrich files that have violations (to save computation)
@@ -420,20 +448,20 @@ export class ComplexityAnalyzer {
 
     for (const filepath of filesWithViolations) {
       const fileData = report.files[filepath];
-      
+
       // Analyze dependencies for this file
       const depAnalysis = analyzeDependencies(filepath, allChunks, workspaceRoot);
-      
+
       // Update file data with dependency information
       fileData.dependents = depAnalysis.dependents.map(d => d.filepath);
       fileData.dependentCount = depAnalysis.dependentCount;
-      
+
       // Boost risk level based on dependency analysis
       // Take the higher of the two risk levels
       if (RISK_ORDER[depAnalysis.riskLevel] > RISK_ORDER[fileData.riskLevel]) {
         fileData.riskLevel = depAnalysis.riskLevel;
       }
-      
+
       // Add complexity metrics if available
       if (depAnalysis.complexityMetrics) {
         fileData.dependentComplexityMetrics = {
@@ -445,4 +473,3 @@ export class ComplexityAnalyzer {
     }
   }
 }
-

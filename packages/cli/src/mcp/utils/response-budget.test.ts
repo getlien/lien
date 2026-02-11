@@ -26,7 +26,13 @@ function makeResultsResponse(count: number, contentSize: number) {
 
 /** Create a get_files_context multi-file response. */
 function makeFilesResponse(fileCount: number, chunksPerFile: number, contentSize: number) {
-  const files: Record<string, { chunks: Array<{ content: string; metadata: Record<string, unknown> }>; testAssociations: string[] }> = {};
+  const files: Record<
+    string,
+    {
+      chunks: Array<{ content: string; metadata: Record<string, unknown> }>;
+      testAssociations: string[];
+    }
+  > = {};
   for (let f = 0; f < fileCount; f++) {
     files[`src/file-${f}.ts`] = {
       chunks: Array.from({ length: chunksPerFile }, (_, i) => ({

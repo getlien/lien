@@ -11,11 +11,16 @@ type ViolationWithFile = ComplexityViolation & { file: string };
  */
 function getMetricLabel(metricType: ComplexityViolation['metricType']): string {
   switch (metricType) {
-    case 'cognitive': return '🧠 Mental load';
-    case 'cyclomatic': return '🔀 Test paths';
-    case 'halstead_effort': return '⏱️ Time to understand';
-    case 'halstead_bugs': return '🐛 Estimated bugs';
-    default: return 'Complexity';
+    case 'cognitive':
+      return '🧠 Mental load';
+    case 'cyclomatic':
+      return '🔀 Test paths';
+    case 'halstead_effort':
+      return '⏱️ Time to understand';
+    case 'halstead_bugs':
+      return '🐛 Estimated bugs';
+    default:
+      return 'Complexity';
   }
 }
 
@@ -43,11 +48,13 @@ function formatTime(minutes: number): string {
  */
 function formatHalsteadDetails(violation: ViolationWithFile): string[] {
   if (!violation.halsteadDetails) return [];
-  
+
   const { volume, difficulty, effort, bugs } = violation.halsteadDetails;
   const timeStr = formatTime(effortToMinutes(effort));
   return [
-    chalk.dim(`    📊  Volume: ${Math.round(volume).toLocaleString()}, Difficulty: ${difficulty.toFixed(1)}`),
+    chalk.dim(
+      `    📊  Volume: ${Math.round(volume).toLocaleString()}, Difficulty: ${difficulty.toFixed(1)}`,
+    ),
     chalk.dim(`    ⏱️  Time: ~${timeStr}, Est. bugs: ${bugs.toFixed(2)}`),
   ];
 }
@@ -97,12 +104,14 @@ function formatDependencyInfo(fileData: FileComplexityData): string[] {
   if (depCount === 0) return [];
 
   const lines = [chalk.dim(`    📦  Imported by ${depCount} file${depCount !== 1 ? 's' : ''}`)];
-  
+
   if (fileData.dependentComplexityMetrics) {
     const { averageComplexity, maxComplexity } = fileData.dependentComplexityMetrics;
-    lines.push(chalk.dim(`    - Dependent avg complexity: ${averageComplexity}, max: ${maxComplexity}`));
+    lines.push(
+      chalk.dim(`    - Dependent avg complexity: ${averageComplexity}, max: ${maxComplexity}`),
+    );
   }
-  
+
   return lines;
 }
 
@@ -121,12 +130,15 @@ function formatViolation(
   violation: ViolationWithFile,
   fileData: FileComplexityData,
   colorFn: typeof chalk.red | typeof chalk.yellow,
-  isBold: boolean
+  isBold: boolean,
 ): string[] {
   const symbolText = formatSymbolDisplay(violation, isBold);
   const metricLabel = getMetricLabel(violation.metricType);
   const formatter = metricFormatters[violation.metricType] || defaultFormatter;
-  const { complexity: complexityDisplay, threshold: thresholdDisplay } = formatter(violation.complexity, violation.threshold);
+  const { complexity: complexityDisplay, threshold: thresholdDisplay } = formatter(
+    violation.complexity,
+    violation.threshold,
+  );
 
   return [
     colorFn(`  ${violation.file}:${violation.startLine}`) + chalk.dim(' - ') + symbolText,
@@ -153,7 +165,10 @@ export function formatTextReport(report: ComplexityReport): string {
   lines.push(chalk.dim('  Files analyzed: ') + report.summary.filesAnalyzed.toString());
   const errorText = `${report.summary.bySeverity.error} error${report.summary.bySeverity.error !== 1 ? 's' : ''}`;
   const warningText = `${report.summary.bySeverity.warning} warning${report.summary.bySeverity.warning !== 1 ? 's' : ''}`;
-  lines.push(chalk.dim('  Violations: ') + `${report.summary.totalViolations} (${errorText}, ${warningText})`);
+  lines.push(
+    chalk.dim('  Violations: ') +
+      `${report.summary.totalViolations} (${errorText}, ${warningText})`,
+  );
   lines.push(chalk.dim('  Average complexity: ') + report.summary.avgComplexity.toString());
   lines.push(chalk.dim('  Max complexity: ') + report.summary.maxComplexity.toString());
   lines.push('');
@@ -170,7 +185,7 @@ export function formatTextReport(report: ComplexityReport): string {
 
   // Errors section
   const errors = filesWithViolations.flatMap(([file, data]) =>
-    data.violations.filter(v => v.severity === 'error').map(v => ({ file, ...v }))
+    data.violations.filter(v => v.severity === 'error').map(v => ({ file, ...v })),
   );
 
   if (errors.length > 0) {
@@ -182,7 +197,7 @@ export function formatTextReport(report: ComplexityReport): string {
 
   // Warnings section
   const warnings = filesWithViolations.flatMap(([file, data]) =>
-    data.violations.filter(v => v.severity === 'warning').map(v => ({ file, ...v }))
+    data.violations.filter(v => v.severity === 'warning').map(v => ({ file, ...v })),
   );
 
   if (warnings.length > 0) {
@@ -194,4 +209,3 @@ export function formatTextReport(report: ComplexityReport): string {
 
   return lines.join('\n');
 }
-

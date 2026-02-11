@@ -37,7 +37,7 @@ export interface SemanticMetadata {
   parameters?: string[];
   signature?: string;
   imports?: string[];
-  
+
   // Halstead metrics (v0.19.0)
   halsteadVolume?: number;
   halsteadDifficulty?: number;
@@ -57,4 +57,3 @@ export interface ASTChunk extends CodeChunk {
  * Canonical definition lives in languages/registry.ts; re-exported here for convenience.
  */
 export type { SupportedLanguage } from './languages/registry.js';
-

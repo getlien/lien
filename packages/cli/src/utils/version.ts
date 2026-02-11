@@ -5,7 +5,7 @@ import { dirname, join } from 'path';
 /**
  * Centralized package version loader.
  * Handles different build output structures (development vs production).
- * 
+ *
  * Build scenarios:
  * - Development (ts-node): src/utils/version.ts → ../package.json
  * - Production (dist): dist/utils/version.js → ../package.json
@@ -46,4 +46,3 @@ export function getPackageVersion(): string {
 export function getPackageInfo(): { version: string; name?: string } {
   return packageJson;
 }
-

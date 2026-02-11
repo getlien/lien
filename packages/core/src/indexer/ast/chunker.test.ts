@@ -42,10 +42,10 @@ function hello() {
       `.trim();
 
       const chunks = chunkByAST('test.ts', content);
-      
+
       expect(chunks.length).toBeGreaterThan(0);
       const funcChunk = chunks.find(c => c.metadata.symbolName === 'hello');
-      
+
       expect(funcChunk).toBeDefined();
       expect(funcChunk?.metadata.symbolType).toBe('function');
       expect(funcChunk?.metadata.type).toBe('function');
@@ -66,7 +66,7 @@ class Calculator {
       `.trim();
 
       const chunks = chunkByAST('test.ts', content);
-      
+
       // Should have a class chunk and chunks for each method
       const classChunk = chunks.find(c => c.metadata.symbolName === 'Calculator');
       const addMethod = chunks.find(c => c.metadata.symbolName === 'add');
@@ -99,7 +99,7 @@ function validateEmail(email: string): boolean {
 
       const chunks = chunkByAST('test.ts', content);
       const chunk = chunks.find(c => c.metadata.symbolName === 'validateEmail');
-      
+
       expect(chunk).toBeDefined();
       expect(chunk?.metadata.symbolName).toBe('validateEmail');
       expect(chunk?.metadata.symbolType).toBe('function');
@@ -116,7 +116,7 @@ const greet = (name: string) => {
       `.trim();
 
       const chunks = chunkByAST('test.ts', content);
-      
+
       // Arrow functions should be detected
       expect(chunks.length).toBeGreaterThan(0);
       const arrowChunk = chunks.find(c => c.metadata.symbolName === 'greet');
@@ -134,7 +134,7 @@ interface User {
 
       const chunks = chunkByAST('test.ts', content);
       const interfaceChunk = chunks.find(c => c.metadata.symbolName === 'User');
-      
+
       expect(interfaceChunk).toBeDefined();
       expect(interfaceChunk?.metadata.symbolType).toBe('interface');
     });
@@ -151,7 +151,7 @@ function test() {
 
       const chunks = chunkByAST('test.ts', content);
       const funcChunk = chunks.find(c => c.metadata.symbolName === 'test');
-      
+
       expect(funcChunk?.metadata.imports).toBeDefined();
       expect(funcChunk?.metadata.imports).toContain('./foo');
       expect(funcChunk?.metadata.imports).toContain('./bar');
@@ -175,7 +175,7 @@ function complexFunction(x: number): string {
 
       const chunks = chunkByAST('test.ts', content);
       const chunk = chunks.find(c => c.metadata.symbolName === 'complexFunction');
-      
+
       expect(chunk?.metadata.complexity).toBeGreaterThan(3); // Multiple if statements
     });
 
@@ -195,7 +195,7 @@ function third() {
       `.trim();
 
       const chunks = chunkByAST('test.ts', content);
-      
+
       expect(chunks.length).toBeGreaterThanOrEqual(3);
       expect(chunks.some(c => c.metadata.symbolName === 'first')).toBe(true);
       expect(chunks.some(c => c.metadata.symbolName === 'second')).toBe(true);
@@ -205,7 +205,7 @@ function third() {
     it('should handle empty files gracefully', () => {
       const content = '';
       const chunks = chunkByAST('test.ts', content);
-      
+
       // Empty file should produce no chunks or minimal chunks
       expect(chunks.length).toBeGreaterThanOrEqual(0);
     });
@@ -222,7 +222,7 @@ function test() {
 
       const chunks = chunkByAST('test.ts', content);
       const funcChunk = chunks.find(c => c.metadata.symbolName === 'test');
-      
+
       expect(funcChunk).toBeDefined();
       expect(funcChunk!.metadata.startLine).toBeGreaterThan(0);
       expect(funcChunk!.metadata.endLine).toBeGreaterThan(funcChunk!.metadata.startLine);
@@ -237,7 +237,7 @@ function add(a, b) {
 
       const chunks = chunkByAST('test.js', content);
       const chunk = chunks.find(c => c.metadata.symbolName === 'add');
-      
+
       expect(chunk).toBeDefined();
       expect(chunk?.metadata.language).toBe('javascript');
     });
@@ -254,7 +254,7 @@ export default function defaultFunc() {
       `.trim();
 
       const chunks = chunkByAST('test.ts', content);
-      
+
       expect(chunks.some(c => c.metadata.symbolName === 'exportedFunc')).toBe(true);
       expect(chunks.some(c => c.metadata.symbolName === 'defaultFunc')).toBe(true);
     });
@@ -280,12 +280,12 @@ function formatUserData($user) {
 ?>`;
 
       const chunks = chunkByAST('test.php', content);
-      
+
       const validateChunk = chunks.find(c => c.metadata.symbolName === 'validateEmail');
       expect(validateChunk).toBeDefined();
       expect(validateChunk?.metadata.symbolType).toBe('function');
       expect(validateChunk?.metadata.language).toBe('php');
-      
+
       const formatChunk = chunks.find(c => c.metadata.symbolName === 'formatUserData');
       expect(formatChunk).toBeDefined();
       expect(formatChunk?.metadata.symbolType).toBe('function');
@@ -357,7 +357,7 @@ function processUsers($users) {
 
       const chunks = chunkByAST('test.php', content);
       const chunk = chunks.find(c => c.metadata.symbolName === 'processUsers');
-      
+
       expect(chunk).toBeDefined();
       expect(chunk?.metadata.complexity).toBeGreaterThan(1);
       // Should count foreach (1) + if (2) + nested if (3) = base(1) + 3 = 4
@@ -373,11 +373,11 @@ function test() {
       `.trim();
 
       const chunks = chunkByAST('test.php', contentWithoutTag);
-      
+
       // Without <?php tag, tree-sitter-php may not parse correctly
       // This is expected behavior - valid PHP files should have the tag
       expect(chunks.length).toBeGreaterThanOrEqual(0);
-      
+
       // With proper tag, should parse correctly
       const contentWithTag = `<?php
 function test() {
@@ -405,7 +405,7 @@ trait Timestampable {
 ?>`;
 
       const chunks = chunkByAST('test.php', content);
-      
+
       // Should extract methods from trait
       const createdChunk = chunks.find(c => c.metadata.symbolName === 'getCreatedAt');
       expect(createdChunk).toBeDefined();
@@ -427,7 +427,7 @@ function calculateTotal($items) {
 
       const chunks = chunkByAST('test.php', content);
       const chunk = chunks.find(c => c.metadata.symbolName === 'calculateTotal');
-      
+
       expect(chunk).toBeDefined();
       expect(chunk?.metadata.symbolName).toBe('calculateTotal');
       expect(chunk?.metadata.symbolType).toBe('function');
@@ -453,7 +453,7 @@ function third() {
 ?>`;
 
       const chunks = chunkByAST('test.php', content);
-      
+
       expect(chunks.length).toBeGreaterThanOrEqual(3);
       expect(chunks.some(c => c.metadata.symbolName === 'first')).toBe(true);
       expect(chunks.some(c => c.metadata.symbolName === 'second')).toBe(true);
@@ -490,14 +490,14 @@ export { default as qux } from './qux';`;
   describe('error handling', () => {
     it('should throw error for unsupported language', () => {
       const content = 'puts "Hello"';
-      
+
       // Ruby is not yet supported
       expect(() => chunkByAST('test.rb', content)).toThrow();
     });
 
     it('should handle invalid syntax gracefully', () => {
       const content = 'function invalid() { this is not valid }}}';
-      
+
       // Tree-sitter is resilient and still produces a tree with errors
       // So this should not throw, but return some chunks
       const chunks = chunkByAST('test.ts', content);
@@ -505,4 +505,3 @@ export { default as qux } from './qux';`;
     });
   });
 });
-

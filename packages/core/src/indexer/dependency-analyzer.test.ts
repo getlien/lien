@@ -13,7 +13,7 @@ describe('analyzeDependencies', () => {
     options?: {
       exports?: string[];
       importedSymbols?: Record<string, string[]>;
-    }
+    },
   ): SearchResult {
     return {
       content: 'test content',
@@ -44,7 +44,7 @@ describe('analyzeDependencies', () => {
 
     expect(result.dependentCount).toBe(2);
     expect(result.dependents.map(d => d.filepath)).toEqual(
-      expect.arrayContaining(['src/app.ts', 'src/config.ts'])
+      expect.arrayContaining(['src/app.ts', 'src/config.ts']),
     );
   });
 
@@ -121,7 +121,9 @@ describe('analyzeDependencies', () => {
 
     // Should be boosted from 'low' (by count) to 'critical' (by complexity)
     expect(result.dependentCount).toBe(3); // Only 3 dependents
-    expect(result.complexityMetrics!.maxComplexity).toBeGreaterThan(COMPLEXITY_THRESHOLDS.CRITICAL_MAX);
+    expect(result.complexityMetrics!.maxComplexity).toBeGreaterThan(
+      COMPLEXITY_THRESHOLDS.CRITICAL_MAX,
+    );
     expect(result.riskLevel).toBe('critical');
   });
 
@@ -137,8 +139,10 @@ describe('analyzeDependencies', () => {
     const result = analyzeDependencies('src/utils.ts', chunks, workspaceRoot);
 
     expect(result.complexityMetrics?.highComplexityDependents).toBeDefined();
-    const highComplexFiles = result.complexityMetrics!.highComplexityDependents.map(d => d.filepath);
-    
+    const highComplexFiles = result.complexityMetrics!.highComplexityDependents.map(
+      d => d.filepath,
+    );
+
     // Should include files with complexity > HIGH_COMPLEXITY_DEPENDENT (10)
     expect(highComplexFiles).toContain('src/app.ts');
     expect(highComplexFiles).toContain('src/config.ts');
@@ -170,10 +174,10 @@ describe('analyzeDependencies', () => {
     const result = analyzeDependencies('src/utils.ts', chunks, workspaceRoot);
 
     expect(result.dependentCount).toBe(3);
-    
+
     const testFiles = result.dependents.filter(d => d.isTestFile);
     const sourceFiles = result.dependents.filter(d => !d.isTestFile);
-    
+
     expect(testFiles).toHaveLength(2);
     expect(sourceFiles).toHaveLength(1);
   });
@@ -182,9 +186,30 @@ describe('analyzeDependencies', () => {
     const chunks: SearchResult[] = [
       createChunk('src/utils.ts', []),
       // Multiple chunks from same dependent file
-      { ...createChunk('src/app.ts', ['src/utils.ts'], 10), metadata: { ...createChunk('src/app.ts', ['src/utils.ts'], 10).metadata, startLine: 1, endLine: 50 } as ChunkMetadata },
-      { ...createChunk('src/app.ts', ['src/utils.ts'], 15), metadata: { ...createChunk('src/app.ts', ['src/utils.ts'], 15).metadata, startLine: 51, endLine: 100 } as ChunkMetadata },
-      { ...createChunk('src/app.ts', ['src/utils.ts'], 20), metadata: { ...createChunk('src/app.ts', ['src/utils.ts'], 20).metadata, startLine: 101, endLine: 150 } as ChunkMetadata },
+      {
+        ...createChunk('src/app.ts', ['src/utils.ts'], 10),
+        metadata: {
+          ...createChunk('src/app.ts', ['src/utils.ts'], 10).metadata,
+          startLine: 1,
+          endLine: 50,
+        } as ChunkMetadata,
+      },
+      {
+        ...createChunk('src/app.ts', ['src/utils.ts'], 15),
+        metadata: {
+          ...createChunk('src/app.ts', ['src/utils.ts'], 15).metadata,
+          startLine: 51,
+          endLine: 100,
+        } as ChunkMetadata,
+      },
+      {
+        ...createChunk('src/app.ts', ['src/utils.ts'], 20),
+        metadata: {
+          ...createChunk('src/app.ts', ['src/utils.ts'], 20).metadata,
+          startLine: 101,
+          endLine: 150,
+        } as ChunkMetadata,
+      },
     ];
 
     const result = analyzeDependencies('src/utils.ts', chunks, workspaceRoot);
@@ -193,7 +218,7 @@ describe('analyzeDependencies', () => {
     expect(result.dependentCount).toBe(1);
     expect(result.dependents).toHaveLength(1);
     expect(result.dependents[0].filepath).toBe('src/app.ts');
-    
+
     // But complexity metrics should aggregate all chunks
     expect(result.complexityMetrics?.maxComplexity).toBe(20);
   });
@@ -399,4 +424,3 @@ describe('analyzeDependencies', () => {
     });
   });
 });
-

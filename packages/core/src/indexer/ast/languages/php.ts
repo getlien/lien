@@ -3,8 +3,16 @@ import type Parser from 'tree-sitter';
 import type { SymbolInfo } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
-import type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from '../extractors/types.js';
-import { extractSignature, extractParameters, extractReturnType } from '../extractors/symbol-helpers.js';
+import type {
+  LanguageExportExtractor,
+  LanguageImportExtractor,
+  LanguageSymbolExtractor,
+} from '../extractors/types.js';
+import {
+  extractSignature,
+  extractParameters,
+  extractReturnType,
+} from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -19,22 +27,19 @@ import { calculateComplexity } from '../complexity/index.js';
  */
 export class PHPTraverser implements LanguageTraverser {
   targetNodeTypes = [
-    'function_definition',      // function foo() {}
-    'method_declaration',       // public function bar() {}
+    'function_definition', // function foo() {}
+    'method_declaration', // public function bar() {}
   ];
 
   containerTypes = [
-    'class_declaration',        // We extract methods, not the class itself
-    'trait_declaration',        // PHP traits
-    'interface_declaration',    // PHP interfaces (for interface methods)
+    'class_declaration', // We extract methods, not the class itself
+    'trait_declaration', // PHP traits
+    'interface_declaration', // PHP interfaces (for interface methods)
   ];
 
   declarationTypes: string[] = [];
 
-  functionTypes = [
-    'function_definition',
-    'method_declaration',
-  ];
+  functionTypes = ['function_definition', 'method_declaration'];
 
   shouldExtractChildren(node: Parser.SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
@@ -45,25 +50,24 @@ export class PHPTraverser implements LanguageTraverser {
   }
 
   getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
-    if (node.type === 'class_declaration' ||
-        node.type === 'trait_declaration' ||
-        node.type === 'interface_declaration') {
+    if (
+      node.type === 'class_declaration' ||
+      node.type === 'trait_declaration' ||
+      node.type === 'interface_declaration'
+    ) {
       return node.childForFieldName('body');
     }
     return null;
   }
 
   shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
-    return node.type === 'program' ||
-           node.type === 'php' ||
-           node.type === 'declaration_list';
+    return node.type === 'program' || node.type === 'php' || node.type === 'declaration_list';
   }
 
   findParentContainerName(node: Parser.SyntaxNode): string | undefined {
     let current = node.parent;
     while (current) {
-      if (current.type === 'class_declaration' ||
-          current.type === 'trait_declaration') {
+      if (current.type === 'class_declaration' || current.type === 'trait_declaration') {
         const nameNode = current.childForFieldName('name');
         return nameNode?.text;
       }
@@ -262,17 +266,9 @@ export class PHPImportExtractor implements LanguageImportExtractor {
  * Call sites: function_call_expression, member_call_expression, scoped_call_expression
  */
 export class PHPSymbolExtractor implements LanguageSymbolExtractor {
-  readonly symbolNodeTypes = [
-    'function_definition',
-    'method_declaration',
-    'class_declaration',
-  ];
+  readonly symbolNodeTypes = ['function_definition', 'method_declaration', 'class_declaration'];
 
-  extractSymbol(
-    node: Parser.SyntaxNode,
-    content: string,
-    parentClass?: string
-  ): SymbolInfo | null {
+  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_definition':
         return this.extractFunctionInfo(node, content, parentClass);
@@ -285,9 +281,7 @@ export class PHPSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(
-    node: Parser.SyntaxNode
-  ): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
     const line = node.startPosition.row + 1;
 
     // function_call_expression - helper_function()
@@ -320,7 +314,7 @@ export class PHPSymbolExtractor implements LanguageSymbolExtractor {
   private extractFunctionInfo(
     node: Parser.SyntaxNode,
     content: string,
-    parentClass?: string
+    parentClass?: string,
   ): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
@@ -341,7 +335,7 @@ export class PHPSymbolExtractor implements LanguageSymbolExtractor {
   private extractMethodInfo(
     node: Parser.SyntaxNode,
     content: string,
-    parentClass?: string
+    parentClass?: string,
   ): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
@@ -388,38 +382,130 @@ export const phpDefinition: LanguageDefinition = {
 
   complexity: {
     decisionPoints: [
-      'if_statement', 'while_statement', 'for_statement', 'switch_case',
-      'catch_clause', 'ternary_expression', 'binary_expression',
+      'if_statement',
+      'while_statement',
+      'for_statement',
+      'switch_case',
+      'catch_clause',
+      'ternary_expression',
+      'binary_expression',
       'foreach_statement',
     ],
     nestingTypes: [
-      'if_statement', 'for_statement', 'while_statement', 'switch_statement',
-      'catch_clause', 'do_statement', 'foreach_statement', 'match_statement',
+      'if_statement',
+      'for_statement',
+      'while_statement',
+      'switch_statement',
+      'catch_clause',
+      'do_statement',
+      'foreach_statement',
+      'match_statement',
     ],
-    nonNestingTypes: [
-      'else_clause', 'ternary_expression',
-    ],
+    nonNestingTypes: ['else_clause', 'ternary_expression'],
     lambdaTypes: [],
     operatorSymbols: new Set([
-      '+', '-', '*', '/', '%', '**',
-      '==', '===', '!=', '!==', '<>', '<', '>', '<=', '>=', '<=>',
-      '&&', '||', '!', 'and', 'or', 'xor',
-      '=', '+=', '-=', '*=', '/=', '%=', '**=', '.=',
-      '&=', '|=', '^=', '<<=', '>>=', '??=',
-      '&', '|', '^', '~', '<<', '>>',
+      '+',
+      '-',
+      '*',
+      '/',
+      '%',
+      '**',
+      '==',
+      '===',
+      '!=',
+      '!==',
+      '<>',
+      '<',
+      '>',
+      '<=',
+      '>=',
+      '<=>',
+      '&&',
+      '||',
+      '!',
+      'and',
+      'or',
+      'xor',
+      '=',
+      '+=',
+      '-=',
+      '*=',
+      '/=',
+      '%=',
+      '**=',
+      '.=',
+      '&=',
+      '|=',
+      '^=',
+      '<<=',
+      '>>=',
+      '??=',
+      '&',
+      '|',
+      '^',
+      '~',
+      '<<',
+      '>>',
       '.',
-      '?', ':', '::', '->', '=>', '??', '@',
-      '(', ')', '[', ']', '{', '}',
+      '?',
+      ':',
+      '::',
+      '->',
+      '=>',
+      '??',
+      '@',
+      '(',
+      ')',
+      '[',
+      ']',
+      '{',
+      '}',
     ]),
     operatorKeywords: new Set([
-      'if', 'elseif', 'else', 'for', 'foreach', 'while', 'do', 'switch', 'case', 'default', 'match',
-      'return', 'throw', 'try', 'catch', 'finally',
-      'new', 'clone', 'instanceof',
-      'yield', 'break', 'continue',
-      'function', 'class', 'extends', 'implements', 'trait', 'interface',
-      'use', 'namespace', 'as',
-      'echo', 'print', 'include', 'require', 'include_once', 'require_once',
-      'global', 'static', 'const', 'public', 'private', 'protected', 'readonly',
+      'if',
+      'elseif',
+      'else',
+      'for',
+      'foreach',
+      'while',
+      'do',
+      'switch',
+      'case',
+      'default',
+      'match',
+      'return',
+      'throw',
+      'try',
+      'catch',
+      'finally',
+      'new',
+      'clone',
+      'instanceof',
+      'yield',
+      'break',
+      'continue',
+      'function',
+      'class',
+      'extends',
+      'implements',
+      'trait',
+      'interface',
+      'use',
+      'namespace',
+      'as',
+      'echo',
+      'print',
+      'include',
+      'require',
+      'include_once',
+      'require_once',
+      'global',
+      'static',
+      'const',
+      'public',
+      'private',
+      'protected',
+      'readonly',
     ]),
   },
 

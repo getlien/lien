@@ -5,7 +5,12 @@ import { MAX_CHUNKS_PER_FILE } from '../constants.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
 import { classifyQueryIntent, QueryIntent } from './intent-classifier.js';
-import { BoostingComposer, PathBoostingStrategy, FilenameBoostingStrategy, FileTypeBoostingStrategy } from './boosting/index.js';
+import {
+  BoostingComposer,
+  PathBoostingStrategy,
+  FilenameBoostingStrategy,
+  FileTypeBoostingStrategy,
+} from './boosting/index.js';
 
 // TODO: Replace with proper type from lancedb-types.ts
 // Currently using 'any' because tests use incomplete mocks that don't satisfy full LanceDB interface
@@ -91,12 +96,7 @@ interface DBRecord {
  * Used to filter out empty/invalid records from query results.
  */
 function isValidRecord(r: DBRecord): boolean {
-  return Boolean(
-    r.content && 
-    r.content.trim().length > 0 &&
-    r.file && 
-    r.file.length > 0
-  );
+  return Boolean(r.content && r.content.trim().length > 0 && r.file && r.file.length > 0);
 }
 
 /**
@@ -110,11 +110,11 @@ function hasValidStringEntries(arr: string[] | undefined): boolean {
 
 /**
  * Check if a number array has valid entries (filters out placeholder values).
- * 
+ *
  * serializeCallSites() uses 0 as a sentinel meaning "no valid line number"
  * (not actual missing data - the array is never truly empty, it contains [0]).
  * This function checks if the array contains real line numbers (> 0).
- * 
+ *
  * Note: Real line numbers are 1-indexed in source files, so 0 is safe as a placeholder.
  */
 function hasValidNumberEntries(arr: number[] | undefined): boolean {
@@ -127,9 +127,10 @@ function hasValidNumberEntries(arr: number[] | undefined): boolean {
  */
 function getSymbolsForType(
   r: DBRecord,
-  symbolType?: 'function' | 'method' | 'class' | 'interface'
+  symbolType?: 'function' | 'method' | 'class' | 'interface',
 ): string[] {
-  if (symbolType === 'function' || symbolType === 'method') return toPlainArray<string>(r.functionNames) || [];
+  if (symbolType === 'function' || symbolType === 'method')
+    return toPlainArray<string>(r.functionNames) || [];
   if (symbolType === 'class') return toPlainArray<string>(r.classNames) || [];
   if (symbolType === 'interface') return toPlainArray<string>(r.interfaceNames) || [];
   return [
@@ -159,27 +160,32 @@ function toPlainArray<T>(arr: any): T[] | undefined {
 
 /**
  * Deserialize importedSymbols from parallel arrays stored in DB.
- * 
+ *
  * @param paths - Array of import paths (keys from importedSymbols map)
  * @param names - Array of JSON-encoded symbol arrays (values from importedSymbols map)
  * @returns Record mapping import paths to symbol arrays, or undefined if no valid data
  */
 function deserializeImportedSymbols(
   paths?: unknown,
-  names?: unknown
+  names?: unknown,
 ): Record<string, string[]> | undefined {
   const pathsArr = toPlainArray<string>(paths);
   const namesArr = toPlainArray<string>(names);
-  
-  if (!pathsArr || !namesArr || !hasValidStringEntries(pathsArr) || !hasValidStringEntries(namesArr)) {
+
+  if (
+    !pathsArr ||
+    !namesArr ||
+    !hasValidStringEntries(pathsArr) ||
+    !hasValidStringEntries(namesArr)
+  ) {
     return undefined;
   }
-  
+
   // Treat mismatched arrays as a hard error (indicates data corruption during serialization)
   if (pathsArr.length !== namesArr.length) {
     throw new DatabaseError(
       `deserializeImportedSymbols: array length mismatch (paths: ${pathsArr.length}, names: ${namesArr.length}). ` +
-      `This indicates data corruption. Refusing to deserialize to avoid silent data loss.`
+        `This indicates data corruption. Refusing to deserialize to avoid silent data loss.`,
     );
   }
   const result: Record<string, string[]> = {};
@@ -190,7 +196,10 @@ function deserializeImportedSymbols(
       try {
         result[path] = JSON.parse(namesJson);
       } catch (err) {
-        console.warn(`deserializeImportedSymbols: failed to parse JSON for path "${path}". Skipping entry.`, err);
+        console.warn(
+          `deserializeImportedSymbols: failed to parse JSON for path "${path}". Skipping entry.`,
+          err,
+        );
       }
     }
   }
@@ -199,27 +208,32 @@ function deserializeImportedSymbols(
 
 /**
  * Deserialize callSites from parallel arrays stored in DB.
- * 
+ *
  * @param symbols - Array of symbol names called at each site
  * @param lines - Array of line numbers for each call site (parallel to symbols)
  * @returns Array of call site objects with symbol and line, or undefined if no valid data
  */
 function deserializeCallSites(
   symbols?: unknown,
-  lines?: unknown
+  lines?: unknown,
 ): Array<{ symbol: string; line: number }> | undefined {
   const symbolsArr = toPlainArray<string>(symbols);
   const linesArr = toPlainArray<number>(lines);
-  
-  if (!symbolsArr || !linesArr || !hasValidStringEntries(symbolsArr) || !hasValidNumberEntries(linesArr)) {
+
+  if (
+    !symbolsArr ||
+    !linesArr ||
+    !hasValidStringEntries(symbolsArr) ||
+    !hasValidNumberEntries(linesArr)
+  ) {
     return undefined;
   }
-  
+
   // Treat mismatched arrays as a hard error (indicates data corruption during serialization)
   if (symbolsArr.length !== linesArr.length) {
     throw new DatabaseError(
       `deserializeCallSites: array length mismatch (symbols: ${symbolsArr.length}, lines: ${linesArr.length}). ` +
-      `This indicates data corruption. Refusing to deserialize to avoid silent data loss.`
+        `This indicates data corruption. Refusing to deserialize to avoid silent data loss.`,
     );
   }
   const result: Array<{ symbol: string; line: number }> = [];
@@ -267,7 +281,7 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
 
 /**
  * Apply relevance boosting strategies to a search score.
- * 
+ *
  * Uses composable boosting strategies based on query intent:
  * - Path matching: Boost files with query tokens in path
  * - Filename matching: Boost files with query tokens in filename
@@ -276,14 +290,14 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
 function applyRelevanceBoosting(
   query: string | undefined,
   filepath: string,
-  baseScore: number
+  baseScore: number,
 ): number {
   if (!query) {
     return baseScore;
   }
-  
+
   const intent = classifyQueryIntent(query);
-  
+
   // Use cached composer instance configured for this intent
   return BOOSTING_COMPOSERS[intent].apply(query, filepath, baseScore);
 }
@@ -291,13 +305,10 @@ function applyRelevanceBoosting(
 /**
  * Convert a DBRecord to a SearchResult
  */
-function dbRecordToSearchResult(
-  r: DBRecord,
-  query?: string
-): SearchResult {
+function dbRecordToSearchResult(r: DBRecord, query?: string): SearchResult {
   const baseScore = r._distance ?? 0;
   const boostedScore = applyRelevanceBoosting(query, r.file, baseScore);
-  
+
   return {
     content: r.content,
     metadata: buildSearchResultMetadata(r),
@@ -313,36 +324,36 @@ export async function search(
   table: LanceDBTable,
   queryVector: Float32Array,
   limit: number = 5,
-  query?: string
+  query?: string,
 ): Promise<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
-  
+
   try {
     const results = await table
       .search(Array.from(queryVector))
       .limit(limit + 20)
       .toArray();
-    
+
     const filtered = (results as unknown as DBRecord[])
       .filter(isValidRecord)
       .map((r: DBRecord) => dbRecordToSearchResult(r, query))
       .sort((a, b) => a.score - b.score)
       .slice(0, limit);
-    
+
     return filtered;
   } catch (error) {
     const errorMsg = String(error);
-    
+
     // Detect corrupted index
     if (errorMsg.includes('Not found:') || errorMsg.includes('.lance')) {
       throw new DatabaseError(
         `Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory.`,
-        { originalError: error }
+        { originalError: error },
       );
     }
-    
+
     throw wrapError(error, 'Failed to search vector database');
   }
 }
@@ -351,8 +362,8 @@ export async function search(
  * Filter records by language (case-insensitive match).
  */
 function filterByLanguage(records: DBRecord[], language: string): DBRecord[] {
-  return records.filter((r: DBRecord) =>
-    r.language && r.language.toLowerCase() === language.toLowerCase()
+  return records.filter(
+    (r: DBRecord) => r.language && r.language.toLowerCase() === language.toLowerCase(),
   );
 }
 
@@ -361,9 +372,7 @@ function filterByLanguage(records: DBRecord[], language: string): DBRecord[] {
  */
 function filterByPattern(records: DBRecord[], pattern: string): DBRecord[] {
   const regex = new RegExp(pattern, 'i');
-  return records.filter((r: DBRecord) =>
-    regex.test(r.content) || regex.test(r.file)
-  );
+  return records.filter((r: DBRecord) => regex.test(r.content) || regex.test(r.file));
 }
 
 /**
@@ -371,15 +380,13 @@ function filterByPattern(records: DBRecord[], pattern: string): DBRecord[] {
  */
 function filterBySymbolType(
   records: DBRecord[],
-  symbolType: keyof typeof SYMBOL_TYPE_MATCHES
+  symbolType: keyof typeof SYMBOL_TYPE_MATCHES,
 ): DBRecord[] {
   const allowedTypes = SYMBOL_TYPE_MATCHES[symbolType];
   if (!allowedTypes) {
     return [];
   }
-  return records.filter((r: DBRecord) =>
-    r.symbolType != null && allowedTypes.has(r.symbolType)
-  );
+  return records.filter((r: DBRecord) => r.symbolType != null && allowedTypes.has(r.symbolType));
 }
 
 /**
@@ -440,7 +447,7 @@ export async function scanWithFilter(
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
-  }
+  },
 ): Promise<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
@@ -465,9 +472,7 @@ export async function scanWithFilter(
       queryLimit = Math.max(totalRows, 1000);
     }
 
-    const query = table.search(zeroVector)
-      .where(whereClause)
-      .limit(queryLimit);
+    const query = table.search(zeroVector).where(whereClause).limit(queryLimit);
 
     const results = await query.toArray();
 
@@ -489,7 +494,7 @@ export async function scanWithFilter(
 function matchesSymbolType(
   record: DBRecord,
   symbolType: 'function' | 'method' | 'class' | 'interface',
-  symbols: string[]
+  symbols: string[],
 ): boolean {
   // If AST-based symbolType exists, use lookup table
   if (record.symbolType) {
@@ -511,34 +516,34 @@ interface SymbolQueryOptions {
  * Extracted to reduce complexity of querySymbols.
  */
 function matchesSymbolFilter(
-  r: DBRecord, 
-  { language, pattern, symbolType }: SymbolQueryOptions
+  r: DBRecord,
+  { language, pattern, symbolType }: SymbolQueryOptions,
 ): boolean {
   // Language filter
   if (language && (!r.language || r.language.toLowerCase() !== language.toLowerCase())) {
     return false;
   }
-  
+
   const symbols = getSymbolsForType(r, symbolType);
   const astSymbolName = r.symbolName || '';
-  
+
   // Must have at least one symbol (legacy or AST-based)
   if (symbols.length === 0 && !astSymbolName) {
     return false;
   }
-  
+
   // Pattern filter (if provided)
   if (pattern) {
     const regex = new RegExp(pattern, 'i');
     const nameMatches = symbols.some((s: string) => regex.test(s)) || regex.test(astSymbolName);
     if (!nameMatches) return false;
   }
-  
+
   // Symbol type filter (if provided)
   if (symbolType) {
     return matchesSymbolType(r, symbolType, symbols);
   }
-  
+
   return true;
 }
 
@@ -567,7 +572,7 @@ export async function querySymbols(
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
-  }
+  },
 ): Promise<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
@@ -583,14 +588,13 @@ export async function querySymbols(
     // Use zero-vector search with limit >= totalRows to get all records
     // This is the recommended approach for LanceDB full scans
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
-    const query = table.search(zeroVector)
-      .where('file != ""')
-      .limit(Math.max(totalRows, 1000));
+    const query = table.search(zeroVector).where('file != ""').limit(Math.max(totalRows, 1000));
 
     const results = await query.toArray();
 
-    const filtered = (results as unknown as DBRecord[])
-      .filter((r) => isValidRecord(r) && matchesSymbolFilter(r, filterOpts));
+    const filtered = (results as unknown as DBRecord[]).filter(
+      r => isValidRecord(r) && matchesSymbolFilter(r, filterOpts),
+    );
 
     return filtered.slice(0, limit).map((r: DBRecord) => ({
       content: r.content,
@@ -615,7 +619,7 @@ export async function scanAll(
   options: {
     language?: string;
     pattern?: string;
-  } = {}
+  } = {},
 ): Promise<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
@@ -644,7 +648,7 @@ export async function* scanPaginated(
   options: {
     pageSize?: number;
     filter?: string;
-  } = {}
+  } = {},
 ): AsyncGenerator<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
@@ -660,25 +664,19 @@ export async function* scanPaginated(
   while (true) {
     let results: Record<string, unknown>[];
     try {
-      results = await table.query()
-        .where(whereClause)
-        .limit(pageSize)
-        .offset(offset)
-        .toArray();
+      results = await table.query().where(whereClause).limit(pageSize).offset(offset).toArray();
     } catch (error) {
       throw wrapError(error, 'Failed to scan paginated chunks', { offset, pageSize });
     }
 
     if (results.length === 0) break;
 
-    const page = (results as unknown as DBRecord[])
-      .filter(isValidRecord)
-      .map((r: DBRecord) => ({
-        content: r.content,
-        metadata: buildSearchResultMetadata(r),
-        score: 0,
-        relevance: 'not_relevant' as const,
-      }));
+    const page = (results as unknown as DBRecord[]).filter(isValidRecord).map((r: DBRecord) => ({
+      content: r.content,
+      metadata: buildSearchResultMetadata(r),
+      score: 0,
+      relevance: 'not_relevant' as const,
+    }));
 
     if (page.length > 0) {
       yield page;

@@ -52,19 +52,19 @@ describe('IndexingProgressTracker', () => {
       tracker.start(); // Second call should be safe
       tracker.stop();
     });
-    
+
     it('should not create duplicate intervals when called multiple times', () => {
       vi.useFakeTimers();
-      
+
       tracker.start();
       const firstInterval = (tracker as any).updateInterval;
-      
+
       tracker.start(); // Second call
       const secondInterval = (tracker as any).updateInterval;
-      
+
       // Should be the same interval (not a new one)
       expect(secondInterval).toBe(firstInterval);
-      
+
       tracker.stop();
       vi.useRealTimers();
     });
@@ -73,10 +73,10 @@ describe('IndexingProgressTracker', () => {
   describe('incrementFiles()', () => {
     it('should increment the processed count', () => {
       expect(tracker.getProcessedCount()).toBe(0);
-      
+
       tracker.incrementFiles();
       expect(tracker.getProcessedCount()).toBe(1);
-      
+
       tracker.incrementFiles();
       expect(tracker.getProcessedCount()).toBe(2);
     });
@@ -98,18 +98,18 @@ describe('IndexingProgressTracker', () => {
   describe('stop()', () => {
     it('should stop the update interval', () => {
       vi.useFakeTimers();
-      
+
       tracker.start();
       const initialText = mockSpinner.text;
-      
+
       tracker.stop();
-      
+
       // Advance time significantly
       vi.advanceTimersByTime(10000);
-      
+
       // Text should not have changed after stop
       expect(mockSpinner.text).toBe(initialText);
-      
+
       vi.useRealTimers();
     });
 
@@ -146,25 +146,24 @@ describe('IndexingProgressTracker', () => {
     it('should handle typical indexing flow (core tracks counts only)', () => {
       const totalFiles = 10;
       const tracker = new IndexingProgressTracker(totalFiles, mockSpinner);
-      
+
       // Start tracking
       tracker.start();
-      
+
       // Simulate processing files
       for (let i = 0; i < totalFiles; i++) {
         tracker.incrementFiles();
       }
-      
+
       // Change message for final phase
       tracker.setMessage('Saving manifest...');
-      
+
       expect(tracker.getProcessedCount()).toBe(10);
       expect(tracker.getTotalFiles()).toBe(10);
       expect(tracker.getCurrentMessage()).toBe('Saving manifest...');
-      
+
       // Clean up
       tracker.stop();
     });
   });
 });
-

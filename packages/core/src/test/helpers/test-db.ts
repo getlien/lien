@@ -9,10 +9,13 @@ import os from 'os';
 export async function createTestDir(): Promise<string> {
   const tmpBase = path.join(os.tmpdir(), 'lien-test');
   await fs.mkdir(tmpBase, { recursive: true });
-  
-  const testDir = path.join(tmpBase, `test-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+
+  const testDir = path.join(
+    tmpBase,
+    `test-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  );
   await fs.mkdir(testDir, { recursive: true });
-  
+
   return testDir;
 }
 
@@ -31,7 +34,10 @@ export async function cleanupTestDir(testDir: string): Promise<void> {
 /**
  * Creates a VectorDB instance for testing with automatic cleanup
  */
-export async function createTestVectorDB(): Promise<{ db: VectorDB; cleanup: () => Promise<void> }> {
+export async function createTestVectorDB(): Promise<{
+  db: VectorDB;
+  cleanup: () => Promise<void>;
+}> {
   const testDir = await createTestDir();
   const db = new VectorDB(testDir);
   await db.initialize();
@@ -46,10 +52,13 @@ export async function createTestVectorDB(): Promise<{ db: VectorDB; cleanup: () 
 /**
  * Creates a test file in a directory
  */
-export async function createTestFile(dir: string, filename: string, content: string): Promise<string> {
+export async function createTestFile(
+  dir: string,
+  filename: string,
+  content: string,
+): Promise<string> {
   const filepath = path.join(dir, filename);
   await fs.mkdir(path.dirname(filepath), { recursive: true });
   await fs.writeFile(filepath, content, 'utf-8');
   return filepath;
 }
-

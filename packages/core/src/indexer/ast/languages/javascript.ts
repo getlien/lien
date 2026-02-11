@@ -3,8 +3,16 @@ import type Parser from 'tree-sitter';
 import type { SymbolInfo } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
-import type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from '../extractors/types.js';
-import { extractSignature, extractParameters, extractReturnType } from '../extractors/symbol-helpers.js';
+import type {
+  LanguageExportExtractor,
+  LanguageImportExtractor,
+  LanguageSymbolExtractor,
+} from '../extractors/types.js';
+import {
+  extractSignature,
+  extractParameters,
+  extractReturnType,
+} from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -23,24 +31,20 @@ export class TypeScriptTraverser implements LanguageTraverser {
     'function',
     'interface_declaration',
     'method_definition',
-    'lexical_declaration',    // For const/let with arrow functions
-    'variable_declaration',   // For var with functions
+    'lexical_declaration', // For const/let with arrow functions
+    'variable_declaration', // For var with functions
   ];
 
   containerTypes = [
-    'class_declaration',      // We extract methods, not the class itself
+    'class_declaration', // We extract methods, not the class itself
   ];
 
   declarationTypes = [
-    'lexical_declaration',    // const/let
-    'variable_declaration',   // var
+    'lexical_declaration', // const/let
+    'variable_declaration', // var
   ];
 
-  functionTypes = [
-    'arrow_function',
-    'function_expression',
-    'function',
-  ];
+  functionTypes = ['arrow_function', 'function_expression', 'function'];
 
   shouldExtractChildren(node: Parser.SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
@@ -58,9 +62,9 @@ export class TypeScriptTraverser implements LanguageTraverser {
   }
 
   shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
-    return node.type === 'program' ||
-           node.type === 'export_statement' ||
-           node.type === 'class_body';
+    return (
+      node.type === 'program' || node.type === 'export_statement' || node.type === 'class_body'
+    );
   }
 
   findParentContainerName(node: Parser.SyntaxNode): string | undefined {
@@ -142,7 +146,10 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private extractExportStatementSymbols(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private extractExportStatementSymbols(
+    node: Parser.SyntaxNode,
+    addExport: (name: string) => void,
+  ): void {
     const defaultKeyword = node.children.find(c => c.type === 'default');
     if (defaultKeyword) {
       addExport('default');
@@ -161,7 +168,10 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     }
   }
 
-  private extractDeclarationExports(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private extractDeclarationExports(
+    node: Parser.SyntaxNode,
+    addExport: (name: string) => void,
+  ): void {
     const nameNode = node.childForFieldName('name');
     if (nameNode) {
       addExport(nameNode.text);
@@ -181,7 +191,10 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     }
   }
 
-  private extractExportClauseSymbols(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
+  private extractExportClauseSymbols(
+    node: Parser.SyntaxNode,
+    addExport: (name: string) => void,
+  ): void {
     for (let i = 0; i < node.namedChildCount; i++) {
       const child = node.namedChild(i);
       if (child?.type === 'export_specifier') {
@@ -232,7 +245,9 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     return null;
   }
 
-  private processImportStatement(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processImportStatement(
+    node: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
     const sourceNode = node.childForFieldName('source');
     if (!sourceNode) return null;
 
@@ -241,7 +256,9 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     return symbols.length > 0 ? { importPath, symbols } : null;
   }
 
-  private processReExportStatement(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processReExportStatement(
+    node: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
     const sourceNode = node.childForFieldName('source');
     if (!sourceNode) return null;
 
@@ -381,11 +398,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
     'interface_declaration',
   ];
 
-  extractSymbol(
-    node: Parser.SyntaxNode,
-    content: string,
-    parentClass?: string
-  ): SymbolInfo | null {
+  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_declaration':
       case 'function':
@@ -404,9 +417,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(
-    node: Parser.SyntaxNode
-  ): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
     const line = node.startPosition.row + 1;
 
     if (node.type === 'call_expression') {
@@ -438,7 +449,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
   private extractFunctionInfo(
     node: Parser.SyntaxNode,
     content: string,
-    parentClass?: string
+    parentClass?: string,
   ): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
@@ -459,7 +470,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
   private extractArrowFunctionInfo(
     node: Parser.SyntaxNode,
     content: string,
-    parentClass?: string
+    parentClass?: string,
   ): SymbolInfo | null {
     const parent = node.parent;
     let name = 'anonymous';
@@ -484,7 +495,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
   private extractMethodInfo(
     node: Parser.SyntaxNode,
     content: string,
-    parentClass?: string
+    parentClass?: string,
   ): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
@@ -549,44 +560,125 @@ export const javascriptDefinition: LanguageDefinition = {
 
   complexity: {
     decisionPoints: [
-      'if_statement', 'while_statement', 'for_statement', 'switch_case',
-      'catch_clause', 'ternary_expression', 'binary_expression',
-      'do_statement', 'for_in_statement', 'for_of_statement',
+      'if_statement',
+      'while_statement',
+      'for_statement',
+      'switch_case',
+      'catch_clause',
+      'ternary_expression',
+      'binary_expression',
+      'do_statement',
+      'for_in_statement',
+      'for_of_statement',
     ],
     nestingTypes: [
-      'if_statement', 'for_statement', 'while_statement', 'switch_statement',
-      'catch_clause', 'do_statement', 'for_in_statement', 'for_of_statement',
+      'if_statement',
+      'for_statement',
+      'while_statement',
+      'switch_statement',
+      'catch_clause',
+      'do_statement',
+      'for_in_statement',
+      'for_of_statement',
     ],
-    nonNestingTypes: [
-      'else_clause', 'ternary_expression',
-    ],
-    lambdaTypes: [
-      'arrow_function', 'function_expression',
-    ],
+    nonNestingTypes: ['else_clause', 'ternary_expression'],
+    lambdaTypes: ['arrow_function', 'function_expression'],
     operatorSymbols: new Set([
-      '+', '-', '*', '/', '%', '**',
-      '==', '===', '!=', '!==', '<', '>', '<=', '>=',
-      '&&', '||', '!', '??',
-      '=', '+=', '-=', '*=', '/=', '%=', '**=', '&&=', '||=', '??=',
-      '&', '|', '^', '~', '<<', '>>', '>>>',
-      '&=', '|=', '^=', '<<=', '>>=', '>>>=',
-      '?', ':', '.', '?.', '++', '--', '...', '=>',
-      '(', ')', '[', ']', '{', '}',
+      '+',
+      '-',
+      '*',
+      '/',
+      '%',
+      '**',
+      '==',
+      '===',
+      '!=',
+      '!==',
+      '<',
+      '>',
+      '<=',
+      '>=',
+      '&&',
+      '||',
+      '!',
+      '??',
+      '=',
+      '+=',
+      '-=',
+      '*=',
+      '/=',
+      '%=',
+      '**=',
+      '&&=',
+      '||=',
+      '??=',
+      '&',
+      '|',
+      '^',
+      '~',
+      '<<',
+      '>>',
+      '>>>',
+      '&=',
+      '|=',
+      '^=',
+      '<<=',
+      '>>=',
+      '>>>=',
+      '?',
+      ':',
+      '.',
+      '?.',
+      '++',
+      '--',
+      '...',
+      '=>',
+      '(',
+      ')',
+      '[',
+      ']',
+      '{',
+      '}',
     ]),
     operatorKeywords: new Set([
-      'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'default',
-      'return', 'throw', 'try', 'catch', 'finally',
-      'new', 'delete', 'typeof', 'instanceof', 'in', 'of',
-      'await', 'yield', 'break', 'continue',
-      'const', 'let', 'var', 'function', 'class', 'extends', 'implements',
-      'import', 'export', 'from', 'as',
+      'if',
+      'else',
+      'for',
+      'while',
+      'do',
+      'switch',
+      'case',
+      'default',
+      'return',
+      'throw',
+      'try',
+      'catch',
+      'finally',
+      'new',
+      'delete',
+      'typeof',
+      'instanceof',
+      'in',
+      'of',
+      'await',
+      'yield',
+      'break',
+      'continue',
+      'const',
+      'let',
+      'var',
+      'function',
+      'class',
+      'extends',
+      'implements',
+      'import',
+      'export',
+      'from',
+      'as',
     ]),
   },
 
   symbols: {
-    callExpressionTypes: [
-      'call_expression',
-      'new_expression',
-    ],
+    callExpressionTypes: ['call_expression', 'new_expression'],
   },
 };

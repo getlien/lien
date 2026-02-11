@@ -28,10 +28,10 @@ export {
  * Used by the MCP server to dispatch tool calls.
  */
 export const toolHandlers: Record<string, ToolHandler> = {
-  'semantic_search': handleSemanticSearch,
-  'find_similar': handleFindSimilar,
-  'get_files_context': handleGetFilesContext,
-  'list_functions': handleListFunctions,
-  'get_dependents': handleGetDependents,
-  'get_complexity': handleGetComplexity,
+  semantic_search: handleSemanticSearch,
+  find_similar: handleFindSimilar,
+  get_files_context: handleGetFilesContext,
+  list_functions: handleListFunctions,
+  get_dependents: handleGetDependents,
+  get_complexity: handleGetComplexity,
 };

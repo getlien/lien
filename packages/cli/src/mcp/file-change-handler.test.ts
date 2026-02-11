@@ -37,11 +37,7 @@ vi.mock('fs/promises', () => ({
   },
 }));
 
-import {
-  isFileIgnored,
-  isGitignoreFile,
-  createFileChangeHandler,
-} from './file-change-handler.js';
+import { isFileIgnored, isGitignoreFile, createFileChangeHandler } from './file-change-handler.js';
 import { createGitignoreFilter } from '@liendev/core';
 
 function createMockVectorDB(dbPath = '/project/.lien/indices/abc') {
@@ -114,7 +110,7 @@ describe('createFileChangeHandler', () => {
       createMockEmbeddings(),
       log,
       reindexStateManager,
-      checkAndReconnect
+      checkAndReconnect,
     );
     expect(typeof handler).toBe('function');
   });
@@ -127,7 +123,7 @@ describe('createFileChangeHandler', () => {
       createMockEmbeddings(),
       log,
       reindexStateManager,
-      checkAndReconnect
+      checkAndReconnect,
     );
 
     await handler({
@@ -148,7 +144,7 @@ describe('createFileChangeHandler', () => {
       createMockEmbeddings(),
       log,
       reindexStateManager,
-      checkAndReconnect
+      checkAndReconnect,
     );
 
     await handler({
@@ -174,7 +170,7 @@ describe('createFileChangeHandler', () => {
       createMockEmbeddings(),
       log,
       reindexStateManager,
-      checkAndReconnect
+      checkAndReconnect,
     );
 
     // First, trigger a non-unlink event to initialize the gitignore filter
@@ -209,7 +205,7 @@ describe('createFileChangeHandler', () => {
       createMockEmbeddings(),
       log,
       reindexStateManager,
-      checkAndReconnect
+      checkAndReconnect,
     );
 
     await handler({

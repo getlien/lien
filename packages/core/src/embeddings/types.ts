@@ -11,4 +11,3 @@ export const EMBEDDING_DIMENSION = EMBEDDING_DIMENSIONS;
 
 // Re-export for convenience
 export { EMBEDDING_DIMENSIONS };
-

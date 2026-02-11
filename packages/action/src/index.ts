@@ -73,7 +73,7 @@ function getPRContext() {
  */
 function setOutputs(
   deltaSummary: { totalDelta: number; improved: number; degraded: number } | null,
-  report: { summary: { totalViolations: number; bySeverity: { error: number; warning: number } } }
+  report: { summary: { totalViolations: number; bySeverity: { error: number; warning: number } } },
 ): void {
   if (deltaSummary) {
     core.setOutput('total_delta', deltaSummary.totalDelta);
@@ -143,7 +143,7 @@ async function run(): Promise<void> {
 }
 
 // Run the action
-run().catch((error) => {
+run().catch(error => {
   core.setFailed(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

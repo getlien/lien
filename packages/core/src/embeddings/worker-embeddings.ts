@@ -27,10 +27,13 @@ function resolveWorkerPath(): string {
 export class WorkerEmbeddings implements EmbeddingService {
   private worker: Worker | null = null;
   private requestId = 0;
-  private pendingRequests = new Map<number, {
-    resolve: (vectors: Float32Array[]) => void;
-    reject: (error: Error) => void;
-  }>();
+  private pendingRequests = new Map<
+    number,
+    {
+      resolve: (vectors: Float32Array[]) => void;
+      reject: (error: Error) => void;
+    }
+  >();
   private initPromise: Promise<void> | null = null;
   private initialized = false;
 

@@ -3,7 +3,7 @@ import type { LienConfig } from './schema.js';
 /**
  * Deep merges user config with defaults, preserving user customizations.
  * User values always take precedence over defaults.
- * 
+ *
  * @param defaults - The default configuration
  * @param user - The user's partial configuration
  * @returns Complete merged configuration
@@ -31,13 +31,15 @@ export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>)
       ...user.fileWatching,
     },
     storage: user.storage ?? defaults.storage,
-    complexity: user.complexity ? {
-      enabled: user.complexity.enabled ?? defaults.complexity?.enabled ?? true,
-      thresholds: {
-        ...defaults.complexity?.thresholds,
-        ...(user.complexity.thresholds || {}),
-      },
-    } : defaults.complexity,
+    complexity: user.complexity
+      ? {
+          enabled: user.complexity.enabled ?? defaults.complexity?.enabled ?? true,
+          thresholds: {
+            ...defaults.complexity?.thresholds,
+            ...(user.complexity.thresholds || {}),
+          },
+        }
+      : defaults.complexity,
     // Only include frameworks if defined (backward compat with old configs)
     ...(user.frameworks !== undefined || defaults.frameworks !== undefined
       ? { frameworks: user.frameworks ?? defaults.frameworks }
@@ -48,7 +50,7 @@ export function deepMergeConfig(defaults: LienConfig, user: Partial<LienConfig>)
 /**
  * Detects new fields that exist in the 'after' config but not in the 'before' config.
  * Returns a list of human-readable field paths.
- * 
+ *
  * @param before - The existing config (potentially missing fields)
  * @param after - The complete config with all fields
  * @returns Array of new field paths (e.g., ["mcp.autoIndexOnFirstRun", "gitDetection"])
@@ -78,4 +80,3 @@ export function detectNewFields(before: Record<string, any>, after: Record<strin
 
   return newFields;
 }
-

@@ -49,7 +49,7 @@ function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, Complexity
   return new Map(
     collect(deltas)
       .map(d => [createDeltaKey(d), d] as [string, ComplexityDelta])
-      .all()
+      .all(),
   );
 }
 
@@ -58,11 +58,16 @@ function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, Complexity
  */
 export function getMetricLabel(metricType: string): string {
   switch (metricType) {
-    case 'cognitive': return 'mental load';
-    case 'cyclomatic': return 'test paths';
-    case 'halstead_effort': return 'time to understand';
-    case 'halstead_bugs': return 'estimated bugs';
-    default: return 'complexity';
+    case 'cognitive':
+      return 'mental load';
+    case 'cyclomatic':
+      return 'test paths';
+    case 'halstead_effort':
+      return 'time to understand';
+    case 'halstead_bugs':
+      return 'estimated bugs';
+    default:
+      return 'complexity';
   }
 }
 
@@ -99,7 +104,10 @@ export function formatThresholdValue(metricType: string, value: number): string 
 /**
  * Format a single violation line with optional delta
  */
-function formatViolationLine(v: ComplexityViolation, deltaMap: Map<string, ComplexityDelta>): string {
+function formatViolationLine(
+  v: ComplexityViolation,
+  deltaMap: Map<string, ComplexityDelta>,
+): string {
   const delta = deltaMap.get(createDeltaKey(v));
   const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
   const metricLabel = getMetricLabel(v.metricType);
@@ -129,16 +137,17 @@ function buildDependencyContext(fileData: ComplexityReport['files'][string]): st
   // Build dependents list (only if we have the array and it's not empty)
   const hasDependentsList = fileData.dependents && fileData.dependents.length > 0;
   const dependentsList = hasDependentsList
-    ? fileData.dependents.slice(0, 10).map(f => `  - ${f}`).join('\n')
+    ? fileData.dependents
+        .slice(0, 10)
+        .map(f => `  - ${f}`)
+        .join('\n')
     : '';
 
   const complexityNote = fileData.dependentComplexityMetrics
     ? `\n- **Dependent complexity**: Avg ${fileData.dependentComplexityMetrics.averageComplexity.toFixed(1)}, Max ${fileData.dependentComplexityMetrics.maxComplexity}`
     : '';
 
-  const moreNote = hasDependentsList && fileData.dependents.length > 10
-    ? '\n  ... (and more)'
-    : '';
+  const moreNote = hasDependentsList && fileData.dependents.length > 10 ? '\n  ... (and more)' : '';
 
   return `\n**Dependency Impact**: ${emoji} ${fileData.riskLevel.toUpperCase()} risk
 - **Dependents**: ${fileData.dependentCount} file(s) import this
@@ -150,31 +159,46 @@ ${dependentsList ? `\n**Key dependents:**\n${dependentsList}${moreNote}` : ''}${
  * Language name lookup by internal language identifier
  */
 const LANGUAGE_NAMES: Record<string, string> = {
-  'typescript': 'TypeScript',
-  'javascript': 'JavaScript',
-  'php': 'PHP',
-  'python': 'Python',
-  'go': 'Go',
-  'rust': 'Rust',
-  'java': 'Java',
-  'ruby': 'Ruby',
-  'swift': 'Swift',
-  'kotlin': 'Kotlin',
-  'csharp': 'C#',
-  'scala': 'Scala',
-  'cpp': 'C++',
-  'c': 'C',
+  typescript: 'TypeScript',
+  javascript: 'JavaScript',
+  php: 'PHP',
+  python: 'Python',
+  go: 'Go',
+  rust: 'Rust',
+  java: 'Java',
+  ruby: 'Ruby',
+  swift: 'Swift',
+  kotlin: 'Kotlin',
+  csharp: 'C#',
+  scala: 'Scala',
+  cpp: 'C++',
+  c: 'C',
 };
 
 /**
  * Language name lookup by file extension
  */
 const EXTENSION_LANGUAGES: Record<string, string> = {
-  'ts': 'TypeScript', 'tsx': 'TypeScript React',
-  'js': 'JavaScript', 'jsx': 'JavaScript React', 'mjs': 'JavaScript', 'cjs': 'JavaScript',
-  'php': 'PHP', 'py': 'Python', 'go': 'Go', 'rs': 'Rust',
-  'java': 'Java', 'rb': 'Ruby', 'swift': 'Swift', 'kt': 'Kotlin',
-  'cs': 'C#', 'scala': 'Scala', 'cpp': 'C++', 'cc': 'C++', 'cxx': 'C++', 'c': 'C',
+  ts: 'TypeScript',
+  tsx: 'TypeScript React',
+  js: 'JavaScript',
+  jsx: 'JavaScript React',
+  mjs: 'JavaScript',
+  cjs: 'JavaScript',
+  php: 'PHP',
+  py: 'Python',
+  go: 'Go',
+  rs: 'Rust',
+  java: 'Java',
+  rb: 'Ruby',
+  swift: 'Swift',
+  kt: 'Kotlin',
+  cs: 'C#',
+  scala: 'Scala',
+  cpp: 'C++',
+  cc: 'C++',
+  cxx: 'C++',
+  c: 'C',
 };
 
 /**
@@ -248,7 +272,9 @@ function isNewOrWorsened(v: ComplexityViolation, deltaMap: Map<string, Complexit
 /**
  * Group violations by filepath
  */
-function groupViolationsByFile(violations: ComplexityViolation[]): Map<string, ComplexityViolation[]> {
+function groupViolationsByFile(
+  violations: ComplexityViolation[],
+): Map<string, ComplexityViolation[]> {
   const byFile = new Map<string, ComplexityViolation[]>();
   for (const v of violations) {
     const existing = byFile.get(v.filepath) || [];
@@ -264,7 +290,7 @@ function groupViolationsByFile(violations: ComplexityViolation[]): Map<string, C
 function formatFileGroup(
   violations: ComplexityViolation[],
   files: ComplexityReport['files'],
-  deltaMap: Map<string, ComplexityDelta>
+  deltaMap: Map<string, ComplexityDelta>,
 ): string {
   return Array.from(groupViolationsByFile(violations).entries())
     .map(([filepath, vs]) => {
@@ -283,7 +309,7 @@ function formatFileGroup(
  */
 function buildViolationsSummary(
   files: ComplexityReport['files'],
-  deltaMap: Map<string, ComplexityDelta>
+  deltaMap: Map<string, ComplexityDelta>,
 ): string {
   if (deltaMap.size === 0) {
     const allViolations = Object.values(files).flatMap(data => data.violations);
@@ -300,11 +326,15 @@ function buildViolationsSummary(
   const sections: string[] = [];
 
   if (newViolations.length > 0) {
-    sections.push(`### New/Worsened Violations (introduced or worsened in this PR)\n\n${formatFileGroup(newViolations, files, deltaMap)}`);
+    sections.push(
+      `### New/Worsened Violations (introduced or worsened in this PR)\n\n${formatFileGroup(newViolations, files, deltaMap)}`,
+    );
   }
 
   if (preExisting.length > 0) {
-    sections.push(`### Pre-existing Violations (in files touched by this PR)\n\n${formatFileGroup(preExisting, files, deltaMap)}`);
+    sections.push(
+      `### Pre-existing Violations (in files touched by this PR)\n\n${formatFileGroup(preExisting, files, deltaMap)}`,
+    );
   }
 
   return sections.join('\n\n');
@@ -326,7 +356,9 @@ function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
   if (!deltas || deltas.length === 0) return '';
 
   const improved = deltas.filter(d => d.severity === 'improved');
-  const degraded = deltas.filter(d => (d.severity === 'error' || d.severity === 'warning') && d.delta > 0);
+  const degraded = deltas.filter(
+    d => (d.severity === 'error' || d.severity === 'warning') && d.delta > 0,
+  );
   const newFuncs = deltas.filter(d => d.severity === 'new');
   const deleted = deltas.filter(d => d.severity === 'deleted');
 
@@ -345,7 +377,9 @@ function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
     sections.push(`\nFunctions that improved:\n${improved.map(formatDeltaChange).join('\n')}`);
   }
   if (newFuncs.length > 0) {
-    sections.push(`\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}`);
+    sections.push(
+      `\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}`,
+    );
   }
 
   return sections.join('\n');
@@ -370,7 +404,7 @@ export function buildReviewPrompt(
   report: ComplexityReport,
   prContext: PRContext,
   codeSnippets: Map<string, string>,
-  deltas: ComplexityDelta[] | null = null
+  deltas: ComplexityDelta[] | null = null,
 ): string {
   const { summary, files } = report;
   const deltaMap = buildDeltaMap(deltas);
@@ -428,7 +462,10 @@ Be concise but actionable. Focus on the highest-impact improvements.`;
 /**
  * Build a minimal prompt when there are no violations
  */
-export function buildNoViolationsMessage(prContext: PRContext, deltas: ComplexityDelta[] | null = null): string {
+export function buildNoViolationsMessage(
+  prContext: PRContext,
+  deltas: ComplexityDelta[] | null = null,
+): string {
   let deltaMessage = '';
 
   if (deltas && deltas.length > 0) {
@@ -458,11 +495,13 @@ export interface TokenUsageInfo {
  * Group deltas by metric type and sum their values
  */
 function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> {
-  return collect(deltas)
-    .groupBy('metricType')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .map((group: any) => group.sum('delta'))
-    .all() as unknown as Record<string, number>;
+  return (
+    collect(deltas)
+      .groupBy('metricType')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((group: any) => group.sum('delta'))
+      .all() as unknown as Record<string, number>
+  );
 }
 
 /**
@@ -492,11 +531,14 @@ function buildMetricBreakdownForDisplay(deltaByMetric: Record<string, number>): 
  * Categorize deltas into improved vs degraded counts
  */
 function categorizeDeltas(deltas: ComplexityDelta[]): { improved: number; degraded: number } {
-  return deltas.reduce((acc, d) => {
-    if (['improved', 'deleted'].includes(d.severity)) acc.improved++;
-    else if (['warning', 'error', 'new'].includes(d.severity)) acc.degraded++;
-    return acc;
-  }, { improved: 0, degraded: 0 });
+  return deltas.reduce(
+    (acc, d) => {
+      if (['improved', 'deleted'].includes(d.severity)) acc.improved++;
+      else if (['warning', 'error', 'new'].includes(d.severity)) acc.degraded++;
+      return acc;
+    },
+    { improved: 0, degraded: 0 },
+  );
 }
 
 /**
@@ -555,15 +597,15 @@ function formatFallbackNote(isFallback: boolean): string {
  */
 function countViolationsByNovelty(
   totalViolations: number,
-  deltas: ComplexityDelta[] | null | undefined
+  deltas: ComplexityDelta[] | null | undefined,
 ): { newCount: number; preExistingCount: number; improvedCount: number } {
   if (!deltas || deltas.length === 0) {
     return { newCount: 0, preExistingCount: 0, improvedCount: 0 };
   }
 
-  const newCount = deltas.filter(d =>
-    d.severity === 'new' || d.severity === 'warning' || d.severity === 'error'
-  ).filter(d => d.severity === 'new' || d.delta > 0).length;
+  const newCount = deltas
+    .filter(d => d.severity === 'new' || d.severity === 'warning' || d.severity === 'error')
+    .filter(d => d.severity === 'new' || d.delta > 0).length;
 
   const improvedCount = deltas.filter(d => d.severity === 'improved').length;
 
@@ -577,9 +619,12 @@ function countViolationsByNovelty(
  */
 export function buildHeaderLine(
   totalViolations: number,
-  deltas: ComplexityDelta[] | null | undefined
+  deltas: ComplexityDelta[] | null | undefined,
 ): string {
-  const { newCount, preExistingCount, improvedCount } = countViolationsByNovelty(totalViolations, deltas);
+  const { newCount, preExistingCount, improvedCount } = countViolationsByNovelty(
+    totalViolations,
+    deltas,
+  );
 
   // No delta data available - fall back to old behavior
   if (!deltas || deltas.length === 0) {
@@ -599,7 +644,9 @@ export function buildHeaderLine(
   }
 
   if (preExistingCount > 0) {
-    parts.push(`${preExistingCount} pre-existing issue${preExistingCount === 1 ? '' : 's'} in touched files.`);
+    parts.push(
+      `${preExistingCount} pre-existing issue${preExistingCount === 1 ? '' : 's'} in touched files.`,
+    );
   }
 
   return parts.join(' ');
@@ -614,7 +661,7 @@ export function formatReviewComment(
   isFallback = false,
   tokenUsage?: TokenUsageInfo,
   deltas?: ComplexityDelta[] | null,
-  uncoveredNote: string = ''
+  uncoveredNote: string = '',
 ): string {
   const { summary } = report;
   const deltaDisplay = formatDeltaDisplay(deltas);
@@ -659,7 +706,7 @@ export function getViolationKey(violation: ComplexityViolation): string {
  */
 function determineStatus(
   report: ComplexityReport | null,
-  deltaSummary: DeltaSummary | null
+  deltaSummary: DeltaSummary | null,
 ): { emoji: string; message: string } {
   const violations = report?.summary.totalViolations ?? 0;
   const errors = report?.summary.bySeverity.error ?? 0;
@@ -675,7 +722,10 @@ function determineStatus(
         message: `**Improved!** Complexity reduced by ${Math.abs(delta)}. ${preExisting} pre-existing issue${preExisting === 1 ? '' : 's'} remain${preExisting === 1 ? 's' : ''} in touched files.`,
       };
     }
-    return { emoji: '✅', message: `**Improved!** This PR reduces complexity by ${Math.abs(delta)}.` };
+    return {
+      emoji: '✅',
+      message: `**Improved!** This PR reduces complexity by ${Math.abs(delta)}.`,
+    };
   }
 
   // New violations introduced - these need attention
@@ -703,7 +753,10 @@ function determineStatus(
 
   // No violations at all
   if (delta > 0) {
-    return { emoji: '➡️', message: '**Stable** - Complexity increased slightly but within limits.' };
+    return {
+      emoji: '➡️',
+      message: '**Stable** - Complexity increased slightly but within limits.',
+    };
   }
 
   return { emoji: '✅', message: '**Good** - No complexity issues found.' };
@@ -714,11 +767,16 @@ function determineStatus(
  */
 function getMetricEmoji(metricType: string): string {
   switch (metricType) {
-    case 'cyclomatic': return '🔀';
-    case 'cognitive': return '🧠';
-    case 'halstead_effort': return '⏱️';
-    case 'halstead_bugs': return '🐛';
-    default: return '📊';
+    case 'cyclomatic':
+      return '🔀';
+    case 'cognitive':
+      return '🧠';
+    case 'halstead_effort':
+      return '⏱️';
+    case 'halstead_bugs':
+      return '🐛';
+    default:
+      return '📊';
   }
 }
 
@@ -727,7 +785,7 @@ function getMetricEmoji(metricType: string): string {
  */
 function buildMetricTable(
   report: ComplexityReport | null,
-  deltas: ComplexityDelta[] | null
+  deltas: ComplexityDelta[] | null,
 ): string {
   if (!report || report.summary.totalViolations === 0) return '';
 
@@ -737,11 +795,11 @@ function buildMetricTable(
     .all() as unknown as Record<string, number>;
 
   const deltaByMetric: Record<string, number> = deltas
-    ? collect(deltas)
+    ? (collect(deltas)
         .groupBy('metricType')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .map((group: any) => group.sum('delta'))
-        .all() as unknown as Record<string, number>
+        .all() as unknown as Record<string, number>)
     : {};
 
   const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
@@ -772,14 +830,15 @@ ${rows.join('\n')}
 function buildImpactSummary(report: ComplexityReport | null): string {
   if (!report) return '';
 
-  const filesWithDependents = Object.values(report.files)
-    .filter(f => f.dependentCount && f.dependentCount > 0);
+  const filesWithDependents = Object.values(report.files).filter(
+    f => f.dependentCount && f.dependentCount > 0,
+  );
 
   if (filesWithDependents.length === 0) return '';
 
   const totalDependents = filesWithDependents.reduce((sum, f) => sum + (f.dependentCount || 0), 0);
   const highRiskFiles = filesWithDependents.filter(f =>
-    ['high', 'critical'].includes(f.riskLevel)
+    ['high', 'critical'].includes(f.riskLevel),
   ).length;
 
   if (highRiskFiles === 0) return '';
@@ -794,7 +853,7 @@ function buildImpactSummary(report: ComplexityReport | null): string {
 export function buildDescriptionBadge(
   report: ComplexityReport | null,
   deltaSummary: DeltaSummary | null,
-  deltas: ComplexityDelta[] | null
+  deltas: ComplexityDelta[] | null,
 ): string {
   const status = determineStatus(report, deltaSummary);
   const metricTable = buildMetricTable(report, deltas);
@@ -823,11 +882,9 @@ function formatHalsteadContext(violation: ComplexityViolation): string {
  */
 export function buildLineCommentPrompt(
   violation: ComplexityViolation,
-  codeSnippet: string | null
+  codeSnippet: string | null,
 ): string {
-  const snippetSection = codeSnippet
-    ? `\n\n**Code:**\n\`\`\`\n${codeSnippet}\n\`\`\``
-    : '';
+  const snippetSection = codeSnippet ? `\n\n**Code:**\n\`\`\`\n${codeSnippet}\n\`\`\`` : '';
 
   const metricType = violation.metricType || 'cyclomatic';
   const metricLabel = getMetricLabel(metricType);
@@ -862,10 +919,7 @@ Format as a single cohesive comment without headers. Be direct and specific to T
 /**
  * Build a summary comment when using line-specific reviews
  */
-export function buildLineSummaryComment(
-  report: ComplexityReport,
-  _prContext: PRContext
-): string {
+export function buildLineSummaryComment(report: ComplexityReport, _prContext: PRContext): string {
   const { summary } = report;
   const emoji = summary.bySeverity.error > 0 ? '🔴' : '🟡';
 
@@ -899,12 +953,10 @@ function getExampleForPrimaryMetric(violations: ComplexityViolation[]): string {
     .countBy((v: ComplexityViolation) => v.metricType || 'cyclomatic')
     .all() as Record<string, number>;
 
-  const maxType = Object.entries(counts)
-    .reduce(
-      (max, [type, count]) =>
-        count > max.count ? { type, count } : max,
-      { type: 'cyclomatic', count: 0 }
-    ).type;
+  const maxType = Object.entries(counts).reduce(
+    (max, [type, count]) => (count > max.count ? { type, count } : max),
+    { type: 'cyclomatic', count: 0 },
+  ).type;
 
   return COMMENT_EXAMPLES[maxType] || DEFAULT_EXAMPLE;
 }
@@ -919,15 +971,13 @@ function getExampleForPrimaryMetric(violations: ComplexityViolation[]): string {
 export function buildBatchedCommentsPrompt(
   violations: ComplexityViolation[],
   codeSnippets: Map<string, string>,
-  report: ComplexityReport
+  report: ComplexityReport,
 ): string {
   const violationsText = violations
     .map((v, i) => {
       const key = `${v.filepath}::${v.symbolName}`;
       const snippet = codeSnippets.get(key);
-      const snippetSection = snippet
-        ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\``
-        : '';
+      const snippetSection = snippet ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\`` : '';
 
       const metricType = v.metricType || 'cyclomatic';
       const metricLabel = getMetricLabel(metricType);
@@ -951,7 +1001,7 @@ export function buildBatchedCommentsPrompt(
 
   // Build JSON keys for the response format
   const jsonKeys = violations
-    .map((v) => `  "${v.filepath}::${v.symbolName}": "your comment here"`)
+    .map(v => `  "${v.filepath}::${v.symbolName}": "your comment here"`)
     .join(',\n');
 
   return `You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.

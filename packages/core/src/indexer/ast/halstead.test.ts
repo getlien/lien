@@ -10,7 +10,7 @@ import type Parser from 'tree-sitter';
 function getHalstead(code: string, language: SupportedLanguage = 'typescript') {
   const result = parseAST(code, language);
   if (!result.tree) throw new Error('Failed to parse code');
-  
+
   // Find the first function node
   const findFunction = (node: Parser.SyntaxNode): Parser.SyntaxNode | null => {
     if (
@@ -30,10 +30,10 @@ function getHalstead(code: string, language: SupportedLanguage = 'typescript') {
     }
     return null;
   };
-  
+
   const funcNode = findFunction(result.tree.rootNode);
   if (!funcNode) throw new Error('No function found in code');
-  
+
   return calculateHalstead(funcNode, language);
 }
 
@@ -43,7 +43,7 @@ function getHalstead(code: string, language: SupportedLanguage = 'typescript') {
 function getHalsteadCounts(code: string, language: SupportedLanguage = 'typescript') {
   const result = parseAST(code, language);
   if (!result.tree) throw new Error('Failed to parse code');
-  
+
   const findFunction = (node: Parser.SyntaxNode): Parser.SyntaxNode | null => {
     if (
       node.type === 'function_declaration' ||
@@ -62,10 +62,10 @@ function getHalsteadCounts(code: string, language: SupportedLanguage = 'typescri
     }
     return null;
   };
-  
+
   const funcNode = findFunction(result.tree.rootNode);
   if (!funcNode) throw new Error('No function found in code');
-  
+
   return countHalstead(funcNode, language);
 }
 
@@ -79,7 +79,7 @@ describe('Halstead Metrics', () => {
         }
       `;
       const counts = getHalsteadCounts(code);
-      
+
       // Operators: =, return
       // Operands: a, 1, a (return)
       expect(counts.n1).toBeGreaterThan(0); // distinct operators
@@ -95,7 +95,7 @@ describe('Halstead Metrics', () => {
         }
       `;
       const counts = getHalsteadCounts(code);
-      
+
       // Should have + operator
       expect(counts.operators.has('+')).toBe(true);
     });
@@ -110,7 +110,7 @@ describe('Halstead Metrics', () => {
         }
       `;
       const counts = getHalsteadCounts(code);
-      
+
       // Should have > operator
       expect(counts.operators.has('>')).toBe(true);
     });
@@ -122,7 +122,7 @@ describe('Halstead Metrics', () => {
         }
       `;
       const counts = getHalsteadCounts(code);
-      
+
       // Should have &&, ||, ! operators
       expect(counts.operators.has('&&')).toBe(true);
       expect(counts.operators.has('||')).toBe(true);
@@ -138,7 +138,7 @@ describe('Halstead Metrics', () => {
         }
       `;
       const counts = getHalsteadCounts(code);
-      
+
       // foo and bar should be operands
       expect(counts.operands.has('foo')).toBe(true);
       expect(counts.operands.has('bar')).toBe(true);
@@ -151,7 +151,7 @@ describe('Halstead Metrics', () => {
         }
       `;
       const counts = getHalsteadCounts(code);
-      
+
       // Numbers should be operands
       expect(counts.operands.has('42')).toBe(true);
       expect(counts.operands.has('3.14')).toBe(true);
@@ -161,16 +161,16 @@ describe('Halstead Metrics', () => {
   describe('derived metrics calculation', () => {
     it('should calculate volume (N × log₂(n))', () => {
       const counts = {
-        n1: 4,  // 4 distinct operators
-        n2: 6,  // 6 distinct operands
+        n1: 4, // 4 distinct operators
+        n2: 6, // 6 distinct operands
         N1: 10, // 10 total operators
         N2: 12, // 12 total operands
         operators: new Map<string, number>(),
         operands: new Map<string, number>(),
       };
-      
+
       const metrics = calculateHalsteadMetrics(counts);
-      
+
       // n = n1 + n2 = 10
       // N = N1 + N2 = 22
       // V = N × log₂(n) = 22 × log₂(10) ≈ 73.1
@@ -181,16 +181,16 @@ describe('Halstead Metrics', () => {
 
     it('should calculate difficulty correctly', () => {
       const counts = {
-        n1: 4,  // 4 distinct operators
-        n2: 6,  // 6 distinct operands
+        n1: 4, // 4 distinct operators
+        n2: 6, // 6 distinct operands
         N1: 10, // 10 total operators
         N2: 12, // 12 total operands
         operators: new Map<string, number>(),
         operands: new Map<string, number>(),
       };
-      
+
       const metrics = calculateHalsteadMetrics(counts);
-      
+
       // D = (n1/2) × (N2/n2) = (4/2) × (12/6) = 2 × 2 = 4
       expect(metrics.difficulty).toBe(4);
     });
@@ -204,9 +204,9 @@ describe('Halstead Metrics', () => {
         operators: new Map<string, number>(),
         operands: new Map<string, number>(),
       };
-      
+
       const metrics = calculateHalsteadMetrics(counts);
-      
+
       // E = D × V (implementation rounds to integer)
       // Allow for rounding: effort should be within 1 of D × V
       const expectedEffort = metrics.difficulty * metrics.volume;
@@ -222,9 +222,9 @@ describe('Halstead Metrics', () => {
         operators: new Map<string, number>(),
         operands: new Map<string, number>(),
       };
-      
+
       const metrics = calculateHalsteadMetrics(counts);
-      
+
       // B = V / 3000 (implementation rounds to 3 decimal places)
       const expectedBugs = metrics.volume / 3000;
       expect(Math.abs(metrics.bugs - expectedBugs)).toBeLessThan(0.001);
@@ -233,15 +233,15 @@ describe('Halstead Metrics', () => {
     it('should handle edge case with zero operands', () => {
       const counts = {
         n1: 2,
-        n2: 0,  // no distinct operands
+        n2: 0, // no distinct operands
         N1: 2,
-        N2: 0,  // no total operands
+        N2: 0, // no total operands
         operators: new Map<string, number>(),
         operands: new Map<string, number>(),
       };
-      
+
       const metrics = calculateHalsteadMetrics(counts);
-      
+
       // Should not throw, should handle division by zero gracefully
       expect(metrics.difficulty).toBe(0);
       expect(metrics.effort).toBe(0);
@@ -256,7 +256,7 @@ describe('Halstead Metrics', () => {
         }
       `;
       const metrics = getHalstead(code);
-      
+
       expect(metrics.volume).toBeGreaterThan(0);
       expect(metrics.difficulty).toBeGreaterThan(0);
       expect(metrics.effort).toBeGreaterThan(0);
@@ -269,7 +269,7 @@ describe('Halstead Metrics', () => {
           return a;
         }
       `;
-      
+
       const complexCode = `
         function complex(a: number, b: number, c: number) {
           if (a > b && b > c) {
@@ -282,10 +282,10 @@ describe('Halstead Metrics', () => {
           return a * b * c;
         }
       `;
-      
+
       const simpleMetrics = getHalstead(simpleCode);
       const complexMetrics = getHalstead(complexCode);
-      
+
       // Complex function should have higher metrics
       expect(complexMetrics.volume).toBeGreaterThan(simpleMetrics.volume);
       expect(complexMetrics.effort).toBeGreaterThan(simpleMetrics.effort);
@@ -296,7 +296,7 @@ describe('Halstead Metrics', () => {
         const multiply = (x: number, y: number) => x * y;
       `;
       const metrics = getHalstead(code);
-      
+
       expect(metrics.volume).toBeGreaterThan(0);
       expect(metrics.difficulty).toBeGreaterThan(0);
     });
@@ -310,7 +310,7 @@ describe('Halstead Metrics', () => {
         }
       `;
       const counts = getHalsteadCounts(code, 'javascript');
-      
+
       // Should recognize ?. and ?? operators
       expect(counts.N1).toBeGreaterThan(0);
     });
@@ -321,7 +321,7 @@ def example(a, b):
     return a and b or not a
       `;
       const counts = getHalsteadCounts(code, 'python');
-      
+
       // Should recognize and, or, not as operators
       expect(counts.N1).toBeGreaterThan(0);
       expect(counts.N2).toBeGreaterThan(0);
@@ -346,7 +346,7 @@ def example(a, b):
         }
       `;
       const metrics = getHalstead(code);
-      
+
       // Should have non-trivial complexity
       expect(metrics.volume).toBeGreaterThan(100);
       expect(metrics.difficulty).toBeGreaterThan(5);
@@ -359,7 +359,7 @@ def example(a, b):
           return x;
         }
       `;
-      
+
       const complex = `
         function processData(input: string[], options: { format: string; validate: boolean }) {
           const results: string[] = [];
@@ -378,10 +378,10 @@ def example(a, b):
           return results;
         }
       `;
-      
+
       const trivialMetrics = getHalstead(trivial);
       const complexMetrics = getHalstead(complex);
-      
+
       // Complex code should have significantly higher effort
       expect(complexMetrics.effort).toBeGreaterThan(trivialMetrics.effort * 5);
     });

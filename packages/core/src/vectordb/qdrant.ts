@@ -47,15 +47,13 @@ class QdrantFilterBuilder {
     this.filter.must.push(
       { key: 'repoId', match: { value: repoId } },
       { key: 'branch', match: { value: branch } },
-      { key: 'commitSha', match: { value: commitSha } }
+      { key: 'commitSha', match: { value: commitSha } },
     );
     return this;
   }
 
   addRepoIds(repoIds: string[]): this {
-    const cleanedRepoIds = repoIds
-      .map(id => id.trim())
-      .filter(id => id.length > 0);
+    const cleanedRepoIds = repoIds.map(id => id.trim()).filter(id => id.length > 0);
 
     // If caller passed repoIds but all were empty/invalid after cleaning,
     // fail fast instead of silently dropping the repoId filter (which would
@@ -63,7 +61,7 @@ class QdrantFilterBuilder {
     if (repoIds.length > 0 && cleanedRepoIds.length === 0) {
       throw new Error(
         'Invalid repoIds: all provided repoIds are empty or whitespace. ' +
-        'Provide at least one non-empty repoId or omit repoIds entirely.'
+          'Provide at least one non-empty repoId or omit repoIds entirely.',
       );
     }
 
@@ -79,9 +77,7 @@ class QdrantFilterBuilder {
   addLanguage(language: string): this {
     const cleanedLanguage = language.trim();
     if (cleanedLanguage.length === 0) {
-      throw new Error(
-        'Invalid language: language must be a non-empty, non-whitespace string.'
-      );
+      throw new Error('Invalid language: language must be a non-empty, non-whitespace string.');
     }
     this.filter.must.push({ key: 'language', match: { value: cleanedLanguage } });
     return this;
@@ -90,9 +86,7 @@ class QdrantFilterBuilder {
   addSymbolType(symbolType: string): this {
     const cleanedSymbolType = symbolType.trim();
     if (cleanedSymbolType.length === 0) {
-      throw new Error(
-        'Invalid symbolType: symbolType must be a non-empty, non-whitespace string.'
-      );
+      throw new Error('Invalid symbolType: symbolType must be a non-empty, non-whitespace string.');
     }
     this.filter.must.push({ key: 'symbolType', match: { value: cleanedSymbolType } });
     return this;
@@ -102,7 +96,7 @@ class QdrantFilterBuilder {
     const cleaned = symbolTypes.map(s => s.trim()).filter(s => s.length > 0);
     if (cleaned.length === 0) {
       throw new Error(
-        'Invalid symbolTypes: at least one non-empty, non-whitespace string is required.'
+        'Invalid symbolTypes: at least one non-empty, non-whitespace string is required.',
       );
     }
     this.filter.must.push({ key: 'symbolType', match: { any: cleaned } });
@@ -131,7 +125,9 @@ class QdrantFilterBuilder {
     } else {
       const cleaned = file.map(f => f.trim()).filter(f => f.length > 0);
       if (cleaned.length === 0) {
-        throw new Error('Invalid file filter: at least one file path must contain non-whitespace characters.');
+        throw new Error(
+          'Invalid file filter: at least one file path must contain non-whitespace characters.',
+        );
       }
       this.filter.must.push({ key: 'file', match: { any: cleaned } });
     }
@@ -141,9 +137,7 @@ class QdrantFilterBuilder {
   addPattern(pattern: string, key: 'file' | 'symbolName' = 'file'): this {
     const cleanedPattern = pattern.trim();
     if (cleanedPattern.length === 0) {
-      throw new Error(
-        'Invalid pattern: pattern must be a non-empty, non-whitespace string.'
-      );
+      throw new Error('Invalid pattern: pattern must be a non-empty, non-whitespace string.');
     }
     this.filter.must.push({ key, match: { text: cleanedPattern } });
     return this;
@@ -154,9 +148,7 @@ class QdrantFilterBuilder {
     // Prevent constructing a filter for an empty/whitespace-only branch,
     // which would search for `branch == ""` and almost certainly return no results.
     if (cleanedBranch.length === 0) {
-      throw new Error(
-        'Invalid branch: branch must be a non-empty, non-whitespace string.'
-      );
+      throw new Error('Invalid branch: branch must be a non-empty, non-whitespace string.');
     }
     this.filter.must.push({ key: 'branch', match: { value: cleanedBranch } });
     return this;
@@ -169,10 +161,10 @@ class QdrantFilterBuilder {
 
 /**
  * Validate filter options for buildBaseFilter.
- * 
+ *
  * This is a separate function to enable unit testing of validation logic.
  * The validations ensure that conflicting options are not used together.
- * 
+ *
  * @param options - Filter options to validate
  * @throws Error if conflicting options are detected
  */
@@ -187,7 +179,7 @@ export function validateFilterOptions(options: {
   if (options.includeCurrentRepo !== false && options.repoIds && options.repoIds.length > 0) {
     throw new Error(
       'Cannot use repoIds when includeCurrentRepo is enabled (the default). ' +
-      'These options are mutually exclusive. Set includeCurrentRepo=false to perform cross-repo queries with repoIds.'
+        'These options are mutually exclusive. Set includeCurrentRepo=false to perform cross-repo queries with repoIds.',
     );
   }
 
@@ -197,14 +189,14 @@ export function validateFilterOptions(options: {
   if (options.branch && options.includeCurrentRepo !== false) {
     throw new Error(
       'Cannot use branch parameter when includeCurrentRepo is enabled (the default). ' +
-      'Branch is automatically included via the current repo context. Set includeCurrentRepo=false to specify a branch explicitly.'
+        'Branch is automatically included via the current repo context. Set includeCurrentRepo=false to specify a branch explicitly.',
     );
   }
 }
 
 /**
  * QdrantDB implements VectorDBInterface using Qdrant vector database.
- * 
+ *
  * Features:
  * - Multi-tenant support via payload filtering (orgId/repoId)
  * - Branch and commit isolation for PR workflows
@@ -212,7 +204,7 @@ export function validateFilterOptions(options: {
  * - Cross-repo search by omitting repoId filter
  * - Tenant isolation via orgId filtering
  * - Point ID generation includes branch/commit to prevent collisions
- * 
+ *
  * Data Isolation:
  * All queries are filtered by orgId, repoId, branch, and commitSha by default.
  * This ensures that different branches and commits have isolated data, preventing
@@ -238,7 +230,7 @@ export class QdrantDB implements VectorDBInterface {
     orgId: string,
     projectRoot: string,
     branch: string,
-    commitSha: string
+    commitSha: string,
   ) {
     this.client = new QdrantClient({
       url,
@@ -250,24 +242,20 @@ export class QdrantDB implements VectorDBInterface {
     this.commitSha = commitSha;
     // Collection naming: one per org
     this.collectionName = `lien_org_${orgId}`;
-    
+
     // Initialize payload mapper
-    this.payloadMapper = new QdrantPayloadMapper(this.orgId, this.repoId, this.branch, this.commitSha);
-    
+    this.payloadMapper = new QdrantPayloadMapper(
+      this.orgId,
+      this.repoId,
+      this.branch,
+      this.commitSha,
+    );
+
     // dbPath is used for manifest and version files (stored locally even with Qdrant)
     // Use same path structure as LanceDB for consistency
     const projectName = path.basename(projectRoot);
-    const pathHash = crypto
-      .createHash('md5')
-      .update(projectRoot)
-      .digest('hex')
-      .substring(0, 8);
-    this.dbPath = path.join(
-      os.homedir(),
-      '.lien',
-      'indices',
-      `${projectName}-${pathHash}`
-    );
+    const pathHash = crypto.createHash('md5').update(projectRoot).digest('hex').substring(0, 8);
+    this.dbPath = path.join(os.homedir(), '.lien', 'indices', `${projectName}-${pathHash}`);
   }
 
   /**
@@ -276,11 +264,7 @@ export class QdrantDB implements VectorDBInterface {
    */
   private extractRepoId(projectRoot: string): string {
     const projectName = path.basename(projectRoot);
-    const pathHash = crypto
-      .createHash('md5')
-      .update(projectRoot)
-      .digest('hex')
-      .substring(0, 8);
+    const pathHash = crypto.createHash('md5').update(projectRoot).digest('hex').substring(0, 8);
     return `${projectName}-${pathHash}`;
   }
 
@@ -288,7 +272,7 @@ export class QdrantDB implements VectorDBInterface {
    * Generate a unique point ID from chunk metadata.
    * Uses hash of file path + line range + branch + commitSha for stable identification.
    * Includes branch/commit to prevent ID collisions across branches.
-   * 
+   *
    * **Hash Algorithm Choice:**
    * Uses MD5 for performance and collision likelihood acceptable for this use case.
    * - MD5 is deprecated for cryptographic purposes but suitable for non-security ID generation
@@ -308,7 +292,7 @@ export class QdrantDB implements VectorDBInterface {
   /**
    * Build base filter for Qdrant queries.
    * Uses builder pattern to simplify filter construction.
-   * 
+   *
    * **Important constraints:**
    * - `includeCurrentRepo` and `repoIds` are mutually exclusive.
    * - `includeCurrentRepo` defaults to `true` when `undefined` (treats `undefined` as "enabled").
@@ -316,7 +300,7 @@ export class QdrantDB implements VectorDBInterface {
    * - The `branch` parameter can only be used when `includeCurrentRepo` is explicitly `false`.
    *   When `includeCurrentRepo` is enabled (default), branch is automatically included via
    *   the current repo context (`addRepoContext`).
-   * 
+   *
    * @param options - Filter options
    * @param options.includeCurrentRepo - Whether to filter by current repo context (default: true when undefined).
    *   Must be explicitly `false` to use `repoIds` or `branch` parameters.
@@ -402,7 +386,7 @@ export class QdrantDB implements VectorDBInterface {
   private async executeScrollQuery(
     filter: any,
     limit: number,
-    errorContext: string
+    errorContext: string,
   ): Promise<SearchResult[]> {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
@@ -420,17 +404,16 @@ export class QdrantDB implements VectorDBInterface {
     } catch (error) {
       throw new DatabaseError(
         `Failed to ${errorContext}: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName }
+        { collectionName: this.collectionName },
       );
     }
   }
-
 
   async initialize(): Promise<void> {
     try {
       // Check if collection exists (returns { exists: boolean })
       const collectionCheck = await this.client.collectionExists(this.collectionName);
-      
+
       if (!collectionCheck.exists) {
         // Create collection with proper vector configuration
         await this.client.createCollection(this.collectionName, {
@@ -440,7 +423,7 @@ export class QdrantDB implements VectorDBInterface {
           },
         });
       }
-      
+
       // Read and cache the current version
       try {
         this.currentVersion = await readVersionFile(this.dbPath);
@@ -448,12 +431,12 @@ export class QdrantDB implements VectorDBInterface {
         // Version file doesn't exist yet, will be created on first index
         this.currentVersion = 0;
       }
-      
+
       this.initialized = true;
     } catch (error) {
       throw new DatabaseError(
         `Failed to initialize Qdrant database: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName }
+        { collectionName: this.collectionName },
       );
     }
   }
@@ -464,7 +447,7 @@ export class QdrantDB implements VectorDBInterface {
   private validateBatchInputs(
     vectors: Float32Array[],
     metadatas: ChunkMetadata[],
-    contents: string[]
+    contents: string[],
   ): void {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
@@ -485,12 +468,12 @@ export class QdrantDB implements VectorDBInterface {
   private preparePoints(
     vectors: Float32Array[],
     metadatas: ChunkMetadata[],
-    contents: string[]
+    contents: string[],
   ): Array<{ id: string; vector: number[]; payload: Record<string, any> }> {
     return vectors.map((vector, i) => {
       const metadata = metadatas[i];
       const payload = this.payloadMapper.toPayload(metadata, contents[i]) as Record<string, any>;
-      
+
       return {
         id: this.generatePointId(metadata),
         vector: Array.from(vector),
@@ -502,7 +485,7 @@ export class QdrantDB implements VectorDBInterface {
   async insertBatch(
     vectors: Float32Array[],
     metadatas: ChunkMetadata[],
-    contents: string[]
+    contents: string[],
   ): Promise<void> {
     this.validateBatchInputs(vectors, metadatas, contents);
 
@@ -525,7 +508,7 @@ export class QdrantDB implements VectorDBInterface {
     } catch (error) {
       throw new DatabaseError(
         `Failed to insert batch into Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName }
+        { collectionName: this.collectionName },
       );
     }
   }
@@ -533,7 +516,7 @@ export class QdrantDB implements VectorDBInterface {
   async search(
     queryVector: Float32Array,
     limit: number = 5,
-    _query?: string // Optional query string (not used in vector search, but kept for interface compatibility)
+    _query?: string, // Optional query string (not used in vector search, but kept for interface compatibility)
   ): Promise<SearchResult[]> {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
@@ -563,7 +546,7 @@ export class QdrantDB implements VectorDBInterface {
     } catch (error) {
       throw new DatabaseError(
         `Failed to search Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName }
+        { collectionName: this.collectionName },
       );
     }
   }
@@ -593,7 +576,7 @@ export class QdrantDB implements VectorDBInterface {
     options?: {
       repoIds?: string[];
       branch?: string;
-    }
+    },
   ): Promise<SearchResult[]> {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
@@ -623,7 +606,7 @@ export class QdrantDB implements VectorDBInterface {
     } catch (error) {
       throw new DatabaseError(
         `Failed to search Qdrant (cross-repo): ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName }
+        { collectionName: this.collectionName },
       );
     }
   }
@@ -647,10 +630,12 @@ export class QdrantDB implements VectorDBInterface {
     return this.executeScrollQuery(filter, options.limit || 100, 'scan Qdrant');
   }
 
-  async scanAll(options: {
-    language?: string;
-    pattern?: string;
-  } = {}): Promise<SearchResult[]> {
+  async scanAll(
+    options: {
+      language?: string;
+      pattern?: string;
+    } = {},
+  ): Promise<SearchResult[]> {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
     }
@@ -670,9 +655,11 @@ export class QdrantDB implements VectorDBInterface {
     return allResults;
   }
 
-  async *scanPaginated(options: {
-    pageSize?: number;
-  } = {}): AsyncGenerator<SearchResult[]> {
+  async *scanPaginated(
+    options: {
+      pageSize?: number;
+    } = {},
+  ): AsyncGenerator<SearchResult[]> {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
     }
@@ -707,7 +694,7 @@ export class QdrantDB implements VectorDBInterface {
       } catch (error) {
         throw new DatabaseError(
           `Failed to scroll Qdrant collection: ${error instanceof Error ? error.message : String(error)}`,
-          { originalError: error }
+          { originalError: error },
         );
       }
 
@@ -753,7 +740,7 @@ export class QdrantDB implements VectorDBInterface {
     return this.executeScrollQuery(
       filter,
       options.limit || 10000, // Higher default for cross-repo
-      'scan Qdrant (cross-repo)'
+      'scan Qdrant (cross-repo)',
     );
   }
 
@@ -802,7 +789,7 @@ export class QdrantDB implements VectorDBInterface {
     } catch (error) {
       throw new DatabaseError(
         `Failed to clear Qdrant collection: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName }
+        { collectionName: this.collectionName },
       );
     }
   }
@@ -843,7 +830,7 @@ export class QdrantDB implements VectorDBInterface {
     } catch (error) {
       throw new DatabaseError(
         `Failed to clear branch from Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName, branch: targetBranch }
+        { collectionName: this.collectionName, branch: targetBranch },
       );
     }
   }
@@ -868,7 +855,7 @@ export class QdrantDB implements VectorDBInterface {
     } catch (error) {
       throw new DatabaseError(
         `Failed to delete file from Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName, filepath }
+        { collectionName: this.collectionName, filepath },
       );
     }
   }
@@ -877,7 +864,7 @@ export class QdrantDB implements VectorDBInterface {
     filepath: string,
     vectors: Float32Array[],
     metadatas: ChunkMetadata[],
-    contents: string[]
+    contents: string[],
   ): Promise<void> {
     if (!this.initialized) {
       throw new DatabaseError('Qdrant database not initialized');
@@ -898,7 +885,7 @@ export class QdrantDB implements VectorDBInterface {
     } catch (error) {
       throw new DatabaseError(
         `Failed to update file in Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName, filepath }
+        { collectionName: this.collectionName, filepath },
       );
     }
   }
@@ -939,22 +926,22 @@ export class QdrantDB implements VectorDBInterface {
 
   async checkVersion(): Promise<boolean> {
     const now = Date.now();
-    
+
     // Cache version checks for 1 second to minimize I/O
     if (now - this.lastVersionCheck < 1000) {
       return false;
     }
-    
+
     this.lastVersionCheck = now;
-    
+
     try {
       const version = await readVersionFile(this.dbPath);
-      
+
       if (version > this.currentVersion) {
         this.currentVersion = version;
         return true;
       }
-      
+
       return false;
     } catch {
       // If we can't read version file, don't reconnect
@@ -970,7 +957,7 @@ export class QdrantDB implements VectorDBInterface {
     } catch (error) {
       throw new DatabaseError(
         `Failed to reconnect to Qdrant database: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName }
+        { collectionName: this.collectionName },
       );
     }
   }
@@ -986,4 +973,3 @@ export class QdrantDB implements VectorDBInterface {
     return new Date(this.currentVersion).toLocaleString();
   }
 }
-

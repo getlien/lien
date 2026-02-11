@@ -8,16 +8,19 @@ import type { ComplexityReport } from '@liendev/core';
 vi.mock('@liendev/core', async () => {
   const actual = await vi.importActual('@liendev/core');
   const mockAnalyzeFn = vi.fn();
-  
+
   // Store reference for use in tests
   (globalThis as any).__mockAnalyze = mockAnalyzeFn;
-  
+
   // Create a proper class mock
   class MockComplexityAnalyzer {
-    constructor(public vectorDB: any, public config: any) {}
+    constructor(
+      public vectorDB: any,
+      public config: any,
+    ) {}
     analyze = mockAnalyzeFn;
   }
-  
+
   return {
     ...actual,
     ComplexityAnalyzer: MockComplexityAnalyzer,
@@ -68,7 +71,7 @@ describe('handleGetComplexity', () => {
       mockAnalyzeFn.mockClear();
     }
   });
-  
+
   const getMockAnalyze = () => (globalThis as any).__mockAnalyze;
 
   describe('threshold filtering', () => {
@@ -145,15 +148,12 @@ describe('handleGetComplexity', () => {
 
       getMockAnalyze().mockResolvedValue(mockReport);
 
-      const result = await handleGetComplexity(
-        { threshold: 20, top: 10 },
-        mockCtx
-      );
+      const result = await handleGetComplexity({ threshold: 20, top: 10 }, mockCtx);
 
       // wrapToolHandler returns { content: [{ type: 'text', text: JSON.stringify(...) }] }
       expect(result).toHaveProperty('content');
       const parsed = JSON.parse(result.content![0].text);
-      
+
       expect(parsed).toHaveProperty('violations');
       // Should only include violations with complexity >= 20
       expect(parsed.violations).toHaveLength(2);
@@ -213,13 +213,10 @@ describe('handleGetComplexity', () => {
 
       getMockAnalyze().mockResolvedValue(mockReport);
 
-      const result = await handleGetComplexity(
-        { top: 10 },
-        mockCtx
-      );
+      const result = await handleGetComplexity({ top: 10 }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      
+
       expect(parsed).toHaveProperty('violations');
       // Should include all violations when threshold is not provided
       expect(parsed.violations).toHaveLength(2);
@@ -278,10 +275,7 @@ describe('handleGetComplexity', () => {
 
       getMockAnalyze().mockResolvedValue(mockReport);
 
-      const result = await handleGetComplexity(
-        { threshold: 1, top: 10 },
-        mockCtx
-      );
+      const result = await handleGetComplexity({ threshold: 1, top: 10 }, mockCtx);
 
       // Check if result is an error first
       if (result.isError) {
@@ -290,7 +284,7 @@ describe('handleGetComplexity', () => {
       }
 
       const parsed = JSON.parse(result.content![0].text);
-      
+
       expect(parsed).toHaveProperty('violations');
       // Threshold of 1 should include all violations (complexity >= 1)
       expect(parsed.violations).toHaveLength(2);
@@ -326,7 +320,7 @@ describe('handleGetComplexity', () => {
           },
         },
         files: Object.fromEntries(
-          violations.map((v) => [
+          violations.map(v => [
             v.filepath,
             {
               violations: [v],
@@ -335,19 +329,16 @@ describe('handleGetComplexity', () => {
               dependentCount: 0,
               riskLevel: 'low' as const,
             },
-          ])
+          ]),
         ),
       };
 
       getMockAnalyze().mockResolvedValue(mockReport);
 
-      const result = await handleGetComplexity(
-        { top: 5 },
-        mockCtx
-      );
+      const result = await handleGetComplexity({ top: 5 }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      
+
       expect(parsed.violations).toHaveLength(5);
       // Should be sorted by complexity descending
       expect(parsed.violations[0].complexity).toBe(30);
@@ -421,13 +412,10 @@ describe('handleGetComplexity', () => {
 
       getMockAnalyze().mockResolvedValue(mockReport);
 
-      const result = await handleGetComplexity(
-        { top: 10 },
-        mockCtx
-      );
+      const result = await handleGetComplexity({ top: 10 }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      
+
       expect(parsed.summary.bySeverity.error).toBe(1);
       expect(parsed.summary.bySeverity.warning).toBe(2);
     });
@@ -451,10 +439,7 @@ describe('handleGetComplexity', () => {
 
       getMockAnalyze().mockResolvedValue(mockReport);
 
-      const result = await handleGetComplexity(
-        { top: 10 },
-        mockCtx
-      );
+      const result = await handleGetComplexity({ top: 10 }, mockCtx);
 
       // Check if result is an error first
       if (result.isError) {
@@ -463,7 +448,7 @@ describe('handleGetComplexity', () => {
       }
 
       const parsed = JSON.parse(result.content![0].text);
-      
+
       expect(parsed).toHaveProperty('indexInfo');
       expect(parsed.indexInfo).toEqual({
         indexVersion: 1234567890,
@@ -472,4 +457,3 @@ describe('handleGetComplexity', () => {
     });
   });
 });
-

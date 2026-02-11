@@ -10,7 +10,7 @@ import {
 
 /**
  * MCP tool definitions with Zod-generated schemas.
- * 
+ *
  * All schemas are automatically generated from Zod definitions,
  * providing type safety and rich validation at runtime.
  */
@@ -32,7 +32,7 @@ Returns:
 - results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, symbolType?, signature?, enclosingSymbol? } }
 - enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
 - relevance: "highly_relevant" | "relevant" | "loosely_related" (not_relevant auto-filtered)
-- groupedByRepo?: Record<repoId, results[]> (when crossRepo=true)`
+- groupedByRepo?: Record<repoId, results[]> (when crossRepo=true)`,
   ),
   toMCPToolSchema(
     FindSimilarSchema,
@@ -54,7 +54,7 @@ Returns:
 - results[]: { content, score, relevance, metadata: { file, startLine, endLine, language?, symbolName?, signature?, enclosingSymbol? } }
 - enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
 - relevance: "highly_relevant" | "relevant" | "loosely_related" (not_relevant auto-filtered)
-- filtersApplied?: { language?, pathHint?, prunedLowRelevance: number }`
+- filtersApplied?: { language?, pathHint?, prunedLowRelevance: number }`,
   ),
   toMCPToolSchema(
     GetFilesContextSchema,
@@ -98,7 +98,7 @@ Returns for each file:
 ALWAYS check testAssociations before modifying source code.
 After changes, remind the user to run the associated tests.
 
-Batch calls are more efficient than multiple single-file calls.`
+Batch calls are more efficient than multiple single-file calls.`,
   ),
   toMCPToolSchema(
     ListFunctionsSchema,
@@ -122,7 +122,7 @@ Returns:
 - enclosingSymbol: "Class.method" for methods, "functionName" for standalone functions, absent for block chunks
 - method: "symbols" | "content" (query method used)
 - hasMore: boolean (more results available)
-- nextOffset?: number (offset for next page, when hasMore=true)`
+- nextOffset?: number (offset for next page, when hasMore=true)`,
   ),
   toMCPToolSchema(
     GetDependentsSchema,
@@ -140,7 +140,7 @@ Returns:
 - dependents[]: { filepath, isTestFile, usages[]? }
 - complexityMetrics: { averageComplexity, maxComplexity, highComplexityDependents[] }
 - totalUsageCount?: number (when symbol parameter provided)
-- groupedByRepo?: Record<repoId, dependents[]> (when crossRepo=true)`
+- groupedByRepo?: Record<repoId, dependents[]> (when crossRepo=true)`,
   ),
   toMCPToolSchema(
     GetComplexitySchema,
@@ -168,6 +168,6 @@ Returns:
 - violations[]: { filepath, symbolName, symbolType, complexity, metricType, threshold, severity, riskLevel, dependentCount }
 - metricType: "cyclomatic" | "cognitive" | "halstead_effort" | "halstead_bugs"
 - severity: "error" | "warning"
-- groupedByRepo?: Record<repoId, violations[]> (when crossRepo=true)`
+- groupedByRepo?: Record<repoId, violations[]> (when crossRepo=true)`,
   ),
 ];

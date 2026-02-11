@@ -33,12 +33,14 @@ describe('handleFindSimilar', () => {
   };
 
   // Helper to create mock search results
-  function createMockResult(overrides: {
-    content?: string;
-    metadata?: Partial<typeof defaultMetadata>;
-    score?: number;
-    relevance?: 'highly_relevant' | 'relevant' | 'loosely_related' | 'not_relevant';
-  } = {}): SearchResult {
+  function createMockResult(
+    overrides: {
+      content?: string;
+      metadata?: Partial<typeof defaultMetadata>;
+      score?: number;
+      relevance?: 'highly_relevant' | 'relevant' | 'loosely_related' | 'not_relevant';
+    } = {},
+  ): SearchResult {
     return {
       content: overrides.content ?? 'function example() {}',
       metadata: {
@@ -76,14 +78,17 @@ describe('handleFindSimilar', () => {
   describe('basic search', () => {
     it('should return search results without filters', async () => {
       const mockResults = [
-        createMockResult({ content: 'function fetchUser() {}', metadata: { file: 'src/fetch.ts' } }),
+        createMockResult({
+          content: 'function fetchUser() {}',
+          metadata: { file: 'src/fetch.ts' },
+        }),
         createMockResult({ content: 'function getUser() {}', metadata: { file: 'src/get.ts' } }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }' },
-        mockCtx
+        mockCtx,
       );
 
       expect(mockVectorDB.search).toHaveBeenCalled();
@@ -97,7 +102,7 @@ describe('handleFindSimilar', () => {
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -119,14 +124,14 @@ describe('handleFindSimilar', () => {
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }', language: 'typescript' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(2);
-      expect(parsed.results.every((r: any) => 
-        r.metadata.language.toLowerCase() === 'typescript'
-      )).toBe(true);
+      expect(
+        parsed.results.every((r: any) => r.metadata.language.toLowerCase() === 'typescript'),
+      ).toBe(true);
       expect(parsed.filtersApplied.language).toBe('typescript');
     });
 
@@ -139,7 +144,7 @@ describe('handleFindSimilar', () => {
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }', language: 'rust' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -151,13 +156,16 @@ describe('handleFindSimilar', () => {
       const mockResults = [
         createMockResult({ metadata: { language: 'typescript' } }),
         // Simulate a record with missing language by using type assertion
-        { ...createMockResult(), metadata: { ...defaultMetadata, language: undefined as unknown as string } },
+        {
+          ...createMockResult(),
+          metadata: { ...defaultMetadata, language: undefined as unknown as string },
+        },
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }', language: 'typescript' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -176,7 +184,7 @@ describe('handleFindSimilar', () => {
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }', pathHint: 'api' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -193,7 +201,7 @@ describe('handleFindSimilar', () => {
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }', pathHint: 'api' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -204,13 +212,16 @@ describe('handleFindSimilar', () => {
       const mockResults = [
         createMockResult({ metadata: { file: 'src/api/users.ts' } }),
         // Simulate a record with missing file by using type assertion
-        { ...createMockResult(), metadata: { ...defaultMetadata, file: undefined as unknown as string } },
+        {
+          ...createMockResult(),
+          metadata: { ...defaultMetadata, file: undefined as unknown as string },
+        },
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }', pathHint: 'api' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -221,16 +232,24 @@ describe('handleFindSimilar', () => {
   describe('low-relevance pruning', () => {
     it('should prune not_relevant results', async () => {
       const mockResults = [
-        createMockResult({ relevance: 'highly_relevant', score: 0.5, metadata: { file: 'src/a.ts' } }),
+        createMockResult({
+          relevance: 'highly_relevant',
+          score: 0.5,
+          metadata: { file: 'src/a.ts' },
+        }),
         createMockResult({ relevance: 'relevant', score: 1.1, metadata: { file: 'src/b.ts' } }),
         createMockResult({ relevance: 'not_relevant', score: 1.6, metadata: { file: 'src/c.ts' } }),
-        createMockResult({ relevance: 'loosely_related', score: 1.4, metadata: { file: 'src/d.ts' } }),
+        createMockResult({
+          relevance: 'loosely_related',
+          score: 1.4,
+          metadata: { file: 'src/d.ts' },
+        }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -248,7 +267,7 @@ describe('handleFindSimilar', () => {
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -267,12 +286,12 @@ describe('handleFindSimilar', () => {
       mockVectorDB.search.mockResolvedValue(mockResults);
 
       const result = await handleFindSimilar(
-        { 
+        {
           code: 'async function fetchData() { return await db.find(); }',
           language: 'typescript',
-          pathHint: 'api'
+          pathHint: 'api',
         },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -284,24 +303,24 @@ describe('handleFindSimilar', () => {
 
     it('should apply all filters and pruning together', async () => {
       const mockResults = [
-        createMockResult({ 
+        createMockResult({
           metadata: { file: 'src/api/users.ts', language: 'typescript' },
-          relevance: 'highly_relevant'
+          relevance: 'highly_relevant',
         }),
-        createMockResult({ 
+        createMockResult({
           metadata: { file: 'src/api/orders.ts', language: 'typescript' },
-          relevance: 'not_relevant'
+          relevance: 'not_relevant',
         }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
       const result = await handleFindSimilar(
-        { 
+        {
           code: 'async function fetchData() { return await db.find(); }',
           language: 'typescript',
-          pathHint: 'api'
+          pathHint: 'api',
         },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -313,16 +332,16 @@ describe('handleFindSimilar', () => {
   describe('limit behavior', () => {
     it('should respect limit after filtering', async () => {
       const mockResults = Array.from({ length: 20 }, (_, i) =>
-        createMockResult({ 
+        createMockResult({
           content: `function example${i}() {}`,
-          metadata: { file: `src/file${i}.ts`, language: 'typescript' }
-        })
+          metadata: { file: `src/file${i}.ts`, language: 'typescript' },
+        }),
       );
       mockVectorDB.search.mockResolvedValue(mockResults);
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }', limit: 3 },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -337,8 +356,12 @@ describe('handleFindSimilar', () => {
       mockVectorDB.search.mockResolvedValue(mockResults);
 
       const result = await handleFindSimilar(
-        { code: 'async function fetchData() { return await db.find(); }', language: 'typescript', limit: 10 },
-        mockCtx
+        {
+          code: 'async function fetchData() { return await db.find(); }',
+          language: 'typescript',
+          limit: 10,
+        },
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -349,16 +372,22 @@ describe('handleFindSimilar', () => {
   describe('deduplication', () => {
     it('should deduplicate results with same file + line range', async () => {
       const mockResults = [
-        createMockResult({ content: 'first', metadata: { file: 'src/a.ts', startLine: 1, endLine: 5 } }),
-        createMockResult({ content: 'duplicate', metadata: { file: 'src/a.ts', startLine: 1, endLine: 5 } }),
-        createMockResult({ content: 'different', metadata: { file: 'src/b.ts', startLine: 1, endLine: 5 } }),
+        createMockResult({
+          content: 'first',
+          metadata: { file: 'src/a.ts', startLine: 1, endLine: 5 },
+        }),
+        createMockResult({
+          content: 'duplicate',
+          metadata: { file: 'src/a.ts', startLine: 1, endLine: 5 },
+        }),
+        createMockResult({
+          content: 'different',
+          metadata: { file: 'src/b.ts', startLine: 1, endLine: 5 },
+        }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
-      const result = await handleFindSimilar(
-        { code: 'async function test() {}' },
-        mockCtx
-      );
+      const result = await handleFindSimilar({ code: 'async function test() {}' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(2);
@@ -370,14 +399,15 @@ describe('handleFindSimilar', () => {
       const inputCode = 'function selfMatch() { return true; }';
       const mockResults = [
         createMockResult({ content: inputCode, score: 0.05, metadata: { file: 'src/self.ts' } }),
-        createMockResult({ content: 'function other() {}', score: 0.5, metadata: { file: 'src/other.ts' } }),
+        createMockResult({
+          content: 'function other() {}',
+          score: 0.5,
+          metadata: { file: 'src/other.ts' },
+        }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
-      const result = await handleFindSimilar(
-        { code: inputCode },
-        mockCtx
-      );
+      const result = await handleFindSimilar({ code: inputCode }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(1);
@@ -387,14 +417,15 @@ describe('handleFindSimilar', () => {
     it('should keep near-matches even with low score', async () => {
       const inputCode = 'function selfMatch() { return true; }';
       const mockResults = [
-        createMockResult({ content: 'function selfMatch() { return false; }', score: 0.05, metadata: { file: 'src/near.ts' } }),
+        createMockResult({
+          content: 'function selfMatch() { return false; }',
+          score: 0.05,
+          metadata: { file: 'src/near.ts' },
+        }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
-      const result = await handleFindSimilar(
-        { code: inputCode },
-        mockCtx
-      );
+      const result = await handleFindSimilar({ code: inputCode }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(1);
@@ -407,10 +438,7 @@ describe('handleFindSimilar', () => {
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
-      const result = await handleFindSimilar(
-        { code: inputCode },
-        mockCtx
-      );
+      const result = await handleFindSimilar({ code: inputCode }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(1);
@@ -423,7 +451,7 @@ describe('handleFindSimilar', () => {
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -436,14 +464,12 @@ describe('handleFindSimilar', () => {
 
   describe('filtersApplied metadata', () => {
     it('should not include filtersApplied when no filtering occurred', async () => {
-      const mockResults = [
-        createMockResult({ relevance: 'highly_relevant' }),
-      ];
+      const mockResults = [createMockResult({ relevance: 'highly_relevant' })];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -459,7 +485,7 @@ describe('handleFindSimilar', () => {
 
       const result = await handleFindSimilar(
         { code: 'async function fetchData() { return await db.find(); }' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -468,4 +494,3 @@ describe('handleFindSimilar', () => {
     });
   });
 });
-

@@ -13,12 +13,12 @@ describe('Symbol Extractor', () => {
           return await fetch('/api/data');
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'typescript');
       expect(symbols.functions).toContain('getUserById');
       expect(symbols.functions).toContain('fetchData');
     });
-    
+
     it('should extract arrow functions', () => {
       const content = `
         const handleClick = () => {
@@ -29,12 +29,12 @@ describe('Symbol Extractor', () => {
           return data.map(d => d.value);
         };
       `;
-      
+
       const symbols = extractSymbols(content, 'typescript');
       expect(symbols.functions).toContain('handleClick');
       expect(symbols.functions).toContain('processData');
     });
-    
+
     it('should extract classes', () => {
       const content = `
         class UserService {
@@ -47,12 +47,12 @@ describe('Symbol Extractor', () => {
           getData() {}
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'typescript');
       expect(symbols.classes).toContain('UserService');
       expect(symbols.classes).toContain('DataManager');
     });
-    
+
     it('should extract interfaces and types', () => {
       const content = `
         interface User {
@@ -67,7 +67,7 @@ describe('Symbol Extractor', () => {
         type Status = 'pending' | 'completed';
         export type Result = { data: any };
       `;
-      
+
       const symbols = extractSymbols(content, 'typescript');
       expect(symbols.interfaces).toContain('User');
       expect(symbols.interfaces).toContain('Config');
@@ -75,7 +75,7 @@ describe('Symbol Extractor', () => {
       expect(symbols.interfaces).toContain('Result');
     });
   });
-  
+
   describe('Python', () => {
     it('should extract functions', () => {
       const content = `
@@ -85,12 +85,12 @@ describe('Symbol Extractor', () => {
         async def fetch_data():
             return await api.get('/data')
       `;
-      
+
       const symbols = extractSymbols(content, 'python');
       expect(symbols.functions).toContain('get_user_by_id');
       expect(symbols.functions).toContain('fetch_data');
     });
-    
+
     it('should extract classes', () => {
       const content = `
         class UserService:
@@ -100,13 +100,13 @@ describe('Symbol Extractor', () => {
         class DataManager(BaseManager):
             pass
       `;
-      
+
       const symbols = extractSymbols(content, 'python');
       expect(symbols.classes).toContain('UserService');
       expect(symbols.classes).toContain('DataManager');
     });
   });
-  
+
   describe('PHP', () => {
     it('should extract functions', () => {
       const content = `
@@ -118,12 +118,12 @@ describe('Symbol Extractor', () => {
           return array_map('strtolower', $data);
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'php');
       expect(symbols.functions).toContain('getUserById');
       expect(symbols.functions).toContain('processData');
     });
-    
+
     it('should extract classes', () => {
       const content = `
         class UserService {
@@ -136,12 +136,12 @@ describe('Symbol Extractor', () => {
           abstract public function handle();
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'php');
       expect(symbols.classes).toContain('UserService');
       expect(symbols.classes).toContain('BaseController');
     });
-    
+
     it('should extract interfaces and traits', () => {
       const content = `
         interface Cacheable {
@@ -152,13 +152,13 @@ describe('Symbol Extractor', () => {
           public function log($message) {}
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'php');
       expect(symbols.interfaces).toContain('Cacheable');
       expect(symbols.interfaces).toContain('Loggable');
     });
   });
-  
+
   describe('Go', () => {
     it('should extract functions', () => {
       const content = `
@@ -170,12 +170,12 @@ describe('Symbol Extractor', () => {
           return http.Get("/api/data")
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'go');
       expect(symbols.functions).toContain('GetUserById');
       expect(symbols.functions).toContain('FetchData');
     });
-    
+
     it('should extract interfaces and structs', () => {
       const content = `
         type User interface {
@@ -187,13 +187,13 @@ describe('Symbol Extractor', () => {
           db *Database
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'go');
       expect(symbols.interfaces).toContain('User');
       expect(symbols.interfaces).toContain('UserService');
     });
   });
-  
+
   describe('Java', () => {
     it('should extract methods', () => {
       const content = `
@@ -205,12 +205,12 @@ describe('Symbol Extractor', () => {
           return users.get(id).getName();
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'java');
       expect(symbols.functions).toContain('main');
       expect(symbols.functions).toContain('getUserName');
     });
-    
+
     it('should extract classes and interfaces', () => {
       const content = `
         public class UserService {
@@ -221,13 +221,13 @@ describe('Symbol Extractor', () => {
           String getCacheKey();
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'java');
       expect(symbols.classes).toContain('UserService');
       expect(symbols.interfaces).toContain('Cacheable');
     });
   });
-  
+
   describe('C#', () => {
     it('should extract methods', () => {
       const content = `
@@ -239,12 +239,12 @@ describe('Symbol Extractor', () => {
           return users[id].Name;
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'csharp');
       expect(symbols.functions).toContain('Main');
       expect(symbols.functions).toContain('GetUserName');
     });
-    
+
     it('should extract classes and interfaces', () => {
       const content = `
         public class UserService {
@@ -255,13 +255,13 @@ describe('Symbol Extractor', () => {
           string GetCacheKey();
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'csharp');
       expect(symbols.classes).toContain('UserService');
       expect(symbols.interfaces).toContain('ICacheable');
     });
   });
-  
+
   describe('Ruby', () => {
     it('should extract methods', () => {
       const content = `
@@ -273,12 +273,12 @@ describe('Symbol Extractor', () => {
           HTTP.get('/api/data')
         end
       `;
-      
+
       const symbols = extractSymbols(content, 'ruby');
       expect(symbols.functions).toContain('get_user_by_id');
       expect(symbols.functions).toContain('fetch_data');
     });
-    
+
     it('should extract classes and modules', () => {
       const content = `
         class UserService
@@ -293,13 +293,13 @@ describe('Symbol Extractor', () => {
           end
         end
       `;
-      
+
       const symbols = extractSymbols(content, 'ruby');
       expect(symbols.classes).toContain('UserService');
       expect(symbols.classes).toContain('Cacheable');
     });
   });
-  
+
   describe('Rust', () => {
     it('should extract functions and structs', () => {
       const content = `
@@ -315,14 +315,14 @@ describe('Symbol Extractor', () => {
           fn cache_key(&self) -> String;
         }
       `;
-      
+
       const symbols = extractSymbols(content, 'rust');
       expect(symbols.functions).toContain('get_user_by_id');
       expect(symbols.functions).toContain('UserService');
       expect(symbols.functions).toContain('Cacheable');
     });
   });
-  
+
   describe('Edge cases', () => {
     it('should handle empty content', () => {
       const symbols = extractSymbols('', 'typescript');
@@ -330,7 +330,7 @@ describe('Symbol Extractor', () => {
       expect(symbols.classes).toHaveLength(0);
       expect(symbols.interfaces).toHaveLength(0);
     });
-    
+
     it('should handle unknown language', () => {
       const content = 'some code here';
       const symbols = extractSymbols(content, 'unknown');
@@ -338,7 +338,7 @@ describe('Symbol Extractor', () => {
       expect(symbols.classes).toHaveLength(0);
       expect(symbols.interfaces).toHaveLength(0);
     });
-    
+
     it('should deduplicate symbols', () => {
       const content = `
         function test() {}
@@ -346,11 +346,10 @@ describe('Symbol Extractor', () => {
         class User {}
         class User {}
       `;
-      
+
       const symbols = extractSymbols(content, 'javascript');
       expect(symbols.functions).toHaveLength(1);
       expect(symbols.classes).toHaveLength(1);
     });
   });
 });
-

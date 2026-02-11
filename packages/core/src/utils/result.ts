@@ -1,9 +1,9 @@
 /**
  * Result type for explicit error handling.
- * 
+ *
  * Provides a type-safe alternative to throwing exceptions, making error
  * handling explicit in function signatures.
- * 
+ *
  * @example
  * ```typescript
  * function divide(a: number, b: number): Result<number, string> {
@@ -12,7 +12,7 @@
  *   }
  *   return Ok(a / b);
  * }
- * 
+ *
  * const result = divide(10, 2);
  * if (isOk(result)) {
  *   console.log(result.value); // 5
@@ -25,9 +25,7 @@
 /**
  * Result type representing either success (Ok) or failure (Err)
  */
-export type Result<T, E = Error> = 
-  | { ok: true; value: T }
-  | { ok: false; error: E };
+export type Result<T, E = Error> = { ok: true; value: T } | { ok: false; error: E };
 
 /**
  * Creates a successful Result containing a value

@@ -29,7 +29,10 @@ describe('version file utilities', () => {
       const after = Date.now();
 
       const versionPath = path.join(testDir, '.lien-index-version');
-      const exists = await fs.access(versionPath).then(() => true).catch(() => false);
+      const exists = await fs
+        .access(versionPath)
+        .then(() => true)
+        .catch(() => false);
       expect(exists).toBe(true);
 
       const content = await fs.readFile(versionPath, 'utf-8');
@@ -42,20 +45,14 @@ describe('version file utilities', () => {
     it('should overwrite existing version file', async () => {
       // Write first version
       await writeVersionFile(testDir);
-      const firstContent = await fs.readFile(
-        path.join(testDir, '.lien-index-version'),
-        'utf-8'
-      );
+      const firstContent = await fs.readFile(path.join(testDir, '.lien-index-version'), 'utf-8');
 
       // Wait a bit
       await new Promise(resolve => setTimeout(resolve, 10));
 
       // Write second version
       await writeVersionFile(testDir);
-      const secondContent = await fs.readFile(
-        path.join(testDir, '.lien-index-version'),
-        'utf-8'
-      );
+      const secondContent = await fs.readFile(path.join(testDir, '.lien-index-version'), 'utf-8');
 
       expect(parseInt(secondContent, 10)).toBeGreaterThan(parseInt(firstContent, 10));
     });
@@ -110,4 +107,3 @@ describe('version file utilities', () => {
     });
   });
 });
-

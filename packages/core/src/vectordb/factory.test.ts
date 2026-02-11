@@ -25,7 +25,7 @@ vi.mock('./qdrant.js', () => ({
       _orgId: string,
       _projectRoot: string,
       _branch: string,
-      _commitSha: string
+      _commitSha: string,
     ) {
       // Mock constructor accepts same parameters as real QdrantDB
     }
@@ -83,7 +83,7 @@ describe('createVectorDB', () => {
 
     it('should successfully extract branch and commit from git', async () => {
       const db = await createVectorDB(testDir);
-      
+
       expect(extractOrgIdFromGit).toHaveBeenCalledWith(testDir);
       expect(getCurrentBranch).toHaveBeenCalledWith(testDir);
       expect(getCurrentCommit).toHaveBeenCalledWith(testDir);
@@ -97,7 +97,7 @@ describe('createVectorDB', () => {
       } as any);
 
       await expect(createVectorDB(testDir)).rejects.toThrow(
-        'Qdrant backend requires qdrant configuration in global config'
+        'Qdrant backend requires qdrant configuration in global config',
       );
     });
 
@@ -105,7 +105,7 @@ describe('createVectorDB', () => {
       vi.mocked(extractOrgIdFromGit).mockResolvedValue(null);
 
       await expect(createVectorDB(testDir)).rejects.toThrow(
-        'Qdrant backend requires a git repository with a remote URL'
+        'Qdrant backend requires a git repository with a remote URL',
       );
     });
 
@@ -114,7 +114,7 @@ describe('createVectorDB', () => {
       vi.mocked(getCurrentCommit).mockRejectedValue(new Error('Git commit detection failed'));
 
       await expect(createVectorDB(testDir)).rejects.toThrow(
-        /Qdrant backend requires a valid git branch and commit SHA[\s\S]*Failed to detect current branch and\/or commit from git/
+        /Qdrant backend requires a valid git branch and commit SHA[\s\S]*Failed to detect current branch and\/or commit from git/,
       );
     });
 
@@ -123,7 +123,7 @@ describe('createVectorDB', () => {
       vi.mocked(getCurrentCommit).mockResolvedValue('abc123');
 
       await expect(createVectorDB(testDir)).rejects.toThrow(
-        'Qdrant backend requires a valid git branch for proper data isolation'
+        'Qdrant backend requires a valid git branch for proper data isolation',
       );
     });
 
@@ -132,7 +132,7 @@ describe('createVectorDB', () => {
       vi.mocked(getCurrentCommit).mockResolvedValue('');
 
       await expect(createVectorDB(testDir)).rejects.toThrow(
-        'Qdrant backend requires a valid git commit SHA for proper data isolation'
+        'Qdrant backend requires a valid git commit SHA for proper data isolation',
       );
     });
 
@@ -141,7 +141,7 @@ describe('createVectorDB', () => {
       vi.mocked(getCurrentCommit).mockResolvedValue('abc123');
 
       await expect(createVectorDB(testDir)).rejects.toThrow(
-        'Qdrant backend requires a valid git branch for proper data isolation'
+        'Qdrant backend requires a valid git branch for proper data isolation',
       );
     });
 
@@ -150,7 +150,7 @@ describe('createVectorDB', () => {
       vi.mocked(getCurrentCommit).mockResolvedValue('\t  \n');
 
       await expect(createVectorDB(testDir)).rejects.toThrow(
-        'Qdrant backend requires a valid git commit SHA for proper data isolation'
+        'Qdrant backend requires a valid git commit SHA for proper data isolation',
       );
     });
 
@@ -168,7 +168,7 @@ describe('createVectorDB', () => {
       vi.mocked(loadGlobalConfig).mockRejectedValue(error);
 
       const db = await createVectorDB(testDir);
-      
+
       expect(db).toBeDefined();
       // No console output expected - this is normal behavior
     });
@@ -177,7 +177,7 @@ describe('createVectorDB', () => {
       const { ConfigValidationError } = await import('../config/global-config.js');
       const error = new ConfigValidationError(
         'Failed to parse global config file.\nConfig file: /test/.lien/config.json\nSyntax error: JSON syntax error',
-        '/test/.lien/config.json'
+        '/test/.lien/config.json',
       );
       vi.mocked(loadGlobalConfig).mockRejectedValue(error);
 
@@ -190,9 +190,8 @@ describe('createVectorDB', () => {
       } as any);
 
       await expect(createVectorDB(testDir)).rejects.toThrow(
-        'Unknown storage backend: unknown-backend'
+        'Unknown storage backend: unknown-backend',
       );
     });
   });
 });
-

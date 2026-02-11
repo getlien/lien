@@ -12,7 +12,6 @@ import {
   type ComplexityMetrics,
 } from './dependency-analyzer.js';
 
-
 // Types for validated args and response building
 interface ValidatedArgs {
   filepath: string;
@@ -46,7 +45,10 @@ interface DependentsResponse {
 /**
  * Check if cross-repo search is requested but not supported.
  */
-function checkCrossRepoFallback(crossRepo: boolean | undefined, vectorDB: VectorDBInterface): boolean {
+function checkCrossRepoFallback(
+  crossRepo: boolean | undefined,
+  vectorDB: VectorDBInterface,
+): boolean {
   return Boolean(crossRepo && !(vectorDB instanceof QdrantDB));
 }
 
@@ -71,16 +73,16 @@ function logRiskAssessment(
   analysis: DependencyAnalysisResult,
   riskLevel: string,
   symbol: string | undefined,
-  log: (msg: string) => void
+  log: (msg: string) => void,
 ): void {
   const prodTest = `(${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test)`;
-  
+
   if (symbol && analysis.totalUsageCount !== undefined) {
     if (analysis.totalUsageCount > 0) {
       // Symbol tracking with call sites found
       log(
         `Found ${analysis.totalUsageCount} tracked call sites across ${analysis.dependents.length} files ` +
-        `${prodTest} - risk: ${riskLevel}`
+          `${prodTest} - risk: ${riskLevel}`,
       );
     } else {
       // Files import the symbol but no call sites were tracked
@@ -88,14 +90,11 @@ function logRiskAssessment(
       // (e.g., chunks without complexity analysis)
       log(
         `Found ${analysis.dependents.length} files importing '${symbol}' ` +
-        `${prodTest} - risk: ${riskLevel} (Note: Call site tracking unavailable for these chunks)`
+          `${prodTest} - risk: ${riskLevel} (Note: Call site tracking unavailable for these chunks)`,
       );
     }
   } else {
-    log(
-      `Found ${analysis.dependents.length} dependents ` +
-      `${prodTest} - risk: ${riskLevel}`
-    );
+    log(`Found ${analysis.dependents.length} dependents ` + `${prodTest} - risk: ${riskLevel}`);
   }
 }
 
@@ -109,10 +108,10 @@ function buildDependentsResponse(
   indexInfo: IndexInfo,
   notes: string[],
   crossRepo: boolean | undefined,
-  vectorDB: VectorDBInterface
+  vectorDB: VectorDBInterface,
 ): DependentsResponse {
   const { symbol, filepath } = args;
-  
+
   const response: DependentsResponse = {
     indexInfo,
     filepath,
@@ -146,57 +145,51 @@ function buildDependentsResponse(
 /**
  * Handle get_dependents tool calls.
  * Finds all code that depends on a file (reverse dependency lookup).
- * 
+ *
  * When the optional `symbol` parameter is provided, returns specific call sites
  * for that exported symbol instead of just file-level dependencies.
  *
  * Note: Symbol tracking only works for direct imports from the target file.
  * Re-exported symbols (e.g., via barrel files or package entry points) are not tracked.
  */
-export async function handleGetDependents(
-  args: unknown,
-  ctx: ToolContext
-): Promise<MCPToolResult> {
+export async function handleGetDependents(args: unknown, ctx: ToolContext): Promise<MCPToolResult> {
   const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
-  return await wrapToolHandler(
-    GetDependentsSchema,
-    async (validatedArgs) => {
-      const { crossRepo, filepath, symbol } = validatedArgs;
-      
-      // Log initial request
-      const symbolSuffix = symbol ? ` (symbol: ${symbol})` : '';
-      const crossRepoSuffix = crossRepo ? ' (cross-repo)' : '';
-      log(`Finding dependents of: ${filepath}${symbolSuffix}${crossRepoSuffix}`);
-      
-      await checkAndReconnect();
+  return await wrapToolHandler(GetDependentsSchema, async validatedArgs => {
+    const { crossRepo, filepath, symbol } = validatedArgs;
 
-      // Analyze dependencies
-      const analysis = await findDependents(vectorDB, filepath, crossRepo ?? false, log, symbol);
+    // Log initial request
+    const symbolSuffix = symbol ? ` (symbol: ${symbol})` : '';
+    const crossRepoSuffix = crossRepo ? ' (cross-repo)' : '';
+    log(`Finding dependents of: ${filepath}${symbolSuffix}${crossRepoSuffix}`);
 
-      // Calculate risk level
-      const riskLevel = calculateRiskLevel(
-        analysis.dependents.length,
-        analysis.complexityMetrics.complexityRiskBoost,
-        analysis.productionDependentCount
-      );
-      
-      // Log results with risk assessment
-      logRiskAssessment(analysis, riskLevel, symbol, log);
+    await checkAndReconnect();
 
-      // Build and return response
-      const crossRepoFallback = checkCrossRepoFallback(crossRepo, vectorDB);
-      const notes = buildNotes(crossRepoFallback, analysis.hitLimit);
-      
-      return buildDependentsResponse(
-        analysis,
-        validatedArgs,
-        riskLevel,
-        getIndexMetadata(),
-        notes,
-        crossRepo,
-        vectorDB
-      );
-    }
-  )(args);
+    // Analyze dependencies
+    const analysis = await findDependents(vectorDB, filepath, crossRepo ?? false, log, symbol);
+
+    // Calculate risk level
+    const riskLevel = calculateRiskLevel(
+      analysis.dependents.length,
+      analysis.complexityMetrics.complexityRiskBoost,
+      analysis.productionDependentCount,
+    );
+
+    // Log results with risk assessment
+    logRiskAssessment(analysis, riskLevel, symbol, log);
+
+    // Build and return response
+    const crossRepoFallback = checkCrossRepoFallback(crossRepo, vectorDB);
+    const notes = buildNotes(crossRepoFallback, analysis.hitLimit);
+
+    return buildDependentsResponse(
+      analysis,
+      validatedArgs,
+      riskLevel,
+      getIndexMetadata(),
+      notes,
+      crossRepo,
+      vectorDB,
+    );
+  })(args);
 }

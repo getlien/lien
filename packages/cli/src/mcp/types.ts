@@ -52,10 +52,7 @@ export interface MCPToolResult {
 /**
  * Type for a tool handler function
  */
-export type ToolHandler = (
-  args: unknown,
-  ctx: ToolContext
-) => Promise<MCPToolResult>;
+export type ToolHandler = (args: unknown, ctx: ToolContext) => Promise<MCPToolResult>;
 
 /**
  * Metadata about the index state
@@ -97,10 +94,13 @@ export interface FilesContextResponse {
  */
 export interface FilesContextMultiResponse {
   indexInfo: IndexMetadata;
-  files: Record<string, { 
-    chunks: SearchResult[];
-    testAssociations: string[];
-  }>;
+  files: Record<
+    string,
+    {
+      chunks: SearchResult[];
+      testAssociations: string[];
+    }
+  >;
   /** Warning note when scan limit reached or other issues */
   note?: string;
 }
@@ -141,7 +141,7 @@ export interface SymbolListResponse {
 export function createIndexMetadata(
   lastIndexed: string | null,
   version: number,
-  hasData: boolean
+  hasData: boolean,
 ): IndexMetadata {
   return {
     lastIndexed,
@@ -149,4 +149,3 @@ export function createIndexMetadata(
     hasData,
   };
 }
-

@@ -2,7 +2,7 @@ import type { ChunkMetadata } from '../indexer/types.js';
 
 /**
  * Qdrant payload structure for storing chunk metadata.
- * 
+ *
  * Note: Metrics (complexity, halstead) are always present as numbers.
  * If missing in source metadata, they are stored as 0.
  */
@@ -21,20 +21,20 @@ export interface QdrantPayload {
   symbolName: string;
   symbolType: string;
   parentClass: string;
-  complexity: number;           // Always present (defaults to 0 if missing)
-  cognitiveComplexity: number;  // Always present (defaults to 0 if missing)
+  complexity: number; // Always present (defaults to 0 if missing)
+  cognitiveComplexity: number; // Always present (defaults to 0 if missing)
   parameters: string[];
   signature: string;
   imports: string[];
   // Halstead metrics
-  halsteadVolume: number;       // Always present (defaults to 0 if missing)
-  halsteadDifficulty: number;   // Always present (defaults to 0 if missing)
-  halsteadEffort: number;       // Always present (defaults to 0 if missing)
-  halsteadBugs: number;         // Always present (defaults to 0 if missing)
+  halsteadVolume: number; // Always present (defaults to 0 if missing)
+  halsteadDifficulty: number; // Always present (defaults to 0 if missing)
+  halsteadEffort: number; // Always present (defaults to 0 if missing)
+  halsteadBugs: number; // Always present (defaults to 0 if missing)
   // Symbol-level dependency tracking (v0.23.0)
   exports: string[];
-  importedSymbols: string;      // JSON-encoded Record<string, string[]>
-  callSites: string;            // JSON-encoded Array<{symbol, line}>
+  importedSymbols: string; // JSON-encoded Record<string, string[]>
+  callSites: string; // JSON-encoded Array<{symbol, line}>
   // Multi-tenant fields
   orgId: string;
   repoId: string;
@@ -52,7 +52,7 @@ export class QdrantPayloadMapper {
     private orgId: string,
     private repoId: string,
     private branch: string,
-    private commitSha: string
+    private commitSha: string,
   ) {}
 
   /**
@@ -167,7 +167,10 @@ export class QdrantPayloadMapper {
     try {
       return JSON.parse(json);
     } catch (err) {
-      console.warn(`QdrantPayloadMapper.safeJsonParse: failed to parse JSON. Returning default.`, err);
+      console.warn(
+        `QdrantPayloadMapper.safeJsonParse: failed to parse JSON. Returning default.`,
+        err,
+      );
       return defaultValue;
     }
   }
@@ -179,11 +182,11 @@ export class QdrantPayloadMapper {
     const exports = payload.exports?.length > 0 ? payload.exports : undefined;
     const importedSymbols = this.safeJsonParse<Record<string, string[]>>(
       payload.importedSymbols,
-      {}
+      {},
     );
     const callSites = this.safeJsonParse<Array<{ symbol: string; line: number }>>(
       payload.callSites,
-      []
+      [],
     );
 
     return {
@@ -216,4 +219,3 @@ export class QdrantPayloadMapper {
     };
   }
 }
-

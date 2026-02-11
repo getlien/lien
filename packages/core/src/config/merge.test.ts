@@ -125,7 +125,7 @@ describe('detectNewFields', () => {
       core: defaultConfig.core,
       mcp: defaultConfig.mcp,
     };
-    
+
     const newFields = detectNewFields(existing, defaultConfig);
 
     expect(newFields).toContain('gitDetection');
@@ -143,7 +143,7 @@ describe('detectNewFields', () => {
       fileWatching: defaultConfig.fileWatching,
       frameworks: defaultConfig.frameworks,
     };
-    
+
     const newFields = detectNewFields(existing, defaultConfig);
 
     expect(newFields).toContain('mcp.autoIndexOnFirstRun');
@@ -164,7 +164,7 @@ describe('detectNewFields', () => {
         chunkSize: 100, // Different value
       },
     };
-    
+
     const newFields = detectNewFields(existing, defaultConfig);
 
     expect(newFields).toEqual([]);
@@ -206,4 +206,3 @@ describe('detectNewFields', () => {
     expect(newFields).toContain('mcp.autoIndexOnFirstRun');
   });
 });
-

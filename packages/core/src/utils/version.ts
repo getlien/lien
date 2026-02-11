@@ -1,6 +1,6 @@
 /**
  * Version utilities for @liendev/core
- * 
+ *
  * Core package has its own version. When CLI uses core,
  * it can override this with its own package version.
  */

@@ -288,7 +288,7 @@ export { default as utils } from './utils';
       expect(exports).toContain('validateEmail');
       expect(exports).toContain('validatePhone');
       expect(exports).toContain('UserType'); // aliased export
-      expect(exports).toContain('utils');    // default re-export with alias
+      expect(exports).toContain('utils'); // default re-export with alias
     });
   });
 
@@ -306,12 +306,8 @@ function processUser(user) {
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
       const callSites = extractCallSites(funcNode, 'typescript');
 
-      expect(callSites).toContainEqual(
-        expect.objectContaining({ symbol: 'validateEmail' })
-      );
-      expect(callSites).toContainEqual(
-        expect.objectContaining({ symbol: 'validatePhone' })
-      );
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'validateEmail' }));
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'validatePhone' }));
     });
 
     it('should extract method calls', () => {
@@ -326,12 +322,8 @@ function saveUser(user) {
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
       const callSites = extractCallSites(funcNode, 'typescript');
 
-      expect(callSites).toContainEqual(
-        expect.objectContaining({ symbol: 'save' })
-      );
-      expect(callSites).toContainEqual(
-        expect.objectContaining({ symbol: 'info' })
-      );
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'save' }));
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'info' }));
     });
 
     it('should include line numbers for calls', () => {
@@ -363,12 +355,8 @@ function complex() {
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
       const callSites = extractCallSites(funcNode, 'typescript');
 
-      expect(callSites).toContainEqual(
-        expect.objectContaining({ symbol: 'outer' })
-      );
-      expect(callSites).toContainEqual(
-        expect.objectContaining({ symbol: 'inner' })
-      );
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'outer' }));
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'inner' }));
     });
 
     it('should handle conditional and loop calls', () => {
@@ -386,12 +374,8 @@ function process(items) {
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
       const callSites = extractCallSites(funcNode, 'typescript');
 
-      expect(callSites).toContainEqual(
-        expect.objectContaining({ symbol: 'validate' })
-      );
-      expect(callSites).toContainEqual(
-        expect.objectContaining({ symbol: 'transform' })
-      );
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'validate' }));
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'transform' }));
     });
 
     it('should deduplicate same-line calls', () => {
@@ -454,12 +438,8 @@ function simple() {
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
       const callSites = extractCallSites(funcNode, 'typescript');
 
-      expect(callSites).toContainEqual(
-        expect.objectContaining({ symbol: 'VectorDB', line: 2 })
-      );
-      expect(callSites).toContainEqual(
-        expect.objectContaining({ symbol: 'initialize', line: 3 })
-      );
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'VectorDB', line: 2 }));
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'initialize', line: 3 }));
     });
 
     it('should extract namespaced constructor calls (new ns.Foo())', () => {
@@ -474,9 +454,7 @@ function create() {
       const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
       const callSites = extractCallSites(funcNode, 'typescript');
 
-      expect(callSites).toContainEqual(
-        expect.objectContaining({ symbol: 'MyClass' })
-      );
+      expect(callSites).toContainEqual(expect.objectContaining({ symbol: 'MyClass' }));
     });
   });
 
@@ -698,7 +676,9 @@ use Domain\\Hobbii\\Collections\\Services\\CollectionManager;
       const parseResult = parseAST(content, 'php');
       const importedSymbols = extractImportedSymbols(parseResult.tree!.rootNode, 'php');
 
-      expect(importedSymbols['Domain\\Hobbii\\Collections\\Services\\CollectionManager']).toEqual(['CollectionManager']);
+      expect(importedSymbols['Domain\\Hobbii\\Collections\\Services\\CollectionManager']).toEqual([
+        'CollectionManager',
+      ]);
     });
   });
 
@@ -1388,4 +1368,3 @@ export default function main() {}
     });
   });
 });
-

@@ -69,4 +69,3 @@ export interface ComplexityReport {
   };
   files: Record<string, FileComplexityData>;
 }
-

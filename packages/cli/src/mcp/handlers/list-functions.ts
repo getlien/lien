@@ -24,7 +24,7 @@ async function performContentScan(
   vectorDB: VectorDBInterface,
   args: Pick<ListFunctionsInput, 'language' | 'pattern' | 'symbolType'>,
   fetchLimit: number,
-  log: LogFn
+  log: LogFn,
 ): Promise<QueryResult> {
   log('Falling back to content scan...');
 
@@ -56,7 +56,7 @@ async function queryWithFallback(
   vectorDB: VectorDBInterface,
   args: Pick<ListFunctionsInput, 'language' | 'pattern' | 'symbolType'>,
   fetchLimit: number,
-  log: LogFn
+  log: LogFn,
 ): Promise<QueryResult> {
   try {
     const results = await vectorDB.querySymbols({
@@ -97,46 +97,48 @@ function paginateResults(results: SearchResult[], offset: number, limit: number)
  * Handle list_functions tool calls.
  * Fast symbol lookup by naming pattern.
  */
-export async function handleListFunctions(
-  args: unknown,
-  ctx: ToolContext
-): Promise<MCPToolResult> {
+export async function handleListFunctions(args: unknown, ctx: ToolContext): Promise<MCPToolResult> {
   const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
-  return await wrapToolHandler(
-    ListFunctionsSchema,
-    async (validatedArgs) => {
-      log('Listing functions with symbol metadata...');
-      await checkAndReconnect();
+  return await wrapToolHandler(ListFunctionsSchema, async validatedArgs => {
+    log('Listing functions with symbol metadata...');
+    await checkAndReconnect();
 
-      const limit = validatedArgs.limit ?? 50;
-      const offset = validatedArgs.offset ?? 0;
-      // Over-fetch by 1 to detect if more results exist beyond the requested window
-      const fetchLimit = limit + offset + 1;
+    const limit = validatedArgs.limit ?? 50;
+    const offset = validatedArgs.offset ?? 0;
+    // Over-fetch by 1 to detect if more results exist beyond the requested window
+    const fetchLimit = limit + offset + 1;
 
-      const queryResult = await queryWithFallback(vectorDB, validatedArgs, fetchLimit, log);
-      const { paginatedResults, hasMore, nextOffset } = paginateResults(queryResult.results, offset, limit);
+    const queryResult = await queryWithFallback(vectorDB, validatedArgs, fetchLimit, log);
+    const { paginatedResults, hasMore, nextOffset } = paginateResults(
+      queryResult.results,
+      offset,
+      limit,
+    );
 
-      log(`Found ${paginatedResults.length} matches using ${queryResult.method} method`);
+    log(`Found ${paginatedResults.length} matches using ${queryResult.method} method`);
 
-      const notes: string[] = [];
-      if (queryResult.results.length === 0) {
-        notes.push('0 results. Try a broader regex pattern (e.g. ".*") or omit the symbolType filter. Use semantic_search for behavior-based queries.');
-      } else if (paginatedResults.length === 0 && offset > 0) {
-        notes.push('No results for this page. The offset is beyond the available results; try reducing or resetting the offset to 0.');
-      }
-      if (queryResult.method === 'content') {
-        notes.push('Using content search. Run "lien reindex" to enable faster symbol-based queries.');
-      }
-
-      return {
-        indexInfo: getIndexMetadata(),
-        method: queryResult.method,
-        hasMore,
-        ...(nextOffset !== undefined ? { nextOffset } : {}),
-        results: shapeResults(paginatedResults, 'list_functions'),
-        ...(notes.length > 0 && { note: notes.join(' ') }),
-      };
+    const notes: string[] = [];
+    if (queryResult.results.length === 0) {
+      notes.push(
+        '0 results. Try a broader regex pattern (e.g. ".*") or omit the symbolType filter. Use semantic_search for behavior-based queries.',
+      );
+    } else if (paginatedResults.length === 0 && offset > 0) {
+      notes.push(
+        'No results for this page. The offset is beyond the available results; try reducing or resetting the offset to 0.',
+      );
     }
-  )(args);
+    if (queryResult.method === 'content') {
+      notes.push('Using content search. Run "lien reindex" to enable faster symbol-based queries.');
+    }
+
+    return {
+      indexInfo: getIndexMetadata(),
+      method: queryResult.method,
+      hasMore,
+      ...(nextOffset !== undefined ? { nextOffset } : {}),
+      results: shapeResults(paginatedResults, 'list_functions'),
+      ...(notes.length > 0 && { note: notes.join(' ') }),
+    };
+  })(args);
 }

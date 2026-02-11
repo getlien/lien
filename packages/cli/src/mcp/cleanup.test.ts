@@ -32,13 +32,7 @@ describe('setupCleanupHandlers', () => {
 
   it('should return an async function', () => {
     const interval = setInterval(() => {}, 99999);
-    const cleanup = setupCleanupHandlers(
-      createMockServer(),
-      interval,
-      null,
-      null,
-      log
-    );
+    const cleanup = setupCleanupHandlers(createMockServer(), interval, null, null, log);
     expect(typeof cleanup).toBe('function');
     clearInterval(interval);
   });
@@ -47,13 +41,7 @@ describe('setupCleanupHandlers', () => {
     const interval = setInterval(() => {}, 99999);
     const clearSpy = vi.spyOn(global, 'clearInterval');
 
-    const cleanup = setupCleanupHandlers(
-      createMockServer(),
-      interval,
-      null,
-      null,
-      log
-    );
+    const cleanup = setupCleanupHandlers(createMockServer(), interval, null, null, log);
 
     await expect(cleanup()).rejects.toThrow('process.exit called');
     expect(clearSpy).toHaveBeenCalledWith(interval);
@@ -70,7 +58,7 @@ describe('setupCleanupHandlers', () => {
       versionInterval,
       gitInterval,
       null,
-      log
+      log,
     );
 
     await expect(cleanup()).rejects.toThrow('process.exit called');
@@ -87,7 +75,7 @@ describe('setupCleanupHandlers', () => {
       setInterval(() => {}, 99999),
       null,
       watcher,
-      log
+      log,
     );
 
     await expect(cleanup()).rejects.toThrow('process.exit called');
@@ -102,7 +90,7 @@ describe('setupCleanupHandlers', () => {
       setInterval(() => {}, 99999),
       null,
       null,
-      log
+      log,
     );
 
     await expect(cleanup()).rejects.toThrow('process.exit called');
@@ -118,7 +106,7 @@ describe('setupCleanupHandlers', () => {
       setInterval(() => {}, 99999),
       null,
       watcher,
-      log
+      log,
     );
 
     // process.exit is in the finally block, so it runs even if watcher.stop throws

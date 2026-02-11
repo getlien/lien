@@ -104,4 +104,3 @@ export function resetMessageCounters(): void {
   currentEmbeddingIndex = 0;
   currentModelIndex = 0;
 }
-

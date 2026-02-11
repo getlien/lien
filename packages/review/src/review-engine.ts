@@ -26,7 +26,12 @@ import {
   getPRDiffLines,
   updatePRDescription,
 } from './github-api.js';
-import { generateReview, generateLineComments, resetTokenUsage, getTokenUsage } from './openrouter.js';
+import {
+  generateReview,
+  generateLineComments,
+  resetTokenUsage,
+  getTokenUsage,
+} from './openrouter.js';
 import {
   buildReviewPrompt,
   buildNoViolationsMessage,
@@ -75,14 +80,7 @@ export interface ReviewSetup {
  * (excludes non-code files, vendor, node_modules, etc.)
  */
 export function filterAnalyzableFiles(files: string[]): string[] {
-  const codeExtensions = new Set([
-    '.ts',
-    '.tsx',
-    '.js',
-    '.jsx',
-    '.py',
-    '.php',
-  ]);
+  const codeExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.php']);
 
   const excludePatterns = [
     /node_modules\//,
@@ -97,7 +95,7 @@ export function filterAnalyzableFiles(files: string[]): string[] {
     /pnpm-lock\.yaml/,
   ];
 
-  return files.filter((file) => {
+  return files.filter(file => {
     // Check extension
     const ext = file.slice(file.lastIndexOf('.'));
     if (!codeExtensions.has(ext)) {
@@ -118,7 +116,11 @@ export function filterAnalyzableFiles(files: string[]): string[] {
 /**
  * Get and filter files eligible for complexity analysis
  */
-async function getFilesToAnalyze(octokit: Octokit, prContext: PRContext, logger: Logger): Promise<string[]> {
+async function getFilesToAnalyze(
+  octokit: Octokit,
+  prContext: PRContext,
+  logger: Logger,
+): Promise<string[]> {
   const allChangedFiles = await getPRChangedFiles(octokit, prContext);
   logger.info(`Found ${allChangedFiles.length} changed files in PR`);
 
@@ -135,7 +137,7 @@ export async function runComplexityAnalysis(
   files: string[],
   threshold: string,
   rootDir: string,
-  logger: Logger
+  logger: Logger,
 ): Promise<ComplexityReport | null> {
   if (files.length === 0) {
     logger.info('No files to analyze');
@@ -154,7 +156,9 @@ export async function runComplexityAnalysis(
       indexResult = await indexCodebase({ rootDir, force: true });
     }
 
-    logger.info(`Indexing complete: ${indexResult.chunksCreated} chunks from ${indexResult.filesIndexed} files (success: ${indexResult.success})`);
+    logger.info(
+      `Indexing complete: ${indexResult.chunksCreated} chunks from ${indexResult.filesIndexed} files (success: ${indexResult.success})`,
+    );
     if (!indexResult.success || indexResult.chunksCreated === 0) {
       logger.warning(`Indexing produced no chunks for ${rootDir}`);
       return null;
@@ -183,7 +187,7 @@ export async function runComplexityAnalysis(
  */
 function prioritizeViolations(
   violations: ComplexityViolation[],
-  report: ComplexityReport
+  report: ComplexityReport,
 ): ComplexityViolation[] {
   return violations.sort((a, b) => {
     const fileA = report.files[a.filepath];
@@ -208,15 +212,13 @@ async function prepareViolationsForReview(
   report: ComplexityReport,
   octokit: Octokit,
   prContext: PRContext,
-  logger: Logger
+  logger: Logger,
 ): Promise<{ violations: ComplexityViolation[]; codeSnippets: Map<string, string> }> {
   // Collect violations
-  const allViolations = Object.values(report.files)
-    .flatMap((fileData) => fileData.violations);
+  const allViolations = Object.values(report.files).flatMap(fileData => fileData.violations);
 
   // Prioritize by impact (dependents + severity)
-  const violations = prioritizeViolations(allViolations, report)
-    .slice(0, 10);
+  const violations = prioritizeViolations(allViolations, report).slice(0, 10);
 
   // Collect code snippets
   const codeSnippets = new Map<string, string>();
@@ -227,7 +229,7 @@ async function prepareViolationsForReview(
       violation.filepath,
       violation.startLine,
       violation.endLine,
-      logger
+      logger,
     );
     if (snippet) {
       codeSnippets.set(getViolationKey(violation), snippet);
@@ -279,7 +281,7 @@ async function analyzeBaseBranch(
   filesToAnalyze: string[],
   threshold: string,
   rootDir: string,
-  logger: Logger
+  logger: Logger,
 ): Promise<ComplexityReport | null> {
   try {
     logger.info(`Checking out base branch at ${baseSha.substring(0, 7)}...`);
@@ -326,16 +328,24 @@ async function getBaselineReport(
   prContext: PRContext,
   filesToAnalyze: string[],
   rootDir: string,
-  logger: Logger
+  logger: Logger,
 ): Promise<ComplexityReport | null> {
   if (config.enableDeltaTracking) {
     logger.info('Delta tracking enabled - analyzing base branch...');
-    return await analyzeBaseBranch(prContext.baseSha, filesToAnalyze, config.threshold, rootDir, logger);
+    return await analyzeBaseBranch(
+      prContext.baseSha,
+      filesToAnalyze,
+      config.threshold,
+      rootDir,
+      logger,
+    );
   }
 
   if (config.baselineComplexityPath) {
     // Backwards compatibility: support old baseline_complexity input
-    logger.warning('baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.');
+    logger.warning(
+      'baseline_complexity input is deprecated. Use enable_delta_tracking: true instead.',
+    );
     return loadBaselineComplexity(config.baselineComplexityPath, logger);
   }
 
@@ -355,8 +365,19 @@ export async function orchestrateAnalysis(setup: ReviewSetup): Promise<AnalysisR
     return null;
   }
 
-  const baselineReport = await getBaselineReport(config, prContext, filesToAnalyze, rootDir, logger);
-  const currentReport = await runComplexityAnalysis(filesToAnalyze, config.threshold, rootDir, logger);
+  const baselineReport = await getBaselineReport(
+    config,
+    prContext,
+    filesToAnalyze,
+    rootDir,
+    logger,
+  );
+  const currentReport = await runComplexityAnalysis(
+    filesToAnalyze,
+    config.threshold,
+    rootDir,
+    logger,
+  );
 
   if (!currentReport) {
     logger.warning('Failed to get complexity report');
@@ -383,7 +404,7 @@ export async function orchestrateAnalysis(setup: ReviewSetup): Promise<AnalysisR
  */
 export async function handleAnalysisOutputs(
   result: AnalysisResult,
-  setup: ReviewSetup
+  setup: ReviewSetup,
 ): Promise<DeltaSummary | null> {
   const { octokit, prContext, logger } = setup;
   const deltaSummary = result.deltas ? calculateDeltaSummary(result.deltas) : null;
@@ -406,7 +427,7 @@ export async function handleAnalysisOutputs(
  */
 function findCommentLine(
   violation: ComplexityViolation,
-  diffLines: Map<string, Set<number>>
+  diffLines: Map<string, Set<number>>,
 ): number | null {
   const fileLines = diffLines.get(violation.filepath);
   if (!fileLines) return null;
@@ -442,7 +463,7 @@ function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, Complexity
   return new Map(
     collect(deltas)
       .map(d => [createDeltaKey(d), d] as [string, ComplexityDelta])
-      .all()
+      .all(),
   );
 }
 
@@ -451,18 +472,26 @@ function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, Complexity
  */
 function getMetricEmoji(metricType: string): string {
   switch (metricType) {
-    case 'cyclomatic': return '🔀';
-    case 'cognitive': return '🧠';
-    case 'halstead_effort': return '⏱️';
-    case 'halstead_bugs': return '🐛';
-    default: return '📊';
+    case 'cyclomatic':
+      return '🔀';
+    case 'cognitive':
+      return '🧠';
+    case 'halstead_effort':
+      return '⏱️';
+    case 'halstead_bugs':
+      return '🐛';
+    default:
+      return '📊';
   }
 }
 
 /**
  * Format a single uncovered violation line
  */
-function formatUncoveredLine(v: ComplexityViolation, deltaMap: Map<string, ComplexityDelta>): string {
+function formatUncoveredLine(
+  v: ComplexityViolation,
+  deltaMap: Map<string, ComplexityDelta>,
+): string {
   const delta = deltaMap.get(createDeltaKey(v));
   const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
   const emoji = getMetricEmoji(v.metricType);
@@ -471,14 +500,15 @@ function formatUncoveredLine(v: ComplexityViolation, deltaMap: Map<string, Compl
   return `* \`${v.symbolName}\` in \`${v.filepath}\`: ${emoji} ${metricLabel} ${valueDisplay}${deltaStr}`;
 }
 
-const BOY_SCOUT_LINK = '[boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)';
+const BOY_SCOUT_LINK =
+  '[boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)';
 
 /**
  * Categorize uncovered violations into new/worsened vs pre-existing
  */
 function categorizeUncoveredViolations(
   violations: ComplexityViolation[],
-  deltaMap: Map<string, ComplexityDelta>
+  deltaMap: Map<string, ComplexityDelta>,
 ): { newOrWorsened: ComplexityViolation[]; preExisting: ComplexityViolation[] } {
   const newOrWorsened = violations.filter(v => {
     const delta = deltaMap.get(createDeltaKey(v));
@@ -496,7 +526,10 @@ function categorizeUncoveredViolations(
 /**
  * Format new/worsened violations section (shown prominently)
  */
-function buildNewWorsenedSection(violations: ComplexityViolation[], deltaMap: Map<string, ComplexityDelta>): string {
+function buildNewWorsenedSection(
+  violations: ComplexityViolation[],
+  deltaMap: Map<string, ComplexityDelta>,
+): string {
   if (violations.length === 0) return '';
   const list = violations.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
   return `\n\n⚠️ **${violations.length} new/worsened violation${violations.length === 1 ? '' : 's'} outside diff:**\n\n${list}`;
@@ -505,7 +538,10 @@ function buildNewWorsenedSection(violations: ComplexityViolation[], deltaMap: Ma
 /**
  * Format pre-existing violations section (collapsed)
  */
-function buildPreExistingSection(violations: ComplexityViolation[], deltaMap: Map<string, ComplexityDelta>): string {
+function buildPreExistingSection(
+  violations: ComplexityViolation[],
+  deltaMap: Map<string, ComplexityDelta>,
+): string {
   if (violations.length === 0) return '';
   const list = violations.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
   return `\n\n<details>\n<summary>ℹ️ ${violations.length} pre-existing violation${violations.length === 1 ? '' : 's'} outside diff</summary>\n\n${list}\n\n> *These violations existed before this PR. No action required, but consider the ${BOY_SCOUT_LINK}!*\n\n</details>`;
@@ -514,7 +550,10 @@ function buildPreExistingSection(violations: ComplexityViolation[], deltaMap: Ma
 /**
  * Format fallback section when no delta data is available (legacy)
  */
-function buildFallbackUncoveredSection(violations: ComplexityViolation[], deltaMap: Map<string, ComplexityDelta>): string {
+function buildFallbackUncoveredSection(
+  violations: ComplexityViolation[],
+  deltaMap: Map<string, ComplexityDelta>,
+): string {
   const list = violations.map(v => formatUncoveredLine(v, deltaMap)).join('\n');
   return `\n\n<details>\n<summary>⚠️ ${violations.length} violation${violations.length === 1 ? '' : 's'} outside diff (no inline comment)</summary>\n\n${list}\n\n> 💡 *These exist in files touched by this PR but the function declarations aren't in the diff. Consider the ${BOY_SCOUT_LINK}!*\n\n</details>`;
 }
@@ -525,19 +564,24 @@ function buildFallbackUncoveredSection(violations: ComplexityViolation[], deltaM
  */
 function buildUncoveredNote(
   uncoveredViolations: ComplexityViolation[],
-  deltaMap: Map<string, ComplexityDelta>
+  deltaMap: Map<string, ComplexityDelta>,
 ): string {
   if (uncoveredViolations.length === 0) return '';
 
-  const { newOrWorsened, preExisting } = categorizeUncoveredViolations(uncoveredViolations, deltaMap);
+  const { newOrWorsened, preExisting } = categorizeUncoveredViolations(
+    uncoveredViolations,
+    deltaMap,
+  );
 
   // Fallback: if no delta data, show all in collapsed section (legacy behavior)
   if (newOrWorsened.length === 0 && preExisting.length === 0) {
     return buildFallbackUncoveredSection(uncoveredViolations, deltaMap);
   }
 
-  return buildNewWorsenedSection(newOrWorsened, deltaMap)
-    + buildPreExistingSection(preExisting, deltaMap);
+  return (
+    buildNewWorsenedSection(newOrWorsened, deltaMap) +
+    buildPreExistingSection(preExisting, deltaMap)
+  );
 }
 
 /**
@@ -566,11 +610,13 @@ function formatCostDisplay(usage: { totalTokens: number; cost: number }): string
  * Group deltas by metric type and sum their values
  */
 function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> {
-  return collect(deltas)
-    .groupBy('metricType')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .map((group: any) => group.sum('delta'))
-    .all() as unknown as Record<string, number>;
+  return (
+    collect(deltas)
+      .groupBy('metricType')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((group: any) => group.sum('delta'))
+      .all() as unknown as Record<string, number>
+  );
 }
 
 /**
@@ -598,7 +644,11 @@ function formatDeltaDisplay(deltas: ComplexityDelta[] | null): string {
   const deltaSummary = calculateDeltaSummary(deltas);
   const deltaByMetric = groupDeltasByMetric(deltas);
 
-  if (deltaSummary.totalDelta === 0 && deltaSummary.improved === 0 && deltaSummary.newFunctions === 0) {
+  if (
+    deltaSummary.totalDelta === 0 &&
+    deltaSummary.improved === 0 &&
+    deltaSummary.newFunctions === 0
+  ) {
     return '\n\n**Complexity:** No change from this PR.';
   }
 
@@ -617,7 +667,7 @@ function formatDeltaDisplay(deltas: ComplexityDelta[] | null): string {
 function buildReviewSummary(
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
-  uncoveredNote: string
+  uncoveredNote: string,
 ): string {
   const { summary } = report;
   const costDisplay = formatCostDisplay(getTokenUsage());
@@ -650,7 +700,7 @@ function buildLineComments(
   violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
   aiComments: Map<ComplexityViolation, string>,
   deltaMap: Map<string, ComplexityDelta>,
-  logger: Logger
+  logger: Logger,
 ): LineComment[] {
   return collect(violationsWithLines)
     .filter(({ violation }) => aiComments.has(violation))
@@ -660,19 +710,30 @@ function buildLineComments(
       const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
       const severityEmoji = delta
         ? formatSeverityEmoji(delta.severity)
-        : (violation.severity === 'error' ? '🔴' : '🟡');
+        : violation.severity === 'error'
+          ? '🔴'
+          : '🟡';
 
       // If comment is not on symbol's starting line, note where it actually starts
-      const lineNote = commentLine !== violation.startLine
-        ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
-        : '';
+      const lineNote =
+        commentLine !== violation.startLine
+          ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
+          : '';
 
       // Format human-friendly complexity display
       const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
-      const valueDisplay = formatComplexityValue(violation.metricType || 'cyclomatic', violation.complexity);
-      const thresholdDisplay = formatThresholdValue(violation.metricType || 'cyclomatic', violation.threshold);
+      const valueDisplay = formatComplexityValue(
+        violation.metricType || 'cyclomatic',
+        violation.complexity,
+      );
+      const thresholdDisplay = formatThresholdValue(
+        violation.metricType || 'cyclomatic',
+        violation.threshold,
+      );
 
-      logger.info(`Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`);
+      logger.info(
+        `Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`,
+      );
 
       return {
         path: violation.filepath,
@@ -688,7 +749,7 @@ function buildLineComments(
  */
 function partitionViolationsByDiff(
   violations: ComplexityViolation[],
-  diffLines: Map<string, Set<number>>
+  diffLines: Map<string, Set<number>>,
 ): {
   withLines: Array<{ violation: ComplexityViolation; commentLine: number }>;
   uncovered: ComplexityViolation[];
@@ -713,7 +774,7 @@ function partitionViolationsByDiff(
  */
 function filterNewOrDegraded(
   violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
-  deltaMap: Map<string, ComplexityDelta>
+  deltaMap: Map<string, ComplexityDelta>,
 ): Array<{ violation: ComplexityViolation; commentLine: number }> {
   return violationsWithLines.filter(({ violation }) => {
     const key = createDeltaKey(violation);
@@ -728,7 +789,7 @@ function filterNewOrDegraded(
  */
 function getSkippedViolations(
   violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
-  deltaMap: Map<string, ComplexityDelta>
+  deltaMap: Map<string, ComplexityDelta>,
 ): ComplexityViolation[] {
   return violationsWithLines
     .filter(({ violation }) => {
@@ -755,7 +816,7 @@ interface ViolationProcessingResult {
 function processViolationsForReview(
   violations: ComplexityViolation[],
   diffLines: Map<string, Set<number>>,
-  deltaMap: Map<string, ComplexityDelta>
+  deltaMap: Map<string, ComplexityDelta>,
 ): ViolationProcessingResult {
   const { withLines, uncovered } = partitionViolationsByDiff(violations, diffLines);
   const newOrDegraded = filterNewOrDegraded(withLines, deltaMap);
@@ -775,7 +836,7 @@ async function handleNoNewViolations(
   deltaMap: Map<string, ComplexityDelta>,
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
-  logger: Logger
+  logger: Logger,
 ): Promise<void> {
   if (violationsWithLines.length === 0) {
     return;
@@ -800,10 +861,12 @@ async function generateAndPostReview(
   config: ReviewConfig,
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
-  logger: Logger
+  logger: Logger,
 ): Promise<void> {
   const commentableViolations = processed.newOrDegraded.map(v => v.violation);
-  logger.info(`Generating AI comments for ${commentableViolations.length} new/degraded violations...`);
+  logger.info(
+    `Generating AI comments for ${commentableViolations.length} new/degraded violations...`,
+  );
 
   const aiComments = await generateLineComments(
     commentableViolations,
@@ -811,7 +874,7 @@ async function generateAndPostReview(
     config.openrouterApiKey,
     config.model,
     report,
-    logger
+    logger,
   );
 
   const lineComments = buildLineComments(processed.newOrDegraded, aiComments, deltaMap, logger);
@@ -836,7 +899,7 @@ async function postLineReview(
   codeSnippets: Map<string, string>,
   config: ReviewConfig,
   logger: Logger,
-  deltas: ComplexityDelta[] | null = null
+  deltas: ComplexityDelta[] | null = null,
 ): Promise<void> {
   const diffLines = await getPRDiffLines(octokit, prContext);
   logger.info(`Diff covers ${diffLines.size} files`);
@@ -846,7 +909,7 @@ async function postLineReview(
 
   logger.info(
     `${processed.withLines.length}/${violations.length} violations can have inline comments ` +
-    `(${processed.uncovered.length} outside diff)`
+      `(${processed.uncovered.length} outside diff)`,
   );
 
   const skippedCount = processed.withLines.length - processed.newOrDegraded.length;
@@ -864,7 +927,7 @@ async function postLineReview(
       deltaMap,
       report,
       deltas,
-      logger
+      logger,
     );
     return;
   }
@@ -878,7 +941,7 @@ async function postLineReview(
     config,
     report,
     deltas,
-    logger
+    logger,
   );
 }
 
@@ -894,17 +957,12 @@ async function postSummaryReview(
   logger: Logger,
   isFallback = false,
   deltas: ComplexityDelta[] | null = null,
-  uncoveredNote: string = ''
+  uncoveredNote: string = '',
 ): Promise<void> {
   const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas);
   logger.debug(`Prompt length: ${prompt.length} characters`);
 
-  const aiReview = await generateReview(
-    prompt,
-    config.openrouterApiKey,
-    config.model,
-    logger
-  );
+  const aiReview = await generateReview(prompt, config.openrouterApiKey, config.model, logger);
 
   const usage = getTokenUsage();
   const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas, uncoveredNote);
@@ -918,7 +976,7 @@ async function postSummaryReview(
  */
 export async function postReviewIfNeeded(
   result: AnalysisResult,
-  setup: ReviewSetup
+  setup: ReviewSetup,
 ): Promise<void> {
   const { config, prContext, octokit, logger } = setup;
 
@@ -934,7 +992,7 @@ export async function postReviewIfNeeded(
     result.currentReport,
     octokit,
     prContext,
-    logger
+    logger,
   );
 
   resetTokenUsage();
@@ -954,7 +1012,7 @@ export async function postReviewIfNeeded(
       logger,
       false,
       result.deltas,
-      uncoveredNote
+      uncoveredNote,
     );
   } else {
     await postLineReview(
@@ -965,7 +1023,7 @@ export async function postReviewIfNeeded(
       codeSnippets,
       config,
       logger,
-      result.deltas
+      result.deltas,
     );
   }
 }

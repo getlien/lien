@@ -8,10 +8,14 @@ import { parseAST } from './parser.js';
 function getCognitiveComplexity(code: string): number {
   const result = parseAST(code, 'typescript');
   if (!result.tree) throw new Error('Failed to parse code');
-  
+
   // Find the first function node
   const findFunction = (node: typeof result.tree.rootNode): typeof result.tree.rootNode | null => {
-    if (node.type === 'function_declaration' || node.type === 'arrow_function' || node.type === 'method_definition') {
+    if (
+      node.type === 'function_declaration' ||
+      node.type === 'arrow_function' ||
+      node.type === 'method_definition'
+    ) {
       return node;
     }
     for (let i = 0; i < node.namedChildCount; i++) {
@@ -23,10 +27,10 @@ function getCognitiveComplexity(code: string): number {
     }
     return null;
   };
-  
+
   const funcNode = findFunction(result.tree.rootNode);
   if (!funcNode) throw new Error('No function found in code');
-  
+
   return calculateCognitiveComplexity(funcNode);
 }
 

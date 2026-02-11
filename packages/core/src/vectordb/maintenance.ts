@@ -19,12 +19,12 @@ export async function clear(
   db: LanceDBConnection,
   table: LanceDBTable | null,
   tableName: string,
-  dbPath?: string
+  dbPath?: string,
 ): Promise<void> {
   if (!db) {
     throw new DatabaseError('Vector database not initialized');
   }
-  
+
   try {
     // Clean up the .lance directory directly
     // This is more reliable than dropTable which can have locking issues
@@ -58,14 +58,11 @@ export async function clear(
 /**
  * Delete all chunks from a specific file
  */
-export async function deleteByFile(
-  table: LanceDBTable,
-  filepath: string
-): Promise<void> {
+export async function deleteByFile(table: LanceDBTable, filepath: string): Promise<void> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
-  
+
   try {
     await table.delete(`file = "${filepath}"`);
   } catch (error) {
@@ -84,16 +81,16 @@ export async function updateFile(
   filepath: string,
   vectors: Float32Array[],
   metadatas: ChunkMetadata[],
-  contents: string[]
+  contents: string[],
 ): Promise<LanceDBTable> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
-  
+
   try {
     // 1. Delete old chunks from this file
     await deleteByFile(table, filepath);
-    
+
     // 2. Insert new chunks (if any)
     let updatedTable = table;
     if (vectors.length > 0) {
@@ -102,13 +99,12 @@ export async function updateFile(
         throw new DatabaseError('insertBatch unexpectedly returned null');
       }
     }
-    
+
     // 3. Update version file to trigger MCP reconnection
     await writeVersionFile(dbPath);
-    
+
     return updatedTable;
   } catch (error) {
     throw wrapError(error, 'Failed to update file in vector database');
   }
 }
-

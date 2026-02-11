@@ -9,9 +9,9 @@ describe('LienError', () => {
       { field: 'test' },
       'high',
       false,
-      true
+      true,
     );
-    
+
     expect(error.message).toBe('Test error');
     expect(error.code).toBe(LienErrorCode.INVALID_INPUT);
     expect(error.context).toEqual({ field: 'test' });
@@ -20,13 +20,10 @@ describe('LienError', () => {
     expect(error.retryable).toBe(true);
     expect(error.name).toBe('LienError');
   });
-  
+
   it('should create error with defaults', () => {
-    const error = new LienError(
-      'Test error',
-      LienErrorCode.FILE_NOT_FOUND
-    );
-    
+    const error = new LienError('Test error', LienErrorCode.FILE_NOT_FOUND);
+
     expect(error.message).toBe('Test error');
     expect(error.code).toBe(LienErrorCode.FILE_NOT_FOUND);
     expect(error.context).toBeUndefined();
@@ -34,7 +31,7 @@ describe('LienError', () => {
     expect(error.recoverable).toBe(true);
     expect(error.retryable).toBe(false);
   });
-  
+
   it('should serialize to JSON correctly', () => {
     const error = new LienError(
       'Test error',
@@ -42,9 +39,9 @@ describe('LienError', () => {
       { path: '/test/path' },
       'high',
       false,
-      true
+      true,
     );
-    
+
     const json = error.toJSON();
     expect(json).toEqual({
       error: 'Test error',
@@ -54,13 +51,10 @@ describe('LienError', () => {
       context: { path: '/test/path' },
     });
   });
-  
+
   it('should serialize to JSON with undefined context', () => {
-    const error = new LienError(
-      'Simple error',
-      LienErrorCode.INTERNAL_ERROR
-    );
-    
+    const error = new LienError('Simple error', LienErrorCode.INTERNAL_ERROR);
+
     const json = error.toJSON();
     expect(json).toEqual({
       error: 'Simple error',
@@ -70,7 +64,7 @@ describe('LienError', () => {
       context: undefined,
     });
   });
-  
+
   it('should correctly report retryable status', () => {
     const retryable = new LienError(
       'Retryable error',
@@ -78,21 +72,21 @@ describe('LienError', () => {
       undefined,
       'medium',
       true,
-      true
+      true,
     );
     expect(retryable.isRetryable()).toBe(true);
-    
+
     const notRetryable = new LienError(
       'Not retryable',
       LienErrorCode.INVALID_INPUT,
       undefined,
       'medium',
       true,
-      false
+      false,
     );
     expect(notRetryable.isRetryable()).toBe(false);
   });
-  
+
   it('should correctly report recoverable status', () => {
     const recoverable = new LienError(
       'Recoverable error',
@@ -100,45 +94,37 @@ describe('LienError', () => {
       undefined,
       'medium',
       true,
-      false
+      false,
     );
     expect(recoverable.isRecoverable()).toBe(true);
-    
+
     const notRecoverable = new LienError(
       'Not recoverable',
       LienErrorCode.INDEX_CORRUPTED,
       undefined,
       'critical',
       false,
-      false
+      false,
     );
     expect(notRecoverable.isRecoverable()).toBe(false);
   });
-  
+
   it('should have proper stack trace', () => {
-    const error = new LienError(
-      'Test error',
-      LienErrorCode.INTERNAL_ERROR
-    );
-    
+    const error = new LienError('Test error', LienErrorCode.INTERNAL_ERROR);
+
     expect(error.stack).toBeDefined();
     expect(error.stack).toContain('LienError');
   });
-  
+
   it('should work with all severity levels', () => {
     const severities: ErrorSeverity[] = ['low', 'medium', 'high', 'critical'];
-    
+
     severities.forEach(severity => {
-      const error = new LienError(
-        'Test',
-        LienErrorCode.INTERNAL_ERROR,
-        undefined,
-        severity
-      );
+      const error = new LienError('Test', LienErrorCode.INTERNAL_ERROR, undefined, severity);
       expect(error.severity).toBe(severity);
     });
   });
-  
+
   it('should work with all error codes', () => {
     const codes = [
       LienErrorCode.CONFIG_NOT_FOUND,
@@ -153,13 +139,13 @@ describe('LienError', () => {
       LienErrorCode.INVALID_INPUT,
       LienErrorCode.INTERNAL_ERROR,
     ];
-    
+
     codes.forEach(code => {
       const error = new LienError('Test', code);
       expect(error.code).toBe(code);
     });
   });
-  
+
   it('should allow complex context objects', () => {
     const context = {
       file: 'test.ts',
@@ -170,35 +156,24 @@ describe('LienError', () => {
         received: 'number',
       },
     };
-    
-    const error = new LienError(
-      'Type error',
-      LienErrorCode.INVALID_INPUT,
-      context
-    );
-    
+
+    const error = new LienError('Type error', LienErrorCode.INVALID_INPUT, context);
+
     expect(error.context).toEqual(context);
     const json = error.toJSON();
     expect(json.context).toEqual(context);
   });
-  
+
   it('should be instanceof Error', () => {
-    const error = new LienError(
-      'Test',
-      LienErrorCode.INTERNAL_ERROR
-    );
-    
+    const error = new LienError('Test', LienErrorCode.INTERNAL_ERROR);
+
     expect(error).toBeInstanceOf(Error);
     expect(error).toBeInstanceOf(LienError);
   });
-  
+
   it('should have correct name property', () => {
-    const error = new LienError(
-      'Test',
-      LienErrorCode.INTERNAL_ERROR
-    );
-    
+    const error = new LienError('Test', LienErrorCode.INTERNAL_ERROR);
+
     expect(error.name).toBe('LienError');
   });
 });
-

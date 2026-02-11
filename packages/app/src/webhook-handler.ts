@@ -91,7 +91,10 @@ async function runPRAnalysis(
   }
 
   const currentReport = await runComplexityAnalysis(
-    filesToAnalyze, reviewConfig.threshold, headClone.dir, logger,
+    filesToAnalyze,
+    reviewConfig.threshold,
+    headClone.dir,
+    logger,
   );
 
   if (!currentReport) {
@@ -103,12 +106,22 @@ async function runPRAnalysis(
   let baselineReport = null;
   let baseClone: CloneResult | null = null;
   try {
-    baseClone = await cloneBase(payload.repository.full_name, payload.pull_request.base.ref, token, logger);
+    baseClone = await cloneBase(
+      payload.repository.full_name,
+      payload.pull_request.base.ref,
+      token,
+      logger,
+    );
     baselineReport = await runComplexityAnalysis(
-      filesToAnalyze, reviewConfig.threshold, baseClone.dir, logger,
+      filesToAnalyze,
+      reviewConfig.threshold,
+      baseClone.dir,
+      logger,
     );
   } catch (error) {
-    logger.warning(`Failed to analyze base branch: ${error instanceof Error ? error.message : String(error)}`);
+    logger.warning(
+      `Failed to analyze base branch: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   const deltas = baselineReport
@@ -138,21 +151,40 @@ export async function handlePullRequest(
 
   const { prContext, reviewConfig } = buildContexts(payload, config);
   const octokit = createOctokit(token);
-  logger.info(`Processing PR #${prContext.pullNumber} (${payload.action}) on ${payload.repository.full_name}`);
+  logger.info(
+    `Processing PR #${prContext.pullNumber} (${payload.action}) on ${payload.repository.full_name}`,
+  );
 
   let headClone: CloneResult | null = null;
   let baseClone: CloneResult | null = null;
 
   try {
-    headClone = await cloneRepo(payload.repository.full_name, payload.pull_request.head.ref, token, logger);
+    headClone = await cloneRepo(
+      payload.repository.full_name,
+      payload.pull_request.head.ref,
+      token,
+      logger,
+    );
 
-    const analysis = await runPRAnalysis(payload, octokit, token, reviewConfig, prContext, headClone, logger);
+    const analysis = await runPRAnalysis(
+      payload,
+      octokit,
+      token,
+      reviewConfig,
+      prContext,
+      headClone,
+      logger,
+    );
     if (!analysis) return;
 
     baseClone = analysis.baseClone;
 
     const setup: ReviewSetup = {
-      config: reviewConfig, prContext, octokit, logger, rootDir: headClone.dir,
+      config: reviewConfig,
+      prContext,
+      octokit,
+      logger,
+      rootDir: headClone.dir,
     };
 
     await handleAnalysisOutputs(analysis.result, setup);

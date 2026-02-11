@@ -35,7 +35,11 @@ export interface VectorDBInterface {
   /** Path to local storage (used for manifest and version files, even with remote backends like Qdrant) */
   readonly dbPath: string;
   initialize(): Promise<void>;
-  insertBatch(vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
+  insertBatch(
+    vectors: Float32Array[],
+    metadatas: ChunkMetadata[],
+    contents: string[],
+  ): Promise<void>;
   search(queryVector: Float32Array, limit?: number, query?: string): Promise<SearchResult[]>;
   scanWithFilter(options: {
     file?: string | string[];
@@ -44,10 +48,7 @@ export interface VectorDBInterface {
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }): Promise<SearchResult[]>;
-  scanAll(options?: {
-    language?: string;
-    pattern?: string;
-  }): Promise<SearchResult[]>;
+  scanAll(options?: { language?: string; pattern?: string }): Promise<SearchResult[]>;
   querySymbols(options: {
     language?: string;
     pattern?: string;
@@ -56,15 +57,17 @@ export interface VectorDBInterface {
   }): Promise<SearchResult[]>;
   clear(): Promise<void>;
   deleteByFile(filepath: string): Promise<void>;
-  updateFile(filepath: string, vectors: Float32Array[], metadatas: ChunkMetadata[], contents: string[]): Promise<void>;
+  updateFile(
+    filepath: string,
+    vectors: Float32Array[],
+    metadatas: ChunkMetadata[],
+    contents: string[],
+  ): Promise<void>;
   hasData(): Promise<boolean>;
   checkVersion(): Promise<boolean>;
   /** Scan all chunks using paginated iteration. Yields pages to avoid loading everything into memory. */
-  scanPaginated(options?: {
-    pageSize?: number;
-  }): AsyncGenerator<SearchResult[]>;
+  scanPaginated(options?: { pageSize?: number }): AsyncGenerator<SearchResult[]>;
   reconnect(): Promise<void>;
   getCurrentVersion(): number;
   getVersionDate(): string;
 }
-

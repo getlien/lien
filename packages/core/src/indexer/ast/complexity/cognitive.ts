@@ -71,18 +71,22 @@ function getChildNestingLevel(
   parent: Parser.SyntaxNode,
   child: Parser.SyntaxNode,
   currentLevel: number,
-  nonNestingTypes: Set<string>
+  nonNestingTypes: Set<string>,
 ): number {
   const isCondition = parent.childForFieldName('condition') === child;
   const isNonNestingChild = nonNestingTypes.has(child.type);
-  return (!isCondition && !isNonNestingChild) ? currentLevel + 1 : currentLevel;
+  return !isCondition && !isNonNestingChild ? currentLevel + 1 : currentLevel;
 }
 
 /**
  * Get complexity increment for nested lambda (only adds if already nested)
  */
-function getNestedLambdaIncrement(nodeType: string, nestingLevel: number, lambdaTypes: Set<string>): number {
-  return (lambdaTypes.has(nodeType) && nestingLevel > 0) ? 1 : 0;
+function getNestedLambdaIncrement(
+  nodeType: string,
+  nestingLevel: number,
+  lambdaTypes: Set<string>,
+): number {
+  return lambdaTypes.has(nodeType) && nestingLevel > 0 ? 1 : 0;
 }
 
 /** Traverse logical operator children, passing the operator type */
@@ -90,7 +94,7 @@ function traverseLogicalChildren(
   n: Parser.SyntaxNode,
   level: number,
   op: string,
-  ctx: TraversalContext
+  ctx: TraversalContext,
 ): void {
   const operator = n.childForFieldName('operator');
   for (let i = 0; i < n.namedChildCount; i++) {
@@ -104,7 +108,7 @@ function traverseNestingChildren(
   n: Parser.SyntaxNode,
   level: number,
   nonNestingTypes: Set<string>,
-  ctx: TraversalContext
+  ctx: TraversalContext,
 ): void {
   for (let i = 0; i < n.namedChildCount; i++) {
     const child = n.namedChild(i);
@@ -113,11 +117,7 @@ function traverseNestingChildren(
 }
 
 /** Traverse all children at specified level */
-function traverseAllChildren(
-  n: Parser.SyntaxNode,
-  level: number,
-  ctx: TraversalContext
-): void {
+function traverseAllChildren(n: Parser.SyntaxNode, level: number, ctx: TraversalContext): void {
   for (let i = 0; i < n.namedChildCount; i++) {
     const child = n.namedChild(i);
     if (child) ctx.traverse(child, level, null);
@@ -144,11 +144,15 @@ export function calculateCognitiveComplexity(node: Parser.SyntaxNode): number {
   const nonNestingTypes = getNonNestingTypes();
   const lambdaTypes = getLambdaTypes();
 
-  function traverse(n: Parser.SyntaxNode, nestingLevel: number, lastLogicalOp: string | null): void {
+  function traverse(
+    n: Parser.SyntaxNode,
+    nestingLevel: number,
+    lastLogicalOp: string | null,
+  ): void {
     const logicalOp = getLogicalOperator(n);
 
     if (logicalOp) {
-      complexity += (lastLogicalOp !== logicalOp) ? 1 : 0;
+      complexity += lastLogicalOp !== logicalOp ? 1 : 0;
       traverseLogicalChildren(n, nestingLevel, logicalOp, ctx);
       return;
     }

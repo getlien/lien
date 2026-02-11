@@ -1,7 +1,13 @@
 import type Parser from 'tree-sitter';
 import type { ASTChunk, SupportedLanguage } from './types.js';
 import { parseAST, detectLanguage, isASTSupported } from './parser.js';
-import { extractSymbolInfo, extractImports, extractImportedSymbols, extractExports, extractCallSites } from './symbols.js';
+import {
+  extractSymbolInfo,
+  extractImports,
+  extractImportedSymbols,
+  extractExports,
+  extractCallSites,
+} from './symbols.js';
 import { calculateCognitiveComplexity, calculateHalstead } from './complexity/index.js';
 import { getTraverser } from './traversers/index.js';
 
@@ -10,7 +16,7 @@ export interface ASTChunkOptions {
   minChunkSize?: number;
   // Multi-tenant fields (optional for backward compatibility)
   repoId?: string; // Repository identifier for multi-tenant scenarios
-  orgId?: string;  // Organization identifier for multi-tenant scenarios
+  orgId?: string; // Organization identifier for multi-tenant scenarios
 }
 
 /**
@@ -33,12 +39,12 @@ function parseAndValidate(filepath: string, content: string) {
   if (!language) {
     throw new Error(`Unsupported language for file: ${filepath}`);
   }
-  
+
   const parseResult = parseAST(content, language);
   if (!parseResult.tree) {
     throw new Error(`Failed to parse ${filepath}: ${parseResult.error}`);
   }
-  
+
   return { language, rootNode: parseResult.tree.rootNode };
 }
 
@@ -48,7 +54,7 @@ function parseAndValidate(filepath: string, content: string) {
 function prepareASTContext(
   content: string,
   rootNode: Parser.SyntaxNode,
-  language: SupportedLanguage
+  language: SupportedLanguage,
 ): ASTContext {
   return {
     lines: content.split('\n'),
@@ -68,10 +74,10 @@ function processTopLevelNode(
   content: string,
   context: ASTContext,
   language: SupportedLanguage,
-  tenantContext: { repoId?: string; orgId?: string }
+  tenantContext: { repoId?: string; orgId?: string },
 ): ASTChunk {
   const { lines, fileImports, fileExports, importedSymbols, traverser } = context;
-  
+
   // For variable declarations, try to find the function inside
   let actualNode = node;
   if (traverser.isDeclarationWithFunction(node)) {
@@ -80,12 +86,12 @@ function processTopLevelNode(
       actualNode = declInfo.functionNode;
     }
   }
-  
+
   // For methods, find the parent container name (e.g., class name)
   const parentClassName = traverser.findParentContainerName(actualNode);
   const symbolInfo = extractSymbolInfo(actualNode, content, parentClassName, language);
   const nodeContent = getNodeContent(node, lines);
-  
+
   return createChunk(
     filepath,
     node,
@@ -95,7 +101,7 @@ function processTopLevelNode(
     language,
     tenantContext,
     fileExports,
-    importedSymbols
+    importedSymbols,
   );
 }
 
@@ -108,24 +114,24 @@ function processTopLevelNodes(
   content: string,
   context: ASTContext,
   language: SupportedLanguage,
-  tenantContext: { repoId?: string; orgId?: string }
+  tenantContext: { repoId?: string; orgId?: string },
 ): ASTChunk[] {
   return topLevelNodes.map(node =>
-    processTopLevelNode(node, filepath, content, context, language, tenantContext)
+    processTopLevelNode(node, filepath, content, context, language, tenantContext),
   );
 }
 
 /**
  * Chunk a file using AST-based semantic boundaries
- * 
+ *
  * Uses Tree-sitter to parse code into an AST and extract semantic chunks
  * (functions, classes, methods) that respect code structure.
- * 
+ *
  * **Known Limitations:**
  * - Tree-sitter may fail with "Invalid argument" error on very large files (1000+ lines)
  * - When this occurs, Lien automatically falls back to line-based chunking
  * - Configure fallback behavior via `chunking.astFallback` ('line-based' or 'error')
- * 
+ *
  * @param filepath - Path to the file
  * @param content - File content
  * @param options - Chunking options
@@ -135,17 +141,17 @@ function processTopLevelNodes(
 export function chunkByAST(
   filepath: string,
   content: string,
-  options: ASTChunkOptions = {}
+  options: ASTChunkOptions = {},
 ): ASTChunk[] {
   const { minChunkSize = 5, repoId, orgId } = options;
   const tenantContext = { repoId, orgId };
-  
+
   // Parse and validate
   const { language, rootNode } = parseAndValidate(filepath, content);
-  
+
   // Prepare context
   const context = prepareASTContext(content, rootNode, language);
-  
+
   // Find and process top-level nodes
   const topLevelNodes = findTopLevelNodes(rootNode, context.traverser);
   const topLevelChunks = processTopLevelNodes(
@@ -154,9 +160,9 @@ export function chunkByAST(
     content,
     context,
     language,
-    tenantContext
+    tenantContext,
   );
-  
+
   // Extract uncovered code (imports, exports, top-level statements)
   const coveredRanges = topLevelNodes.map(n => ({
     start: n.startPosition.row,
@@ -171,19 +177,20 @@ export function chunkByAST(
     language,
     tenantContext,
     context.fileExports,
-    context.importedSymbols
+    context.importedSymbols,
   );
-  
+
   // Combine and sort by line number
-  return [...topLevelChunks, ...uncoveredChunks]
-    .sort((a, b) => a.metadata.startLine - b.metadata.startLine);
+  return [...topLevelChunks, ...uncoveredChunks].sort(
+    (a, b) => a.metadata.startLine - b.metadata.startLine,
+  );
 }
 
 /** Check if node is a function-containing declaration at top level */
 function isFunctionDeclaration(
   node: Parser.SyntaxNode,
   depth: number,
-  traverser: ReturnType<typeof getTraverser>
+  traverser: ReturnType<typeof getTraverser>,
 ): boolean {
   if (depth !== 0 || !traverser.isDeclarationWithFunction(node)) return false;
   return traverser.findFunctionInDeclaration(node).hasFunction;
@@ -193,35 +200,35 @@ function isFunctionDeclaration(
 function isTargetNode(
   node: Parser.SyntaxNode,
   depth: number,
-  traverser: ReturnType<typeof getTraverser>
+  traverser: ReturnType<typeof getTraverser>,
 ): boolean {
   return depth <= 1 && traverser.targetNodeTypes.includes(node.type);
 }
 
 /**
  * Find all top-level nodes that should become chunks
- * 
+ *
  * Uses a language-specific traverser to handle different AST structures.
  * This function is now language-agnostic - all language-specific logic
  * is delegated to the traverser.
- * 
+ *
  * @param rootNode - Root AST node
  * @param traverser - Language-specific traverser
  * @returns Array of nodes to extract as chunks
  */
 function findTopLevelNodes(
   rootNode: Parser.SyntaxNode,
-  traverser: ReturnType<typeof getTraverser>
+  traverser: ReturnType<typeof getTraverser>,
 ): Parser.SyntaxNode[] {
   const nodes: Parser.SyntaxNode[] = [];
-  
+
   function traverse(node: Parser.SyntaxNode, depth: number): void {
     // Capture function declarations and target nodes
     if (isFunctionDeclaration(node, depth, traverser) || isTargetNode(node, depth, traverser)) {
       nodes.push(node);
       return;
     }
-    
+
     // Handle containers - emit the container itself AND traverse body for children
     if (traverser.shouldExtractChildren(node)) {
       nodes.push(node);
@@ -229,7 +236,7 @@ function findTopLevelNodes(
       if (body) traverse(body, depth + 1);
       return;
     }
-    
+
     // Traverse children of traversable nodes
     if (!traverser.shouldTraverseChildren(node)) return;
     for (let i = 0; i < node.namedChildCount; i++) {
@@ -237,7 +244,7 @@ function findTopLevelNodes(
       if (child) traverse(child, depth);
     }
   }
-  
+
   traverse(rootNode, 0);
   return nodes;
 }
@@ -248,7 +255,7 @@ function findTopLevelNodes(
 function getNodeContent(node: Parser.SyntaxNode, lines: string[]): string {
   const startLine = node.startPosition.row;
   const endLine = node.endPosition.row;
-  
+
   return lines.slice(startLine, endLine + 1).join('\n');
 }
 
@@ -271,20 +278,26 @@ function buildLegacySymbols(symbolInfo: ReturnType<typeof extractSymbolInfo>): {
   classes: string[];
   interfaces: string[];
 } {
-  const symbols = { functions: [] as string[], classes: [] as string[], interfaces: [] as string[] };
-  
+  const symbols = {
+    functions: [] as string[],
+    classes: [] as string[],
+    interfaces: [] as string[],
+  };
+
   if (symbolInfo?.name && symbolInfo.type) {
     const arrayKey = SYMBOL_TYPE_TO_ARRAY[symbolInfo.type];
     if (arrayKey) symbols[arrayKey].push(symbolInfo.name);
   }
-  
+
   return symbols;
 }
 
 /**
  * Determine chunk type from symbol info
  */
-function getChunkType(symbolInfo: ReturnType<typeof extractSymbolInfo>): 'block' | 'class' | 'function' {
+function getChunkType(
+  symbolInfo: ReturnType<typeof extractSymbolInfo>,
+): 'block' | 'class' | 'function' {
   if (!symbolInfo) return 'block';
   return symbolInfo.type === 'class' ? 'class' : 'function';
 }
@@ -301,26 +314,20 @@ function createChunk(
   language: SupportedLanguage,
   tenantContext?: { repoId?: string; orgId?: string },
   fileExports?: string[],
-  importedSymbols?: Record<string, string[]>
+  importedSymbols?: Record<string, string[]>,
 ): ASTChunk {
   const symbols = buildLegacySymbols(symbolInfo);
   const shouldCalcComplexity = symbolInfo?.type && COMPLEXITY_SYMBOL_TYPES.has(symbolInfo.type);
-  
+
   // Calculate complexity metrics only for functions and methods
-  const cognitiveComplexity = shouldCalcComplexity
-    ? calculateCognitiveComplexity(node)
-    : undefined;
-  
+  const cognitiveComplexity = shouldCalcComplexity ? calculateCognitiveComplexity(node) : undefined;
+
   // Calculate Halstead metrics only for functions and methods
-  const halstead = shouldCalcComplexity
-    ? calculateHalstead(node, language)
-    : undefined;
-  
+  const halstead = shouldCalcComplexity ? calculateHalstead(node, language) : undefined;
+
   // Extract call sites for functions and methods
-  const callSites = shouldCalcComplexity
-    ? extractCallSites(node, language)
-    : undefined;
-  
+  const callSites = shouldCalcComplexity ? extractCallSites(node, language) : undefined;
+
   return {
     content,
     metadata: {
@@ -370,16 +377,13 @@ interface LineRange {
 /**
  * Find gaps between covered ranges (uncovered code)
  */
-function findUncoveredRanges(
-  coveredRanges: LineRange[],
-  totalLines: number
-): LineRange[] {
+function findUncoveredRanges(coveredRanges: LineRange[], totalLines: number): LineRange[] {
   const uncoveredRanges: LineRange[] = [];
   let currentStart = 0;
-  
+
   // Sort covered ranges
   const sortedRanges = [...coveredRanges].sort((a, b) => a.start - b.start);
-  
+
   for (const range of sortedRanges) {
     if (currentStart < range.start) {
       // There's a gap before this range
@@ -390,7 +394,7 @@ function findUncoveredRanges(
     }
     currentStart = range.end + 1;
   }
-  
+
   // Handle remaining code after last covered range
   if (currentStart < totalLines) {
     uncoveredRanges.push({
@@ -398,7 +402,7 @@ function findUncoveredRanges(
       end: totalLines - 1,
     });
   }
-  
+
   return uncoveredRanges;
 }
 
@@ -413,11 +417,11 @@ function createChunkFromRange(
   imports: string[],
   tenantContext?: { repoId?: string; orgId?: string },
   fileExports?: string[],
-  importedSymbols?: Record<string, string[]>
+  importedSymbols?: Record<string, string[]>,
 ): ASTChunk {
   const uncoveredLines = lines.slice(range.start, range.end + 1);
   const content = uncoveredLines.join('\n').trim();
-  
+
   return {
     content,
     metadata: {
@@ -460,15 +464,26 @@ function extractUncoveredCode(
   language: SupportedLanguage,
   tenantContext?: { repoId?: string; orgId?: string },
   fileExports?: string[],
-  importedSymbols?: Record<string, string[]>
+  importedSymbols?: Record<string, string[]>,
 ): ASTChunk[] {
   const uncoveredRanges = findUncoveredRanges(coveredRanges, lines.length);
-  
+
   const hasExports = fileExports && fileExports.length > 0;
 
   return uncoveredRanges
-    .map(range => createChunkFromRange(range, lines, filepath, language, imports, tenantContext, fileExports, importedSymbols))
-    .filter(chunk => hasExports ? chunk.content.length > 0 : isValidChunk(chunk, minChunkSize));
+    .map(range =>
+      createChunkFromRange(
+        range,
+        lines,
+        filepath,
+        language,
+        imports,
+        tenantContext,
+        fileExports,
+        importedSymbols,
+      ),
+    )
+    .filter(chunk => (hasExports ? chunk.content.length > 0 : isValidChunk(chunk, minChunkSize)));
 }
 
 /**
@@ -477,4 +492,3 @@ function extractUncoveredCode(
 export function shouldUseAST(filepath: string): boolean {
   return isASTSupported(filepath);
 }
-

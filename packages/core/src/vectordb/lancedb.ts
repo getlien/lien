@@ -21,37 +21,28 @@ export class VectorDB implements VectorDBInterface {
   private readonly tableName = 'code_chunks';
   private lastVersionCheck: number = 0;
   private currentVersion: number = 0;
-  
+
   constructor(projectRoot: string) {
     // Store in user's home directory under ~/.lien/indices/{projectName-hash}
     const projectName = path.basename(projectRoot);
-    
+
     // Create unique identifier from full path to prevent collisions
-    const pathHash = crypto
-      .createHash('md5')
-      .update(projectRoot)
-      .digest('hex')
-      .substring(0, 8);
-    
-    this.dbPath = path.join(
-      os.homedir(),
-      '.lien',
-      'indices',
-      `${projectName}-${pathHash}`
-    );
+    const pathHash = crypto.createHash('md5').update(projectRoot).digest('hex').substring(0, 8);
+
+    this.dbPath = path.join(os.homedir(), '.lien', 'indices', `${projectName}-${pathHash}`);
   }
-  
+
   async initialize(): Promise<void> {
     try {
       this.db = await lancedb.connect(this.dbPath);
-      
+
       try {
         this.table = await this.db.openTable(this.tableName);
       } catch {
         // Table doesn't exist yet - will be created on first insert
         this.table = null;
       }
-      
+
       // Read and cache the current version
       try {
         this.currentVersion = await readVersionFile(this.dbPath);
@@ -63,11 +54,11 @@ export class VectorDB implements VectorDBInterface {
       throw wrapError(error, 'Failed to initialize vector database', { dbPath: this.dbPath });
     }
   }
-  
+
   async insertBatch(
     vectors: Float32Array[],
     metadatas: ChunkMetadata[],
-    contents: string[]
+    contents: string[],
   ): Promise<void> {
     if (!this.db) {
       throw new DatabaseError('Vector database not initialized');
@@ -80,24 +71,24 @@ export class VectorDB implements VectorDBInterface {
       this.tableName,
       vectors,
       metadatas,
-      contents
+      contents,
     );
   }
-  
+
   async search(
     queryVector: Float32Array,
     limit: number = 5,
-    query?: string
+    query?: string,
   ): Promise<SearchResult[]> {
     if (!this.table) {
       throw new DatabaseError('Vector database not initialized');
     }
-    
+
     try {
       return await queryOps.search(this.table, queryVector, limit, query);
     } catch (error) {
       const errorMsg = String(error);
-      
+
       // Detect corrupted index or missing data files
       if (errorMsg.includes('Not found:') || errorMsg.includes('.lance')) {
         // Attempt to reconnect - index may have been rebuilt
@@ -110,15 +101,15 @@ export class VectorDB implements VectorDBInterface {
         } catch (retryError: unknown) {
           throw new DatabaseError(
             `Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory.`,
-            { originalError: retryError }
+            { originalError: retryError },
           );
         }
       }
-      
+
       throw error;
     }
   }
-  
+
   async scanWithFilter(options: {
     file?: string | string[];
     language?: string;
@@ -131,17 +122,19 @@ export class VectorDB implements VectorDBInterface {
     }
     return queryOps.scanWithFilter(this.table, options);
   }
-  
+
   /**
    * Scan all chunks in the database
    * Fetches total count first, then retrieves all chunks in a single optimized query
    * @param options - Filter options (language, pattern)
    * @returns All matching chunks
    */
-  async scanAll(options: {
-    language?: string;
-    pattern?: string;
-  } = {}): Promise<SearchResult[]> {
+  async scanAll(
+    options: {
+      language?: string;
+      pattern?: string;
+    } = {},
+  ): Promise<SearchResult[]> {
     if (!this.table) {
       throw new DatabaseError('Vector database not initialized');
     }
@@ -152,9 +145,11 @@ export class VectorDB implements VectorDBInterface {
    * Scan all chunks using paginated queries.
    * Yields pages of SearchResult[] to avoid loading everything into memory.
    */
-  async *scanPaginated(options: {
-    pageSize?: number;
-  } = {}): AsyncGenerator<SearchResult[]> {
+  async *scanPaginated(
+    options: {
+      pageSize?: number;
+    } = {},
+  ): AsyncGenerator<SearchResult[]> {
     if (!this.table) {
       throw new DatabaseError('Vector database not initialized');
     }
@@ -172,7 +167,7 @@ export class VectorDB implements VectorDBInterface {
     }
     return queryOps.querySymbols(this.table, options);
   }
-  
+
   async clear(): Promise<void> {
     if (!this.db) {
       throw new DatabaseError('Vector database not initialized');
@@ -181,19 +176,19 @@ export class VectorDB implements VectorDBInterface {
     this.table = null;
     await maintenanceOps.clear(this.db, null, this.tableName, this.dbPath);
   }
-  
+
   async deleteByFile(filepath: string): Promise<void> {
     if (!this.table) {
       throw new DatabaseError('Vector database not initialized');
     }
     await maintenanceOps.deleteByFile(this.table, filepath);
   }
-  
+
   async updateFile(
     filepath: string,
     vectors: Float32Array[],
     metadatas: ChunkMetadata[],
-    contents: string[]
+    contents: string[],
   ): Promise<void> {
     if (!this.db) {
       throw new DatabaseError('Vector database connection not initialized');
@@ -209,89 +204,88 @@ export class VectorDB implements VectorDBInterface {
       filepath,
       vectors,
       metadatas,
-      contents
+      contents,
     );
   }
-  
+
   async checkVersion(): Promise<boolean> {
     const now = Date.now();
-    
+
     // Cache version checks for 1 second to minimize I/O
     if (now - this.lastVersionCheck < 1000) {
       return false;
     }
-    
+
     this.lastVersionCheck = now;
-    
+
     try {
       const version = await readVersionFile(this.dbPath);
-      
+
       if (version > this.currentVersion) {
         this.currentVersion = version;
         return true;
       }
-      
+
       return false;
     } catch {
       // If we can't read version file, don't reconnect
       return false;
     }
   }
-  
+
   async reconnect(): Promise<void> {
     try {
       // Close existing connections to force reload from disk
       this.table = null;
       this.db = null;
-      
+
       // Reinitialize with fresh connection
       await this.initialize();
     } catch (error) {
       throw wrapError(error, 'Failed to reconnect to vector database');
     }
   }
-  
+
   getCurrentVersion(): number {
     return this.currentVersion;
   }
-  
+
   getVersionDate(): string {
     if (this.currentVersion === 0) {
       return 'Unknown';
     }
     return new Date(this.currentVersion).toLocaleString();
   }
-  
+
   async hasData(): Promise<boolean> {
     if (!this.table) {
       return false;
     }
-    
+
     try {
       const count = await this.table.countRows();
-      
+
       if (count === 0) {
         return false;
       }
-      
+
       // Sample a few rows to verify they contain real data
       const sample = await this.table
         .search(Array(EMBEDDING_DIMENSION).fill(0))
         .limit(Math.min(count, 5))
         .toArray();
-      
-      const hasRealData = (sample as unknown as any[]).some((r: any) => 
-        r.content && 
-        r.content.trim().length > 0
+
+      const hasRealData = (sample as unknown as any[]).some(
+        (r: any) => r.content && r.content.trim().length > 0,
       );
-      
+
       return hasRealData;
     } catch {
       // If any error occurs, assume no data
       return false;
     }
   }
-  
+
   static async load(projectRoot: string): Promise<VectorDB> {
     const db = new VectorDB(projectRoot);
     await db.initialize();

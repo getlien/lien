@@ -57,7 +57,10 @@ describe('createGitignoreFilter', () => {
   });
 
   it('should handle comments and blank lines in .gitignore', async () => {
-    await fs.writeFile(path.join(testDir, '.gitignore'), '# Build output\ndist/\n\n# Temp files\n*.tmp\n');
+    await fs.writeFile(
+      path.join(testDir, '.gitignore'),
+      '# Build output\ndist/\n\n# Temp files\n*.tmp\n',
+    );
 
     const isIgnored = await createGitignoreFilter(testDir);
 
@@ -81,7 +84,10 @@ describe('createGitignoreFilter', () => {
   });
 
   it('should not allow .gitignore negations to override built-in patterns', async () => {
-    await fs.writeFile(path.join(testDir, '.gitignore'), '!node_modules/\n!.lien/\n!vendor/\n!.git/\n');
+    await fs.writeFile(
+      path.join(testDir, '.gitignore'),
+      '!node_modules/\n!.lien/\n!vendor/\n!.git/\n',
+    );
 
     const isIgnored = await createGitignoreFilter(testDir);
 

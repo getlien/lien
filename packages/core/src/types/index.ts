@@ -1,6 +1,6 @@
 /**
  * @liendev/core types
- * 
+ *
  * All shared types for Lien - single source of truth
  */
 
@@ -8,11 +8,11 @@
 export type { ChunkMetadata, CodeChunk, ScanOptions } from '../indexer/types.js';
 export type { SearchResult, VectorDBInterface } from '../vectordb/types.js';
 export type { EmbeddingService } from '../embeddings/types.js';
-export type { 
-  LienConfig, 
+export type {
+  LienConfig,
   LegacyLienConfig,
-  FrameworkConfig, 
-  FrameworkInstance 
+  FrameworkConfig,
+  FrameworkInstance,
 } from '../config/schema.js';
 export type { GitState } from '../git/tracker.js';
 export type { RelevanceCategory } from '../vectordb/relevance.js';

@@ -81,7 +81,7 @@ describe('Background git reindex reconnect guard', () => {
         createMockEmbeddings(),
         log,
         reindexStateManager,
-        checkAndReconnect
+        checkAndReconnect,
       );
 
       expect(checkAndReconnect).toHaveBeenCalledOnce();
@@ -99,7 +99,7 @@ describe('Background git reindex reconnect guard', () => {
         createMockEmbeddings(),
         log,
         reindexStateManager,
-        checkAndReconnect
+        checkAndReconnect,
       );
 
       expect(checkAndReconnect).not.toHaveBeenCalled();
@@ -119,7 +119,7 @@ describe('Background git reindex reconnect guard', () => {
         createMockEmbeddings(),
         log,
         reindexStateManager,
-        checkAndReconnect
+        checkAndReconnect,
       );
 
       // Advance past the poll interval
@@ -142,7 +142,7 @@ describe('Background git reindex reconnect guard', () => {
         createMockEmbeddings(),
         log,
         reindexStateManager,
-        checkAndReconnect
+        checkAndReconnect,
       );
 
       await handler();
@@ -162,7 +162,7 @@ describe('Background git reindex reconnect guard', () => {
         createMockEmbeddings(),
         log,
         reindexStateManager,
-        checkAndReconnect
+        checkAndReconnect,
       );
 
       await handler();

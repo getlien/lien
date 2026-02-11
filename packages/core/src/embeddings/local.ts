@@ -34,39 +34,37 @@ export class LocalEmbeddings implements EmbeddingService {
 
     return this.initPromise;
   }
-  
+
   async embed(text: string): Promise<Float32Array> {
     await this.initialize();
-    
+
     if (!this.extractor) {
       throw new EmbeddingError('Embedding model not initialized');
     }
-    
+
     try {
       const output = await this.extractor(text, {
         pooling: 'mean',
         normalize: true,
       });
-      
+
       return output.data as Float32Array;
     } catch (error: unknown) {
       throw wrapError(error, 'Failed to generate embedding', { textLength: text.length });
     }
   }
-  
+
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
     await this.initialize();
-    
+
     if (!this.extractor) {
       throw new EmbeddingError('Embedding model not initialized');
     }
-    
+
     try {
       // Process embeddings with Promise.all for concurrent execution
       // Each call is sequential but Promise.all allows task interleaving
-      const results = await Promise.all(
-        texts.map(text => this.embed(text))
-      );
+      const results = await Promise.all(texts.map(text => this.embed(text)));
       return results;
     } catch (error: unknown) {
       throw wrapError(error, 'Failed to generate batch embeddings', { batchSize: texts.length });
@@ -78,4 +76,3 @@ export class LocalEmbeddings implements EmbeddingService {
     this.initPromise = null;
   }
 }
-
