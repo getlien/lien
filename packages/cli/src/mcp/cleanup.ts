@@ -12,7 +12,10 @@ export function setupCleanupHandlers(
   fileWatcher: FileWatcher | null,
   log: LogFn
 ): () => Promise<void> {
+  let cleaningUp = false;
   return async () => {
+    if (cleaningUp) return;
+    cleaningUp = true;
     try {
       log('Shutting down MCP server...');
       await server.close();
