@@ -130,7 +130,7 @@ async function processFileContent(
   if (chunks.length === 0) {
     // Empty file - return null so caller can handle appropriately
     if (verbose) {
-      console.log(`[Lien] Empty file (0 chunks): ${filepath}`);
+      console.error(`[Lien] Empty file (0 chunks): ${filepath}`);
     }
     return null;
   }
@@ -189,7 +189,7 @@ export async function indexSingleFile(
     } catch {
       // File doesn't exist - delete from index and manifest using normalized path
       if (verbose) {
-        console.log(`[Lien] File deleted: ${normalizedPath}`);
+        console.error(`[Lien] File deleted: ${normalizedPath}`);
       }
       await vectorDB.deleteByFile(normalizedPath);
       
@@ -238,7 +238,7 @@ export async function indexSingleFile(
     });
     
     if (verbose) {
-      console.log(`[Lien] ✓ Updated ${normalizedPath} (${result.chunkCount} chunks)`);
+      console.error(`[Lien] ✓ Updated ${normalizedPath} (${result.chunkCount} chunks)`);
     }
   } catch (error) {
     // Log error but don't throw - we want to continue with other files
@@ -341,7 +341,7 @@ async function handleNonEmptyFile(
   });
   
   if (verbose) {
-    console.log(`[Lien] ✓ Updated ${storedPath} (${processResult.chunkCount} chunks)`);
+    console.error(`[Lien] ✓ Updated ${storedPath} (${processResult.chunkCount} chunks)`);
   }
 }
 
@@ -364,7 +364,7 @@ async function handleFileNotFound(
     await manifest.removeFile(normalizedPath);
   } catch {
     if (verbose) {
-      console.log(`[Lien] Note: ${normalizedPath} not in index`);
+      console.error(`[Lien] Note: ${normalizedPath} not in index`);
     }
   }
 }

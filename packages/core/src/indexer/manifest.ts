@@ -375,10 +375,6 @@ export class ManifestManager {
         await this.save(manifest);
       }
       
-      if (skippedByHash > 0) {
-        console.log(`[Lien] Skipped ${skippedByHash} file(s) with unchanged content`);
-      }
-      
       return changedFiles;
     });
     
