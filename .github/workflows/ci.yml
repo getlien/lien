@@ -26,12 +26,12 @@ jobs:
       
       - name: Install dependencies
         run: npm ci
-      
-      - name: Build Core (required by CLI)
-        run: npm run build -w @liendev/core
-      
+
       - name: Format check
         run: npm run format:check
+
+      - name: Build Core (required by CLI)
+        run: npm run build -w @liendev/core
 
       - name: Lint
         run: npm run lint
