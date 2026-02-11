@@ -46,9 +46,10 @@ for (const def of definitions) {
   }
 }
 
-// Validate LANGUAGE_IDS has no duplicates and matches definitions
+// Validate LANGUAGE_IDS has no duplicates and every ID has a definition
 if (new Set(LANGUAGE_IDS).size !== LANGUAGE_IDS.length) {
-  throw new Error('LANGUAGE_IDS contains duplicate entries');
+  const dupes = LANGUAGE_IDS.filter((id, i) => LANGUAGE_IDS.indexOf(id) !== i);
+  throw new Error(`LANGUAGE_IDS contains duplicate entries: ${dupes.join(', ')}`);
 }
 for (const id of LANGUAGE_IDS) {
   if (!languageRegistry.has(id)) {
