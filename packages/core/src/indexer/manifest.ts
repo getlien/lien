@@ -376,7 +376,7 @@ export class ManifestManager {
       }
       
       if (skippedByHash > 0) {
-        console.log(`[Lien] Skipped ${skippedByHash} file(s) with unchanged content`);
+        console.error(`[Lien] Skipped ${skippedByHash} file(s) with unchanged content`);
       }
       
       return changedFiles;
