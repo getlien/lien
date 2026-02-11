@@ -17,7 +17,9 @@ describe('config command', () => {
     vi.clearAllMocks();
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('process.exit'); });
+    vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit');
+    });
     mockLoadGlobalConfig.mockResolvedValue({ backend: 'lancedb' });
     mockMergeGlobalConfig.mockResolvedValue({ backend: 'lancedb' });
   });
@@ -42,13 +44,18 @@ describe('config command', () => {
 
     it('should allow free-form values for qdrant.url', async () => {
       await configSetCommand('qdrant.url', 'http://localhost:6333');
-      expect(mockMergeGlobalConfig).toHaveBeenCalledWith({ qdrant: { url: 'http://localhost:6333' } });
+      expect(mockMergeGlobalConfig).toHaveBeenCalledWith({
+        qdrant: { url: 'http://localhost:6333' },
+      });
     });
   });
 
   describe('configGetCommand', () => {
     it('should display a set value', async () => {
-      mockLoadGlobalConfig.mockResolvedValue({ backend: 'qdrant', qdrant: { url: 'http://localhost:6333' } });
+      mockLoadGlobalConfig.mockResolvedValue({
+        backend: 'qdrant',
+        qdrant: { url: 'http://localhost:6333' },
+      });
       await configGetCommand('backend');
       expect(console.log).toHaveBeenCalledWith(expect.stringContaining('qdrant'));
     });

@@ -15,7 +15,7 @@ export interface SetupCommandOptions {
 /**
  * Sets up common CLI command initialization
  * Handles banner display and logging setup
- * 
+ *
  * @param options - Setup options
  */
 export async function setupCommand(options: SetupCommandOptions = {}): Promise<void> {
@@ -74,11 +74,11 @@ export class TaskSpinner {
    */
   fail(text: string, error?: Error | unknown): void {
     this.spinner.fail(text);
-    
+
     if (error) {
       const errorMsg = getErrorMessage(error);
       console.error(chalk.red(`Error: ${errorMsg}`));
-      
+
       // Show stack trace for non-Lien errors in verbose mode
       if (!isLienError(error)) {
         const stack = getErrorStack(error);
@@ -114,7 +114,7 @@ export class TaskSpinner {
 /**
  * Handles command errors with consistent formatting
  * Distinguishes between Lien errors and unexpected errors
- * 
+ *
  * @param error - The error that occurred
  * @param verbose - Whether to show verbose error output
  */
@@ -124,7 +124,7 @@ export function handleCommandError(error: unknown, verbose: boolean = false): vo
   if (isLienError(error)) {
     // Lien-specific error - show clean message
     console.error(chalk.red(`\n❌ ${errorMessage}\n`));
-    
+
     if (error.context && verbose) {
       console.error(chalk.dim('Context:'));
       console.error(chalk.dim(JSON.stringify(error.context, null, 2)));
@@ -132,7 +132,7 @@ export function handleCommandError(error: unknown, verbose: boolean = false): vo
   } else {
     // Unexpected error - show full details
     console.error(chalk.red(`\n❌ Unexpected error: ${errorMessage}\n`));
-    
+
     const stack = getErrorStack(error);
     if (stack && verbose) {
       console.error(chalk.dim('Stack trace:'));
@@ -174,4 +174,3 @@ export function formatFileCount(count: number): string {
 export function formatChunkCount(count: number): string {
   return `${count} chunk${count === 1 ? '' : 's'}`;
 }
-

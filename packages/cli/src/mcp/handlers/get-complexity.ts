@@ -2,7 +2,12 @@ import collect from 'collect.js';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetComplexitySchema } from '../schemas/index.js';
 import { ComplexityAnalyzer, QdrantDB } from '@liendev/core';
-import type { ComplexityViolation, FileComplexityData, ComplexityReport, VectorDBInterface } from '@liendev/core';
+import type {
+  ComplexityViolation,
+  FileComplexityData,
+  ComplexityReport,
+  VectorDBInterface,
+} from '@liendev/core';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 
 // ============================================================================
@@ -54,15 +59,15 @@ function transformViolation(v: ComplexityViolation, fileData: FileComplexityData
  */
 function groupViolationsByRepo(
   violations: TransformedViolation[],
-  allChunks: ChunkWithRepo[]
+  allChunks: ChunkWithRepo[],
 ): Record<string, TransformedViolation[]> {
   const fileToRepo = new Map<string, string>();
-  
+
   for (const chunk of allChunks) {
     const repoId = chunk.metadata.repoId || 'unknown';
     fileToRepo.set(chunk.metadata.file, repoId);
   }
-  
+
   const grouped: Record<string, TransformedViolation[]> = {};
   for (const violation of violations) {
     const repoId = fileToRepo.get(violation.filepath) || 'unknown';
@@ -71,7 +76,7 @@ function groupViolationsByRepo(
     }
     grouped[repoId].push(violation);
   }
-  
+
   return grouped;
 }
 
@@ -83,18 +88,18 @@ async function fetchCrossRepoChunks(
   vectorDB: VectorDBInterface,
   crossRepo: boolean | undefined,
   repoIds: string[] | undefined,
-  log: LogFn
+  log: LogFn,
 ): Promise<CrossRepoResult> {
   if (!crossRepo) {
     return { chunks: [], fallback: false };
   }
-  
+
   if (vectorDB instanceof QdrantDB) {
     const chunks = await vectorDB.scanCrossRepo({ limit: 100000, repoIds });
     log(`Scanned ${chunks.length} chunks across repos`);
     return { chunks, fallback: false };
   }
-  
+
   return { chunks: [], fallback: true };
 }
 
@@ -105,20 +110,22 @@ async function fetchCrossRepoChunks(
 function processViolations(
   report: ComplexityReport,
   threshold: number | undefined,
-  top: number
+  top: number,
 ): ProcessedViolations {
   const allViolations: TransformedViolation[] = collect(Object.entries(report.files))
-    .flatMap(([/* filepath unused */, fileData]) => 
-      fileData.violations.map(v => transformViolation(v, fileData))
+    .flatMap(([, /* filepath unused */ fileData]) =>
+      fileData.violations.map(v => transformViolation(v, fileData)),
     )
     .sortByDesc('complexity')
     .all() as unknown as TransformedViolation[];
 
-  const violations = threshold !== undefined
-    ? allViolations.filter(v => v.complexity >= threshold)
-    : allViolations;
+  const violations =
+    threshold !== undefined ? allViolations.filter(v => v.complexity >= threshold) : allViolations;
 
-  const severityCounts = collect(violations).countBy('severity').all() as { error?: number; warning?: number };
+  const severityCounts = collect(violations).countBy('severity').all() as {
+    error?: number;
+    warning?: number;
+  };
 
   return {
     violations,
@@ -147,60 +154,59 @@ function buildCrossRepoFallbackNote(fallback: boolean): string | undefined {
  * Handle get_complexity tool calls.
  * Analyzes complexity for files or the entire codebase.
  */
-export async function handleGetComplexity(
-  args: unknown,
-  ctx: ToolContext
-): Promise<MCPToolResult> {
+export async function handleGetComplexity(args: unknown, ctx: ToolContext): Promise<MCPToolResult> {
   const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
-  return await wrapToolHandler(
-    GetComplexitySchema,
-    async (validatedArgs) => {
-      const { crossRepo, repoIds, files, top, threshold } = validatedArgs;
-      log(`Analyzing complexity${crossRepo ? ' (cross-repo)' : ''}...`);
-      await checkAndReconnect();
+  return await wrapToolHandler(GetComplexitySchema, async validatedArgs => {
+    const { crossRepo, repoIds, files, top, threshold } = validatedArgs;
+    log(`Analyzing complexity${crossRepo ? ' (cross-repo)' : ''}...`);
+    await checkAndReconnect();
 
-      // Step 1: Fetch cross-repo chunks if needed
-      const { chunks: allChunks, fallback } = await fetchCrossRepoChunks(
-        vectorDB,
-        crossRepo,
-        repoIds,
-        log
+    // Step 1: Fetch cross-repo chunks if needed
+    const { chunks: allChunks, fallback } = await fetchCrossRepoChunks(
+      vectorDB,
+      crossRepo,
+      repoIds,
+      log,
+    );
+
+    // Step 2: Run complexity analysis
+    const analyzer = new ComplexityAnalyzer(vectorDB);
+    const report = await analyzer.analyze(files, crossRepo && !fallback, repoIds);
+    log(`Analyzed ${report.summary.filesAnalyzed} files`);
+
+    // Step 3: Process violations
+    const { violations, topViolations, bySeverity } = processViolations(
+      report,
+      threshold,
+      top ?? 10,
+    );
+
+    // Step 4: Build response
+    const note = buildCrossRepoFallbackNote(fallback);
+    if (note) {
+      log(
+        'Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo analysis.',
+        'warning',
       );
+    }
 
-      // Step 2: Run complexity analysis
-      const analyzer = new ComplexityAnalyzer(vectorDB);
-      const report = await analyzer.analyze(files, crossRepo && !fallback, repoIds);
-      log(`Analyzed ${report.summary.filesAnalyzed} files`);
-
-      // Step 3: Process violations
-      const { violations, topViolations, bySeverity } = processViolations(
-        report,
-        threshold,
-        top ?? 10
-      );
-
-      // Step 4: Build response
-      const note = buildCrossRepoFallbackNote(fallback);
-      if (note) {
-        log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo analysis.', 'warning');
-      }
-
-      return {
-        indexInfo: getIndexMetadata(),
-        summary: {
-          filesAnalyzed: report.summary.filesAnalyzed,
-          avgComplexity: report.summary.avgComplexity,
-          maxComplexity: report.summary.maxComplexity,
-          violationCount: violations.length,
-          bySeverity,
-        },
-        violations: topViolations,
-        ...(crossRepo && !fallback && allChunks.length > 0 && {
+    return {
+      indexInfo: getIndexMetadata(),
+      summary: {
+        filesAnalyzed: report.summary.filesAnalyzed,
+        avgComplexity: report.summary.avgComplexity,
+        maxComplexity: report.summary.maxComplexity,
+        violationCount: violations.length,
+        bySeverity,
+      },
+      violations: topViolations,
+      ...(crossRepo &&
+        !fallback &&
+        allChunks.length > 0 && {
           groupedByRepo: groupViolationsByRepo(topViolations, allChunks),
         }),
-        ...(note && { note }),
-      };
-    }
-  )(args);
+      ...(note && { note }),
+    };
+  })(args);
 }

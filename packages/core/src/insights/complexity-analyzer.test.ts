@@ -44,8 +44,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             complexity: 5, // Below threshold
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
       ];
 
@@ -75,8 +75,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             complexity: 20, // Above threshold (15), warning level
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
         {
           content: 'function error() { }',
@@ -90,8 +90,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             complexity: 32, // >= 2x threshold (30) = error
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
       ];
 
@@ -118,8 +118,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             complexity: 15,
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
         {
           content: 'function test2() { }',
@@ -133,8 +133,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             complexity: 20,
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
       ];
 
@@ -174,8 +174,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             complexity: 5,
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
         {
           content: 'function b() { }',
@@ -189,8 +189,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             complexity: 15,
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
         {
           content: 'function c() { }',
@@ -204,8 +204,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             complexity: 10,
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
       ];
 
@@ -232,8 +232,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             // No complexity field
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
       ];
 
@@ -260,8 +260,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             complexity: 5,
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
         // File with 1 warning (>= 15, < 30)
         {
@@ -276,8 +276,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             complexity: 20, // Warning level (>= 15, < 30)
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
         // File with 1 error (>= 30)
         {
@@ -292,8 +292,8 @@ describe('ComplexityAnalyzer', () => {
             symbolType: 'function',
             complexity: 35, // Error level (>= 30)
           } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
+          score: 1.0,
+          relevance: 'highly_relevant' as const,
         },
       ];
 
@@ -368,17 +368,17 @@ describe('ComplexityAnalyzer', () => {
 
       // Should have 2 violations: one cyclomatic, one cognitive
       expect(report.summary.totalViolations).toBe(2);
-      
+
       const violations = report.files['src/test.ts'].violations;
       expect(violations).toHaveLength(2);
-      
+
       const cyclomaticViolation = violations.find(v => v.metricType === 'cyclomatic');
       const cognitiveViolation = violations.find(v => v.metricType === 'cognitive');
-      
+
       expect(cyclomaticViolation).toBeDefined();
       expect(cyclomaticViolation!.complexity).toBe(20);
       expect(cyclomaticViolation!.message).toContain('test cases');
-      
+
       expect(cognitiveViolation).toBeDefined();
       expect(cognitiveViolation!.complexity).toBe(18);
       expect(cognitiveViolation!.message).toContain('Mental load');
@@ -526,7 +526,7 @@ describe('ComplexityAnalyzer', () => {
       const violations = report.files['src/test.ts'].violations;
       const effortViolation = violations.find(v => v.metricType === 'halstead_effort');
       const bugsViolation = violations.find(v => v.metricType === 'halstead_bugs');
-      
+
       expect(effortViolation).toBeDefined();
       expect(bugsViolation).toBeDefined();
     });
@@ -676,7 +676,7 @@ describe('ComplexityAnalyzer', () => {
       const report = await analyzer.analyze();
 
       const fileData = report.files['src/utils.ts'];
-      
+
       // Should be boosted to critical due to high dependent count (35 > 30)
       expect(fileData.dependentCount).toBe(35);
       expect(fileData.riskLevel).toBe('critical');
@@ -729,4 +729,3 @@ describe('ComplexityAnalyzer', () => {
     });
   });
 });
-

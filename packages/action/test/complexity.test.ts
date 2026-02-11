@@ -45,10 +45,7 @@ describe('filterAnalyzableFiles', () => {
   });
 
   it('should exclude node_modules', () => {
-    const files = [
-      'node_modules/lodash/index.js',
-      'node_modules/@types/node/index.d.ts',
-    ];
+    const files = ['node_modules/lodash/index.js', 'node_modules/@types/node/index.d.ts'];
     const result = filterAnalyzableFiles(files);
 
     expect(result).toEqual([]);

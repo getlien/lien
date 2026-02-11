@@ -1,6 +1,6 @@
 /**
  * Core indexing module - programmatic API without CLI dependencies.
- * 
+ *
  * This module provides the core indexing functionality that can be used by:
  * - @liendev/cli (with UI wrapper)
  * - @liendev/action (directly)
@@ -96,11 +96,7 @@ interface IndexingConfig {
  */
 function extractRepoId(projectRoot: string): string {
   const projectName = path.basename(projectRoot);
-  const pathHash = crypto
-    .createHash('md5')
-    .update(projectRoot)
-    .digest('hex')
-    .substring(0, 8);
+  const pathHash = crypto.createHash('md5').update(projectRoot).digest('hex').substring(0, 8);
   return `${projectName}-${pathHash}`;
 }
 
@@ -108,7 +104,7 @@ function extractRepoId(projectRoot: string): string {
 function getIndexingConfig(rootDir: string): IndexingConfig {
   // Use defaults for all settings - no config needed!
   const repoId = extractRepoId(rootDir);
-  
+
   // orgId is now handled in createVectorDB() via global config and git remote detection
   // No need to extract it here anymore
 
@@ -146,19 +142,19 @@ export async function scanFilesToIndex(rootDir: string): Promise<string[]> {
 async function updateGitState(
   rootDir: string,
   vectorDB: VectorDBInterface,
-  manifest: ManifestManager
+  manifest: ManifestManager,
 ): Promise<void> {
   const gitAvailable = await isGitAvailable();
   const isRepo = await isGitRepo(rootDir);
-  
+
   if (!gitAvailable || !isRepo) {
     return;
   }
-  
+
   const gitTracker = new GitStateTracker(rootDir, vectorDB.dbPath);
   await gitTracker.initialize();
   const gitState = gitTracker.getState();
-  
+
   if (gitState) {
     await manifest.updateGitState(gitState);
   }
@@ -170,14 +166,14 @@ async function updateGitState(
 async function handleDeletions(
   deletedFiles: string[],
   vectorDB: VectorDBInterface,
-  manifest: ManifestManager
+  manifest: ManifestManager,
 ): Promise<number> {
   if (deletedFiles.length === 0) {
     return 0;
   }
-  
+
   let removedCount = 0;
-  
+
   for (const filepath of deletedFiles) {
     try {
       await vectorDB.deleteByFile(filepath);
@@ -187,7 +183,7 @@ async function handleDeletions(
       // Continue on error, just count failures
     }
   }
-  
+
   return removedCount;
 }
 
@@ -200,21 +196,19 @@ async function handleUpdates(
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
   options: IndexingOptions,
-  rootDir: string
+  rootDir: string,
 ): Promise<number> {
   const filesToIndex = [...addedFiles, ...modifiedFiles];
-  
+
   if (filesToIndex.length === 0) {
     return 0;
   }
-  
-  const count = await indexMultipleFiles(
-    filesToIndex,
-    vectorDB,
-    embeddings,
-    { verbose: options.verbose, rootDir }
-  );
-  
+
+  const count = await indexMultipleFiles(filesToIndex, vectorDB, embeddings, {
+    verbose: options.verbose,
+    rootDir,
+  });
+
   await writeVersionFile(vectorDB.dbPath);
   return count;
 }
@@ -225,7 +219,7 @@ async function handleUpdates(
  */
 async function withEmbeddings<T>(
   preInitialized: EmbeddingService | undefined,
-  operation: (embeddings: EmbeddingService) => Promise<T>
+  operation: (embeddings: EmbeddingService) => Promise<T>,
 ): Promise<T> {
   const ownEmbeddings = !preInitialized;
   const embeddings = preInitialized ?? new WorkerEmbeddings();
@@ -254,7 +248,7 @@ interface IncrementalChanges {
  */
 async function detectIncrementalChanges(
   rootDir: string,
-  vectorDB: VectorDBInterface
+  vectorDB: VectorDBInterface,
 ): Promise<IncrementalChanges | null> {
   const manifest = new ManifestManager(vectorDB.dbPath);
   const savedManifest = await manifest.load();
@@ -280,7 +274,7 @@ async function tryIncrementalIndex(
   rootDir: string,
   vectorDB: VectorDBInterface,
   options: IndexingOptions,
-  startTime: number
+  startTime: number,
 ): Promise<IndexingResult | null> {
   const detected = await detectIncrementalChanges(rootDir, vectorDB);
 
@@ -307,7 +301,7 @@ async function tryIncrementalIndex(
       incremental: true,
     };
   }
-  
+
   // Fast path: deletions-only — no need to initialize embeddings
   if (totalChanges === 0 && totalDeleted > 0) {
     await handleDeletions(changes.deleted, vectorDB, manifest);
@@ -334,7 +328,7 @@ async function tryIncrementalIndex(
     message: `Detected ${totalChanges} files to index, ${totalDeleted} to remove`,
   });
 
-  return await withEmbeddings(options.embeddings, async (embeddings) => {
+  return await withEmbeddings(options.embeddings, async embeddings => {
     await handleDeletions(changes.deleted, vectorDB, manifest);
     const indexedCount = await handleUpdates(
       changes.added,
@@ -342,7 +336,7 @@ async function tryIncrementalIndex(
       vectorDB,
       embeddings,
       options,
-      rootDir
+      rootDir,
     );
 
     await updateGitState(rootDir, vectorDB, manifest);
@@ -376,7 +370,7 @@ async function processFileForIndexing(
   batchProcessor: ChunkBatchProcessor,
   indexConfig: IndexingConfig,
   progressTracker: { incrementFiles: () => void },
-  _verbose: boolean
+  _verbose: boolean,
 ): Promise<boolean> {
   try {
     // Resolve relative paths against rootDir for file I/O
@@ -408,7 +402,9 @@ async function processFileForIndexing(
 
     return true;
   } catch (error) {
-    console.error(`[indexer] Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `[indexer] Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`,
+    );
     progressTracker.incrementFiles();
     return false;
   }
@@ -419,10 +415,10 @@ async function processFileForIndexing(
  */
 function createProgressTracker(
   files: string[],
-  onProgress?: (progress: IndexingProgress) => void
+  onProgress?: (progress: IndexingProgress) => void,
 ): ProgressTracker {
   const processedCount = { value: 0 };
-  
+
   return {
     incrementFiles: () => {
       processedCount.value++;
@@ -446,10 +442,10 @@ function createProgressTracker(
 async function saveIndexResults(
   batchProcessor: ChunkBatchProcessor,
   vectorDB: VectorDBInterface,
-  rootDir: string
+  rootDir: string,
 ): Promise<void> {
   const { indexedFiles } = batchProcessor.getResults();
-  
+
   const manifest = new ManifestManager(vectorDB.dbPath);
   await manifest.updateFiles(
     indexedFiles.map(entry => ({
@@ -457,7 +453,7 @@ async function saveIndexResults(
       lastModified: entry.mtime,
       chunkCount: entry.chunkCount,
       contentHash: entry.contentHash,
-    }))
+    })),
   );
 
   // Save git state if in a git repo
@@ -476,20 +472,25 @@ async function batchProcessFiles(
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
   progressTracker: ProgressTracker,
-  verbose: boolean
+  verbose: boolean,
 ): Promise<ChunkBatchProcessor> {
   const indexConfig = getIndexingConfig(rootDir);
 
-  const bp = new ChunkBatchProcessor(vectorDB, embeddings, {
-    batchThreshold: 100,
-    embeddingBatchSize: indexConfig.embeddingBatchSize,
-  }, progressTracker);
+  const bp = new ChunkBatchProcessor(
+    vectorDB,
+    embeddings,
+    {
+      batchThreshold: 100,
+      embeddingBatchSize: indexConfig.embeddingBatchSize,
+    },
+    progressTracker,
+  );
 
   const limit = pLimit(indexConfig.concurrency);
   await Promise.all(
     files.map(file =>
-      limit(() => processFileForIndexing(file, rootDir, bp, indexConfig, progressTracker, verbose))
-    )
+      limit(() => processFileForIndexing(file, rootDir, bp, indexConfig, progressTracker, verbose)),
+    ),
   );
 
   await bp.flush();
@@ -503,7 +504,7 @@ async function performFullIndex(
   rootDir: string,
   vectorDB: VectorDBInterface,
   options: IndexingOptions,
-  startTime: number
+  startTime: number,
 ): Promise<IndexingResult> {
   // 1. Clear existing index
   options.onProgress?.({ phase: 'initializing', message: 'Clearing existing index...' });
@@ -541,8 +542,15 @@ async function performFullIndex(
       filesProcessed: 0,
     });
 
-    const batchProcessor = await withEmbeddings(options.embeddings,
-      (embeddings) => batchProcessFiles(files, rootDir, vectorDB, embeddings, progressTracker, options.verbose ?? false)
+    const batchProcessor = await withEmbeddings(options.embeddings, embeddings =>
+      batchProcessFiles(
+        files,
+        rootDir,
+        vectorDB,
+        embeddings,
+        progressTracker,
+        options.verbose ?? false,
+      ),
     );
 
     // 4. Save results
@@ -579,26 +587,26 @@ async function performFullIndex(
 
 /**
  * Index a codebase, creating vector embeddings for semantic search.
- * 
+ *
  * This is the main entry point for indexing. It:
  * - Tries incremental indexing first (if not forced)
  * - Falls back to full indexing if needed
  * - Provides progress callbacks for UI integration
- * 
+ *
  * @param options - Indexing options
  * @returns Indexing result with stats
- * 
+ *
  * @example
  * ```typescript
  * // Basic usage
  * const result = await indexCodebase({ rootDir: '/path/to/project' });
- * 
+ *
  * // With progress callback
  * const result = await indexCodebase({
  *   rootDir: '/path/to/project',
  *   onProgress: (p) => console.log(`${p.phase}: ${p.message}`)
  * });
- * 
+ *
  * // With pre-initialized embeddings (warm worker)
  * const embeddings = new WorkerEmbeddings();
  * await embeddings.initialize();
@@ -608,15 +616,15 @@ async function performFullIndex(
 export async function indexCodebase(options: IndexingOptions = {}): Promise<IndexingResult> {
   const rootDir = options.rootDir ?? process.cwd();
   const startTime = Date.now();
-  
+
   try {
     options.onProgress?.({ phase: 'initializing', message: 'Loading configuration...' });
-    
+
     // Initialize vector database (use factory to select backend from global config)
     options.onProgress?.({ phase: 'initializing', message: 'Initializing vector database...' });
     const vectorDB = await createVectorDB(rootDir);
     await vectorDB.initialize();
-    
+
     // Try incremental indexing first (unless forced)
     if (!options.force) {
       const incrementalResult = await tryIncrementalIndex(rootDir, vectorDB, options, startTime);
@@ -624,10 +632,9 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<Inde
         return incrementalResult;
       }
     }
-    
+
     // Fall back to full index
     return await performFullIndex(rootDir, vectorDB, options, startTime);
-    
   } catch (error) {
     return {
       success: false,

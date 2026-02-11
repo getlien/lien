@@ -8,10 +8,7 @@ export type OutputFormat = 'text' | 'json' | 'sarif';
 /**
  * Format complexity report in the specified format
  */
-export function formatReport(
-  report: ComplexityReport,
-  format: OutputFormat
-): string {
+export function formatReport(report: ComplexityReport, format: OutputFormat): string {
   switch (format) {
     case 'json':
       return formatJsonReport(report);
@@ -25,4 +22,3 @@ export function formatReport(
 
 // Export individual formatters
 export { formatTextReport, formatJsonReport, formatSarifReport };
-

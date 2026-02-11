@@ -18,17 +18,17 @@ export class LienError extends Error {
     public readonly context?: Record<string, unknown>,
     public readonly severity: ErrorSeverity = 'medium',
     public readonly recoverable: boolean = true,
-    public readonly retryable: boolean = false
+    public readonly retryable: boolean = false,
   ) {
     super(message);
     this.name = 'LienError';
-    
+
     // Maintains proper stack trace for where our error was thrown (only available on V8)
     if (Error.captureStackTrace) {
       Error.captureStackTrace(this, this.constructor);
     }
   }
-  
+
   /**
    * Serialize error to JSON for MCP responses
    */
@@ -41,14 +41,14 @@ export class LienError extends Error {
       context: this.context,
     };
   }
-  
+
   /**
    * Check if this error is retryable
    */
   isRetryable(): boolean {
     return this.retryable;
   }
-  
+
   /**
    * Check if this error is recoverable
    */
@@ -74,7 +74,7 @@ export class IndexingError extends LienError {
   constructor(
     message: string,
     public readonly file?: string,
-    context?: Record<string, unknown>
+    context?: Record<string, unknown>,
   ) {
     super(message, LienErrorCode.INTERNAL_ERROR, { ...context, file }, 'medium', true, false);
     this.name = 'IndexingError';
@@ -111,22 +111,22 @@ export class DatabaseError extends LienError {
 export function wrapError(
   error: unknown,
   context: string,
-  additionalContext?: Record<string, unknown>
+  additionalContext?: Record<string, unknown>,
 ): LienError {
   const message = error instanceof Error ? error.message : String(error);
   const stack = error instanceof Error ? error.stack : undefined;
-  
+
   const wrappedError = new LienError(
     `${context}: ${message}`,
     LienErrorCode.INTERNAL_ERROR,
-    additionalContext
+    additionalContext,
   );
-  
+
   // Preserve original stack trace if available
   if (stack) {
     wrappedError.stack = `${wrappedError.stack}\n\nCaused by:\n${stack}`;
   }
-  
+
   return wrappedError;
 }
 
@@ -160,4 +160,3 @@ export function getErrorStack(error: unknown): string | undefined {
   }
   return undefined;
 }
-

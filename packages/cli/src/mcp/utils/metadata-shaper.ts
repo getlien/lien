@@ -4,11 +4,7 @@ import type { SearchResult, ChunkMetadata, RelevanceCategory } from '@liendev/co
  * Tool names that support metadata shaping.
  * get_dependents and get_complexity use their own response formats.
  */
-export type ToolName =
-  | 'semantic_search'
-  | 'find_similar'
-  | 'get_files_context'
-  | 'list_functions';
+export type ToolName = 'semantic_search' | 'find_similar' | 'get_files_context' | 'list_functions';
 
 /**
  * Slim metadata included in MCP tool responses.
@@ -63,25 +59,50 @@ type AllowlistKey = keyof ChunkMetadata & keyof ToolResultMetadata;
  */
 const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<AllowlistKey>> = {
   semantic_search: new Set<AllowlistKey>([
-    'language', 'type',
-    'symbolName', 'symbolType', 'signature', 'parentClass',
-    'parameters', 'exports', 'repoId',
+    'language',
+    'type',
+    'symbolName',
+    'symbolType',
+    'signature',
+    'parentClass',
+    'parameters',
+    'exports',
+    'repoId',
   ]),
   find_similar: new Set<AllowlistKey>([
-    'language', 'type',
-    'symbolName', 'symbolType', 'signature', 'parentClass',
-    'parameters', 'exports',
+    'language',
+    'type',
+    'symbolName',
+    'symbolType',
+    'signature',
+    'parentClass',
+    'parameters',
+    'exports',
   ]),
   get_files_context: new Set<AllowlistKey>([
-    'language', 'type',
-    'symbolName', 'symbolType', 'signature', 'parentClass',
-    'parameters', 'exports',
-    'imports', 'importedSymbols', 'callSites', 'symbols',
+    'language',
+    'type',
+    'symbolName',
+    'symbolType',
+    'signature',
+    'parentClass',
+    'parameters',
+    'exports',
+    'imports',
+    'importedSymbols',
+    'callSites',
+    'symbols',
   ]),
   list_functions: new Set<AllowlistKey>([
-    'language', 'type',
-    'symbolName', 'symbolType', 'signature', 'parentClass',
-    'parameters', 'exports', 'symbols',
+    'language',
+    'type',
+    'symbolName',
+    'symbolType',
+    'signature',
+    'parentClass',
+    'parameters',
+    'exports',
+    'symbols',
   ]),
 };
 
@@ -94,7 +115,12 @@ const FIELD_ALLOWLISTS: Record<ToolName, ReadonlySet<AllowlistKey>> = {
 export function deduplicateResults(results: SearchResult[]): SearchResult[] {
   const seen = new Set<string>();
   return results.filter(r => {
-    const key = JSON.stringify([r.metadata.repoId ?? '', r.metadata.file, r.metadata.startLine, r.metadata.endLine]);
+    const key = JSON.stringify([
+      r.metadata.repoId ?? '',
+      r.metadata.file,
+      r.metadata.startLine,
+      r.metadata.endLine,
+    ]);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -122,7 +148,10 @@ function cleanMetadataValue(key: string, value: unknown): unknown | null {
       classes: filterArr(symbols.classes),
       interfaces: filterArr(symbols.interfaces),
     };
-    const hasAny = filtered.functions.length > 0 || filtered.classes.length > 0 || filtered.interfaces.length > 0;
+    const hasAny =
+      filtered.functions.length > 0 ||
+      filtered.classes.length > 0 ||
+      filtered.interfaces.length > 0;
     return hasAny ? filtered : null;
   }
 
@@ -135,7 +164,7 @@ function cleanMetadataValue(key: string, value: unknown): unknown | null {
  */
 function pickMetadata(
   metadata: ChunkMetadata,
-  allowlist: ReadonlySet<AllowlistKey>
+  allowlist: ReadonlySet<AllowlistKey>,
 ): ToolResultMetadata {
   const result: ToolResultMetadata = {
     file: metadata.file,

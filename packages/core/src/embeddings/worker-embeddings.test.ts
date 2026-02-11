@@ -17,23 +17,35 @@ describe('WorkerEmbeddings', () => {
   });
 
   describe('initialize', () => {
-    it('should initialize the worker and load the model', async () => {
-      await expect(embeddings.initialize()).resolves.not.toThrow();
-    }, DOWNLOAD_TIMEOUT);
+    it(
+      'should initialize the worker and load the model',
+      async () => {
+        await expect(embeddings.initialize()).resolves.not.toThrow();
+      },
+      DOWNLOAD_TIMEOUT,
+    );
 
-    it('should be idempotent - multiple calls should work', async () => {
-      await embeddings.initialize();
-      await embeddings.initialize();
-      await embeddings.initialize();
-    }, DOWNLOAD_TIMEOUT);
+    it(
+      'should be idempotent - multiple calls should work',
+      async () => {
+        await embeddings.initialize();
+        await embeddings.initialize();
+        await embeddings.initialize();
+      },
+      DOWNLOAD_TIMEOUT,
+    );
 
-    it('should handle concurrent initialization calls', async () => {
-      await Promise.all([
-        embeddings.initialize(),
-        embeddings.initialize(),
-        embeddings.initialize(),
-      ]);
-    }, DOWNLOAD_TIMEOUT);
+    it(
+      'should handle concurrent initialization calls',
+      async () => {
+        await Promise.all([
+          embeddings.initialize(),
+          embeddings.initialize(),
+          embeddings.initialize(),
+        ]);
+      },
+      DOWNLOAD_TIMEOUT,
+    );
   });
 
   describe('embed', () => {
@@ -133,16 +145,24 @@ describe('WorkerEmbeddings', () => {
   });
 
   describe('dispose', () => {
-    it('should terminate cleanly', async () => {
-      await embeddings.initialize();
-      await expect(embeddings.dispose()).resolves.not.toThrow();
-    }, DOWNLOAD_TIMEOUT);
+    it(
+      'should terminate cleanly',
+      async () => {
+        await embeddings.initialize();
+        await expect(embeddings.dispose()).resolves.not.toThrow();
+      },
+      DOWNLOAD_TIMEOUT,
+    );
 
-    it('should be safe to call multiple times', async () => {
-      await embeddings.initialize();
-      await embeddings.dispose();
-      await embeddings.dispose();
-    }, DOWNLOAD_TIMEOUT);
+    it(
+      'should be safe to call multiple times',
+      async () => {
+        await embeddings.initialize();
+        await embeddings.dispose();
+        await embeddings.dispose();
+      },
+      DOWNLOAD_TIMEOUT,
+    );
 
     it('should be safe to call without initialization', async () => {
       await expect(embeddings.dispose()).resolves.not.toThrow();

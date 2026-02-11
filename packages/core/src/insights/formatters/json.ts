@@ -7,7 +7,7 @@ import type { ComplexityReport } from '../types.js';
 export function formatJsonReport(report: ComplexityReport): string {
   // Filter to only files with violations - no point showing files with empty arrays
   const filesWithViolations = Object.fromEntries(
-    Object.entries(report.files).filter(([_, data]) => data.violations.length > 0)
+    Object.entries(report.files).filter(([_, data]) => data.violations.length > 0),
   );
 
   const filteredReport: ComplexityReport = {
@@ -17,4 +17,3 @@ export function formatJsonReport(report: ComplexityReport): string {
 
   return JSON.stringify(filteredReport, null, 2);
 }
-

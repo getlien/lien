@@ -6,7 +6,7 @@ const VERSION_FILE = '.lien-index-version';
 /**
  * Writes a version timestamp file to mark when the index was last updated.
  * This file is used by the MCP server to detect when it needs to reconnect.
- * 
+ *
  * @param indexPath - Path to the index directory
  */
 export async function writeVersionFile(indexPath: string): Promise<void> {
@@ -23,7 +23,7 @@ export async function writeVersionFile(indexPath: string): Promise<void> {
 /**
  * Reads the version timestamp from the index directory.
  * Returns 0 if the file doesn't exist (e.g., old index).
- * 
+ *
  * @param indexPath - Path to the index directory
  * @returns Version timestamp, or 0 if not found
  */
@@ -38,4 +38,3 @@ export async function readVersionFile(indexPath: string): Promise<number> {
     return 0;
   }
 }
-

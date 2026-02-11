@@ -46,10 +46,10 @@ interface DatabaseRecord {
   halsteadBugs: number;
   // Symbol-level dependency tracking (v0.23.0)
   exports: string[];
-  importedSymbolPaths: string[];    // Import paths (keys from importedSymbols map)
-  importedSymbolNames: string[];    // JSON-encoded symbol arrays (values from importedSymbols map)
-  callSiteSymbols: string[];        // Called symbol names
-  callSiteLines: number[];          // Line numbers of calls (parallel array)
+  importedSymbolPaths: string[]; // Import paths (keys from importedSymbols map)
+  importedSymbolNames: string[]; // JSON-encoded symbol arrays (values from importedSymbols map)
+  callSiteSymbols: string[]; // Called symbol names
+  callSiteLines: number[]; // Line numbers of calls (parallel array)
 }
 
 /**
@@ -90,7 +90,7 @@ const ARROW_EMPTY_NUMBER_PLACEHOLDER = [0];
 
 /**
  * Serialize callSites into parallel arrays for Arrow storage.
- * 
+ *
  * Note: Uses ARROW_EMPTY_STRING_PLACEHOLDER and ARROW_EMPTY_NUMBER_PLACEHOLDER
  * for missing data. This is required for Arrow type inference - empty arrays cause
  * schema inference failures.
@@ -116,11 +116,11 @@ function serializeCallSites(callSites?: Array<{ symbol: string; line: number }>)
 function transformChunkToRecord(
   vector: Float32Array,
   content: string,
-  metadata: ChunkMetadata
+  metadata: ChunkMetadata,
 ): DatabaseRecord {
   const importedSymbolsSerialized = serializeImportedSymbols(metadata.importedSymbols);
   const callSitesSerialized = serializeCallSites(metadata.callSites);
-  
+
   return {
     vector: Array.from(vector),
     content,
@@ -187,7 +187,7 @@ function splitBatchInHalf(batch: BatchToProcess): [BatchToProcess, BatchToProces
  */
 function transformBatchToRecords(batch: BatchToProcess): DatabaseRecord[] {
   return batch.vectors.map((vector, i) =>
-    transformChunkToRecord(vector, batch.contents[i], batch.metadatas[i])
+    transformChunkToRecord(vector, batch.contents[i], batch.metadatas[i]),
   );
 }
 
@@ -199,12 +199,12 @@ function validateBatchInputs(
   db: LanceDBConnection,
   vectors: Float32Array[],
   metadatas: ChunkMetadata[],
-  contents: string[]
+  contents: string[],
 ): void {
   if (!db) {
     throw new DatabaseError('Vector database not initialized');
   }
-  
+
   if (vectors.length !== metadatas.length || vectors.length !== contents.length) {
     throw new DatabaseError('Vectors, metadatas, and contents arrays must have the same length', {
       vectorsLength: vectors.length,
@@ -222,27 +222,23 @@ function chunkIntoBatches(
   vectors: Float32Array[],
   metadatas: ChunkMetadata[],
   contents: string[],
-  batchSize: number
+  batchSize: number,
 ): Array<[Float32Array[], ChunkMetadata[], string[]]> {
   if (vectors.length <= batchSize) {
     return [[vectors, metadatas, contents]];
   }
-  
+
   const batches: Array<[Float32Array[], ChunkMetadata[], string[]]> = [];
   for (let i = 0; i < vectors.length; i += batchSize) {
     const end = Math.min(i + batchSize, vectors.length);
-    batches.push([
-      vectors.slice(i, end),
-      metadatas.slice(i, end),
-      contents.slice(i, end),
-    ]);
+    batches.push([vectors.slice(i, end), metadatas.slice(i, end), contents.slice(i, end)]);
   }
   return batches;
 }
 
 /**
  * Insert a batch of vectors into the database
- * 
+ *
  * @returns The table instance after insertion, or null only when:
  *          - vectors.length === 0 AND table === null (no-op case)
  *          For non-empty batches, always returns a valid table or throws.
@@ -254,23 +250,30 @@ export async function insertBatch(
   tableName: string,
   vectors: Float32Array[],
   metadatas: ChunkMetadata[],
-  contents: string[]
+  contents: string[],
 ): Promise<LanceDBTable | null> {
   validateBatchInputs(db, vectors, metadatas, contents);
-  
+
   // Handle empty batch gracefully - return table as-is (could be null)
   if (vectors.length === 0) {
     return table;
   }
-  
+
   // Process batches
   const batches = chunkIntoBatches(vectors, metadatas, contents, VECTOR_DB_MAX_BATCH_SIZE);
-  
+
   let currentTable = table;
   for (const [batchVectors, batchMetadatas, batchContents] of batches) {
-    currentTable = await insertBatchInternal(db, currentTable, tableName, batchVectors, batchMetadatas, batchContents);
+    currentTable = await insertBatchInternal(
+      db,
+      currentTable,
+      tableName,
+      batchVectors,
+      batchMetadatas,
+      batchContents,
+    );
   }
-  
+
   if (!currentTable) {
     throw new DatabaseError('Failed to create table during batch insert');
   }
@@ -280,7 +283,7 @@ export async function insertBatch(
 /**
  * Internal method to insert a single batch with iterative retry logic.
  * Uses a queue-based approach to handle batch splitting on failure.
- * 
+ *
  * @returns Always returns a valid LanceDBTable or throws DatabaseError
  */
 async function insertBatchInternal(
@@ -289,17 +292,17 @@ async function insertBatchInternal(
   tableName: string,
   vectors: Float32Array[],
   metadatas: ChunkMetadata[],
-  contents: string[]
+  contents: string[],
 ): Promise<LanceDBTable> {
   const queue: BatchToProcess[] = [{ vectors, metadatas, contents }];
   const failedBatches: BatchToProcess[] = [];
   let currentTable = table;
   let lastError: Error | undefined;
-  
+
   while (queue.length > 0) {
     const batch = queue.shift()!;
     const insertResult = await tryInsertBatch(db, currentTable, tableName, batch);
-    
+
     if (insertResult.success) {
       currentTable = insertResult.table;
     } else {
@@ -307,13 +310,13 @@ async function insertBatchInternal(
       handleBatchFailure(batch, queue, failedBatches);
     }
   }
-  
+
   throwIfBatchesFailed(failedBatches, lastError);
-  
+
   if (!currentTable) {
     throw new DatabaseError('Failed to create table during batch insert');
   }
-  
+
   return currentTable;
 }
 
@@ -334,11 +337,11 @@ async function tryInsertBatch(
   db: LanceDBConnection,
   currentTable: LanceDBTable | null,
   tableName: string,
-  batch: BatchToProcess
+  batch: BatchToProcess,
 ): Promise<InsertResult> {
   try {
     const records = transformBatchToRecords(batch);
-    
+
     if (!currentTable) {
       const newTable = await db.createTable(tableName, records);
       return { success: true, table: newTable };
@@ -358,7 +361,7 @@ async function tryInsertBatch(
 function handleBatchFailure(
   batch: BatchToProcess,
   queue: BatchToProcess[],
-  failedBatches: BatchToProcess[]
+  failedBatches: BatchToProcess[],
 ): void {
   if (batch.vectors.length > VECTOR_DB_MIN_BATCH_SIZE) {
     // Split and retry
@@ -376,15 +379,12 @@ function handleBatchFailure(
  */
 function throwIfBatchesFailed(failedBatches: BatchToProcess[], lastError?: Error): void {
   if (failedBatches.length === 0) return;
-  
+
   const totalFailed = failedBatches.reduce((sum, batch) => sum + batch.vectors.length, 0);
-  throw new DatabaseError(
-    `Failed to insert ${totalFailed} record(s) after retry attempts`,
-    {
-      failedBatches: failedBatches.length,
-      totalRecords: totalFailed,
-      sampleFile: failedBatches[0].metadatas[0].file,
-      lastError: lastError?.message,
-    }
-  );
+  throw new DatabaseError(`Failed to insert ${totalFailed} record(s) after retry attempts`, {
+    failedBatches: failedBatches.length,
+    totalRecords: totalFailed,
+    sampleFile: failedBatches[0].metadatas[0].file,
+    lastError: lastError?.message,
+  });
 }

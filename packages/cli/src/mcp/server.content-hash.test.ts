@@ -36,7 +36,7 @@ describe('Stage 4: Content-Hash Based Change Detection', () => {
     it('should return same hash for identical content', async () => {
       const testFile = path.join(testDir, 'test.ts');
       const content = 'export const TEST = "value";';
-      
+
       await fs.writeFile(testFile, content);
       const hash1 = await computeContentHash(testFile);
 
@@ -51,7 +51,7 @@ describe('Stage 4: Content-Hash Based Change Detection', () => {
 
     it('should return different hash for different content', async () => {
       const testFile = path.join(testDir, 'test.ts');
-      
+
       await fs.writeFile(testFile, 'export const TEST = "value1";');
       const hash1 = await computeContentHash(testFile);
 
@@ -83,7 +83,7 @@ describe('Stage 4: Content-Hash Based Change Detection', () => {
 
     it('should NOT detect changes to middle of large files (known limitation)', async () => {
       const testFile = path.join(testDir, 'large-middle.ts');
-      
+
       // Create 2MB file with distinct head, middle, and tail
       const head = 'HEAD'.repeat(2048); // First 8KB
       const middle = 'MIDDLE'.repeat(300000); // ~1.8MB middle
@@ -100,7 +100,7 @@ describe('Stage 4: Content-Hash Based Change Detection', () => {
 
       // Known limitation: hashes are identical because only head + tail + size are sampled
       expect(hash1).toBe(hash2);
-      
+
       // Sanity check: modifying head or tail DOES change the hash
       await fs.writeFile(testFile, 'MODIFIED' + head + middle + tail);
       const hash3 = await computeContentHash(testFile);
@@ -161,7 +161,7 @@ describe('Stage 4: Content-Hash Based Change Detection', () => {
       // the handler would check hash before calling indexSingleFile
       const testFile = path.join(testDir, 'test.ts');
       const content = 'export const TEST = "value";';
-      
+
       await fs.writeFile(testFile, content);
       const hash1 = await computeContentHash(testFile);
 
@@ -190,7 +190,7 @@ describe('Stage 4: Content-Hash Based Change Detection', () => {
 
     it('should reindex when content actually changes', async () => {
       const testFile = path.join(testDir, 'test.ts');
-      
+
       await fs.writeFile(testFile, 'original content');
       const hash1 = await computeContentHash(testFile);
 

@@ -99,7 +99,7 @@ describe('mapCommentsToViolations', () => {
   const createViolation = (
     filepath: string,
     symbolName: string,
-    symbolType = 'function'
+    symbolType = 'function',
   ): ComplexityViolation => ({
     filepath,
     symbolName,

@@ -3,8 +3,16 @@ import type Parser from 'tree-sitter';
 import type { SymbolInfo } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
-import type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from '../extractors/types.js';
-import { extractSignature, extractParameters, extractReturnType } from '../extractors/symbol-helpers.js';
+import type {
+  LanguageExportExtractor,
+  LanguageImportExtractor,
+  LanguageSymbolExtractor,
+} from '../extractors/types.js';
+import {
+  extractSignature,
+  extractParameters,
+  extractReturnType,
+} from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -21,21 +29,13 @@ import { calculateComplexity } from '../complexity/index.js';
  * - Closures exist but are not top-level declarations
  */
 export class RustTraverser implements LanguageTraverser {
-  targetNodeTypes = [
-    'function_item',
-    'function_signature_item',
-  ];
+  targetNodeTypes = ['function_item', 'function_signature_item'];
 
-  containerTypes = [
-    'impl_item',
-    'trait_item',
-  ];
+  containerTypes = ['impl_item', 'trait_item'];
 
   declarationTypes: string[] = [];
 
-  functionTypes = [
-    'closure_expression',
-  ];
+  functionTypes = ['closure_expression'];
 
   shouldExtractChildren(node: Parser.SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
@@ -53,9 +53,9 @@ export class RustTraverser implements LanguageTraverser {
   }
 
   shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
-    return node.type === 'source_file' ||
-           node.type === 'declaration_list' ||
-           node.type === 'mod_item';
+    return (
+      node.type === 'source_file' || node.type === 'declaration_list' || node.type === 'mod_item'
+    );
   }
 
   findParentContainerName(node: Parser.SyntaxNode): string | undefined {
@@ -137,10 +137,7 @@ export class RustExportExtractor implements LanguageExportExtractor {
     return exports;
   }
 
-  private extractExportName(
-    node: Parser.SyntaxNode,
-    addExport: (name: string) => void
-  ): void {
+  private extractExportName(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
     if (node.type === 'use_declaration') {
       const argument = node.childForFieldName('argument');
       if (argument) {
@@ -312,7 +309,9 @@ export class RustImportExtractor implements LanguageImportExtractor {
     return this.processUseArgument(argument);
   }
 
-  private processUseArgument(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processUseArgument(
+    node: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
     // Simple: `use crate::auth::AuthService;`
     if (node.type === 'scoped_identifier') {
       return this.processScopedIdentifier(node);
@@ -341,7 +340,9 @@ export class RustImportExtractor implements LanguageImportExtractor {
     return null;
   }
 
-  private processScopedIdentifier(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processScopedIdentifier(
+    node: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
     const pathNode = node.childForFieldName('path');
     const nameNode = node.childForFieldName('name');
     if (!pathNode || !nameNode) return null;
@@ -352,7 +353,9 @@ export class RustImportExtractor implements LanguageImportExtractor {
     return { importPath: modulePath, symbols: [nameNode.text] };
   }
 
-  private processScopedUseList(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processScopedUseList(
+    node: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
     const scopePath = extractScopePath(node);
     if (!scopePath) return null;
 
@@ -375,7 +378,9 @@ export class RustImportExtractor implements LanguageImportExtractor {
     return symbols.length > 0 ? { importPath: modulePath, symbols } : null;
   }
 
-  private processUseAsClause(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processUseAsClause(
+    node: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
     // `use crate::auth::Service as Auth;`
     // The first child is the path (scoped_identifier), alias field has the alias
     const aliasNode = node.childForFieldName('alias');
@@ -403,7 +408,9 @@ export class RustImportExtractor implements LanguageImportExtractor {
     return { importPath: modulePath, symbols: [symbol] };
   }
 
-  private processUseWildcard(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processUseWildcard(
+    node: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
     // `use crate::models::*;` -> AST is:
     //   use_wildcard
     //     scoped_identifier (crate::models)
@@ -479,11 +486,7 @@ export class RustSymbolExtractor implements LanguageSymbolExtractor {
     'trait_item',
   ];
 
-  extractSymbol(
-    node: Parser.SyntaxNode,
-    content: string,
-    parentClass?: string
-  ): SymbolInfo | null {
+  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_item':
       case 'function_signature_item':
@@ -497,9 +500,7 @@ export class RustSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(
-    node: Parser.SyntaxNode
-  ): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
     const line = node.startPosition.row + 1;
 
     // call_expression: foo(), obj.method()
@@ -537,7 +538,7 @@ export class RustSymbolExtractor implements LanguageSymbolExtractor {
   private extractFunctionInfo(
     node: Parser.SyntaxNode,
     content: string,
-    parentClass?: string
+    parentClass?: string,
   ): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
@@ -597,43 +598,102 @@ export const rustDefinition: LanguageDefinition = {
 
   complexity: {
     decisionPoints: [
-      'if_expression', 'match_expression', 'while_expression',
-      'for_expression', 'loop_expression', 'match_arm',
+      'if_expression',
+      'match_expression',
+      'while_expression',
+      'for_expression',
+      'loop_expression',
+      'match_arm',
       'binary_expression',
     ],
     nestingTypes: [
-      'if_expression', 'for_expression', 'while_expression',
-      'loop_expression', 'match_expression',
+      'if_expression',
+      'for_expression',
+      'while_expression',
+      'loop_expression',
+      'match_expression',
     ],
-    nonNestingTypes: [
-      'else_clause', 'match_arm',
-    ],
-    lambdaTypes: [
-      'closure_expression',
-    ],
+    nonNestingTypes: ['else_clause', 'match_arm'],
+    lambdaTypes: ['closure_expression'],
     operatorSymbols: new Set([
-      '+', '-', '*', '/', '%',
-      '==', '!=', '<', '>', '<=', '>=',
-      '=', '+=', '-=', '*=', '/=', '%=',
-      '&=', '|=', '^=', '<<=', '>>=',
-      '&', '|', '^', '!', '<<', '>>',
-      '.', '::', '..', '..=', '=>', '->', '?',
-      '(', ')', '[', ']', '{', '}',
+      '+',
+      '-',
+      '*',
+      '/',
+      '%',
+      '==',
+      '!=',
+      '<',
+      '>',
+      '<=',
+      '>=',
+      '=',
+      '+=',
+      '-=',
+      '*=',
+      '/=',
+      '%=',
+      '&=',
+      '|=',
+      '^=',
+      '<<=',
+      '>>=',
+      '&',
+      '|',
+      '^',
+      '!',
+      '<<',
+      '>>',
+      '.',
+      '::',
+      '..',
+      '..=',
+      '=>',
+      '->',
+      '?',
+      '(',
+      ')',
+      '[',
+      ']',
+      '{',
+      '}',
     ]),
     operatorKeywords: new Set([
-      'if', 'else', 'match', 'for', 'while', 'loop',
-      'return', 'break', 'continue',
-      'let', 'mut', 'fn', 'struct', 'enum', 'impl', 'trait',
-      'pub', 'mod', 'use', 'as',
-      'async', 'await', 'unsafe', 'where', 'move',
-      'ref', 'self', 'super', 'crate', 'dyn', 'type',
+      'if',
+      'else',
+      'match',
+      'for',
+      'while',
+      'loop',
+      'return',
+      'break',
+      'continue',
+      'let',
+      'mut',
+      'fn',
+      'struct',
+      'enum',
+      'impl',
+      'trait',
+      'pub',
+      'mod',
+      'use',
+      'as',
+      'async',
+      'await',
+      'unsafe',
+      'where',
+      'move',
+      'ref',
+      'self',
+      'super',
+      'crate',
+      'dyn',
+      'type',
     ]),
   },
 
   symbols: {
-    callExpressionTypes: [
-      'call_expression',
-      'macro_invocation',
-    ],
+    callExpressionTypes: ['call_expression', 'macro_invocation'],
   },
 };

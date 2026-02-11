@@ -74,7 +74,9 @@ export function getTokenUsage(): TokenUsage {
  * Cost is returned in usage.cost when usage accounting is enabled
  */
 function trackUsage(
-  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number; cost?: number } | undefined
+  usage:
+    | { prompt_tokens: number; completion_tokens: number; total_tokens: number; cost?: number }
+    | undefined,
 ): void {
   if (!usage) return;
 
@@ -89,7 +91,10 @@ function trackUsage(
  * Returns null if parsing fails after retry attempts
  * Exported for testing
  */
-export function parseCommentsResponse(content: string, logger: Logger): Record<string, string> | null {
+export function parseCommentsResponse(
+  content: string,
+  logger: Logger,
+): Record<string, string> | null {
   // Try extracting JSON from markdown code block first
   const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
   const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
@@ -127,7 +132,7 @@ export async function generateReview(
   prompt: string,
   apiKey: string,
   model: string,
-  logger: Logger
+  logger: Logger,
 ): Promise<string> {
   logger.info(`Calling OpenRouter with model: ${model}`);
 
@@ -145,7 +150,7 @@ export async function generateReview(
         {
           role: 'system',
           content:
-            'You are an expert code reviewer. Provide actionable, specific feedback on code complexity issues. Be concise but thorough. Before suggesting refactorings, analyze the code snippets provided to identify the codebase\'s architectural patterns (e.g., functions vs classes, module organization, naming conventions). Then suggest refactorings that match those existing patterns.',
+            "You are an expert code reviewer. Provide actionable, specific feedback on code complexity issues. Be concise but thorough. Before suggesting refactorings, analyze the code snippets provided to identify the codebase's architectural patterns (e.g., functions vs classes, module organization, naming conventions). Then suggest refactorings that match those existing patterns.",
         },
         {
           role: 'user',
@@ -164,9 +169,7 @@ export async function generateReview(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      `OpenRouter API error (${response.status}): ${errorText}`
-    );
+    throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
   }
 
   const data = (await response.json()) as OpenRouterResponse;
@@ -182,7 +185,7 @@ export async function generateReview(
     trackUsage(data.usage);
     const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
     logger.info(
-      `Tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`
+      `Tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`,
     );
   }
 
@@ -195,7 +198,7 @@ export async function generateReview(
 async function callBatchedCommentsAPI(
   prompt: string,
   apiKey: string,
-  model: string
+  model: string,
 ): Promise<OpenRouterResponse> {
   const response = await fetch(OPENROUTER_API_URL, {
     method: 'POST',
@@ -211,7 +214,7 @@ async function callBatchedCommentsAPI(
         {
           role: 'system',
           content:
-            'You are an expert code reviewer. Write detailed, actionable comments with specific refactoring suggestions. Respond ONLY with valid JSON. Before suggesting refactorings, analyze the code snippets provided to identify the codebase\'s architectural patterns (e.g., functions vs classes, module organization, naming conventions). Then suggest refactorings that match those existing patterns.',
+            "You are an expert code reviewer. Write detailed, actionable comments with specific refactoring suggestions. Respond ONLY with valid JSON. Before suggesting refactorings, analyze the code snippets provided to identify the codebase's architectural patterns (e.g., functions vs classes, module organization, naming conventions). Then suggest refactorings that match those existing patterns.",
         },
         { role: 'user', content: prompt },
       ],
@@ -242,7 +245,7 @@ async function callBatchedCommentsAPI(
 export function mapCommentsToViolations(
   commentsMap: Record<string, string> | null,
   violations: ComplexityViolation[],
-  logger: Logger
+  logger: Logger,
 ): Map<ComplexityViolation, string> {
   const results = new Map<ComplexityViolation, string>();
   const fallbackMessage = (v: ComplexityViolation) =>
@@ -284,7 +287,7 @@ export async function generateLineComments(
   apiKey: string,
   model: string,
   report: ComplexityReport,
-  logger: Logger
+  logger: Logger,
 ): Promise<Map<ComplexityViolation, string>> {
   if (violations.length === 0) {
     return new Map();
@@ -298,7 +301,9 @@ export async function generateLineComments(
   if (data.usage) {
     trackUsage(data.usage);
     const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
-    logger.info(`Batch tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`);
+    logger.info(
+      `Batch tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`,
+    );
   }
 
   const commentsMap = parseCommentsResponse(data.choices[0].message.content, logger);

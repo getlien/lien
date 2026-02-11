@@ -1,17 +1,13 @@
 import chalk from 'chalk';
 import path from 'path';
 import os from 'os';
-import {
-  loadGlobalConfig,
-  mergeGlobalConfig,
-  type GlobalConfig,
-} from '@liendev/core';
+import { loadGlobalConfig, mergeGlobalConfig, type GlobalConfig } from '@liendev/core';
 
 const CONFIG_PATH = path.join(os.homedir(), '.lien', 'config.json');
 
 /** Allowed config keys and their valid values */
 const ALLOWED_KEYS: Record<string, { values: readonly string[]; description: string }> = {
-  'backend': {
+  backend: {
     values: ['lancedb', 'qdrant'],
     description: 'Vector database backend',
   },

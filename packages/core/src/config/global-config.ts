@@ -11,7 +11,10 @@ const execAsync = promisify(exec);
  * This is separate from "file not found" which is expected behavior.
  */
 export class ConfigValidationError extends Error {
-  constructor(message: string, public readonly configPath: string) {
+  constructor(
+    message: string,
+    public readonly configPath: string,
+  ) {
     super(message);
     this.name = 'ConfigValidationError';
   }
@@ -46,8 +49,8 @@ function loadConfigFromEnv(): GlobalConfig | null {
   if (!validBackends.includes(backendEnv as any)) {
     throw new ConfigValidationError(
       `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` +
-      `Valid values: 'lancedb' or 'qdrant'`,
-      '<environment>'
+        `Valid values: 'lancedb' or 'qdrant'`,
+      '<environment>',
     );
   }
 
@@ -58,8 +61,8 @@ function loadConfigFromEnv(): GlobalConfig | null {
     if (!url) {
       throw new ConfigValidationError(
         'Qdrant backend requires LIEN_QDRANT_URL environment variable.\n' +
-        'Set it with: export LIEN_QDRANT_URL=http://localhost:6333',
-        '<environment>'
+          'Set it with: export LIEN_QDRANT_URL=http://localhost:6333',
+        '<environment>',
       );
     }
 
@@ -80,29 +83,29 @@ function validateConfig(config: GlobalConfig, configPath: string): void {
   if (config.backend && !['lancedb', 'qdrant'].includes(config.backend)) {
     throw new ConfigValidationError(
       `Invalid backend in global config: "${config.backend}"\n` +
-      `Config file: ${configPath}\n` +
-      `Valid values: 'lancedb' or 'qdrant'`,
-      configPath
+        `Config file: ${configPath}\n` +
+        `Valid values: 'lancedb' or 'qdrant'`,
+      configPath,
     );
   }
-  
+
   // Validate Qdrant configuration
   if (config.backend === 'qdrant') {
     if (!config.qdrant) {
       throw new ConfigValidationError(
         `Qdrant backend requires a "qdrant" configuration section\n` +
-        `Config file: ${configPath}\n` +
-        `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
-        configPath
+          `Config file: ${configPath}\n` +
+          `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
+        configPath,
       );
     }
-    
+
     if (!config.qdrant.url) {
       throw new ConfigValidationError(
         `Qdrant backend requires qdrant.url in config\n` +
-        `Config file: ${configPath}\n` +
-        `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
-        configPath
+          `Config file: ${configPath}\n` +
+          `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
+        configPath,
       );
     }
   }
@@ -118,22 +121,22 @@ function parseConfigFile(content: string, configPath: string): GlobalConfig {
     const errorMsg = parseError instanceof Error ? parseError.message : String(parseError);
     throw new ConfigValidationError(
       `Failed to parse global config file.\n` +
-      `Config file: ${configPath}\n` +
-      `Syntax error: ${errorMsg}\n\n` +
-      `Please fix the JSON syntax errors in your config file.`,
-      configPath
+        `Config file: ${configPath}\n` +
+        `Syntax error: ${errorMsg}\n\n` +
+        `Please fix the JSON syntax errors in your config file.`,
+      configPath,
     );
   }
 }
 
 /**
  * Load global configuration from environment variables or config file.
- * 
+ *
  * Precedence:
  * 1. Environment variables (highest)
  * 2. Global config file (~/.lien/config.json)
  * 3. Defaults (LanceDB)
- * 
+ *
  * @returns Global configuration
  */
 export async function loadGlobalConfig(): Promise<GlobalConfig> {
@@ -248,7 +251,7 @@ async function getGitRemoteUrl(rootDir: string): Promise<string | null> {
   } catch {
     return null; // Not a git repo
   }
-  
+
   // Get remote URL (prefer 'origin', fallback to first remote)
   try {
     const { stdout } = await execAsync('git remote get-url origin', {
@@ -265,7 +268,7 @@ async function getGitRemoteUrl(rootDir: string): Promise<string | null> {
       });
       const remoteName = remoteList.trim().split('\n')[0];
       if (!remoteName) return null;
-      
+
       const { stdout } = await execAsync(`git remote get-url ${remoteName}`, {
         cwd: rootDir,
         timeout: 5000,
@@ -280,13 +283,13 @@ async function getGitRemoteUrl(rootDir: string): Promise<string | null> {
 /**
  * Extract organization ID from git remote URL.
  * Supports GitHub, GitLab, Bitbucket, and other common formats.
- * 
+ *
  * Examples:
  * - https://github.com/org/repo.git → "org"
  * - git@github.com:org/repo.git → "org"
  * - https://gitlab.com/org/repo.git → "org"
  * - https://bitbucket.org/org/repo.git → "org"
- * 
+ *
  * @param rootDir - Root directory of the project (must be a git repo)
  * @returns Organization ID, or null if not a git repo or can't extract
  */
@@ -294,23 +297,17 @@ export async function extractOrgIdFromGit(rootDir: string): Promise<string | nul
   try {
     const remoteUrl = await getGitRemoteUrl(rootDir);
     if (!remoteUrl) return null;
-    
+
     // Try parsers in order of specificity
-    const parsers = [
-      parseHttpsGitUrl,
-      parseSshGitUrl,
-      parseSshProtocolUrl,
-      parseGenericGitUrl,
-    ];
-    
+    const parsers = [parseHttpsGitUrl, parseSshGitUrl, parseSshProtocolUrl, parseGenericGitUrl];
+
     for (const parser of parsers) {
       const orgId = parser(remoteUrl);
       if (orgId) return orgId;
     }
-    
+
     return null;
   } catch {
     return null; // Git not available or other error
   }
 }
-

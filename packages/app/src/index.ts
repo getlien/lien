@@ -52,12 +52,7 @@ function setupWebhooks(app: App, config: AppConfig, queue: JobQueue): void {
     });
 
     queue.enqueue(async () => {
-      await handlePullRequest(
-        payload as any,
-        token as string,
-        config,
-        logger,
-      );
+      await handlePullRequest(payload as any, token as string, config, logger);
     });
   });
 }
@@ -71,10 +66,12 @@ function startServer(app: App, config: AppConfig, queue: JobQueue): http.Server 
     // Health check endpoint
     if (req.url === '/health' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        status: 'ok',
-        queue: { size: queue.size, processing: queue.isProcessing },
-      }));
+      res.end(
+        JSON.stringify({
+          status: 'ok',
+          queue: { size: queue.size, processing: queue.isProcessing },
+        }),
+      );
       return;
     }
 

@@ -1,3 +1,4 @@
+import eslintConfigPrettier from 'eslint-config-prettier';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -46,4 +47,7 @@ export default tseslint.config(
       'no-console': 'off',
     },
   },
+
+  // Disable ESLint rules that conflict with Prettier
+  eslintConfigPrettier,
 );

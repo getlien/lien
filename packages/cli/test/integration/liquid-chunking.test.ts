@@ -23,23 +23,23 @@ describe('Liquid Chunking (Regex-based)', () => {
 
 <div>More template</div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     // Should have at least 2 chunks: template before schema, schema block, template after
     expect(chunks.length).toBeGreaterThan(0);
-    
+
     // Find the schema chunk
     const schemaChunk = chunks.find(c => c.content.includes('{% schema %}'));
     expect(schemaChunk).toBeDefined();
     expect(schemaChunk?.metadata.symbolType).toBe('schema');
     expect(schemaChunk?.metadata.symbolName).toBe('USPS Multicolumn');
-    
+
     // Schema block should be a single chunk
     expect(schemaChunk?.content).toContain('{% schema %}');
     expect(schemaChunk?.content).toContain('{% endschema %}');
   });
-  
+
   it('should keep style blocks together', () => {
     const content = `
 <div>Content</div>
@@ -53,15 +53,15 @@ describe('Liquid Chunking (Regex-based)', () => {
 
 <div>More content</div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     const styleChunk = chunks.find(c => c.content.includes('{% style %}'));
     expect(styleChunk).toBeDefined();
     expect(styleChunk?.metadata.symbolType).toBe('style');
     expect(styleChunk?.content).toContain('.container');
   });
-  
+
   it('should keep javascript blocks together', () => {
     const content = `
 <div>Content</div>
@@ -75,15 +75,15 @@ function init() {
 
 <div>More content</div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     const jsChunk = chunks.find(c => c.content.includes('{% javascript %}'));
     expect(jsChunk).toBeDefined();
     expect(jsChunk?.metadata.symbolType).toBe('javascript');
     expect(jsChunk?.content).toContain('console.log');
   });
-  
+
   it('should chunk template content normally', () => {
     const content = `
 <div>{{ product.title }}</div>
@@ -92,14 +92,14 @@ function init() {
 {% endif %}
 {{ product.description }}
 `.trim();
-    
+
     const chunks = chunkFile('snippets/test.liquid', content);
-    
+
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks[0].metadata.language).toBe('liquid');
     expect(chunks[0].metadata.type).toBe('template');
   });
-  
+
   it('should handle multiple schema and style blocks', () => {
     const content = `
 {% schema %}
@@ -114,12 +114,12 @@ function init() {
 
 <div>More template</div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     const schemaChunks = chunks.filter(c => c.metadata.symbolType === 'schema');
     const styleChunks = chunks.filter(c => c.metadata.symbolType === 'style');
-    
+
     expect(schemaChunks.length).toBe(1);
     expect(styleChunks.length).toBe(1);
   });
@@ -133,9 +133,9 @@ function init() {
 }
 {% endschema %}
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     const schemaChunk = chunks.find(c => c.metadata.symbolType === 'schema');
     expect(schemaChunk).toBeDefined();
     expect(schemaChunk?.metadata.symbolName).toBeUndefined();
@@ -150,9 +150,9 @@ function init() {
 }
 {% endschema %}
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     const schemaChunk = chunks.find(c => c.metadata.symbolType === 'schema');
     expect(schemaChunk).toBeDefined();
     expect(schemaChunk?.metadata.symbolName).toBeUndefined(); // Should not crash
@@ -183,24 +183,24 @@ console.log('loaded');
 
 <div>Footer template</div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/complex.liquid', content);
-    
+
     expect(chunks.length).toBeGreaterThan(3); // At least the 3 special blocks + template chunks
-    
+
     const schemaChunk = chunks.find(c => c.metadata.symbolType === 'schema');
     const styleChunk = chunks.find(c => c.metadata.symbolType === 'style');
     const jsChunk = chunks.find(c => c.metadata.symbolType === 'javascript');
-    
+
     expect(schemaChunk).toBeDefined();
     expect(styleChunk).toBeDefined();
     expect(jsChunk).toBeDefined();
-    
+
     // Verify they're in order
     const schemaIdx = chunks.indexOf(schemaChunk!);
     const styleIdx = chunks.indexOf(styleChunk!);
     const jsIdx = chunks.indexOf(jsChunk!);
-    
+
     expect(schemaIdx).toBeLessThan(styleIdx);
     expect(styleIdx).toBeLessThan(jsIdx);
   });
@@ -220,13 +220,13 @@ console.log('loaded');
   {% endif %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('snippets/product-card.liquid', content);
-    
+
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.every(c => c.metadata.language === 'liquid')).toBe(true);
     expect(chunks.every(c => c.metadata.type === 'template')).toBe(true);
-    
+
     // Should not have any special block types
     expect(chunks.some(c => c.metadata.symbolType === 'schema')).toBe(false);
     expect(chunks.some(c => c.metadata.symbolType === 'style')).toBe(false);
@@ -241,9 +241,9 @@ Line 4
 Line 5
 {% endschema %}
 Line 7`;
-    
+
     const chunks = chunkFile('test.liquid', content);
-    
+
     const schemaChunk = chunks.find(c => c.metadata.symbolType === 'schema');
     expect(schemaChunk?.metadata.startLine).toBe(3);
     expect(schemaChunk?.metadata.endLine).toBe(6);
@@ -256,9 +256,9 @@ Line 7`;
   {% render "navigation", menu: main_menu %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/header.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toBeDefined();
     expect(templateChunk?.metadata.imports).toContain('logo');
@@ -272,9 +272,9 @@ Line 7`;
   {% include "product-availability", product: product %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/product.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toBeDefined();
     expect(templateChunk?.metadata.imports).toContain('product-price');
@@ -288,9 +288,9 @@ Line 7`;
   {% include 'cart-total' %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('snippets/cart.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toContain('cart-item');
     expect(templateChunk?.metadata.imports).toContain('cart-total');
@@ -305,9 +305,9 @@ Line 7`;
   {% render 'icon', name: 'search' %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/header.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toEqual(['icon']);
   });
@@ -319,9 +319,9 @@ Line 7`;
   {%- render "featured-product", product: product -%}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/collection.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toContain('product-card');
     expect(templateChunk?.metadata.imports).toContain('featured-product');
@@ -336,9 +336,9 @@ Line 7`;
   {% endif %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('snippets/simple.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toBeUndefined();
   });
@@ -363,13 +363,13 @@ Line 7`;
 
 {% render 'product-card' %}
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     const schemaChunk = chunks.find(c => c.metadata.symbolType === 'schema');
     // Schema should not have render tags (they're JSON)
     expect(schemaChunk?.metadata.imports).toBeUndefined();
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toContain('product-card');
   });
@@ -385,9 +385,9 @@ Line 7`;
 </body>
 </html>
 `.trim();
-    
+
     const chunks = chunkFile('layout/theme.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toBeDefined();
     expect(templateChunk?.metadata.imports).toContain('header');
@@ -406,9 +406,9 @@ Line 7`;
   {% section 'footer' %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('layout/theme.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toContain('announcement-bar');
     expect(templateChunk?.metadata.imports).toContain('header-logo');
@@ -425,9 +425,9 @@ Line 7`;
   {%- section 'footer' -%}
 </body>
 `.trim();
-    
+
     const chunks = chunkFile('layout/minimal.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toContain('header');
     expect(templateChunk?.metadata.imports).toContain('footer');
@@ -445,9 +445,9 @@ Line 7`;
   {% render 'current-snippet' %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toBeDefined();
     expect(templateChunk?.metadata.imports).toContain('current-snippet');
@@ -463,9 +463,9 @@ Line 7`;
   {% include 'current-include' %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toEqual(['current-include']);
   });
@@ -483,9 +483,9 @@ Line 7`;
   {% section 'footer' %}
 </body>
 `.trim();
-    
+
     const chunks = chunkFile('layout/theme.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toContain('header');
     expect(templateChunk?.metadata.imports).toContain('footer');
@@ -502,9 +502,9 @@ Line 7`;
   {% render 'active-snippet' %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toEqual(['active-snippet']);
   });
@@ -524,9 +524,9 @@ Line 7`;
   {% include 'active-3' %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toContain('active-1');
     expect(templateChunk?.metadata.imports).toContain('active-2');
@@ -550,9 +550,9 @@ Line 7`;
   {% render 'actual-snippet' %}
 </div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     const templateChunk = chunks.find(c => c.metadata.type === 'template');
     expect(templateChunk?.metadata.imports).toEqual(['actual-snippet']);
   });
@@ -574,9 +574,9 @@ Line 7`;
   Use the new version instead.
 {% endcomment %}
 `.trim();
-    
+
     const chunks = chunkFile('deprecated.liquid', content);
-    
+
     // Comments are valid template content and should be preserved in chunks
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.type).toBe('template');
@@ -592,9 +592,9 @@ Line 7`;
 }
 {% endschema %}
 `.trim();
-    
+
     const chunks = chunkFile('sections/schema-only.liquid', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolType).toBe('schema');
     expect(chunks[0].metadata.symbolName).toBe('Schema Only Section');
@@ -608,7 +608,7 @@ Line 7`;
       label: `Setting ${i}`,
       default: `Default ${i}`,
     }));
-    
+
     const content = `
 {% schema %}
 {
@@ -617,9 +617,9 @@ Line 7`;
 }
 {% endschema %}
 `.trim();
-    
+
     const chunks = chunkFile('sections/large-schema.liquid', content);
-    
+
     // Should be kept as one chunk since it's within threshold
     const schemaChunks = chunks.filter(c => c.metadata.symbolType === 'schema');
     expect(schemaChunks).toHaveLength(1);
@@ -636,9 +636,9 @@ Line 7`;
 {
   "name": "Unclosed Schema"
 `.trim();
-    
+
     const chunks = chunkFile('sections/broken.liquid', content);
-    
+
     // Should treat everything as template since schema is never closed
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.every(c => c.metadata.type === 'template')).toBe(true);
@@ -655,9 +655,9 @@ Line 7`;
   color: red;
 <div>More content</div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/broken-style.liquid', content);
-    
+
     // Should treat everything as template since style is never closed
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.every(c => c.metadata.type === 'template')).toBe(true);
@@ -671,9 +671,9 @@ Line 7`;
 console.log("unclosed");
 <div>More content</div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/broken-js.liquid', content);
-    
+
     // Should treat everything as template since javascript is never closed
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.every(c => c.metadata.type === 'template')).toBe(true);
@@ -690,9 +690,9 @@ console.log("unclosed");
 {% endstyle %}
 <div>More content</div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/wrong-end-tag.liquid', content);
-    
+
     // Schema has wrong end tag (endstyle instead of endschema), should be treated as template
     expect(chunks.every(c => c.metadata.symbolType !== 'schema')).toBe(true);
     expect(chunks.every(c => c.metadata.type === 'template')).toBe(true);
@@ -700,9 +700,9 @@ console.log("unclosed");
 
   it('should handle single line liquid file', () => {
     const content = '{{ product.title }}';
-    
+
     const chunks = chunkFile('snippets/single-line.liquid', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.type).toBe('template');
     expect(chunks[0].content).toBe(content);
@@ -710,9 +710,9 @@ console.log("unclosed");
 
   it('should handle single-line schema blocks', () => {
     const content = '{% schema %}{"name": "Compact Section", "settings": []}{% endschema %}';
-    
+
     const chunks = chunkFile('sections/compact.liquid', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolType).toBe('schema');
     expect(chunks[0].metadata.symbolName).toBe('Compact Section');
@@ -723,9 +723,9 @@ console.log("unclosed");
 
   it('should handle single-line style blocks', () => {
     const content = '{% style %}.compact { color: red; }{% endstyle %}';
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolType).toBe('style');
     expect(chunks[0].metadata.type).toBe('block');
@@ -734,9 +734,9 @@ console.log("unclosed");
 
   it('should handle single-line javascript blocks', () => {
     const content = '{% javascript %}console.log("compact");{% endjavascript %}';
-    
+
     const chunks = chunkFile('sections/test.liquid', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolType).toBe('javascript');
     expect(chunks[0].metadata.type).toBe('block');
@@ -755,29 +755,29 @@ console.log("unclosed");
 {% javascript %}console.log("single");{% endjavascript %}
 <div>More template</div>
 `.trim();
-    
+
     const chunks = chunkFile('sections/mixed.liquid', content);
-    
+
     const schemaChunk = chunks.find(c => c.metadata.symbolType === 'schema');
     const styleChunk = chunks.find(c => c.metadata.symbolType === 'style');
     const jsChunk = chunks.find(c => c.metadata.symbolType === 'javascript');
-    
+
     expect(schemaChunk).toBeDefined();
     expect(schemaChunk?.metadata.symbolName).toBe('Mixed');
     expect(schemaChunk?.metadata.startLine).toBe(schemaChunk?.metadata.endLine); // Single line
-    
+
     expect(styleChunk).toBeDefined();
     expect(styleChunk?.metadata.endLine).toBeGreaterThan(styleChunk!.metadata.startLine); // Multi-line
-    
+
     expect(jsChunk).toBeDefined();
     expect(jsChunk?.metadata.startLine).toBe(jsChunk?.metadata.endLine); // Single line
   });
 
   it('should handle single-line blocks with whitespace control', () => {
     const content = '{%- schema -%}{"name": "Compact"}{%- endschema -%}';
-    
+
     const chunks = chunkFile('sections/compact-ws.liquid', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolType).toBe('schema');
     expect(chunks[0].metadata.symbolName).toBe('Compact');
@@ -791,26 +791,29 @@ console.log("unclosed");
       label: `Setting ${i}`,
       default: `Default ${i}`,
     }));
-    
+
     const largeSchema = `{% schema %}
 {
   "name": "Extremely Large Schema",
   "settings": ${JSON.stringify(settings, null, 2)}
 }
 {% endschema %}`;
-    
-    const chunks = chunkFile('sections/huge-schema.liquid', largeSchema, { chunkSize: 75, chunkOverlap: 10 });
-    
+
+    const chunks = chunkFile('sections/huge-schema.liquid', largeSchema, {
+      chunkSize: 75,
+      chunkOverlap: 10,
+    });
+
     const schemaChunks = chunks.filter(c => c.metadata.symbolType === 'schema');
-    
+
     // Should be split into multiple chunks
     expect(schemaChunks.length).toBeGreaterThan(1);
-    
+
     // All chunks should have same symbolName and symbolType
     expect(schemaChunks.every(c => c.metadata.symbolName === 'Extremely Large Schema')).toBe(true);
     expect(schemaChunks.every(c => c.metadata.symbolType === 'schema')).toBe(true);
     expect(schemaChunks.every(c => c.metadata.type === 'block')).toBe(true);
-    
+
     // Chunks should have overlap (verify line numbers overlap)
     for (let i = 1; i < schemaChunks.length; i++) {
       const prevChunk = schemaChunks[i - 1];
@@ -826,18 +829,18 @@ console.log("unclosed");
       id: `setting_${i}`,
       label: `Setting ${i}`,
     }));
-    
+
     const moderateSchema = `{% schema %}
 {
   "name": "Moderate Schema",
   "settings": ${JSON.stringify(settings, null, 2)}
 }
 {% endschema %}`;
-    
+
     const chunks = chunkFile('sections/moderate-schema.liquid', moderateSchema, { chunkSize: 75 });
-    
+
     const schemaChunks = chunks.filter(c => c.metadata.symbolType === 'schema');
-    
+
     // Should stay as single chunk since it's within threshold
     expect(schemaChunks).toHaveLength(1);
     expect(schemaChunks[0].metadata.symbolName).toBe('Moderate Schema');
@@ -845,18 +848,22 @@ console.log("unclosed");
 
   it('should split large style blocks', () => {
     // Create a style block with 300+ lines (well over chunkSize * 3 = 225)
-    const cssRules = Array.from({ length: 250 }, (_, i) => 
-      `.class-${i} { color: #${i.toString(16).padStart(6, '0')}; }`
+    const cssRules = Array.from(
+      { length: 250 },
+      (_, i) => `.class-${i} { color: #${i.toString(16).padStart(6, '0')}; }`,
     ).join('\n');
-    
+
     const largeStyle = `{% style %}
 ${cssRules}
 {% endstyle %}`;
-    
-    const chunks = chunkFile('sections/huge-styles.liquid', largeStyle, { chunkSize: 75, chunkOverlap: 10 });
-    
+
+    const chunks = chunkFile('sections/huge-styles.liquid', largeStyle, {
+      chunkSize: 75,
+      chunkOverlap: 10,
+    });
+
     const styleChunks = chunks.filter(c => c.metadata.symbolType === 'style');
-    
+
     // Should be split into multiple chunks (252 lines > 225 threshold)
     expect(styleChunks.length).toBeGreaterThan(1);
     expect(styleChunks.every(c => c.metadata.symbolType === 'style')).toBe(true);
@@ -864,18 +871,22 @@ ${cssRules}
 
   it('should split large javascript blocks', () => {
     // Create a javascript block with 300+ lines (well over chunkSize * 3 = 225)
-    const jsCode = Array.from({ length: 250 }, (_, i) => 
-      `function func${i}() { console.log("Function ${i}"); }`
+    const jsCode = Array.from(
+      { length: 250 },
+      (_, i) => `function func${i}() { console.log("Function ${i}"); }`,
     ).join('\n');
-    
+
     const largeJs = `{% javascript %}
 ${jsCode}
 {% endjavascript %}`;
-    
-    const chunks = chunkFile('sections/huge-js.liquid', largeJs, { chunkSize: 75, chunkOverlap: 10 });
-    
+
+    const chunks = chunkFile('sections/huge-js.liquid', largeJs, {
+      chunkSize: 75,
+      chunkOverlap: 10,
+    });
+
     const jsChunks = chunks.filter(c => c.metadata.symbolType === 'javascript');
-    
+
     // Should be split into multiple chunks (252 lines > 225 threshold)
     expect(jsChunks.length).toBeGreaterThan(1);
     expect(jsChunks.every(c => c.metadata.symbolType === 'javascript')).toBe(true);
@@ -889,11 +900,11 @@ ${jsCode}
   "settings": []
 }
 {% endschema %}`;
-    
-    const cssRules = Array.from({ length: 250 }, (_, i) => 
-      `.rule-${i} { display: block; }`
-    ).join('\n');
-    
+
+    const cssRules = Array.from({ length: 250 }, (_, i) => `.rule-${i} { display: block; }`).join(
+      '\n',
+    );
+
     const content = `
 ${smallSchema}
 <div>Template</div>
@@ -901,25 +912,29 @@ ${smallSchema}
 ${cssRules}
 {% endstyle %}
 `.trim();
-    
-    const chunks = chunkFile('sections/mixed-sizes.liquid', content, { chunkSize: 75, chunkOverlap: 10 });
-    
+
+    const chunks = chunkFile('sections/mixed-sizes.liquid', content, {
+      chunkSize: 75,
+      chunkOverlap: 10,
+    });
+
     const schemaChunks = chunks.filter(c => c.metadata.symbolType === 'schema');
     const styleChunks = chunks.filter(c => c.metadata.symbolType === 'style');
-    
+
     // Small schema stays as one chunk
     expect(schemaChunks).toHaveLength(1);
-    
+
     // Large style is split (252 lines > 225 threshold)
     expect(styleChunks.length).toBeGreaterThan(1);
   });
 
   it('should have correct 1-indexed line numbers for split blocks', () => {
     // Create a large schema block that will be split
-    const schemaLines = Array.from({ length: 300 }, (_, i) => 
-      `  "setting_${i}": "value_${i}",`
+    const schemaLines = Array.from(
+      { length: 300 },
+      (_, i) => `  "setting_${i}": "value_${i}",`,
     ).join('\n');
-    
+
     const content = `<div>Before</div>
 {% schema %}
 {
@@ -929,25 +944,28 @@ ${schemaLines}
 }
 {% endschema %}
 <div>After</div>`.trim();
-    
-    const chunks = chunkFile('sections/line-numbers.liquid', content, { chunkSize: 75, chunkOverlap: 10 });
+
+    const chunks = chunkFile('sections/line-numbers.liquid', content, {
+      chunkSize: 75,
+      chunkOverlap: 10,
+    });
     const schemaChunks = chunks.filter(c => c.metadata.symbolType === 'schema');
-    
+
     // Verify split occurred
     expect(schemaChunks.length).toBeGreaterThan(1);
-    
+
     // Verify line numbers are 1-indexed and continuous
     for (let i = 0; i < schemaChunks.length - 1; i++) {
       const currentChunk = schemaChunks[i];
       const nextChunk = schemaChunks[i + 1];
-      
+
       // Line numbers should be 1-indexed (greater than 0)
       expect(currentChunk.metadata.startLine).toBeGreaterThan(0);
       expect(currentChunk.metadata.endLine).toBeGreaterThan(0);
-      
+
       // endLine should be >= startLine
       expect(currentChunk.metadata.endLine).toBeGreaterThanOrEqual(currentChunk.metadata.startLine);
-      
+
       // With overlap, next chunk should start within or near current chunk's end
       expect(nextChunk.metadata.startLine).toBeLessThanOrEqual(currentChunk.metadata.endLine + 1);
     }
@@ -960,9 +978,9 @@ ${schemaLines}
   "settings": []
 }
 {% endschema %}`;
-    
+
     const chunks = chunkFile('sections/escaped-quotes.liquid', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolType).toBe('schema');
     expect(chunks[0].metadata.symbolName).toBe('My "Special" Section');

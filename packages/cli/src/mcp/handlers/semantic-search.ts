@@ -36,18 +36,23 @@ async function executeSearch(
   vectorDB: VectorDBInterface,
   queryEmbedding: Float32Array,
   params: SearchParams,
-  log: LogFn
+  log: LogFn,
 ): Promise<{ results: SearchResult[]; crossRepoFallback: boolean }> {
   const { query, limit, crossRepo, repoIds } = params;
 
   if (crossRepo && vectorDB instanceof QdrantDB) {
     const results = await vectorDB.searchCrossRepo(queryEmbedding, limit, { repoIds });
-    log(`Found ${results.length} results across ${Object.keys(groupResultsByRepo(results)).length} repos`);
+    log(
+      `Found ${results.length} results across ${Object.keys(groupResultsByRepo(results)).length} repos`,
+    );
     return { results, crossRepoFallback: false };
   }
 
   if (crossRepo) {
-    log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.', 'warning');
+    log(
+      'Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.',
+      'warning',
+    );
   }
   const results = await vectorDB.search(queryEmbedding, limit, query);
   log(`Found ${results.length} results`);
@@ -60,7 +65,7 @@ async function executeSearch(
 function processResults(
   rawResults: SearchResult[],
   crossRepoFallback: boolean,
-  log: LogFn
+  log: LogFn,
 ): { results: SearchResult[]; notes: string[] } {
   const notes: string[] = [];
   if (crossRepoFallback) {
@@ -85,39 +90,42 @@ function processResults(
  */
 export async function handleSemanticSearch(
   args: unknown,
-  ctx: ToolContext
+  ctx: ToolContext,
 ): Promise<MCPToolResult> {
   const { vectorDB, embeddings, log, checkAndReconnect, getIndexMetadata } = ctx;
 
-  return await wrapToolHandler(
-    SemanticSearchSchema,
-    async (validatedArgs) => {
-      const { crossRepo, repoIds, query, limit } = validatedArgs;
+  return await wrapToolHandler(SemanticSearchSchema, async validatedArgs => {
+    const { crossRepo, repoIds, query, limit } = validatedArgs;
 
-      log(`Searching for: "${query}"${crossRepo ? ' (cross-repo)' : ''}`);
-      await checkAndReconnect();
+    log(`Searching for: "${query}"${crossRepo ? ' (cross-repo)' : ''}`);
+    await checkAndReconnect();
 
-      const queryEmbedding = await embeddings.embed(query);
-      const { results: rawResults, crossRepoFallback } = await executeSearch(
-        vectorDB, queryEmbedding, { query, limit: limit ?? 5, crossRepo, repoIds }, log
+    const queryEmbedding = await embeddings.embed(query);
+    const { results: rawResults, crossRepoFallback } = await executeSearch(
+      vectorDB,
+      queryEmbedding,
+      { query, limit: limit ?? 5, crossRepo, repoIds },
+      log,
+    );
+
+    const { results, notes } = processResults(rawResults, crossRepoFallback, log);
+
+    log(`Returning ${results.length} results`);
+
+    const shaped = shapeResults(results, 'semantic_search');
+
+    if (shaped.length === 0) {
+      notes.push(
+        '0 results. Try rephrasing as a full question (e.g. "How does X work?"), or use grep for exact string matches. If the codebase was recently updated, run "lien reindex".',
       );
-
-      const { results, notes } = processResults(rawResults, crossRepoFallback, log);
-
-      log(`Returning ${results.length} results`);
-
-      const shaped = shapeResults(results, 'semantic_search');
-
-      if (shaped.length === 0) {
-        notes.push('0 results. Try rephrasing as a full question (e.g. "How does X work?"), or use grep for exact string matches. If the codebase was recently updated, run "lien reindex".');
-      }
-
-      return {
-        indexInfo: getIndexMetadata(),
-        results: shaped,
-        ...(crossRepo && vectorDB instanceof QdrantDB && { groupedByRepo: groupResultsByRepo(shaped) }),
-        ...(notes.length > 0 && { note: notes.join(' ') }),
-      };
     }
-  )(args);
+
+    return {
+      indexInfo: getIndexMetadata(),
+      results: shaped,
+      ...(crossRepo &&
+        vectorDB instanceof QdrantDB && { groupedByRepo: groupResultsByRepo(shaped) }),
+      ...(notes.length > 0 && { note: notes.join(' ') }),
+    };
+  })(args);
 }

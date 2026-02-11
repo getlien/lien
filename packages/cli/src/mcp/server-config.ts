@@ -1,8 +1,5 @@
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { tools } from './tools.js';
 import { toolHandlers } from './handlers/index.js';
 import type { ToolContext, LogFn } from './types.js';
@@ -23,10 +20,7 @@ export interface MCPServerConfig {
 /**
  * Create MCP server configuration.
  */
-export function createMCPServerConfig(
-  name: string,
-  version: string
-): MCPServerConfig {
+export function createMCPServerConfig(name: string, version: string): MCPServerConfig {
   return {
     name,
     version,
@@ -40,18 +34,14 @@ export function createMCPServerConfig(
 /**
  * Register all MCP tool handlers on the server.
  */
-export function registerMCPHandlers(
-  server: Server,
-  toolContext: ToolContext,
-  log: LogFn
-): void {
+export function registerMCPHandlers(server: Server, toolContext: ToolContext, log: LogFn): void {
   // Register tools list handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return { tools };
   });
 
   // Register tool call handler
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async request => {
     const { name, arguments: args } = request.params;
     log(`Handling tool call: ${name}`);
 
@@ -63,7 +53,7 @@ export function registerMCPHandlers(
         { requestedTool: name, availableTools: tools.map(t => t.name) },
         'medium',
         false,
-        false
+        false,
       );
       return {
         isError: true,
@@ -93,7 +83,7 @@ export function registerMCPHandlers(
                 tool: name,
               },
               null,
-              2
+              2,
             ),
           },
         ],
@@ -101,4 +91,3 @@ export function registerMCPHandlers(
     }
   });
 }
-

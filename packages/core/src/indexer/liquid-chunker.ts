@@ -2,7 +2,7 @@ import type { CodeChunk } from './types.js';
 
 /**
  * Liquid-specific chunking for Shopify themes
- * 
+ *
  * Uses regex to identify special Liquid blocks (schema, style, javascript)
  * and keeps them as single semantic units
  */
@@ -16,10 +16,10 @@ interface LiquidBlock {
 
 /**
  * Extract schema name from JSON content
- * 
+ *
  * Extracts the "name" field from Shopify schema JSON.
  * Uses JSON.parse to properly handle escaped quotes and other JSON edge cases.
- * 
+ *
  * Example:
  * {% schema %}
  * {
@@ -27,7 +27,7 @@ interface LiquidBlock {
  *   "settings": []
  * }
  * {% endschema %}
- * 
+ *
  * Returns: 'My "Special" Section' (with literal quotes, unescaped)
  */
 function extractSchemaName(schemaContent: string): string | undefined {
@@ -38,7 +38,7 @@ function extractSchemaName(schemaContent: string): string | undefined {
       .replace(/\{%-?\s*schema\s*-?%\}/g, '')
       .replace(/\{%-?\s*endschema\s*-?%\}/g, '')
       .trim();
-    
+
     // Parse the JSON
     const schema = JSON.parse(jsonContent);
     // Ensure name is a string before returning
@@ -52,7 +52,7 @@ function extractSchemaName(schemaContent: string): string | undefined {
 
 /**
  * Remove Liquid comment blocks from content to avoid extracting tags from comments
- * 
+ *
  * Example:
  * {% comment %}Don't use {% render 'old-snippet' %}{% endcomment %}
  * → (removed)
@@ -64,55 +64,55 @@ function removeComments(content: string): string {
 
 /**
  * Extract dependencies from {% render %}, {% include %}, and {% section %} tags
- * 
+ *
  * Examples:
  * - {% render 'product-card' %} → 'product-card'
  * - {% render "cart-item", product: product %} → 'cart-item'
  * - {% include 'snippets/header' %} → 'snippets/header'
  * - {% section 'announcement-bar' %} → 'announcement-bar'
- * 
+ *
  * Limitations:
  * - Does not handle escaped quotes in snippet names (e.g., {% render 'name\'s' %})
  * - This is acceptable because Shopify snippet names map to filenames, and
  *   filesystem restrictions prevent quotes in filenames (snippets/name's.liquid is invalid)
  * - In practice, Shopify snippet names use only alphanumeric, dash, and underscore
- * 
+ *
  * Note: Expects content with comments already removed for performance
- * 
+ *
  * @param contentWithoutComments - Content with Liquid comments already removed
  */
 function extractRenderTags(contentWithoutComments: string): string[] {
   const dependencies = new Set<string>();
-  
+
   // Match {% render 'snippet-name' %} or {% render "snippet-name" %}
   // Note: Does not handle escaped quotes - see function docs for rationale
   const renderPattern = /\{%-?\s*render\s+['"]([^'"]+)['"]/g;
   let match;
-  
+
   while ((match = renderPattern.exec(contentWithoutComments)) !== null) {
     dependencies.add(match[1]);
   }
-  
+
   // Match {% include 'snippet-name' %} or {% include "snippet-name" %}
   const includePattern = /\{%-?\s*include\s+['"]([^'"]+)['"]/g;
-  
+
   while ((match = includePattern.exec(contentWithoutComments)) !== null) {
     dependencies.add(match[1]);
   }
-  
+
   // Match {% section 'section-name' %} or {% section "section-name" %}
   const sectionPattern = /\{%-?\s*section\s+['"]([^'"]+)['"]/g;
-  
+
   while ((match = sectionPattern.exec(contentWithoutComments)) !== null) {
     dependencies.add(match[1]);
   }
-  
+
   return Array.from(dependencies);
 }
 
 /**
  * Find all special Liquid blocks in the template
- * 
+ *
  * Limitation: Does not support nested blocks of the same type.
  * - Matches first start tag with first end tag
  * - This is acceptable because Shopify Liquid does not allow nested blocks
@@ -122,50 +122,52 @@ function extractRenderTags(contentWithoutComments: string): string[] {
 function findLiquidBlocks(content: string): LiquidBlock[] {
   const lines = content.split('\n');
   const blocks: LiquidBlock[] = [];
-  
+
   // Regex patterns for Liquid blocks
   // Note: Matches first start → first end (no nesting support, which is correct for Shopify)
   const blockPatterns = [
     { type: 'schema' as const, start: /\{%-?\s*schema\s*-?%\}/, end: /\{%-?\s*endschema\s*-?%\}/ },
     { type: 'style' as const, start: /\{%-?\s*style\s*-?%\}/, end: /\{%-?\s*endstyle\s*-?%\}/ },
-    { type: 'javascript' as const, start: /\{%-?\s*javascript\s*-?%\}/, end: /\{%-?\s*endjavascript\s*-?%\}/ },
+    {
+      type: 'javascript' as const,
+      start: /\{%-?\s*javascript\s*-?%\}/,
+      end: /\{%-?\s*endjavascript\s*-?%\}/,
+    },
   ];
-  
+
   for (const pattern of blockPatterns) {
     let searchStart = 0;
-    
+
     while (searchStart < lines.length) {
       // Find start tag
-      const startIdx = lines.findIndex((line, idx) => 
-        idx >= searchStart && pattern.start.test(line)
+      const startIdx = lines.findIndex(
+        (line, idx) => idx >= searchStart && pattern.start.test(line),
       );
-      
+
       if (startIdx === -1) break;
-      
+
       // Find end tag (allow same line for single-line blocks)
-      const endIdx = lines.findIndex((line, idx) => 
-        idx >= startIdx && pattern.end.test(line)
-      );
-      
+      const endIdx = lines.findIndex((line, idx) => idx >= startIdx && pattern.end.test(line));
+
       if (endIdx === -1) {
         // No end tag found, treat rest as template
         break;
       }
-      
+
       // Extract block content
       const blockContent = lines.slice(startIdx, endIdx + 1).join('\n');
-      
+
       blocks.push({
         type: pattern.type,
         startLine: startIdx,
         endLine: endIdx,
         content: blockContent,
       });
-      
+
       searchStart = endIdx + 1;
     }
   }
-  
+
   return blocks.sort((a, b) => a.startLine - b.startLine);
 }
 
@@ -198,7 +200,7 @@ function createCodeChunk(
     imports?: string[];
     repoId?: string;
     orgId?: string;
-  } = {}
+  } = {},
 ): CodeChunk {
   return {
     content,
@@ -225,7 +227,7 @@ function splitLargeBlock(
   ctx: ChunkContext,
   symbolName: string | undefined,
   imports: string[],
-  tenantContext?: { repoId?: string; orgId?: string }
+  tenantContext?: { repoId?: string; orgId?: string },
 ): CodeChunk[] {
   const chunks: CodeChunk[] = [];
   const blockLines = block.content.split('\n');
@@ -236,14 +238,16 @@ function splitLargeBlock(
     const chunkContent = blockLines.slice(offset, endOffset).join('\n');
 
     if (chunkContent.trim().length > 0) {
-      chunks.push(createCodeChunk(
-        chunkContent,
-        block.startLine + offset + 1,
-        block.startLine + endOffset,
-        filepath,
-        'block',
-        { symbolName, symbolType: block.type, imports, ...tenantContext }
-      ));
+      chunks.push(
+        createCodeChunk(
+          chunkContent,
+          block.startLine + offset + 1,
+          block.startLine + endOffset,
+          filepath,
+          'block',
+          { symbolName, symbolType: block.type, imports, ...tenantContext },
+        ),
+      );
     }
 
     if (endOffset >= blockLines.length) break;
@@ -260,7 +264,7 @@ function processSpecialBlock(
   block: LiquidBlock,
   ctx: ChunkContext,
   coveredLines: Set<number>,
-  tenantContext?: { repoId?: string; orgId?: string }
+  tenantContext?: { repoId?: string; orgId?: string },
 ): CodeChunk[] {
   // Mark lines as covered
   for (let i = block.startLine; i <= block.endLine; i++) {
@@ -281,14 +285,16 @@ function processSpecialBlock(
 
   // Keep small blocks as single chunk, split large ones
   if (blockLineCount <= maxBlockSize) {
-    return [createCodeChunk(
-      block.content,
-      block.startLine + 1,
-      block.endLine + 1,
-      ctx.params.filepath,
-      'block',
-      { symbolName, symbolType: block.type, imports, ...tenantContext }
-    )];
+    return [
+      createCodeChunk(
+        block.content,
+        block.startLine + 1,
+        block.endLine + 1,
+        ctx.params.filepath,
+        'block',
+        { symbolName, symbolType: block.type, imports, ...tenantContext },
+      ),
+    ];
   }
 
   return splitLargeBlock(block, ctx, symbolName, imports, tenantContext);
@@ -302,7 +308,7 @@ function flushTemplateChunk(
   chunkStartLine: number,
   endLine: number,
   ctx: ChunkContext,
-  tenantContext?: { repoId?: string; orgId?: string }
+  tenantContext?: { repoId?: string; orgId?: string },
 ): CodeChunk | null {
   if (currentChunk.length === 0) return null;
 
@@ -318,7 +324,7 @@ function flushTemplateChunk(
     endLine,
     ctx.params.filepath,
     'template',
-    { imports, ...tenantContext }
+    { imports, ...tenantContext },
   );
 }
 
@@ -328,7 +334,7 @@ function flushTemplateChunk(
 function processTemplateContent(
   ctx: ChunkContext,
   coveredLines: Set<number>,
-  tenantContext?: { repoId?: string; orgId?: string }
+  tenantContext?: { repoId?: string; orgId?: string },
 ): CodeChunk[] {
   const chunks: CodeChunk[] = [];
   const { lines, params } = ctx;
@@ -365,7 +371,13 @@ function processTemplateContent(
   }
 
   // Flush remaining chunk
-  const finalChunk = flushTemplateChunk(currentChunk, chunkStartLine, lines.length, ctx, tenantContext);
+  const finalChunk = flushTemplateChunk(
+    currentChunk,
+    chunkStartLine,
+    lines.length,
+    ctx,
+    tenantContext,
+  );
   if (finalChunk) chunks.push(finalChunk);
 
   return chunks;
@@ -373,10 +385,10 @@ function processTemplateContent(
 
 /**
  * Chunk a Liquid template file
- * 
+ *
  * Special handling for:
  * - {% schema %} blocks (kept together, extract section name)
- * - {% style %} blocks (kept together)  
+ * - {% style %} blocks (kept together)
  * - {% javascript %} blocks (kept together)
  * - {% render %}, {% include %}, and {% section %} tags (tracked as imports)
  * - Regular template content (chunked by lines)
@@ -386,7 +398,7 @@ export function chunkLiquidFile(
   content: string,
   chunkSize: number = 75,
   chunkOverlap: number = 10,
-  tenantContext?: { repoId?: string; orgId?: string }
+  tenantContext?: { repoId?: string; orgId?: string },
 ): CodeChunk[] {
   // Build context once for reuse across helpers
   const contentWithoutComments = removeComments(content);
@@ -401,12 +413,15 @@ export function chunkLiquidFile(
   const coveredLines = new Set<number>();
 
   // Process special blocks
-  const blockChunks = blocks.flatMap(block => processSpecialBlock(block, ctx, coveredLines, tenantContext));
+  const blockChunks = blocks.flatMap(block =>
+    processSpecialBlock(block, ctx, coveredLines, tenantContext),
+  );
 
   // Process uncovered template content
   const templateChunks = processTemplateContent(ctx, coveredLines, tenantContext);
 
   // Combine and sort by line number
-  return [...blockChunks, ...templateChunks].sort((a, b) => a.metadata.startLine - b.metadata.startLine);
+  return [...blockChunks, ...templateChunks].sort(
+    (a, b) => a.metadata.startLine - b.metadata.startLine,
+  );
 }
-

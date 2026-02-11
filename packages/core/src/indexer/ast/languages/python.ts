@@ -3,7 +3,11 @@ import type Parser from 'tree-sitter';
 import type { SymbolInfo } from '../types.js';
 import type { LanguageDefinition } from './types.js';
 import type { LanguageTraverser, DeclarationFunctionInfo } from '../traversers/types.js';
-import type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from '../extractors/types.js';
+import type {
+  LanguageExportExtractor,
+  LanguageImportExtractor,
+  LanguageSymbolExtractor,
+} from '../extractors/types.js';
 import { extractSignature, extractParameters } from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
@@ -44,21 +48,15 @@ function extractAliasedSymbolName(node: Parser.SyntaxNode): string | null {
  * - Classes contain methods (which are just functions)
  */
 export class PythonTraverser implements LanguageTraverser {
-  targetNodeTypes = [
-    'function_definition',
-    'async_function_definition',
-  ];
+  targetNodeTypes = ['function_definition', 'async_function_definition'];
 
   containerTypes = [
-    'class_definition',  // We extract methods, not the class itself
+    'class_definition', // We extract methods, not the class itself
   ];
 
   declarationTypes: string[] = [];
 
-  functionTypes = [
-    'function_definition',
-    'async_function_definition',
-  ];
+  functionTypes = ['function_definition', 'async_function_definition'];
 
   shouldExtractChildren(node: Parser.SyntaxNode): boolean {
     return this.containerTypes.includes(node.type);
@@ -76,8 +74,7 @@ export class PythonTraverser implements LanguageTraverser {
   }
 
   shouldTraverseChildren(node: Parser.SyntaxNode): boolean {
-    return node.type === 'module' ||
-           node.type === 'block';
+    return node.type === 'module' || node.type === 'block';
   }
 
   findParentContainerName(node: Parser.SyntaxNode): string | undefined {
@@ -176,10 +173,7 @@ export class PythonExportExtractor implements LanguageExportExtractor {
     return -1;
   }
 
-  private extractReExportNames(
-    node: Parser.SyntaxNode,
-    addExport: (name: string) => void
-  ): void {
+  private extractReExportNames(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
     const startIndex = this.findModulePathIndex(node);
     if (startIndex === -1) return;
 
@@ -235,14 +229,15 @@ export class PythonImportExtractor implements LanguageImportExtractor {
     };
   }
 
-  private processAliasedImport(child: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processAliasedImport(
+    child: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
     const dottedName = child.namedChildren.find(c => c.type === 'dotted_name');
     const identifiers = child.namedChildren.filter(c => c.type === 'identifier');
 
     const moduleName = dottedName?.text || identifiers[0]?.text;
-    const aliasName = identifiers.length >= 2
-      ? identifiers[identifiers.length - 1]?.text
-      : identifiers[0]?.text;
+    const aliasName =
+      identifiers.length >= 2 ? identifiers[identifiers.length - 1]?.text : identifiers[0]?.text;
 
     if (!moduleName || !aliasName) return null;
     return { importPath: moduleName, symbols: [aliasName] };
@@ -252,7 +247,9 @@ export class PythonImportExtractor implements LanguageImportExtractor {
    * Process Python regular import statement.
    * e.g., "import os", "import os as system"
    */
-  private processPythonImport(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processPythonImport(
+    node: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
     for (let i = 0; i < node.namedChildCount; i++) {
       const child = node.namedChild(i);
       if (!child) continue;
@@ -297,7 +294,9 @@ export class PythonImportExtractor implements LanguageImportExtractor {
    * Process Python from...import statement.
    * e.g., "from utils.validate import validateEmail, validatePhone"
    */
-  private processPythonFromImport(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
+  private processPythonFromImport(
+    node: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
     const moduleInfo = this.findModulePath(node);
     if (!moduleInfo) return null;
 
@@ -306,7 +305,6 @@ export class PythonImportExtractor implements LanguageImportExtractor {
 
     return { importPath: moduleInfo.path, symbols };
   }
-
 }
 
 // =============================================================================
@@ -330,11 +328,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
     'class_definition',
   ];
 
-  extractSymbol(
-    node: Parser.SyntaxNode,
-    content: string,
-    parentClass?: string
-  ): SymbolInfo | null {
+  extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_definition':
       case 'async_function_definition':
@@ -346,9 +340,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
-  extractCallSite(
-    node: Parser.SyntaxNode
-  ): { symbol: string; line: number; key: string } | null {
+  extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
     if (node.type !== 'call') return null;
 
     const line = node.startPosition.row + 1;
@@ -374,7 +366,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
   private extractFunctionInfo(
     node: Parser.SyntaxNode,
     content: string,
-    parentClass?: string
+    parentClass?: string,
   ): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
@@ -420,43 +412,103 @@ export const pythonDefinition: LanguageDefinition = {
 
   complexity: {
     decisionPoints: [
-      'if_statement', 'while_statement', 'for_statement', 'switch_case',
-      'catch_clause', 'ternary_expression', 'binary_expression',
-      'elif_clause', 'except_clause', 'conditional_expression',
-    ],
-    nestingTypes: [
-      'if_statement', 'for_statement', 'while_statement',
+      'if_statement',
+      'while_statement',
+      'for_statement',
+      'switch_case',
+      'catch_clause',
+      'ternary_expression',
+      'binary_expression',
+      'elif_clause',
       'except_clause',
+      'conditional_expression',
     ],
-    nonNestingTypes: [
-      'elif_clause', 'conditional_expression',
-    ],
-    lambdaTypes: [
-      'lambda',
-    ],
+    nestingTypes: ['if_statement', 'for_statement', 'while_statement', 'except_clause'],
+    nonNestingTypes: ['elif_clause', 'conditional_expression'],
+    lambdaTypes: ['lambda'],
     operatorSymbols: new Set([
-      '+', '-', '*', '/', '%', '**', '//',
-      '==', '!=', '<', '>', '<=', '>=',
-      '=', '+=', '-=', '*=', '/=', '%=', '**=', '//=',
-      '&=', '|=', '^=', '<<=', '>>=',
-      '&', '|', '^', '~', '<<', '>>',
-      '.', ':', '->', '@',
-      '(', ')', '[', ']', '{', '}',
+      '+',
+      '-',
+      '*',
+      '/',
+      '%',
+      '**',
+      '//',
+      '==',
+      '!=',
+      '<',
+      '>',
+      '<=',
+      '>=',
+      '=',
+      '+=',
+      '-=',
+      '*=',
+      '/=',
+      '%=',
+      '**=',
+      '//=',
+      '&=',
+      '|=',
+      '^=',
+      '<<=',
+      '>>=',
+      '&',
+      '|',
+      '^',
+      '~',
+      '<<',
+      '>>',
+      '.',
+      ':',
+      '->',
+      '@',
+      '(',
+      ')',
+      '[',
+      ']',
+      '{',
+      '}',
     ]),
     operatorKeywords: new Set([
-      'if', 'elif', 'else', 'for', 'while', 'match', 'case',
-      'return', 'raise', 'try', 'except', 'finally',
-      'and', 'or', 'not', 'is', 'in',
-      'await', 'yield', 'break', 'continue', 'pass',
-      'def', 'class', 'lambda', 'async',
-      'import', 'from', 'as', 'with',
-      'global', 'nonlocal', 'del', 'assert',
+      'if',
+      'elif',
+      'else',
+      'for',
+      'while',
+      'match',
+      'case',
+      'return',
+      'raise',
+      'try',
+      'except',
+      'finally',
+      'and',
+      'or',
+      'not',
+      'is',
+      'in',
+      'await',
+      'yield',
+      'break',
+      'continue',
+      'pass',
+      'def',
+      'class',
+      'lambda',
+      'async',
+      'import',
+      'from',
+      'as',
+      'with',
+      'global',
+      'nonlocal',
+      'del',
+      'assert',
     ]),
   },
 
   symbols: {
-    callExpressionTypes: [
-      'call',
-    ],
+    callExpressionTypes: ['call'],
   },
 };

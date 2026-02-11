@@ -19,10 +19,7 @@ export function createOctokit(token: string): Octokit {
 /**
  * Get list of files changed in the PR
  */
-export async function getPRChangedFiles(
-  octokit: Octokit,
-  prContext: PRContext
-): Promise<string[]> {
+export async function getPRChangedFiles(octokit: Octokit, prContext: PRContext): Promise<string[]> {
   const files: string[] = [];
   let page = 1;
   const perPage = 100;
@@ -59,7 +56,7 @@ export async function postPRComment(
   octokit: Octokit,
   prContext: PRContext,
   body: string,
-  logger: Logger
+  logger: Logger,
 ): Promise<void> {
   // Check for existing Lien comment to update instead of creating new
   const existingComment = await findExistingComment(octokit, prContext);
@@ -88,7 +85,7 @@ export async function postPRComment(
  */
 async function findExistingComment(
   octokit: Octokit,
-  prContext: PRContext
+  prContext: PRContext,
 ): Promise<{ id: number } | null> {
   const COMMENT_MARKER = '<!-- lien-ai-review -->';
 
@@ -116,7 +113,7 @@ export async function getFileContent(
   filepath: string,
   startLine: number,
   endLine: number,
-  logger: Logger
+  logger: Logger,
 ): Promise<string | null> {
   try {
     const response = await octokit.repos.getContent({
@@ -127,9 +124,7 @@ export async function getFileContent(
     });
 
     if ('content' in response.data) {
-      const content = Buffer.from(response.data.content as string, 'base64').toString(
-        'utf-8'
-      );
+      const content = Buffer.from(response.data.content as string, 'base64').toString('utf-8');
       const lines = content.split('\n');
       // Line numbers are 1-based, array is 0-based
       const snippet = lines.slice(startLine - 1, endLine).join('\n');
@@ -150,7 +145,7 @@ export async function postPRReview(
   prContext: PRContext,
   comments: LineComment[],
   summaryBody: string,
-  logger: Logger
+  logger: Logger,
 ): Promise<void> {
   if (comments.length === 0) {
     // No line comments, just post summary as regular comment
@@ -169,7 +164,7 @@ export async function postPRReview(
       commit_id: prContext.headSha,
       event: 'COMMENT', // Don't approve or request changes, just comment
       body: summaryBody,
-      comments: comments.map((c) => ({
+      comments: comments.map(c => ({
         path: c.path,
         line: c.line,
         body: c.body,
@@ -199,7 +194,7 @@ export async function updatePRDescription(
   octokit: Octokit,
   prContext: PRContext,
   badgeMarkdown: string,
-  logger: Logger
+  logger: Logger,
 ): Promise<void> {
   try {
     // Get current PR
@@ -281,7 +276,7 @@ export function parsePatchLines(patch: string): Set<number> {
  */
 export async function getPRDiffLines(
   octokit: Octokit,
-  prContext: PRContext
+  prContext: PRContext,
 ): Promise<Map<string, Set<number>>> {
   const diffLines = new Map<string, Set<number>>();
 

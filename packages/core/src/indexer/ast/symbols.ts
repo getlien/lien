@@ -17,7 +17,7 @@ export function extractSymbolInfo(
   node: Parser.SyntaxNode,
   content: string,
   parentClass?: string,
-  language?: string
+  language?: string,
 ): SymbolInfo | null {
   if (language) {
     const extractor = getSymbolExtractor(language as SupportedLanguage);
@@ -33,7 +33,7 @@ export function extractSymbolInfo(
  */
 function extractImportPaths(
   rootNode: Parser.SyntaxNode,
-  importExtractor: ReturnType<typeof getImportExtractor>
+  importExtractor: ReturnType<typeof getImportExtractor>,
 ): string[] {
   if (!importExtractor) return [];
 
@@ -57,7 +57,10 @@ function extractImportPaths(
  * When a language is provided, uses the language-specific import extractor.
  * Falls back to legacy behavior for backwards compatibility.
  */
-export function extractImports(rootNode: Parser.SyntaxNode, language?: SupportedLanguage): string[] {
+export function extractImports(
+  rootNode: Parser.SyntaxNode,
+  language?: SupportedLanguage,
+): string[] {
   if (!language) return [];
   return extractImportPaths(rootNode, getImportExtractor(language));
 }
@@ -68,7 +71,7 @@ export function extractImports(rootNode: Parser.SyntaxNode, language?: Supported
 function addSymbolsToMap(
   map: Record<string, string[]>,
   importPath: string,
-  symbols: string[]
+  symbols: string[],
 ): void {
   const existing = map[importPath];
   if (existing) {
@@ -83,7 +86,7 @@ function addSymbolsToMap(
  */
 function extractSymbolsWithExtractor(
   rootNode: Parser.SyntaxNode,
-  importExtractor: ReturnType<typeof getImportExtractor>
+  importExtractor: ReturnType<typeof getImportExtractor>,
 ): Record<string, string[]> {
   if (!importExtractor) return {};
 
@@ -111,7 +114,10 @@ function extractSymbolsWithExtractor(
  * When a language is provided, uses the language-specific import extractor.
  * Falls back to legacy behavior for backwards compatibility.
  */
-export function extractImportedSymbols(rootNode: Parser.SyntaxNode, language?: SupportedLanguage): Record<string, string[]> {
+export function extractImportedSymbols(
+  rootNode: Parser.SyntaxNode,
+  language?: SupportedLanguage,
+): Record<string, string[]> {
   if (!language) return {};
   return extractSymbolsWithExtractor(rootNode, getImportExtractor(language));
 }
@@ -145,7 +151,10 @@ export function extractImportedSymbols(rootNode: Parser.SyntaxNode, language?: S
  * @param language - Programming language (defaults to 'javascript' for backwards compatibility)
  * @returns Array of exported symbol names
  */
-export function extractExports(rootNode: Parser.SyntaxNode, language?: SupportedLanguage): string[] {
+export function extractExports(
+  rootNode: Parser.SyntaxNode,
+  language?: SupportedLanguage,
+): string[] {
   // Default to JavaScript if no language specified (for backwards compatibility)
   const lang: SupportedLanguage = language ?? 'javascript';
   const extractor = getExtractor(lang);
@@ -165,7 +174,7 @@ export function extractExports(rootNode: Parser.SyntaxNode, language?: Supported
  */
 export function extractCallSites(
   node: Parser.SyntaxNode,
-  language?: SupportedLanguage
+  language?: SupportedLanguage,
 ): Array<{ symbol: string; line: number }> {
   if (!language) return [];
 
@@ -189,7 +198,7 @@ function traverseForCallSites(
   callSites: Array<{ symbol: string; line: number }>,
   seen: Set<string>,
   callExprTypes: Set<string>,
-  extractor: LanguageSymbolExtractor
+  extractor: LanguageSymbolExtractor,
 ): void {
   if (callExprTypes.has(node.type)) {
     const callSite = extractor.extractCallSite(node);

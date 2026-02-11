@@ -42,10 +42,10 @@ describe('Change Detector', () => {
 
   beforeEach(async () => {
     testDir = await createTestDir();
-    
+
     vectorDB = new VectorDB(testDir);
     await vectorDB.initialize();
-    
+
     // Use vectorDB.dbPath which is where detectChanges will look for the manifest
     manifest = new ManifestManager(vectorDB.dbPath);
   });
@@ -59,9 +59,9 @@ describe('Change Detector', () => {
       // Create test files
       await fs.writeFile(path.join(testDir, 'file1.ts'), 'export const a = 1;');
       await fs.writeFile(path.join(testDir, 'file2.ts'), 'export const b = 2;');
-      
+
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       expect(result.reason).toBe('full');
       expect(result.added.length).toBe(2);
       expect(result.modified.length).toBe(0);
@@ -78,20 +78,20 @@ describe('Change Detector', () => {
       const file1 = path.join(testDir, 'file1.ts');
       await fs.writeFile(file1, 'export const a = 1;');
       const stats1 = await fs.stat(file1);
-      
+
       savedManifest.files[file1] = {
         filepath: file1,
         lastModified: stats1.mtimeMs,
         chunkCount: 1,
       };
       await manifest.save(savedManifest);
-      
+
       // Add new file
       const file2 = path.join(testDir, 'file2.ts');
       await fs.writeFile(file2, 'export const b = 2;');
-      
+
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       expect(result.reason).toBe('mtime');
       expect(result.added).toContain(toRelative(file2));
       expect(result.modified.length).toBe(0);
@@ -103,20 +103,20 @@ describe('Change Detector', () => {
       const savedManifest = createEmptyManifest();
       const file1 = path.join(testDir, 'file1.ts');
       await fs.writeFile(file1, 'export const a = 1;');
-      
+
       savedManifest.files[file1] = {
         filepath: file1,
         lastModified: Date.now() - 10000, // 10 seconds ago
         chunkCount: 1,
       };
       await manifest.save(savedManifest);
-      
+
       // Wait and modify file
       await new Promise(resolve => setTimeout(resolve, 10));
       await fs.writeFile(file1, 'export const a = 2;'); // Modified
-      
+
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       expect(result.reason).toBe('mtime');
       expect(result.modified).toContain(toRelative(file1));
       expect(result.added.length).toBe(0);
@@ -128,13 +128,13 @@ describe('Change Detector', () => {
       const savedManifest = createEmptyManifest();
       const file1 = path.join(testDir, 'file1.ts');
       const file2 = path.join(testDir, 'file2.ts');
-      
+
       await fs.writeFile(file1, 'export const a = 1;');
       await fs.writeFile(file2, 'export const b = 2;');
-      
+
       const stats1 = await fs.stat(file1);
       const stats2 = await fs.stat(file2);
-      
+
       savedManifest.files[file1] = {
         filepath: file1,
         lastModified: stats1.mtimeMs,
@@ -146,12 +146,12 @@ describe('Change Detector', () => {
         chunkCount: 1,
       };
       await manifest.save(savedManifest);
-      
+
       // Delete file2
       await fs.unlink(file2);
-      
+
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       expect(result.reason).toBe('mtime');
       expect(result.deleted).toContain(toRelative(file2));
       expect(result.added.length).toBe(0);
@@ -163,10 +163,10 @@ describe('Change Detector', () => {
       const savedManifest = createEmptyManifest();
       const file1 = path.join(testDir, 'file1.ts');
       const file2 = path.join(testDir, 'file2.ts');
-      
+
       await fs.writeFile(file1, 'export const a = 1;');
       await fs.writeFile(file2, 'export const b = 2;');
-      
+
       savedManifest.files[file1] = {
         filepath: file1,
         lastModified: Date.now() - 10000,
@@ -178,16 +178,16 @@ describe('Change Detector', () => {
         chunkCount: 1,
       };
       await manifest.save(savedManifest);
-      
+
       // Modify file1, delete file2, add file3
       await new Promise(resolve => setTimeout(resolve, 10));
       await fs.writeFile(file1, 'export const a = 2;'); // Modified
       await fs.unlink(file2); // Deleted
       const file3 = path.join(testDir, 'file3.ts');
       await fs.writeFile(file3, 'export const c = 3;'); // Added
-      
+
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       expect(result.reason).toBe('mtime');
       expect(result.modified).toContain(toRelative(file1));
       expect(result.deleted).toContain(toRelative(file2));
@@ -211,16 +211,16 @@ describe('Change Detector', () => {
       await fs.writeFile(file2, 'export const b = 2;');
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Initial commit"', { cwd: testDir });
-      
+
       // Get current commit
       const { stdout: commit1 } = await execAsync('git rev-parse HEAD', { cwd: testDir });
       const mainCommit = commit1.trim();
-      
+
       // Create manifest with git state
       const savedManifest = createEmptyManifest();
       const stats1 = await fs.stat(file1);
       const stats2 = await fs.stat(file2);
-      
+
       savedManifest.files[file1] = {
         filepath: file1,
         lastModified: stats1.mtimeMs,
@@ -237,7 +237,7 @@ describe('Change Detector', () => {
         timestamp: Date.now(),
       };
       await manifest.save(savedManifest);
-      
+
       // Create feature branch, modify file1, add file3
       await execAsync('git checkout -b feature', { cwd: testDir });
       await fs.writeFile(file1, 'export const a = 2;'); // Modified
@@ -245,9 +245,9 @@ describe('Change Detector', () => {
       await fs.writeFile(file3, 'export const c = 3;'); // Added
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Feature changes"', { cwd: testDir });
-      
+
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       expect(result.reason).toBe('git-state-changed');
       expect(result.modified).toContain(toRelative(file1)); // Should detect file1 as modified
       expect(result.added).toContain(toRelative(file3)); // Should detect file3 as added
@@ -265,15 +265,15 @@ describe('Change Detector', () => {
       await fs.writeFile(file2, 'export const b = 2;');
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Initial commit"', { cwd: testDir });
-      
+
       const { stdout: commit1 } = await execAsync('git rev-parse HEAD', { cwd: testDir });
       const mainCommit = commit1.trim();
-      
+
       // Create manifest
       const savedManifest = createEmptyManifest();
       const stats1 = await fs.stat(file1);
       const stats2 = await fs.stat(file2);
-      
+
       savedManifest.files[file1] = {
         filepath: file1,
         lastModified: stats1.mtimeMs,
@@ -290,15 +290,15 @@ describe('Change Detector', () => {
         timestamp: Date.now(),
       };
       await manifest.save(savedManifest);
-      
+
       // Create feature branch, delete file2
       await execAsync('git checkout -b feature', { cwd: testDir });
       await fs.unlink(file2);
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Delete file2"', { cwd: testDir });
-      
+
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       expect(result.reason).toBe('git-state-changed');
       expect(result.deleted).toContain(toRelative(file2));
       expect(result.modified.length).toBe(0);
@@ -315,10 +315,10 @@ describe('Change Detector', () => {
       }
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Initial commit"', { cwd: testDir });
-      
+
       const { stdout: commit1 } = await execAsync('git rev-parse HEAD', { cwd: testDir });
       const initialCommit = commit1.trim();
-      
+
       // Create manifest
       const savedManifest = createEmptyManifest();
       for (const file of files) {
@@ -335,14 +335,14 @@ describe('Change Detector', () => {
         timestamp: Date.now(),
       };
       await manifest.save(savedManifest);
-      
+
       // Modify only 1 file
       await fs.writeFile(files[0], 'export const v1 = 100;');
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Modify file1"', { cwd: testDir });
-      
+
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       expect(result.reason).toBe('git-state-changed');
       expect(result.modified.length).toBe(1); // Only 1 file modified
       expect(result.modified).toContain(toRelative(files[0]));
@@ -361,11 +361,11 @@ describe('Change Detector', () => {
       await fs.writeFile(file1, 'export const a = 1;');
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Initial"', { cwd: testDir });
-      
+
       // Create manifest with git state but invalid commit
       const savedManifest = createEmptyManifest();
       const stats = await fs.stat(file1);
-      
+
       savedManifest.files[file1] = {
         filepath: file1,
         lastModified: stats.mtimeMs,
@@ -377,13 +377,13 @@ describe('Change Detector', () => {
         timestamp: Date.now(),
       };
       await manifest.save(savedManifest);
-      
+
       // Add another file
       const file2 = path.join(testDir, 'file2.ts');
       await fs.writeFile(file2, 'export const b = 2;');
-      
+
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       // Should fall back to full reindex when git diff fails
       expect(result.reason).toBe('git-state-changed');
       expect(result.added.length).toBe(2); // All files treated as added (fallback)
@@ -396,10 +396,10 @@ describe('Change Detector', () => {
       await fs.writeFile(file1, 'export const a = 1;');
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Initial commit"', { cwd: testDir });
-      
+
       const { stdout: commit1 } = await execAsync('git rev-parse HEAD', { cwd: testDir });
       const initialCommit = commit1.trim();
-      
+
       // Create manifest
       const savedManifest = createEmptyManifest();
       const stats1 = await fs.stat(file1);
@@ -414,20 +414,20 @@ describe('Change Detector', () => {
         timestamp: Date.now(),
       };
       await manifest.save(savedManifest);
-      
+
       // Create new branch with committed changes
       await execAsync('git checkout -b feature', { cwd: testDir });
       const file2 = path.join(testDir, 'file2.ts');
       await fs.writeFile(file2, 'export const b = 2;');
       await execAsync('git add .', { cwd: testDir });
       await execAsync('git commit -m "Add file2"', { cwd: testDir });
-      
+
       // Create unstaged file (not in git)
       const file3 = path.join(testDir, 'file3.ts');
       await fs.writeFile(file3, 'export const c = 3;');
-      
+
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       expect(result.reason).toBe('git-state-changed');
       expect(result.added).toContain(toRelative(file2)); // From git diff
       expect(result.added).toContain(toRelative(file3)); // New file not in git or manifest
@@ -437,7 +437,7 @@ describe('Change Detector', () => {
   describe('Edge cases', () => {
     it('should handle empty project', async () => {
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       expect(result.reason).toBe('full');
       expect(result.added.length).toBe(0);
       expect(result.modified.length).toBe(0);
@@ -447,14 +447,13 @@ describe('Change Detector', () => {
     it('should handle manifest with no files', async () => {
       const savedManifest = createEmptyManifest();
       await manifest.save(savedManifest);
-      
+
       const file1 = path.join(testDir, 'file1.ts');
       await fs.writeFile(file1, 'export const a = 1;');
-      
+
       const result = await detectChanges(testDir, vectorDB, defaultConfig);
-      
+
       expect(result.added).toContain(toRelative(file1));
     });
   });
 });
-

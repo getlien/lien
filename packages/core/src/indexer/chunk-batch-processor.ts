@@ -47,19 +47,19 @@ export interface FileIndexEntry {
  */
 export async function processEmbeddingMicroBatches(
   texts: string[],
-  embeddings: EmbeddingService
+  embeddings: EmbeddingService,
 ): Promise<Float32Array[]> {
   const results: Float32Array[] = [];
-  
+
   for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
     const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
     const microResults = await embeddings.embedBatch(microBatch);
     results.push(...microResults);
-    
+
     // Yield to event loop for UI responsiveness
     await new Promise(resolve => setImmediate(resolve));
   }
-  
+
   return results;
 }
 
@@ -94,7 +94,7 @@ export class ChunkBatchProcessor {
     private readonly vectorDB: VectorDBInterface,
     private readonly embeddings: EmbeddingService,
     private readonly config: BatchProcessorConfig,
-    private readonly progressTracker: ProgressTracker
+    private readonly progressTracker: ProgressTracker,
   ) {}
 
   /**
@@ -110,7 +110,7 @@ export class ChunkBatchProcessor {
     chunks: CodeChunk[],
     filepath: string,
     mtime: number,
-    contentHash: string
+    contentHash: string,
   ): Promise<void> {
     if (chunks.length === 0) {
       return;
@@ -207,7 +207,7 @@ export class ChunkBatchProcessor {
       for (let i = 0; i < toProcess.length; i += this.config.embeddingBatchSize) {
         const batch = toProcess.slice(
           i,
-          Math.min(i + this.config.embeddingBatchSize, toProcess.length)
+          Math.min(i + this.config.embeddingBatchSize, toProcess.length),
         );
         const texts = batch.map(item => item.content);
 
@@ -221,7 +221,7 @@ export class ChunkBatchProcessor {
         await this.vectorDB.insertBatch(
           embeddingVectors,
           batch.map(item => item.chunk.metadata),
-          texts
+          texts,
         );
 
         // Yield to event loop

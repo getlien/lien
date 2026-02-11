@@ -33,4 +33,3 @@ export function validateEmail(email: string): boolean {
 export function formatUserName(user: User): string {
   return `${user.name} (${user.email})`;
 }
-

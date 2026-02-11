@@ -48,7 +48,7 @@ describe('batch-insert', () => {
         const { vectors, metadatas, contents } = createTestData(1);
 
         await expect(
-          insertBatch(null, null, 'test_table', vectors, metadatas, contents)
+          insertBatch(null, null, 'test_table', vectors, metadatas, contents),
         ).rejects.toThrow(new DatabaseError('Vector database not initialized'));
       });
 
@@ -59,7 +59,7 @@ describe('batch-insert', () => {
         const contents = ['content'];
 
         await expect(
-          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents)
+          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents),
         ).rejects.toThrow('Vectors, metadatas, and contents arrays must have the same length');
       });
 
@@ -70,7 +70,7 @@ describe('batch-insert', () => {
         const contents = ['content1', 'content2'];
 
         await expect(
-          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents)
+          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents),
         ).rejects.toThrow('Vectors, metadatas, and contents arrays must have the same length');
       });
     });
@@ -117,7 +117,14 @@ describe('batch-insert', () => {
         const mockDb = { createTable: vi.fn() };
         const { vectors, metadatas, contents } = createTestData(1);
 
-        const result = await insertBatch(mockDb, mockTable, 'test_table', vectors, metadatas, contents);
+        const result = await insertBatch(
+          mockDb,
+          mockTable,
+          'test_table',
+          vectors,
+          metadatas,
+          contents,
+        );
 
         expect(mockDb.createTable).not.toHaveBeenCalled();
         expect(mockTable.add).toHaveBeenCalledWith(expect.any(Array));
@@ -131,28 +138,30 @@ describe('batch-insert', () => {
         const mockDb = {
           createTable: vi.fn().mockResolvedValue(mockTable),
         };
-        
+
         const vectors = [new Float32Array([1, 2, 3])];
-        const metadatas: ChunkMetadata[] = [{
-          file: 'src/test.ts',
-          startLine: 10,
-          endLine: 20,
-          type: 'function',
-          language: 'typescript',
-          symbols: {
-            functions: ['myFunc', 'otherFunc'],
-            classes: ['MyClass'],
-            interfaces: ['MyInterface'],
+        const metadatas: ChunkMetadata[] = [
+          {
+            file: 'src/test.ts',
+            startLine: 10,
+            endLine: 20,
+            type: 'function',
+            language: 'typescript',
+            symbols: {
+              functions: ['myFunc', 'otherFunc'],
+              classes: ['MyClass'],
+              interfaces: ['MyInterface'],
+            },
+            symbolName: 'myFunc',
+            symbolType: 'function',
+            parentClass: 'MyClass',
+            complexity: 15,
+            cognitiveComplexity: 25,
+            parameters: ['a: string', 'b: number'],
+            signature: 'function myFunc(a: string, b: number): void',
+            imports: ['./utils.js', './types.js'],
           },
-          symbolName: 'myFunc',
-          symbolType: 'function',
-          parentClass: 'MyClass',
-          complexity: 15,
-          cognitiveComplexity: 25,
-          parameters: ['a: string', 'b: number'],
-          signature: 'function myFunc(a: string, b: number): void',
-          imports: ['./utils.js', './types.js'],
-        }];
+        ];
         const contents = ['function myFunc() {}'];
 
         await insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents);
@@ -197,16 +206,18 @@ describe('batch-insert', () => {
         const mockDb = {
           createTable: vi.fn().mockResolvedValue(mockTable),
         };
-        
+
         const vectors = [new Float32Array([1, 2, 3])];
-        const metadatas: ChunkMetadata[] = [{
-          file: 'src/test.ts',
-          startLine: 1,
-          endLine: 10,
-          type: 'block',
-          language: 'typescript',
-          // No symbols, parameters, imports
-        }];
+        const metadatas: ChunkMetadata[] = [
+          {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'block',
+            language: 'typescript',
+            // No symbols, parameters, imports
+          },
+        ];
         const contents = ['some code'];
 
         await insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents);
@@ -230,22 +241,24 @@ describe('batch-insert', () => {
         const mockDb = {
           createTable: vi.fn().mockResolvedValue(mockTable),
         };
-        
+
         const vectors = [new Float32Array([1, 2, 3])];
-        const metadatas: ChunkMetadata[] = [{
-          file: 'src/test.ts',
-          startLine: 1,
-          endLine: 10,
-          type: 'function',
-          language: 'typescript',
-          symbols: {
-            functions: [],
-            classes: [],
-            interfaces: [],
+        const metadatas: ChunkMetadata[] = [
+          {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbols: {
+              functions: [],
+              classes: [],
+              interfaces: [],
+            },
+            parameters: [],
+            imports: [],
           },
-          parameters: [],
-          imports: [],
-        }];
+        ];
         const contents = ['some code'];
 
         await insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents);
@@ -266,7 +279,7 @@ describe('batch-insert', () => {
         const mockDb = {
           createTable: vi.fn().mockResolvedValue(mockTable),
         };
-        
+
         // Create batch larger than max size
         const batchSize = VECTOR_DB_MAX_BATCH_SIZE + 100;
         const { vectors, metadatas, contents } = createTestData(batchSize);
@@ -283,7 +296,7 @@ describe('batch-insert', () => {
         const mockDb = {
           createTable: vi.fn().mockResolvedValue(mockTable),
         };
-        
+
         // Create batch exactly at max size
         const { vectors, metadatas, contents } = createTestData(VECTOR_DB_MAX_BATCH_SIZE);
 
@@ -310,7 +323,7 @@ describe('batch-insert', () => {
             return Promise.resolve(mockTable);
           }),
         };
-        
+
         // Create batch larger than min size so it can be split
         const batchSize = VECTOR_DB_MIN_BATCH_SIZE * 2 + 2;
         const { vectors, metadatas, contents } = createTestData(batchSize);
@@ -326,12 +339,12 @@ describe('batch-insert', () => {
         const mockDb = {
           createTable: vi.fn().mockRejectedValue(new Error('Persistent error')),
         };
-        
+
         // Create batch at min size (cannot be split further)
         const { vectors, metadatas, contents } = createTestData(VECTOR_DB_MIN_BATCH_SIZE);
 
         await expect(
-          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents)
+          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents),
         ).rejects.toThrow(/Failed to insert .* record\(s\) after retry attempts/);
       });
 
@@ -339,7 +352,7 @@ describe('batch-insert', () => {
         const mockDb = {
           createTable: vi.fn().mockRejectedValue(new Error('Persistent error')),
         };
-        
+
         const { vectors, metadatas, contents } = createTestData(VECTOR_DB_MIN_BATCH_SIZE);
 
         try {
@@ -358,7 +371,7 @@ describe('batch-insert', () => {
         const mockDb = {
           createTable: vi.fn().mockRejectedValue(new Error('Schema mismatch: column type invalid')),
         };
-        
+
         const { vectors, metadatas, contents } = createTestData(VECTOR_DB_MIN_BATCH_SIZE);
 
         try {
@@ -380,14 +393,14 @@ describe('batch-insert', () => {
         const mockDb = {
           createTable: vi.fn().mockRejectedValue(new Error('Always fails')),
         };
-        
+
         // Create a batch that will be split multiple times before failing
         const batchSize = VECTOR_DB_MIN_BATCH_SIZE * 3;
         const { vectors, metadatas, contents } = createTestData(batchSize);
 
         // This should throw because all batches fail after splitting
         await expect(
-          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents)
+          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents),
         ).rejects.toThrow(/Failed to insert .* record\(s\) after retry attempts/);
       });
 
@@ -404,7 +417,7 @@ describe('batch-insert', () => {
             return Promise.resolve(mockTable);
           }),
         };
-        
+
         // Create batch that needs splitting
         const batchSize = VECTOR_DB_MIN_BATCH_SIZE * 4;
         const { vectors, metadatas, contents } = createTestData(batchSize);
@@ -438,7 +451,7 @@ describe('batch-insert', () => {
         const { vectors, metadatas, contents } = createTestData(1);
 
         await expect(
-          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents)
+          insertBatch(mockDb, null, 'test_table', vectors, metadatas, contents),
         ).rejects.toThrow(DatabaseError);
       });
     });

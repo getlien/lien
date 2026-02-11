@@ -19,28 +19,27 @@ import { showCompactBanner } from '../utils/banner.js';
 export async function statusCommand() {
   const rootDir = process.cwd();
   const projectName = path.basename(rootDir);
-  
+
   // Use same hashing logic as VectorDB to show correct path
-  const pathHash = crypto
-    .createHash('md5')
-    .update(rootDir)
-    .digest('hex')
-    .substring(0, 8);
-  
+  const pathHash = crypto.createHash('md5').update(rootDir).digest('hex').substring(0, 8);
+
   const indexPath = path.join(os.homedir(), '.lien', 'indices', `${projectName}-${pathHash}`);
-  
+
   showCompactBanner();
   console.log(chalk.bold('Status\n'));
-  
+
   // Config is no longer required - everything uses defaults or global config
-  console.log(chalk.dim('Configuration:'), chalk.green('✓ Using defaults (no per-project config needed)'));
-  
+  console.log(
+    chalk.dim('Configuration:'),
+    chalk.green('✓ Using defaults (no per-project config needed)'),
+  );
+
   // Check if index exists
   try {
     const stats = await fs.stat(indexPath);
     console.log(chalk.dim('Index location:'), indexPath);
     console.log(chalk.dim('Index status:'), chalk.green('✓ Exists'));
-    
+
     // Try to get directory size
     try {
       const files = await fs.readdir(indexPath, { recursive: true });
@@ -48,9 +47,9 @@ export async function statusCommand() {
     } catch {
       // Ignore
     }
-    
+
     console.log(chalk.dim('Last modified:'), stats.mtime.toLocaleString());
-    
+
     // Show version file info
     try {
       const version = await readVersionFile(indexPath);
@@ -63,25 +62,29 @@ export async function statusCommand() {
     }
   } catch {
     console.log(chalk.dim('Index status:'), chalk.yellow('✗ Not indexed'));
-    console.log(chalk.yellow('\nRun'), chalk.bold('lien index'), chalk.yellow('to index your codebase'));
+    console.log(
+      chalk.yellow('\nRun'),
+      chalk.bold('lien index'),
+      chalk.yellow('to index your codebase'),
+    );
   }
-  
+
   // Show features (all enabled by default)
   console.log(chalk.bold('\nFeatures:'));
-  
+
   // Git detection status
   const isRepo = await isGitRepo(rootDir);
   if (isRepo) {
     console.log(chalk.dim('Git detection:'), chalk.green('✓ Enabled'));
     console.log(chalk.dim('  Poll interval:'), `${DEFAULT_GIT_POLL_INTERVAL_MS / 1000}s`);
-    
+
     // Show current git state
     try {
       const branch = await getCurrentBranch(rootDir);
       const commit = await getCurrentCommit(rootDir);
       console.log(chalk.dim('  Current branch:'), branch);
       console.log(chalk.dim('  Current commit:'), commit.substring(0, 8));
-      
+
       // Check if git state file exists
       const gitStateFile = path.join(indexPath, '.git-state.json');
       try {
@@ -99,12 +102,12 @@ export async function statusCommand() {
   } else {
     console.log(chalk.dim('Git detection:'), chalk.yellow('Not a git repo'));
   }
-  
+
   // File watching status (enabled by default)
   console.log(chalk.dim('File watching:'), chalk.green('✓ Enabled (default)'));
   console.log(chalk.dim('  Batch window:'), '500ms (collects rapid changes, force-flush after 5s)');
   console.log(chalk.dim('  Disable with:'), chalk.bold('lien serve --no-watch'));
-  
+
   // Indexing settings (defaults)
   console.log(chalk.bold('\nIndexing Settings (defaults):'));
   console.log(chalk.dim('Concurrency:'), DEFAULT_CONCURRENCY);
@@ -112,4 +115,3 @@ export async function statusCommand() {
   console.log(chalk.dim('Chunk size:'), DEFAULT_CHUNK_SIZE);
   console.log(chalk.dim('Chunk overlap:'), DEFAULT_CHUNK_OVERLAP);
 }
-

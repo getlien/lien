@@ -4,11 +4,7 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { EmbeddingService, VectorDBInterface } from '@liendev/core';
-import {
-  WorkerEmbeddings,
-  VERSION_CHECK_INTERVAL_MS,
-  createVectorDB
-} from '@liendev/core';
+import { WorkerEmbeddings, VERSION_CHECK_INTERVAL_MS, createVectorDB } from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import { createReindexStateManager } from './reindex-state-manager.js';
@@ -41,7 +37,7 @@ export interface MCPServerOptions {
  */
 async function initializeDatabase(
   rootDir: string,
-  log: LogFn
+  log: LogFn,
 ): Promise<{ embeddings: EmbeddingService; vectorDB: VectorDBInterface }> {
   const embeddings = new WorkerEmbeddings();
 
@@ -55,7 +51,9 @@ async function initializeDatabase(
   }
 
   if (typeof vectorDB.initialize !== 'function') {
-    throw new Error(`Invalid vectorDB instance: ${vectorDB.constructor?.name || 'unknown'}. Expected VectorDBInterface but got: ${JSON.stringify(Object.keys(vectorDB))}`);
+    throw new Error(
+      `Invalid vectorDB instance: ${vectorDB.constructor?.name || 'unknown'}. Expected VectorDBInterface but got: ${JSON.stringify(Object.keys(vectorDB))}`,
+    );
   }
 
   log('Loading embedding model...');
@@ -75,7 +73,7 @@ async function initializeDatabase(
 async function handleAutoIndexing(
   vectorDB: VectorDBInterface,
   rootDir: string,
-  log: LogFn
+  log: LogFn,
 ): Promise<void> {
   const hasIndex = await vectorDB.hasData();
 
@@ -105,7 +103,7 @@ async function setupFileWatching(
   embeddings: EmbeddingService,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
-  checkAndReconnect: () => Promise<void>
+  checkAndReconnect: () => Promise<void>,
 ): Promise<FileWatcher | null> {
   // Enable by default, or use --watch flag
   const fileWatchingEnabled = watch !== undefined ? watch : true;
@@ -117,7 +115,14 @@ async function setupFileWatching(
   const fileWatcher = new FileWatcher(rootDir);
 
   try {
-    const handler = createFileChangeHandler(rootDir, vectorDB, embeddings, log, reindexStateManager, checkAndReconnect);
+    const handler = createFileChangeHandler(
+      rootDir,
+      vectorDB,
+      embeddings,
+      log,
+      reindexStateManager,
+      checkAndReconnect,
+    );
     await fileWatcher.start(handler);
     log(`✓ File watching enabled (watching ${fileWatcher.getWatchedFiles().length} files)`);
     return fileWatcher;
@@ -133,7 +138,7 @@ async function setupFileWatching(
 function setupTransport(log: LogFn): StdioServerTransport {
   const transport = new StdioServerTransport();
 
-  transport.onerror = (error) => {
+  transport.onerror = error => {
     log(`Transport error: ${error}`, 'warning');
   };
 
@@ -162,7 +167,7 @@ interface VersionCheckingResult {
 function setupVersionChecking(
   vectorDB: VectorDBInterface,
   log: LogFn,
-  reindexStateManager: ReturnType<typeof createReindexStateManager>
+  reindexStateManager: ReturnType<typeof createReindexStateManager>,
 ): VersionCheckingResult {
   const checkAndReconnect = async () => {
     try {
@@ -215,14 +220,16 @@ function createEarlyLog(verbose: boolean | undefined): LogFn {
 function createMCPLog(server: Server, verbose: boolean | undefined): LogFn {
   return (message, level: LogLevel = 'info') => {
     if (verbose || level === 'warning' || level === 'error') {
-      server.sendLoggingMessage({
-        level,
-        logger: 'lien',
-        data: message,
-      }).catch(() => {
-        // Fallback to stderr if MCP notification fails (e.g., not connected yet)
-        console.error(`[Lien MCP] [${level}] ${message}`);
-      });
+      server
+        .sendLoggingMessage({
+          level,
+          logger: 'lien',
+          data: message,
+        })
+        .catch(() => {
+          // Fallback to stderr if MCP notification fails (e.g., not connected yet)
+          console.error(`[Lien MCP] [${level}] ${message}`);
+        });
     }
   };
 }
@@ -232,7 +239,7 @@ function createMCPLog(server: Server, verbose: boolean | undefined): LogFn {
  */
 async function initializeComponents(
   rootDir: string,
-  earlyLog: LogFn
+  earlyLog: LogFn,
 ): Promise<{ embeddings: EmbeddingService; vectorDB: VectorDBInterface }> {
   try {
     const result = await initializeDatabase(rootDir, earlyLog);
@@ -254,7 +261,7 @@ function createMCPServer(): Server {
   const serverConfig = createMCPServerConfig('lien', packageJson.version);
   return new Server(
     { name: serverConfig.name, version: serverConfig.version },
-    { capabilities: serverConfig.capabilities }
+    { capabilities: serverConfig.capabilities },
   );
 }
 
@@ -267,7 +274,7 @@ async function setupAndConnectServer(
   log: LogFn,
   versionCheckInterval: NodeJS.Timeout,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
-  options: { rootDir: string; watch: boolean | undefined }
+  options: { rootDir: string; watch: boolean | undefined },
 ): Promise<void> {
   const { rootDir, watch } = options;
   const { vectorDB, embeddings } = toolContext;
@@ -279,13 +286,35 @@ async function setupAndConnectServer(
   await handleAutoIndexing(vectorDB, rootDir, log);
 
   // Setup file watching first (needed for event-driven git detection)
-  const fileWatcher = await setupFileWatching(watch, rootDir, vectorDB, embeddings, log, reindexStateManager, toolContext.checkAndReconnect);
+  const fileWatcher = await setupFileWatching(
+    watch,
+    rootDir,
+    vectorDB,
+    embeddings,
+    log,
+    reindexStateManager,
+    toolContext.checkAndReconnect,
+  );
 
   // Setup git detection (will use event-driven approach if fileWatcher is available)
-  const { gitPollInterval } = await setupGitDetection(rootDir, vectorDB, embeddings, log, reindexStateManager, fileWatcher, toolContext.checkAndReconnect);
+  const { gitPollInterval } = await setupGitDetection(
+    rootDir,
+    vectorDB,
+    embeddings,
+    log,
+    reindexStateManager,
+    fileWatcher,
+    toolContext.checkAndReconnect,
+  );
 
   // Setup cleanup handlers
-  const cleanup = setupCleanupHandlers(server, versionCheckInterval, gitPollInterval, fileWatcher, log);
+  const cleanup = setupCleanupHandlers(
+    server,
+    versionCheckInterval,
+    gitPollInterval,
+    fileWatcher,
+    log,
+  );
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
 
@@ -317,7 +346,11 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   // Create reindex state manager
   const reindexStateManager = createReindexStateManager();
 
-  const { interval: versionCheckInterval, checkAndReconnect, getIndexMetadata } = setupVersionChecking(vectorDB, log, reindexStateManager);
+  const {
+    interval: versionCheckInterval,
+    checkAndReconnect,
+    getIndexMetadata,
+  } = setupVersionChecking(vectorDB, log, reindexStateManager);
   const toolContext: ToolContext = {
     vectorDB,
     embeddings,
@@ -328,5 +361,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
     getReindexState: () => reindexStateManager.getState(),
   };
 
-  await setupAndConnectServer(server, toolContext, log, versionCheckInterval, reindexStateManager, { rootDir, watch });
+  await setupAndConnectServer(server, toolContext, log, versionCheckInterval, reindexStateManager, {
+    rootDir,
+    watch,
+  });
 }

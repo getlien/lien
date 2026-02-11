@@ -11,7 +11,11 @@ export function extractSignature(node: Parser.SyntaxNode, content: string): stri
 
   // If signature spans multiple lines, try to get up to the opening brace
   let currentLine = startLine;
-  while (currentLine < node.endPosition.row && !signature.includes('{') && !signature.includes('=>')) {
+  while (
+    currentLine < node.endPosition.row &&
+    !signature.includes('{') &&
+    !signature.includes('=>')
+  ) {
     currentLine++;
     signature += ' ' + (lines[currentLine] || '');
   }

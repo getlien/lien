@@ -7,7 +7,7 @@ describe('VectorDB Query Operations', () => {
   describe('search', () => {
     it('should throw DatabaseError if table is null', async () => {
       const queryVector = new Float32Array([1, 2, 3]);
-      
+
       await expect(search(null, queryVector, 5)).rejects.toThrow(DatabaseError);
       await expect(search(null, queryVector, 5)).rejects.toThrow('Vector database not initialized');
     });
@@ -842,17 +842,29 @@ describe('VectorDB Query Operations', () => {
   describe('scanPaginated', () => {
     it('should yield pages of results', async () => {
       const page1 = [
-        { content: 'fn a() {}', file: 'a.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
-        { content: 'fn b() {}', file: 'b.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
+        {
+          content: 'fn a() {}',
+          file: 'a.ts',
+          startLine: 1,
+          endLine: 3,
+          type: 'function',
+          language: 'typescript',
+        },
+        {
+          content: 'fn b() {}',
+          file: 'b.ts',
+          startLine: 1,
+          endLine: 3,
+          type: 'function',
+          language: 'typescript',
+        },
       ];
       const mockTable = {
         query: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           offset: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          toArray: vi.fn()
-            .mockResolvedValueOnce(page1)
-            .mockResolvedValueOnce([]),
+          toArray: vi.fn().mockResolvedValueOnce(page1).mockResolvedValueOnce([]),
         }),
       };
 
@@ -870,20 +882,39 @@ describe('VectorDB Query Operations', () => {
 
     it('should paginate across multiple pages', async () => {
       const page1 = [
-        { content: 'fn a() {}', file: 'a.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
-        { content: 'fn b() {}', file: 'b.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
+        {
+          content: 'fn a() {}',
+          file: 'a.ts',
+          startLine: 1,
+          endLine: 3,
+          type: 'function',
+          language: 'typescript',
+        },
+        {
+          content: 'fn b() {}',
+          file: 'b.ts',
+          startLine: 1,
+          endLine: 3,
+          type: 'function',
+          language: 'typescript',
+        },
       ];
       const page2 = [
-        { content: 'fn c() {}', file: 'c.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
+        {
+          content: 'fn c() {}',
+          file: 'c.ts',
+          startLine: 1,
+          endLine: 3,
+          type: 'function',
+          language: 'typescript',
+        },
       ];
       const mockTable = {
         query: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           offset: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          toArray: vi.fn()
-            .mockResolvedValueOnce(page1)
-            .mockResolvedValueOnce(page2),
+          toArray: vi.fn().mockResolvedValueOnce(page1).mockResolvedValueOnce(page2),
         }),
       };
 
@@ -944,14 +975,22 @@ describe('VectorDB Query Operations', () => {
         { content: '', file: '', startLine: 1, endLine: 1, type: 'block', language: 'typescript' },
       ];
       const validPage = [
-        { content: 'fn a() {}', file: 'a.ts', startLine: 1, endLine: 3, type: 'function', language: 'typescript' },
+        {
+          content: 'fn a() {}',
+          file: 'a.ts',
+          startLine: 1,
+          endLine: 3,
+          type: 'function',
+          language: 'typescript',
+        },
       ];
       const mockTable = {
         query: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnThis(),
           offset: vi.fn().mockReturnThis(),
           limit: vi.fn().mockReturnThis(),
-          toArray: vi.fn()
+          toArray: vi
+            .fn()
             .mockResolvedValueOnce(invalidPage)
             .mockResolvedValueOnce(validPage)
             .mockResolvedValueOnce([]),
@@ -972,4 +1011,3 @@ describe('VectorDB Query Operations', () => {
     });
   });
 });
-

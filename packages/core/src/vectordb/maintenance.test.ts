@@ -42,7 +42,7 @@ describe('VectorDB Maintenance Operations', () => {
     it('should throw DatabaseError if db is not initialized', async () => {
       await expect(clear(null, { name: 'test' }, 'test_table')).rejects.toThrow(DatabaseError);
       await expect(clear(null, { name: 'test' }, 'test_table')).rejects.toThrow(
-        'Vector database not initialized'
+        'Vector database not initialized',
       );
     });
 
@@ -52,7 +52,7 @@ describe('VectorDB Maintenance Operations', () => {
       };
 
       await expect(clear(mockDb, { name: 'test' }, 'test_table')).rejects.toThrow(
-        'Failed to clear vector database'
+        'Failed to clear vector database',
       );
     });
 
@@ -102,7 +102,7 @@ describe('VectorDB Maintenance Operations', () => {
     it('should throw DatabaseError if table is null', async () => {
       await expect(deleteByFile(null, 'src/test.ts')).rejects.toThrow(DatabaseError);
       await expect(deleteByFile(null, 'src/test.ts')).rejects.toThrow(
-        'Vector database not initialized'
+        'Vector database not initialized',
       );
     });
 
@@ -112,7 +112,7 @@ describe('VectorDB Maintenance Operations', () => {
       };
 
       await expect(deleteByFile(mockTable, 'src/test.ts')).rejects.toThrow(
-        'Failed to delete file from vector database'
+        'Failed to delete file from vector database',
       );
     });
   });
@@ -147,7 +147,7 @@ describe('VectorDB Maintenance Operations', () => {
         'src/test.ts',
         vectors,
         metadatas,
-        contents
+        contents,
       );
 
       expect(mockTable.delete).toHaveBeenCalledWith('file = "src/test.ts"');
@@ -168,7 +168,16 @@ describe('VectorDB Maintenance Operations', () => {
       const contents = ['function test() {}'];
 
       await expect(
-        updateFile({}, null, 'test_table', '/path/to/db', 'src/test.ts', vectors, metadatas, contents)
+        updateFile(
+          {},
+          null,
+          'test_table',
+          '/path/to/db',
+          'src/test.ts',
+          vectors,
+          metadatas,
+          contents,
+        ),
       ).rejects.toThrow(DatabaseError);
     });
 
@@ -186,7 +195,7 @@ describe('VectorDB Maintenance Operations', () => {
         'src/test.ts',
         [],
         [],
-        []
+        [],
       );
 
       expect(mockTable.delete).toHaveBeenCalledWith('file = "src/test.ts"');
@@ -214,9 +223,17 @@ describe('VectorDB Maintenance Operations', () => {
       const contents = ['function test() {}'];
 
       await expect(
-        updateFile(mockDb, mockTable, 'test_table', '/path/to/db', 'src/test.ts', vectors, metadatas, contents)
+        updateFile(
+          mockDb,
+          mockTable,
+          'test_table',
+          '/path/to/db',
+          'src/test.ts',
+          vectors,
+          metadatas,
+          contents,
+        ),
       ).rejects.toThrow('Failed to update file in vector database');
     });
   });
 });
-

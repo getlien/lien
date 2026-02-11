@@ -5,7 +5,7 @@ import type { SearchResult } from '@liendev/core';
 import { QdrantDB } from '@liendev/core';
 
 // Mock the dependency-analyzer module
-vi.mock('./dependency-analyzer.js', async (importOriginal) => {
+vi.mock('./dependency-analyzer.js', async importOriginal => {
   const original = await importOriginal<typeof import('./dependency-analyzer.js')>();
   return {
     ...original,
@@ -35,25 +35,29 @@ describe('handleGetDependents', () => {
   let mockCtx: ToolContext;
 
   // Helper to create mock analysis result
-  function createMockAnalysis(overrides: {
-    dependents?: Array<{
-      filepath: string;
-      isTestFile: boolean;
-      usages?: Array<{ callerSymbol: string; line: number; snippet: string }>;
-    }>;
-    hitLimit?: boolean;
-    complexityMetrics?: {
-      averageComplexity: number;
-      maxComplexity: number;
-      filesWithComplexityData: number;
-      highComplexityDependents: Array<{ filepath: string; maxComplexity: number; avgComplexity: number }>;
-      complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical';
-    };
-    totalUsageCount?: number;
-  } = {}) {
-    const dependents = overrides.dependents ?? [
-      { filepath: 'src/consumer.ts', isTestFile: false },
-    ];
+  function createMockAnalysis(
+    overrides: {
+      dependents?: Array<{
+        filepath: string;
+        isTestFile: boolean;
+        usages?: Array<{ callerSymbol: string; line: number; snippet: string }>;
+      }>;
+      hitLimit?: boolean;
+      complexityMetrics?: {
+        averageComplexity: number;
+        maxComplexity: number;
+        filesWithComplexityData: number;
+        highComplexityDependents: Array<{
+          filepath: string;
+          maxComplexity: number;
+          avgComplexity: number;
+        }>;
+        complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical';
+      };
+      totalUsageCount?: number;
+    } = {},
+  ) {
+    const dependents = overrides.dependents ?? [{ filepath: 'src/consumer.ts', isTestFile: false }];
     const testDependentCount = dependents.filter(d => d.isTestFile).length;
     const productionDependentCount = dependents.length - testDependentCount;
 
@@ -113,10 +117,7 @@ describe('handleGetDependents', () => {
       });
       vi.mocked(findDependents).mockResolvedValue(mockAnalysis);
 
-      const result = await handleGetDependents(
-        { filepath: 'src/utils/validate.ts' },
-        mockCtx
-      );
+      const result = await handleGetDependents({ filepath: 'src/utils/validate.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.filepath).toBe('src/utils/validate.ts');
@@ -129,38 +130,31 @@ describe('handleGetDependents', () => {
     });
 
     it('should call findDependents with correct parameters', async () => {
-      await handleGetDependents(
-        { filepath: 'src/utils/helpers.ts' },
-        mockCtx
-      );
+      await handleGetDependents({ filepath: 'src/utils/helpers.ts' }, mockCtx);
 
       expect(findDependents).toHaveBeenCalledWith(
         mockVectorDB,
         'src/utils/helpers.ts',
         false, // crossRepo default
         mockLog,
-        undefined // symbol default
+        undefined, // symbol default
       );
     });
 
     it('should call checkAndReconnect before analysis', async () => {
-      await handleGetDependents(
-        { filepath: 'src/test.ts' },
-        mockCtx
-      );
+      await handleGetDependents({ filepath: 'src/test.ts' }, mockCtx);
 
       expect(mockCheckAndReconnect).toHaveBeenCalled();
     });
 
     it('should handle no dependents gracefully', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        dependents: [],
-      }));
-
-      const result = await handleGetDependents(
-        { filepath: 'src/isolated.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [],
+        }),
       );
+
+      const result = await handleGetDependents({ filepath: 'src/isolated.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.dependentCount).toBe(0);
@@ -171,24 +165,23 @@ describe('handleGetDependents', () => {
 
   describe('risk level calculation', () => {
     it('should return low risk for few dependents', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        dependents: [
-          { filepath: 'src/a.ts', isTestFile: false },
-          { filepath: 'src/b.ts', isTestFile: false },
-        ],
-        complexityMetrics: {
-          averageComplexity: 3,
-          maxComplexity: 5,
-          filesWithComplexityData: 2,
-          highComplexityDependents: [],
-          complexityRiskBoost: 'low',
-        },
-      }));
-
-      const result = await handleGetDependents(
-        { filepath: 'src/utils.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [
+            { filepath: 'src/a.ts', isTestFile: false },
+            { filepath: 'src/b.ts', isTestFile: false },
+          ],
+          complexityMetrics: {
+            averageComplexity: 3,
+            maxComplexity: 5,
+            filesWithComplexityData: 2,
+            highComplexityDependents: [],
+            complexityRiskBoost: 'low',
+          },
+        }),
       );
+
+      const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.riskLevel).toBe('low');
@@ -205,43 +198,41 @@ describe('handleGetDependents', () => {
         complexityRiskBoost: 'high' as const,
       };
 
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        dependents: Array(20).fill(null).map((_, i) => ({
-          filepath: `src/file${i}.ts`,
-          isTestFile: false,
-        })),
-        complexityMetrics,
-      }));
-
-      const result = await handleGetDependents(
-        { filepath: 'src/core.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: Array(20)
+            .fill(null)
+            .map((_, i) => ({
+              filepath: `src/file${i}.ts`,
+              isTestFile: false,
+            })),
+          complexityMetrics,
+        }),
       );
+
+      const result = await handleGetDependents({ filepath: 'src/core.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.complexityMetrics).toEqual(complexityMetrics);
     });
 
     it('should boost risk level when complexity is high', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        dependents: [
-          { filepath: 'src/a.ts', isTestFile: false },
-        ],
-        complexityMetrics: {
-          averageComplexity: 20,
-          maxComplexity: 30,
-          filesWithComplexityData: 1,
-          highComplexityDependents: [
-            { filepath: 'src/a.ts', maxComplexity: 30, avgComplexity: 20 },
-          ],
-          complexityRiskBoost: 'critical',
-        },
-      }));
-
-      const result = await handleGetDependents(
-        { filepath: 'src/utils.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [{ filepath: 'src/a.ts', isTestFile: false }],
+          complexityMetrics: {
+            averageComplexity: 20,
+            maxComplexity: 30,
+            filesWithComplexityData: 1,
+            highComplexityDependents: [
+              { filepath: 'src/a.ts', maxComplexity: 30, avgComplexity: 20 },
+            ],
+            complexityRiskBoost: 'critical',
+          },
+        }),
       );
+
+      const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       // Even with 1 dependent, complexity can boost the risk
@@ -251,18 +242,19 @@ describe('handleGetDependents', () => {
 
   describe('hitLimit behavior', () => {
     it('should include warning note when scan limit is reached', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        hitLimit: true,
-        dependents: Array(50).fill(null).map((_, i) => ({
-          filepath: `src/file${i}.ts`,
-          isTestFile: false,
-        })),
-      }));
-
-      const result = await handleGetDependents(
-        { filepath: 'src/widely-used.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          hitLimit: true,
+          dependents: Array(50)
+            .fill(null)
+            .map((_, i) => ({
+              filepath: `src/file${i}.ts`,
+              isTestFile: false,
+            })),
+        }),
       );
+
+      const result = await handleGetDependents({ filepath: 'src/widely-used.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.note).toContain('10,000');
@@ -271,14 +263,13 @@ describe('handleGetDependents', () => {
     });
 
     it('should not include note when scan limit is not reached', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        hitLimit: false,
-      }));
-
-      const result = await handleGetDependents(
-        { filepath: 'src/normal.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          hitLimit: false,
+        }),
       );
+
+      const result = await handleGetDependents({ filepath: 'src/normal.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.note).toBeUndefined();
@@ -315,17 +306,14 @@ describe('handleGetDependents', () => {
     it('should pass crossRepo=true to findDependents when enabled', async () => {
       vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
 
-      await handleGetDependents(
-        { filepath: 'src/shared/utils.ts', crossRepo: true },
-        mockCtx
-      );
+      await handleGetDependents({ filepath: 'src/shared/utils.ts', crossRepo: true }, mockCtx);
 
       expect(findDependents).toHaveBeenCalledWith(
         mockQdrantDB,
         'src/shared/utils.ts',
         true,
         mockLog,
-        undefined
+        undefined,
       );
     });
 
@@ -371,7 +359,7 @@ describe('handleGetDependents', () => {
 
       const result = await handleGetDependents(
         { filepath: 'shared/utils.ts', crossRepo: true },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -385,7 +373,7 @@ describe('handleGetDependents', () => {
 
       const result = await handleGetDependents(
         { filepath: 'src/utils.ts', crossRepo: true },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -395,27 +383,21 @@ describe('handleGetDependents', () => {
     it('should still pass crossRepo to findDependents (which handles warning)', async () => {
       vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
 
-      await handleGetDependents(
-        { filepath: 'src/utils.ts', crossRepo: true },
-        mockCtx
-      );
+      await handleGetDependents({ filepath: 'src/utils.ts', crossRepo: true }, mockCtx);
 
       expect(findDependents).toHaveBeenCalledWith(
         mockVectorDB,
         'src/utils.ts',
         true,
         mockLog,
-        undefined
+        undefined,
       );
     });
   });
 
   describe('validation', () => {
     it('should reject empty filepath', async () => {
-      const result = await handleGetDependents(
-        { filepath: '' },
-        mockCtx
-      );
+      const result = await handleGetDependents({ filepath: '' }, mockCtx);
 
       expect(result.isError).toBe(true);
       const parsed = JSON.parse(result.content![0].text);
@@ -424,17 +406,14 @@ describe('handleGetDependents', () => {
         expect.objectContaining({
           field: 'filepath',
           message: expect.stringContaining('cannot be empty'),
-        })
+        }),
       );
     });
 
     it('should accept valid filepath', async () => {
       vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
 
-      const result = await handleGetDependents(
-        { filepath: 'src/valid/path.ts' },
-        mockCtx
-      );
+      const result = await handleGetDependents({ filepath: 'src/valid/path.ts' }, mockCtx);
 
       expect(result.isError).toBeUndefined();
     });
@@ -442,10 +421,7 @@ describe('handleGetDependents', () => {
     it('should use default depth of 1', async () => {
       vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
 
-      const result = await handleGetDependents(
-        { filepath: 'src/test.ts' },
-        mockCtx
-      );
+      const result = await handleGetDependents({ filepath: 'src/test.ts' }, mockCtx);
 
       // Should not error - depth defaults to 1
       expect(result.isError).toBeUndefined();
@@ -456,89 +432,76 @@ describe('handleGetDependents', () => {
     it('should log the filepath being analyzed', async () => {
       vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
 
-      await handleGetDependents(
-        { filepath: 'src/important.ts' },
-        mockCtx
-      );
+      await handleGetDependents({ filepath: 'src/important.ts' }, mockCtx);
 
-      expect(mockLog).toHaveBeenCalledWith(
-        'Finding dependents of: src/important.ts'
-      );
+      expect(mockLog).toHaveBeenCalledWith('Finding dependents of: src/important.ts');
     });
 
     it('should indicate cross-repo in log when enabled', async () => {
       vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
 
-      await handleGetDependents(
-        { filepath: 'src/shared.ts', crossRepo: true },
-        mockCtx
-      );
+      await handleGetDependents({ filepath: 'src/shared.ts', crossRepo: true }, mockCtx);
 
-      expect(mockLog).toHaveBeenCalledWith(
-        'Finding dependents of: src/shared.ts (cross-repo)'
-      );
+      expect(mockLog).toHaveBeenCalledWith('Finding dependents of: src/shared.ts (cross-repo)');
     });
 
     it('should log dependent count with prod/test breakdown', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        dependents: [
-          { filepath: 'src/a.ts', isTestFile: false },
-          { filepath: 'src/b.ts', isTestFile: false },
-          { filepath: 'src/c.test.ts', isTestFile: true },
-        ],
-      }));
-
-      await handleGetDependents(
-        { filepath: 'src/utils.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [
+            { filepath: 'src/a.ts', isTestFile: false },
+            { filepath: 'src/b.ts', isTestFile: false },
+            { filepath: 'src/c.test.ts', isTestFile: true },
+          ],
+        }),
       );
 
+      await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
+
       expect(mockLog).toHaveBeenCalledWith(
-        expect.stringContaining('Found 3 dependents (2 prod, 1 test)')
+        expect.stringContaining('Found 3 dependents (2 prod, 1 test)'),
       );
     });
   });
 
   describe('test file identification', () => {
     it('should include isTestFile flag for each dependent', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        dependents: [
-          { filepath: 'src/auth.ts', isTestFile: false },
-          { filepath: 'src/__tests__/auth.test.ts', isTestFile: true },
-        ],
-      }));
-
-      const result = await handleGetDependents(
-        { filepath: 'src/utils.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [
+            { filepath: 'src/auth.ts', isTestFile: false },
+            { filepath: 'src/__tests__/auth.test.ts', isTestFile: true },
+          ],
+        }),
       );
+
+      const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.dependents).toContainEqual(
-        expect.objectContaining({ filepath: 'src/auth.ts', isTestFile: false })
+        expect.objectContaining({ filepath: 'src/auth.ts', isTestFile: false }),
       );
       expect(parsed.dependents).toContainEqual(
-        expect.objectContaining({ filepath: 'src/__tests__/auth.test.ts', isTestFile: true })
+        expect.objectContaining({ filepath: 'src/__tests__/auth.test.ts', isTestFile: true }),
       );
     });
   });
 
   describe('test/production split', () => {
     it('should return separate counts for test and production dependents', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        dependents: [
-          { filepath: 'src/auth.ts', isTestFile: false },
-          { filepath: 'src/user.ts', isTestFile: false },
-          { filepath: 'src/__tests__/auth.test.ts', isTestFile: true },
-          { filepath: 'src/__tests__/user.test.ts', isTestFile: true },
-          { filepath: 'src/utils.test.ts', isTestFile: true },
-        ],
-      }));
-
-      const result = await handleGetDependents(
-        { filepath: 'src/utils.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [
+            { filepath: 'src/auth.ts', isTestFile: false },
+            { filepath: 'src/user.ts', isTestFile: false },
+            { filepath: 'src/__tests__/auth.test.ts', isTestFile: true },
+            { filepath: 'src/__tests__/user.test.ts', isTestFile: true },
+            { filepath: 'src/utils.test.ts', isTestFile: true },
+          ],
+        }),
       );
+
+      const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.productionDependentCount).toBe(2);
@@ -550,20 +513,19 @@ describe('handleGetDependents', () => {
       // 10 test dependents + 1 production dependent = 11 total
       // With all dependents: would be "medium" risk (6-15 threshold)
       // With only production: should be "low" risk (1-5 threshold)
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        dependents: [
-          { filepath: 'src/consumer.ts', isTestFile: false },
-          ...Array.from({ length: 10 }, (_, i) => ({
-            filepath: `src/__tests__/test${i}.test.ts`,
-            isTestFile: true,
-          })),
-        ],
-      }));
-
-      const result = await handleGetDependents(
-        { filepath: 'src/utils.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [
+            { filepath: 'src/consumer.ts', isTestFile: false },
+            ...Array.from({ length: 10 }, (_, i) => ({
+              filepath: `src/__tests__/test${i}.test.ts`,
+              isTestFile: true,
+            })),
+          ],
+        }),
       );
+
+      const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.dependentCount).toBe(11);
@@ -573,18 +535,17 @@ describe('handleGetDependents', () => {
     });
 
     it('should return low risk when all dependents are test files', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        dependents: [
-          { filepath: 'src/__tests__/a.test.ts', isTestFile: true },
-          { filepath: 'src/__tests__/b.test.ts', isTestFile: true },
-          { filepath: 'src/__tests__/c.test.ts', isTestFile: true },
-        ],
-      }));
-
-      const result = await handleGetDependents(
-        { filepath: 'src/internal-util.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [
+            { filepath: 'src/__tests__/a.test.ts', isTestFile: true },
+            { filepath: 'src/__tests__/b.test.ts', isTestFile: true },
+            { filepath: 'src/__tests__/c.test.ts', isTestFile: true },
+          ],
+        }),
       );
+
+      const result = await handleGetDependents({ filepath: 'src/internal-util.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.productionDependentCount).toBe(0);
@@ -593,25 +554,22 @@ describe('handleGetDependents', () => {
     });
 
     it('should still boost risk level for high complexity even with few production dependents', async () => {
-      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis({
-        dependents: [
-          { filepath: 'src/complex.ts', isTestFile: false },
-        ],
-        complexityMetrics: {
-          averageComplexity: 30,
-          maxComplexity: 50,
-          filesWithComplexityData: 1,
-          highComplexityDependents: [
-            { filepath: 'src/complex.ts', maxComplexity: 50, avgComplexity: 30 },
-          ],
-          complexityRiskBoost: 'critical',
-        },
-      }));
-
-      const result = await handleGetDependents(
-        { filepath: 'src/utils.ts' },
-        mockCtx
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [{ filepath: 'src/complex.ts', isTestFile: false }],
+          complexityMetrics: {
+            averageComplexity: 30,
+            maxComplexity: 50,
+            filesWithComplexityData: 1,
+            highComplexityDependents: [
+              { filepath: 'src/complex.ts', maxComplexity: 50, avgComplexity: 30 },
+            ],
+            complexityRiskBoost: 'critical',
+          },
+        }),
       );
+
+      const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.productionDependentCount).toBe(1);
@@ -625,7 +583,7 @@ describe('handleGetDependents', () => {
 
       await handleGetDependents(
         { filepath: 'src/utils/validate.ts', symbol: 'validateEmail' },
-        mockCtx
+        mockCtx,
       );
 
       expect(findDependents).toHaveBeenCalledWith(
@@ -633,7 +591,7 @@ describe('handleGetDependents', () => {
         'src/utils/validate.ts',
         false,
         mockLog,
-        'validateEmail'
+        'validateEmail',
       );
     });
 
@@ -645,7 +603,7 @@ describe('handleGetDependents', () => {
 
       const result = await handleGetDependents(
         { filepath: 'src/utils/validate.ts', symbol: 'validateEmail' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -678,7 +636,7 @@ describe('handleGetDependents', () => {
 
       const result = await handleGetDependents(
         { filepath: 'src/utils/validate.ts', symbol: 'validateEmail' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -708,7 +666,7 @@ describe('handleGetDependents', () => {
 
       const result = await handleGetDependents(
         { filepath: 'src/utils/validate.ts', symbol: 'validateEmail' },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -728,36 +686,25 @@ describe('handleGetDependents', () => {
         totalUsageCount: 5,
       });
 
-      await handleGetDependents(
-        { filepath: 'src/utils.ts', symbol: 'myFunction' },
-        mockCtx
-      );
+      await handleGetDependents({ filepath: 'src/utils.ts', symbol: 'myFunction' }, mockCtx);
 
       expect(mockLog).toHaveBeenCalledWith(
-        expect.stringContaining("Found 5 tracked call sites across 2 files")
+        expect.stringContaining('Found 5 tracked call sites across 2 files'),
       );
     });
 
     it('should indicate symbol in initial log message', async () => {
       vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
 
-      await handleGetDependents(
-        { filepath: 'src/utils.ts', symbol: 'helper' },
-        mockCtx
-      );
+      await handleGetDependents({ filepath: 'src/utils.ts', symbol: 'helper' }, mockCtx);
 
-      expect(mockLog).toHaveBeenCalledWith(
-        'Finding dependents of: src/utils.ts (symbol: helper)'
-      );
+      expect(mockLog).toHaveBeenCalledWith('Finding dependents of: src/utils.ts (symbol: helper)');
     });
 
     it('should not include totalUsageCount when symbol not provided', async () => {
       vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
 
-      const result = await handleGetDependents(
-        { filepath: 'src/utils.ts' },
-        mockCtx
-      );
+      const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.symbol).toBeUndefined();
@@ -832,4 +779,3 @@ describe('calculateRiskLevel (unit tests)', () => {
     });
   });
 });
-

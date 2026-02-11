@@ -1,5 +1,9 @@
 import type { LanguageTraverser } from '../traversers/types.js';
-import type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from '../extractors/types.js';
+import type {
+  LanguageExportExtractor,
+  LanguageImportExtractor,
+  LanguageSymbolExtractor,
+} from '../extractors/types.js';
 import type { SupportedLanguage } from './registry.js';
 
 /**

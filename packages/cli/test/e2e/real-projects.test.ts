@@ -9,21 +9,21 @@ import { VectorDB, LocalEmbeddings } from '@liendev/core';
 
 /**
  * E2E Tests with Real Open Source Projects
- * 
+ *
  * These tests validate that Lien works correctly on real-world codebases
  * by cloning popular open source projects and indexing them.
- * 
+ *
  * **Running these tests:**
  * - Locally: `npm run test:e2e`
  * - CI: Runs automatically on push to main
  * - Individual language: `npm test -- real-projects.test.ts -t "Python"`
- * 
+ *
  * **Why these projects:**
  * - Flask (Python): Popular web framework, well-structured, moderate size
  * - Zod (TypeScript): Schema validation library, clean codebase, modern TS
  * - Express (JavaScript): Most popular Node.js framework
  * - Monolog (PHP): Logging library, standard PHP patterns
- * 
+ *
  * **Test strategy:**
  * 1. Clone project to /tmp/lien-e2e-tests/ (shallow clone for speed)
  * 2. Initialize Lien
@@ -35,7 +35,7 @@ import { VectorDB, LocalEmbeddings } from '@liendev/core';
  *    - AST metadata present
  *    - Search works
  * 5. Cleanup temp directory (always, even on failure/interrupt)
- * 
+ *
  * **Cleanup guarantees:**
  * - afterAll() hook cleans up after tests complete
  * - Process signal handlers (SIGINT/SIGTERM) clean up on Ctrl+C or kill
@@ -135,12 +135,8 @@ function getIndexPath(projectDir: string): string {
   // This matches what process.cwd() returns when Lien runs
   const realPath = fsSync.realpathSync(projectDir);
   const projectName = path.basename(realPath);
-  const pathHash = crypto
-    .createHash('md5')
-    .update(realPath)
-    .digest('hex')
-    .substring(0, 8);
-  
+  const pathHash = crypto.createHash('md5').update(realPath).digest('hex').substring(0, 8);
+
   return path.join(os.homedir(), '.lien', 'indices', `${projectName}-${pathHash}`);
 }
 
@@ -154,15 +150,17 @@ function getIndexStats(projectDir: string): { files: number; chunks: number } {
     const manifestPath = path.join(indexPath, 'manifest.json');
     const manifestContent = fsSync.readFileSync(manifestPath, 'utf-8');
     const manifest = JSON.parse(manifestContent);
-    
+
     // Manifest.files is an object/dictionary, not an array
     const filesObject = manifest.files || {};
     const fileEntries = Object.values(filesObject);
-    
+
     const files = fileEntries.length;
-    const chunks = fileEntries.reduce((total: number, file: any) => 
-      total + (file.chunkCount || 0), 0);
-    
+    const chunks = fileEntries.reduce(
+      (total: number, file: any) => total + (file.chunkCount || 0),
+      0,
+    );
+
     return { files, chunks };
   } catch (error) {
     // Fallback: try to parse from index output if manifest isn't available yet
@@ -174,27 +172,27 @@ function getIndexStats(projectDir: string): { files: number; chunks: number } {
 /**
  * Helper to validate AST metadata in index
  */
-async function validateASTMetadata(
-  projectDir: string
-): Promise<boolean> {
+async function validateASTMetadata(projectDir: string): Promise<boolean> {
   // Check that manifest exists and has AST metadata
   const indexPath = getIndexPath(projectDir);
   const manifestPath = path.join(indexPath, 'manifest.json');
-  
+
   try {
     const manifestContent = await fs.readFile(manifestPath, 'utf-8');
     const manifest = JSON.parse(manifestContent);
-    
+
     // Manifest.files is an object/dictionary, check if any file has chunks with AST metadata
     // We don't have chunk details in the manifest, so we just verify files exist
     // The real validation is that chunks > files (which proves AST chunking worked)
     const filesObject = manifest.files || {};
     const fileEntries = Object.values(filesObject);
-    
+
     // If we have files and multiple chunks, AST metadata is working
-    const totalChunks = fileEntries.reduce((total: number, file: any) => 
-      total + (file.chunkCount || 0), 0);
-    
+    const totalChunks = fileEntries.reduce(
+      (total: number, file: any) => total + (file.chunkCount || 0),
+      0,
+    );
+
     // AST chunking should create more chunks than files (functions/methods extracted)
     return totalChunks > fileEntries.length;
   } catch {
@@ -226,7 +224,7 @@ async function cleanup() {
  * Register signal handlers at module scope for proper cleanup
  * This ensures cleanup even if tests are interrupted (Ctrl+C, kill, etc.)
  * Only enabled in local dev (not CI where process management differs)
- * 
+ *
  * Uses process.on() instead of process.once() to handle multiple signals
  * (e.g., impatient users pressing Ctrl+C multiple times)
  */
@@ -239,13 +237,13 @@ if (!process.env.CI) {
       console.log(`\nReceived ${signal} again, forcing exit...`);
       process.exit(1);
     }
-    
+
     cleanupInProgress = true;
     console.log(`\n\nReceived ${signal}, cleaning up test directories...`);
     await cleanup();
     process.exit(0);
   };
-  
+
   process.on('SIGINT', () => exitHandler('SIGINT'));
   process.on('SIGTERM', () => exitHandler('SIGTERM'));
 }
@@ -263,12 +261,12 @@ describe('E2E: Real Open Source Projects', () => {
   afterAll(async () => {
     await cleanup();
   });
-  
+
   // Create a test for each project
-  TEST_PROJECTS.forEach((project) => {
+  TEST_PROJECTS.forEach(project => {
     describe(`${project.name} (${project.language})`, () => {
       let projectDir: string;
-      
+
       beforeAll(async () => {
         // Create temp directory using OS temp dir for cross-platform compatibility
         // Linux/macOS: /tmp/lien-e2e-tests or /var/folders/.../lien-e2e-tests
@@ -277,107 +275,113 @@ describe('E2E: Real Open Source Projects', () => {
         await fs.mkdir(tempBase, { recursive: true });
         projectDir = path.join(tempBase, `${project.name.toLowerCase()}-${Date.now()}`);
         testDirs.push(projectDir);
-        
+
         console.log(`\n📦 Cloning ${project.name} to ${projectDir}...`);
-        
+
         // Shallow clone for speed (depth=1)
-        execSync(
-          `git clone --depth 1 --branch ${project.branch} ${project.repo} ${projectDir}`,
-          { stdio: 'pipe' }
-        );
-        
+        execSync(`git clone --depth 1 --branch ${project.branch} ${project.repo} ${projectDir}`, {
+          stdio: 'pipe',
+        });
+
         console.log(`✓ Cloned ${project.name}`);
       }, E2E_TIMEOUT);
-      
+
       it('should have cloned project files', () => {
         // Verify project was cloned successfully
         const files = fsSync.readdirSync(projectDir);
         expect(files.length).toBeGreaterThan(0);
-        
+
         console.log(`📁 ${project.name} structure:`, files.slice(0, 10).join(', '));
       });
-      
-      it('should initialize Lien successfully', async () => {
-        const output = runLienCommand(projectDir, 'init --yes');
-        
-        // Config file no longer created - init just shows setup info
-        expect(output).toContain('No per-project configuration needed');
-        
-        // Verify config file does NOT exist (per-project config removed)
-        const configPath = path.join(projectDir, '.lien.config.json');
-        await expect(fs.access(configPath)).rejects.toThrow();
-      }, E2E_TIMEOUT);
-      
-      it('should index the project without errors', () => {
-        console.log(`\n🔍 Indexing ${project.name}...`);
-        
-        const output = runLienCommand(projectDir, 'index');
-        console.log(`Index output:\n${output.substring(0, 500)}`);
-        
-        // Should complete successfully (check for success indicators)
-        const hasSuccess = output.includes('Indexed') || 
-                          output.includes('✔') || 
-                          output.includes('Manifest saved');
-        expect(hasSuccess).toBe(true);
-        
-        // Should not have errors
-        expect(output.toLowerCase()).not.toContain('error');
-        expect(output.toLowerCase()).not.toContain('failed');
-        
-        // Verify manifest was created (in ~/.lien/indices/)
-        const indexPath = getIndexPath(projectDir);
-        const manifestPath = path.join(indexPath, 'manifest.json');
-        const manifestExists = fsSync.existsSync(manifestPath);
-        
-        if (!manifestExists) {
-          console.error(`❌ Manifest not created at: ${manifestPath}`);
-          console.error(`Index output was:\n${output}`);
-          console.error(`Index path: ${indexPath}`);
-          
-          // Check if index directory exists
-          if (fsSync.existsSync(indexPath)) {
-            const indexFiles = fsSync.readdirSync(indexPath);
-            console.error(`Index directory contents:`, indexFiles);
-          } else {
-            console.error(`Index directory does not exist`);
+
+      it(
+        'should initialize Lien successfully',
+        async () => {
+          const output = runLienCommand(projectDir, 'init --yes');
+
+          // Config file no longer created - init just shows setup info
+          expect(output).toContain('No per-project configuration needed');
+
+          // Verify config file does NOT exist (per-project config removed)
+          const configPath = path.join(projectDir, '.lien.config.json');
+          await expect(fs.access(configPath)).rejects.toThrow();
+        },
+        E2E_TIMEOUT,
+      );
+
+      it(
+        'should index the project without errors',
+        () => {
+          console.log(`\n🔍 Indexing ${project.name}...`);
+
+          const output = runLienCommand(projectDir, 'index');
+          console.log(`Index output:\n${output.substring(0, 500)}`);
+
+          // Should complete successfully (check for success indicators)
+          const hasSuccess =
+            output.includes('Indexed') || output.includes('✔') || output.includes('Manifest saved');
+          expect(hasSuccess).toBe(true);
+
+          // Should not have errors
+          expect(output.toLowerCase()).not.toContain('error');
+          expect(output.toLowerCase()).not.toContain('failed');
+
+          // Verify manifest was created (in ~/.lien/indices/)
+          const indexPath = getIndexPath(projectDir);
+          const manifestPath = path.join(indexPath, 'manifest.json');
+          const manifestExists = fsSync.existsSync(manifestPath);
+
+          if (!manifestExists) {
+            console.error(`❌ Manifest not created at: ${manifestPath}`);
+            console.error(`Index output was:\n${output}`);
+            console.error(`Index path: ${indexPath}`);
+
+            // Check if index directory exists
+            if (fsSync.existsSync(indexPath)) {
+              const indexFiles = fsSync.readdirSync(indexPath);
+              console.error(`Index directory contents:`, indexFiles);
+            } else {
+              console.error(`Index directory does not exist`);
+            }
           }
-        }
-        
-        expect(manifestExists).toBe(true);
-        
-        console.log(`✓ Indexed ${project.name}`);
-      }, E2E_TIMEOUT);
-      
+
+          expect(manifestExists).toBe(true);
+
+          console.log(`✓ Indexed ${project.name}`);
+        },
+        E2E_TIMEOUT,
+      );
+
       it('should index minimum expected number of files', async () => {
         const stats = getIndexStats(projectDir);
-        
+
         console.log(`📊 ${project.name} stats: ${stats.files} files, ${stats.chunks} chunks`);
-        
+
         // If this fails, the project structure may have changed.
         // Check: ls {projectDir} to see actual structure
         if (stats.files === 0) {
           console.error(`❌ No files indexed for ${project.name}!`);
           console.error(`   Project directory: ${projectDir}`);
           console.error(`   Check project structure and include patterns in config`);
-          
+
           // Show what files exist
           try {
-            const findPyFiles = execSync(
-              `find . -name "*.py" -type f | head -20`,
-              { cwd: projectDir, encoding: 'utf-8' }
-            );
+            const findPyFiles = execSync(`find . -name "*.py" -type f | head -20`, {
+              cwd: projectDir,
+              encoding: 'utf-8',
+            });
             console.error(`   Python files found:\n${findPyFiles}`);
           } catch (e) {
             console.error(`   Could not find Python files`);
           }
         }
-        
+
         expect(stats.files).toBeGreaterThanOrEqual(project.expectedMinFiles);
       });
-      
+
       it('should create chunks with AST metadata', () => {
         const stats = getIndexStats(projectDir);
-        
+
         // AST chunking should create more chunks than files (functions/methods extracted)
         // Unless no files were indexed (in which case we should fail earlier)
         if (stats.files > 0) {
@@ -385,52 +389,66 @@ describe('E2E: Real Open Source Projects', () => {
         }
         expect(stats.chunks).toBeGreaterThanOrEqual(project.expectedMinChunks);
       });
-      
+
       it('should have AST metadata for code chunks', async () => {
         const hasMetadata = await validateASTMetadata(projectDir);
-        
+
         expect(hasMetadata).toBe(true);
       });
-      
-      it('should return relevant results for semantic search', async () => {
-        const db = await VectorDB.load(fsSync.realpathSync(projectDir));
-        const queryVector = await embeddings.embed(project.sampleSearchQuery);
-        const results = await db.search(queryVector, 5, project.sampleSearchQuery);
 
-        console.log(`🔎 Search "${project.sampleSearchQuery}" returned ${results.length} results`);
-        if (results.length > 0) {
-          console.log(`   Top result: ${results[0].metadata.file} (${results[0].relevance}, score: ${results[0].score.toFixed(3)})`);
-        }
+      it(
+        'should return relevant results for semantic search',
+        async () => {
+          const db = await VectorDB.load(fsSync.realpathSync(projectDir));
+          const queryVector = await embeddings.embed(project.sampleSearchQuery);
+          const results = await db.search(queryVector, 5, project.sampleSearchQuery);
 
-        expect(results.length).toBeGreaterThan(0);
+          console.log(
+            `🔎 Search "${project.sampleSearchQuery}" returned ${results.length} results`,
+          );
+          if (results.length > 0) {
+            console.log(
+              `   Top result: ${results[0].metadata.file} (${results[0].relevance}, score: ${results[0].score.toFixed(3)})`,
+            );
+          }
 
-        // Top result should be at least loosely related
-        expect(['highly_relevant', 'relevant', 'loosely_related']).toContain(results[0].relevance);
+          expect(results.length).toBeGreaterThan(0);
 
-        // All results should have valid metadata
-        for (const result of results) {
-          expect(result.metadata.file).toBeTruthy();
-          expect(result.content).toBeTruthy();
-        }
-      }, E2E_TIMEOUT);
-      
-      it('should handle reindexing without errors', () => {
-        console.log(`\n🔄 Reindexing ${project.name}...`);
-        
-        const output = runLienCommand(projectDir, 'index');
-        
-        // Check for success (either "Indexed" or "Incremental reindex")
-        const hasSuccess = output.includes('Indexed') || 
-                          output.includes('Incremental reindex complete') ||
-                          output.includes('✔');
-        expect(hasSuccess).toBe(true);
-        expect(output.toLowerCase()).not.toContain('error');
-        
-        // Stats should be similar to first index
-        const stats = getIndexStats(projectDir);
-        expect(stats.files).toBeGreaterThanOrEqual(project.expectedMinFiles);
-      }, E2E_TIMEOUT);
+          // Top result should be at least loosely related
+          expect(['highly_relevant', 'relevant', 'loosely_related']).toContain(
+            results[0].relevance,
+          );
+
+          // All results should have valid metadata
+          for (const result of results) {
+            expect(result.metadata.file).toBeTruthy();
+            expect(result.content).toBeTruthy();
+          }
+        },
+        E2E_TIMEOUT,
+      );
+
+      it(
+        'should handle reindexing without errors',
+        () => {
+          console.log(`\n🔄 Reindexing ${project.name}...`);
+
+          const output = runLienCommand(projectDir, 'index');
+
+          // Check for success (either "Indexed" or "Incremental reindex")
+          const hasSuccess =
+            output.includes('Indexed') ||
+            output.includes('Incremental reindex complete') ||
+            output.includes('✔');
+          expect(hasSuccess).toBe(true);
+          expect(output.toLowerCase()).not.toContain('error');
+
+          // Stats should be similar to first index
+          const stats = getIndexStats(projectDir);
+          expect(stats.files).toBeGreaterThanOrEqual(project.expectedMinFiles);
+        },
+        E2E_TIMEOUT,
+      );
     });
   });
 });
-

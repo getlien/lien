@@ -38,13 +38,13 @@ export interface ComplexityMetrics {
  * Complexity thresholds for risk assessment.
  */
 const COMPLEXITY_THRESHOLDS = {
-  HIGH_COMPLEXITY_DEPENDENT: 10,  // Individual file is complex
-  CRITICAL_AVG: 15,              // Average complexity indicates systemic complexity
-  CRITICAL_MAX: 25,              // Peak complexity indicates hotspot
-  HIGH_AVG: 10,                  // Moderately complex on average
-  HIGH_MAX: 20,                  // Some complex functions exist
-  MEDIUM_AVG: 6,                 // Slightly above simple code
-  MEDIUM_MAX: 15,                // Occasional branching
+  HIGH_COMPLEXITY_DEPENDENT: 10, // Individual file is complex
+  CRITICAL_AVG: 15, // Average complexity indicates systemic complexity
+  CRITICAL_MAX: 25, // Peak complexity indicates hotspot
+  HIGH_AVG: 10, // Moderately complex on average
+  HIGH_MAX: 20, // Some complex functions exist
+  MEDIUM_AVG: 6, // Slightly above simple code
+  MEDIUM_MAX: 15, // Occasional branching
 } as const;
 
 type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
@@ -102,7 +102,7 @@ function collectNamedSymbolsFromChunk(
   chunk: SearchResult,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string,
-  symbols: Set<string>
+  symbols: Set<string>,
 ): void {
   const importedSymbols = chunk.metadata.importedSymbols;
   if (!importedSymbols || typeof importedSymbols !== 'object') return;
@@ -120,7 +120,7 @@ function collectRawImportSentinel(
   chunk: SearchResult,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string,
-  symbols: Set<string>
+  symbols: Set<string>,
 ): void {
   const imports = chunk.metadata.imports || [];
   for (const imp of imports) {
@@ -136,7 +136,7 @@ function collectSymbolsFromChunk(
   chunk: SearchResult,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string,
-  symbols: Set<string>
+  symbols: Set<string>,
 ): void {
   collectNamedSymbolsFromChunk(chunk, normalizedTarget, normalizePathCached, symbols);
   collectRawImportSentinel(chunk, normalizedTarget, normalizePathCached, symbols);
@@ -150,7 +150,7 @@ function collectSymbolsFromChunk(
 function collectImportedSymbolsFromTarget(
   chunks: SearchResult[],
   normalizedTarget: string,
-  normalizePathCached: (path: string) => string
+  normalizePathCached: (path: string) => string,
 ): Set<string> {
   const symbols = new Set<string>();
   for (const chunk of chunks) {
@@ -174,10 +174,7 @@ function collectExportsFromChunks(chunks: SearchResult[]): Set<string> {
  * Find which symbols are re-exported (imported from target AND exported).
  * Handles wildcard/namespace imports by treating all exports as re-exported.
  */
-function findReExportedSymbols(
-  importsFromTarget: Set<string>,
-  allExports: Set<string>
-): string[] {
+function findReExportedSymbols(importsFromTarget: Set<string>, allExports: Set<string>): string[] {
   if (importsFromTarget.has('*')) return [...allExports];
 
   for (const sym of importsFromTarget) {
@@ -203,14 +200,18 @@ function findReExportedSymbols(
 function buildReExportGraph(
   allChunksByFile: Map<string, SearchResult[]>,
   normalizedTarget: string,
-  normalizePathCached: (path: string) => string
+  normalizePathCached: (path: string) => string,
 ): ReExporter[] {
   const reExporters: ReExporter[] = [];
 
   for (const [filepath, chunks] of allChunksByFile.entries()) {
     if (matchesFile(filepath, normalizedTarget)) continue;
 
-    const importsFromTarget = collectImportedSymbolsFromTarget(chunks, normalizedTarget, normalizePathCached);
+    const importsFromTarget = collectImportedSymbolsFromTarget(
+      chunks,
+      normalizedTarget,
+      normalizePathCached,
+    );
     const allExports = collectExportsFromChunks(chunks);
     if (importsFromTarget.size === 0 || allExports.size === 0) continue;
 
@@ -231,7 +232,7 @@ function fileImportsSymbolFromAny(
   chunks: SearchResult[],
   targetSymbol: string,
   targetPaths: string[],
-  normalizePathCached: (path: string) => string
+  normalizePathCached: (path: string) => string,
 ): boolean {
   return chunks.some(chunk => {
     const importedSymbols = chunk.metadata.importedSymbols;
@@ -255,7 +256,7 @@ function fileImportsSymbolFromAny(
 function addChunkToImportIndex(
   chunk: SearchResult,
   normalizePathCached: (path: string) => string,
-  importIndex: Map<string, SearchResult[]>
+  importIndex: Map<string, SearchResult[]>,
 ): void {
   const imports = chunk.metadata.imports || [];
   for (const imp of imports) {
@@ -284,7 +285,7 @@ function addChunkToImportIndex(
 function addChunkToFileMap(
   chunk: SearchResult,
   normalizePathCached: (path: string) => string,
-  fileMap: Map<string, SearchResult[]>
+  fileMap: Map<string, SearchResult[]>,
 ): void {
   const canonical = normalizePathCached(chunk.metadata.file);
   if (!fileMap.has(canonical)) {
@@ -301,7 +302,7 @@ async function scanChunksPaginated(
   vectorDB: VectorDBInterface,
   crossRepo: boolean,
   log: (message: string, level?: 'warning') => void,
-  normalizePathCached: (path: string) => string
+  normalizePathCached: (path: string) => string,
 ): Promise<{
   importIndex: Map<string, SearchResult[]>;
   allChunksByFile: Map<string, SearchResult[]>;
@@ -319,7 +320,10 @@ async function scanChunksPaginated(
     totalChunks = allChunks.length;
     const hitLimit = totalChunks >= CROSS_REPO_LIMIT;
     if (hitLimit) {
-      log(`Warning: cross-repo scan hit ${CROSS_REPO_LIMIT} chunk limit. Results may be incomplete.`, 'warning');
+      log(
+        `Warning: cross-repo scan hit ${CROSS_REPO_LIMIT} chunk limit. Results may be incomplete.`,
+        'warning',
+      );
     }
     for (const chunk of allChunks) {
       addChunkToImportIndex(chunk, normalizePathCached, importIndex);
@@ -329,7 +333,10 @@ async function scanChunksPaginated(
   }
 
   if (crossRepo) {
-    log('Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo paginated scan.', 'warning');
+    log(
+      'Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo paginated scan.',
+      'warning',
+    );
   }
 
   // Paginated scan: build indexes incrementally
@@ -350,7 +357,7 @@ async function scanChunksPaginated(
 function createPathNormalizer(): (path: string) => string {
   const workspaceRoot = process.cwd().replace(/\\/g, '/');
   const cache = new Map<string, string>();
-  
+
   return (path: string): string => {
     if (!cache.has(path)) {
       cache.set(path, normalizePath(path, workspaceRoot));
@@ -365,14 +372,14 @@ function createPathNormalizer(): (path: string) => string {
 function groupChunksByFile(chunks: SearchResult[]): Map<string, SearchResult[]> {
   const workspaceRoot = process.cwd().replace(/\\/g, '/');
   const chunksByFile = new Map<string, SearchResult[]>();
-  
+
   for (const chunk of chunks) {
     const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
     const existing = chunksByFile.get(canonical) || [];
     existing.push(chunk);
     chunksByFile.set(canonical, existing);
   }
-  
+
   return chunksByFile;
 }
 
@@ -387,14 +394,20 @@ function buildDependentsList(
   targetFileChunks: SearchResult[],
   filepath: string,
   log: (message: string, level?: 'warning') => void,
-  reExporterPaths: string[] = []
+  reExporterPaths: string[] = [],
 ): { dependents: DependentInfo[]; totalUsageCount?: number } {
   if (symbol) {
     // Validate that the target file exports this symbol
     validateSymbolExport(targetFileChunks, symbol, filepath, log);
 
     // Symbol-level analysis — check imports from target AND re-exporter paths
-    return findSymbolUsages(chunksByFile, symbol, normalizedTarget, normalizePathCached, reExporterPaths);
+    return findSymbolUsages(
+      chunksByFile,
+      symbol,
+      normalizedTarget,
+      normalizePathCached,
+      reExporterPaths,
+    );
   }
 
   // File-level analysis
@@ -408,14 +421,14 @@ function buildDependentsList(
 
 /**
  * Validate that the target file exports the requested symbol.
- * 
+ *
  * Design decision: This function only logs a warning and does NOT throw an error
  * or return false to stop execution. This is intentional because:
- * 
+ *
  * 1. The export might be dynamic or conditional (not captured by static analysis)
  * 2. False positives are better than false negatives (we want to show potential matches)
  * 3. The user can see the warning and interpret results accordingly
- * 
+ *
  * The function continues to search for usages even if the symbol isn't found in exports,
  * which may reveal re-exports, dynamic exports, or help diagnose indexing issues.
  */
@@ -423,11 +436,9 @@ function validateSymbolExport(
   targetFileChunks: SearchResult[],
   symbol: string,
   filepath: string,
-  log: (message: string, level?: 'warning') => void
+  log: (message: string, level?: 'warning') => void,
 ): void {
-  const exportsSymbol = targetFileChunks.some(chunk =>
-    chunk.metadata.exports?.includes(symbol)
-  );
+  const exportsSymbol = targetFileChunks.some(chunk => chunk.metadata.exports?.includes(symbol));
 
   if (!exportsSymbol) {
     log(`Warning: Symbol "${symbol}" not found in exports of ${filepath}`, 'warning');
@@ -439,7 +450,7 @@ function validateSymbolExport(
  */
 function mergeChunksByFile(
   target: Map<string, SearchResult[]>,
-  source: Map<string, SearchResult[]>
+  source: Map<string, SearchResult[]>,
 ): void {
   for (const [fp, chunks] of source.entries()) {
     const existing = target.get(fp);
@@ -461,11 +472,16 @@ function mergeTransitiveDependents(
   normalizePathCached: (path: string) => string,
   allChunksByFile: Map<string, SearchResult[]>,
   chunksByFile: Map<string, SearchResult[]>,
-  log: (message: string, level?: 'warning') => void
+  log: (message: string, level?: 'warning') => void,
 ): void {
   const existingFiles = new Set(chunksByFile.keys());
   const transitiveChunks = findTransitiveDependents(
-    reExporters.map(r => r.filepath), importIndex, normalizedTarget, normalizePathCached, allChunksByFile, existingFiles
+    reExporters.map(r => r.filepath),
+    importIndex,
+    normalizedTarget,
+    normalizePathCached,
+    allChunksByFile,
+    existingFiles,
   );
   if (transitiveChunks.length > 0) {
     const transitiveByFile = groupChunksByFile(transitiveChunks);
@@ -488,7 +504,7 @@ export async function findDependents(
   filepath: string,
   crossRepo: boolean,
   log: (message: string, level?: 'warning') => void,
-  symbol?: string
+  symbol?: string,
 ): Promise<DependencyAnalysisResult> {
   // Setup path normalization (needed for paginated scan)
   const normalizePathCached = createPathNormalizer();
@@ -496,7 +512,10 @@ export async function findDependents(
 
   // Paginated scan: builds import index and file groupings incrementally
   const { importIndex, allChunksByFile, totalChunks, hitLimit } = await scanChunksPaginated(
-    vectorDB, crossRepo, log, normalizePathCached
+    vectorDB,
+    crossRepo,
+    log,
+    normalizePathCached,
   );
   log(`Scanned ${totalChunks} chunks for imports...`);
 
@@ -507,7 +526,15 @@ export async function findDependents(
   // Find transitive dependents through re-export chains (barrel files)
   const reExporters = buildReExportGraph(allChunksByFile, normalizedTarget, normalizePathCached);
   if (reExporters.length > 0) {
-    mergeTransitiveDependents(reExporters, importIndex, normalizedTarget, normalizePathCached, allChunksByFile, chunksByFile, log);
+    mergeTransitiveDependents(
+      reExporters,
+      importIndex,
+      normalizedTarget,
+      normalizePathCached,
+      allChunksByFile,
+      chunksByFile,
+      log,
+    );
   }
 
   // Calculate metrics
@@ -519,7 +546,14 @@ export async function findDependents(
   const targetFileChunks = symbol ? (allChunksByFile.get(normalizedTarget) ?? []) : [];
   const reExporterPaths = reExporters.map(re => re.filepath);
   const { dependents, totalUsageCount } = buildDependentsList(
-    chunksByFile, symbol, normalizedTarget, normalizePathCached, targetFileChunks, filepath, log, reExporterPaths
+    chunksByFile,
+    symbol,
+    normalizedTarget,
+    normalizePathCached,
+    targetFileChunks,
+    filepath,
+    log,
+    reExporterPaths,
   );
 
   // Sort dependents: production files first, then test files
@@ -553,7 +587,7 @@ export async function findDependents(
  */
 function findDependentChunks(
   importIndex: Map<string, SearchResult[]>,
-  normalizedTarget: string
+  normalizedTarget: string,
 ): SearchResult[] {
   const dependentChunks: SearchResult[] = [];
   const seenChunkIds = new Set<string>();
@@ -588,9 +622,7 @@ function findDependentChunks(
 /**
  * Calculate complexity metrics for each file from its chunks.
  */
-function calculateFileComplexities(
-  chunksByFile: Map<string, SearchResult[]>
-): FileComplexity[] {
+function calculateFileComplexities(chunksByFile: Map<string, SearchResult[]>): FileComplexity[] {
   const fileComplexities: FileComplexity[] = [];
 
   for (const [filepath, chunks] of chunksByFile.entries()) {
@@ -616,9 +648,7 @@ function calculateFileComplexities(
 /**
  * Calculate overall complexity metrics from per-file complexities.
  */
-function calculateOverallComplexityMetrics(
-  fileComplexities: FileComplexity[]
-): ComplexityMetrics {
+function calculateOverallComplexityMetrics(fileComplexities: FileComplexity[]): ComplexityMetrics {
   if (fileComplexities.length === 0) {
     return {
       averageComplexity: 0,
@@ -638,7 +668,11 @@ function calculateOverallComplexityMetrics(
     .filter(f => f.maxComplexity > COMPLEXITY_THRESHOLDS.HIGH_COMPLEXITY_DEPENDENT)
     .sort((a, b) => b.maxComplexity - a.maxComplexity)
     .slice(0, 5)
-    .map(f => ({ filepath: f.filepath, maxComplexity: f.maxComplexity, avgComplexity: f.avgComplexity }));
+    .map(f => ({
+      filepath: f.filepath,
+      maxComplexity: f.maxComplexity,
+      avgComplexity: f.avgComplexity,
+    }));
 
   const complexityRiskBoost = calculateComplexityRiskBoost(totalAvg, globalMax);
 
@@ -655,13 +689,22 @@ function calculateOverallComplexityMetrics(
  * Calculate complexity-based risk boost level.
  */
 function calculateComplexityRiskBoost(avgComplexity: number, maxComplexity: number): RiskLevel {
-  if (avgComplexity > COMPLEXITY_THRESHOLDS.CRITICAL_AVG || maxComplexity > COMPLEXITY_THRESHOLDS.CRITICAL_MAX) {
+  if (
+    avgComplexity > COMPLEXITY_THRESHOLDS.CRITICAL_AVG ||
+    maxComplexity > COMPLEXITY_THRESHOLDS.CRITICAL_MAX
+  ) {
     return 'critical';
   }
-  if (avgComplexity > COMPLEXITY_THRESHOLDS.HIGH_AVG || maxComplexity > COMPLEXITY_THRESHOLDS.HIGH_MAX) {
+  if (
+    avgComplexity > COMPLEXITY_THRESHOLDS.HIGH_AVG ||
+    maxComplexity > COMPLEXITY_THRESHOLDS.HIGH_MAX
+  ) {
     return 'high';
   }
-  if (avgComplexity > COMPLEXITY_THRESHOLDS.MEDIUM_AVG || maxComplexity > COMPLEXITY_THRESHOLDS.MEDIUM_MAX) {
+  if (
+    avgComplexity > COMPLEXITY_THRESHOLDS.MEDIUM_AVG ||
+    maxComplexity > COMPLEXITY_THRESHOLDS.MEDIUM_MAX
+  ) {
     return 'medium';
   }
   return 'low';
@@ -676,7 +719,7 @@ function calculateComplexityRiskBoost(avgComplexity: number, maxComplexity: numb
 export function calculateRiskLevel(
   dependentCount: number,
   complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical',
-  productionDependentCount?: number
+  productionDependentCount?: number,
 ): 'low' | 'medium' | 'high' | 'critical' {
   const DEPENDENT_COUNT_THRESHOLDS = {
     LOW: 5,
@@ -691,10 +734,15 @@ export function calculateRiskLevel(
   const effectiveCount = productionDependentCount ?? dependentCount;
 
   let riskLevel: RiskLevel =
-    effectiveCount === 0 ? 'low' :
-    effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.LOW ? 'low' :
-    effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.MEDIUM ? 'medium' :
-    effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.HIGH ? 'high' : 'critical';
+    effectiveCount === 0
+      ? 'low'
+      : effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.LOW
+        ? 'low'
+        : effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.MEDIUM
+          ? 'medium'
+          : effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.HIGH
+            ? 'high'
+            : 'critical';
 
   // Boost if complexity risk is higher
   if (RISK_ORDER[complexityRiskBoost] > RISK_ORDER[riskLevel]) {
@@ -709,7 +757,7 @@ export function calculateRiskLevel(
  */
 export function groupDependentsByRepo(
   dependents: DependentInfo[],
-  chunks: SearchResult[]
+  chunks: SearchResult[],
 ): Record<string, DependentInfo[]> {
   const repoMap = new Map<string, Set<string>>();
 
@@ -763,7 +811,7 @@ function findSymbolUsages(
   targetSymbol: string,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string,
-  reExporterPaths: string[] = []
+  reExporterPaths: string[] = [],
 ): { dependents: DependentInfo[]; totalUsageCount: number } {
   const dependents: DependentInfo[] = [];
   let totalUsageCount = 0;
@@ -776,7 +824,7 @@ function findSymbolUsages(
     }
 
     const usages = extractSymbolUsagesFromChunks(chunks, targetSymbol);
-    
+
     dependents.push({
       filepath,
       isTestFile: isTestFile(filepath),
@@ -792,16 +840,19 @@ function findSymbolUsages(
 /**
  * Extract all usages of a symbol from a file's chunks.
  */
-function extractSymbolUsagesFromChunks(chunks: SearchResult[], targetSymbol: string): SymbolUsage[] {
+function extractSymbolUsagesFromChunks(
+  chunks: SearchResult[],
+  targetSymbol: string,
+): SymbolUsage[] {
   const usages: SymbolUsage[] = [];
-  
+
   for (const chunk of chunks) {
     const callSites = chunk.metadata.callSites;
     if (!callSites) continue;
-    
+
     // Split content once per chunk for efficiency (avoid repeated splits)
     const lines = chunk.content.split('\n');
-    
+
     for (const call of callSites) {
       if (call.symbol === targetSymbol) {
         usages.push({
@@ -812,7 +863,7 @@ function extractSymbolUsagesFromChunks(chunks: SearchResult[], targetSymbol: str
       }
     }
   }
-  
+
   return usages;
 }
 
@@ -820,26 +871,31 @@ function extractSymbolUsagesFromChunks(chunks: SearchResult[], targetSymbol: str
  * Extract a code snippet for a call site with bounds checking.
  * If the target line is blank, searches nearby lines for context.
  */
-function extractSnippet(lines: string[], callLine: number, startLine: number, symbolName: string): string {
+function extractSnippet(
+  lines: string[],
+  callLine: number,
+  startLine: number,
+  symbolName: string,
+): string {
   const lineIndex = callLine - startLine;
   const placeholder = `${symbolName}(...)`;
-  
+
   if (lineIndex < 0 || lineIndex >= lines.length) {
     // This can happen when call site line is outside chunk boundaries (edge case)
     // Not necessarily an error - could be chunk boundary misalignment
     return placeholder;
   }
-  
+
   // Try the direct line first
   const directLine = lines[lineIndex].trim();
   if (directLine) {
     return directLine;
   }
-  
+
   // If direct line is blank, search for nearby non-blank context
   // Limit search radius to 5 lines to ensure contextual relevance
   const searchRadius = 5;
-  
+
   // Search backwards first (prefer earlier lines)
   for (let i = lineIndex - 1; i >= Math.max(0, lineIndex - searchRadius); i--) {
     const candidate = lines[i].trim();
@@ -847,7 +903,7 @@ function extractSnippet(lines: string[], callLine: number, startLine: number, sy
       return candidate;
     }
   }
-  
+
   // Search forwards
   for (let i = lineIndex + 1; i < Math.min(lines.length, lineIndex + searchRadius + 1); i++) {
     const candidate = lines[i].trim();
@@ -855,7 +911,6 @@ function extractSnippet(lines: string[], callLine: number, startLine: number, sy
       return candidate;
     }
   }
-  
+
   return placeholder;
 }
-

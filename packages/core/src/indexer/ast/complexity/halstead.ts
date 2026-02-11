@@ -10,23 +10,23 @@ interface ResolvedOperators {
 
 /** Raw Halstead counts from AST */
 export interface HalsteadCounts {
-  n1: number;  // distinct operators
-  n2: number;  // distinct operands
-  N1: number;  // total operators
-  N2: number;  // total operands
-  operators: Map<string, number>;  // operator -> count
-  operands: Map<string, number>;   // operand -> count
+  n1: number; // distinct operators
+  n2: number; // distinct operands
+  N1: number; // total operators
+  N2: number; // total operands
+  operators: Map<string, number>; // operator -> count
+  operands: Map<string, number>; // operand -> count
 }
 
 /** Calculated Halstead metrics */
 export interface HalsteadMetrics {
-  vocabulary: number;   // n = n1 + n2
-  length: number;       // N = N1 + N2
-  volume: number;       // V = N × log₂(n)
-  difficulty: number;   // D = (n1/2) × (N2/n2)
-  effort: number;       // E = D × V
-  time: number;         // T = E / 18 (seconds to understand)
-  bugs: number;         // B = V / 3000 (estimated delivered bugs)
+  vocabulary: number; // n = n1 + n2
+  length: number; // N = N1 + N2
+  volume: number; // V = N × log₂(n)
+  difficulty: number; // D = (n1/2) × (N2/n2)
+  effort: number; // E = D × V
+  time: number; // T = E / 18 (seconds to understand)
+  bugs: number; // B = V / 3000 (estimated delivered bugs)
 }
 
 /**
@@ -159,7 +159,10 @@ function sumValues(map: Map<string, number>): number {
  * @param language - Programming language for language-specific handling
  * @returns HalsteadCounts with raw operator/operand counts
  */
-export function countHalstead(node: Parser.SyntaxNode, language: SupportedLanguage): HalsteadCounts {
+export function countHalstead(
+  node: Parser.SyntaxNode,
+  language: SupportedLanguage,
+): HalsteadCounts {
   const operators = new Map<string, number>();
   const operands = new Map<string, number>();
   const ops = resolveOperators(language);
@@ -220,7 +223,7 @@ export function calculateHalsteadMetrics(counts: HalsteadCounts): HalsteadMetric
   const volume = vocabulary > 0 ? length * Math.log2(vocabulary) : 0;
   const difficulty = n2 > 0 ? (n1 / 2) * (N2 / n2) : 0;
   const effort = difficulty * volume;
-  const time = effort / 18;  // Stroud number (18 mental discriminations per second)
+  const time = effort / 18; // Stroud number (18 mental discriminations per second)
   const bugs = volume / 3000;
 
   return {
@@ -243,7 +246,10 @@ export function calculateHalsteadMetrics(counts: HalsteadCounts): HalsteadMetric
  * @param language - Programming language
  * @returns Calculated HalsteadMetrics
  */
-export function calculateHalstead(node: Parser.SyntaxNode, language: SupportedLanguage): HalsteadMetrics {
+export function calculateHalstead(
+  node: Parser.SyntaxNode,
+  language: SupportedLanguage,
+): HalsteadMetrics {
   const counts = countHalstead(node, language);
   return calculateHalsteadMetrics(counts);
 }

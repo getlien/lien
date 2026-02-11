@@ -33,7 +33,11 @@
     "docs:preview": "npm run docs:preview -w packages/site",
     "test:coverage": "npm run test:coverage -w @liendev/core",
     "lint": "eslint packages/*/src/",
-    "lint:fix": "eslint --fix packages/*/src/"
+    "lint:fix": "eslint --fix packages/*/src/",
+    "format": "prettier --write packages/*/src/ packages/*/test/",
+    "format:check": "prettier --check packages/*/src/ packages/*/test/",
+    "check": "npm run format:check && npm run lint && npm run typecheck",
+    "fix": "eslint --fix packages/*/src/ && prettier --write packages/*/src/ packages/*/test/"
   },
   "keywords": [
     "mcp",
@@ -57,6 +61,8 @@
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
     "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1",
     "typescript-eslint": "^8.55.0"
   }
 }

@@ -18,9 +18,9 @@ describe('Shopify JSON Template Chunking', () => {
   },
   "order": ["main", "recommendations"]
 }`;
-    
+
     const chunks = chunkFile('templates/product.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.language).toBe('json');
     expect(chunks[0].metadata.type).toBe('template');
@@ -37,9 +37,9 @@ describe('Shopify JSON Template Chunking', () => {
   },
   "order": ["main"]
 }`;
-    
+
     const chunks = chunkFile('templates/customers/account.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolName).toBe('customers/account');
   });
@@ -49,9 +49,9 @@ describe('Shopify JSON Template Chunking', () => {
   "sections": {},
   "order": []
 }`;
-    
+
     const chunks = chunkFile('templates/page.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.imports).toBeUndefined();
   });
@@ -60,9 +60,9 @@ describe('Shopify JSON Template Chunking', () => {
     const content = `{
   "order": []
 }`;
-    
+
     const chunks = chunkFile('templates/minimal.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.imports).toBeUndefined();
   });
@@ -73,22 +73,22 @@ describe('Shopify JSON Template Chunking', () => {
     invalid json here
   }
 }`;
-    
+
     const chunks = chunkFile('templates/broken.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.imports).toBeUndefined(); // No imports extracted from invalid JSON
   });
 
   it('should handle empty JSON template files', () => {
     const chunks = chunkFile('templates/empty.json', '');
-    
+
     expect(chunks).toHaveLength(0);
   });
 
   it('should handle whitespace-only JSON files', () => {
     const chunks = chunkFile('templates/whitespace.json', '   \n\n   ');
-    
+
     expect(chunks).toHaveLength(0);
   });
 
@@ -103,9 +103,9 @@ describe('Shopify JSON Template Chunking', () => {
   },
   "order": ["announcement", "header", "main", "filters", "footer"]
 }`;
-    
+
     const chunks = chunkFile('templates/collection.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.imports).toHaveLength(5);
     expect(chunks[0].metadata.imports).toContain('announcement-bar');
@@ -124,9 +124,9 @@ describe('Shopify JSON Template Chunking', () => {
   },
   "order": ["header1", "header2", "main"]
 }`;
-    
+
     const chunks = chunkFile('templates/page.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     // Should have only 2 unique section types
     expect(chunks[0].metadata.imports).toHaveLength(2);
@@ -142,9 +142,9 @@ describe('Shopify JSON Template Chunking', () => {
     "main": { "type": "should-not-extract" }
   }
 }`;
-    
+
     const chunks = chunkFile('config/settings_schema.json', content);
-    
+
     // Should NOT extract section references (not a template file)
     expect(chunks[0].metadata.imports).toBeUndefined();
   });
@@ -157,9 +157,9 @@ describe('Shopify JSON Template Chunking', () => {
   },
   "order": ["main"]
 }`;
-    
+
     const chunks = chunkFile('shopify-theme/templates/product.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolName).toBe('product');
     expect(chunks[0].metadata.imports).toContain('main-product');
@@ -172,9 +172,9 @@ describe('Shopify JSON Template Chunking', () => {
     "main": { "type": "should-not-extract" }
   }
 }`;
-    
+
     const chunks = chunkFile('my-templates/product.json', content);
-    
+
     // Should use regular JSON chunking (no section extraction)
     expect(chunks[0].metadata.imports).toBeUndefined();
   });
@@ -186,9 +186,9 @@ describe('Shopify JSON Template Chunking', () => {
   },
   "order": ["main"]
 }`;
-    
+
     const chunks = chunkFile('templates/customers/login.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolName).toBe('customers/login');
     expect(chunks[0].metadata.imports).toContain('main-login');
@@ -220,9 +220,9 @@ describe('Shopify JSON Template Chunking', () => {
   },
   "order": ["main", "related-products"]
 }`;
-    
+
     const chunks = chunkFile('templates/product.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolName).toBe('product');
     expect(chunks[0].metadata.imports).toContain('main-product');
@@ -251,9 +251,9 @@ describe('Shopify JSON Template Chunking', () => {
   },
   "order": ["hero"]
 }`;
-    
+
     const chunks = chunkFile('templates/index.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.imports).toEqual(['image-banner']);
   });
@@ -269,9 +269,9 @@ describe('Shopify JSON Template Chunking', () => {
   },
   "order": ["valid", "invalid_number", "invalid_null", "invalid_array", "another_valid"]
 }`;
-    
+
     const chunks = chunkFile('templates/malformed.json', content);
-    
+
     expect(chunks).toHaveLength(1);
     // Should only extract valid string types, ignoring malformed ones
     expect(chunks[0].metadata.imports).toHaveLength(2);
@@ -282,4 +282,3 @@ describe('Shopify JSON Template Chunking', () => {
     expect(chunks[0].metadata.imports).not.toContain(null);
   });
 });
-

@@ -4,9 +4,14 @@ import path from 'path';
 import { startMCPServer } from '../mcp/server.js';
 import { showBanner } from '../utils/banner.js';
 
-export async function serveCommand(options: { port?: string; watch?: boolean; noWatch?: boolean; root?: string }) {
+export async function serveCommand(options: {
+  port?: string;
+  watch?: boolean;
+  noWatch?: boolean;
+  root?: string;
+}) {
   const rootDir = options.root ? path.resolve(options.root) : process.cwd();
-  
+
   try {
     // Validate root directory if --root was specified
     if (options.root) {
@@ -28,25 +33,25 @@ export async function serveCommand(options: { port?: string; watch?: boolean; no
         process.exit(1);
       }
     }
-    
+
     // Log to stderr since stdout is for MCP protocol
     showBanner();
     console.error(chalk.bold('Starting MCP server...\n'));
-    
+
     if (options.root) {
       console.error(chalk.dim(`Serving from: ${rootDir}\n`));
     }
-    
+
     // Handle deprecated --watch flag
     if (options.watch) {
       console.error(chalk.yellow('⚠️  --watch flag is deprecated (file watching is now default)'));
       console.error(chalk.dim('    Use --no-watch to disable file watching\n'));
     }
-    
+
     // Determine file watching state
     // Priority: --no-watch > --watch (deprecated) > config default
     const watch = options.noWatch ? false : options.watch ? true : undefined;
-    
+
     await startMCPServer({
       rootDir,
       verbose: true,
@@ -57,4 +62,3 @@ export async function serveCommand(options: { port?: string; watch?: boolean; no
     process.exit(1);
   }
 }
-

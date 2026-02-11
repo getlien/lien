@@ -72,7 +72,11 @@ export function calculateProduct(a: number, b: number): number {
   it('should handle multiple files', async () => {
     // Create multiple test files
     await createTestFile(testDir, 'utils.ts', 'export function helper() { return "test"; }');
-    await createTestFile(testDir, 'constants.ts', 'export const API_URL = "https://api.example.com";');
+    await createTestFile(
+      testDir,
+      'constants.ts',
+      'export const API_URL = "https://api.example.com";',
+    );
 
     // Scan files
     const files = await scanCodebase({
@@ -119,4 +123,3 @@ export function calculateProduct(a: number, b: number): number {
     expect(files.some(f => f.includes('node_modules'))).toBe(false);
   });
 });
-

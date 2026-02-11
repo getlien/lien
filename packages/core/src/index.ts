@@ -1,12 +1,12 @@
 /**
  * @liendev/core - Lien's indexing and analysis engine
- * 
+ *
  * This is the public API for:
  * - @liendev/cli (CLI commands)
  * - @liendev/action (GitHub Action)
  * - @liendev/cloud (Cloud workers)
  * - Third-party integrations
- * 
+ *
  * @example
  * ```typescript
  * import {
@@ -14,10 +14,10 @@
  *   VectorDB,
  *   ComplexityAnalyzer,
  * } from '@liendev/core';
- * 
+ *
  * // Index a codebase
  * const result = await indexCodebase({ rootDir: '/path/to/project' });
- * 
+ *
  * // Run complexity analysis
  * const db = await VectorDB.load('/path/to/project');
  * const analyzer = new ComplexityAnalyzer(db);
@@ -37,7 +37,11 @@ export { chunkFile } from './indexer/chunker.js';
 export { scanCodebase, detectFileType } from './indexer/scanner.js';
 /** @deprecated Use {@link detectFileType} instead. */
 export { detectFileType as detectLanguage } from './indexer/scanner.js';
-export { indexSingleFile, indexMultipleFiles, normalizeToRelativePath } from './indexer/incremental.js';
+export {
+  indexSingleFile,
+  indexMultipleFiles,
+  normalizeToRelativePath,
+} from './indexer/incremental.js';
 export { createGitignoreFilter, ALWAYS_IGNORE_PATTERNS } from './indexer/gitignore.js';
 export { extractSymbols } from './indexer/symbol-extractor.js';
 export { computeContentHash, isHashAlgorithmCompatible } from './indexer/content-hash.js';
@@ -80,14 +84,24 @@ export { readVersionFile, writeVersionFile } from './vectordb/version.js';
 // =============================================================================
 
 export { ComplexityAnalyzer } from './insights/complexity-analyzer.js';
-export { formatReport, formatTextReport, formatJsonReport, formatSarifReport } from './insights/formatters/index.js';
+export {
+  formatReport,
+  formatTextReport,
+  formatJsonReport,
+  formatSarifReport,
+} from './insights/formatters/index.js';
 export type { OutputFormat } from './insights/formatters/index.js';
 
 // =============================================================================
 // GLOBAL CONFIGURATION
 // =============================================================================
 
-export { loadGlobalConfig, saveGlobalConfig, mergeGlobalConfig, ConfigValidationError } from './config/global-config.js';
+export {
+  loadGlobalConfig,
+  saveGlobalConfig,
+  mergeGlobalConfig,
+  ConfigValidationError,
+} from './config/global-config.js';
 export type { GlobalConfig } from './config/global-config.js';
 
 // =============================================================================
@@ -100,8 +114,17 @@ export type { GlobalConfig } from './config/global-config.js';
 // - Sensible defaults for all settings
 
 import { ConfigService, configService as _configService } from './config/service.js';
-import { defaultConfig as _defaultConfig, isLegacyConfig, isModernConfig } from './config/schema.js';
-import type { LienConfig, LegacyLienConfig, FrameworkConfig, FrameworkInstance } from './config/schema.js';
+import {
+  defaultConfig as _defaultConfig,
+  isLegacyConfig,
+  isModernConfig,
+} from './config/schema.js';
+import type {
+  LienConfig,
+  LegacyLienConfig,
+  FrameworkConfig,
+  FrameworkInstance,
+} from './config/schema.js';
 
 /**
  * @deprecated Per-project config is no longer required. Use global config or environment variables instead.
@@ -178,7 +201,7 @@ export type {
   ChunkMetadata,
   CodeChunk,
   ScanOptions,
-  
+
   // Complexity
   RiskLevel,
   ComplexityMetricType,

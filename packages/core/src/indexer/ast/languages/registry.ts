@@ -40,7 +40,9 @@ for (const def of definitions) {
 
   for (const ext of def.extensions) {
     if (extensionMap.has(ext)) {
-      throw new Error(`Duplicate extension "${ext}" registered by "${def.id}" (already claimed by "${extensionMap.get(ext)}")`);
+      throw new Error(
+        `Duplicate extension "${ext}" registered by "${def.id}" (already claimed by "${extensionMap.get(ext)}")`,
+      );
     }
     extensionMap.set(ext, def.id);
   }

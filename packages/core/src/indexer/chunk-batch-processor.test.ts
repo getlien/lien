@@ -15,9 +15,11 @@ function createMockVectorDB(): VectorDB {
 
 function createMockEmbeddings(): EmbeddingService {
   return {
-    embedBatch: vi.fn().mockImplementation((texts: string[]) =>
-      Promise.resolve(texts.map(() => new Float32Array([0.1, 0.2, 0.3])))
-    ),
+    embedBatch: vi
+      .fn()
+      .mockImplementation((texts: string[]) =>
+        Promise.resolve(texts.map(() => new Float32Array([0.1, 0.2, 0.3]))),
+      ),
   } as unknown as EmbeddingService;
 }
 
@@ -62,7 +64,7 @@ describe('ChunkBatchProcessor', () => {
         mockVectorDB,
         mockEmbeddings,
         { batchThreshold: 10, embeddingBatchSize: 5 },
-        mockProgressTracker
+        mockProgressTracker,
       );
 
       const chunks = [createMockChunk(1), createMockChunk(2)];
@@ -82,7 +84,7 @@ describe('ChunkBatchProcessor', () => {
         mockVectorDB,
         mockEmbeddings,
         { batchThreshold: 3, embeddingBatchSize: 10 },
-        mockProgressTracker
+        mockProgressTracker,
       );
 
       // Add chunks to reach threshold
@@ -98,7 +100,7 @@ describe('ChunkBatchProcessor', () => {
         mockVectorDB,
         mockEmbeddings,
         { batchThreshold: 10, embeddingBatchSize: 5 },
-        mockProgressTracker
+        mockProgressTracker,
       );
 
       await processor.addChunks([], 'empty.ts', Date.now());
@@ -112,7 +114,7 @@ describe('ChunkBatchProcessor', () => {
         mockVectorDB,
         mockEmbeddings,
         { batchThreshold: 100, embeddingBatchSize: 50 },
-        mockProgressTracker
+        mockProgressTracker,
       );
 
       // Simulate concurrent file processing
@@ -120,8 +122,8 @@ describe('ChunkBatchProcessor', () => {
         processor.addChunks(
           [createMockChunk(i * 2), createMockChunk(i * 2 + 1)],
           `file${i}.ts`,
-          Date.now()
-        )
+          Date.now(),
+        ),
       );
 
       await Promise.all(promises);
@@ -137,7 +139,7 @@ describe('ChunkBatchProcessor', () => {
         mockVectorDB,
         mockEmbeddings,
         { batchThreshold: 100, embeddingBatchSize: 5 }, // High threshold
-        mockProgressTracker
+        mockProgressTracker,
       );
 
       await processor.addChunks([createMockChunk(1), createMockChunk(2)], 'file1.ts', Date.now());
@@ -156,7 +158,7 @@ describe('ChunkBatchProcessor', () => {
         mockVectorDB,
         mockEmbeddings,
         { batchThreshold: 10, embeddingBatchSize: 5 },
-        mockProgressTracker
+        mockProgressTracker,
       );
 
       // Flush with nothing added
@@ -172,7 +174,7 @@ describe('ChunkBatchProcessor', () => {
         mockVectorDB,
         mockEmbeddings,
         { batchThreshold: 2, embeddingBatchSize: 10 },
-        mockProgressTracker
+        mockProgressTracker,
       );
 
       await processor.addChunks([createMockChunk(1)], 'file1.ts', 1000);
@@ -189,7 +191,7 @@ describe('ChunkBatchProcessor', () => {
         mockVectorDB,
         mockEmbeddings,
         { batchThreshold: 100, embeddingBatchSize: 50 },
-        mockProgressTracker
+        mockProgressTracker,
       );
 
       const mtime = Date.now();
@@ -210,7 +212,7 @@ describe('ChunkBatchProcessor', () => {
         mockVectorDB,
         mockEmbeddings,
         { batchThreshold: 5, embeddingBatchSize: 2 },
-        mockProgressTracker
+        mockProgressTracker,
       );
 
       // Add 6 chunks to trigger processing

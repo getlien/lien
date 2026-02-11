@@ -7,7 +7,7 @@ describe('chunkFile', () => {
     const chunks = chunkFile('test.ts', code, { chunkSize: 3, chunkOverlap: 1, useAST: false });
 
     // With 10 lines, chunkSize=3, overlap=1:
-    // Chunk 1: lines 1-3, Chunk 2: lines 3-5, Chunk 3: lines 5-7, 
+    // Chunk 1: lines 1-3, Chunk 2: lines 3-5, Chunk 3: lines 5-7,
     // Chunk 4: lines 7-9, Chunk 5: lines 9-10 = 5 chunks
     expect(chunks).toHaveLength(5);
     expect(chunks[0].content).toContain('line 1');
@@ -69,7 +69,7 @@ describe('chunkFile', () => {
     const tsCode = 'const x = 1;';
     const jsCode = 'const x = 1;';
     const pyCode = 'def test(): pass';
-    
+
     const tsChunks = chunkFile('test.ts', tsCode);
     const jsChunks = chunkFile('test.js', jsCode);
     const pyChunks = chunkFile('test.py', pyCode);
@@ -101,11 +101,11 @@ describe('chunkFile', () => {
   it('should accept astFallback option without error', () => {
     // Test that astFallback option doesn't break normal operation
     const code = 'function test() { return 42; }';
-    
+
     // Test with line-based fallback (default)
     const chunks1 = chunkFile('test.ts', code, { useAST: true, astFallback: 'line-based' });
     expect(chunks1.length).toBeGreaterThan(0);
-    
+
     // Test with error fallback (should work fine for valid code)
     const chunks2 = chunkFile('test.ts', code, { useAST: true, astFallback: 'error' });
     expect(chunks2.length).toBeGreaterThan(0);
@@ -123,7 +123,7 @@ describe('chunkText', () => {
     const chunks = chunkText(text, { chunkSize: 3, chunkOverlap: 1 });
 
     // With 10 lines, chunkSize=3, overlap=1:
-    // Chunk 1: lines 1-3, Chunk 2: lines 3-5, Chunk 3: lines 5-7, 
+    // Chunk 1: lines 1-3, Chunk 2: lines 3-5, Chunk 3: lines 5-7,
     // Chunk 4: lines 7-9, Chunk 5: lines 9-10 = 5 chunks
     expect(chunks).toHaveLength(5);
     expect(chunks[0]).toContain('line 1');
@@ -161,4 +161,3 @@ describe('chunkText', () => {
     expect(chunks.length).toBeGreaterThan(1);
   });
 });
-

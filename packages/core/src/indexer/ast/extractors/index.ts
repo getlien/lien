@@ -1,8 +1,16 @@
 import type { SupportedLanguage } from '../types.js';
-import type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from './types.js';
+import type {
+  LanguageExportExtractor,
+  LanguageImportExtractor,
+  LanguageSymbolExtractor,
+} from './types.js';
 import { getLanguage, languageExists } from '../languages/registry.js';
 
-export type { LanguageExportExtractor, LanguageImportExtractor, LanguageSymbolExtractor } from './types.js';
+export type {
+  LanguageExportExtractor,
+  LanguageImportExtractor,
+  LanguageSymbolExtractor,
+} from './types.js';
 
 /**
  * Get the export extractor for a specific language.
@@ -22,7 +30,9 @@ export function getExtractor(language: SupportedLanguage): LanguageExportExtract
  * @param language - Programming language
  * @returns Language-specific import extractor, or undefined if not implemented
  */
-export function getImportExtractor(language: SupportedLanguage): LanguageImportExtractor | undefined {
+export function getImportExtractor(
+  language: SupportedLanguage,
+): LanguageImportExtractor | undefined {
   return getLanguage(language).importExtractor;
 }
 
@@ -33,7 +43,9 @@ export function getImportExtractor(language: SupportedLanguage): LanguageImportE
  * @param language - Programming language
  * @returns Language-specific symbol extractor, or undefined if not implemented
  */
-export function getSymbolExtractor(language: SupportedLanguage): LanguageSymbolExtractor | undefined {
+export function getSymbolExtractor(
+  language: SupportedLanguage,
+): LanguageSymbolExtractor | undefined {
   return getLanguage(language).symbolExtractor;
 }
 

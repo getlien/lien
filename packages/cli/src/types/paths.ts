@@ -2,7 +2,7 @@ import path from 'path';
 
 /**
  * Type-safe path system to prevent mixing absolute/relative paths
- * 
+ *
  * Uses TypeScript branded types for compile-time safety.
  * Runtime validation ensures correctness.
  */
@@ -60,4 +60,3 @@ export function isRelativePath(pathStr: string): pathStr is RelativePath {
 export function isAbsolutePath(pathStr: string): pathStr is AbsolutePath {
   return pathStr.startsWith('/') || !!pathStr.match(/^[A-Z]:\\/);
 }
-

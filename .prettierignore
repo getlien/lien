@@ -1,0 +1,7 @@
+dist/
+node_modules/
+packages/site/
+packages/action/dist/
+.wip/
+*.md
+package-lock.json

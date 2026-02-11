@@ -63,11 +63,16 @@ interface SarifResult {
  */
 function getRuleId(metricType: string): string {
   switch (metricType) {
-    case 'cognitive': return 'lien/high-cognitive-complexity';
-    case 'cyclomatic': return 'lien/high-cyclomatic-complexity';
-    case 'halstead_effort': return 'lien/high-halstead-effort';
-    case 'halstead_bugs': return 'lien/high-estimated-bugs';
-    default: return 'lien/high-complexity';
+    case 'cognitive':
+      return 'lien/high-cognitive-complexity';
+    case 'cyclomatic':
+      return 'lien/high-cyclomatic-complexity';
+    case 'halstead_effort':
+      return 'lien/high-halstead-effort';
+    case 'halstead_bugs':
+      return 'lien/high-estimated-bugs';
+    default:
+      return 'lien/high-complexity';
   }
 }
 
@@ -132,7 +137,7 @@ export function formatSarifReport(report: ComplexityReport): string {
   for (const [filepath, fileData] of Object.entries(report.files)) {
     for (const violation of fileData.violations) {
       const ruleId = getRuleId(violation.metricType);
-      
+
       results.push({
         ruleId,
         level: violation.severity,
@@ -157,7 +162,8 @@ export function formatSarifReport(report: ComplexityReport): string {
   }
 
   const sarifReport: SarifReport = {
-    $schema: 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json',
+    $schema:
+      'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json',
     version: '2.1.0',
     runs: [
       {
@@ -176,4 +182,3 @@ export function formatSarifReport(report: ComplexityReport): string {
 
   return JSON.stringify(sarifReport, null, 2);
 }
-

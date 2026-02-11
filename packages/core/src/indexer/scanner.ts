@@ -25,27 +25,22 @@ async function loadGitignore(...dirs: string[]): Promise<ReturnType<typeof ignor
  */
 export async function scanCodebase(options: ScanOptions): Promise<string[]> {
   const { rootDir, includePatterns = [], excludePatterns = [] } = options;
-  
+
   const ig = await loadGitignore(rootDir);
-  ig.add([
-    ...ALWAYS_IGNORE_PATTERNS,
-    ...excludePatterns,
-  ]);
-  
+  ig.add([...ALWAYS_IGNORE_PATTERNS, ...excludePatterns]);
+
   // Determine patterns to search for
-  const patterns = includePatterns.length > 0 
-    ? includePatterns 
-    : ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,cpp,c,cs,h,md,mdx}'];
-  
+  const patterns =
+    includePatterns.length > 0
+      ? includePatterns
+      : ['**/*.{ts,tsx,js,jsx,py,php,go,rs,java,cpp,c,cs,h,md,mdx}'];
+
   // Combine always-ignored patterns with exclude patterns for glob
-  const globIgnorePatterns = [
-    ...ALWAYS_IGNORE_PATTERNS,
-    ...excludePatterns,
-  ];
-  
+  const globIgnorePatterns = [...ALWAYS_IGNORE_PATTERNS, ...excludePatterns];
+
   // Find all code files
   const allFiles: string[] = [];
-  
+
   for (const pattern of patterns) {
     const files = await glob(pattern, {
       cwd: rootDir,
@@ -55,10 +50,10 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
     });
     allFiles.push(...files);
   }
-  
+
   // Remove duplicates
   const uniqueFiles = Array.from(new Set(allFiles));
-  
+
   // Filter using ignore patterns
   return uniqueFiles.filter(file => {
     const relativePath = path.relative(rootDir, file);
@@ -72,7 +67,7 @@ export async function scanCodebase(options: ScanOptions): Promise<string[]> {
  */
 export function detectFileType(filepath: string): string {
   const ext = path.extname(filepath).toLowerCase();
-  
+
   const languageMap: Record<string, string> = {
     '.ts': 'typescript',
     '.tsx': 'typescript',
@@ -102,7 +97,7 @@ export function detectFileType(filepath: string): string {
     '.mdx': 'markdown',
     '.markdown': 'markdown',
   };
-  
+
   return languageMap[ext] || 'unknown';
 }
 
@@ -111,4 +106,3 @@ export function detectFileType(filepath: string): string {
  * compatibility with deep imports.
  */
 export const detectLanguage = detectFileType;
-

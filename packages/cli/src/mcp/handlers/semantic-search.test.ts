@@ -28,12 +28,14 @@ describe('handleSemanticSearch', () => {
   };
 
   // Helper to create mock search results
-  function createMockResult(overrides: {
-    content?: string;
-    metadata?: Partial<typeof defaultMetadata & { repoId?: string }>;
-    score?: number;
-    relevance?: 'highly_relevant' | 'relevant' | 'loosely_related' | 'not_relevant';
-  } = {}): SearchResult {
+  function createMockResult(
+    overrides: {
+      content?: string;
+      metadata?: Partial<typeof defaultMetadata & { repoId?: string }>;
+      score?: number;
+      relevance?: 'highly_relevant' | 'relevant' | 'loosely_related' | 'not_relevant';
+    } = {},
+  ): SearchResult {
     return {
       content: overrides.content ?? 'function example() { return true; }',
       metadata: {
@@ -79,15 +81,18 @@ describe('handleSemanticSearch', () => {
   describe('basic search', () => {
     it('should return search results with indexInfo', async () => {
       const mockResults = [
-        createMockResult({ content: 'function handleAuth() {}', metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 } }),
-        createMockResult({ content: 'function validateUser() {}', metadata: { file: 'src/validate.ts', startLine: 1, endLine: 10 } }),
+        createMockResult({
+          content: 'function handleAuth() {}',
+          metadata: { file: 'src/auth.ts', startLine: 1, endLine: 10 },
+        }),
+        createMockResult({
+          content: 'function validateUser() {}',
+          metadata: { file: 'src/validate.ts', startLine: 1, endLine: 10 },
+        }),
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
-      const result = await handleSemanticSearch(
-        { query: 'handles user authentication' },
-        mockCtx
-      );
+      const result = await handleSemanticSearch({ query: 'handles user authentication' }, mockCtx);
 
       expect(mockVectorDB.search).toHaveBeenCalled();
       const parsed = JSON.parse(result.content![0].text);
@@ -106,41 +111,32 @@ describe('handleSemanticSearch', () => {
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
-      await handleSemanticSearch(
-        { query: 'test query here', limit: 10 },
-        mockCtx
-      );
+      await handleSemanticSearch({ query: 'test query here', limit: 10 }, mockCtx);
 
       // Verify limit was passed to search
       expect(mockVectorDB.search).toHaveBeenCalledWith(
         expect.any(Float32Array),
         10,
-        'test query here'
+        'test query here',
       );
     });
 
     it('should use default limit of 5 when not specified', async () => {
       mockVectorDB.search.mockResolvedValue([]);
 
-      await handleSemanticSearch(
-        { query: 'test query here' },
-        mockCtx
-      );
+      await handleSemanticSearch({ query: 'test query here' }, mockCtx);
 
       expect(mockVectorDB.search).toHaveBeenCalledWith(
         expect.any(Float32Array),
         5,
-        'test query here'
+        'test query here',
       );
     });
 
     it('should call checkAndReconnect before searching', async () => {
       mockVectorDB.search.mockResolvedValue([]);
 
-      await handleSemanticSearch(
-        { query: 'test query here' },
-        mockCtx
-      );
+      await handleSemanticSearch({ query: 'test query here' }, mockCtx);
 
       expect(mockCheckAndReconnect).toHaveBeenCalled();
     });
@@ -148,10 +144,7 @@ describe('handleSemanticSearch', () => {
     it('should embed the query before searching', async () => {
       mockVectorDB.search.mockResolvedValue([]);
 
-      await handleSemanticSearch(
-        { query: 'handles authentication' },
-        mockCtx
-      );
+      await handleSemanticSearch({ query: 'handles authentication' }, mockCtx);
 
       expect(mockEmbeddings.embed).toHaveBeenCalledWith('handles authentication');
     });
@@ -159,10 +152,7 @@ describe('handleSemanticSearch', () => {
     it('should handle empty results gracefully', async () => {
       mockVectorDB.search.mockResolvedValue([]);
 
-      const result = await handleSemanticSearch(
-        { query: 'nonexistent feature' },
-        mockCtx
-      );
+      const result = await handleSemanticSearch({ query: 'nonexistent feature' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(0);
@@ -172,10 +162,7 @@ describe('handleSemanticSearch', () => {
     it('should include diagnostic note when search returns empty results', async () => {
       mockVectorDB.search.mockResolvedValue([]);
 
-      const result = await handleSemanticSearch(
-        { query: 'nonexistent feature' },
-        mockCtx
-      );
+      const result = await handleSemanticSearch({ query: 'nonexistent feature' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(0);
@@ -222,14 +209,12 @@ describe('handleSemanticSearch', () => {
 
       const result = await handleSemanticSearch(
         { query: 'cross repo search', crossRepo: true },
-        mockCtx
+        mockCtx,
       );
 
-      expect(mockQdrantDB.searchCrossRepo).toHaveBeenCalledWith(
-        expect.any(Float32Array),
-        5,
-        { repoIds: undefined }
-      );
+      expect(mockQdrantDB.searchCrossRepo).toHaveBeenCalledWith(expect.any(Float32Array), 5, {
+        repoIds: undefined,
+      });
       expect(mockQdrantDB.search).not.toHaveBeenCalled();
 
       const parsed = JSON.parse(result.content![0].text);
@@ -239,15 +224,24 @@ describe('handleSemanticSearch', () => {
 
     it('should group results by repository when crossRepo=true', async () => {
       const mockResults = [
-        createMockResult({ content: 'result 1', metadata: { repoId: 'repo-a', file: 'src/a1.ts' } }),
-        createMockResult({ content: 'result 2', metadata: { repoId: 'repo-a', file: 'src/a2.ts' } }),
-        createMockResult({ content: 'result 3', metadata: { repoId: 'repo-b', file: 'src/b1.ts' } }),
+        createMockResult({
+          content: 'result 1',
+          metadata: { repoId: 'repo-a', file: 'src/a1.ts' },
+        }),
+        createMockResult({
+          content: 'result 2',
+          metadata: { repoId: 'repo-a', file: 'src/a2.ts' },
+        }),
+        createMockResult({
+          content: 'result 3',
+          metadata: { repoId: 'repo-b', file: 'src/b1.ts' },
+        }),
       ];
       mockQdrantDB.searchCrossRepo.mockResolvedValue(mockResults);
 
       const result = await handleSemanticSearch(
         { query: 'test cross repo', crossRepo: true },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -261,14 +255,12 @@ describe('handleSemanticSearch', () => {
 
       await handleSemanticSearch(
         { query: 'filtered search', crossRepo: true, repoIds: ['repo-a', 'repo-c'] },
-        mockCtx
+        mockCtx,
       );
 
-      expect(mockQdrantDB.searchCrossRepo).toHaveBeenCalledWith(
-        expect.any(Float32Array),
-        5,
-        { repoIds: ['repo-a', 'repo-c'] }
-      );
+      expect(mockQdrantDB.searchCrossRepo).toHaveBeenCalledWith(expect.any(Float32Array), 5, {
+        repoIds: ['repo-a', 'repo-c'],
+      });
     });
   });
 
@@ -279,13 +271,13 @@ describe('handleSemanticSearch', () => {
 
       const result = await handleSemanticSearch(
         { query: 'test fallback query', crossRepo: true },
-        mockCtx
+        mockCtx,
       );
 
       // Should log a warning
       expect(mockLog).toHaveBeenCalledWith(
         'Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.',
-        'warning'
+        'warning',
       );
 
       // Should use regular search, not searchCrossRepo
@@ -306,7 +298,7 @@ describe('handleSemanticSearch', () => {
 
       const result = await handleSemanticSearch(
         { query: 'test fallback results', crossRepo: true },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -317,10 +309,7 @@ describe('handleSemanticSearch', () => {
 
   describe('validation', () => {
     it('should reject queries shorter than 3 characters', async () => {
-      const result = await handleSemanticSearch(
-        { query: 'ab' },
-        mockCtx
-      );
+      const result = await handleSemanticSearch({ query: 'ab' }, mockCtx);
 
       expect(result.isError).toBe(true);
       const parsed = JSON.parse(result.content![0].text);
@@ -329,15 +318,12 @@ describe('handleSemanticSearch', () => {
         expect.objectContaining({
           field: 'query',
           message: expect.stringContaining('at least 3 characters'),
-        })
+        }),
       );
     });
 
     it('should reject empty query', async () => {
-      const result = await handleSemanticSearch(
-        { query: '' },
-        mockCtx
-      );
+      const result = await handleSemanticSearch({ query: '' }, mockCtx);
 
       expect(result.isError).toBe(true);
       const parsed = JSON.parse(result.content![0].text);
@@ -345,10 +331,7 @@ describe('handleSemanticSearch', () => {
     });
 
     it('should reject limit below 1', async () => {
-      const result = await handleSemanticSearch(
-        { query: 'valid query', limit: 0 },
-        mockCtx
-      );
+      const result = await handleSemanticSearch({ query: 'valid query', limit: 0 }, mockCtx);
 
       expect(result.isError).toBe(true);
       const parsed = JSON.parse(result.content![0].text);
@@ -356,15 +339,12 @@ describe('handleSemanticSearch', () => {
         expect.objectContaining({
           field: 'limit',
           message: expect.stringContaining('at least 1'),
-        })
+        }),
       );
     });
 
     it('should reject limit above 50', async () => {
-      const result = await handleSemanticSearch(
-        { query: 'valid query', limit: 100 },
-        mockCtx
-      );
+      const result = await handleSemanticSearch({ query: 'valid query', limit: 100 }, mockCtx);
 
       expect(result.isError).toBe(true);
       const parsed = JSON.parse(result.content![0].text);
@@ -372,7 +352,7 @@ describe('handleSemanticSearch', () => {
         expect.objectContaining({
           field: 'limit',
           message: expect.stringContaining('cannot exceed 50'),
-        })
+        }),
       );
     });
 
@@ -380,17 +360,11 @@ describe('handleSemanticSearch', () => {
       mockVectorDB.search.mockResolvedValue([]);
 
       // Test minimum valid query (3 chars)
-      const result1 = await handleSemanticSearch(
-        { query: 'abc' },
-        mockCtx
-      );
+      const result1 = await handleSemanticSearch({ query: 'abc' }, mockCtx);
       expect(result1.isError).toBeUndefined();
 
       // Test maximum valid limit (50)
-      const result2 = await handleSemanticSearch(
-        { query: 'valid query', limit: 50 },
-        mockCtx
-      );
+      const result2 = await handleSemanticSearch({ query: 'valid query', limit: 50 }, mockCtx);
       expect(result2.isError).toBeUndefined();
     });
   });
@@ -403,10 +377,7 @@ describe('handleSemanticSearch', () => {
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
-      const result = await handleSemanticSearch(
-        { query: 'something irrelevant' },
-        mockCtx
-      );
+      const result = await handleSemanticSearch({ query: 'something irrelevant' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(0);
@@ -423,7 +394,7 @@ describe('handleSemanticSearch', () => {
 
       const result = await handleSemanticSearch(
         { query: 'something irrelevant', crossRepo: true },
-        mockCtx
+        mockCtx,
       );
 
       const parsed = JSON.parse(result.content![0].text);
@@ -439,10 +410,7 @@ describe('handleSemanticSearch', () => {
       ];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
-      const result = await handleSemanticSearch(
-        { query: 'partially relevant' },
-        mockCtx
-      );
+      const result = await handleSemanticSearch({ query: 'partially relevant' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(2);
@@ -453,44 +421,26 @@ describe('handleSemanticSearch', () => {
     it('should log search query', async () => {
       mockVectorDB.search.mockResolvedValue([]);
 
-      await handleSemanticSearch(
-        { query: 'authentication handler' },
-        mockCtx
-      );
+      await handleSemanticSearch({ query: 'authentication handler' }, mockCtx);
 
-      expect(mockLog).toHaveBeenCalledWith(
-        'Searching for: "authentication handler"'
-      );
+      expect(mockLog).toHaveBeenCalledWith('Searching for: "authentication handler"');
     });
 
     it('should indicate cross-repo in log when enabled', async () => {
       mockVectorDB.search.mockResolvedValue([]);
 
-      await handleSemanticSearch(
-        { query: 'cross repo test', crossRepo: true },
-        mockCtx
-      );
+      await handleSemanticSearch({ query: 'cross repo test', crossRepo: true }, mockCtx);
 
-      expect(mockLog).toHaveBeenCalledWith(
-        'Searching for: "cross repo test" (cross-repo)'
-      );
+      expect(mockLog).toHaveBeenCalledWith('Searching for: "cross repo test" (cross-repo)');
     });
 
     it('should log result count', async () => {
-      const mockResults = [
-        createMockResult(),
-        createMockResult(),
-        createMockResult(),
-      ];
+      const mockResults = [createMockResult(), createMockResult(), createMockResult()];
       mockVectorDB.search.mockResolvedValue(mockResults);
 
-      await handleSemanticSearch(
-        { query: 'test query here' },
-        mockCtx
-      );
+      await handleSemanticSearch({ query: 'test query here' }, mockCtx);
 
       expect(mockLog).toHaveBeenCalledWith('Found 3 results');
     });
   });
 });
-

@@ -4,10 +4,7 @@
  */
 
 import collect from 'collect.js';
-import type {
-  ComplexityReport,
-  ComplexityViolation,
-} from '@liendev/core';
+import type { ComplexityReport, ComplexityViolation } from '@liendev/core';
 import type { Logger } from './logger.js';
 
 /**
@@ -51,7 +48,7 @@ function getFunctionKey(filepath: string, symbolName: string, metricType: string
  */
 function buildComplexityMap(
   report: ComplexityReport | null,
-  files: string[]
+  files: string[],
 ): Map<string, { complexity: number; violation: ComplexityViolation }> {
   if (!report) return new Map();
 
@@ -62,10 +59,13 @@ function buildComplexityMap(
     .map(filepath => ({ filepath, fileData: report.files[filepath] }))
     .filter(({ fileData }) => !!fileData)
     .flatMap(({ filepath, fileData }) =>
-      fileData.violations.map(violation => [
-        getFunctionKey(filepath, violation.symbolName, violation.metricType),
-        { complexity: violation.complexity, violation }
-      ] as MapEntry)
+      fileData.violations.map(
+        violation =>
+          [
+            getFunctionKey(filepath, violation.symbolName, violation.metricType),
+            { complexity: violation.complexity, violation },
+          ] as MapEntry,
+      ),
     )
     .all() as unknown as MapEntry[];
 
@@ -79,7 +79,7 @@ function determineSeverity(
   baseComplexity: number | null,
   headComplexity: number,
   delta: number,
-  threshold: number
+  threshold: number,
 ): ComplexityDelta['severity'] {
   if (baseComplexity === null) return 'new';
   if (delta < 0) return 'improved';
@@ -93,11 +93,12 @@ function createDelta(
   violation: ComplexityViolation,
   baseComplexity: number | null,
   headComplexity: number | null,
-  severity: ComplexityDelta['severity']
+  severity: ComplexityDelta['severity'],
 ): ComplexityDelta {
-  const delta = baseComplexity !== null && headComplexity !== null
-    ? headComplexity - baseComplexity
-    : headComplexity ?? -(baseComplexity ?? 0);
+  const delta =
+    baseComplexity !== null && headComplexity !== null
+      ? headComplexity - baseComplexity
+      : (headComplexity ?? -(baseComplexity ?? 0));
 
   return {
     filepath: violation.filepath,
@@ -117,7 +118,11 @@ function createDelta(
  * Sort deltas by severity (errors first), then by delta magnitude (worst first)
  */
 const SEVERITY_ORDER: Record<ComplexityDelta['severity'], number> = {
-  error: 0, warning: 1, new: 2, improved: 3, deleted: 4,
+  error: 0,
+  warning: 1,
+  new: 2,
+  improved: 3,
+  deleted: 4,
 };
 
 function sortDeltas(deltas: ComplexityDelta[]): ComplexityDelta[] {
@@ -146,7 +151,12 @@ function processHeadViolations(
       const baseComplexity = baseData?.complexity ?? null;
       const headComplexity = headData.complexity;
       const delta = baseComplexity !== null ? headComplexity - baseComplexity : headComplexity;
-      const severity = determineSeverity(baseComplexity, headComplexity, delta, headData.violation.threshold);
+      const severity = determineSeverity(
+        baseComplexity,
+        headComplexity,
+        delta,
+        headData.violation.threshold,
+      );
 
       return createDelta(headData.violation, baseComplexity, headComplexity, severity);
     })
@@ -161,7 +171,7 @@ function processHeadViolations(
 export function calculateDeltas(
   baseReport: ComplexityReport | null,
   headReport: ComplexityReport,
-  changedFiles: string[]
+  changedFiles: string[],
 ): ComplexityDelta[] {
   const baseMap = buildComplexityMap(baseReport, changedFiles);
   const headMap = buildComplexityMap(headReport, changedFiles);

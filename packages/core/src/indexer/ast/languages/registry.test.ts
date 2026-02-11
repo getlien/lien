@@ -60,7 +60,7 @@ describe('Language Registry', () => {
 
     it('should throw for unregistered languages', () => {
       expect(() => getLanguage('go' as SupportedLanguage)).toThrow(
-        'No language definition registered for: go'
+        'No language definition registered for: go',
       );
     });
   });

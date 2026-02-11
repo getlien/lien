@@ -53,10 +53,7 @@ program
   .option('-r, --root <path>', 'Root directory to serve (defaults to current directory)')
   .action(serveCommand);
 
-program
-  .command('status')
-  .description('Show indexing status and statistics')
-  .action(statusCommand);
+program.command('status').description('Show indexing status and statistics').action(statusCommand);
 
 program
   .command('complexity')
@@ -78,13 +75,6 @@ configCmd
   .description('Set a global config value')
   .action(configSetCommand);
 
-configCmd
-  .command('get <key>')
-  .description('Get a config value')
-  .action(configGetCommand);
+configCmd.command('get <key>').description('Get a config value').action(configGetCommand);
 
-configCmd
-  .command('list')
-  .description('Show all current config')
-  .action(configListCommand);
-
+configCmd.command('list').description('Show all current config').action(configListCommand);

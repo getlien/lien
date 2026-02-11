@@ -15,10 +15,10 @@ describe('parsePatchLines', () => {
 
     const lines = parsePatchLines(patch);
 
-    expect(lines.has(1)).toBe(true);  // context line
-    expect(lines.has(2)).toBe(true);  // context line
-    expect(lines.has(3)).toBe(true);  // added line
-    expect(lines.has(4)).toBe(true);  // context line
+    expect(lines.has(1)).toBe(true); // context line
+    expect(lines.has(2)).toBe(true); // context line
+    expect(lines.has(3)).toBe(true); // added line
+    expect(lines.has(4)).toBe(true); // context line
     expect(lines.size).toBe(4);
   });
 
@@ -147,9 +147,9 @@ describe('parsePatchLines', () => {
 
     // Result should be lines 1, 2, 3, 4, 5 in the new file
     expect(lines.has(1)).toBe(true);
-    expect(lines.has(2)).toBe(true);  // new line 2
+    expect(lines.has(2)).toBe(true); // new line 2
     expect(lines.has(3)).toBe(true);
-    expect(lines.has(4)).toBe(true);  // new line 4
+    expect(lines.has(4)).toBe(true); // new line 4
     expect(lines.has(5)).toBe(true);
     expect(lines.size).toBe(5);
   });

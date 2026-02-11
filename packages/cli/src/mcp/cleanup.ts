@@ -10,7 +10,7 @@ export function setupCleanupHandlers(
   versionCheckInterval: NodeJS.Timeout,
   gitPollInterval: NodeJS.Timeout | null,
   fileWatcher: FileWatcher | null,
-  log: LogFn
+  log: LogFn,
 ): () => Promise<void> {
   let cleaningUp = false;
   return async () => {

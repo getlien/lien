@@ -22,18 +22,18 @@ export interface FileEntry {
  * Index manifest tracking all indexed files and version information
  */
 export interface IndexManifest {
-  formatVersion: number;      // Index format version for compatibility checking
-  lienVersion: string;         // Lien package version (for reference)
-  lastIndexed: number;         // Timestamp of last indexing operation
-  gitState?: GitState;         // Last known git state
-  files: Record<string, FileEntry>;  // Map of filepath -> FileEntry (stored as object for JSON)
-  hashAlgorithm?: 'sha256-16' | 'sha256-16-large';  // Content hash algorithm (for future migrations)
+  formatVersion: number; // Index format version for compatibility checking
+  lienVersion: string; // Lien package version (for reference)
+  lastIndexed: number; // Timestamp of last indexing operation
+  gitState?: GitState; // Last known git state
+  files: Record<string, FileEntry>; // Map of filepath -> FileEntry (stored as object for JSON)
+  hashAlgorithm?: 'sha256-16' | 'sha256-16-large'; // Content hash algorithm (for future migrations)
 }
 
 /**
  * Manages the index manifest file, tracking which files are indexed
  * and their metadata for incremental indexing support.
- * 
+ *
  * The manifest includes version checking to invalidate indices when
  * Lien's indexing format changes (e.g., new chunking algorithm,
  * different embedding model, schema changes).
@@ -41,13 +41,13 @@ export interface IndexManifest {
 export class ManifestManager {
   private manifestPath: string;
   private indexPath: string;
-  
+
   /**
    * Promise-based lock to prevent race conditions during concurrent updates.
    * Ensures read-modify-write operations are atomic.
    */
   private updateLock = Promise.resolve();
-  
+
   /**
    * Creates a new ManifestManager
    * @param indexPath - Path to the index directory (same as VectorDB path)
@@ -56,57 +56,57 @@ export class ManifestManager {
     this.indexPath = indexPath;
     this.manifestPath = path.join(indexPath, MANIFEST_FILE);
   }
-  
+
   /**
    * Loads the manifest from disk.
    * Returns null if:
    * - Manifest doesn't exist (first run)
    * - Manifest is corrupt
    * - Format version is incompatible (triggers full reindex)
-   * 
+   *
    * @returns Loaded manifest or null
    */
   async load(): Promise<IndexManifest | null> {
     try {
       const content = await fs.readFile(this.manifestPath, 'utf-8');
       const manifest = JSON.parse(content) as IndexManifest;
-      
+
       // VERSION CHECK: Invalidate if format version doesn't match
       if (manifest.formatVersion !== INDEX_FORMAT_VERSION) {
         console.error(
-          `[Lien] Index format v${manifest.formatVersion} is incompatible with current v${INDEX_FORMAT_VERSION}`
+          `[Lien] Index format v${manifest.formatVersion} is incompatible with current v${INDEX_FORMAT_VERSION}`,
         );
         console.error(`[Lien] Full reindex required after Lien upgrade`);
-        
+
         // Clear old manifest and return null (triggers full reindex)
         await this.clear();
         return null;
       }
-      
+
       return manifest;
     } catch (error) {
       // File doesn't exist or is invalid - return null for first run
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return null;
       }
-      
+
       // Corrupt manifest - log warning and return null
       console.error(`[Lien] Warning: Failed to load manifest: ${error}`);
       return null;
     }
   }
-  
+
   /**
    * Saves the manifest to disk.
    * Always saves with current format and package versions.
-   * 
+   *
    * @param manifest - Manifest to save
    */
   async save(manifest: IndexManifest): Promise<void> {
     try {
       // Ensure index directory exists
       await fs.mkdir(this.indexPath, { recursive: true });
-      
+
       // Always save with current versions
       const manifestToSave: IndexManifest = {
         ...manifest,
@@ -115,7 +115,7 @@ export class ManifestManager {
         lastIndexed: Date.now(),
         hashAlgorithm: 'sha256-16-large', // Current hash algorithm
       };
-      
+
       const content = JSON.stringify(manifestToSave, null, 2);
       await fs.writeFile(this.manifestPath, content, 'utf-8');
     } catch (error) {
@@ -123,114 +123,122 @@ export class ManifestManager {
       console.error(`[Lien] Warning: Failed to save manifest: ${error}`);
     }
   }
-  
+
   /**
    * Adds or updates a file entry in the manifest.
    * Protected by lock to prevent race conditions during concurrent updates.
-   * 
+   *
    * @param filepath - Path to the file
    * @param entry - File entry metadata
    */
   async updateFile(filepath: string, entry: FileEntry): Promise<void> {
     // Chain this operation to the lock to ensure atomicity
-    this.updateLock = this.updateLock.then(async () => {
-      const manifest = await this.load() || this.createEmpty();
-      manifest.files[filepath] = entry;
-      await this.save(manifest);
-    }).catch(error => {
-      console.error(`[Lien] Failed to update manifest for ${filepath}: ${error}`);
-      // Return to reset lock - don't let errors block future operations
-      return undefined;
-    });
-    
+    this.updateLock = this.updateLock
+      .then(async () => {
+        const manifest = (await this.load()) || this.createEmpty();
+        manifest.files[filepath] = entry;
+        await this.save(manifest);
+      })
+      .catch(error => {
+        console.error(`[Lien] Failed to update manifest for ${filepath}: ${error}`);
+        // Return to reset lock - don't let errors block future operations
+        return undefined;
+      });
+
     // Wait for this operation to complete
     await this.updateLock;
   }
-  
+
   /**
    * Removes a file entry from the manifest.
    * Protected by lock to prevent race conditions during concurrent updates.
-   * 
+   *
    * Note: If the manifest doesn't exist, this is a no-op (not an error).
    * This can happen legitimately after clearing the index or on fresh installs.
-   * 
+   *
    * @param filepath - Path to the file to remove
    */
   async removeFile(filepath: string): Promise<void> {
     // Chain this operation to the lock to ensure atomicity
-    this.updateLock = this.updateLock.then(async () => {
-      const manifest = await this.load();
-      if (!manifest) {
-        // No manifest exists - nothing to remove from (expected in some scenarios)
-        return;
-      }
-      
-      delete manifest.files[filepath];
-      await this.save(manifest);
-    }).catch(error => {
-      console.error(`[Lien] Failed to remove manifest entry for ${filepath}: ${error}`);
-      // Return to reset lock - don't let errors block future operations
-      return undefined;
-    });
-    
+    this.updateLock = this.updateLock
+      .then(async () => {
+        const manifest = await this.load();
+        if (!manifest) {
+          // No manifest exists - nothing to remove from (expected in some scenarios)
+          return;
+        }
+
+        delete manifest.files[filepath];
+        await this.save(manifest);
+      })
+      .catch(error => {
+        console.error(`[Lien] Failed to remove manifest entry for ${filepath}: ${error}`);
+        // Return to reset lock - don't let errors block future operations
+        return undefined;
+      });
+
     // Wait for this operation to complete
     await this.updateLock;
   }
-  
+
   /**
    * Updates multiple files at once (more efficient than individual updates).
    * Protected by lock to prevent race conditions during concurrent updates.
-   * 
+   *
    * @param entries - Array of file entries to update
    */
   async updateFiles(entries: FileEntry[]): Promise<void> {
     // Chain this operation to the lock to ensure atomicity
-    this.updateLock = this.updateLock.then(async () => {
-      const manifest = await this.load() || this.createEmpty();
-      
-      for (const entry of entries) {
-        manifest.files[entry.filepath] = entry;
-      }
-      
-      await this.save(manifest);
-    }).catch(error => {
-      console.error(`[Lien] Failed to update manifest for ${entries.length} files: ${error}`);
-      // Return to reset lock - don't let errors block future operations
-      return undefined;
-    });
-    
+    this.updateLock = this.updateLock
+      .then(async () => {
+        const manifest = (await this.load()) || this.createEmpty();
+
+        for (const entry of entries) {
+          manifest.files[entry.filepath] = entry;
+        }
+
+        await this.save(manifest);
+      })
+      .catch(error => {
+        console.error(`[Lien] Failed to update manifest for ${entries.length} files: ${error}`);
+        // Return to reset lock - don't let errors block future operations
+        return undefined;
+      });
+
     // Wait for this operation to complete
     await this.updateLock;
   }
-  
+
   /**
    * Updates the git state in the manifest.
    * Protected by lock to prevent race conditions during concurrent updates.
-   * 
+   *
    * @param gitState - Current git state
    */
   async updateGitState(gitState: GitState): Promise<void> {
     // Chain this operation to the lock to ensure atomicity
-    this.updateLock = this.updateLock.then(async () => {
-      const manifest = await this.load() || this.createEmpty();
-      
-      manifest.gitState = gitState;
-      await this.save(manifest);
-    }).catch(error => {
-      console.error(`[Lien] Failed to update git state in manifest: ${error}`);
-      // Return to reset lock - don't let errors block future operations
-      return undefined;
-    });
-    
+    this.updateLock = this.updateLock
+      .then(async () => {
+        const manifest = (await this.load()) || this.createEmpty();
+
+        manifest.gitState = gitState;
+        await this.save(manifest);
+      })
+      .catch(error => {
+        console.error(`[Lien] Failed to update git state in manifest: ${error}`);
+        // Return to reset lock - don't let errors block future operations
+        return undefined;
+      });
+
     // Wait for this operation to complete
     await this.updateLock;
   }
-  
+
   /**
    * Perform an atomic transaction on the manifest.
    * The updater function receives the current manifest and can modify it.
    * All changes are applied atomically under lock protection.
-   * 
+   *
    * @param updater - Function that modifies the manifest
    * @returns Result returned by updater function
    * @throws Error if transaction fails
@@ -238,51 +246,53 @@ export class ManifestManager {
   async transaction<T>(updater: (manifest: IndexManifest) => T | Promise<T>): Promise<T> {
     let result: T;
     let error: Error | undefined;
-    
+
     // Chain this operation to the lock to ensure atomicity
-    this.updateLock = this.updateLock.then(async () => {
-      const manifest = await this.load() || this.createEmpty();
-      
-      // Execute updater function
-      result = await Promise.resolve(updater(manifest));
-      
-      // Save changes
-      await this.save(manifest);
-    }).catch(err => {
-      console.error(`[Lien] Failed to execute manifest transaction: ${err}`);
-      error = err instanceof Error ? err : new Error(String(err));
-      // Return to reset lock - don't let errors block future operations
-      return undefined;
-    });
-    
+    this.updateLock = this.updateLock
+      .then(async () => {
+        const manifest = (await this.load()) || this.createEmpty();
+
+        // Execute updater function
+        result = await Promise.resolve(updater(manifest));
+
+        // Save changes
+        await this.save(manifest);
+      })
+      .catch(err => {
+        console.error(`[Lien] Failed to execute manifest transaction: ${err}`);
+        error = err instanceof Error ? err : new Error(String(err));
+        // Return to reset lock - don't let errors block future operations
+        return undefined;
+      });
+
     // Wait for this operation to complete
     await this.updateLock;
-    
+
     // If an error occurred, throw it
     if (error) {
       throw error;
     }
-    
+
     return result!;
   }
-  
+
   /**
    * Gets the list of files currently in the manifest
-   * 
+   *
    * @returns Array of filepaths
    */
   async getIndexedFiles(): Promise<string[]> {
     const manifest = await this.load();
     if (!manifest) return [];
-    
+
     return Object.keys(manifest.files);
   }
-  
+
   /**
    * Check if a file needs reindexing based on mtime and content hash.
    * Returns true if file should be reindexed, false otherwise.
    * Updates entry mtime if content unchanged.
-   * 
+   *
    * @param filepath - File path (relative to project root)
    * @param mtime - Current file modification time
    * @param entry - Existing manifest entry
@@ -294,46 +304,46 @@ export class ManifestManager {
     mtime: number,
     entry: FileEntry | undefined,
     hashCompatible: boolean,
-    rootDir?: string
+    rootDir?: string,
   ): Promise<{ needsReindex: boolean; mtimeUpdated: boolean }> {
     // New file
     if (!entry) {
       return { needsReindex: true, mtimeUpdated: false };
     }
-    
+
     // Quick check: if mtime unchanged, skip
     if (entry.lastModified === mtime) {
       return { needsReindex: false, mtimeUpdated: false };
     }
-    
+
     // mtime changed - check if content actually changed (if hash available and rootDir provided)
     if (hashCompatible && entry.contentHash && rootDir) {
       // Resolve relative path against rootDir
       const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
       const currentHash = await computeContentHash(absolutePath);
-      
+
       if (currentHash && currentHash === entry.contentHash) {
         // Content unchanged - update mtime and skip reindex
         entry.lastModified = mtime;
         return { needsReindex: false, mtimeUpdated: true };
       }
     }
-    
+
     // Content changed or hash unavailable
     return { needsReindex: true, mtimeUpdated: false };
   }
 
   /**
    * Detects which files have changed based on mtime and content hash comparison.
-   * 
+   *
    * Uses a two-stage approach:
    * 1. Quick mtime check - if unchanged, skip file
    * 2. Content hash check - if mtime changed but hash matches, skip reindex
-   * 
+   *
    * This avoids unnecessary reindexing when files are touched without content changes.
-   * 
+   *
    * Thread-safe: Uses the same update lock as other manifest operations.
-   * 
+   *
    * @param currentFiles - Map of current files with their mtimes
    * @param rootDir - Optional project root directory for resolving relative paths (required for hash checking)
    * @returns Array of filepaths that have changed
@@ -346,12 +356,12 @@ export class ManifestManager {
         // No manifest = all files are "changed" (need full index)
         return Array.from(currentFiles.keys());
       }
-      
+
       const hashCompatible = isHashAlgorithmCompatible(manifest.hashAlgorithm);
       const changedFiles: string[] = [];
       let _skippedByHash = 0;
       let manifestNeedsUpdate = false;
-      
+
       for (const [filepath, mtime] of currentFiles) {
         const entry = manifest.files[filepath];
         const { needsReindex, mtimeUpdated } = await this.shouldReindexFile(
@@ -359,9 +369,9 @@ export class ManifestManager {
           mtime,
           entry,
           hashCompatible,
-          rootDir
+          rootDir,
         );
-        
+
         if (needsReindex) {
           changedFiles.push(filepath);
         } else if (mtimeUpdated) {
@@ -369,48 +379,48 @@ export class ManifestManager {
           manifestNeedsUpdate = true;
         }
       }
-      
+
       // Save manifest if we updated any mtimes
       if (manifestNeedsUpdate) {
         await this.save(manifest);
       }
-      
+
       return changedFiles;
     });
-    
+
     // Update the lock for the next operation, with error handling
     this.updateLock = result.then(
       () => {},
-      (error) => {
+      error => {
         console.error('[Lien] Warning: Failed to get changed files:', error);
-      }
+      },
     );
-    
+
     return result;
   }
-  
+
   /**
    * Gets files that are in the manifest but not in the current file list
    * (i.e., deleted files)
-   * 
+   *
    * @param currentFiles - Set of current file paths
    * @returns Array of deleted file paths
    */
   async getDeletedFiles(currentFiles: Set<string>): Promise<string[]> {
     const manifest = await this.load();
     if (!manifest) return [];
-    
+
     const deletedFiles: string[] = [];
-    
+
     for (const filepath of Object.keys(manifest.files)) {
       if (!currentFiles.has(filepath)) {
         deletedFiles.push(filepath);
       }
     }
-    
+
     return deletedFiles;
   }
-  
+
   /**
    * Clears the manifest file
    */
@@ -424,10 +434,10 @@ export class ManifestManager {
       }
     }
   }
-  
+
   /**
    * Creates an empty manifest with current version information
-   * 
+   *
    * @returns Empty manifest
    */
   private createEmpty(): IndexManifest {
@@ -439,4 +449,3 @@ export class ManifestManager {
     };
   }
 }
-

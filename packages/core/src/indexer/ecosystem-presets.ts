@@ -153,10 +153,7 @@ export const ECOSYSTEM_PRESETS: EcosystemPreset[] = [
   {
     name: 'rust',
     markerFiles: ['Cargo.toml'],
-    excludePatterns: [
-      'target/**',
-      '**/target/**',
-    ],
+    excludePatterns: ['target/**', '**/target/**'],
   },
   {
     name: 'jvm',
@@ -217,22 +214,40 @@ export const ECOSYSTEM_PRESETS: EcosystemPreset[] = [
   {
     name: 'astro',
     markerFiles: ['astro.config.*'],
-    excludePatterns: [
-      '.astro/**',
-      '**/.astro/**',
-    ],
+    excludePatterns: ['.astro/**', '**/.astro/**'],
   },
 ];
 
 /** Directories to skip when scanning for marker files in subdirectories */
 const SKIP_DIRS = new Set([
-  'node_modules', 'vendor', '.git', '.lien', 'dist', 'build',
-  '.next', '.nuxt', '.vite', '.turbo', 'venv', '.venv',
-  '__pycache__', '.tox', 'coverage', '.cache',
-  'target', '.gradle', '.idea', 'out',
-  'DerivedData', 'Pods', '.build',
-  'obj', '.vs',
-  'tmp', 'log', '.bundle',
+  'node_modules',
+  'vendor',
+  '.git',
+  '.lien',
+  'dist',
+  'build',
+  '.next',
+  '.nuxt',
+  '.vite',
+  '.turbo',
+  'venv',
+  '.venv',
+  '__pycache__',
+  '.tox',
+  'coverage',
+  '.cache',
+  'target',
+  '.gradle',
+  '.idea',
+  'out',
+  'DerivedData',
+  'Pods',
+  '.build',
+  'obj',
+  '.vs',
+  'tmp',
+  'log',
+  '.bundle',
   '.astro',
 ]);
 

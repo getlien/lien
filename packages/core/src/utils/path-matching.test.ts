@@ -41,7 +41,9 @@ describe('matchesFile - Path Boundary Checking', () => {
     });
 
     it('should match relative imports to full paths', () => {
-      expect(testMatchesFile('./schemas/index.js', 'packages/cli/src/mcp/schemas/index.ts')).toBe(true);
+      expect(testMatchesFile('./schemas/index.js', 'packages/cli/src/mcp/schemas/index.ts')).toBe(
+        true,
+      );
       expect(testMatchesFile('../schemas/index', 'src/mcp/schemas/index')).toBe(true);
     });
 
@@ -157,16 +159,28 @@ describe('matchesFile - Path Boundary Checking', () => {
     it('should match PHP namespace to file path', () => {
       // PHP uses namespaces like App\Models\User which map to app/Models/User.php
       expect(testMatchesFile('App\\Models\\User', 'app/Models/User.php')).toBe(true);
-      expect(testMatchesFile('App\\Models\\Collection', 'web/app/Models/Collection.php')).toBe(true);
+      expect(testMatchesFile('App\\Models\\Collection', 'web/app/Models/Collection.php')).toBe(
+        true,
+      );
     });
 
     it('should match nested PHP namespaces', () => {
-      expect(testMatchesFile('Domain\\Hobbii\\Collections\\Services\\CollectionManager', 'web/Domain/Hobbii/Collections/Services/CollectionManager.php')).toBe(true);
+      expect(
+        testMatchesFile(
+          'Domain\\Hobbii\\Collections\\Services\\CollectionManager',
+          'web/Domain/Hobbii/Collections/Services/CollectionManager.php',
+        ),
+      ).toBe(true);
     });
 
     it('should match case-insensitively for App namespace', () => {
       // Laravel convention: App namespace maps to app directory
-      expect(testMatchesFile('App\\Http\\Controllers\\UserController', 'app/Http/Controllers/UserController.php')).toBe(true);
+      expect(
+        testMatchesFile(
+          'App\\Http\\Controllers\\UserController',
+          'app/Http/Controllers/UserController.php',
+        ),
+      ).toBe(true);
     });
 
     it('should NOT match unrelated PHP namespaces', () => {
@@ -217,7 +231,9 @@ describe('matchesFile - Path Boundary Checking', () => {
 
     it('should match exact Python module path', () => {
       expect(testMatchesFile('django.http.response', 'django/http/response.py')).toBe(true);
-      expect(testMatchesFile('django.views.generic.base', 'django/views/generic/base.py')).toBe(true);
+      expect(testMatchesFile('django.views.generic.base', 'django/views/generic/base.py')).toBe(
+        true,
+      );
     });
 
     it('should match Python module with prefix in target', () => {
@@ -272,7 +288,6 @@ describe('matchesFile - Path Boundary Checking', () => {
  * Fix: Use precise regex patterns
  */
 describe('isTestFile - Precise Test Detection', () => {
-
   describe('should correctly identify test files', () => {
     it('should match .test. files', () => {
       expect(isTestFile('src/auth.test.ts')).toBe(true);

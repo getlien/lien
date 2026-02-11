@@ -26,14 +26,7 @@ export const ALWAYS_IGNORE_PATTERNS = [
 ];
 
 /** Directories to skip during .gitignore discovery (no useful .gitignore inside) */
-const SKIP_DIRS = new Set([
-  'node_modules',
-  'vendor',
-  '.git',
-  '.lien',
-  'dist',
-  'build',
-]);
+const SKIP_DIRS = new Set(['node_modules', 'vendor', '.git', '.lien', 'dist', 'build']);
 
 /** Whether a directory entry should be traversed during .gitignore discovery */
 function shouldTraverseDir(entry: fsSync.Dirent): boolean {
@@ -116,7 +109,9 @@ function matchesScopedIgnore(normalized: string, prefix: string, ig: Ignore): bo
  * @param rootDir - Project root directory
  * @returns Function that returns true if a relative path is ignored
  */
-export async function createGitignoreFilter(rootDir: string): Promise<(relativePath: string) => boolean> {
+export async function createGitignoreFilter(
+  rootDir: string,
+): Promise<(relativePath: string) => boolean> {
   // Always-ignore patterns in a separate instance (cannot be negated)
   const alwaysIg = ignore();
   alwaysIg.add(ALWAYS_IGNORE_PATTERNS);

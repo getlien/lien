@@ -14,10 +14,10 @@ import { DEFAULT_STAT_CONCURRENCY } from '../constants.js';
  * Result of change detection, categorized by type of change
  */
 export interface ChangeDetectionResult {
-  added: string[];      // New files not in previous index
-  modified: string[];   // Existing files that have been modified
-  deleted: string[];    // Files that were indexed but no longer exist
-  reason: 'mtime' | 'full' | 'git-state-changed';  // How changes were detected
+  added: string[]; // New files not in previous index
+  modified: string[]; // Existing files that have been modified
+  deleted: string[]; // Files that were indexed but no longer exist
+  reason: 'mtime' | 'full' | 'git-state-changed'; // How changes were detected
 }
 
 /**
@@ -26,7 +26,7 @@ export interface ChangeDetectionResult {
 async function hasGitStateChanged(
   rootDir: string,
   dbPath: string,
-  savedGitState: IndexManifest['gitState']
+  savedGitState: IndexManifest['gitState'],
 ): Promise<{ changed: boolean; currentState?: ReturnType<GitStateTracker['getState']> }> {
   if (!savedGitState) return { changed: false };
 
@@ -40,8 +40,8 @@ async function hasGitStateChanged(
 
   if (!currentState) return { changed: false };
 
-  const changed = currentState.branch !== savedGitState.branch ||
-                  currentState.commit !== savedGitState.commit;
+  const changed =
+    currentState.branch !== savedGitState.branch || currentState.commit !== savedGitState.commit;
 
   return { changed, currentState };
 }
@@ -53,7 +53,7 @@ function categorizeChangedFiles(
   changedFilesPaths: string[],
   currentFileSet: Set<string>,
   normalizedManifestFiles: Set<string>,
-  allFiles: string[]
+  allFiles: string[],
 ): { added: string[]; modified: string[]; deleted: string[] } {
   const changedFilesSet = new Set(changedFilesPaths);
   const added: string[] = [];
@@ -93,7 +93,7 @@ function categorizeChangedFiles(
  */
 function normalizeManifestPaths(
   manifestFiles: IndexManifest['files'],
-  rootDir: string
+  rootDir: string,
 ): Set<string> {
   const normalized = new Set<string>();
   for (const filepath of Object.keys(manifestFiles)) {
@@ -108,12 +108,12 @@ function normalizeManifestPaths(
 async function detectGitBasedChanges(
   rootDir: string,
   savedManifest: IndexManifest,
-  currentCommit: string
+  currentCommit: string,
 ): Promise<ChangeDetectionResult> {
   const changedFilesAbsolute = await getChangedFiles(
     rootDir,
     savedManifest.gitState!.commit,
-    currentCommit
+    currentCommit,
   );
   const changedFilesPaths = changedFilesAbsolute.map(fp => normalizeToRelativePath(fp, rootDir));
 
@@ -125,7 +125,7 @@ async function detectGitBasedChanges(
     changedFilesPaths,
     currentFileSet,
     normalizedManifestFiles,
-    allFiles
+    allFiles,
   );
 
   return { added, modified, deleted, reason: 'git-state-changed' };
@@ -136,7 +136,7 @@ async function detectGitBasedChanges(
  */
 async function fallbackToFullReindex(
   rootDir: string,
-  savedManifest: IndexManifest
+  savedManifest: IndexManifest,
 ): Promise<ChangeDetectionResult> {
   const allFiles = await getAllFiles(rootDir);
   const currentFileSet = new Set(allFiles);
@@ -158,7 +158,7 @@ async function fallbackToFullReindex(
  */
 export async function detectChanges(
   rootDir: string,
-  vectorDB: VectorDBInterface
+  vectorDB: VectorDBInterface,
 ): Promise<ChangeDetectionResult> {
   const manifest = new ManifestManager(vectorDB.dbPath);
   const savedManifest = await manifest.load();
@@ -194,7 +194,7 @@ async function getAllFiles(rootDir: string): Promise<string[]> {
   // Import it from index.ts to reuse the framework detection logic
   const { scanFilesToIndex } = await import('./index.js');
   const files = await scanFilesToIndex(rootDir);
-  
+
   // Normalize all paths to relative for consistent comparison
   return files.map((fp: string) => normalizeToRelativePath(fp, rootDir));
 }
@@ -202,22 +202,21 @@ async function getAllFiles(rootDir: string): Promise<string[]> {
 /**
  * Gather file modification times concurrently.
  */
-async function gatherFileStats(
-  files: string[],
-  rootDir: string
-): Promise<Map<string, number>> {
+async function gatherFileStats(files: string[], rootDir: string): Promise<Map<string, number>> {
   const limit = pLimit(DEFAULT_STAT_CONCURRENCY);
   const fileStats = new Map<string, number>();
   await Promise.all(
-    files.map(filepath => limit(async () => {
-      try {
-        const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
-        const stats = await fs.stat(absolutePath);
-        fileStats.set(filepath, stats.mtimeMs);
-      } catch {
-        // File not accessible - skip
-      }
-    }))
+    files.map(filepath =>
+      limit(async () => {
+        try {
+          const absolutePath = path.isAbsolute(filepath) ? filepath : path.join(rootDir, filepath);
+          const stats = await fs.stat(absolutePath);
+          fileStats.set(filepath, stats.mtimeMs);
+        } catch {
+          // File not accessible - skip
+        }
+      }),
+    ),
   );
   return fileStats;
 }
@@ -228,7 +227,7 @@ async function gatherFileStats(
  */
 function buildNormalizedManifestMap(
   savedManifest: IndexManifest,
-  rootDir: string
+  rootDir: string,
 ): Map<string, IndexManifest['files'][string]> {
   const normalized = new Map<string, IndexManifest['files'][string]>();
   for (const [filepath, entry] of Object.entries(savedManifest.files)) {
@@ -243,7 +242,7 @@ function buildNormalizedManifestMap(
 function classifyByMtime(
   fileStats: Map<string, number>,
   manifestFiles: Map<string, IndexManifest['files'][string]>,
-  currentFileSet: Set<string>
+  currentFileSet: Set<string>,
 ): { added: string[]; modified: string[]; deleted: string[] } {
   const added: string[] = [];
   const modified: string[] = [];
@@ -272,7 +271,7 @@ function classifyByMtime(
  */
 async function mtimeBasedDetection(
   rootDir: string,
-  savedManifest: IndexManifest
+  savedManifest: IndexManifest,
 ): Promise<ChangeDetectionResult> {
   const currentFiles = await getAllFiles(rootDir);
   const currentFileSet = new Set(currentFiles);
@@ -282,4 +281,3 @@ async function mtimeBasedDetection(
 
   return { added, modified, deleted, reason: 'mtime' };
 }
-

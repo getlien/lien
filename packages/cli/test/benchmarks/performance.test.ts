@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { VectorDB, LocalEmbeddings, CachedEmbeddings, chunkFile, extractSymbols } from '@liendev/core';
+import {
+  VectorDB,
+  LocalEmbeddings,
+  CachedEmbeddings,
+  chunkFile,
+  extractSymbols,
+} from '@liendev/core';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -80,7 +86,7 @@ interface Item {
     for (let i = 0; i < 50; i++) {
       const content = testCode + `\n// File ${i}`;
       const vector = await embeddings.embed(content);
-      
+
       vectors.push(vector);
       contents.push(content);
       metadatas.push({
@@ -109,7 +115,7 @@ interface Item {
       }
 
       const avgDuration = timings.reduce((a, b) => a + b, 0) / iterations;
-      
+
       console.log(`Average embedding generation: ${avgDuration.toFixed(2)}ms`);
       expect(avgDuration).toBeLessThan(BENCHMARKS.EMBEDDING_GENERATION_MS);
     });
@@ -127,9 +133,11 @@ interface Item {
       await cachedEmbeddings.embed(testText);
       const cachedDuration = performance.now() - start2;
 
-      console.log(`Uncached: ${uncachedDuration.toFixed(2)}ms, Cached: ${cachedDuration.toFixed(2)}ms`);
+      console.log(
+        `Uncached: ${uncachedDuration.toFixed(2)}ms, Cached: ${cachedDuration.toFixed(2)}ms`,
+      );
       console.log(`Cache speedup: ${(uncachedDuration / cachedDuration).toFixed(1)}x faster`);
-      
+
       // Cache should be significantly faster
       expect(cachedDuration).toBeLessThan(uncachedDuration / 5); // At least 5x faster
     });
@@ -150,7 +158,7 @@ interface Item {
       }
 
       const avgDuration = timings.reduce((a, b) => a + b, 0) / iterations;
-      
+
       console.log(`Average vector DB search: ${avgDuration.toFixed(2)}ms`);
       expect(avgDuration).toBeLessThan(BENCHMARKS.VECTOR_DB_QUERY_MS);
     });
@@ -176,17 +184,17 @@ interface Item {
 
       for (let i = 0; i < iterations; i++) {
         const start = performance.now();
-        
+
         // Full search pipeline: embed + search
         const queryVector = await embeddings.embed(queryText);
         await vectorDB.search(queryVector, 5);
-        
+
         const duration = performance.now() - start;
         timings.push(duration);
       }
 
       const avgDuration = timings.reduce((a, b) => a + b, 0) / iterations;
-      
+
       console.log(`Average end-to-end search: ${avgDuration.toFixed(2)}ms`);
       expect(avgDuration).toBeLessThan(BENCHMARKS.SEARCH_LATENCY_MS);
     });
@@ -206,8 +214,10 @@ interface Item {
       }
 
       const avgDuration = timings.reduce((a, b) => a + b, 0) / iterations;
-      
-      console.log(`Average chunking (${testCode.split('\n').length} lines): ${avgDuration.toFixed(2)}ms`);
+
+      console.log(
+        `Average chunking (${testCode.split('\n').length} lines): ${avgDuration.toFixed(2)}ms`,
+      );
       expect(avgDuration).toBeLessThan(BENCHMARKS.CHUNK_PROCESSING_MS);
     });
 
@@ -224,14 +234,18 @@ export class AnotherClass {}
       const symbols = extractSymbols(testCode, 'typescript');
       const duration = performance.now() - start;
 
-      console.log(`Symbol extraction (${symbols.functions.length} functions, ${symbols.classes.length} classes): ${duration.toFixed(2)}ms`);
+      console.log(
+        `Symbol extraction (${symbols.functions.length} functions, ${symbols.classes.length} classes): ${duration.toFixed(2)}ms`,
+      );
       expect(duration).toBeLessThan(BENCHMARKS.SYMBOL_EXTRACTION_MS);
     });
   });
 
   describe('Batch Operations', () => {
     it('should handle batch embedding efficiently', async () => {
-      const texts = Array(10).fill(0).map((_, i) => `Test query number ${i}`);
+      const texts = Array(10)
+        .fill(0)
+        .map((_, i) => `Test query number ${i}`);
 
       const start = performance.now();
       const results = await embeddings.embedBatch(texts);
@@ -239,7 +253,7 @@ export class AnotherClass {}
 
       console.log(`Batch embedding (${texts.length} texts): ${duration.toFixed(2)}ms`);
       console.log(`Per-item average: ${(duration / texts.length).toFixed(2)}ms`);
-      
+
       expect(results).toHaveLength(texts.length);
       expect(duration / texts.length).toBeLessThan(BENCHMARKS.EMBEDDING_GENERATION_MS);
     });
@@ -248,17 +262,16 @@ export class AnotherClass {}
 
 /**
  * Baseline Performance Metrics
- * 
+ *
  * These benchmarks establish performance baselines for the Lien codebase.
  * Run with: npm run test:benchmark
- * 
+ *
  * Expected results on modern hardware:
  * - Embedding generation: < 200ms per query
  * - Vector DB search: < 300ms per query
  * - End-to-end search: < 500ms total
  * - Code chunking: < 50ms per file
  * - Symbol extraction: < 100ms per file
- * 
+ *
  * Cache should provide 5-10x speedup for repeated queries.
  */
-

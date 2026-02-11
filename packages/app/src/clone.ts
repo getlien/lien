@@ -30,9 +30,13 @@ export async function cloneRepo(
 
   logger.info(`Cloning ${repoFullName}@${ref} into ${dir}`);
 
-  await execFileAsync('git', ['clone', '--depth=1', '--branch', ref, '--single-branch', cloneUrl, dir], {
-    timeout: 120_000,
-  });
+  await execFileAsync(
+    'git',
+    ['clone', '--depth=1', '--branch', ref, '--single-branch', cloneUrl, dir],
+    {
+      timeout: 120_000,
+    },
+  );
 
   logger.info(`Clone complete: ${dir}`);
 
@@ -42,7 +46,9 @@ export async function cloneRepo(
       try {
         await rm(dir, { recursive: true, force: true });
       } catch (error) {
-        logger.warning(`Failed to clean up ${dir}: ${error instanceof Error ? error.message : String(error)}`);
+        logger.warning(
+          `Failed to clean up ${dir}: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     },
   };
