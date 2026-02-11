@@ -1,5 +1,4 @@
-import type { SearchResult ,
-  VectorDBInterface} from '@liendev/core';
+import type { SearchResult, VectorDBInterface } from '@liendev/core';
 import {
   QdrantDB,
   findTransitiveDependents,

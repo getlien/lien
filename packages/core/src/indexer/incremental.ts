@@ -14,7 +14,7 @@ import {
 import { ManifestManager } from './manifest.js';
 import { computeContentHash } from './content-hash.js';
 import type { CodeChunk } from './types.js';
-import type { Result} from '../utils/result.js';
+import type { Result } from '../utils/result.js';
 import { Ok, Err, isOk } from '../utils/result.js';
 
 /**

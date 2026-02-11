@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { ConfigService } from './service.js';
-import type { LienConfig, LegacyLienConfig} from './schema.js';
+import type { LienConfig, LegacyLienConfig } from './schema.js';
 import { defaultConfig } from './schema.js';
 import { ConfigError } from '../errors/index.js';
 

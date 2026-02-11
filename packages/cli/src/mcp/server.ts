@@ -3,9 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import type {
-  EmbeddingService,
-  VectorDBInterface} from '@liendev/core';
+import type { EmbeddingService, VectorDBInterface } from '@liendev/core';
 import {
   WorkerEmbeddings,
   VERSION_CHECK_INTERVAL_MS,

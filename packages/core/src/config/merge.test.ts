@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { deepMergeConfig, detectNewFields } from './merge.js';
-import type { LienConfig} from './schema.js';
+import type { LienConfig } from './schema.js';
 import { defaultConfig } from './schema.js';
 
 describe('deepMergeConfig', () => {

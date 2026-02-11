@@ -1,7 +1,5 @@
 import fs from 'fs/promises';
-import type {
-  VectorDBInterface,
-  EmbeddingService} from '@liendev/core';
+import type { VectorDBInterface, EmbeddingService } from '@liendev/core';
 import {
   GitStateTracker,
   indexMultipleFiles,
