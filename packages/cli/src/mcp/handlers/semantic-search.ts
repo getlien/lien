@@ -122,8 +122,7 @@ export async function handleSemanticSearch(
     return {
       indexInfo: getIndexMetadata(),
       results: shaped,
-      ...(crossRepo &&
-        vectorDB.supportsCrossRepo && { groupedByRepo: groupResultsByRepo(shaped) }),
+      ...(crossRepo && vectorDB.supportsCrossRepo && { groupedByRepo: groupResultsByRepo(shaped) }),
       ...(notes.length > 0 && { note: notes.join(' ') }),
     };
   })(args);
