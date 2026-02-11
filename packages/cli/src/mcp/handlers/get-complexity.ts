@@ -1,7 +1,7 @@
 import collect from 'collect.js';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetComplexitySchema } from '../schemas/index.js';
-import { ComplexityAnalyzer, QdrantDB } from '@liendev/core';
+import { ComplexityAnalyzer } from '@liendev/core';
 import type {
   ComplexityViolation,
   FileComplexityData,
@@ -94,7 +94,7 @@ async function fetchCrossRepoChunks(
     return { chunks: [], fallback: false };
   }
 
-  if (vectorDB instanceof QdrantDB) {
+  if (vectorDB.supportsCrossRepo) {
     const chunks = await vectorDB.scanCrossRepo({ limit: 100000, repoIds });
     log(`Scanned ${chunks.length} chunks across repos`);
     return { chunks, fallback: false };
@@ -142,7 +142,7 @@ function processViolations(
  */
 function buildCrossRepoFallbackNote(fallback: boolean): string | undefined {
   return fallback
-    ? 'Cross-repo analysis requires Qdrant backend. Fell back to single-repo analysis.'
+    ? 'Cross-repo analysis requires a cross-repo-capable backend. Fell back to single-repo analysis.'
     : undefined;
 }
 
@@ -186,7 +186,7 @@ export async function handleGetComplexity(args: unknown, ctx: ToolContext): Prom
     const note = buildCrossRepoFallbackNote(fallback);
     if (note) {
       log(
-        'Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo analysis.',
+        'Warning: crossRepo=true requires a cross-repo-capable backend. Falling back to single-repo analysis.',
         'warning',
       );
     }

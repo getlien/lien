@@ -1,6 +1,5 @@
 import type { SearchResult, VectorDBInterface } from '@liendev/core';
 import {
-  QdrantDB,
   findTransitiveDependents,
   normalizePath,
   matchesFile,
@@ -321,8 +320,8 @@ async function scanChunksPaginated(
   const seenRanges = new Map<string, Set<string>>();
   let totalChunks = 0;
 
-  // Cross-repo with Qdrant: fall back to bulk scan (scanCrossRepo doesn't have paginated variant)
-  if (crossRepo && vectorDB instanceof QdrantDB) {
+  // Cross-repo: fall back to bulk scan (scanCrossRepo doesn't have paginated variant)
+  if (crossRepo && vectorDB.supportsCrossRepo) {
     const CROSS_REPO_LIMIT = 100000;
     const allChunks = await vectorDB.scanCrossRepo({ limit: CROSS_REPO_LIMIT });
     totalChunks = allChunks.length;
@@ -342,7 +341,7 @@ async function scanChunksPaginated(
 
   if (crossRepo) {
     log(
-      'Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo paginated scan.',
+      'Warning: crossRepo=true requires a cross-repo-capable backend. Falling back to single-repo paginated scan.',
       'warning',
     );
   }

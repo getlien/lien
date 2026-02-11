@@ -20,7 +20,7 @@ lien init [options]
 
 Lien uses a **config-less approach** with sensible defaults:
 
-1. Auto-detects ecosystem presets (Node.js, Laravel, Python, Rust, Shopify, etc.)
+1. Auto-detects ecosystem presets (Node.js, Laravel, Python, Rust, etc.)
 2. No per-project config file needed!
 
 ### Examples

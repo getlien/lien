@@ -39,7 +39,7 @@ export const SemanticSearchSchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      'If true, search across all repos in the organization (requires Qdrant backend).\n\n' +
+      'If true, search across all repos in the organization (requires a cross-repo-capable backend, currently Qdrant).\n\n' +
         'Default: false (single-repo search)\n' +
         'When enabled, results are grouped by repository.',
     ),

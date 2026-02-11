@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleGetDependents } from './get-dependents.js';
 import type { ToolContext } from '../types.js';
 import type { SearchResult } from '@liendev/core';
-import { QdrantDB } from '@liendev/core';
 
 // Mock the dependency-analyzer module
 vi.mock('./dependency-analyzer.js', async importOriginal => {
@@ -30,6 +29,7 @@ describe('handleGetDependents', () => {
   let mockVectorDB: {
     scanWithFilter: ReturnType<typeof vi.fn>;
     scanCrossRepo: ReturnType<typeof vi.fn>;
+    supportsCrossRepo: boolean;
   };
 
   let mockCtx: ToolContext;
@@ -86,6 +86,7 @@ describe('handleGetDependents', () => {
     mockVectorDB = {
       scanWithFilter: vi.fn(),
       scanCrossRepo: vi.fn(),
+      supportsCrossRepo: false,
     };
 
     mockCtx = {
@@ -280,12 +281,11 @@ describe('handleGetDependents', () => {
     let mockQdrantDB: any;
 
     beforeEach(() => {
-      // Create a mock that passes instanceof QdrantDB check
       mockQdrantDB = {
         scanWithFilter: vi.fn(),
         scanCrossRepo: vi.fn(),
+        supportsCrossRepo: true,
       };
-      Object.setPrototypeOf(mockQdrantDB, QdrantDB.prototype);
 
       mockCtx = {
         vectorDB: mockQdrantDB,

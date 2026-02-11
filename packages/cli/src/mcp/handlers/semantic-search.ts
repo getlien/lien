@@ -3,7 +3,6 @@ import { SemanticSearchSchema } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
-import { QdrantDB } from '@liendev/core';
 
 /**
  * Group search results by repository ID.
@@ -40,7 +39,7 @@ async function executeSearch(
 ): Promise<{ results: SearchResult[]; crossRepoFallback: boolean }> {
   const { query, limit, crossRepo, repoIds } = params;
 
-  if (crossRepo && vectorDB instanceof QdrantDB) {
+  if (crossRepo && vectorDB.supportsCrossRepo) {
     const results = await vectorDB.searchCrossRepo(queryEmbedding, limit, { repoIds });
     log(
       `Found ${results.length} results across ${Object.keys(groupResultsByRepo(results)).length} repos`,
@@ -50,7 +49,7 @@ async function executeSearch(
 
   if (crossRepo) {
     log(
-      'Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.',
+      'Warning: crossRepo=true requires a cross-repo-capable backend. Falling back to single-repo search.',
       'warning',
     );
   }
@@ -69,7 +68,9 @@ function processResults(
 ): { results: SearchResult[]; notes: string[] } {
   const notes: string[] = [];
   if (crossRepoFallback) {
-    notes.push('Cross-repo search requires Qdrant backend. Fell back to single-repo search.');
+    notes.push(
+      'Cross-repo search requires a cross-repo-capable backend. Fell back to single-repo search.',
+    );
   }
 
   const results = deduplicateResults(rawResults);
@@ -86,7 +87,7 @@ function processResults(
 /**
  * Handle semantic_search tool calls.
  * Searches the codebase by meaning using embeddings.
- * Supports cross-repo search when using Qdrant backend.
+ * Supports cross-repo search when using a cross-repo-capable backend.
  */
 export async function handleSemanticSearch(
   args: unknown,
@@ -123,8 +124,7 @@ export async function handleSemanticSearch(
     return {
       indexInfo: getIndexMetadata(),
       results: shaped,
-      ...(crossRepo &&
-        vectorDB instanceof QdrantDB && { groupedByRepo: groupResultsByRepo(shaped) }),
+      ...(crossRepo && vectorDB.supportsCrossRepo && { groupedByRepo: groupResultsByRepo(shaped) }),
       ...(notes.length > 0 && { note: notes.join(' ') }),
     };
   })(args);

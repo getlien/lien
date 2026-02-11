@@ -35,7 +35,7 @@ export class ComplexityAnalyzer {
   /**
    * Analyze complexity of codebase or specific files
    * @param files - Optional list of specific files to analyze
-   * @param crossRepo - If true, analyze across all repos (requires QdrantDB)
+   * @param crossRepo - If true, analyze across all repos (requires a cross-repo-capable backend)
    * @param repoIds - Optional list of repo IDs to filter to (when crossRepo=true)
    * @returns Complexity report with violations and summary
    */
@@ -45,19 +45,12 @@ export class ComplexityAnalyzer {
     repoIds?: string[],
   ): Promise<ComplexityReport> {
     // 1. Get all chunks from index
-    // For cross-repo with QdrantDB, use scanCrossRepo
+    // For cross-repo, use scanCrossRepo
     // Note: We fetch all chunks even with --files filter because dependency analysis
     // needs the complete dataset to find dependents accurately
     let allChunks: SearchResult[];
-    if (crossRepo) {
-      // Check if vectorDB is QdrantDB instance
-      const { QdrantDB } = await import('../vectordb/qdrant.js');
-      if (this.vectorDB instanceof QdrantDB) {
-        allChunks = await this.vectorDB.scanCrossRepo({ limit: 100000, repoIds });
-      } else {
-        // Fallback to regular scan if not QdrantDB
-        allChunks = await this.vectorDB.scanAll();
-      }
+    if (crossRepo && this.vectorDB.supportsCrossRepo) {
+      allChunks = await this.vectorDB.scanCrossRepo({ limit: 100000, repoIds });
     } else {
       allChunks = await this.vectorDB.scanAll();
     }

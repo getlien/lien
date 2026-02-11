@@ -2,7 +2,6 @@ import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetDependentsSchema } from '../schemas/index.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import type { VectorDBInterface } from '@liendev/core';
-import { QdrantDB } from '@liendev/core';
 import {
   findDependents,
   calculateRiskLevel,
@@ -49,7 +48,7 @@ function checkCrossRepoFallback(
   crossRepo: boolean | undefined,
   vectorDB: VectorDBInterface,
 ): boolean {
-  return Boolean(crossRepo && !(vectorDB instanceof QdrantDB));
+  return Boolean(crossRepo && !vectorDB.supportsCrossRepo);
 }
 
 /**
@@ -58,7 +57,9 @@ function checkCrossRepoFallback(
 function buildNotes(crossRepoFallback: boolean, hitLimit: boolean): string[] {
   const notes: string[] = [];
   if (crossRepoFallback) {
-    notes.push('Cross-repo search requires Qdrant backend. Fell back to single-repo search.');
+    notes.push(
+      'Cross-repo search requires a cross-repo-capable backend. Fell back to single-repo search.',
+    );
   }
   if (hitLimit) {
     notes.push('Scanned 10,000 chunks (limit reached). Results may be incomplete.');
@@ -135,7 +136,7 @@ function buildDependentsResponse(
   }
 
   // Group by repo if cross-repo search with Qdrant
-  if (crossRepo && vectorDB instanceof QdrantDB) {
+  if (crossRepo && vectorDB.supportsCrossRepo) {
     response.groupedByRepo = groupDependentsByRepo(analysis.dependents, analysis.allChunks);
   }
 

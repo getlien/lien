@@ -53,7 +53,7 @@ export const GetDependentsSchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      'If true, find dependents across all repos in the organization (requires Qdrant backend).\n\n' +
+      'If true, find dependents across all repos in the organization (requires a cross-repo-capable backend, currently Qdrant).\n\n' +
         'Default: false (single-repo search)\n' +
         'When enabled, results are grouped by repository.',
     ),

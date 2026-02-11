@@ -56,10 +56,9 @@ Lien automatically detects your project type via **ecosystem presets**:
 - **Laravel/PHP** - via composer.json
 - **Python** - via pyproject.toml, setup.py, requirements.txt
 - **Rust** - via Cargo.toml
-- **Shopify Themes** - via config/settings_schema.json
 - **Monorepos** - Multiple ecosystems in one repo (e.g., Node.js frontend + Laravel backend)
 
-Each ecosystem preset applies appropriate file exclusions and indexing patterns!
+Each ecosystem preset applies appropriate file exclusions (e.g., ignoring `node_modules` or `vendor`). Additionally, 15+ languages (including Liquid, Go, C/C++, and more) are indexed out of the box via the default scan pattern.
 
 ## Supported Languages
 

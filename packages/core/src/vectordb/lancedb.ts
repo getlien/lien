@@ -18,6 +18,7 @@ export class VectorDB implements VectorDBInterface {
   private db: LanceDBConnection | null = null;
   private table: LanceDBTable | null = null;
   public readonly dbPath: string;
+  public readonly supportsCrossRepo = false;
   private readonly tableName = 'code_chunks';
   private lastVersionCheck: number = 0;
   private currentVersion: number = 0;
@@ -284,6 +285,24 @@ export class VectorDB implements VectorDBInterface {
       // If any error occurs, assume no data
       return false;
     }
+  }
+
+  async searchCrossRepo(
+    _queryVector: Float32Array,
+    _limit?: number,
+    _options?: { repoIds?: string[]; branch?: string },
+  ): Promise<SearchResult[]> {
+    return [];
+  }
+
+  async scanCrossRepo(_options: {
+    language?: string;
+    pattern?: string;
+    limit?: number;
+    repoIds?: string[];
+    branch?: string;
+  }): Promise<SearchResult[]> {
+    return [];
   }
 
   static async load(projectRoot: string): Promise<VectorDB> {

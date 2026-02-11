@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SearchResult } from '@liendev/core';
-import { QdrantDB } from '@liendev/core';
 import { findDependents, groupDependentsByRepo } from './dependency-analyzer.js';
 
 /**
@@ -415,12 +414,12 @@ describe('findDependents', () => {
   });
 
   describe('cross-repo with QdrantDB', () => {
-    it('should call scanCrossRepo when vectorDB is QdrantDB and crossRepo=true', async () => {
+    it('should call scanCrossRepo when vectorDB supports cross-repo and crossRepo=true', async () => {
       const mockQdrantDB: any = {
         scanPaginated: vi.fn().mockReturnValue(mockAsyncGenerator([])),
         scanCrossRepo: vi.fn().mockResolvedValue([]),
+        supportsCrossRepo: true,
       };
-      Object.setPrototypeOf(mockQdrantDB, QdrantDB.prototype);
 
       await findDependents(mockQdrantDB, 'src/target.ts', true, mockLog);
 
@@ -434,7 +433,7 @@ describe('findDependents', () => {
       await findDependents(mockDB as any, 'src/target.ts', true, mockLog);
 
       expect(mockLog).toHaveBeenCalledWith(
-        expect.stringContaining('crossRepo=true requires Qdrant backend'),
+        expect.stringContaining('crossRepo=true requires a cross-repo-capable backend'),
         'warning',
       );
       expect(mockDB.scanPaginated).toHaveBeenCalled();

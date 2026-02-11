@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleSemanticSearch } from './semantic-search.js';
 import type { ToolContext } from '../types.js';
 import type { SearchResult } from '@liendev/core';
-import { QdrantDB } from '@liendev/core';
 
 describe('handleSemanticSearch', () => {
   const mockLog = vi.fn();
@@ -50,6 +49,7 @@ describe('handleSemanticSearch', () => {
   let mockVectorDB: {
     search: ReturnType<typeof vi.fn>;
     searchCrossRepo: ReturnType<typeof vi.fn>;
+    supportsCrossRepo: boolean;
   };
 
   let mockCtx: ToolContext;
@@ -60,6 +60,7 @@ describe('handleSemanticSearch', () => {
     mockVectorDB = {
       search: vi.fn(),
       searchCrossRepo: vi.fn(),
+      supportsCrossRepo: false,
     };
 
     mockCtx = {
@@ -173,16 +174,14 @@ describe('handleSemanticSearch', () => {
   });
 
   describe('cross-repo search with Qdrant', () => {
-    // Create a mock that passes instanceof QdrantDB check
     let mockQdrantDB: any;
 
     beforeEach(() => {
-      // Create a mock object and set its prototype to QdrantDB.prototype
       mockQdrantDB = {
         search: vi.fn(),
         searchCrossRepo: vi.fn(),
+        supportsCrossRepo: true,
       };
-      Object.setPrototypeOf(mockQdrantDB, QdrantDB.prototype);
 
       mockCtx = {
         vectorDB: mockQdrantDB,
@@ -276,7 +275,7 @@ describe('handleSemanticSearch', () => {
 
       // Should log a warning
       expect(mockLog).toHaveBeenCalledWith(
-        'Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo search.',
+        'Warning: crossRepo=true requires a cross-repo-capable backend. Falling back to single-repo search.',
         'warning',
       );
 
@@ -399,7 +398,7 @@ describe('handleSemanticSearch', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(0);
-      expect(parsed.note).toContain('Cross-repo search requires Qdrant backend');
+      expect(parsed.note).toContain('Cross-repo search requires a cross-repo-capable backend');
       expect(parsed.note).toContain('No relevant matches found.');
     });
 
