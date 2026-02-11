@@ -286,11 +286,18 @@ function addChunkToFileMap(
   chunk: SearchResult,
   normalizePathCached: (path: string) => string,
   fileMap: Map<string, SearchResult[]>,
+  seenRanges: Map<string, Set<string>>,
 ): void {
   const canonical = normalizePathCached(chunk.metadata.file);
   if (!fileMap.has(canonical)) {
     fileMap.set(canonical, []);
+    seenRanges.set(canonical, new Set());
   }
+  // Skip duplicate chunks (same line range) from abs/relative path variants
+  const rangeKey = `${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
+  const seen = seenRanges.get(canonical)!;
+  if (seen.has(rangeKey)) return;
+  seen.add(rangeKey);
   fileMap.get(canonical)!.push(chunk);
 }
 
@@ -311,6 +318,7 @@ async function scanChunksPaginated(
 }> {
   const importIndex = new Map<string, SearchResult[]>();
   const allChunksByFile = new Map<string, SearchResult[]>();
+  const seenRanges = new Map<string, Set<string>>();
   let totalChunks = 0;
 
   // Cross-repo with Qdrant: fall back to bulk scan (scanCrossRepo doesn't have paginated variant)
@@ -327,7 +335,7 @@ async function scanChunksPaginated(
     }
     for (const chunk of allChunks) {
       addChunkToImportIndex(chunk, normalizePathCached, importIndex);
-      addChunkToFileMap(chunk, normalizePathCached, allChunksByFile);
+      addChunkToFileMap(chunk, normalizePathCached, allChunksByFile, seenRanges);
     }
     return { importIndex, allChunksByFile, totalChunks, hitLimit };
   }
@@ -344,7 +352,7 @@ async function scanChunksPaginated(
     totalChunks += page.length;
     for (const chunk of page) {
       addChunkToImportIndex(chunk, normalizePathCached, importIndex);
-      addChunkToFileMap(chunk, normalizePathCached, allChunksByFile);
+      addChunkToFileMap(chunk, normalizePathCached, allChunksByFile, seenRanges);
     }
   }
 

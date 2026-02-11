@@ -1,3 +1,4 @@
+import { normalizeToRelativePath } from '@liendev/core';
 import type { SearchResult, ChunkMetadata, RelevanceCategory } from '@liendev/core';
 
 /**
@@ -117,7 +118,7 @@ export function deduplicateResults(results: SearchResult[]): SearchResult[] {
   return results.filter(r => {
     const key = JSON.stringify([
       r.metadata.repoId ?? '',
-      r.metadata.file,
+      r.metadata.file ? normalizeToRelativePath(r.metadata.file) : '',
       r.metadata.startLine,
       r.metadata.endLine,
     ]);

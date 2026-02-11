@@ -168,7 +168,7 @@ export class ComplexityAnalyzer {
     for (const { metadata } of chunks) {
       if (metadata.symbolType !== 'function' && metadata.symbolType !== 'method') continue;
 
-      const key = `${metadata.file}:${metadata.startLine}-${metadata.endLine}`;
+      const key = `${metadata.repoId ?? ''}:${this.normalizeFilePath(metadata.file)}:${metadata.startLine}-${metadata.endLine}`;
       if (seen.has(key)) continue;
 
       seen.add(key);
