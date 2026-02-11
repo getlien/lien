@@ -287,11 +287,21 @@ export class VectorDB implements VectorDBInterface {
     }
   }
 
-  async searchCrossRepo(): Promise<SearchResult[]> {
+  async searchCrossRepo(
+    _queryVector: Float32Array,
+    _limit?: number,
+    _options?: { repoIds?: string[]; branch?: string },
+  ): Promise<SearchResult[]> {
     return [];
   }
 
-  async scanCrossRepo(): Promise<SearchResult[]> {
+  async scanCrossRepo(_options: {
+    language?: string;
+    pattern?: string;
+    limit?: number;
+    repoIds?: string[];
+    branch?: string;
+  }): Promise<SearchResult[]> {
     return [];
   }
 

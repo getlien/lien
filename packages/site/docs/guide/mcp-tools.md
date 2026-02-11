@@ -14,8 +14,8 @@ Search your codebase using natural language queries.
 |-----------|------|----------|---------|-------------|
 | `query` | string | Yes | - | Natural language search query |
 | `limit` | number | No | 5 | Maximum number of results to return |
-| `crossRepo` | boolean | No | false | Search across all repos in the organization (requires Qdrant backend) |
-| `repoIds` | string[] | No | - | Filter to specific repos when `crossRepo=true` |
+| `crossRepo` | boolean | No | false | Search across all repos in the organization (requires Qdrant backend; non-Qdrant backends fall back to single-repo search) |
+| `repoIds` | string[] | No | - | Restrict cross-repo search to these repo IDs. Only applied when `crossRepo=true` with Qdrant; ignored otherwise |
 
 ### Usage
 
@@ -241,14 +241,18 @@ Show all TypeScript classes
 
 ```json
 {
+  "indexInfo": { "indexVersion": 1234567890, "indexDate": "2025-12-19" },
   "results": [
     {
       "content": "...",
+      "score": 0,
+      "relevance": "not_relevant",
       "metadata": {
         "symbolName": "UserController",
         "symbolType": "class",
         "file": "src/controllers/UserController.ts",
         "startLine": 10,
+        "endLine": 85,
         "language": "typescript"
       }
     }
@@ -299,6 +303,7 @@ Is it safe to change this file?
 
 ```json
 {
+  "indexInfo": { "indexVersion": 1234567890, "indexDate": "2025-12-19" },
   "filepath": "src/utils/validate.ts",
   "dependentCount": 12,
   "productionDependentCount": 9,
