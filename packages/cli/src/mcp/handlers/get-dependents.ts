@@ -166,15 +166,17 @@ export async function handleGetDependents(args: unknown, ctx: ToolContext): Prom
 
     await checkAndReconnect();
 
+    // Capture index metadata once to avoid inconsistency from concurrent reindex
+    const indexInfo = getIndexMetadata();
+
     // Analyze dependencies (pass indexVersion for scan cache)
-    const { indexVersion } = getIndexMetadata();
     const analysis = await findDependents(
       vectorDB,
       filepath,
       crossRepo ?? false,
       log,
       symbol,
-      indexVersion,
+      indexInfo.indexVersion,
     );
 
     // Calculate risk level
@@ -195,7 +197,7 @@ export async function handleGetDependents(args: unknown, ctx: ToolContext): Prom
       analysis,
       validatedArgs,
       riskLevel,
-      getIndexMetadata(),
+      indexInfo,
       notes,
       crossRepo,
       vectorDB,

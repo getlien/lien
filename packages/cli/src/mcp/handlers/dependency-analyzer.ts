@@ -55,9 +55,11 @@ type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
  */
 let scanCache: {
   indexVersion: number;
+  crossRepo: boolean;
   importIndex: Map<string, SearchResult[]>;
   allChunksByFile: Map<string, SearchResult[]>;
   totalChunks: number;
+  hitLimit: boolean;
 } | null = null;
 
 /**
@@ -544,12 +546,17 @@ export async function findDependents(
   let totalChunks: number;
   let hitLimit: boolean;
 
-  // Use cached scan results if the index version matches
-  if (indexVersion !== undefined && scanCache !== null && scanCache.indexVersion === indexVersion) {
+  // Use cached scan results if the index version and crossRepo mode match
+  if (
+    indexVersion !== undefined &&
+    scanCache !== null &&
+    scanCache.indexVersion === indexVersion &&
+    scanCache.crossRepo === crossRepo
+  ) {
     importIndex = scanCache.importIndex;
     allChunksByFile = scanCache.allChunksByFile;
     totalChunks = scanCache.totalChunks;
-    hitLimit = false;
+    hitLimit = scanCache.hitLimit;
     log(`Using cached import index (${totalChunks} chunks, version ${indexVersion})`);
   } else {
     // Paginated scan: builds import index and file groupings incrementally
@@ -561,7 +568,7 @@ export async function findDependents(
 
     // Cache the scan results if indexVersion is provided
     if (indexVersion !== undefined) {
-      scanCache = { indexVersion, importIndex, allChunksByFile, totalChunks };
+      scanCache = { indexVersion, crossRepo, importIndex, allChunksByFile, totalChunks, hitLimit };
     }
     log(`Scanned ${totalChunks} chunks for imports...`);
   }

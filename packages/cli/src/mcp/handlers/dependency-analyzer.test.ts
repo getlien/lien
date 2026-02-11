@@ -527,6 +527,25 @@ describe('findDependents', () => {
       expect(mockDB.scanPaginated).toHaveBeenCalledTimes(2);
     });
 
+    it('should invalidate cache when crossRepo mode changes', async () => {
+      const chunks = [
+        createChunk('src/target.ts', { exports: ['foo'] }),
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+      ];
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator(chunks));
+
+      // First call with crossRepo=false
+      await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
+      expect(mockDB.scanPaginated).toHaveBeenCalledTimes(1);
+
+      // Second call with crossRepo=true, same indexVersion: should re-scan
+      mockDB.scanCrossRepo.mockReturnValue(mockAsyncGenerator(chunks));
+      await findDependents(mockDB as any, 'src/target.ts', true, mockLog, undefined, 100);
+      expect(mockDB.scanPaginated.mock.calls.length + mockDB.scanCrossRepo.mock.calls.length).toBe(
+        2,
+      );
+    });
+
     it('should not cache when indexVersion is not provided', async () => {
       const chunks = [
         createChunk('src/target.ts', { exports: ['foo'] }),

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import crypto from 'crypto';
-import path from 'path';
 import { extractRepoId } from './repo-id.js';
 
 describe('extractRepoId', () => {
