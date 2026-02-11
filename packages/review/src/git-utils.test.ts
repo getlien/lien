@@ -50,4 +50,13 @@ describe('assertValidSha', () => {
       'Invalid myLabel: must be a 7-40 character hex string, got "bad!"',
     );
   });
+
+  it('sanitizes control characters in error message', () => {
+    expect(() => assertValidSha('bad\n\x00val', 'test')).toThrow('"badval"');
+  });
+
+  it('truncates long values in error message', () => {
+    const long = 'x'.repeat(100);
+    expect(() => assertValidSha(long, 'test')).toThrow('...');
+  });
 });

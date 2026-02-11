@@ -27,6 +27,9 @@ describe('safeRegex', () => {
     expect(safeRegex('(a*)*$')).toBeNull();
     expect(safeRegex('(.*)*$')).toBeNull();
     expect(safeRegex('(a+)+b')).toBeNull();
+    expect(safeRegex('(a+)?')).toBeNull();
+    expect(safeRegex('(a*){2,}')).toBeNull();
+    expect(safeRegex('(a+){1,3}')).toBeNull();
   });
 
   it('should allow normal patterns with quantifiers', () => {
