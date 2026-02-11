@@ -13,7 +13,9 @@ describe('VectorDB Query Operations', () => {
       const queryVector = new Float32Array([1, 2, 3]);
 
       await expect(search(asTable(null), queryVector, 5)).rejects.toThrow(DatabaseError);
-      await expect(search(asTable(null), queryVector, 5)).rejects.toThrow('Vector database not initialized');
+      await expect(search(asTable(null), queryVector, 5)).rejects.toThrow(
+        'Vector database not initialized',
+      );
     });
 
     it('should perform vector search with query boosting', async () => {
@@ -163,7 +165,10 @@ describe('VectorDB Query Operations', () => {
         }),
       };
 
-      const results = await scanWithFilter(asTable(mockTable), { language: 'typescript', limit: 10 });
+      const results = await scanWithFilter(asTable(mockTable), {
+        language: 'typescript',
+        limit: 10,
+      });
 
       expect(results).toHaveLength(1);
       expect(results[0].metadata.language).toBe('typescript');
@@ -244,11 +249,17 @@ describe('VectorDB Query Operations', () => {
         }),
       };
 
-      const classResults = await scanWithFilter(asTable(mockTable), { symbolType: 'class', limit: 10 });
+      const classResults = await scanWithFilter(asTable(mockTable), {
+        symbolType: 'class',
+        limit: 10,
+      });
       expect(classResults).toHaveLength(1);
       expect(classResults[0].metadata.symbolType).toBe('class');
 
-      const funcResults = await scanWithFilter(asTable(mockTable), { symbolType: 'function', limit: 10 });
+      const funcResults = await scanWithFilter(asTable(mockTable), {
+        symbolType: 'function',
+        limit: 10,
+      });
       // symbolType 'function' matches both 'function' and 'method'
       expect(funcResults).toHaveLength(2);
       expect(funcResults.map(r => r.metadata.symbolType)).toEqual(['function', 'method']);
@@ -392,7 +403,10 @@ describe('VectorDB Query Operations', () => {
         }),
       };
 
-      const results = await scanWithFilter(asTable(mockTable), { pattern: '[unterminated', limit: 10 });
+      const results = await scanWithFilter(asTable(mockTable), {
+        pattern: '[unterminated',
+        limit: 10,
+      });
       // Invalid regex gracefully skipped — returns all records
       expect(results).toHaveLength(2);
     });
@@ -553,7 +567,10 @@ describe('VectorDB Query Operations', () => {
         }),
       };
 
-      const results = await querySymbols(asTable(mockTable), { symbolType: 'interface', limit: 10 });
+      const results = await querySymbols(asTable(mockTable), {
+        symbolType: 'interface',
+        limit: 10,
+      });
 
       expect(results).toHaveLength(1);
       expect(results[0].metadata.symbolType).toBe('interface');
@@ -788,11 +805,17 @@ describe('VectorDB Query Operations', () => {
         }),
       };
 
-      const classResults = await querySymbols(asTable(mockTable), { symbolType: 'class', limit: 10 });
+      const classResults = await querySymbols(asTable(mockTable), {
+        symbolType: 'class',
+        limit: 10,
+      });
       expect(classResults).toHaveLength(1);
       expect(classResults[0].metadata.symbolName).toBe('MyService');
 
-      const funcResults = await querySymbols(asTable(mockTable), { symbolType: 'function', limit: 10 });
+      const funcResults = await querySymbols(asTable(mockTable), {
+        symbolType: 'function',
+        limit: 10,
+      });
       expect(funcResults).toHaveLength(1);
       expect(funcResults[0].metadata.symbolName).toBe('helper');
     });
@@ -931,7 +954,10 @@ describe('VectorDB Query Operations', () => {
         }),
       };
 
-      const results = await querySymbols(asTable(mockTable), { pattern: '[unterminated', limit: 10 });
+      const results = await querySymbols(asTable(mockTable), {
+        pattern: '[unterminated',
+        limit: 10,
+      });
       // Invalid regex gracefully skipped — pattern filter not applied
       expect(results).toHaveLength(2);
     });
@@ -1088,7 +1114,9 @@ describe('VectorDB Query Operations', () => {
       };
 
       const pages: SearchResult[][] = [];
-      for await (const page of scanPaginated(asTable(mockTable), { filter: 'language = "typescript"' })) {
+      for await (const page of scanPaginated(asTable(mockTable), {
+        filter: 'language = "typescript"',
+      })) {
         pages.push(page);
       }
 

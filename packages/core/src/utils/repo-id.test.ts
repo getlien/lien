@@ -6,7 +6,11 @@ import { extractRepoId } from './repo-id.js';
 describe('extractRepoId', () => {
   it('returns project name with path hash', () => {
     const result = extractRepoId('/home/user/my-project');
-    const expectedHash = crypto.createHash('md5').update('/home/user/my-project').digest('hex').substring(0, 8);
+    const expectedHash = crypto
+      .createHash('md5')
+      .update('/home/user/my-project')
+      .digest('hex')
+      .substring(0, 8);
     expect(result).toBe(`my-project-${expectedHash}`);
   });
 

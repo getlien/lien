@@ -46,7 +46,9 @@ describe('VectorDB Maintenance Operations', () => {
     });
 
     it('should throw DatabaseError if db is not initialized', async () => {
-      await expect(clear(asDb(null), asTable({ name: 'test' }), 'test_table')).rejects.toThrow(DatabaseError);
+      await expect(clear(asDb(null), asTable({ name: 'test' }), 'test_table')).rejects.toThrow(
+        DatabaseError,
+      );
       await expect(clear(asDb(null), asTable({ name: 'test' }), 'test_table')).rejects.toThrow(
         'Vector database not initialized',
       );
@@ -90,7 +92,9 @@ describe('VectorDB Maintenance Operations', () => {
       vi.mocked(fs.rm).mockRejectedValue(new Error('Directory not found'));
 
       // Should not throw
-      await expect(clear(asDb(mockDb), asTable(mockTable), 'test_table', '/path/to/db')).resolves.toBeUndefined();
+      await expect(
+        clear(asDb(mockDb), asTable(mockTable), 'test_table', '/path/to/db'),
+      ).resolves.toBeUndefined();
     });
   });
 

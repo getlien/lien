@@ -139,10 +139,7 @@ export class GitStateTracker {
       }
 
       // Get list of changed files between current and new state
-      const changedFiles = await this.getChangedFilesForStateChange(
-        this.currentState,
-        newState,
-      );
+      const changedFiles = await this.getChangedFilesForStateChange(this.currentState, newState);
 
       // Update current state
       this.currentState = newState;
@@ -175,20 +172,12 @@ export class GitStateTracker {
         return await getChangedFiles(this.rootDir, oldState.branch, newState.branch);
       } catch (error) {
         console.error(`[Lien] Branch diff failed, using commit diff: ${error}`);
-        return await getChangedFilesBetweenCommits(
-          this.rootDir,
-          oldState.commit,
-          newState.commit,
-        );
+        return await getChangedFilesBetweenCommits(this.rootDir, oldState.commit, newState.commit);
       }
     }
 
     // Same branch, different commit
-    return await getChangedFilesBetweenCommits(
-      this.rootDir,
-      oldState.commit,
-      newState.commit,
-    );
+    return await getChangedFilesBetweenCommits(this.rootDir, oldState.commit, newState.commit);
   }
 
   /**

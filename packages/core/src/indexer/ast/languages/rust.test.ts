@@ -400,7 +400,9 @@ impl Calculator {
       const chunks = chunkByAST('test.rs', content);
       expect(chunks.length).toBeGreaterThanOrEqual(3);
 
-      const implChunk = chunks.find(c => c.metadata.symbolName === 'Calculator' && c.metadata.symbolType === 'class');
+      const implChunk = chunks.find(
+        c => c.metadata.symbolName === 'Calculator' && c.metadata.symbolType === 'class',
+      );
       expect(implChunk).toBeDefined();
 
       const addMethod = chunks.find(c => c.metadata.symbolName === 'add');

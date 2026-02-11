@@ -95,7 +95,14 @@ describe('batch-insert', () => {
         const mockDb = { createTable: vi.fn() };
         const mockTable = { add: vi.fn() };
 
-        const result = await insertBatch(asDb(mockDb), asTable(mockTable), 'test_table', [], [], []);
+        const result = await insertBatch(
+          asDb(mockDb),
+          asTable(mockTable),
+          'test_table',
+          [],
+          [],
+          [],
+        );
 
         expect(result).toBe(mockTable);
         expect(mockTable.add).not.toHaveBeenCalled();
@@ -110,7 +117,14 @@ describe('batch-insert', () => {
         };
         const { vectors, metadatas, contents } = createTestData(1);
 
-        const result = await insertBatch(asDb(mockDb), null, 'test_table', vectors, metadatas, contents);
+        const result = await insertBatch(
+          asDb(mockDb),
+          null,
+          'test_table',
+          vectors,
+          metadatas,
+          contents,
+        );
 
         expect(mockDb.createTable).toHaveBeenCalledWith('test_table', expect.any(Array));
         expect(result).toBe(mockTable);
@@ -334,7 +348,14 @@ describe('batch-insert', () => {
         const batchSize = VECTOR_DB_MIN_BATCH_SIZE * 2 + 2;
         const { vectors, metadatas, contents } = createTestData(batchSize);
 
-        const result = await insertBatch(asDb(mockDb), null, 'test_table', vectors, metadatas, contents);
+        const result = await insertBatch(
+          asDb(mockDb),
+          null,
+          'test_table',
+          vectors,
+          metadatas,
+          contents,
+        );
 
         // Should have retried with smaller batches
         expect(mockDb.createTable).toHaveBeenCalledTimes(2);
@@ -428,7 +449,14 @@ describe('batch-insert', () => {
         const batchSize = VECTOR_DB_MIN_BATCH_SIZE * 4;
         const { vectors, metadatas, contents } = createTestData(batchSize);
 
-        const result = await insertBatch(asDb(mockDb), null, 'test_table', vectors, metadatas, contents);
+        const result = await insertBatch(
+          asDb(mockDb),
+          null,
+          'test_table',
+          vectors,
+          metadatas,
+          contents,
+        );
 
         expect(result).toBe(mockTable);
         // Should have made multiple createTable calls
@@ -444,7 +472,14 @@ describe('batch-insert', () => {
         };
         const { vectors, metadatas, contents } = createTestData(1);
 
-        const result = await insertBatch(asDb(mockDb), null, 'test_table', vectors, metadatas, contents);
+        const result = await insertBatch(
+          asDb(mockDb),
+          null,
+          'test_table',
+          vectors,
+          metadatas,
+          contents,
+        );
 
         expect(mockDb.createTable).toHaveBeenCalledTimes(1);
         expect(result).toBe(mockTable);
