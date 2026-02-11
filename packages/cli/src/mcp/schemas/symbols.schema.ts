@@ -8,6 +8,7 @@ import { z } from 'zod';
 export const ListFunctionsSchema = z.object({
   pattern: z
     .string()
+    .max(200)
     .optional()
     .describe(
       'Regex pattern to match symbol names.\n\n' +
@@ -20,6 +21,7 @@ export const ListFunctionsSchema = z.object({
 
   language: z
     .string()
+    .max(50)
     .optional()
     .describe(
       'Filter by programming language.\n\n' +

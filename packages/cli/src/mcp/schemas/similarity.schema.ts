@@ -9,6 +9,7 @@ export const FindSimilarSchema = z.object({
   code: z
     .string()
     .min(24, 'Code snippet must be at least 24 characters')
+    .max(50000, 'Code snippet too long (max 50000 characters)')
     .describe(
       'Code snippet to find similar implementations for.\n\n' +
         'Provide a representative code sample that demonstrates the pattern ' +
@@ -26,6 +27,7 @@ export const FindSimilarSchema = z.object({
   language: z
     .string()
     .min(1, 'Language filter cannot be empty')
+    .max(50)
     .optional()
     .describe(
       'Filter by programming language.\n\n' +
@@ -36,6 +38,7 @@ export const FindSimilarSchema = z.object({
   pathHint: z
     .string()
     .min(1, 'Path hint cannot be empty')
+    .max(500)
     .optional()
     .describe(
       'Filter by file path substring.\n\n' +

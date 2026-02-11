@@ -360,6 +360,62 @@ describe('VectorDB Query Operations', () => {
       expect(results[0].metadata.parameters).toBeUndefined();
       expect(results[0].metadata.imports).toBeUndefined();
     });
+
+    it('should return all records when pattern is invalid regex', async () => {
+      const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'function alpha() {}',
+              file: 'src/alpha.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+            },
+            {
+              content: 'function beta() {}',
+              file: 'src/beta.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+            },
+          ]),
+        }),
+      };
+
+      const results = await scanWithFilter(mockTable, { pattern: '[unterminated', limit: 10 });
+      // Invalid regex gracefully skipped — returns all records
+      expect(results).toHaveLength(2);
+    });
+
+    it('should return all records when pattern is ReDoS-prone', async () => {
+      const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'function alpha() {}',
+              file: 'src/alpha.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+            },
+          ]),
+        }),
+      };
+
+      const results = await scanWithFilter(mockTable, { pattern: '(a+)+$', limit: 10 });
+      // ReDoS pattern rejected — returns all records
+      expect(results).toHaveLength(1);
+    });
   });
 
   describe('querySymbols', () => {
@@ -836,6 +892,71 @@ describe('VectorDB Query Operations', () => {
 
       expect(results).toHaveLength(1);
       expect(results[0].metadata.file).toBe('src/test.ts');
+    });
+
+    it('should return all symbols when pattern is invalid regex', async () => {
+      const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'function alpha() {}',
+              file: 'src/alpha.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'alpha',
+              symbolType: 'function',
+              functionNames: ['alpha'],
+            },
+            {
+              content: 'function beta() {}',
+              file: 'src/beta.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'beta',
+              symbolType: 'function',
+              functionNames: ['beta'],
+            },
+          ]),
+        }),
+      };
+
+      const results = await querySymbols(mockTable, { pattern: '[unterminated', limit: 10 });
+      // Invalid regex gracefully skipped — pattern filter not applied
+      expect(results).toHaveLength(2);
+    });
+
+    it('should return all symbols when pattern is ReDoS-prone', async () => {
+      const mockTable = {
+        countRows: vi.fn().mockResolvedValue(10),
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            {
+              content: 'function alpha() {}',
+              file: 'src/alpha.ts',
+              startLine: 1,
+              endLine: 3,
+              type: 'function',
+              language: 'typescript',
+              symbolName: 'alpha',
+              symbolType: 'function',
+              functionNames: ['alpha'],
+            },
+          ]),
+        }),
+      };
+
+      const results = await querySymbols(mockTable, { pattern: '(a+)+$', limit: 10 });
+      // ReDoS pattern rejected — returns all symbols
+      expect(results).toHaveLength(1);
     });
   });
 

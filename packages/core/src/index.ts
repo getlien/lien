@@ -240,6 +240,7 @@ export {
 
 export { Result, Ok, Err, isOk, isErr, unwrap, unwrapOr } from './utils/result.js';
 export { normalizePath, matchesFile, getCanonicalPath, isTestFile } from './utils/path-matching.js';
+export { safeRegex } from './utils/safe-regex.js';
 
 // =============================================================================
 // AST LANGUAGE REGISTRY

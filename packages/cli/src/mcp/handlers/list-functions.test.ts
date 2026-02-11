@@ -439,6 +439,80 @@ describe('handleListFunctions', () => {
     });
   });
 
+  describe('invalid and ReDoS regex patterns', () => {
+    it('should filter to symbolName entries for invalid regex pattern', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([]);
+      mockVectorDB.scanWithFilter.mockResolvedValue([
+        {
+          content: 'function helper() {}',
+          metadata: {
+            file: 'src/utils.ts',
+            symbolName: 'helper',
+            symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: '// block without symbolName',
+          metadata: {
+            file: 'src/block.ts',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions({ pattern: '[unterminated' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      // Invalid regex rejected — still filters to entries with symbolName
+      expect(parsed.results).toHaveLength(1);
+      expect(parsed.results[0].metadata.symbolName).toBe('helper');
+    });
+
+    it('should return only symbolName results for ReDoS pattern', async () => {
+      mockVectorDB.querySymbols.mockResolvedValue([]);
+      mockVectorDB.scanWithFilter.mockResolvedValue([
+        {
+          content: 'function alpha() {}',
+          metadata: {
+            file: 'src/alpha.ts',
+            symbolName: 'alpha',
+            symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: '// a random block without symbolName',
+          metadata: {
+            file: 'src/block.ts',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+        {
+          content: 'function beta() {}',
+          metadata: {
+            file: 'src/beta.ts',
+            symbolName: 'beta',
+            symbolType: 'function',
+          },
+          score: 0,
+          relevance: 'highly_relevant',
+        },
+      ]);
+
+      const result = await handleListFunctions({ pattern: '(a+)+$' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      // ReDoS pattern rejected — still filters to entries with symbolName
+      expect(parsed.results).toHaveLength(2);
+      expect(parsed.results.map((r: any) => r.metadata.symbolName)).toEqual(['alpha', 'beta']);
+    });
+  });
+
   describe('empty result diagnostics', () => {
     it('should include diagnostic note when no results are found', async () => {
       mockVectorDB.querySymbols.mockResolvedValue([]);

@@ -8,7 +8,7 @@ import { z } from 'zod';
  */
 export const GetComplexitySchema = z.object({
   files: z
-    .array(z.string().min(1, 'Filepath cannot be empty'))
+    .array(z.string().min(1, 'Filepath cannot be empty').max(1000))
     .optional()
     .describe(
       'Specific files to analyze. If omitted, analyzes entire codebase.\n\n' +
@@ -48,7 +48,7 @@ export const GetComplexitySchema = z.object({
     ),
 
   repoIds: z
-    .array(z.string())
+    .array(z.string().max(255))
     .optional()
     .describe(
       'Optional: Filter to specific repos when crossRepo=true.\n\n' +
