@@ -46,7 +46,10 @@ for (const def of definitions) {
   }
 }
 
-// Validate LANGUAGE_IDS matches definitions (catches forgotten definitions)
+// Validate LANGUAGE_IDS has no duplicates and matches definitions
+if (new Set(LANGUAGE_IDS).size !== LANGUAGE_IDS.length) {
+  throw new Error('LANGUAGE_IDS contains duplicate entries');
+}
 for (const id of LANGUAGE_IDS) {
   if (!languageRegistry.has(id)) {
     throw new Error(`Language "${id}" is in LANGUAGE_IDS but has no definition in the registry`);
