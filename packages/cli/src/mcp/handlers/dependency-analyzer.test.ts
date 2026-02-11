@@ -433,7 +433,7 @@ describe('findDependents', () => {
       await findDependents(mockDB as any, 'src/target.ts', true, mockLog);
 
       expect(mockLog).toHaveBeenCalledWith(
-        expect.stringContaining('crossRepo=true requires Qdrant backend'),
+        expect.stringContaining('crossRepo=true requires a cross-repo-capable backend'),
         'warning',
       );
       expect(mockDB.scanPaginated).toHaveBeenCalled();

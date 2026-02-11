@@ -42,7 +42,7 @@ export const GetComplexitySchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      'If true, analyze complexity across all repos in the organization (requires Qdrant backend).\n\n' +
+      'If true, analyze complexity across all repos in the organization (requires a cross-repo-capable backend, currently Qdrant).\n\n' +
         'Default: false (single-repo analysis)\n' +
         'When enabled, results are aggregated by repository.',
     ),

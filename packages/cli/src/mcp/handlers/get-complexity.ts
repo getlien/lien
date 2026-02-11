@@ -142,7 +142,7 @@ function processViolations(
  */
 function buildCrossRepoFallbackNote(fallback: boolean): string | undefined {
   return fallback
-    ? 'Cross-repo analysis requires Qdrant backend. Fell back to single-repo analysis.'
+    ? 'Cross-repo analysis requires a cross-repo-capable backend. Fell back to single-repo analysis.'
     : undefined;
 }
 
@@ -186,7 +186,7 @@ export async function handleGetComplexity(args: unknown, ctx: ToolContext): Prom
     const note = buildCrossRepoFallbackNote(fallback);
     if (note) {
       log(
-        'Warning: crossRepo=true requires Qdrant backend. Falling back to single-repo analysis.',
+        'Warning: crossRepo=true requires a cross-repo-capable backend. Falling back to single-repo analysis.',
         'warning',
       );
     }

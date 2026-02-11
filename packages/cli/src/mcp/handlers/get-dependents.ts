@@ -57,7 +57,9 @@ function checkCrossRepoFallback(
 function buildNotes(crossRepoFallback: boolean, hitLimit: boolean): string[] {
   const notes: string[] = [];
   if (crossRepoFallback) {
-    notes.push('Cross-repo search requires Qdrant backend. Fell back to single-repo search.');
+    notes.push(
+      'Cross-repo search requires a cross-repo-capable backend. Fell back to single-repo search.',
+    );
   }
   if (hitLimit) {
     notes.push('Scanned 10,000 chunks (limit reached). Results may be incomplete.');
