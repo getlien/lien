@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import type { ZodSchema } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
 /**
@@ -27,7 +27,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
  * ```
  */
 export function toMCPToolSchema(
-  zodSchema: z.ZodSchema,
+  zodSchema: ZodSchema,
   name: string,
   description: string
 ) {
