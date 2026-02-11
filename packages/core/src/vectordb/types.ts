@@ -70,4 +70,20 @@ export interface VectorDBInterface {
   reconnect(): Promise<void>;
   getCurrentVersion(): number;
   getVersionDate(): string;
+  /** Whether this backend supports cross-repo operations (e.g. Qdrant). */
+  readonly supportsCrossRepo: boolean;
+  /** Search across all repos in the organization. Returns [] if unsupported. */
+  searchCrossRepo(
+    queryVector: Float32Array,
+    limit?: number,
+    options?: { repoIds?: string[]; branch?: string },
+  ): Promise<SearchResult[]>;
+  /** Scan across all repos in the organization. Returns [] if unsupported. */
+  scanCrossRepo(options: {
+    language?: string;
+    pattern?: string;
+    limit?: number;
+    repoIds?: string[];
+    branch?: string;
+  }): Promise<SearchResult[]>;
 }

@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleSemanticSearch } from './semantic-search.js';
 import type { ToolContext } from '../types.js';
 import type { SearchResult } from '@liendev/core';
-import { QdrantDB } from '@liendev/core';
 
 describe('handleSemanticSearch', () => {
   const mockLog = vi.fn();
@@ -50,6 +49,7 @@ describe('handleSemanticSearch', () => {
   let mockVectorDB: {
     search: ReturnType<typeof vi.fn>;
     searchCrossRepo: ReturnType<typeof vi.fn>;
+    supportsCrossRepo: boolean;
   };
 
   let mockCtx: ToolContext;
@@ -60,6 +60,7 @@ describe('handleSemanticSearch', () => {
     mockVectorDB = {
       search: vi.fn(),
       searchCrossRepo: vi.fn(),
+      supportsCrossRepo: false,
     };
 
     mockCtx = {
@@ -173,16 +174,14 @@ describe('handleSemanticSearch', () => {
   });
 
   describe('cross-repo search with Qdrant', () => {
-    // Create a mock that passes instanceof QdrantDB check
     let mockQdrantDB: any;
 
     beforeEach(() => {
-      // Create a mock object and set its prototype to QdrantDB.prototype
       mockQdrantDB = {
         search: vi.fn(),
         searchCrossRepo: vi.fn(),
+        supportsCrossRepo: true,
       };
-      Object.setPrototypeOf(mockQdrantDB, QdrantDB.prototype);
 
       mockCtx = {
         vectorDB: mockQdrantDB,

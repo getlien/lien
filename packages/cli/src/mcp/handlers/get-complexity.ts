@@ -1,7 +1,7 @@
 import collect from 'collect.js';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetComplexitySchema } from '../schemas/index.js';
-import { ComplexityAnalyzer, QdrantDB } from '@liendev/core';
+import { ComplexityAnalyzer } from '@liendev/core';
 import type {
   ComplexityViolation,
   FileComplexityData,
@@ -94,7 +94,7 @@ async function fetchCrossRepoChunks(
     return { chunks: [], fallback: false };
   }
 
-  if (vectorDB instanceof QdrantDB) {
+  if (vectorDB.supportsCrossRepo) {
     const chunks = await vectorDB.scanCrossRepo({ limit: 100000, repoIds });
     log(`Scanned ${chunks.length} chunks across repos`);
     return { chunks, fallback: false };

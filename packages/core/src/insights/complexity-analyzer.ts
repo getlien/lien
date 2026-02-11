@@ -49,15 +49,8 @@ export class ComplexityAnalyzer {
     // Note: We fetch all chunks even with --files filter because dependency analysis
     // needs the complete dataset to find dependents accurately
     let allChunks: SearchResult[];
-    if (crossRepo) {
-      // Check if vectorDB is QdrantDB instance
-      const { QdrantDB } = await import('../vectordb/qdrant.js');
-      if (this.vectorDB instanceof QdrantDB) {
-        allChunks = await this.vectorDB.scanCrossRepo({ limit: 100000, repoIds });
-      } else {
-        // Fallback to regular scan if not QdrantDB
-        allChunks = await this.vectorDB.scanAll();
-      }
+    if (crossRepo && this.vectorDB.supportsCrossRepo) {
+      allChunks = await this.vectorDB.scanCrossRepo({ limit: 100000, repoIds });
     } else {
       allChunks = await this.vectorDB.scanAll();
     }

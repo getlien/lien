@@ -2,7 +2,6 @@ import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetDependentsSchema } from '../schemas/index.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import type { VectorDBInterface } from '@liendev/core';
-import { QdrantDB } from '@liendev/core';
 import {
   findDependents,
   calculateRiskLevel,
@@ -49,7 +48,7 @@ function checkCrossRepoFallback(
   crossRepo: boolean | undefined,
   vectorDB: VectorDBInterface,
 ): boolean {
-  return Boolean(crossRepo && !(vectorDB instanceof QdrantDB));
+  return Boolean(crossRepo && !vectorDB.supportsCrossRepo);
 }
 
 /**
@@ -135,7 +134,7 @@ function buildDependentsResponse(
   }
 
   // Group by repo if cross-repo search with Qdrant
-  if (crossRepo && vectorDB instanceof QdrantDB) {
+  if (crossRepo && vectorDB.supportsCrossRepo) {
     response.groupedByRepo = groupDependentsByRepo(analysis.dependents, analysis.allChunks);
   }
 

@@ -220,6 +220,7 @@ export class QdrantDB implements VectorDBInterface {
   private commitSha: string;
   private initialized: boolean = false;
   public readonly dbPath: string; // For compatibility with manifest/version file operations
+  public readonly supportsCrossRepo = true;
   private lastVersionCheck: number = 0;
   private currentVersion: number = 0;
   private payloadMapper: QdrantPayloadMapper;
