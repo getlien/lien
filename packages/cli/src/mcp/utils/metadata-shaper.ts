@@ -118,7 +118,7 @@ export function deduplicateResults(results: SearchResult[]): SearchResult[] {
   return results.filter(r => {
     const key = JSON.stringify([
       r.metadata.repoId ?? '',
-      normalizeToRelativePath(r.metadata.file),
+      r.metadata.file ? normalizeToRelativePath(r.metadata.file) : '',
       r.metadata.startLine,
       r.metadata.endLine,
     ]);
