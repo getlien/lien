@@ -30,7 +30,8 @@
     "release": "npm run build && changeset publish --provenance",
     "docs:dev": "npm run docs:dev -w packages/site",
     "docs:build": "npm run docs:build -w packages/site",
-    "docs:preview": "npm run docs:preview -w packages/site"
+    "docs:preview": "npm run docs:preview -w packages/site",
+    "test:coverage": "npm run test:coverage -w @liendev/core"
   },
   "keywords": [
     "mcp",
