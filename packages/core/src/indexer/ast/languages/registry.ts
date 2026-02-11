@@ -48,7 +48,7 @@ for (const def of definitions) {
 
 // Validate LANGUAGE_IDS has no duplicates and every ID has a definition
 if (new Set(LANGUAGE_IDS).size !== LANGUAGE_IDS.length) {
-  const dupes = LANGUAGE_IDS.filter((id, i) => LANGUAGE_IDS.indexOf(id) !== i);
+  const dupes = [...new Set(LANGUAGE_IDS.filter((id, i) => LANGUAGE_IDS.indexOf(id) !== i))];
   throw new Error(`LANGUAGE_IDS contains duplicate entries: ${dupes.join(', ')}`);
 }
 for (const id of LANGUAGE_IDS) {
