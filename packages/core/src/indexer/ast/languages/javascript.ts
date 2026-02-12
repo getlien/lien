@@ -248,12 +248,12 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     }
 
     // module.exports.bar = ...
-    if (
-      left.type === 'member_expression' &&
-      this.isModuleExports(left.childForFieldName('object')!)
-    ) {
-      const prop = left.childForFieldName('property');
-      if (prop) addExport(prop.text);
+    if (left.type === 'member_expression') {
+      const objectNode = left.childForFieldName('object');
+      if (objectNode && this.isModuleExports(objectNode)) {
+        const prop = left.childForFieldName('property');
+        if (prop) addExport(prop.text);
+      }
     }
   }
 
@@ -327,6 +327,13 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
   extractImportPath(node: Parser.SyntaxNode): string | null {
     const sourceNode = node.childForFieldName('source');
     if (sourceNode) return sourceNode.text.replace(/['"]/g, '');
+
+    // Handle CommonJS require() in variable/lexical declarations
+    if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
+      const requireInfo = this.processRequireDeclaration(node);
+      if (requireInfo?.importPath) return requireInfo.importPath;
+    }
+
     return this.extractRequirePath(node);
   }
 
@@ -565,7 +572,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     // require('./polyfill') — side-effect import, no symbols
     const importPath = this.extractRequirePath(node);
     if (!importPath) return null;
-    return null;
+    return { importPath, symbols: [] };
   }
 }
 

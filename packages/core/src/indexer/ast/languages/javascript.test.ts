@@ -276,12 +276,22 @@ exports.bar = 42;`;
       expect(path).toBe('./polyfill');
     });
 
-    it('should return null symbols for bare require()', () => {
+    it('should return empty symbols for bare require()', () => {
       const code = "require('./polyfill');";
       const tree = parser.parse(code);
       const node = tree.rootNode.namedChild(0)!;
       const result = importExtractor.processImportSymbols(node);
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('./polyfill');
+      expect(result!.symbols).toEqual([]);
+    });
+
+    it('should extract import path from require() declaration via extractImportPath', () => {
+      const code = "const express = require('express');";
+      const tree = parser.parse(code);
+      const node = tree.rootNode.namedChild(0)!;
+      const path = importExtractor.extractImportPath(node);
+      expect(path).toBe('express');
     });
 
     it('should return null for non-require declarations', () => {
