@@ -397,6 +397,155 @@ describe('E2E: Real Open Source Projects', () => {
         expect(hasMetadata).toBe(true);
       });
 
+      it('should show status after indexing', () => {
+        const output = runLienCommand(projectDir, 'status');
+
+        // Should report index exists
+        expect(output).toContain('Exists');
+
+        // Should show index files count
+        expect(output).toMatch(/Index files:\s+\d+/);
+      });
+
+      it(
+        'should analyze complexity without errors',
+        () => {
+          const output = runLienCommand(projectDir, 'complexity --format json');
+
+          // Extract JSON from output (complexity command may include banner text before JSON)
+          const jsonStart = output.indexOf('{');
+          expect(jsonStart).toBeGreaterThanOrEqual(0);
+
+          const report = JSON.parse(output.substring(jsonStart));
+
+          expect(report.summary).toBeDefined();
+          expect(report.summary.filesAnalyzed).toBeGreaterThan(0);
+          expect(typeof report.summary.avgComplexity).toBe('number');
+
+          console.log(
+            `🧮 ${project.name} complexity: ${report.summary.filesAnalyzed} files, ` +
+              `avg ${report.summary.avgComplexity.toFixed(1)}, ` +
+              `${report.summary.totalViolations} violations`,
+          );
+        },
+        E2E_TIMEOUT,
+      );
+
+      it(
+        'should find symbols via querySymbols',
+        async () => {
+          const db = await VectorDB.load(fsSync.realpathSync(projectDir));
+
+          // Query for functions — every project should have at least some
+          const functions = await db.querySymbols({ symbolType: 'function', limit: 10 });
+
+          console.log(`🔣 ${project.name} symbols: ${functions.length} functions found`);
+
+          expect(functions.length).toBeGreaterThan(0);
+
+          // Every result should have a symbolName and valid symbol type
+          for (const r of functions) {
+            expect(r.metadata.symbolName).toBeTruthy();
+            expect(['function', 'method']).toContain(r.metadata.symbolType);
+            expect(r.metadata.file).toBeTruthy();
+          }
+        },
+        E2E_TIMEOUT,
+      );
+
+      it(
+        'should retrieve chunks for a specific file',
+        async () => {
+          // Pick a file from the manifest
+          const indexPath = getIndexPath(projectDir);
+          const manifest = JSON.parse(
+            fsSync.readFileSync(path.join(indexPath, 'manifest.json'), 'utf-8'),
+          );
+          const indexedFiles = Object.keys(manifest.files);
+          expect(indexedFiles.length).toBeGreaterThan(0);
+
+          const targetFile = indexedFiles[0];
+          const db = await VectorDB.load(fsSync.realpathSync(projectDir));
+          const results = await db.scanWithFilter({ file: [targetFile], limit: 50 });
+
+          console.log(
+            `📄 ${project.name} file context: ${results.length} chunks for ${targetFile}`,
+          );
+
+          expect(results.length).toBeGreaterThan(0);
+
+          // All results should reference the target file
+          for (const r of results) {
+            expect(r.metadata.file).toBe(targetFile);
+            expect(r.content).toBeTruthy();
+            expect(r.metadata.startLine).toBeGreaterThanOrEqual(0);
+          }
+        },
+        E2E_TIMEOUT,
+      );
+
+      it(
+        'should have import/export metadata in chunks',
+        async () => {
+          const db = await VectorDB.load(fsSync.realpathSync(projectDir));
+          const results = await db.scanWithFilter({ limit: 100 });
+
+          // At least some chunks should have imports populated
+          const chunksWithImports = results.filter(
+            r => r.metadata.imports && r.metadata.imports.length > 0,
+          );
+
+          // At least some chunks should have exports populated
+          const chunksWithExports = results.filter(
+            r => r.metadata.exports && r.metadata.exports.length > 0,
+          );
+
+          console.log(
+            `📦 ${project.name} metadata: ${chunksWithImports.length}/${results.length} chunks with imports, ` +
+              `${chunksWithExports.length}/${results.length} with exports`,
+          );
+
+          // Every real-world project has imports
+          expect(chunksWithImports.length).toBeGreaterThan(0);
+          // TODO: Restore this assertion once CommonJS module.exports/require()
+          // extraction is implemented (see #212). Currently Express (CommonJS)
+          // returns 0 export metadata because only ES module exports are tracked.
+          // expect(chunksWithExports.length).toBeGreaterThan(0);
+          if (chunksWithExports.length === 0) {
+            console.log(
+              `   ℹ️  No export metadata — project may use CommonJS module.exports (#212)`,
+            );
+          }
+        },
+        E2E_TIMEOUT,
+      );
+
+      it(
+        'should find similar code from an indexed chunk',
+        async () => {
+          const db = await VectorDB.load(fsSync.realpathSync(projectDir));
+
+          // Get a function chunk to use as the similarity query
+          const [sample] = await db.querySymbols({ symbolType: 'function', limit: 1 });
+          expect(sample).toBeDefined();
+
+          const vector = await embeddings.embed(sample.content);
+          const results = await db.search(vector, 5);
+
+          console.log(
+            `🔍 ${project.name} find_similar: ${results.length} results, ` +
+              `top score: ${results[0]?.score.toFixed(3)}`,
+          );
+
+          expect(results.length).toBeGreaterThan(0);
+
+          // Top result should be the same or very similar chunk
+          expect(results[0].metadata.file).toBeTruthy();
+          expect(['highly_relevant', 'relevant']).toContain(results[0].relevance);
+        },
+        E2E_TIMEOUT,
+      );
+
       it(
         'should return relevant results for semantic search',
         async () => {

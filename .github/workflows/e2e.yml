@@ -3,6 +3,7 @@ name: E2E Tests (Real Projects)
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled]
 
   # Allow manual trigger
   workflow_dispatch:
@@ -13,16 +14,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check-changeset:
-    name: Check for changeset
+  check-trigger:
+    name: Check E2E trigger
     runs-on: ubuntu-latest
     outputs:
-      has-changeset: ${{ github.event_name == 'workflow_dispatch' || steps.check.outputs.has-changeset }}
+      should-run: ${{ github.event_name == 'workflow_dispatch' || steps.check.outputs.has-changeset == 'true' || steps.label.outputs.has-label == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Check for e2e label
+        id: label
+        run: |
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'e2e') }}" == "true" ]]; then
+            echo "has-label=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-label=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Check for changeset files in PR
         id: check
@@ -37,8 +47,8 @@ jobs:
     name: E2E - ${{ matrix.project }} (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: check-changeset
-    if: needs.check-changeset.outputs.has-changeset == 'true'
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should-run == 'true'
 
     strategy:
       fail-fast: false
