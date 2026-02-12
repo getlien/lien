@@ -5,195 +5,16 @@ import os from 'os';
 import type { SearchResult, VectorDBInterface } from './types.js';
 import type { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
-import { calculateRelevance } from './relevance.js';
 import { DatabaseError } from '../errors/index.js';
 import { readVersionFile } from './version.js';
 import { QdrantPayloadMapper } from './qdrant-payload-mapper.js';
 import { extractRepoId } from '../utils/repo-id.js';
+import { QdrantFilterBuilder, validateFilterOptions } from './qdrant-filter-builder.js';
+import * as queryOps from './qdrant-query.js';
+import * as batchOps from './qdrant-batch-insert.js';
+import * as maintenanceOps from './qdrant-maintenance.js';
 
-/**
- * Qdrant filter types for stronger type-safety when constructing filters.
- */
-interface QdrantMatch {
-  value?: string | number | boolean;
-  text?: string;
-  any?: string[];
-}
-
-interface QdrantCondition {
-  key: string;
-  match: QdrantMatch;
-}
-
-interface QdrantFilter {
-  must: QdrantCondition[];
-  should?: QdrantCondition[];
-  must_not?: QdrantCondition[];
-}
-
-/**
- * Builder class for constructing Qdrant filters.
- * Simplifies filter construction and reduces complexity.
- */
-class QdrantFilterBuilder {
-  private filter: QdrantFilter;
-
-  constructor(orgId: string) {
-    this.filter = {
-      must: [{ key: 'orgId', match: { value: orgId } }],
-    };
-  }
-
-  addRepoContext(repoId: string, branch: string, commitSha: string): this {
-    this.filter.must.push(
-      { key: 'repoId', match: { value: repoId } },
-      { key: 'branch', match: { value: branch } },
-      { key: 'commitSha', match: { value: commitSha } },
-    );
-    return this;
-  }
-
-  addRepoIds(repoIds: string[]): this {
-    const cleanedRepoIds = repoIds.map(id => id.trim()).filter(id => id.length > 0);
-
-    // If caller passed repoIds but all were empty/invalid after cleaning,
-    // fail fast instead of silently dropping the repoId filter (which would
-    // otherwise widen the query to all repos in the org).
-    if (repoIds.length > 0 && cleanedRepoIds.length === 0) {
-      throw new Error(
-        'Invalid repoIds: all provided repoIds are empty or whitespace. ' +
-          'Provide at least one non-empty repoId or omit repoIds entirely.',
-      );
-    }
-
-    if (cleanedRepoIds.length > 0) {
-      this.filter.must.push({
-        key: 'repoId',
-        match: { any: cleanedRepoIds },
-      });
-    }
-    return this;
-  }
-
-  addLanguage(language: string): this {
-    const cleanedLanguage = language.trim();
-    if (cleanedLanguage.length === 0) {
-      throw new Error('Invalid language: language must be a non-empty, non-whitespace string.');
-    }
-    this.filter.must.push({ key: 'language', match: { value: cleanedLanguage } });
-    return this;
-  }
-
-  addSymbolType(symbolType: string): this {
-    const cleanedSymbolType = symbolType.trim();
-    if (cleanedSymbolType.length === 0) {
-      throw new Error('Invalid symbolType: symbolType must be a non-empty, non-whitespace string.');
-    }
-    this.filter.must.push({ key: 'symbolType', match: { value: cleanedSymbolType } });
-    return this;
-  }
-
-  addSymbolTypes(symbolTypes: string[]): this {
-    const cleaned = symbolTypes.map(s => s.trim()).filter(s => s.length > 0);
-    if (cleaned.length === 0) {
-      throw new Error(
-        'Invalid symbolTypes: at least one non-empty, non-whitespace string is required.',
-      );
-    }
-    this.filter.must.push({ key: 'symbolType', match: { any: cleaned } });
-    return this;
-  }
-
-  /**
-   * Add symbol type filter with backward-compatible semantics.
-   * 'function' matches both 'function' and 'method' records because
-   * pre-AST indices stored methods under the 'function' type.
-   */
-  addSymbolTypeFilter(symbolType: 'function' | 'method' | 'class' | 'interface'): this {
-    if (symbolType === 'function') {
-      return this.addSymbolTypes(['function', 'method']);
-    }
-    return this.addSymbolType(symbolType);
-  }
-
-  addFileFilter(file: string | string[]): this {
-    if (typeof file === 'string') {
-      const cleaned = file.trim();
-      if (cleaned.length === 0) {
-        throw new Error('Invalid file filter: file path must contain non-whitespace characters.');
-      }
-      this.filter.must.push({ key: 'file', match: { value: cleaned } });
-    } else {
-      const cleaned = file.map(f => f.trim()).filter(f => f.length > 0);
-      if (cleaned.length === 0) {
-        throw new Error(
-          'Invalid file filter: at least one file path must contain non-whitespace characters.',
-        );
-      }
-      this.filter.must.push({ key: 'file', match: { any: cleaned } });
-    }
-    return this;
-  }
-
-  addPattern(pattern: string, key: 'file' | 'symbolName' = 'file'): this {
-    const cleanedPattern = pattern.trim();
-    if (cleanedPattern.length === 0) {
-      throw new Error('Invalid pattern: pattern must be a non-empty, non-whitespace string.');
-    }
-    this.filter.must.push({ key, match: { text: cleanedPattern } });
-    return this;
-  }
-
-  addBranch(branch: string): this {
-    const cleanedBranch = branch.trim();
-    // Prevent constructing a filter for an empty/whitespace-only branch,
-    // which would search for `branch == ""` and almost certainly return no results.
-    if (cleanedBranch.length === 0) {
-      throw new Error('Invalid branch: branch must be a non-empty, non-whitespace string.');
-    }
-    this.filter.must.push({ key: 'branch', match: { value: cleanedBranch } });
-    return this;
-  }
-
-  build(): QdrantFilter {
-    return this.filter;
-  }
-}
-
-/**
- * Validate filter options for buildBaseFilter.
- *
- * This is a separate function to enable unit testing of validation logic.
- * The validations ensure that conflicting options are not used together.
- *
- * @param options - Filter options to validate
- * @throws Error if conflicting options are detected
- */
-export function validateFilterOptions(options: {
-  repoIds?: string[];
-  branch?: string;
-  includeCurrentRepo?: boolean;
-}): void {
-  // Validate: includeCurrentRepo and repoIds are mutually exclusive
-  // Note: `includeCurrentRepo !== false` treats undefined as "enabled" (default behavior).
-  // Callers must explicitly pass includeCurrentRepo=false when using repoIds for cross-repo queries.
-  if (options.includeCurrentRepo !== false && options.repoIds && options.repoIds.length > 0) {
-    throw new Error(
-      'Cannot use repoIds when includeCurrentRepo is enabled (the default). ' +
-        'These options are mutually exclusive. Set includeCurrentRepo=false to perform cross-repo queries with repoIds.',
-    );
-  }
-
-  // Validate: branch parameter should only be used when includeCurrentRepo is false.
-  // As above, `includeCurrentRepo !== false` treats both undefined and true as "enabled"
-  // for the current repo context, so callers must explicitly pass false for cross-repo.
-  if (options.branch && options.includeCurrentRepo !== false) {
-    throw new Error(
-      'Cannot use branch parameter when includeCurrentRepo is enabled (the default). ' +
-        'Branch is automatically included via the current repo context. Set includeCurrentRepo=false to specify a branch explicitly.',
-    );
-  }
-}
+export { validateFilterOptions } from './qdrant-filter-builder.js';
 
 /**
  * QdrantDB implements VectorDBInterface using Qdrant vector database.
@@ -292,13 +113,6 @@ export class QdrantDB implements VectorDBInterface {
    * - The `branch` parameter can only be used when `includeCurrentRepo` is explicitly `false`.
    *   When `includeCurrentRepo` is enabled (default), branch is automatically included via
    *   the current repo context (`addRepoContext`).
-   *
-   * @param options - Filter options
-   * @param options.includeCurrentRepo - Whether to filter by current repo context (default: true when undefined).
-   *   Must be explicitly `false` to use `repoIds` or `branch` parameters.
-   * @param options.repoIds - Repository IDs to filter by (requires `includeCurrentRepo: false`).
-   * @param options.branch - Branch name to filter by (requires `includeCurrentRepo: false`).
-   * @returns Qdrant filter object
    */
   private buildBaseFilter(options: {
     file?: string | string[];
@@ -327,7 +141,6 @@ export class QdrantDB implements VectorDBInterface {
       builder.addRepoIds(options.repoIds);
     }
 
-    // Validate language is non-empty if explicitly provided (even if empty string)
     if (options.language !== undefined) {
       builder.addLanguage(options.language);
     }
@@ -336,16 +149,13 @@ export class QdrantDB implements VectorDBInterface {
       builder.addSymbolTypeFilter(options.symbolType);
     }
 
-    // Validate pattern is non-empty if explicitly provided (even if empty string)
     if (options.pattern !== undefined) {
       builder.addPattern(options.pattern, options.patternKey);
     }
 
     // Only add branch filter when includeCurrentRepo is false
     // When includeCurrentRepo is true, branch is already added via addRepoContext
-    // Validate branch is non-empty if explicitly provided (even if empty string)
     if (options.branch !== undefined && options.includeCurrentRepo === false) {
-      // addBranch will validate that branch is non-empty and non-whitespace
       builder.addBranch(options.branch);
     }
 
@@ -356,49 +166,33 @@ export class QdrantDB implements VectorDBInterface {
     return builder.build();
   }
 
-  /**
-   * Map Qdrant scroll results to SearchResult format.
-   *
-   * Note: Scroll/scan operations do not compute semantic similarity scores.
-   * For these results, score is always 0 and relevance is set to 'not_relevant'
-   * to indicate that the results are unscored (not that they are useless).
-   */
-  private mapScrollResults(results: any): SearchResult[] {
-    return (results.points || []).map((point: any) => ({
-      content: (point.payload?.content as string) || '',
-      metadata: this.payloadMapper.fromPayload(point.payload || {}),
-      score: 0,
-      relevance: 'not_relevant' as const,
-    }));
+  /** Build the query context object shared by query sub-module functions. */
+  private get queryCtx(): queryOps.QdrantQueryContext {
+    return {
+      client: this.client,
+      collectionName: this.collectionName,
+      orgId: this.orgId,
+      repoId: this.repoId,
+      branch: this.branch,
+      commitSha: this.commitSha,
+      initialized: this.initialized,
+      payloadMapper: this.payloadMapper,
+      buildBaseFilter: this.buildBaseFilter.bind(this),
+    };
   }
 
-  /**
-   * Execute a scroll query with error handling.
-   */
-  private async executeScrollQuery(
-    filter: any,
-    limit: number,
-    errorContext: string,
-  ): Promise<SearchResult[]> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
-
-    try {
-      const results = await this.client.scroll(this.collectionName, {
-        filter,
-        limit,
-        with_payload: true,
-        with_vector: false,
-      });
-
-      return this.mapScrollResults(results);
-    } catch (error) {
-      throw new DatabaseError(
-        `Failed to ${errorContext}: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName },
-      );
-    }
+  /** Build the maintenance context object shared by maintenance sub-module functions. */
+  private get maintenanceCtx(): maintenanceOps.QdrantMaintenanceContext {
+    return {
+      client: this.client,
+      collectionName: this.collectionName,
+      orgId: this.orgId,
+      repoId: this.repoId,
+      branch: this.branch,
+      commitSha: this.commitSha,
+      initialized: this.initialized,
+      dbPath: this.dbPath,
+    };
   }
 
   async initialize(): Promise<void> {
@@ -433,70 +227,26 @@ export class QdrantDB implements VectorDBInterface {
     }
   }
 
-  /**
-   * Validate batch input arrays have matching lengths.
-   */
-  private validateBatchInputs(
-    vectors: Float32Array[],
-    metadatas: ChunkMetadata[],
-    contents: string[],
-  ): void {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
-
-    if (vectors.length !== metadatas.length || vectors.length !== contents.length) {
-      throw new DatabaseError('Vectors, metadatas, and contents arrays must have the same length', {
-        vectorsLength: vectors.length,
-        metadatasLength: metadatas.length,
-        contentsLength: contents.length,
-      });
-    }
-  }
-
-  /**
-   * Prepare Qdrant points from vectors, metadatas, and contents.
-   */
-  private preparePoints(
-    vectors: Float32Array[],
-    metadatas: ChunkMetadata[],
-    contents: string[],
-  ): Array<{ id: string; vector: number[]; payload: Record<string, any> }> {
-    return vectors.map((vector, i) => {
-      const metadata = metadatas[i];
-      const payload = this.payloadMapper.toPayload(metadata, contents[i]) as Record<string, any>;
-
-      return {
-        id: this.generatePointId(metadata),
-        vector: Array.from(vector),
-        payload,
-      };
-    });
-  }
-
   async insertBatch(
     vectors: Float32Array[],
     metadatas: ChunkMetadata[],
     contents: string[],
   ): Promise<void> {
-    this.validateBatchInputs(vectors, metadatas, contents);
+    batchOps.validateBatchInputs(this.initialized, vectors, metadatas, contents);
 
     if (vectors.length === 0) {
       return; // No-op for empty batches
     }
 
     try {
-      const points = this.preparePoints(vectors, metadatas, contents);
-
-      // Upsert points in batches (Qdrant recommends batches of 100-1000)
-      const batchSize = 100;
-      for (let i = 0; i < points.length; i += batchSize) {
-        const batch = points.slice(i, Math.min(i + batchSize, points.length));
-        await this.client.upsert(this.collectionName, {
-          wait: true,
-          points: batch,
-        });
-      }
+      const points = batchOps.preparePoints(
+        vectors,
+        metadatas,
+        contents,
+        this.payloadMapper,
+        this.generatePointId.bind(this),
+      );
+      await batchOps.insertBatch(this.client, this.collectionName, points);
     } catch (error) {
       throw new DatabaseError(
         `Failed to insert batch into Qdrant: ${error instanceof Error ? error.message : String(error)}`,
@@ -510,58 +260,9 @@ export class QdrantDB implements VectorDBInterface {
     limit: number = 5,
     _query?: string, // Optional query string (not used in vector search, but kept for interface compatibility)
   ): Promise<SearchResult[]> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
-
-    try {
-      // Search with tenant isolation (filter by orgId, repoId, branch, and commitSha)
-      const results = await this.client.search(this.collectionName, {
-        vector: Array.from(queryVector),
-        limit,
-        filter: {
-          must: [
-            { key: 'orgId', match: { value: this.orgId } },
-            { key: 'repoId', match: { value: this.repoId } },
-            { key: 'branch', match: { value: this.branch } },
-            { key: 'commitSha', match: { value: this.commitSha } },
-          ],
-        },
-      });
-
-      return results.map(result => ({
-        content: (result.payload?.content as string) || '',
-        metadata: this.payloadMapper.fromPayload(result.payload || {}),
-        score: result.score || 0,
-        relevance: calculateRelevance(result.score || 0),
-      }));
-    } catch (error) {
-      throw new DatabaseError(
-        `Failed to search Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName },
-      );
-    }
+    return queryOps.search(this.queryCtx, queryVector, limit);
   }
 
-  /**
-   * Search across all repos in the organization (cross-repo search).
-   *
-   * - Omits repoId filter by default to enable true cross-repo queries.
-   * - When repoIds are provided, restricts results to those repositories only.
-   * - When branch is omitted, returns chunks from all branches and commits
-   *   (including historical PR branches and stale commits).
-   * - When branch is provided, filters by branch name only and still returns
-   *   chunks from all commits on that branch across the selected repos.
-   *
-   * This is a low-level primitive for cross-repo augmentation. Higher-level
-   * workflows (e.g. \"latest commit only\") should be built on top of this API.
-   *
-   * @param queryVector - Query vector for semantic search
-   * @param limit - Maximum number of results to return (default: 5)
-   * @param options - Optional search options
-   * @param options.repoIds - Repository IDs to filter by (optional)
-   * @param options.branch - Branch name to filter by (optional)
-   */
   async searchCrossRepo(
     queryVector: Float32Array,
     limit: number = 5,
@@ -570,37 +271,7 @@ export class QdrantDB implements VectorDBInterface {
       branch?: string;
     },
   ): Promise<SearchResult[]> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
-
-    try {
-      // Use buildBaseFilter for consistency with scanCrossRepo and other methods
-      // This provides automatic validation for empty repoIds arrays, whitespace-only branches, etc.
-      const filter = this.buildBaseFilter({
-        includeCurrentRepo: false,
-        repoIds: options?.repoIds,
-        branch: options?.branch,
-      });
-
-      const results = await this.client.search(this.collectionName, {
-        vector: Array.from(queryVector),
-        limit,
-        filter,
-      });
-
-      return results.map(result => ({
-        content: (result.payload?.content as string) || '',
-        metadata: this.payloadMapper.fromPayload(result.payload || {}),
-        score: result.score || 0,
-        relevance: calculateRelevance(result.score || 0),
-      }));
-    } catch (error) {
-      throw new DatabaseError(
-        `Failed to search Qdrant (cross-repo): ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName },
-      );
-    }
+    return queryOps.searchCrossRepo(this.queryCtx, queryVector, limit, options);
   }
 
   async scanWithFilter(options: {
@@ -610,16 +281,7 @@ export class QdrantDB implements VectorDBInterface {
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }): Promise<SearchResult[]> {
-    const filter = this.buildBaseFilter({
-      file: options.file,
-      language: options.language,
-      pattern: options.pattern,
-      symbolType: options.symbolType,
-      patternKey: 'file',
-      includeCurrentRepo: true,
-    });
-
-    return this.executeScrollQuery(filter, options.limit || 100, 'scan Qdrant');
+    return queryOps.scanWithFilter(this.queryCtx, options);
   }
 
   async scanAll(
@@ -628,23 +290,7 @@ export class QdrantDB implements VectorDBInterface {
       pattern?: string;
     } = {},
   ): Promise<SearchResult[]> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
-
-    // Use server-side filtering via buildBaseFilter + paginated scroll to avoid arbitrary caps
-    const filter = this.buildBaseFilter({
-      includeCurrentRepo: true,
-      language: options.language,
-      pattern: options.pattern,
-      patternKey: 'file',
-    });
-
-    const allResults: SearchResult[] = [];
-    for await (const page of this.scrollPaginated(filter, 1000)) {
-      allResults.push(...page);
-    }
-    return allResults;
+    return queryOps.scanAll(this.queryCtx, options);
   }
 
   async *scanPaginated(
@@ -652,67 +298,9 @@ export class QdrantDB implements VectorDBInterface {
       pageSize?: number;
     } = {},
   ): AsyncGenerator<SearchResult[]> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
-
-    const pageSize = options.pageSize ?? 1000;
-    if (pageSize <= 0) {
-      throw new DatabaseError('pageSize must be a positive number');
-    }
-    const filter = this.buildBaseFilter({ includeCurrentRepo: true });
-    yield* this.scrollPaginated(filter, pageSize);
+    yield* queryOps.scanPaginated(this.queryCtx, options);
   }
 
-  /**
-   * Internal paginated scroll helper. Both scanAll and scanPaginated delegate here
-   * to keep scroll logic, error handling, and termination in one place.
-   */
-  // Note: filter uses `any` to match buildBaseFilter/executeScrollQuery return type.
-  // The local QdrantFilter interface doesn't fully align with the @qdrant/js-client-rest SDK types.
-  private async *scrollPaginated(filter: any, pageSize: number): AsyncGenerator<SearchResult[]> {
-    let offset: string | number | undefined;
-
-    while (true) {
-      let results;
-      try {
-        results = await this.client.scroll(this.collectionName, {
-          filter,
-          limit: pageSize,
-          with_payload: true,
-          with_vector: false,
-          ...(offset !== undefined && { offset }),
-        });
-      } catch (error) {
-        throw new DatabaseError(
-          `Failed to scroll Qdrant collection: ${error instanceof Error ? error.message : String(error)}`,
-          { originalError: error },
-        );
-      }
-
-      const page = this.mapScrollResults(results);
-      if (page.length > 0) {
-        yield page;
-      }
-
-      offset = results.next_page_offset as string | number | undefined;
-      if (offset == null) break;
-    }
-  }
-
-  /**
-   * Scan with filter across all repos in the organization (cross-repo).
-   *
-   * - Omits repoId filter by default to enable true cross-repo scans.
-   * - When repoIds are provided, restricts results to those repositories only.
-   * - When branch is omitted, returns chunks from all branches and commits
-   *   (including historical PR branches and stale commits).
-   * - When branch is provided, filters by branch name only and still returns
-   *   chunks from all commits on that branch across the selected repos.
-   *
-   * Like searchCrossRepo, this is a low-level primitive. Higher-level behavior
-   * such as \"latest commit only\" should be implemented in orchestrating code.
-   */
   async scanCrossRepo(options: {
     language?: string;
     pattern?: string;
@@ -720,20 +308,7 @@ export class QdrantDB implements VectorDBInterface {
     repoIds?: string[];
     branch?: string;
   }): Promise<SearchResult[]> {
-    const filter = this.buildBaseFilter({
-      language: options.language,
-      pattern: options.pattern,
-      patternKey: 'file',
-      repoIds: options.repoIds,
-      branch: options.branch,
-      includeCurrentRepo: false, // Cross-repo: don't filter by current repo
-    });
-
-    return this.executeScrollQuery(
-      filter,
-      options.limit || 10000, // Higher default for cross-repo
-      'scan Qdrant (cross-repo)',
-    );
+    return queryOps.scanCrossRepo(this.queryCtx, options);
   }
 
   async querySymbols(options: {
@@ -742,114 +317,19 @@ export class QdrantDB implements VectorDBInterface {
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
   }): Promise<SearchResult[]> {
-    const filter = this.buildBaseFilter({
-      language: options.language,
-      pattern: options.pattern,
-      patternKey: 'symbolName',
-      symbolType: options.symbolType,
-      includeCurrentRepo: true,
-    });
-
-    return this.executeScrollQuery(filter, options.limit || 100, 'query symbols in Qdrant');
+    return queryOps.querySymbols(this.queryCtx, options);
   }
 
   async clear(): Promise<void> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
-
-    try {
-      // Check if collection exists before trying to clear it (returns { exists: boolean })
-      const collectionCheck = await this.client.collectionExists(this.collectionName);
-      if (!collectionCheck.exists) {
-        // Collection doesn't exist yet, nothing to clear
-        return;
-      }
-
-      // Delete all points for this repository and branch/commit only
-      // This ensures we only clear the current branch's data, not all branches
-      await this.client.delete(this.collectionName, {
-        filter: {
-          must: [
-            { key: 'orgId', match: { value: this.orgId } },
-            { key: 'repoId', match: { value: this.repoId } },
-            { key: 'branch', match: { value: this.branch } },
-            { key: 'commitSha', match: { value: this.commitSha } },
-          ],
-        },
-      });
-    } catch (error) {
-      throw new DatabaseError(
-        `Failed to clear Qdrant collection: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName },
-      );
-    }
+    return maintenanceOps.clear(this.maintenanceCtx);
   }
 
-  /**
-   * Clear all data for a specific branch (all commits).
-   *
-   * Qdrant-only helper: this is not part of the generic VectorDBInterface and
-   * is intended for cloud/PR workflows where multiple commits exist per branch.
-   * LanceDB and other backends do not implement this method.
-   *
-   * @param branch - Branch name to clear (defaults to current branch)
-   */
   async clearBranch(branch?: string): Promise<void> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
-
-    const targetBranch = branch ?? this.branch;
-
-    try {
-      const collectionCheck = await this.client.collectionExists(this.collectionName);
-      if (!collectionCheck.exists) {
-        // Collection doesn't exist yet, nothing to clear
-        return;
-      }
-
-      // Delete all points for this repository and branch (all commits)
-      await this.client.delete(this.collectionName, {
-        filter: {
-          must: [
-            { key: 'orgId', match: { value: this.orgId } },
-            { key: 'repoId', match: { value: this.repoId } },
-            { key: 'branch', match: { value: targetBranch } },
-          ],
-        },
-      });
-    } catch (error) {
-      throw new DatabaseError(
-        `Failed to clear branch from Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName, branch: targetBranch },
-      );
-    }
+    return maintenanceOps.clearBranch(this.maintenanceCtx, branch);
   }
 
   async deleteByFile(filepath: string): Promise<void> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
-
-    try {
-      await this.client.delete(this.collectionName, {
-        filter: {
-          must: [
-            { key: 'orgId', match: { value: this.orgId } },
-            { key: 'repoId', match: { value: this.repoId } },
-            { key: 'branch', match: { value: this.branch } },
-            { key: 'commitSha', match: { value: this.commitSha } },
-            { key: 'file', match: { value: filepath } },
-          ],
-        },
-      });
-    } catch (error) {
-      throw new DatabaseError(
-        `Failed to delete file from Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName, filepath },
-      );
-    }
+    return maintenanceOps.deleteByFile(this.maintenanceCtx, filepath);
   }
 
   async updateFile(
@@ -858,41 +338,19 @@ export class QdrantDB implements VectorDBInterface {
     metadatas: ChunkMetadata[],
     contents: string[],
   ): Promise<void> {
-    if (!this.initialized) {
-      throw new DatabaseError('Qdrant database not initialized');
-    }
-
-    if (vectors.length !== metadatas.length || vectors.length !== contents.length) {
-      throw new DatabaseError('Vectors, metadatas, and contents arrays must have the same length');
-    }
-
-    try {
-      // Delete existing chunks for this file
-      await this.deleteByFile(filepath);
-
-      // Insert new chunks
-      if (vectors.length > 0) {
-        await this.insertBatch(vectors, metadatas, contents);
-      }
-    } catch (error) {
-      throw new DatabaseError(
-        `Failed to update file in Qdrant: ${error instanceof Error ? error.message : String(error)}`,
-        { collectionName: this.collectionName, filepath },
-      );
-    }
+    return maintenanceOps.updateFile(
+      this.maintenanceCtx,
+      filepath,
+      this.deleteByFile.bind(this),
+      this.insertBatch.bind(this),
+      vectors,
+      metadatas,
+      contents,
+    );
   }
 
   async hasData(): Promise<boolean> {
-    if (!this.initialized) {
-      return false;
-    }
-
-    try {
-      const info = await this.client.getCollection(this.collectionName);
-      return (info.points_count || 0) > 0;
-    } catch {
-      return false;
-    }
+    return maintenanceOps.hasData(this.maintenanceCtx);
   }
 
   /**
@@ -917,28 +375,14 @@ export class QdrantDB implements VectorDBInterface {
   }
 
   async checkVersion(): Promise<boolean> {
-    const now = Date.now();
-
-    // Cache version checks for 1 second to minimize I/O
-    if (now - this.lastVersionCheck < 1000) {
-      return false;
-    }
-
-    this.lastVersionCheck = now;
-
-    try {
-      const version = await readVersionFile(this.dbPath);
-
-      if (version > this.currentVersion) {
-        this.currentVersion = version;
-        return true;
-      }
-
-      return false;
-    } catch {
-      // If we can't read version file, don't reconnect
-      return false;
-    }
+    const result = await maintenanceOps.checkVersion(
+      this.dbPath,
+      this.lastVersionCheck,
+      this.currentVersion,
+    );
+    this.lastVersionCheck = result.newLastCheck;
+    this.currentVersion = result.newVersion;
+    return result.changed;
   }
 
   async reconnect(): Promise<void> {

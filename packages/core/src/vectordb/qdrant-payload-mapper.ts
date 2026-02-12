@@ -7,6 +7,7 @@ import type { ChunkMetadata } from '../indexer/types.js';
  * If missing in source metadata, they are stored as 0.
  */
 export interface QdrantPayload {
+  [key: string]: string | number | string[];
   content: string;
   file: string;
   startLine: number;
