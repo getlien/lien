@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -50,11 +50,18 @@ program
   )
   .option('-p, --port <port>', 'Port number (for future use)', '7133')
   .option('--no-watch', 'Disable file watching for this session')
-  .option('-w, --watch', '[DEPRECATED] File watching is now enabled by default')
+  .addOption(
+    new Option('-w, --watch', '[DEPRECATED] File watching is now enabled by default').hideHelp(),
+  )
   .option('-r, --root <path>', 'Root directory to serve (defaults to current directory)')
   .action(serveCommand);
 
-program.command('status').description('Show indexing status and statistics').action(statusCommand);
+program
+  .command('status')
+  .description('Show indexing status and statistics')
+  .option('-v, --verbose', 'Show detailed settings')
+  .option('--format <type>', 'Output format: text, json', 'text')
+  .action(statusCommand);
 
 program
   .command('complexity')
@@ -76,5 +83,9 @@ configCmd
 configCmd.command('get <key>').description('Get a config value').action(configGetCommand);
 
 configCmd.command('list').description('Show all current config').action(configListCommand);
+
+program.action(() => {
+  program.help();
+});
 
 program.addHelpText('beforeAll', `Quick start: run 'lien serve' in your project directory\n`);

@@ -94,7 +94,7 @@ describe('statusCommand', () => {
     expect(allOutput).toContain('Not a git repo');
   });
 
-  it('should show feature flags and defaults', async () => {
+  it('should hide indexing settings by default', async () => {
     vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
 
     await statusCommand();
@@ -102,11 +102,45 @@ describe('statusCommand', () => {
     const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
     expect(allOutput).toContain('Features:');
     expect(allOutput).toContain('File watching:');
+    expect(allOutput).not.toContain('Indexing Settings');
+    expect(allOutput).not.toContain('Concurrency:');
+  });
+
+  it('should show indexing settings with --verbose', async () => {
+    vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
+
+    await statusCommand({ verbose: true });
+
+    const allOutput = consoleLogSpy.mock.calls.flat().join(' ');
     expect(allOutput).toContain('Indexing Settings');
     expect(allOutput).toContain('Concurrency:');
     expect(allOutput).toContain('Batch size:');
     expect(allOutput).toContain('Chunk size:');
     expect(allOutput).toContain('Chunk overlap:');
+  });
+
+  it('should output valid JSON with --format json', async () => {
+    vi.mocked(fs.stat).mockRejectedValue(new Error('ENOENT'));
+
+    await statusCommand({ format: 'json' });
+
+    const calls = consoleLogSpy.mock.calls as string[][];
+    const jsonCall = calls.find(call => {
+      try {
+        JSON.parse(call[0]);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    expect(jsonCall).toBeDefined();
+
+    const data = JSON.parse(jsonCall![0]);
+    expect(data.indexStatus).toBe('not_indexed');
+    expect(data.indexPath).toBeDefined();
+    expect(data.features).toEqual({ fileWatching: true, gitDetection: true });
+    expect(data.settings).toBeDefined();
+    expect(data.settings.concurrency).toBeDefined();
   });
 
   it('should show file count in index', async () => {

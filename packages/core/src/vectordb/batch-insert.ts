@@ -337,12 +337,16 @@ async function tryInsertBatch(
   try {
     const records = transformBatchToRecords(batch);
 
-    const data = records as unknown as Record<string, unknown>[];
     if (!currentTable) {
-      const newTable = await db.createTable(tableName, data);
+      // LanceDB's createTable/add accept Record<string, unknown>[] — DatabaseRecord
+      // satisfies this shape but TypeScript can't verify it structurally, so we cast once.
+      const newTable = await db.createTable(
+        tableName,
+        records as unknown as Record<string, unknown>[],
+      );
       return { success: true, table: newTable };
     } else {
-      await currentTable.add(data);
+      await currentTable.add(records as unknown as Record<string, unknown>[]);
       return { success: true, table: currentTable };
     }
   } catch (error) {

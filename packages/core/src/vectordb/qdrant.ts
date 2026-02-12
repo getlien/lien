@@ -9,7 +9,11 @@ import { DatabaseError } from '../errors/index.js';
 import { readVersionFile } from './version.js';
 import { QdrantPayloadMapper } from './qdrant-payload-mapper.js';
 import { extractRepoId } from '../utils/repo-id.js';
-import { QdrantFilterBuilder, validateFilterOptions } from './qdrant-filter-builder.js';
+import {
+  QdrantFilterBuilder,
+  validateFilterOptions,
+  type QdrantFilter,
+} from './qdrant-filter-builder.js';
 import * as queryOps from './qdrant-query.js';
 import * as batchOps from './qdrant-batch-insert.js';
 import * as maintenanceOps from './qdrant-maintenance.js';
@@ -123,7 +127,7 @@ export class QdrantDB implements VectorDBInterface {
     branch?: string;
     includeCurrentRepo?: boolean;
     patternKey?: 'file' | 'symbolName';
-  }): any {
+  }): QdrantFilter {
     // Validate filter options (extracted to enable unit testing)
     validateFilterOptions({
       repoIds: options.repoIds,

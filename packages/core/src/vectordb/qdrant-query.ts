@@ -1,6 +1,7 @@
 import type { QdrantClient } from '@qdrant/js-client-rest';
 import type { SearchResult } from './types.js';
 import type { QdrantPayloadMapper } from './qdrant-payload-mapper.js';
+import type { QdrantFilter } from './qdrant-filter-builder.js';
 import { calculateRelevance } from './relevance.js';
 import { DatabaseError } from '../errors/index.js';
 
@@ -25,7 +26,7 @@ export interface QdrantQueryContext {
     branch?: string;
     includeCurrentRepo?: boolean;
     patternKey?: 'file' | 'symbolName';
-  }) => Record<string, unknown>;
+  }) => QdrantFilter;
 }
 
 /**
@@ -52,7 +53,7 @@ export function mapScrollResults(
  */
 export async function executeScrollQuery(
   ctx: QdrantQueryContext,
-  filter: Record<string, unknown>,
+  filter: QdrantFilter,
   limit: number,
   errorContext: string,
 ): Promise<SearchResult[]> {
@@ -61,8 +62,9 @@ export async function executeScrollQuery(
   }
 
   try {
+    // Cast: QdrantFilter is structurally correct but TS can't verify against client's union type
     const results = await ctx.client.scroll(ctx.collectionName, {
-      filter,
+      filter: filter as unknown as Record<string, unknown>,
       limit,
       with_payload: true,
       with_vector: false,
@@ -150,10 +152,11 @@ export async function searchCrossRepo(
       branch: options?.branch,
     });
 
+    // Cast: QdrantFilter is structurally correct but TS can't verify against client's union type
     const results = await ctx.client.search(ctx.collectionName, {
       vector: Array.from(queryVector),
       limit,
-      filter,
+      filter: filter as unknown as Record<string, unknown>,
     });
 
     return results.map(result => ({
@@ -241,7 +244,7 @@ export async function* scanPaginated(
  */
 async function* scrollPaginated(
   ctx: QdrantQueryContext,
-  filter: Record<string, unknown>,
+  filter: QdrantFilter,
   pageSize: number,
 ): AsyncGenerator<SearchResult[]> {
   let offset: string | number | undefined;
@@ -249,8 +252,9 @@ async function* scrollPaginated(
   while (true) {
     let results;
     try {
+      // Cast: QdrantFilter is structurally correct but TS can't verify against client's union type
       results = await ctx.client.scroll(ctx.collectionName, {
-        filter,
+        filter: filter as unknown as Record<string, unknown>,
         limit: pageSize,
         with_payload: true,
         with_vector: false,

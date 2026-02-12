@@ -12,7 +12,7 @@ interface QdrantCondition {
   match: QdrantMatch;
 }
 
-interface QdrantFilter {
+export interface QdrantFilter {
   must: QdrantCondition[];
   should?: QdrantCondition[];
   must_not?: QdrantCondition[];
