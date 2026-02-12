@@ -191,11 +191,11 @@ function transformBatchToRecords(batch: BatchToProcess): DatabaseRecord[] {
  * @throws {DatabaseError} If validation fails
  */
 function validateBatchInputs(
-  db: LanceDBConnection,
+  db: LanceDBConnection | null,
   vectors: Float32Array[],
   metadatas: ChunkMetadata[],
   contents: string[],
-): void {
+): asserts db is LanceDBConnection {
   if (!db) {
     throw new DatabaseError('Vector database not initialized');
   }
@@ -240,7 +240,7 @@ function chunkIntoBatches(
  * @throws {DatabaseError} If database not initialized or insertion fails
  */
 export async function insertBatch(
-  db: LanceDBConnection,
+  db: LanceDBConnection | null,
   table: LanceDBTable | null,
   tableName: string,
   vectors: Float32Array[],

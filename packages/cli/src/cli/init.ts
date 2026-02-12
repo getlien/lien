@@ -9,44 +9,60 @@ export interface InitOptions {
   path?: string;
 }
 
+const MCP_CONFIG = {
+  command: 'lien',
+  args: ['serve'],
+};
+
 export async function initCommand(options: InitOptions = {}) {
   showCompactBanner();
 
-  console.log(chalk.bold('\nLien Initialization\n'));
-  console.log(chalk.green('✓ No per-project configuration needed!'));
-  console.log(chalk.dim('\nLien now uses:'));
-  console.log(chalk.dim('  • Auto-detected frameworks'));
-  console.log(chalk.dim('  • Sensible defaults for all settings'));
-  console.log(chalk.dim('  • Global config (optional) at ~/.lien/config.json'));
+  const rootDir = options.path || process.cwd();
+  const cursorDir = path.join(rootDir, '.cursor');
+  const mcpConfigPath = path.join(cursorDir, 'mcp.json');
 
-  console.log(chalk.bold('\nNext steps:'));
-  console.log(chalk.dim('  1. Run'), chalk.bold('lien index'), chalk.dim('to index your codebase'));
-  console.log(
-    chalk.dim('  2. Run'),
-    chalk.bold('lien serve'),
-    chalk.dim('to start the MCP server'),
-  );
+  // Check if .cursor/mcp.json exists
+  let existingConfig: { mcpServers?: Record<string, unknown> } | null = null;
+  try {
+    const raw = await fs.readFile(mcpConfigPath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    // Validate parsed JSON is a plain object we can merge into
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      existingConfig = parsed;
+    }
+  } catch {
+    // File doesn't exist or isn't valid JSON
+  }
 
-  console.log(chalk.bold('\nGlobal Configuration (optional):'));
-  console.log(chalk.dim('  To use Qdrant backend, create ~/.lien/config.json:'));
-  console.log(chalk.dim('  {'));
-  console.log(chalk.dim('    "backend": "qdrant",'));
-  console.log(chalk.dim('    "qdrant": {'));
-  console.log(chalk.dim('      "url": "http://localhost:6333",'));
-  console.log(chalk.dim('      "apiKey": "optional-api-key"'));
-  console.log(chalk.dim('    }'));
-  console.log(chalk.dim('  }'));
-  console.log(chalk.dim('\n  Or use environment variables:'));
-  console.log(chalk.dim('    LIEN_BACKEND=qdrant'));
-  console.log(chalk.dim('    LIEN_QDRANT_URL=http://localhost:6333'));
-  console.log(chalk.dim('    LIEN_QDRANT_API_KEY=your-key'));
+  if (existingConfig?.mcpServers?.lien) {
+    // Already configured
+    console.log(chalk.green('\n✓ Already configured — .cursor/mcp.json contains lien entry'));
+  } else if (existingConfig) {
+    // Merge lien into existing config, validating mcpServers is a plain object
+    const servers = existingConfig.mcpServers;
+    const safeServers =
+      servers && typeof servers === 'object' && !Array.isArray(servers)
+        ? (servers as Record<string, unknown>)
+        : {};
+    safeServers.lien = MCP_CONFIG;
+    existingConfig.mcpServers = safeServers;
+    await fs.writeFile(mcpConfigPath, JSON.stringify(existingConfig, null, 2) + '\n');
+    console.log(chalk.green('\n✓ Added lien to existing .cursor/mcp.json'));
+  } else {
+    // Create new .cursor/mcp.json
+    await fs.mkdir(cursorDir, { recursive: true });
+    const config = { mcpServers: { lien: MCP_CONFIG } };
+    await fs.writeFile(mcpConfigPath, JSON.stringify(config, null, 2) + '\n');
+    console.log(chalk.green('\n✓ Created .cursor/mcp.json'));
+  }
+
+  console.log(chalk.dim('  Restart Cursor to activate.\n'));
 
   // Check if old config exists and warn
-  const rootDir = options.path || process.cwd();
-  const configPath = path.join(rootDir, '.lien.config.json');
+  const legacyConfigPath = path.join(rootDir, '.lien.config.json');
   try {
-    await fs.access(configPath);
-    console.log(chalk.yellow('\n⚠️  Note: .lien.config.json found but no longer used'));
+    await fs.access(legacyConfigPath);
+    console.log(chalk.yellow('⚠️  Note: .lien.config.json found but no longer used'));
     console.log(chalk.dim('  You can safely delete it.'));
   } catch {
     // Config doesn't exist - that's fine

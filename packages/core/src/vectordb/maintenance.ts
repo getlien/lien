@@ -11,7 +11,7 @@ import { insertBatch } from './batch-insert.js';
  * Drops the table AND cleans up the .lance directory to prevent corrupted state.
  */
 export async function clear(
-  db: LanceDBConnection,
+  db: LanceDBConnection | null,
   table: LanceDBTable | null,
   tableName: string,
   dbPath?: string,
@@ -53,7 +53,7 @@ export async function clear(
 /**
  * Delete all chunks from a specific file
  */
-export async function deleteByFile(table: LanceDBTable, filepath: string): Promise<void> {
+export async function deleteByFile(table: LanceDBTable | null, filepath: string): Promise<void> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }

@@ -44,10 +44,10 @@ describe('VectorDB Maintenance Operations', () => {
     });
 
     it('should throw DatabaseError if db is not initialized', async () => {
-      await expect(clear(asDb(null), asTable({ name: 'test' }), 'test_table')).rejects.toThrow(
+      await expect(clear(null, asTable({ name: 'test' }), 'test_table')).rejects.toThrow(
         DatabaseError,
       );
-      await expect(clear(asDb(null), asTable({ name: 'test' }), 'test_table')).rejects.toThrow(
+      await expect(clear(null, asTable({ name: 'test' }), 'test_table')).rejects.toThrow(
         'Vector database not initialized',
       );
     });
@@ -108,8 +108,8 @@ describe('VectorDB Maintenance Operations', () => {
     });
 
     it('should throw DatabaseError if table is null', async () => {
-      await expect(deleteByFile(asTable(null), 'src/test.ts')).rejects.toThrow(DatabaseError);
-      await expect(deleteByFile(asTable(null), 'src/test.ts')).rejects.toThrow(
+      await expect(deleteByFile(null, 'src/test.ts')).rejects.toThrow(DatabaseError);
+      await expect(deleteByFile(null, 'src/test.ts')).rejects.toThrow(
         'Vector database not initialized',
       );
     });

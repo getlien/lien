@@ -11,10 +11,8 @@ describe('VectorDB Query Operations', () => {
     it('should throw DatabaseError if table is null', async () => {
       const queryVector = new Float32Array([1, 2, 3]);
 
-      await expect(search(asTable(null), queryVector, 5)).rejects.toThrow(DatabaseError);
-      await expect(search(asTable(null), queryVector, 5)).rejects.toThrow(
-        'Vector database not initialized',
-      );
+      await expect(search(null, queryVector, 5)).rejects.toThrow(DatabaseError);
+      await expect(search(null, queryVector, 5)).rejects.toThrow('Vector database not initialized');
     });
 
     it('should perform vector search with query boosting', async () => {
@@ -142,7 +140,7 @@ describe('VectorDB Query Operations', () => {
 
   describe('scanWithFilter', () => {
     it('should throw DatabaseError if table is null', async () => {
-      await expect(scanWithFilter(asTable(null), {})).rejects.toThrow(DatabaseError);
+      await expect(scanWithFilter(null, {})).rejects.toThrow(DatabaseError);
     });
 
     it('should filter by language', async () => {
@@ -437,7 +435,7 @@ describe('VectorDB Query Operations', () => {
 
   describe('querySymbols', () => {
     it('should throw DatabaseError if table is null', async () => {
-      await expect(querySymbols(asTable(null), {})).rejects.toThrow(DatabaseError);
+      await expect(querySymbols(null, {})).rejects.toThrow(DatabaseError);
     });
 
     it('should filter by language', async () => {
@@ -1097,7 +1095,7 @@ describe('VectorDB Query Operations', () => {
     });
 
     it('should throw DatabaseError if table is null', async () => {
-      const gen = scanPaginated(asTable(null));
+      const gen = scanPaginated(null);
       await expect(gen.next()).rejects.toThrow(DatabaseError);
     });
 

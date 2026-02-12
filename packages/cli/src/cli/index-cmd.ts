@@ -9,6 +9,7 @@ import {
   getEmbeddingMessage,
   getModelLoadingMessage,
 } from '../utils/loading-messages.js';
+import { formatDuration } from './utils.js';
 
 /**
  * Clears the existing index and manifest (for --force flag).
@@ -154,29 +155,30 @@ function createProgressCallback(
 }
 
 /**
- * Displays final result if not already shown via progress callback.
+ * Displays final result with timing information.
+ * If progress callback already showed a message, appends timing as a separate line.
  */
 function displayFinalResult(
   spinner: Ora,
   tracker: ProgressTracker,
   result: { filesIndexed: number; chunksCreated: number },
+  durationMs: number,
 ): void {
-  if (!tracker.completedViaProgress) {
-    if (result.filesIndexed === 0) {
-      spinner.succeed(chalk.green('Index is up to date - no changes detected'));
-    } else {
-      spinner.succeed(
-        chalk.green(`Indexed ${result.filesIndexed} files, ${result.chunksCreated} chunks`),
-      );
-    }
+  const timing = formatDuration(durationMs);
+  if (tracker.completedViaProgress) {
+    console.log(chalk.dim(`  Completed in ${timing}`));
+  } else if (result.filesIndexed === 0) {
+    spinner.succeed(chalk.green(`Index is up to date - no changes detected in ${timing}`));
+  } else {
+    spinner.succeed(
+      chalk.green(
+        `Indexed ${result.filesIndexed} files, ${result.chunksCreated} chunks in ${timing}`,
+      ),
+    );
   }
 }
 
-export async function indexCommand(options: {
-  watch?: boolean;
-  verbose?: boolean;
-  force?: boolean;
-}) {
+export async function indexCommand(options: { verbose?: boolean; force?: boolean }) {
   showCompactBanner();
 
   try {
@@ -212,11 +214,7 @@ export async function indexCommand(options: {
     }
 
     // Display final result
-    displayFinalResult(spinner, tracker, result);
-
-    if (options.watch) {
-      console.log(chalk.yellow('\n⚠️  Watch mode not yet implemented'));
-    }
+    displayFinalResult(spinner, tracker, result, result.durationMs);
   } catch (error) {
     console.error(chalk.red('Error during indexing:'), error);
     process.exit(1);

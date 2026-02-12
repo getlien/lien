@@ -318,7 +318,7 @@ function dbRecordToSearchResult(r: DBRecord, query?: string): SearchResult {
  * Search the vector database
  */
 export async function search(
-  table: LanceDBTable,
+  table: LanceDBTable | null,
   queryVector: Float32Array,
   limit: number = 5,
   query?: string,
@@ -438,7 +438,7 @@ function buildFileWhereClause(file: string | string[]): string {
 }
 
 export async function scanWithFilter(
-  table: LanceDBTable,
+  table: LanceDBTable | null,
   options: {
     file?: string | string[];
     language?: string;
@@ -572,7 +572,7 @@ function buildLegacySymbols(r: DBRecord) {
  * Scans all records in the database to find matching symbols.
  */
 export async function querySymbols(
-  table: LanceDBTable,
+  table: LanceDBTable | null,
   options: {
     language?: string;
     pattern?: string;
@@ -621,7 +621,7 @@ export async function querySymbols(
  * Returns all records matching the optional filters.
  */
 export async function scanAll(
-  table: LanceDBTable,
+  table: LanceDBTable | null,
   options: {
     language?: string;
     pattern?: string;
@@ -650,7 +650,7 @@ export async function scanAll(
  * Yields pages of SearchResult[] to avoid loading everything into memory.
  */
 export async function* scanPaginated(
-  table: LanceDBTable,
+  table: LanceDBTable | null,
   options: {
     pageSize?: number;
     filter?: string;

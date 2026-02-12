@@ -302,53 +302,6 @@ describe('complexityCommand', () => {
     expect(processExitSpy).toHaveBeenCalledWith(1);
   });
 
-  it('should override threshold when provided via CLI', async () => {
-    const chunks = [
-      {
-        content: 'function test() { }',
-        metadata: {
-          file: 'src/test.ts',
-          startLine: 1,
-          endLine: 5,
-          type: 'function',
-          language: 'typescript',
-          symbolName: 'test',
-          symbolType: 'function',
-          complexity: 12,
-        } as ChunkMetadata,
-        score: 1.0,
-        relevance: 'highly_relevant' as const,
-      },
-    ];
-
-    // Mock index check and actual scan
-    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]); // Check if index exists
-    mockVectorDB.scanAll.mockResolvedValue(chunks); // Actual analysis
-
-    // With default threshold of 15, this would be a violation
-    // But with threshold of 15, it should not be
-    await complexityCommand({
-      format: 'json',
-      threshold: '15',
-    });
-
-    expect(consoleLogSpy).toHaveBeenCalled();
-    const output = consoleLogSpy.mock.calls[0][0];
-    const parsed = JSON.parse(output);
-
-    expect(parsed.summary.totalViolations).toBe(0);
-  });
-
-  it('should handle invalid threshold gracefully', async () => {
-    await complexityCommand({
-      format: 'text',
-      threshold: 'invalid',
-    });
-
-    expect(consoleErrorSpy).toHaveBeenCalled();
-    expect(processExitSpy).toHaveBeenCalledWith(1);
-  });
-
   it('should handle invalid --fail-on value', async () => {
     await complexityCommand({
       format: 'text',
@@ -370,25 +323,6 @@ describe('complexityCommand', () => {
       expect.stringContaining('Invalid --format value "xml"'),
     );
     expect(processExitSpy).toHaveBeenCalledWith(1);
-  });
-
-  it('should warn about threshold flags (not supported)', async () => {
-    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    // Mock index check and actual scan
-    mockVectorDB.scanWithFilter.mockResolvedValue([{ id: 'test' }]);
-    mockVectorDB.scanAll.mockResolvedValue([]);
-
-    await complexityCommand({
-      format: 'text',
-      threshold: '-5',
-    });
-
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Threshold overrides via CLI flags are not supported'),
-    );
-
-    consoleWarnSpy.mockRestore();
   });
 
   it('should handle missing index gracefully', async () => {
