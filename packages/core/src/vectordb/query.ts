@@ -346,7 +346,7 @@ export async function search(
     // Detect corrupted index
     if (errorMsg.includes('Not found:') || errorMsg.includes('.lance')) {
       throw new DatabaseError(
-        `Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory.`,
+        `Index appears corrupted or outdated. Please restart the MCP server or run 'lien index' in the project directory.`,
         { originalError: error },
       );
     }
@@ -410,7 +410,7 @@ function toUnscoredSearchResults(records: DBRecord[], limit: number): SearchResu
  *
  * Example: `path"to"file.ts` → `path""to""file.ts`
  */
-function escapeSqlString(value: string): string {
+export function escapeSqlString(value: string): string {
   return value.replace(/"/g, '""');
 }
 

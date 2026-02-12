@@ -1,10 +1,10 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Error thrown when config file exists but has invalid syntax or structure.
@@ -254,7 +254,7 @@ async function getGitRemoteUrl(rootDir: string): Promise<string | null> {
 
   // Get remote URL (prefer 'origin', fallback to first remote)
   try {
-    const { stdout } = await execAsync('git remote get-url origin', {
+    const { stdout } = await execFileAsync('git', ['remote', 'get-url', 'origin'], {
       cwd: rootDir,
       timeout: 5000,
     });
@@ -262,14 +262,14 @@ async function getGitRemoteUrl(rootDir: string): Promise<string | null> {
   } catch {
     // If origin doesn't exist, get first remote
     try {
-      const { stdout: remoteList } = await execAsync('git remote', {
+      const { stdout: remoteList } = await execFileAsync('git', ['remote'], {
         cwd: rootDir,
         timeout: 5000,
       });
       const remoteName = remoteList.trim().split('\n')[0];
       if (!remoteName) return null;
 
-      const { stdout } = await execAsync(`git remote get-url ${remoteName}`, {
+      const { stdout } = await execFileAsync('git', ['remote', 'get-url', remoteName], {
         cwd: rootDir,
         timeout: 5000,
       });

@@ -5,6 +5,7 @@ import type { ChunkMetadata } from '../indexer/types.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { writeVersionFile } from './version.js';
 import { insertBatch } from './batch-insert.js';
+import { escapeSqlString } from './query.js';
 
 /**
  * Clear all data from the vector database.
@@ -59,7 +60,7 @@ export async function deleteByFile(table: LanceDBTable | null, filepath: string)
   }
 
   try {
-    await table.delete(`file = "${filepath}"`);
+    await table.delete(`file = "${escapeSqlString(filepath)}"`);
   } catch (error) {
     throw wrapError(error, 'Failed to delete file from vector database');
   }

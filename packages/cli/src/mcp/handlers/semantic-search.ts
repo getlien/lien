@@ -117,7 +117,7 @@ export async function handleSemanticSearch(
 
     if (shaped.length === 0) {
       notes.push(
-        '0 results. Try rephrasing as a full question (e.g. "How does X work?"), or use grep for exact string matches. If the codebase was recently updated, run "lien reindex".',
+        '0 results. Try rephrasing as a full question (e.g. "How does X work?"), or use grep for exact string matches. If the codebase was recently updated, run "lien index".',
       );
     }
 

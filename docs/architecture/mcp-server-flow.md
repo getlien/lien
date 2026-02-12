@@ -26,7 +26,7 @@ sequenceDiagram
     
     Note over CLI,Embeddings: Phase 2: Initialize Services
     CLI->>Embeddings: initialize()
-    Note right of Embeddings: WorkerEmbeddings runs in worker thread<br/>Downloads model if first run (~50MB, cached)
+    Note right of Embeddings: WorkerEmbeddings runs in worker thread<br/>Downloads model if first run (~100MB, cached)
     Embeddings->>Embeddings: Load all-MiniLM-L6-v2
     Embeddings-->>CLI: Ready (takes 3-5s)
     

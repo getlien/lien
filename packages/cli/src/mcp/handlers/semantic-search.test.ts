@@ -169,7 +169,7 @@ describe('handleSemanticSearch', () => {
       expect(parsed.results).toHaveLength(0);
       expect(parsed.note).toContain('0 results');
       expect(parsed.note).toContain('grep');
-      expect(parsed.note).toContain('lien reindex');
+      expect(parsed.note).toContain('lien index');
     });
   });
 

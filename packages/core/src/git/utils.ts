@@ -1,9 +1,9 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Checks if a directory is a git repository.
@@ -30,7 +30,7 @@ export async function isGitRepo(rootDir: string): Promise<boolean> {
  */
 export async function getCurrentBranch(rootDir: string): Promise<string> {
   try {
-    const { stdout } = await execAsync('git rev-parse --abbrev-ref HEAD', {
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: rootDir,
       timeout: 5000, // 5 second timeout
     });
@@ -49,7 +49,7 @@ export async function getCurrentBranch(rootDir: string): Promise<string> {
  */
 export async function getCurrentCommit(rootDir: string): Promise<string> {
   try {
-    const { stdout } = await execAsync('git rev-parse HEAD', {
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
       cwd: rootDir,
       timeout: 5000,
     });
@@ -74,10 +74,14 @@ export async function getChangedFiles(
   toRef: string,
 ): Promise<string[]> {
   try {
-    const { stdout } = await execAsync(`git diff --name-only ${fromRef}...${toRef}`, {
-      cwd: rootDir,
-      timeout: 10000, // 10 second timeout for diffs
-    });
+    const { stdout } = await execFileAsync(
+      'git',
+      ['diff', '--name-only', `${fromRef}...${toRef}`],
+      {
+        cwd: rootDir,
+        timeout: 10000, // 10 second timeout for diffs
+      },
+    );
 
     const files = stdout
       .trim()
@@ -104,10 +108,14 @@ export async function getChangedFilesInCommit(
   commitSha: string,
 ): Promise<string[]> {
   try {
-    const { stdout } = await execAsync(`git diff-tree --no-commit-id --name-only -r ${commitSha}`, {
-      cwd: rootDir,
-      timeout: 10000,
-    });
+    const { stdout } = await execFileAsync(
+      'git',
+      ['diff-tree', '--no-commit-id', '--name-only', '-r', commitSha],
+      {
+        cwd: rootDir,
+        timeout: 10000,
+      },
+    );
 
     const files = stdout
       .trim()
@@ -137,7 +145,7 @@ export async function getChangedFilesBetweenCommits(
   toCommit: string,
 ): Promise<string[]> {
   try {
-    const { stdout } = await execAsync(`git diff --name-only ${fromCommit} ${toCommit}`, {
+    const { stdout } = await execFileAsync('git', ['diff', '--name-only', fromCommit, toCommit], {
       cwd: rootDir,
       timeout: 10000,
     });
@@ -161,7 +169,7 @@ export async function getChangedFilesBetweenCommits(
  */
 export async function isGitAvailable(): Promise<boolean> {
   try {
-    await execAsync('git --version', { timeout: 3000 });
+    await execFileAsync('git', ['--version'], { timeout: 3000 });
     return true;
   } catch {
     return false;
