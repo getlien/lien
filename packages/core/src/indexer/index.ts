@@ -36,6 +36,7 @@ import type { EmbeddingService } from '../embeddings/types.js';
 import { ChunkBatchProcessor } from './chunk-batch-processor.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
 import { extractRepoId } from '../utils/repo-id.js';
+import type { CodeChunk } from './types.js';
 
 /**
  * Options for indexing a codebase
@@ -53,6 +54,8 @@ export interface IndexingOptions {
   config?: LienConfig;
   /** Progress callback for external UI */
   onProgress?: (progress: IndexingProgress) => void;
+  /** Skip embedding generation and VectorDB storage — return raw chunks in-memory */
+  skipEmbeddings?: boolean;
 }
 
 /**
@@ -76,6 +79,8 @@ export interface IndexingResult {
   durationMs: number;
   incremental: boolean;
   error?: string;
+  /** Raw chunks when skipEmbeddings is true */
+  chunks?: CodeChunk[];
 }
 
 /** Extracted config values with defaults for indexing */
@@ -579,6 +584,97 @@ async function performFullIndex(
 }
 
 /**
+ * Perform chunk-only indexing (no embeddings or VectorDB).
+ * Returns raw chunks in-memory for direct analysis.
+ */
+async function performChunkOnlyIndex(
+  rootDir: string,
+  options: IndexingOptions,
+  startTime: number,
+): Promise<IndexingResult> {
+  // 1. Scan for files
+  options.onProgress?.({ phase: 'scanning', message: 'Scanning codebase...' });
+  const files = await scanFilesToIndex(rootDir);
+
+  if (files.length === 0) {
+    return {
+      success: false,
+      filesIndexed: 0,
+      chunksCreated: 0,
+      durationMs: Date.now() - startTime,
+      incremental: false,
+      error: 'No files found to index',
+    };
+  }
+
+  const indexConfig = getIndexingConfig(rootDir);
+  const allChunks: CodeChunk[] = [];
+  let filesProcessed = 0;
+
+  options.onProgress?.({
+    phase: 'indexing',
+    message: `Processing ${files.length} files (chunk-only)...`,
+    filesTotal: files.length,
+    filesProcessed: 0,
+  });
+
+  const limit = pLimit(indexConfig.concurrency);
+  await Promise.all(
+    files.map(file =>
+      limit(async () => {
+        try {
+          const absolutePath = path.isAbsolute(file) ? file : path.join(rootDir, file);
+          const relativePath = normalizeToRelativePath(file, rootDir);
+          const content = await fs.readFile(absolutePath, 'utf-8');
+
+          const chunks = chunkFile(relativePath, content, {
+            chunkSize: indexConfig.chunkSize,
+            chunkOverlap: indexConfig.chunkOverlap,
+            useAST: indexConfig.useAST,
+            astFallback: indexConfig.astFallback,
+            repoId: indexConfig.repoId,
+            orgId: indexConfig.orgId,
+          });
+
+          if (chunks.length > 0) {
+            allChunks.push(...chunks);
+            filesProcessed++;
+          }
+
+          options.onProgress?.({
+            phase: 'indexing',
+            message: `Processing files...`,
+            filesTotal: files.length,
+            filesProcessed: filesProcessed,
+          });
+        } catch (error) {
+          console.error(
+            `[indexer] Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }),
+    ),
+  );
+
+  options.onProgress?.({
+    phase: 'complete',
+    message: 'Chunk-only indexing complete',
+    filesTotal: files.length,
+    filesProcessed,
+    chunksProcessed: allChunks.length,
+  });
+
+  return {
+    success: true,
+    filesIndexed: filesProcessed,
+    chunksCreated: allChunks.length,
+    durationMs: Date.now() - startTime,
+    incremental: false,
+    chunks: allChunks,
+  };
+}
+
+/**
  * Index a codebase, creating vector embeddings for semantic search.
  *
  * This is the main entry point for indexing. It:
@@ -609,6 +705,11 @@ async function performFullIndex(
 export async function indexCodebase(options: IndexingOptions = {}): Promise<IndexingResult> {
   const rootDir = options.rootDir ?? process.cwd();
   const startTime = Date.now();
+
+  // Fast path: skip embeddings and VectorDB, return raw chunks
+  if (options.skipEmbeddings) {
+    return await performChunkOnlyIndex(rootDir, options, startTime);
+  }
 
   try {
     options.onProgress?.({ phase: 'initializing', message: 'Loading configuration...' });

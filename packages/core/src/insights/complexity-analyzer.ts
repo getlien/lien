@@ -7,7 +7,7 @@ import type {
   HalsteadDetails,
 } from './types.js';
 import { RISK_ORDER } from './types.js';
-import type { ChunkMetadata } from '../indexer/types.js';
+import type { ChunkMetadata, CodeChunk } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
 import type { SearchResult } from '../vectordb/types.js';
 
@@ -68,6 +68,32 @@ export class ComplexityAnalyzer {
 
     // 5. Enrich files with violations with dependency data
     this.enrichWithDependencies(report, allChunks as SearchResult[]);
+
+    return report;
+  }
+
+  /**
+   * Analyze complexity from in-memory chunks (no VectorDB needed).
+   * Use with indexCodebase({ skipEmbeddings: true }) for fast complexity-only analysis.
+   */
+  analyzeFromChunks(chunks: CodeChunk[], files?: string[]): ComplexityReport {
+    // Map CodeChunk → SearchResult
+    const allResults: SearchResult[] = chunks.map(chunk => ({
+      content: chunk.content,
+      metadata: chunk.metadata,
+      score: 0,
+      relevance: 'not_relevant' as const,
+    }));
+
+    // Filter to specified files if provided
+    const filtered = files
+      ? allResults.filter(c => this.matchesAnyFile(c.metadata.file, files))
+      : allResults;
+
+    // Find violations, build report, enrich with dependencies
+    const violations = this.findViolations(filtered);
+    const report = this.buildReport(violations, filtered);
+    this.enrichWithDependencies(report, allResults);
 
     return report;
   }

@@ -8,7 +8,6 @@ import { execFileSync } from 'child_process';
 import collect from 'collect.js';
 import {
   indexCodebase,
-  createVectorDB,
   ComplexityAnalyzer,
   RISK_ORDER,
   type ComplexityReport,
@@ -146,33 +145,22 @@ export async function runComplexityAnalysis(
   }
 
   try {
-    // Try incremental indexing first, then fall back to force if it produces
-    // 0 chunks (can happen when a prior indexCodebase() call — e.g. base
-    // branch in delta tracking — left a stale manifest in the shared DB).
-    logger.info('Indexing codebase...');
-    let indexResult = await indexCodebase({ rootDir });
-
-    if (indexResult.success && indexResult.chunksCreated === 0) {
-      logger.info('Incremental index produced 0 chunks, retrying with force...');
-      indexResult = await indexCodebase({ rootDir, force: true });
-    }
+    // Use skipEmbeddings for fast chunk-only indexing (no VectorDB needed)
+    logger.info('Indexing codebase (chunk-only)...');
+    const indexResult = await indexCodebase({ rootDir, skipEmbeddings: true });
 
     logger.info(
       `Indexing complete: ${indexResult.chunksCreated} chunks from ${indexResult.filesIndexed} files (success: ${indexResult.success})`,
     );
-    if (!indexResult.success || indexResult.chunksCreated === 0) {
+    if (!indexResult.success || !indexResult.chunks || indexResult.chunks.length === 0) {
       logger.warning(`Indexing produced no chunks for ${rootDir}`);
       return null;
     }
 
-    // Load the vector database (uses global config or defaults to LanceDB)
-    const vectorDB = await createVectorDB(rootDir);
-    await vectorDB.initialize();
-
-    // Run complexity analysis (uses default thresholds)
+    // Run complexity analysis from in-memory chunks (no VectorDB needed)
     logger.info('Analyzing complexity...');
-    const analyzer = new ComplexityAnalyzer(vectorDB);
-    const report = await analyzer.analyze(files);
+    const analyzer = new ComplexityAnalyzer(null as any);
+    const report = analyzer.analyzeFromChunks(indexResult.chunks, files);
     logger.info(`Found ${report.summary.totalViolations} violations`);
 
     return report;
