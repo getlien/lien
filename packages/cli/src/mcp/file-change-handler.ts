@@ -19,12 +19,10 @@ import type { LogFn } from './types.js';
 async function handleFileDeletion(
   filepath: string,
   vectorDB: VectorDBInterface,
+  manifest: ManifestManager,
   log: LogFn,
 ): Promise<void> {
   log(`🗑️  File deleted: ${filepath}`);
-
-  // Initialize manifest manager before any operations to ensure consistency
-  const manifest = new ManifestManager(vectorDB.dbPath);
 
   try {
     await vectorDB.deleteByFile(filepath);
@@ -37,15 +35,14 @@ async function handleFileDeletion(
 }
 
 /**
- * Handle batch deletions with a shared ManifestManager instance.
- * Avoids creating a new ManifestManager per deletion.
+ * Handle batch deletions, removing files from both the vector DB and manifest.
  */
 async function handleBatchDeletions(
   deletedFiles: string[],
   vectorDB: VectorDBInterface,
+  manifest: ManifestManager,
   log: LogFn,
 ): Promise<void> {
-  const manifest = new ManifestManager(vectorDB.dbPath);
   const failures: string[] = [];
 
   for (const filepath of deletedFiles) {
@@ -72,10 +69,9 @@ async function handleBatchDeletions(
 async function canSkipReindex(
   filepath: string,
   rootDir: string,
-  vectorDB: VectorDBInterface,
+  manifest: ManifestManager,
   log: LogFn,
 ): Promise<boolean> {
-  const manifest = new ManifestManager(vectorDB.dbPath);
   const normalizedPath = normalizeToRelativePath(filepath, rootDir);
 
   const manifestData = await manifest.load();
@@ -108,6 +104,7 @@ async function handleSingleFileChange(
   rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
+  manifest: ManifestManager,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
 ): Promise<void> {
@@ -115,7 +112,7 @@ async function handleSingleFileChange(
 
   if (type === 'change') {
     try {
-      if (await canSkipReindex(filepath, rootDir, vectorDB, log)) return;
+      if (await canSkipReindex(filepath, rootDir, manifest, log)) return;
     } catch (error) {
       log(`Content hash check failed, will reindex: ${error}`, 'warning');
     }
@@ -226,12 +223,11 @@ async function updateUnchangedMtimes(
 async function filterModifiedFilesByHash(
   modifiedFiles: string[],
   rootDir: string,
-  vectorDB: VectorDBInterface,
+  manifest: ManifestManager,
   log: LogFn,
 ): Promise<string[]> {
   if (modifiedFiles.length === 0) return [];
 
-  const manifest = new ManifestManager(vectorDB.dbPath);
   const manifestData = await manifest.load();
   if (!manifestData) return modifiedFiles;
 
@@ -253,7 +249,7 @@ async function filterModifiedFilesByHash(
 async function prepareFilesForReindexing(
   event: FileChangeEvent,
   rootDir: string,
-  vectorDB: VectorDBInterface,
+  manifest: ManifestManager,
   log: LogFn,
 ): Promise<{ filesToIndex: string[]; deletedFiles: string[] }> {
   const addedFiles = event.added || [];
@@ -263,7 +259,7 @@ async function prepareFilesForReindexing(
   // Filter modified files by content hash, with error handling
   let modifiedFilesToReindex: string[] = [];
   try {
-    modifiedFilesToReindex = await filterModifiedFilesByHash(modifiedFiles, rootDir, vectorDB, log);
+    modifiedFilesToReindex = await filterModifiedFilesByHash(modifiedFiles, rootDir, manifest, log);
   } catch (error) {
     // If hash-based filtering fails, fall back to reindexing all modified files
     log(`Hash-based filtering failed, will reindex all modified files: ${error}`, 'warning');
@@ -285,6 +281,7 @@ async function executeReindexOperations(
   rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
+  manifest: ManifestManager,
   log: LogFn,
 ): Promise<void> {
   const operations: Promise<unknown>[] = [];
@@ -297,7 +294,7 @@ async function executeReindexOperations(
   }
 
   if (deletedFiles.length > 0) {
-    operations.push(handleBatchDeletions(deletedFiles, vectorDB, log));
+    operations.push(handleBatchDeletions(deletedFiles, vectorDB, manifest, log));
   }
 
   await Promise.all(operations);
@@ -312,6 +309,7 @@ async function handleBatchEvent(
   rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
+  manifest: ManifestManager,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
 ): Promise<void> {
@@ -319,7 +317,7 @@ async function handleBatchEvent(
   const { filesToIndex, deletedFiles } = await prepareFilesForReindexing(
     event,
     rootDir,
-    vectorDB,
+    manifest,
     log,
   );
   const allFiles = [...filesToIndex, ...deletedFiles];
@@ -333,7 +331,15 @@ async function handleBatchEvent(
   reindexStateManager.startReindex(allFiles);
 
   try {
-    await executeReindexOperations(filesToIndex, deletedFiles, rootDir, vectorDB, embeddings, log);
+    await executeReindexOperations(
+      filesToIndex,
+      deletedFiles,
+      rootDir,
+      vectorDB,
+      embeddings,
+      manifest,
+      log,
+    );
 
     const duration = Date.now() - startTime;
     reindexStateManager.completeReindex(duration);
@@ -352,6 +358,7 @@ async function handleBatchEvent(
 async function handleUnlinkEvent(
   filepath: string,
   vectorDB: VectorDBInterface,
+  manifest: ManifestManager,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
 ): Promise<void> {
@@ -359,7 +366,7 @@ async function handleUnlinkEvent(
   reindexStateManager.startReindex([filepath]);
 
   try {
-    await handleFileDeletion(filepath, vectorDB, log);
+    await handleFileDeletion(filepath, vectorDB, manifest, log);
     const duration = Date.now() - startTime;
     reindexStateManager.completeReindex(duration);
   } catch (error) {
@@ -427,6 +434,7 @@ export function createFileChangeHandler(
   checkAndReconnect: () => Promise<void>,
 ): FileChangeHandler {
   let ignoreFilter: ((relativePath: string) => boolean) | null = null;
+  const manifest = new ManifestManager(vectorDB.dbPath);
 
   return async event => {
     // Invalidate filter when a .gitignore file changes so nested patterns take effect
@@ -447,12 +455,20 @@ export function createFileChangeHandler(
         filtered.added!.length + filtered.modified!.length + filtered.deleted!.length;
       if (totalToProcess === 0) return;
       await checkAndReconnect();
-      await handleBatchEvent(filtered, rootDir, vectorDB, embeddings, log, reindexStateManager);
+      await handleBatchEvent(
+        filtered,
+        rootDir,
+        vectorDB,
+        embeddings,
+        manifest,
+        log,
+        reindexStateManager,
+      );
     } else if (type === 'unlink') {
       // Always process deletions — a previously-indexed file must be removed
       // from the index even if it's now gitignored
       await checkAndReconnect();
-      await handleUnlinkEvent(event.filepath, vectorDB, log, reindexStateManager);
+      await handleUnlinkEvent(event.filepath, vectorDB, manifest, log, reindexStateManager);
     } else {
       // Fallback for single file add/change (backwards compatibility)
       if (isFileIgnored(event.filepath, rootDir, ignoreFilter)) return;
@@ -463,6 +479,7 @@ export function createFileChangeHandler(
         rootDir,
         vectorDB,
         embeddings,
+        manifest,
         log,
         reindexStateManager,
       );

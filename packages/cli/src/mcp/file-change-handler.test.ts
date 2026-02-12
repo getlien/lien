@@ -18,11 +18,13 @@ vi.mock('@liendev/core', async () => {
       return 1;
     }),
     createGitignoreFilter: vi.fn(async () => () => false),
-    ManifestManager: vi.fn().mockImplementation(() => ({
-      load: vi.fn().mockResolvedValue({ files: {} }),
-      removeFile: vi.fn().mockResolvedValue(undefined),
-      transaction: vi.fn().mockResolvedValue(null),
-    })),
+    ManifestManager: vi.fn().mockImplementation(function () {
+      return {
+        load: vi.fn().mockResolvedValue({ files: {} }),
+        removeFile: vi.fn().mockResolvedValue(undefined),
+        transaction: vi.fn().mockResolvedValue(null),
+      };
+    }),
     computeContentHash: vi.fn().mockResolvedValue('hash123'),
     normalizeToRelativePath: vi.fn((filepath: string, _rootDir: string) => filepath),
   };
