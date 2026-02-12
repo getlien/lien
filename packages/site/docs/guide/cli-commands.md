@@ -15,6 +15,8 @@ lien init [options]
 | Option | Description |
 |--------|-------------|
 | `--yes` | Skip prompts and use defaults |
+| `--upgrade` | Upgrade existing config with new options |
+| `--path <path>` | Path to initialize (defaults to current directory) |
 
 ### Behavior
 
@@ -31,6 +33,12 @@ lien init
 
 # Initialize with defaults (non-interactive)
 lien init --yes
+
+# Initialize a specific directory
+lien init --path /path/to/project
+
+# Upgrade existing config with new options
+lien init --upgrade
 ```
 
 ::: tip Zero Config
@@ -449,7 +457,7 @@ Show installed version.
 
 ```bash
 lien --version
-# Output: 0.23.0
+# Output: 0.35.0
 ```
 
 ## lien --help

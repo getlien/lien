@@ -12,7 +12,7 @@ sequenceDiagram
     participant CLI as CLI Command
     participant Config as ConfigService
     participant Scanner as File Scanner
-    participant Framework as Framework Detector
+    participant Framework as Ecosystem Presets
     participant TestAssoc as Test Association Manager
     participant Embeddings as Embedding Service
     participant VectorDB as Vector Database

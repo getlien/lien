@@ -97,6 +97,68 @@ Detected via `composer.json`. Indexes:
 - Excludes: `vendor`, `storage`, `bootstrap/cache`
 - Test patterns: `tests/**/*Test.php`
 
+### Python
+
+Detected via `requirements.txt`, `setup.py`, `pyproject.toml`, or `Pipfile`. Indexes:
+- `**/*.py`
+- Excludes: `venv`, `.venv`, `__pycache__`, `*.pyc`, `.tox`, `.pytest_cache`, `.mypy_cache`, `htmlcov`, `migrations`
+- Test patterns: `test_*.py`, `*_test.py`, `tests/**`
+
+### Django
+
+Detected via `manage.py`. Indexes:
+- `**/*.py`, `**/*.html` (templates)
+- Excludes: `staticfiles`, `media`, `*.sqlite3`
+- Test patterns: `test_*.py`, `*_test.py`
+
+### Ruby
+
+Detected via `Gemfile`. Indexes:
+- `**/*.rb`, `**/*.erb`
+- Excludes: `tmp`, `.bundle`, `log`, `coverage`, `public/assets`, `public/packs`
+- Test patterns: `*_test.rb`, `*_spec.rb`
+
+### Rails
+
+Detected via `bin/rails`. Indexes:
+- `app/**/*.rb`, `config/**/*.rb`, `lib/**/*.rb`
+- Excludes: `db/migrate`, `db/seeds`, `storage`, `tmp`, `log`, `public/assets`, `public/packs`
+- Test patterns: `*_test.rb`, `*_spec.rb`
+
+### Rust
+
+Detected via `Cargo.toml`. Indexes:
+- `**/*.rs`
+- Excludes: `target`
+- Test patterns: `#[test]` annotations, `tests/**`
+
+### JVM (Java/Kotlin/Scala)
+
+Detected via `pom.xml`, `build.gradle`, or `build.gradle.kts`. Indexes:
+- `**/*.java`, `**/*.kt`, `**/*.scala`
+- Excludes: `.gradle`, `target`, `out`, `.idea`, `*.class`
+- Test patterns: `*Test.java`, `*Spec.kt`
+
+### Swift
+
+Detected via `Package.swift`, `*.xcodeproj`, or `*.xcworkspace`. Indexes:
+- `**/*.swift`
+- Excludes: `.build`, `DerivedData`, `*.xcodeproj`, `Pods`
+- Test patterns: `*Tests.swift`
+
+### .NET
+
+Detected via `*.csproj` or `*.sln`. Indexes:
+- `**/*.cs`, `**/*.fs`
+- Excludes: `bin`, `obj`, `packages`, `.vs`
+- Test patterns: `*Tests.cs`, `*Test.cs`
+
+### Astro
+
+Detected via `astro.config.*`. Indexes:
+- `**/*.astro`, `**/*.ts`, `**/*.tsx`
+- Excludes: `.astro`
+
 ### Liquid
 
 Liquid (`.liquid`) files are indexed via the default scan pattern—no ecosystem preset or auto-detection is required. They work out of the box alongside all other supported file types.

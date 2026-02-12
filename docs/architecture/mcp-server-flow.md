@@ -490,26 +490,6 @@ User Experience: No downtime, seamless updates
 [Lien MCP] MCP server running on stdio
 ```
 
-### Verbose Mode
-
-```bash
-lien serve --verbose
-
-# Additional output:
-[Lien MCP] Received tool call: semantic_search
-[Lien MCP] Query: "authentication logic"
-[Lien MCP] Embedding cache miss, generating...
-[Lien MCP] Search found 5 results
-[Lien MCP] Returned response (320ms)
-[Lien MCP] Version check: no changes
-[Lien MCP] Git detected changes: [src/auth.ts]
-[Lien MCP] Background reindex started
-[Lien MCP] ✓ Updated src/auth.ts (3 chunks)
-[Lien MCP] Background reindex complete: 1 files
-[Lien MCP] Index version changed, reconnecting...
-[Lien MCP] Reconnected to updated index
-```
-
 ## Shutdown & Cleanup
 
 ```mermaid
