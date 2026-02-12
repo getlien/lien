@@ -658,8 +658,8 @@ async function performChunkOnlyIndex(
   await Promise.all(
     files.map(file =>
       limit(async () => {
-        const processed = await chunkFileForCollection(file, rootDir, indexConfig, allChunks);
-        if (processed) filesProcessed++;
+        await chunkFileForCollection(file, rootDir, indexConfig, allChunks);
+        filesProcessed++;
         options.onProgress?.({
           phase: 'indexing',
           message: 'Processing files...',

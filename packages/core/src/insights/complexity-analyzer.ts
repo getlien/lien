@@ -30,7 +30,7 @@ export class ComplexityAnalyzer {
     estimatedBugs: 1.5,
   };
 
-  constructor(private vectorDB?: VectorDBInterface) {}
+  constructor(private vectorDB: VectorDBInterface) {}
 
   /**
    * Analyze complexity of codebase or specific files
@@ -44,12 +44,6 @@ export class ComplexityAnalyzer {
     crossRepo?: boolean,
     repoIds?: string[],
   ): Promise<ComplexityReport> {
-    if (!this.vectorDB) {
-      throw new Error(
-        'analyze() requires a VectorDB instance. Use analyzeFromChunks() for in-memory analysis.',
-      );
-    }
-
     // 1. Get all chunks from index
     // For cross-repo, use scanCrossRepo
     // Note: We fetch all chunks even with --files filter because dependency analysis
@@ -82,7 +76,10 @@ export class ComplexityAnalyzer {
    * Analyze complexity from in-memory chunks (no VectorDB needed).
    * Use with indexCodebase({ skipEmbeddings: true }) for fast complexity-only analysis.
    */
-  analyzeFromChunks(chunks: CodeChunk[], files?: string[]): ComplexityReport {
+  static analyzeFromChunks(chunks: CodeChunk[], files?: string[]): ComplexityReport {
+    // Create a lightweight instance to access private analysis methods
+    const instance = new ComplexityAnalyzer(null as unknown as VectorDBInterface);
+
     // Map CodeChunk → SearchResult
     const allResults: SearchResult[] = chunks.map(chunk => ({
       content: chunk.content,
@@ -93,13 +90,13 @@ export class ComplexityAnalyzer {
 
     // Filter to specified files if provided
     const filtered = files
-      ? allResults.filter(c => this.matchesAnyFile(c.metadata.file, files))
+      ? allResults.filter(c => instance.matchesAnyFile(c.metadata.file, files))
       : allResults;
 
     // Find violations, build report, enrich with dependencies
-    const violations = this.findViolations(filtered);
-    const report = this.buildReport(violations, filtered);
-    this.enrichWithDependencies(report, allResults);
+    const violations = instance.findViolations(filtered);
+    const report = instance.buildReport(violations, filtered);
+    instance.enrichWithDependencies(report, allResults);
 
     return report;
   }
