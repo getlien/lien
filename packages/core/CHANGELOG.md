@@ -1,11 +1,34 @@
 # @liendev/core
 
+## 0.36.0
+
+### Minor Changes
+
+- ac9fce5: ### Features
+  - Add `skipEmbeddings` option to `indexCodebase` for chunk-only indexing, ~90% faster for complexity-only workflows (#208)
+  - `lien init` now creates `.cursor/mcp.json` directly instead of printing setup instructions (#205)
+
+  ### Fixes
+  - Address ReDoS, command injection, and MCP schema validation security issues (#200)
+  - Eliminate `instanceof QdrantDB` checks via `VectorDBInterface` cross-repo methods (#201)
+  - Add missing language extensions (.scala, .c, .cpp, .h, .hpp, etc.) to default scan patterns (#201)
+  - Deduplicate results from absolute and relative path entries (#172)
+  - Replace LanceDB `any` types with proper `Connection`/`Table` types (#202)
+  - Cache import index in dependency analyzer, keyed by indexVersion (#202)
+  - Align LanceDB function signatures with runtime null checks (#205)
+  - Remove dead CLI flags (`--watch`, `--threshold`) and add timing to index output (#205)
+  - Resolve npm audit vulnerabilities (#163, #204)
+
+  ### Refactors
+  - Derive `SupportedLanguage` type from `LANGUAGE_IDS` array (#166)
+  - Consolidate path-matching utilities into core package (#165)
+  - Extract shared `extractRepoId` utility, removing 4 duplicate implementations (#202)
+
 ## 0.35.0
 
 ### Minor Changes
 
 - 5c62ebc: ### Features
-
   - Upgrade to @huggingface/transformers v3 with GPU support + `lien config` command (#160)
   - Parallelize embedding generation and file processing for faster indexing (#156)
   - Paginate dependency analysis scans to handle large codebases (#155)
@@ -17,7 +40,6 @@
   - Show result counts in MCP truncation messages (#136)
 
   ### Fixes
-
   - Support nested `.gitignore` files in incremental indexing (#147)
   - Filter gitignored files in watcher and unify ignore patterns (#140, #146)
   - Add checkAndReconnect guard to background git reindex paths (#145)
@@ -26,7 +48,6 @@
   - Remove redundant dependencies provided by @liendev/core in action (#122)
 
   ### Refactors
-
   - Remove dead embeddings.device (cpu|gpu) config (#161)
   - Extract helper functions from indexing pipeline (#158)
   - Split MCP server.ts into focused modules (#153)
@@ -76,7 +97,6 @@
 ### Patch Changes
 
 - 808a1b6: fix: clean up empty string artifacts in metadata, fix list_functions crash with LanceDB storage
-
   - Filter empty strings from metadata fields (parameters, symbolType, symbols) at both AST extraction and MCP response shaping
   - Fix list_functions crash when LanceDB flattens nested symbols objects
   - Consolidate duplicate deduplication logic into shared utility
@@ -88,7 +108,6 @@
 ### Minor Changes
 
 - e592243: - **Smart Batching**: Aggregates multiple rapid file changes into single reindex operations, reducing overhead during "Save All" operations
-
   - **Reindex Status Visibility**: Added `reindexInProgress`, `pendingFileCount`, `lastReindexDurationMs`, and `msSinceLastReindex` to all MCP responses for better AI assistant awareness
   - **Event-Driven Git Detection**: Replaced polling with `.git` directory watching for instant git change detection (~3s latency vs poll interval)
   - **Content-Hash Based Change Detection**: Files touched without content changes (e.g., `touch file.ts`) no longer trigger expensive reindexing
@@ -110,13 +129,11 @@
   Extends symbol-level `get_dependents` support to PHP and Python codebases by implementing export tracking for these languages. The `extractExports()` function now identifies:
 
   **PHP:**
-
   - Classes, traits, interfaces (namespaced and global)
   - Top-level functions
   - All exportable declarations within namespace blocks
 
   **Python:**
-
   - Classes (including `@dataclass` and other decorated classes)
   - Functions and async functions
   - Decorated definitions (e.g., `@property`, `@staticmethod`)
@@ -135,7 +152,6 @@
   "@liendev/core": minor
 
   ***
-
   - **Claude Code support** - New `CLAUDE.md` project rules file for Claude Code integration with tool quick reference and workflow guidelines
 
   - **`list_functions` fallback bug** - Content scan fallback now correctly filters by `symbolName` instead of `content`, preventing markdown docs from appearing in results
@@ -164,7 +180,6 @@
   ```
 
   **What changed:**
-
   - Config parsing errors now show the exact file path
   - Specific syntax error with line/column position
   - Helpful remediation message
@@ -175,7 +190,6 @@
 ### Minor Changes
 
 - 09f7f92: - **Branch & commit tracking for Qdrant backend**: Automatically isolates indices by git branch and commit SHA, preventing data overwrites when working with multiple branches or PRs
-
   - **Fail-fast validation**: Factory now throws clear errors when config file exists but has syntax errors, instead of silently falling back to LanceDB
 
   - Fixed factory silently falling back to LanceDB when Qdrant was explicitly configured but encountered errors
@@ -188,7 +202,6 @@
   - Updated documentation for branch/commit isolation behavior
 
   When using Qdrant backend, all index operations now automatically:
-
   - Extract current git branch and commit SHA
   - Include branch/commit in point IDs to prevent collisions
   - Filter all search queries by current branch (unless explicitly disabled)
@@ -200,7 +213,6 @@
 ### Minor Changes
 
 - 7fe7010: - **Qdrant backend support with multi-tenant capabilities**
-
   - Full `VectorDBInterface` implementation using Qdrant vector database
   - Multi-tenant support via `orgId`/`repoId` payload filtering
   - Collection-per-organization naming: `lien_org_{orgId}`
@@ -208,47 +220,40 @@
   - Version management and reconnection support
 
   - **Cross-repository semantic search**
-
     - Search across all repositories in your organization with a single query
     - Optional repository filtering via `repoIds` parameter
     - Results grouped by repository for easy navigation
     - Works with `semantic_search`, `get_dependents`, and `get_complexity` MCP tools
 
   - **Global configuration system**
-
     - Optional `~/.lien/config.json` for backend selection (only needed for Qdrant)
     - Environment variable support: `LIEN_BACKEND`, `LIEN_QDRANT_URL`, `LIEN_QDRANT_API_KEY`
     - Auto-detection of frameworks and organization ID
     - Zero-config by default (LanceDB remains default backend)
 
   - **Enhanced MCP tools for cross-repo operations**
-
     - `semantic_search`: Added `crossRepo` and `repoIds` parameters
     - `get_dependents`: Cross-repo dependency analysis support
     - `get_complexity`: Organization-wide complexity analysis support
 
   - **Configuration system simplified**
-
     - Removed requirement for per-project `.lien.config.json` files
     - Removed config migration logic and version tracking
     - All functionality now works with sensible defaults
     - Old config files are ignored (no errors, backward compatible)
 
   - **Backend selection via factory pattern**
-
     - `createVectorDB()` factory function selects backend based on global config
     - Automatic fallback to LanceDB if Qdrant configuration is invalid
     - Improved error messages for debugging backend setup
 
   - **Better developer experience**
-
     - Zero configuration required for basic usage
     - Auto-detection of git organization from remote URLs
     - Clearer error messages for missing configuration
     - Comprehensive test coverage for Qdrant backend (448 tests)
 
   - **Code organization**
-
     - Extracted dependency analysis into dedicated module
     - Introduced `QdrantPayloadMapper` for payload transformations
     - Refactored MCP server setup for better modularity
@@ -277,18 +282,15 @@
 - 3ff7a26: Extract core indexing and analysis into `@liendev/core` package
 
   **New: @liendev/core**
-
   - Standalone package for indexing, embeddings, vector search, and complexity analysis
   - Programmatic API for third-party integrations
   - Can be used by cloud workers with warm embeddings
 
   **CLI**
-
   - Now imports from `@liendev/core` instead of bundled modules
   - Thinner package, shared dependency on core
 
   **Action (Breaking)**
-
   - No longer requires `npm install -g @liendev/lien`
   - Simplified setup: just `uses: getlien/lien-action@v1`
   - Automatic delta tracking with `enable_delta_tracking: true`
