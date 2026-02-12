@@ -507,15 +507,7 @@ describe('E2E: Real Open Source Projects', () => {
 
           // Every real-world project has imports
           expect(chunksWithImports.length).toBeGreaterThan(0);
-          // TODO: Restore this assertion once CommonJS module.exports/require()
-          // extraction is implemented (see #212). Currently Express (CommonJS)
-          // returns 0 export metadata because only ES module exports are tracked.
-          // expect(chunksWithExports.length).toBeGreaterThan(0);
-          if (chunksWithExports.length === 0) {
-            console.log(
-              `   ℹ️  No export metadata — project may use CommonJS module.exports (#212)`,
-            );
-          }
+          expect(chunksWithExports.length).toBeGreaterThan(0);
         },
         E2E_TIMEOUT,
       );
