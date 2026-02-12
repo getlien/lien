@@ -45,7 +45,9 @@ export class ComplexityAnalyzer {
     repoIds?: string[],
   ): Promise<ComplexityReport> {
     if (!this.vectorDB) {
-      throw new Error('analyze() requires a VectorDB instance. Use analyzeFromChunks() for in-memory analysis.');
+      throw new Error(
+        'analyze() requires a VectorDB instance. Use analyzeFromChunks() for in-memory analysis.',
+      );
     }
 
     // 1. Get all chunks from index
