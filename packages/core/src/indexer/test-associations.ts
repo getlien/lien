@@ -31,24 +31,17 @@ export function findTestAssociationsFromChunks(
     return normalized;
   };
 
+  // Pre-filter to only test chunks for performance
+  const testChunks = chunks.filter(chunk => isTestFile(chunk.metadata.file));
+
   for (const filepath of filepaths) {
     const normalizedTarget = normalize(filepath);
     const testFiles = new Set<string>();
 
-    for (const chunk of chunks) {
-      const chunkFile = chunk.metadata.file;
-
-      // Skip non-test files
-      if (!isTestFile(chunkFile)) continue;
-
-      // Check if this test file imports the target
+    for (const chunk of testChunks) {
       const imports = chunk.metadata.imports || [];
-      for (const imp of imports) {
-        const normalizedImport = normalize(imp);
-        if (matchesFile(normalizedImport, normalizedTarget)) {
-          testFiles.add(chunkFile);
-          break;
-        }
+      if (imports.some(imp => matchesFile(normalize(imp), normalizedTarget))) {
+        testFiles.add(chunk.metadata.file);
       }
     }
 

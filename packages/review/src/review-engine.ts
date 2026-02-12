@@ -437,6 +437,13 @@ function createDeltaKey(v: { filepath: string; symbolName: string; metricType: s
 }
 
 /**
+ * Check if a line number falls within a range
+ */
+function inRange(line: number, start: number, end: number): boolean {
+  return line >= start && line <= end;
+}
+
+/**
  * Extract the portion of a unified diff patch that overlaps with a given line range.
  * Returns the relevant diff hunk lines, or null if no overlap.
  */
@@ -449,32 +456,25 @@ export function extractRelevantHunk(
   let currentLine = 0;
 
   for (const patchLine of patch.split('\n')) {
-    // Hunk header: @@ -start,count +start,count @@
     const hunkMatch = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
     if (hunkMatch) {
       currentLine = parseInt(hunkMatch[1], 10);
-      // Include the hunk header if the hunk overlaps the range
       continue;
     }
 
+    // Deleted lines don't advance the line counter
     if (patchLine.startsWith('-')) {
-      // Deleted lines: show them as context if we're in the range
-      if (currentLine >= startLine && currentLine <= endLine) {
-        lines.push(patchLine);
-      }
-      // Deleted lines don't increment currentLine
+      if (inRange(currentLine, startLine, endLine)) lines.push(patchLine);
       continue;
     }
 
-    if (patchLine.startsWith('+') && !patchLine.startsWith('+++')) {
-      if (currentLine >= startLine && currentLine <= endLine) {
-        lines.push(patchLine);
-      }
-      currentLine++;
-    } else if (patchLine.startsWith(' ')) {
-      if (currentLine >= startLine && currentLine <= endLine) {
-        lines.push(patchLine);
-      }
+    // Added or context lines advance the line counter
+    const isRelevant = patchLine.startsWith('+')
+      ? !patchLine.startsWith('+++')
+      : patchLine.startsWith(' ');
+
+    if (isRelevant) {
+      if (inRange(currentLine, startLine, endLine)) lines.push(patchLine);
       currentLine++;
     }
   }
@@ -788,6 +788,38 @@ function formatMetricHeaderLine(
 }
 
 /**
+ * Build the body of a grouped comment for a single function.
+ */
+function buildGroupedCommentBody(
+  group: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  aiComments: Map<ComplexityViolation, string>,
+  deltaMap: Map<string, ComplexityDelta>,
+  report: ComplexityReport,
+): string {
+  const firstViolation = group[0].violation;
+  const { commentLine } = group[0];
+
+  const metricHeaders = group
+    .map(({ violation }) => formatMetricHeaderLine(violation, deltaMap))
+    .join('\n');
+
+  const lineNote =
+    commentLine !== firstViolation.startLine
+      ? ` *(\`${firstViolation.symbolName}\` starts at line ${firstViolation.startLine})*`
+      : '';
+
+  const comment = aiComments.get(firstViolation)!;
+
+  const fileData = report.files[firstViolation.filepath];
+  const testNote =
+    fileData && (!fileData.testAssociations || fileData.testAssociations.length === 0)
+      ? '\n\n> No test files found for this function.'
+      : '';
+
+  return `${metricHeaders}${lineNote}\n\n${comment}${testNote}`;
+}
+
+/**
  * Build line comments from violations and AI comments.
  * Groups violations by filepath::symbolName to produce one comment per function.
  */
@@ -810,39 +842,16 @@ function buildLineComments(
 
   const comments: LineComment[] = [];
   for (const [, group] of grouped) {
-    // Use the first entry's comment line for placement
-    const { commentLine } = group[0];
     const firstViolation = group[0].violation;
 
-    // Build multi-metric header
-    const metricHeaders = group
-      .map(({ violation }) => formatMetricHeaderLine(violation, deltaMap))
-      .join('\n');
-
-    // If comment is not on symbol's starting line, note where it actually starts
-    const lineNote =
-      commentLine !== firstViolation.startLine
-        ? ` *(\`${firstViolation.symbolName}\` starts at line ${firstViolation.startLine})*`
-        : '';
-
-    // Use the AI comment from any violation in the group (they all share the same comment)
-    const comment = aiComments.get(firstViolation)!;
-
-    // Add test coverage note if no tests found for this file
-    const fileData = report.files[firstViolation.filepath];
-    const testNote =
-      fileData && (!fileData.testAssociations || fileData.testAssociations.length === 0)
-        ? '\n\n> No test files found for this function.'
-        : '';
-
     logger.info(
-      `Adding grouped comment for ${firstViolation.filepath}:${commentLine} (${firstViolation.symbolName}, ${group.length} metric${group.length === 1 ? '' : 's'})`,
+      `Adding grouped comment for ${firstViolation.filepath}:${group[0].commentLine} (${firstViolation.symbolName}, ${group.length} metric${group.length === 1 ? '' : 's'})`,
     );
 
     comments.push({
       path: firstViolation.filepath,
-      line: commentLine,
-      body: `${metricHeaders}${lineNote}\n\n${comment}${testNote}`,
+      line: group[0].commentLine,
+      body: buildGroupedCommentBody(group, aiComments, deltaMap, report),
     });
   }
 

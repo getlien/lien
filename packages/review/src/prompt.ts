@@ -585,6 +585,54 @@ function getExampleForPrimaryMetric(violations: ComplexityViolation[]): string {
 }
 
 /**
+ * Format a single metric line for a violation
+ */
+function formatMetricLine(v: ComplexityViolation): string {
+  const metricType = v.metricType || 'cyclomatic';
+  const metricLabel = getMetricLabel(metricType);
+  const valueDisplay = formatComplexityValue(metricType, v.complexity);
+  const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
+  const halsteadContext = formatHalsteadContext(v);
+  return `- **${metricLabel}**: ${valueDisplay} (threshold: ${thresholdDisplay}) [${v.severity}]${halsteadContext}`;
+}
+
+/**
+ * Build a prompt section for a single function's violations
+ */
+function buildViolationSection(
+  index: number,
+  key: string,
+  groupViolations: ComplexityViolation[],
+  codeSnippets: Map<string, string>,
+  report: ComplexityReport,
+  diffHunks?: Map<string, string>,
+): string {
+  const first = groupViolations[0];
+  const snippet = codeSnippets.get(key);
+  const snippetSection = snippet ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\`` : '';
+
+  const metricLines = groupViolations.map(formatMetricLine).join('\n');
+
+  const fileData = report.files[first.filepath];
+  const dependencyContext = fileData ? buildDependencyContext(fileData) : '';
+  const fileContext = fileData ? buildFileContext(first.filepath, fileData) : '';
+
+  const testContext =
+    fileData && fileData.testAssociations && fileData.testAssociations.length > 0
+      ? `\n- **Test files**: ${fileData.testAssociations.join(', ')}`
+      : fileData
+        ? '\n- **Tests**: None found — consider adding tests'
+        : '';
+
+  const hunk = diffHunks?.get(key);
+  const diffSection = hunk ? `\n**Changes in this PR (diff):**\n\`\`\`diff\n${hunk}\n\`\`\`` : '';
+
+  return `### ${index}. ${key}
+- **Function**: \`${first.symbolName}\` (${first.symbolType})
+${metricLines}${fileContext}${testContext}${dependencyContext}${snippetSection}${diffSection}`;
+}
+
+/**
  * Build a batched prompt for generating multiple line comments at once
  * This is more efficient than individual prompts as:
  * - System prompt only sent once
@@ -610,46 +658,14 @@ export function buildBatchedCommentsPrompt(
   const violationsText = Array.from(grouped.entries())
     .map(([key, groupViolations]) => {
       sectionIndex++;
-      const first = groupViolations[0];
-      const snippet = codeSnippets.get(key);
-      const snippetSection = snippet ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\`` : '';
-
-      // Build metric lines for all violations in this group
-      const metricLines = groupViolations
-        .map(v => {
-          const metricType = v.metricType || 'cyclomatic';
-          const metricLabel = getMetricLabel(metricType);
-          const valueDisplay = formatComplexityValue(metricType, v.complexity);
-          const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
-          const halsteadContext = formatHalsteadContext(v);
-          return `- **${metricLabel}**: ${valueDisplay} (threshold: ${thresholdDisplay}) [${v.severity}]${halsteadContext}`;
-        })
-        .join('\n');
-
-      // Add dependency context for this violation's file
-      const fileData = report.files[first.filepath];
-      const dependencyContext = fileData ? buildDependencyContext(fileData) : '';
-
-      // Add file-level context (language, type, other violations)
-      const fileContext = fileData ? buildFileContext(first.filepath, fileData) : '';
-
-      // Add test context
-      const testContext =
-        fileData && fileData.testAssociations && fileData.testAssociations.length > 0
-          ? `\n- **Test files**: ${fileData.testAssociations.join(', ')}`
-          : fileData
-            ? '\n- **Tests**: None found — consider adding tests'
-            : '';
-
-      // Add diff hunk showing what changed in this PR
-      const hunk = diffHunks?.get(key);
-      const diffSection = hunk
-        ? `\n**Changes in this PR (diff):**\n\`\`\`diff\n${hunk}\n\`\`\``
-        : '';
-
-      return `### ${sectionIndex}. ${key}
-- **Function**: \`${first.symbolName}\` (${first.symbolType})
-${metricLines}${fileContext}${testContext}${dependencyContext}${snippetSection}${diffSection}`;
+      return buildViolationSection(
+        sectionIndex,
+        key,
+        groupViolations,
+        codeSnippets,
+        report,
+        diffHunks,
+      );
     })
     .join('\n\n');
 
