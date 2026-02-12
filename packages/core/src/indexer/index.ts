@@ -584,6 +584,43 @@ async function performFullIndex(
 }
 
 /**
+ * Process a single file for chunk-only indexing (no embeddings).
+ * Reads the file, chunks it, and appends results to the output array.
+ */
+async function chunkFileForCollection(
+  file: string,
+  rootDir: string,
+  indexConfig: IndexingConfig,
+  output: CodeChunk[],
+): Promise<boolean> {
+  try {
+    const absolutePath = path.isAbsolute(file) ? file : path.join(rootDir, file);
+    const relativePath = normalizeToRelativePath(file, rootDir);
+    const content = await fs.readFile(absolutePath, 'utf-8');
+
+    const chunks = chunkFile(relativePath, content, {
+      chunkSize: indexConfig.chunkSize,
+      chunkOverlap: indexConfig.chunkOverlap,
+      useAST: indexConfig.useAST,
+      astFallback: indexConfig.astFallback,
+      repoId: indexConfig.repoId,
+      orgId: indexConfig.orgId,
+    });
+
+    if (chunks.length > 0) {
+      output.push(...chunks);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error(
+      `[indexer] Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
+}
+
+/**
  * Perform chunk-only indexing (no embeddings or VectorDB).
  * Returns raw chunks in-memory for direct analysis.
  */
@@ -592,7 +629,6 @@ async function performChunkOnlyIndex(
   options: IndexingOptions,
   startTime: number,
 ): Promise<IndexingResult> {
-  // 1. Scan for files
   options.onProgress?.({ phase: 'scanning', message: 'Scanning codebase...' });
   const files = await scanFilesToIndex(rootDir);
 
@@ -622,36 +658,14 @@ async function performChunkOnlyIndex(
   await Promise.all(
     files.map(file =>
       limit(async () => {
-        try {
-          const absolutePath = path.isAbsolute(file) ? file : path.join(rootDir, file);
-          const relativePath = normalizeToRelativePath(file, rootDir);
-          const content = await fs.readFile(absolutePath, 'utf-8');
-
-          const chunks = chunkFile(relativePath, content, {
-            chunkSize: indexConfig.chunkSize,
-            chunkOverlap: indexConfig.chunkOverlap,
-            useAST: indexConfig.useAST,
-            astFallback: indexConfig.astFallback,
-            repoId: indexConfig.repoId,
-            orgId: indexConfig.orgId,
-          });
-
-          if (chunks.length > 0) {
-            allChunks.push(...chunks);
-            filesProcessed++;
-          }
-
-          options.onProgress?.({
-            phase: 'indexing',
-            message: `Processing files...`,
-            filesTotal: files.length,
-            filesProcessed: filesProcessed,
-          });
-        } catch (error) {
-          console.error(
-            `[indexer] Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
+        const processed = await chunkFileForCollection(file, rootDir, indexConfig, allChunks);
+        if (processed) filesProcessed++;
+        options.onProgress?.({
+          phase: 'indexing',
+          message: 'Processing files...',
+          filesTotal: files.length,
+          filesProcessed,
+        });
       }),
     ),
   );
