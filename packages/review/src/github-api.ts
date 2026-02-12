@@ -146,6 +146,7 @@ export async function postPRReview(
   comments: LineComment[],
   summaryBody: string,
   logger: Logger,
+  event: 'COMMENT' | 'REQUEST_CHANGES' = 'COMMENT',
 ): Promise<void> {
   if (comments.length === 0) {
     // No line comments, just post summary as regular comment
@@ -153,7 +154,7 @@ export async function postPRReview(
     return;
   }
 
-  logger.info(`Creating review with ${comments.length} line comments`);
+  logger.info(`Creating review with ${comments.length} line comments (event: ${event})`);
 
   try {
     // Create a review with line comments
@@ -162,7 +163,7 @@ export async function postPRReview(
       repo: prContext.repo,
       pull_number: prContext.pullNumber,
       commit_id: prContext.headSha,
-      event: 'COMMENT', // Don't approve or request changes, just comment
+      event,
       body: summaryBody,
       comments: comments.map(c => ({
         path: c.path,

@@ -28,6 +28,8 @@ export interface ReviewConfig {
   reviewStyle: ReviewStyle;
   enableDeltaTracking: boolean;
   baselineComplexityPath: string;
+  /** Post REQUEST_CHANGES instead of COMMENT when new error-level violations are found */
+  blockOnNewErrors: boolean;
 }
 
 /**

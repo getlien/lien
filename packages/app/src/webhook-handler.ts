@@ -63,6 +63,7 @@ function buildContexts(
       reviewStyle: 'line',
       enableDeltaTracking: true,
       baselineComplexityPath: '',
+      blockOnNewErrors: false,
     },
   };
 }

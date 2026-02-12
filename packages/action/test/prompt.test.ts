@@ -194,8 +194,9 @@ describe('prompt', () => {
 
       expect(prompt).toContain('processData');
       expect(prompt).toContain('handleRequest');
-      expect(prompt).toContain('Complexity**: 23');
-      expect(prompt).toContain('Complexity**: 11');
+      // Violations without metricType default to 'cyclomatic' → 'test paths'
+      expect(prompt).toContain('23 tests');
+      expect(prompt).toContain('11');
     });
 
     it('should include code snippets when provided', () => {

@@ -42,6 +42,7 @@ function getConfig(): ReviewConfig {
     reviewStyle: (reviewStyle === 'summary' ? 'summary' : 'line') as ReviewStyle,
     enableDeltaTracking: core.getInput('enable_delta_tracking') === 'true',
     baselineComplexityPath: core.getInput('baseline_complexity') || '',
+    blockOnNewErrors: core.getInput('block_on_new_errors') === 'true',
   };
 }
 

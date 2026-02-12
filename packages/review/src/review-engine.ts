@@ -1004,7 +1004,24 @@ async function generateAndPostReview(
   const skippedNote = buildSkippedNote(processed.skipped);
   const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
 
-  await postPRReview(octokit, prContext, lineComments, summaryBody, logger);
+  // Determine review event: REQUEST_CHANGES if blocking is enabled and
+  // any new/degraded violation has error severity
+  const hasNewErrors =
+    config.blockOnNewErrors &&
+    processed.newOrDegraded.some(({ violation }) => {
+      const delta = deltaMap.get(createDeltaKey(violation));
+      // Block on new violations or worsened-to-error violations
+      return (
+        violation.severity === 'error' && (!delta || delta.severity === 'new' || delta.delta > 0)
+      );
+    });
+  const event = hasNewErrors ? 'REQUEST_CHANGES' : 'COMMENT';
+
+  if (hasNewErrors) {
+    logger.info('New error-level violations detected — posting REQUEST_CHANGES review');
+  }
+
+  await postPRReview(octokit, prContext, lineComments, summaryBody, logger, event);
   logger.info(`Posted review with ${lineComments.length} line comments`);
 }
 
