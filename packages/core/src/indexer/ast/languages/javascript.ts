@@ -241,10 +241,7 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     }
 
     // exports.foo = ...
-    if (
-      left.type === 'member_expression' &&
-      left.childForFieldName('object')?.text === 'exports'
-    ) {
+    if (left.type === 'member_expression' && left.childForFieldName('object')?.text === 'exports') {
       const prop = left.childForFieldName('property');
       if (prop) addExport(prop.text);
       return;
@@ -266,17 +263,7 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
   ): void {
     // module.exports = { foo, bar, baz: val }
     if (node.type === 'object') {
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const prop = node.namedChild(i);
-        if (!prop) continue;
-
-        if (prop.type === 'shorthand_property_identifier') {
-          addExport(prop.text);
-        } else if (prop.type === 'pair') {
-          const key = prop.childForFieldName('key');
-          if (key) addExport(key.text);
-        }
-      }
+      this.extractObjectExportProperties(node, addExport);
       return;
     }
 
@@ -290,6 +277,23 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
 
     // module.exports = identifier or anything else
     addExport('default');
+  }
+
+  private extractObjectExportProperties(
+    node: Parser.SyntaxNode,
+    addExport: (name: string) => void,
+  ): void {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const prop = node.namedChild(i);
+      if (!prop) continue;
+
+      if (prop.type === 'shorthand_property_identifier') {
+        addExport(prop.text);
+      } else if (prop.type === 'pair') {
+        const key = prop.childForFieldName('key');
+        if (key) addExport(key.text);
+      }
+    }
   }
 }
 
@@ -471,10 +475,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
   // ---------------------------------------------------------------------------
 
   private findRequireCall(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
-    if (
-      node.type === 'call_expression' &&
-      node.childForFieldName('function')?.text === 'require'
-    ) {
+    if (node.type === 'call_expression' && node.childForFieldName('function')?.text === 'require') {
       return node;
     }
     for (let i = 0; i < node.namedChildCount; i++) {
@@ -529,29 +530,27 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
 
   private extractRequireBindingSymbols(nameNode: Parser.SyntaxNode): string[] {
     // const express = require('express')
-    if (nameNode.type === 'identifier') {
-      return [nameNode.text];
-    }
-
+    if (nameNode.type === 'identifier') return [nameNode.text];
     // const { Router, json } = require('express')
-    if (nameNode.type === 'object_pattern') {
-      const symbols: string[] = [];
-      for (let i = 0; i < nameNode.namedChildCount; i++) {
-        const prop = nameNode.namedChild(i);
-        if (!prop) continue;
-
-        if (prop.type === 'shorthand_property_identifier_pattern') {
-          symbols.push(prop.text);
-        } else if (prop.type === 'pair_pattern') {
-          // const { Router: MyRouter } = require('express')
-          const value = prop.childForFieldName('value');
-          if (value) symbols.push(value.text);
-        }
-      }
-      return symbols;
-    }
-
+    if (nameNode.type === 'object_pattern') return this.extractObjectPatternSymbols(nameNode);
     return [];
+  }
+
+  private extractObjectPatternSymbols(node: Parser.SyntaxNode): string[] {
+    const symbols: string[] = [];
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const prop = node.namedChild(i);
+      if (!prop) continue;
+
+      if (prop.type === 'shorthand_property_identifier_pattern') {
+        symbols.push(prop.text);
+      } else if (prop.type === 'pair_pattern') {
+        // const { Router: MyRouter } = require('express')
+        const value = prop.childForFieldName('value');
+        if (value) symbols.push(value.text);
+      }
+    }
+    return symbols;
   }
 
   private processBareRequire(
