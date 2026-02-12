@@ -58,6 +58,8 @@ function wrapInBox(text: string, footer: string, padding = 1): string {
  * Display the gorgeous ANSI Shadow banner (uses stderr for MCP server)
  */
 export function showBanner(): void {
+  if (!process.stderr.isTTY) return;
+
   const banner = figlet.textSync('LIEN', {
     font: 'ANSI Shadow',
     horizontalLayout: 'fitted',
@@ -74,6 +76,8 @@ export function showBanner(): void {
  * Display the gorgeous ANSI Shadow banner (uses stdout for CLI commands)
  */
 export function showCompactBanner(): void {
+  if (!process.stdout.isTTY) return;
+
   const banner = figlet.textSync('LIEN', {
     font: 'ANSI Shadow',
     horizontalLayout: 'fitted',
