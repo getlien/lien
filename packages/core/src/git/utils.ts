@@ -6,6 +6,17 @@ import path from 'path';
 const execFileAsync = promisify(execFile);
 
 /**
+ * Validate a git ref (branch, tag, or SHA) to prevent argument injection.
+ * Even with execFile (no shell), values starting with "-" could be
+ * interpreted as git options.
+ */
+function validateGitRef(ref: string, label: string): void {
+  if (ref.startsWith('-')) {
+    throw new Error(`Invalid ${label}: must not start with "-"`);
+  }
+}
+
+/**
  * Checks if a directory is a git repository.
  *
  * @param rootDir - Directory to check
@@ -73,6 +84,9 @@ export async function getChangedFiles(
   fromRef: string,
   toRef: string,
 ): Promise<string[]> {
+  validateGitRef(fromRef, 'fromRef');
+  validateGitRef(toRef, 'toRef');
+
   try {
     const { stdout } = await execFileAsync(
       'git',
@@ -107,6 +121,8 @@ export async function getChangedFilesInCommit(
   rootDir: string,
   commitSha: string,
 ): Promise<string[]> {
+  validateGitRef(commitSha, 'commitSha');
+
   try {
     const { stdout } = await execFileAsync(
       'git',
@@ -144,6 +160,9 @@ export async function getChangedFilesBetweenCommits(
   fromCommit: string,
   toCommit: string,
 ): Promise<string[]> {
+  validateGitRef(fromCommit, 'fromCommit');
+  validateGitRef(toCommit, 'toCommit');
+
   try {
     const { stdout } = await execFileAsync('git', ['diff', '--name-only', fromCommit, toCommit], {
       cwd: rootDir,

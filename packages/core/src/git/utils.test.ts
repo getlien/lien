@@ -257,6 +257,32 @@ describe('Git Utils', () => {
     });
   });
 
+  describe('git ref validation', () => {
+    it('should reject refs starting with "-" in getChangedFiles', async () => {
+      await expect(getChangedFiles(testDir, '--evil', 'main')).rejects.toThrow(
+        'must not start with "-"',
+      );
+      await expect(getChangedFiles(testDir, 'main', '-evil')).rejects.toThrow(
+        'must not start with "-"',
+      );
+    });
+
+    it('should reject refs starting with "-" in getChangedFilesInCommit', async () => {
+      await expect(getChangedFilesInCommit(testDir, '--exec=evil')).rejects.toThrow(
+        'must not start with "-"',
+      );
+    });
+
+    it('should reject refs starting with "-" in getChangedFilesBetweenCommits', async () => {
+      await expect(getChangedFilesBetweenCommits(testDir, '--flag', 'abc123')).rejects.toThrow(
+        'must not start with "-"',
+      );
+      await expect(getChangedFilesBetweenCommits(testDir, 'abc123', '-flag')).rejects.toThrow(
+        'must not start with "-"',
+      );
+    });
+  });
+
   describe('getChangedFiles', () => {
     it('should get changed files between branches', async () => {
       if (!isGitInstalled) {

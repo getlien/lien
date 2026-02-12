@@ -269,7 +269,7 @@ async function getGitRemoteUrl(rootDir: string): Promise<string | null> {
       const remoteName = remoteList.trim().split('\n')[0];
       if (!remoteName) return null;
 
-      const { stdout } = await execFileAsync('git', ['remote', 'get-url', remoteName], {
+      const { stdout } = await execFileAsync('git', ['remote', 'get-url', '--', remoteName], {
         cwd: rootDir,
         timeout: 5000,
       });
