@@ -101,20 +101,20 @@ Detected via `composer.json`. Indexes:
 
 Detected via `requirements.txt`, `setup.py`, `pyproject.toml`, or `Pipfile`. Indexes:
 - `**/*.py`
-- Excludes: `venv`, `.venv`, `__pycache__`, `*.pyc`, `.tox`, `.pytest_cache`, `.mypy_cache`, `htmlcov`, `migrations`
+- Excludes: `venv`, `.venv`, `__pycache__`, `*.pyc`, `*.pyo`, `*.pyd`, `*.egg-info`, `.tox`, `.pytest_cache`, `.mypy_cache`, `.coverage`, `htmlcov`, `docs/_build`, `migrations`
 - Test patterns: `test_*.py`, `*_test.py`, `tests/**`
 
 ### Django
 
 Detected via `manage.py`. Indexes:
-- `**/*.py`, `**/*.html` (templates)
+- `**/*.py`
 - Excludes: `staticfiles`, `media`, `*.sqlite3`
 - Test patterns: `test_*.py`, `*_test.py`
 
 ### Ruby
 
 Detected via `Gemfile`. Indexes:
-- `**/*.rb`, `**/*.erb`
+- `**/*.rb`
 - Excludes: `tmp`, `.bundle`, `log`, `coverage`, `public/assets`, `public/packs`
 - Test patterns: `*_test.rb`, `*_spec.rb`
 
@@ -149,14 +149,14 @@ Detected via `Package.swift`, `*.xcodeproj`, or `*.xcworkspace`. Indexes:
 ### .NET
 
 Detected via `*.csproj` or `*.sln`. Indexes:
-- `**/*.cs`, `**/*.fs`
+- `**/*.cs`
 - Excludes: `bin`, `obj`, `packages`, `.vs`
 - Test patterns: `*Tests.cs`, `*Test.cs`
 
 ### Astro
 
 Detected via `astro.config.*`. Indexes:
-- `**/*.astro`, `**/*.ts`, `**/*.tsx`
+- `**/*.ts`, `**/*.tsx`
 - Excludes: `.astro`
 
 ### Liquid

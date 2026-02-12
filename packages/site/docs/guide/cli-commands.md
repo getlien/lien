@@ -15,7 +15,6 @@ lien init [options]
 | Option | Description |
 |--------|-------------|
 | `--yes` | Skip prompts and use defaults |
-| `--upgrade` | Upgrade existing config with new options |
 | `--path <path>` | Path to initialize (defaults to current directory) |
 
 ### Behavior
@@ -36,9 +35,6 @@ lien init --yes
 
 # Initialize a specific directory
 lien init --path /path/to/project
-
-# Upgrade existing config with new options
-lien init --upgrade
 ```
 
 ::: tip Zero Config

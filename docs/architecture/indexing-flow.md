@@ -29,11 +29,11 @@ sequenceDiagram
     Config-->>CLI: LienConfig
     
     Note over CLI,Scanner: Phase 2: File Discovery
-    CLI->>Scanner: scanCodebaseWithFrameworks()
-    Scanner->>Framework: Get framework instances
-    Framework-->>Scanner: Framework list
+    CLI->>Scanner: scanCodebaseWithEcosystems()
+    Scanner->>Framework: Get ecosystem presets
+    Framework-->>Scanner: Ecosystem list
     Scanner->>Scanner: Apply include/exclude patterns
-    Scanner->>Scanner: Respect framework boundaries
+    Scanner->>Scanner: Respect ecosystem boundaries
     Scanner->>Scanner: Filter .gitignore
     Scanner-->>CLI: File list (e.g., 1000 files)
     CLI->>CLI: Update spinner: "Found 1000 files"
