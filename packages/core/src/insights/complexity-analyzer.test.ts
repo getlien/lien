@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ComplexityAnalyzer } from './complexity-analyzer.js';
 import type { VectorDB } from '../vectordb/lancedb.js';
-import type { ChunkMetadata } from '../indexer/types.js';
+import type { ChunkMetadata, CodeChunk } from '../indexer/types.js';
 import type { SearchResult } from '../vectordb/types.js';
 
 describe('ComplexityAnalyzer', () => {
@@ -726,6 +726,92 @@ describe('ComplexityAnalyzer', () => {
       expect(fileData.violations).toHaveLength(0);
       expect(fileData.dependentCount).toBeUndefined(); // Should not be enriched
       expect(fileData.dependents).toHaveLength(0); // Empty array by default
+    });
+  });
+
+  describe('analyzeFromChunks', () => {
+    it('should find violations from in-memory chunks', () => {
+      const chunks: CodeChunk[] = [
+        {
+          content: 'function complex() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'complex',
+            symbolType: 'function',
+            complexity: 20,
+          } as ChunkMetadata,
+        },
+        {
+          content: 'function simple() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 12,
+            endLine: 15,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'simple',
+            symbolType: 'function',
+            complexity: 5,
+          } as ChunkMetadata,
+        },
+      ];
+
+      const report = ComplexityAnalyzer.analyzeFromChunks(chunks);
+
+      expect(report.summary.totalViolations).toBe(1);
+      expect(report.summary.filesAnalyzed).toBe(1);
+      expect(report.files['src/test.ts'].violations).toHaveLength(1);
+      expect(report.files['src/test.ts'].violations[0].symbolName).toBe('complex');
+    });
+
+    it('should filter by specific files', () => {
+      const chunks: CodeChunk[] = [
+        {
+          content: 'function a() { }',
+          metadata: {
+            file: 'src/file1.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'a',
+            symbolType: 'function',
+            complexity: 20,
+          } as ChunkMetadata,
+        },
+        {
+          content: 'function b() { }',
+          metadata: {
+            file: 'src/file2.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'b',
+            symbolType: 'function',
+            complexity: 20,
+          } as ChunkMetadata,
+        },
+      ];
+
+      const report = ComplexityAnalyzer.analyzeFromChunks(chunks, ['src/file1.ts']);
+
+      expect(report.summary.filesAnalyzed).toBe(1);
+      expect(report.files['src/file1.ts']).toBeDefined();
+      expect(report.files['src/file2.ts']).toBeUndefined();
+    });
+
+    it('should handle empty chunks', () => {
+      const report = ComplexityAnalyzer.analyzeFromChunks([]);
+
+      expect(report.summary.totalViolations).toBe(0);
+      expect(report.summary.filesAnalyzed).toBe(0);
+      expect(report.summary.avgComplexity).toBe(0);
+      expect(report.summary.maxComplexity).toBe(0);
     });
   });
 });
