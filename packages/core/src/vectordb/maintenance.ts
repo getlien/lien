@@ -8,6 +8,39 @@ import { insertBatch } from './batch-insert.js';
 import { escapeSqlString } from './query.js';
 
 /**
+ * Try to remove the .lance directory directly.
+ * Returns true if successful, false if a fallback drop+retry is needed.
+ * Other errors are silently ignored (best-effort cleanup).
+ */
+async function removeLanceDirectory(lanceDir: string): Promise<boolean> {
+  try {
+    await fs.rm(lanceDir, { recursive: true, force: true });
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'ENOTEMPTY' || err?.message?.includes('not empty')) {
+      return false;
+    }
+    return true; // Silently ignore other errors (best-effort cleanup)
+  }
+}
+
+/**
+ * Fallback: drop the table first, then retry directory removal.
+ */
+async function dropTableAndRetryCleanup(
+  db: LanceDBConnection,
+  tableName: string,
+  lanceDir: string,
+): Promise<void> {
+  try {
+    await db.dropTable(tableName);
+    await fs.rm(lanceDir, { recursive: true, force: true });
+  } catch {
+    // Best effort cleanup
+  }
+}
+
+/**
  * Clear all data from the vector database.
  * Drops the table AND cleans up the .lance directory to prevent corrupted state.
  */
@@ -22,29 +55,14 @@ export async function clear(
   }
 
   try {
-    // Clean up the .lance directory directly
-    // This is more reliable than dropTable which can have locking issues
     if (dbPath) {
       const lanceDir = path.join(dbPath, `${tableName}.lance`);
-      try {
-        await fs.rm(lanceDir, { recursive: true, force: true });
-      } catch (err: any) {
-        // If deletion fails, try dropping the table first
-        if (err?.code === 'ENOTEMPTY' || err?.message?.includes('not empty')) {
-          try {
-            await db.dropTable(tableName);
-            // Try deletion again after dropping
-            await fs.rm(lanceDir, { recursive: true, force: true });
-          } catch {
-            // Ignore - best effort cleanup
-          }
-        }
+      const removed = await removeLanceDirectory(lanceDir);
+      if (!removed) {
+        await dropTableAndRetryCleanup(db, tableName, lanceDir);
       }
-    } else {
-      // No dbPath provided, just drop the table
-      if (table) {
-        await db.dropTable(tableName);
-      }
+    } else if (table) {
+      await db.dropTable(tableName);
     }
   } catch (error) {
     throw wrapError(error, 'Failed to clear vector database');
