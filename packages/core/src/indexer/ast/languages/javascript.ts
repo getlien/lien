@@ -140,6 +140,8 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
       const child = rootNode.namedChild(i);
       if (child?.type === 'export_statement') {
         this.extractExportStatementSymbols(child, addExport);
+      } else if (child?.type === 'expression_statement') {
+        this.extractCJSExportSymbols(child, addExport);
       }
     }
 
@@ -207,6 +209,88 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
       }
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // CommonJS export extraction
+  // ---------------------------------------------------------------------------
+
+  private isModuleExports(node: Parser.SyntaxNode): boolean {
+    return (
+      node.type === 'member_expression' &&
+      node.childForFieldName('object')?.text === 'module' &&
+      node.childForFieldName('property')?.text === 'exports'
+    );
+  }
+
+  private extractCJSExportSymbols(
+    node: Parser.SyntaxNode,
+    addExport: (name: string) => void,
+  ): void {
+    // Look for assignment_expression inside expression_statement
+    const expr = node.namedChild(0);
+    if (expr?.type !== 'assignment_expression') return;
+
+    const left = expr.childForFieldName('left');
+    const right = expr.childForFieldName('right');
+    if (!left || !right) return;
+
+    // module.exports = ...
+    if (this.isModuleExports(left)) {
+      this.extractModuleExportsValue(right, addExport);
+      return;
+    }
+
+    // exports.foo = ...
+    if (
+      left.type === 'member_expression' &&
+      left.childForFieldName('object')?.text === 'exports'
+    ) {
+      const prop = left.childForFieldName('property');
+      if (prop) addExport(prop.text);
+      return;
+    }
+
+    // module.exports.bar = ...
+    if (
+      left.type === 'member_expression' &&
+      this.isModuleExports(left.childForFieldName('object')!)
+    ) {
+      const prop = left.childForFieldName('property');
+      if (prop) addExport(prop.text);
+    }
+  }
+
+  private extractModuleExportsValue(
+    node: Parser.SyntaxNode,
+    addExport: (name: string) => void,
+  ): void {
+    // module.exports = { foo, bar, baz: val }
+    if (node.type === 'object') {
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const prop = node.namedChild(i);
+        if (!prop) continue;
+
+        if (prop.type === 'shorthand_property_identifier') {
+          addExport(prop.text);
+        } else if (prop.type === 'pair') {
+          const key = prop.childForFieldName('key');
+          if (key) addExport(key.text);
+        }
+      }
+      return;
+    }
+
+    // module.exports = function name() {} or module.exports = class Name {}
+    if (node.type === 'function_expression' || node.type === 'class') {
+      addExport('default');
+      const nameNode = node.childForFieldName('name');
+      if (nameNode) addExport(nameNode.text);
+      return;
+    }
+
+    // module.exports = identifier or anything else
+    addExport('default');
+  }
 }
 
 /**
@@ -228,11 +312,18 @@ export class TypeScriptExportExtractor extends JavaScriptExportExtractor {}
  * - Re-exports: export { foo } from './module'
  */
 export class JavaScriptImportExtractor implements LanguageImportExtractor {
-  readonly importNodeTypes = ['import_statement', 'export_statement'];
+  readonly importNodeTypes = [
+    'import_statement',
+    'export_statement',
+    'lexical_declaration',
+    'variable_declaration',
+    'expression_statement',
+  ];
 
   extractImportPath(node: Parser.SyntaxNode): string | null {
     const sourceNode = node.childForFieldName('source');
-    return sourceNode ? sourceNode.text.replace(/['"]/g, '') : null;
+    if (sourceNode) return sourceNode.text.replace(/['"]/g, '');
+    return this.extractRequirePath(node);
   }
 
   processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
@@ -241,6 +332,12 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     }
     if (node.type === 'export_statement') {
       return this.processReExportStatement(node);
+    }
+    if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
+      return this.processRequireDeclaration(node);
+    }
+    if (node.type === 'expression_statement') {
+      return this.processBareRequire(node);
     }
     return null;
   }
@@ -367,6 +464,103 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
       }
     }
     return symbols;
+  }
+
+  // ---------------------------------------------------------------------------
+  // CommonJS require() extraction
+  // ---------------------------------------------------------------------------
+
+  private findRequireCall(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+    if (
+      node.type === 'call_expression' &&
+      node.childForFieldName('function')?.text === 'require'
+    ) {
+      return node;
+    }
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (child) {
+        const found = this.findRequireCall(child);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  private getRequirePathFromCall(callNode: Parser.SyntaxNode): string | null {
+    const args = callNode.childForFieldName('arguments');
+    if (!args) return null;
+    const firstArg = args.namedChild(0);
+    if (!firstArg || firstArg.type !== 'string') return null;
+    return firstArg.text.replace(/['"]/g, '');
+  }
+
+  private extractRequirePath(node: Parser.SyntaxNode): string | null {
+    const call = this.findRequireCall(node);
+    if (!call) return null;
+    return this.getRequirePathFromCall(call);
+  }
+
+  private processRequireDeclaration(
+    node: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
+    // Find the variable_declarator with a require() value
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const declarator = node.namedChild(i);
+      if (declarator?.type !== 'variable_declarator') continue;
+
+      const value = declarator.childForFieldName('value');
+      if (!value) continue;
+
+      const call = this.findRequireCall(value);
+      if (!call) continue;
+
+      const importPath = this.getRequirePathFromCall(call);
+      if (!importPath) return null;
+
+      const nameNode = declarator.childForFieldName('name');
+      if (!nameNode) return null;
+
+      const symbols = this.extractRequireBindingSymbols(nameNode);
+      return symbols.length > 0 ? { importPath, symbols } : null;
+    }
+    return null;
+  }
+
+  private extractRequireBindingSymbols(nameNode: Parser.SyntaxNode): string[] {
+    // const express = require('express')
+    if (nameNode.type === 'identifier') {
+      return [nameNode.text];
+    }
+
+    // const { Router, json } = require('express')
+    if (nameNode.type === 'object_pattern') {
+      const symbols: string[] = [];
+      for (let i = 0; i < nameNode.namedChildCount; i++) {
+        const prop = nameNode.namedChild(i);
+        if (!prop) continue;
+
+        if (prop.type === 'shorthand_property_identifier_pattern') {
+          symbols.push(prop.text);
+        } else if (prop.type === 'pair_pattern') {
+          // const { Router: MyRouter } = require('express')
+          const value = prop.childForFieldName('value');
+          if (value) symbols.push(value.text);
+        }
+      }
+      return symbols;
+    }
+
+    return [];
+  }
+
+  private processBareRequire(
+    node: Parser.SyntaxNode,
+  ): { importPath: string; symbols: string[] } | null {
+    // require('./polyfill') — side-effect import, no symbols
+    const importPath = this.extractRequirePath(node);
+    if (!importPath) return null;
+    return null;
   }
 }
 

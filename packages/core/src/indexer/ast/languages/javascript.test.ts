@@ -175,6 +175,132 @@ export const baz = 42;`;
     });
   });
 
+  describe('CJS Export Extraction', () => {
+    it('should extract module.exports = { foo, bar }', () => {
+      const code = 'module.exports = { foo, bar };';
+      const tree = parser.parse(code);
+      const exports = exportExtractor.extractExports(tree.rootNode);
+      expect(exports).toEqual(['foo', 'bar']);
+    });
+
+    it('should extract module.exports = { key: value }', () => {
+      const code = 'module.exports = { handler: handleRequest, router: appRouter };';
+      const tree = parser.parse(code);
+      const exports = exportExtractor.extractExports(tree.rootNode);
+      expect(exports).toEqual(['handler', 'router']);
+    });
+
+    it('should extract module.exports = MyClass as default', () => {
+      const code = 'module.exports = MyClass;';
+      const tree = parser.parse(code);
+      const exports = exportExtractor.extractExports(tree.rootNode);
+      expect(exports).toEqual(['default']);
+    });
+
+    it('should extract module.exports = function name() {}', () => {
+      const code = 'module.exports = function createApp() {};';
+      const tree = parser.parse(code);
+      const exports = exportExtractor.extractExports(tree.rootNode);
+      expect(exports).toEqual(['default', 'createApp']);
+    });
+
+    it('should extract module.exports = function() {} (anonymous)', () => {
+      const code = 'module.exports = function() {};';
+      const tree = parser.parse(code);
+      const exports = exportExtractor.extractExports(tree.rootNode);
+      expect(exports).toEqual(['default']);
+    });
+
+    it('should extract exports.foo and exports.bar', () => {
+      const code = `exports.foo = function() {};
+exports.bar = 42;`;
+      const tree = parser.parse(code);
+      const exports = exportExtractor.extractExports(tree.rootNode);
+      expect(exports).toEqual(['foo', 'bar']);
+    });
+
+    it('should extract module.exports.handler', () => {
+      const code = 'module.exports.handler = function() {};';
+      const tree = parser.parse(code);
+      const exports = exportExtractor.extractExports(tree.rootNode);
+      expect(exports).toEqual(['handler']);
+    });
+  });
+
+  describe('CJS Import Extraction', () => {
+    it('should extract path and symbols from const x = require()', () => {
+      const code = "const express = require('express');";
+      const tree = parser.parse(code);
+      const node = tree.rootNode.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(node);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('express');
+      expect(result!.symbols).toEqual(['express']);
+    });
+
+    it('should extract destructured symbols from require()', () => {
+      const code = "const { Router, json } = require('express');";
+      const tree = parser.parse(code);
+      const node = tree.rootNode.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(node);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('express');
+      expect(result!.symbols).toEqual(['Router', 'json']);
+    });
+
+    it('should extract aliased destructured symbols', () => {
+      const code = "const { Router: MyRouter } = require('express');";
+      const tree = parser.parse(code);
+      const node = tree.rootNode.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(node);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('express');
+      expect(result!.symbols).toEqual(['MyRouter']);
+    });
+
+    it('should handle var declarations with require()', () => {
+      const code = "var fs = require('fs');";
+      const tree = parser.parse(code);
+      const node = tree.rootNode.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(node);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('fs');
+      expect(result!.symbols).toEqual(['fs']);
+    });
+
+    it('should extract path from bare require()', () => {
+      const code = "require('./polyfill');";
+      const tree = parser.parse(code);
+      const node = tree.rootNode.namedChild(0)!;
+      const path = importExtractor.extractImportPath(node);
+      expect(path).toBe('./polyfill');
+    });
+
+    it('should return null symbols for bare require()', () => {
+      const code = "require('./polyfill');";
+      const tree = parser.parse(code);
+      const node = tree.rootNode.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(node);
+      expect(result).toBeNull();
+    });
+
+    it('should return null for non-require declarations', () => {
+      const code = 'const x = 42;';
+      const tree = parser.parse(code);
+      const node = tree.rootNode.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(node);
+      expect(result).toBeNull();
+    });
+
+    it('should return null for dynamic require()', () => {
+      const code = 'const mod = require(dynamicPath);';
+      const tree = parser.parse(code);
+      const node = tree.rootNode.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(node);
+      expect(result).toBeNull();
+    });
+  });
+
   describe('Symbol Extraction', () => {
     it('should extract function declaration info', () => {
       const code = 'function processData(items) { return items; }';
