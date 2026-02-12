@@ -299,12 +299,13 @@ describe('E2E: Real Open Source Projects', () => {
         async () => {
           const output = runLienCommand(projectDir, 'init --yes');
 
-          // Config file no longer created - init just shows setup info
-          expect(output).toContain('No per-project configuration needed');
+          // init creates .cursor/mcp.json with lien MCP server entry
+          expect(output).toContain('.cursor/mcp.json');
 
-          // Verify config file does NOT exist (per-project config removed)
-          const configPath = path.join(projectDir, '.lien.config.json');
-          await expect(fs.access(configPath)).rejects.toThrow();
+          // Verify .cursor/mcp.json was created with lien entry
+          const mcpConfigPath = path.join(projectDir, '.cursor', 'mcp.json');
+          const mcpConfig = JSON.parse(await fs.readFile(mcpConfigPath, 'utf-8'));
+          expect(mcpConfig.mcpServers?.lien).toBeDefined();
         },
         E2E_TIMEOUT,
       );
