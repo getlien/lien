@@ -12,7 +12,7 @@ sequenceDiagram
     participant CLI as CLI Command
     participant Config as ConfigService
     participant Scanner as File Scanner
-    participant Framework as Framework Detector
+    participant Framework as Ecosystem Presets
     participant TestAssoc as Test Association Manager
     participant Embeddings as Embedding Service
     participant VectorDB as Vector Database
@@ -29,11 +29,11 @@ sequenceDiagram
     Config-->>CLI: LienConfig
     
     Note over CLI,Scanner: Phase 2: File Discovery
-    CLI->>Scanner: scanCodebaseWithFrameworks()
-    Scanner->>Framework: Get framework instances
-    Framework-->>Scanner: Framework list
+    CLI->>Scanner: scanFilesToIndex()
+    Scanner->>Framework: detectEcosystems()
+    Framework-->>Scanner: Ecosystem list
     Scanner->>Scanner: Apply include/exclude patterns
-    Scanner->>Scanner: Respect framework boundaries
+    Scanner->>Scanner: Respect ecosystem boundaries
     Scanner->>Scanner: Filter .gitignore
     Scanner-->>CLI: File list (e.g., 1000 files)
     CLI->>CLI: Update spinner: "Found 1000 files"

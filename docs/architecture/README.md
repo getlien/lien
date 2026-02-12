@@ -283,7 +283,7 @@ Our Mermaid diagrams follow these conventions:
 
 ## 🔄 Version History
 
-### v0.34.0 (Current)
+### v0.35.0 (Current)
 - ✅ Docs updated to match current state of codebase
 - ✅ Six MCP tools documented (`get_dependents`, `get_complexity` added)
 - ✅ Ecosystem presets replace framework detection (ADR-007)
@@ -334,5 +334,5 @@ If something in the architecture is unclear:
 
 **Last Updated:** February 10, 2026
 **Maintained By:** Lien contributors
-**Status:** ✅ Complete and up-to-date (v0.34.0)
+**Status:** ✅ Complete and up-to-date (v0.35.0)
 
