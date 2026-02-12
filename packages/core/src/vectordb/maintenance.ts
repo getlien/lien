@@ -9,18 +9,14 @@ import { escapeSqlString } from './query.js';
 
 /**
  * Try to remove the .lance directory directly.
- * Returns true if successful, false if a fallback drop+retry is needed.
- * Other errors are silently ignored (best-effort cleanup).
+ * Returns true if removal succeeds, false on any error so the caller can attempt fallback.
  */
 async function removeLanceDirectory(lanceDir: string): Promise<boolean> {
   try {
     await fs.rm(lanceDir, { recursive: true, force: true });
     return true;
-  } catch (err: any) {
-    if (err?.code === 'ENOTEMPTY' || err?.message?.includes('not empty')) {
-      return false;
-    }
-    return true; // Silently ignore other errors (best-effort cleanup)
+  } catch {
+    return false;
   }
 }
 

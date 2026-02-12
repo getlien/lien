@@ -5,10 +5,10 @@ const safeFilepath = z
   .string()
   .min(1, 'Filepath cannot be empty')
   .max(1000)
-  .refine(
-    p => !path.isAbsolute(p) && !p.split('/').includes('..'),
-    'Path must be relative and cannot contain ".." traversal',
-  );
+  .refine(p => {
+    const normalized = p.replace(/\\/g, '/');
+    return !path.isAbsolute(normalized) && !normalized.split('/').includes('..');
+  }, 'Path must be relative and cannot contain ".." traversal');
 
 /**
  * Schema for get_files_context tool input.
