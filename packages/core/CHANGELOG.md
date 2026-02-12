@@ -1,5 +1,25 @@
 # @liendev/core
 
+## 0.38.1
+
+### Patch Changes
+
+- 4b1dddf: ### Fixes
+  - Exit code 0 when running `lien` with no arguments (#235)
+  - Hide deprecated `--watch` flag from serve help (#239)
+  - Suppress ASCII banner for non-TTY output (#237)
+  - Hide indexing settings behind `--verbose` flag (#236)
+  - Add `--format json` to `lien status` (#238)
+  - Type Qdrant filter parameters — replace `any` with exported `QdrantFilter` (#240)
+  - Fix LanceDB records double-cast in batch insert (#203)
+  - Share ManifestManager instance in file-change-handler to avoid lock contention (#226)
+  - Sequence manifest-mutating operations to avoid write races (#243)
+
+  ### Refactors
+  - Split QdrantDB into focused sub-modules (filter-builder, query, batch-insert, maintenance) (#227)
+  - Remove deprecated config exports (#228)
+  - Extract status command into focused display functions (#245)
+
 ## 0.38.0
 
 ### Minor Changes
