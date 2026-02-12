@@ -29,8 +29,8 @@ sequenceDiagram
     Config-->>CLI: LienConfig
     
     Note over CLI,Scanner: Phase 2: File Discovery
-    CLI->>Scanner: scanCodebaseWithEcosystems()
-    Scanner->>Framework: Get ecosystem presets
+    CLI->>Scanner: scanFilesToIndex()
+    Scanner->>Framework: detectEcosystems()
     Framework-->>Scanner: Ecosystem list
     Scanner->>Scanner: Apply include/exclude patterns
     Scanner->>Scanner: Respect ecosystem boundaries

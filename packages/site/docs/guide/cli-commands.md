@@ -15,6 +15,7 @@ lien init [options]
 | Option | Description |
 |--------|-------------|
 | `--yes` | Skip prompts and use defaults |
+| `--upgrade` | Upgrade existing config with new options (reserved) |
 | `--path <path>` | Path to initialize (defaults to current directory) |
 
 ### Behavior

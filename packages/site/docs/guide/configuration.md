@@ -121,8 +121,8 @@ Detected via `Gemfile`. Indexes:
 ### Rails
 
 Detected via `bin/rails`. Indexes:
-- `app/**/*.rb`, `config/**/*.rb`, `lib/**/*.rb`
-- Excludes: `db/migrate`, `db/seeds`, `storage`, `tmp`, `log`, `public/assets`, `public/packs`
+- `**/*.rb` (the Rails preset adds Rails-specific excludes)
+- Excludes: `db/migrate`, `db/seeds/**`, `storage`, `tmp`, `log`, `public/assets`, `public/packs`
 - Test patterns: `*_test.rb`, `*_spec.rb`
 
 ### Rust
