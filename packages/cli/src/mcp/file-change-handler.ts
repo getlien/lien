@@ -273,7 +273,9 @@ async function prepareFilesForReindexing(
 
 /**
  * Execute reindex operations for files to index and deletions.
- * Processes both in parallel for efficiency.
+ * Runs sequentially to avoid manifest write races — indexMultipleFiles creates
+ * its own ManifestManager internally, so concurrent manifest mutations can
+ * cause lost updates.
  */
 async function executeReindexOperations(
   filesToIndex: string[],
@@ -284,20 +286,14 @@ async function executeReindexOperations(
   manifest: ManifestManager,
   log: LogFn,
 ): Promise<void> {
-  const operations: Promise<unknown>[] = [];
-
   if (filesToIndex.length > 0) {
     log(`📁 ${filesToIndex.length} file(s) changed, reindexing...`);
-    operations.push(
-      indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose: false, rootDir }),
-    );
+    await indexMultipleFiles(filesToIndex, vectorDB, embeddings, { verbose: false, rootDir });
   }
 
   if (deletedFiles.length > 0) {
-    operations.push(handleBatchDeletions(deletedFiles, vectorDB, manifest, log));
+    await handleBatchDeletions(deletedFiles, vectorDB, manifest, log);
   }
-
-  await Promise.all(operations);
 }
 
 /**
