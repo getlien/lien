@@ -1,4 +1,5 @@
 import type { QdrantClient } from '@qdrant/js-client-rest';
+import type { ChunkMetadata } from '../indexer/types.js';
 import { DatabaseError } from '../errors/index.js';
 import { readVersionFile } from './version.js';
 
@@ -120,9 +121,13 @@ export async function updateFile(
   ctx: QdrantMaintenanceContext,
   filepath: string,
   deleteByFileFn: (filepath: string) => Promise<void>,
-  insertBatchFn: (vectors: Float32Array[], metadatas: any[], contents: string[]) => Promise<void>,
+  insertBatchFn: (
+    vectors: Float32Array[],
+    metadatas: ChunkMetadata[],
+    contents: string[],
+  ) => Promise<void>,
   vectors: Float32Array[],
-  metadatas: any[],
+  metadatas: ChunkMetadata[],
   contents: string[],
 ): Promise<void> {
   if (!ctx.initialized) {

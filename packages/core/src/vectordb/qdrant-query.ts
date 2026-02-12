@@ -25,7 +25,7 @@ export interface QdrantQueryContext {
     branch?: string;
     includeCurrentRepo?: boolean;
     patternKey?: 'file' | 'symbolName';
-  }) => any;
+  }) => Record<string, unknown>;
 }
 
 /**
@@ -35,10 +35,13 @@ export interface QdrantQueryContext {
  * For these results, score is always 0 and relevance is set to 'not_relevant'
  * to indicate that the results are unscored (not that they are useless).
  */
-export function mapScrollResults(ctx: QdrantQueryContext, results: any): SearchResult[] {
-  return (results.points || []).map((point: any) => ({
-    content: (point.payload?.content as string) || '',
-    metadata: ctx.payloadMapper.fromPayload(point.payload || {}),
+export function mapScrollResults(
+  ctx: QdrantQueryContext,
+  results: { points?: Array<Record<string, unknown>> },
+): SearchResult[] {
+  return (results.points || []).map(point => ({
+    content: ((point.payload as Record<string, unknown>)?.content as string) || '',
+    metadata: ctx.payloadMapper.fromPayload((point.payload as Record<string, unknown>) || {}),
     score: 0,
     relevance: 'not_relevant' as const,
   }));
@@ -49,7 +52,7 @@ export function mapScrollResults(ctx: QdrantQueryContext, results: any): SearchR
  */
 export async function executeScrollQuery(
   ctx: QdrantQueryContext,
-  filter: any,
+  filter: Record<string, unknown>,
   limit: number,
   errorContext: string,
 ): Promise<SearchResult[]> {
@@ -236,11 +239,9 @@ export async function* scanPaginated(
  * Internal paginated scroll helper. Both scanAll and scanPaginated delegate here
  * to keep scroll logic, error handling, and termination in one place.
  */
-// Note: filter uses `any` to match buildBaseFilter/executeScrollQuery return type.
-// The local QdrantFilter interface doesn't fully align with the @qdrant/js-client-rest SDK types.
 async function* scrollPaginated(
   ctx: QdrantQueryContext,
-  filter: any,
+  filter: Record<string, unknown>,
   pageSize: number,
 ): AsyncGenerator<SearchResult[]> {
   let offset: string | number | undefined;

@@ -2,6 +2,7 @@ import type { QdrantClient } from '@qdrant/js-client-rest';
 import type { ChunkMetadata } from '../indexer/types.js';
 import type { QdrantPayloadMapper } from './qdrant-payload-mapper.js';
 import { DatabaseError } from '../errors/index.js';
+import { VECTOR_DB_MAX_BATCH_SIZE } from '../constants.js';
 
 /**
  * Validate batch input arrays have matching lengths.
@@ -55,8 +56,7 @@ export async function insertBatch(
   collectionName: string,
   points: Array<{ id: string; vector: number[]; payload: Record<string, any> }>,
 ): Promise<void> {
-  // Upsert points in batches (Qdrant recommends batches of 100-1000)
-  const batchSize = 100;
+  const batchSize = VECTOR_DB_MAX_BATCH_SIZE;
   for (let i = 0; i < points.length; i += batchSize) {
     const batch = points.slice(i, Math.min(i + batchSize, points.length));
     await client.upsert(collectionName, {
