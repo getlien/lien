@@ -299,6 +299,24 @@ exports.bar = 42;`;
       const result = importExtractor.processImportSymbols(node);
       expect(result).toBeNull();
     });
+
+    it('should not treat nested require() as an import', () => {
+      const code = "const x = foo(require('a'));";
+      const tree = parser.parse(code);
+      const node = tree.rootNode.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(node);
+      expect(result).toBeNull();
+    });
+
+    it('should skip dynamic require and find static require in same declaration', () => {
+      const code = "const a = require(dynamic), b = require('express');";
+      const tree = parser.parse(code);
+      const node = tree.rootNode.namedChild(0)!;
+      const result = importExtractor.processImportSymbols(node);
+      expect(result).not.toBeNull();
+      expect(result!.importPath).toBe('express');
+      expect(result!.symbols).toEqual(['b']);
+    });
   });
 
   describe('Symbol Extraction', () => {

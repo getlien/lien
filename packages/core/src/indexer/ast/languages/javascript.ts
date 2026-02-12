@@ -475,15 +475,9 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
   // ---------------------------------------------------------------------------
 
   private findRequireCall(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+    // Only match require() as a direct call_expression — not nested inside other expressions
     if (node.type === 'call_expression' && node.childForFieldName('function')?.text === 'require') {
       return node;
-    }
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child) {
-        const found = this.findRequireCall(child);
-        if (found) return found;
-      }
     }
     return null;
   }
@@ -497,9 +491,21 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
   }
 
   private extractRequirePath(node: Parser.SyntaxNode): string | null {
-    const call = this.findRequireCall(node);
+    // Check the node itself, then its direct named children
+    const call = this.findRequireCall(node) ?? this.findRequireCallInChildren(node);
     if (!call) return null;
     return this.getRequirePathFromCall(call);
+  }
+
+  private findRequireCallInChildren(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (child) {
+        const found = this.findRequireCall(child);
+        if (found) return found;
+      }
+    }
+    return null;
   }
 
   private processRequireDeclaration(
@@ -517,13 +523,13 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
       if (!call) continue;
 
       const importPath = this.getRequirePathFromCall(call);
-      if (!importPath) return null;
+      if (!importPath) continue;
 
       const nameNode = declarator.childForFieldName('name');
-      if (!nameNode) return null;
+      if (!nameNode) continue;
 
       const symbols = this.extractRequireBindingSymbols(nameNode);
-      return symbols.length > 0 ? { importPath, symbols } : null;
+      if (symbols.length > 0) return { importPath, symbols };
     }
     return null;
   }
