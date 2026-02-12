@@ -159,7 +159,7 @@ export async function runComplexityAnalysis(
 
     // Run complexity analysis from in-memory chunks (no VectorDB needed)
     logger.info('Analyzing complexity...');
-    const analyzer = new ComplexityAnalyzer(null as any);
+    const analyzer = new ComplexityAnalyzer();
     const report = analyzer.analyzeFromChunks(indexResult.chunks, files);
     logger.info(`Found ${report.summary.totalViolations} violations`);
 

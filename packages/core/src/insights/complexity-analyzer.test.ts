@@ -760,7 +760,7 @@ describe('ComplexityAnalyzer', () => {
         },
       ];
 
-      const analyzer = new ComplexityAnalyzer(null as any);
+      const analyzer = new ComplexityAnalyzer();
       const report = analyzer.analyzeFromChunks(chunks);
 
       expect(report.summary.totalViolations).toBe(1);
@@ -799,7 +799,7 @@ describe('ComplexityAnalyzer', () => {
         },
       ];
 
-      const analyzer = new ComplexityAnalyzer(null as any);
+      const analyzer = new ComplexityAnalyzer();
       const report = analyzer.analyzeFromChunks(chunks, ['src/file1.ts']);
 
       expect(report.summary.filesAnalyzed).toBe(1);
@@ -808,7 +808,7 @@ describe('ComplexityAnalyzer', () => {
     });
 
     it('should handle empty chunks', () => {
-      const analyzer = new ComplexityAnalyzer(null as any);
+      const analyzer = new ComplexityAnalyzer();
       const report = analyzer.analyzeFromChunks([]);
 
       expect(report.summary.totalViolations).toBe(0);

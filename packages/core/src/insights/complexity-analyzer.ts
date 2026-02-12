@@ -30,7 +30,7 @@ export class ComplexityAnalyzer {
     estimatedBugs: 1.5,
   };
 
-  constructor(private vectorDB: VectorDBInterface) {}
+  constructor(private vectorDB?: VectorDBInterface) {}
 
   /**
    * Analyze complexity of codebase or specific files
@@ -44,6 +44,10 @@ export class ComplexityAnalyzer {
     crossRepo?: boolean,
     repoIds?: string[],
   ): Promise<ComplexityReport> {
+    if (!this.vectorDB) {
+      throw new Error('analyze() requires a VectorDB instance. Use analyzeFromChunks() for in-memory analysis.');
+    }
+
     // 1. Get all chunks from index
     // For cross-repo, use scanCrossRepo
     // Note: We fetch all chunks even with --files filter because dependency analysis

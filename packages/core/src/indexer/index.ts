@@ -722,7 +722,18 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<Inde
 
   // Fast path: skip embeddings and VectorDB, return raw chunks
   if (options.skipEmbeddings) {
-    return await performChunkOnlyIndex(rootDir, options, startTime);
+    try {
+      return await performChunkOnlyIndex(rootDir, options, startTime);
+    } catch (error) {
+      return {
+        success: false,
+        filesIndexed: 0,
+        chunksCreated: 0,
+        durationMs: Date.now() - startTime,
+        incremental: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   try {
