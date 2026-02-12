@@ -16,8 +16,6 @@ export interface PRContext {
   headSha: string;
 }
 
-export type ReviewStyle = 'line' | 'summary';
-
 /**
  * Configuration for a review run
  */
@@ -25,7 +23,6 @@ export interface ReviewConfig {
   openrouterApiKey: string;
   model: string;
   threshold: string;
-  reviewStyle: ReviewStyle;
   enableDeltaTracking: boolean;
   baselineComplexityPath: string;
   /** Post REQUEST_CHANGES instead of COMMENT when new error-level violations are found */

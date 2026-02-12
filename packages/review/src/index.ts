@@ -10,7 +10,6 @@
 export type {
   PRContext,
   ReviewConfig,
-  ReviewStyle,
   LineComment,
   ComplexityReport,
   ComplexityViolation,
@@ -53,16 +52,13 @@ export {
   resetTokenUsage,
   getTokenUsage,
   parseCommentsResponse,
-  generateReview,
   mapCommentsToViolations,
   generateLineComments,
 } from './openrouter.js';
 
 // Prompt building
 export {
-  buildReviewPrompt,
   buildNoViolationsMessage,
-  formatReviewComment,
   getViolationKey,
   buildDescriptionBadge,
   buildHeaderLine,

@@ -25,16 +25,9 @@ import {
   getPRPatchData,
   updatePRDescription,
 } from './github-api.js';
+import { generateLineComments, resetTokenUsage, getTokenUsage } from './openrouter.js';
 import {
-  generateReview,
-  generateLineComments,
-  resetTokenUsage,
-  getTokenUsage,
-} from './openrouter.js';
-import {
-  buildReviewPrompt,
   buildNoViolationsMessage,
-  formatReviewComment,
   getViolationKey,
   buildDescriptionBadge,
   buildHeaderLine,
@@ -1089,33 +1082,7 @@ async function postLineReview(
 }
 
 /**
- * Post review as a single summary comment
- */
-async function postSummaryReview(
-  octokit: Octokit,
-  prContext: PRContext,
-  report: ComplexityReport,
-  codeSnippets: Map<string, string>,
-  config: ReviewConfig,
-  logger: Logger,
-  isFallback = false,
-  deltas: ComplexityDelta[] | null = null,
-  uncoveredNote: string = '',
-): Promise<void> {
-  const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas);
-  logger.debug(`Prompt length: ${prompt.length} characters`);
-
-  const aiReview = await generateReview(prompt, config.openrouterApiKey, config.model, logger);
-
-  const usage = getTokenUsage();
-  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas, uncoveredNote);
-  await postPRComment(octokit, prContext, comment, logger);
-  logger.info('Successfully posted AI review summary comment');
-}
-
-/**
  * Post review if violations are found, or success message if none
- * Handles both summary and line-by-line review modes
  */
 export async function postReviewIfNeeded(
   result: AnalysisResult,
@@ -1139,34 +1106,14 @@ export async function postReviewIfNeeded(
   );
 
   resetTokenUsage();
-  if (config.reviewStyle === 'summary') {
-    // Get diff lines to identify uncovered violations
-    const { diffLines } = await getPRPatchData(octokit, prContext);
-    const deltaMap = buildDeltaMap(result.deltas);
-    const { uncovered } = partitionViolationsByDiff(violations, diffLines);
-    const uncoveredNote = buildUncoveredNote(uncovered, deltaMap);
-
-    await postSummaryReview(
-      octokit,
-      prContext,
-      result.currentReport,
-      codeSnippets,
-      config,
-      logger,
-      false,
-      result.deltas,
-      uncoveredNote,
-    );
-  } else {
-    await postLineReview(
-      octokit,
-      prContext,
-      result.currentReport,
-      violations,
-      codeSnippets,
-      config,
-      logger,
-      result.deltas,
-    );
-  }
+  await postLineReview(
+    octokit,
+    prContext,
+    result.currentReport,
+    violations,
+    codeSnippets,
+    config,
+    logger,
+    result.deltas,
+  );
 }

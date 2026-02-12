@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildReviewPrompt,
   buildNoViolationsMessage,
-  formatReviewComment,
   getViolationKey,
   buildBatchedCommentsPrompt,
   buildDescriptionBadge,
@@ -82,48 +80,6 @@ const mockReport: ComplexityReport = {
 };
 
 describe('prompt', () => {
-  describe('buildReviewPrompt', () => {
-    it('should build a prompt with PR context', () => {
-      const codeSnippets = new Map<string, string>();
-      codeSnippets.set(
-        'src/utils.ts::processData',
-        'function processData() { /* complex code */ }',
-      );
-
-      const prompt = buildReviewPrompt(mockReport, mockPRContext, codeSnippets);
-
-      expect(prompt).toContain('testowner/testrepo');
-      expect(prompt).toContain('#42');
-      expect(prompt).toContain('feat: add new feature');
-      expect(prompt).toContain('3'); // total violations
-    });
-
-    it('should include violations summary', () => {
-      const prompt = buildReviewPrompt(mockReport, mockPRContext, new Map());
-
-      expect(prompt).toContain('src/utils.ts');
-      expect(prompt).toContain('processData');
-      expect(prompt).toContain('complexity 23');
-      expect(prompt).toContain('error');
-    });
-
-    it('should include code snippets when provided', () => {
-      const codeSnippets = new Map<string, string>();
-      codeSnippets.set('src/utils.ts::processData', 'const x = 1;');
-
-      const prompt = buildReviewPrompt(mockReport, mockPRContext, codeSnippets);
-
-      expect(prompt).toContain('const x = 1;');
-      expect(prompt).toContain('src/utils.ts - processData');
-    });
-
-    it('should handle empty code snippets', () => {
-      const prompt = buildReviewPrompt(mockReport, mockPRContext, new Map());
-
-      expect(prompt).toContain('No code snippets available');
-    });
-  });
-
   describe('buildNoViolationsMessage', () => {
     it('should include PR number', () => {
       const message = buildNoViolationsMessage(mockPRContext);
@@ -136,40 +92,6 @@ describe('prompt', () => {
       const message = buildNoViolationsMessage(mockPRContext);
 
       expect(message).toContain('<!-- lien-ai-review -->');
-    });
-  });
-
-  describe('formatReviewComment', () => {
-    it('should format AI review with summary', () => {
-      const aiReview = 'This is the AI review content.';
-      const comment = formatReviewComment(aiReview, mockReport);
-
-      expect(comment).toContain('<!-- lien-ai-review -->');
-      expect(comment).toContain('3 issues spotted in this PR.');
-      expect(comment).toContain(aiReview);
-    });
-
-    it('should include analysis details', () => {
-      const comment = formatReviewComment('Review', mockReport);
-
-      expect(comment).toContain('Files analyzed: 2');
-      expect(comment).toContain('Average complexity: 15.5');
-      expect(comment).toContain('Max complexity: 23');
-    });
-
-    it('should handle singular violation', () => {
-      const singleViolationReport: ComplexityReport = {
-        ...mockReport,
-        summary: {
-          ...mockReport.summary,
-          totalViolations: 1,
-          bySeverity: { error: 1, warning: 0 },
-        },
-      };
-
-      const comment = formatReviewComment('Review', singleViolationReport);
-
-      expect(comment).toContain('1 issue spotted in this PR.');
     });
   });
 
@@ -585,138 +507,6 @@ describe('prompt', () => {
       expect(header).toContain('No new complexity introduced.');
       expect(header).toContain('1 function improved.');
       expect(header).toContain('pre-existing');
-    });
-  });
-
-  describe('formatReviewComment with new/pre-existing separation', () => {
-    it('should show new vs pre-existing header when deltas provided', () => {
-      const deltas: ComplexityDelta[] = [
-        {
-          filepath: 'src/utils.ts',
-          symbolName: 'processData',
-          symbolType: 'function',
-          startLine: 10,
-          metricType: 'cyclomatic',
-          baseComplexity: 20,
-          headComplexity: 23,
-          delta: 3,
-          threshold: 15,
-          severity: 'warning',
-        },
-        {
-          filepath: 'src/utils.ts',
-          symbolName: 'validateInput',
-          symbolType: 'function',
-          startLine: 60,
-          metricType: 'cyclomatic',
-          baseComplexity: 12,
-          headComplexity: 12,
-          delta: 0,
-          threshold: 15,
-          severity: 'warning',
-        },
-        {
-          filepath: 'src/handler.ts',
-          symbolName: 'handleRequest',
-          symbolType: 'function',
-          startLine: 5,
-          metricType: 'cyclomatic',
-          baseComplexity: 11,
-          headComplexity: 11,
-          delta: 0,
-          threshold: 15,
-          severity: 'warning',
-        },
-      ];
-      const comment = formatReviewComment('Review', mockReport, false, undefined, deltas);
-      expect(comment).toContain('1 new issue spotted in this PR.');
-      expect(comment).toContain('2 pre-existing issues in touched files.');
-    });
-
-    it('should show "No new complexity" when all deltas are zero', () => {
-      const deltas: ComplexityDelta[] = [
-        {
-          filepath: 'src/utils.ts',
-          symbolName: 'processData',
-          symbolType: 'function',
-          startLine: 10,
-          metricType: 'cyclomatic',
-          baseComplexity: 23,
-          headComplexity: 23,
-          delta: 0,
-          threshold: 15,
-          severity: 'warning',
-        },
-      ];
-      const reportOneViolation: ComplexityReport = {
-        ...mockReport,
-        summary: { ...mockReport.summary, totalViolations: 1 },
-      };
-      const comment = formatReviewComment('Review', reportOneViolation, false, undefined, deltas);
-      expect(comment).toContain('No new complexity introduced.');
-      expect(comment).toContain('1 pre-existing issue in touched files.');
-      expect(comment).toContain('**Complexity:** No change from this PR.');
-    });
-  });
-
-  describe('buildReviewPrompt with new/pre-existing separation', () => {
-    it('should separate violations into new vs pre-existing when deltas provided', () => {
-      const reportWithMetrics: ComplexityReport = {
-        summary: mockReport.summary,
-        files: {
-          'src/utils.ts': {
-            violations: [
-              { ...mockReport.files['src/utils.ts'].violations[0], metricType: 'cyclomatic' },
-            ],
-            dependents: [],
-            testAssociations: [],
-            riskLevel: 'high',
-          },
-          'src/handler.ts': {
-            violations: [
-              { ...mockReport.files['src/handler.ts'].violations[0], metricType: 'cyclomatic' },
-            ],
-            dependents: [],
-            testAssociations: [],
-            riskLevel: 'medium',
-          },
-        },
-      };
-      const deltas: ComplexityDelta[] = [
-        {
-          filepath: 'src/utils.ts',
-          symbolName: 'processData',
-          symbolType: 'function',
-          startLine: 10,
-          metricType: 'cyclomatic',
-          baseComplexity: null,
-          headComplexity: 23,
-          delta: 23,
-          threshold: 15,
-          severity: 'new',
-        },
-        {
-          filepath: 'src/handler.ts',
-          symbolName: 'handleRequest',
-          symbolType: 'function',
-          startLine: 5,
-          metricType: 'cyclomatic',
-          baseComplexity: 11,
-          headComplexity: 11,
-          delta: 0,
-          threshold: 15,
-          severity: 'warning',
-        },
-      ];
-      const prompt = buildReviewPrompt(reportWithMetrics, mockPRContext, new Map(), deltas);
-      expect(prompt).toContain('New/Worsened Violations');
-      expect(prompt).toContain('Pre-existing Violations');
-    });
-
-    it('should not separate when no deltas provided', () => {
-      const prompt = buildReviewPrompt(mockReport, mockPRContext, new Map());
-      expect(prompt).not.toContain('New/Worsened Violations');
-      expect(prompt).not.toContain('Pre-existing Violations');
     });
   });
 });

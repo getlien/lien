@@ -60,7 +60,6 @@ function buildContexts(
       openrouterApiKey: config.openRouterApiKey,
       model: config.openRouterModel,
       threshold: '15',
-      reviewStyle: 'line',
       enableDeltaTracking: true,
       baselineComplexityPath: '',
       blockOnNewErrors: false,
