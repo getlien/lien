@@ -22,7 +22,7 @@ import {
   getFileContent,
   postPRComment,
   postPRReview,
-  getPRDiffLines,
+  getPRPatchData,
   updatePRDescription,
 } from './github-api.js';
 import {
@@ -441,6 +441,77 @@ function findCommentLine(
  */
 function createDeltaKey(v: { filepath: string; symbolName: string; metricType: string }): string {
   return `${v.filepath}::${v.symbolName}::${v.metricType}`;
+}
+
+/**
+ * Extract the portion of a unified diff patch that overlaps with a given line range.
+ * Returns the relevant diff hunk lines, or null if no overlap.
+ */
+export function extractRelevantHunk(
+  patch: string,
+  startLine: number,
+  endLine: number,
+): string | null {
+  const lines: string[] = [];
+  let currentLine = 0;
+
+  for (const patchLine of patch.split('\n')) {
+    // Hunk header: @@ -start,count +start,count @@
+    const hunkMatch = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunkMatch) {
+      currentLine = parseInt(hunkMatch[1], 10);
+      // Include the hunk header if the hunk overlaps the range
+      continue;
+    }
+
+    if (patchLine.startsWith('-')) {
+      // Deleted lines: show them as context if we're in the range
+      if (currentLine >= startLine && currentLine <= endLine) {
+        lines.push(patchLine);
+      }
+      // Deleted lines don't increment currentLine
+      continue;
+    }
+
+    if (patchLine.startsWith('+') && !patchLine.startsWith('+++')) {
+      if (currentLine >= startLine && currentLine <= endLine) {
+        lines.push(patchLine);
+      }
+      currentLine++;
+    } else if (patchLine.startsWith(' ')) {
+      if (currentLine >= startLine && currentLine <= endLine) {
+        lines.push(patchLine);
+      }
+      currentLine++;
+    }
+  }
+
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
+/**
+ * Build diff hunks map keyed by filepath::symbolName from patches and violations
+ */
+function buildDiffHunks(
+  patches: Map<string, string>,
+  violations: ComplexityViolation[],
+): Map<string, string> {
+  const diffHunks = new Map<string, string>();
+
+  for (const v of violations) {
+    const key = `${v.filepath}::${v.symbolName}`;
+    if (diffHunks.has(key)) continue; // Already extracted for this function
+
+    const patch = patches.get(v.filepath);
+    if (!patch) continue;
+
+    const hunk = extractRelevantHunk(patch, v.startLine, v.endLine);
+    if (hunk) {
+      diffHunks.set(key, hunk);
+    }
+  }
+
+  return diffHunks;
 }
 
 /**
@@ -895,6 +966,7 @@ async function generateAndPostReview(
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
   logger: Logger,
+  diffHunks?: Map<string, string>,
 ): Promise<void> {
   const commentableViolations = processed.newOrDegraded.map(v => v.violation);
   logger.info(
@@ -908,6 +980,7 @@ async function generateAndPostReview(
     config.model,
     report,
     logger,
+    diffHunks,
   );
 
   const lineComments = buildLineComments(processed.newOrDegraded, aiComments, deltaMap, logger);
@@ -934,7 +1007,7 @@ async function postLineReview(
   logger: Logger,
   deltas: ComplexityDelta[] | null = null,
 ): Promise<void> {
-  const diffLines = await getPRDiffLines(octokit, prContext);
+  const { diffLines, patches } = await getPRPatchData(octokit, prContext);
   logger.info(`Diff covers ${diffLines.size} files`);
 
   const deltaMap = buildDeltaMap(deltas);
@@ -965,6 +1038,11 @@ async function postLineReview(
     return;
   }
 
+  // Build diff hunks for the commentable violations so AI can see what changed
+  const commentableViolations = processed.newOrDegraded.map(v => v.violation);
+  const diffHunks = buildDiffHunks(patches, commentableViolations);
+  logger.info(`Extracted diff hunks for ${diffHunks.size} functions`);
+
   await generateAndPostReview(
     octokit,
     prContext,
@@ -975,6 +1053,7 @@ async function postLineReview(
     report,
     deltas,
     logger,
+    diffHunks,
   );
 }
 
@@ -1031,7 +1110,7 @@ export async function postReviewIfNeeded(
   resetTokenUsage();
   if (config.reviewStyle === 'summary') {
     // Get diff lines to identify uncovered violations
-    const diffLines = await getPRDiffLines(octokit, prContext);
+    const { diffLines } = await getPRPatchData(octokit, prContext);
     const deltaMap = buildDeltaMap(result.deltas);
     const { uncovered } = partitionViolationsByDiff(violations, diffLines);
     const uncoveredNote = buildUncoveredNote(uncovered, deltaMap);

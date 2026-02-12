@@ -290,6 +290,7 @@ export async function generateLineComments(
   model: string,
   report: ComplexityReport,
   logger: Logger,
+  diffHunks?: Map<string, string>,
 ): Promise<Map<ComplexityViolation, string>> {
   if (violations.length === 0) {
     return new Map();
@@ -297,7 +298,7 @@ export async function generateLineComments(
 
   logger.info(`Generating comments for ${violations.length} violations in single batch`);
 
-  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets, report);
+  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets, report, diffHunks);
   const data = await callBatchedCommentsAPI(prompt, apiKey, model);
 
   if (data.usage) {

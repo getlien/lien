@@ -28,11 +28,13 @@ export {
   orchestrateAnalysis,
   handleAnalysisOutputs,
   postReviewIfNeeded,
+  extractRelevantHunk,
 } from './review-engine.js';
 
 // GitHub API (portable, uses @octokit/rest)
 export {
   type Octokit,
+  type PRPatchData,
   createOctokit,
   getPRChangedFiles,
   postPRComment,
@@ -41,6 +43,7 @@ export {
   updatePRDescription,
   parsePatchLines,
   getPRDiffLines,
+  getPRPatchData,
 } from './github-api.js';
 
 // OpenRouter API

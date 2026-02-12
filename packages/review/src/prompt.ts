@@ -972,6 +972,7 @@ export function buildBatchedCommentsPrompt(
   violations: ComplexityViolation[],
   codeSnippets: Map<string, string>,
   report: ComplexityReport,
+  diffHunks?: Map<string, string>,
 ): string {
   // Group violations by filepath::symbolName so one function gets one comment
   const grouped = new Map<string, ComplexityViolation[]>();
@@ -1009,9 +1010,15 @@ export function buildBatchedCommentsPrompt(
       // Add file-level context (language, type, other violations)
       const fileContext = fileData ? buildFileContext(first.filepath, fileData) : '';
 
+      // Add diff hunk showing what changed in this PR
+      const hunk = diffHunks?.get(key);
+      const diffSection = hunk
+        ? `\n**Changes in this PR (diff):**\n\`\`\`diff\n${hunk}\n\`\`\``
+        : '';
+
       return `### ${sectionIndex}. ${key}
 - **Function**: \`${first.symbolName}\` (${first.symbolType})
-${metricLines}${fileContext}${dependencyContext}${snippetSection}`;
+${metricLines}${fileContext}${dependencyContext}${snippetSection}${diffSection}`;
     })
     .join('\n\n');
 
@@ -1051,6 +1058,8 @@ For each violation, write a code review comment that:
    - If this is an orchestration function, complexity may be acceptable
    - If the logic is inherently complex (state machines, parsers), say so
    - Don't suggest over-engineering for marginal gains
+
+**IMPORTANT**: When a diff is provided, focus your review on the CHANGED lines shown in the diff. Pre-existing complexity is context, not the primary target. If the complexity was introduced or worsened in this PR, say so. If it's pre-existing, note that and suggest improvements the author could make while they're already in the file.
 
 Be direct and specific to THIS code. Avoid generic advice like "break into smaller functions."
 

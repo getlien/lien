@@ -301,3 +301,41 @@ export async function getPRDiffLines(
 
   return diffLines;
 }
+
+/**
+ * Result of getPRPatchData — combines diff lines with raw patch text
+ */
+export interface PRPatchData {
+  diffLines: Map<string, Set<number>>;
+  patches: Map<string, string>;
+}
+
+/**
+ * Get both diff lines and raw patch text in a single API traversal.
+ * More efficient than calling getPRDiffLines separately when patch data is also needed.
+ */
+export async function getPRPatchData(octokit: Octokit, prContext: PRContext): Promise<PRPatchData> {
+  const diffLines = new Map<string, Set<number>>();
+  const patches = new Map<string, string>();
+
+  const iterator = octokit.paginate.iterator(octokit.pulls.listFiles, {
+    owner: prContext.owner,
+    repo: prContext.repo,
+    pull_number: prContext.pullNumber,
+    per_page: 100,
+  });
+
+  for await (const response of iterator) {
+    for (const file of response.data) {
+      if (!file.patch) continue;
+
+      patches.set(file.filename, file.patch);
+      const lines = parsePatchLines(file.patch);
+      if (lines.size > 0) {
+        diffLines.set(file.filename, lines);
+      }
+    }
+  }
+
+  return { diffLines, patches };
+}
