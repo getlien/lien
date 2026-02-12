@@ -33,7 +33,7 @@ describe('registerMCPHandlers', () => {
   };
   let mockToolContext: ToolContext;
   let mockLog: LogFn;
-  let registeredHandlers: Map<any, Function>;
+  let registeredHandlers: Map<unknown, (...args: unknown[]) => unknown>;
 
   beforeEach(() => {
     registeredHandlers = new Map();

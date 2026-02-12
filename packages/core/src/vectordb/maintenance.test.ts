@@ -4,10 +4,8 @@ import { DatabaseError } from '../errors/index.js';
 import type { LanceDBConnection, LanceDBTable } from './lancedb-types.js';
 import fs from 'fs/promises';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const asDb = (obj: any) => obj as unknown as LanceDBConnection;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const asTable = (obj: any) => obj as unknown as LanceDBTable;
+const asDb = (obj: unknown) => obj as LanceDBConnection;
+const asTable = (obj: unknown) => obj as LanceDBTable;
 
 // Mock fs/promises
 vi.mock('fs/promises', () => ({

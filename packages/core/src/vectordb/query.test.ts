@@ -4,8 +4,7 @@ import type { SearchResult } from './types.js';
 import type { LanceDBTable } from './lancedb-types.js';
 import { DatabaseError } from '../errors/index.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const asTable = (obj: any) => obj as unknown as LanceDBTable;
+const asTable = (obj: unknown) => obj as LanceDBTable;
 
 describe('VectorDB Query Operations', () => {
   describe('search', () => {

@@ -5,10 +5,8 @@ import type { LanceDBConnection, LanceDBTable } from './lancedb-types.js';
 import type { ChunkMetadata } from '../indexer/types.js';
 import { VECTOR_DB_MAX_BATCH_SIZE, VECTOR_DB_MIN_BATCH_SIZE } from '../constants.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const asDb = (obj: any) => obj as unknown as LanceDBConnection;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const asTable = (obj: any) => obj as unknown as LanceDBTable;
+const asDb = (obj: unknown) => obj as LanceDBConnection;
+const asTable = (obj: unknown) => obj as LanceDBTable;
 
 // Helper to create mock metadata
 function createMockMetadata(file: string, startLine: number = 1): ChunkMetadata {

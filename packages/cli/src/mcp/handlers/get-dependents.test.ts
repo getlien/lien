@@ -5,9 +5,9 @@ import type { SearchResult } from '@liendev/core';
 
 // Mock the dependency-analyzer module
 vi.mock('./dependency-analyzer.js', async importOriginal => {
-  const original = await importOriginal<typeof import('./dependency-analyzer.js')>();
+  const original = await importOriginal();
   return {
-    ...original,
+    ...(original as Record<string, unknown>),
     findDependents: vi.fn(),
   };
 });
