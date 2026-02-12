@@ -56,6 +56,8 @@ export interface IndexingOptions {
   onProgress?: (progress: IndexingProgress) => void;
   /** Skip embedding generation and VectorDB storage — return raw chunks in-memory */
   skipEmbeddings?: boolean;
+  /** Explicit list of files to index (skips full repo scan when provided) */
+  filesToIndex?: string[];
 }
 
 /**
@@ -630,7 +632,7 @@ async function performChunkOnlyIndex(
   startTime: number,
 ): Promise<IndexingResult> {
   options.onProgress?.({ phase: 'scanning', message: 'Scanning codebase...' });
-  const files = await scanFilesToIndex(rootDir);
+  const files = options.filesToIndex ?? (await scanFilesToIndex(rootDir));
 
   if (files.length === 0) {
     return {

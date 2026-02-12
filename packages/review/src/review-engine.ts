@@ -146,8 +146,9 @@ export async function runComplexityAnalysis(
 
   try {
     // Use skipEmbeddings for fast chunk-only indexing (no VectorDB needed)
-    logger.info('Indexing codebase (chunk-only)...');
-    const indexResult = await indexCodebase({ rootDir, skipEmbeddings: true });
+    // Pass filesToIndex to skip full repo scan — only chunk the changed files
+    logger.info(`Indexing ${files.length} files (chunk-only)...`);
+    const indexResult = await indexCodebase({ rootDir, skipEmbeddings: true, filesToIndex: files });
 
     logger.info(
       `Indexing complete: ${indexResult.chunksCreated} chunks from ${indexResult.filesIndexed} files (success: ${indexResult.success})`,
@@ -682,7 +683,49 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
 }
 
 /**
- * Build line comments from violations and AI comments
+ * Get emoji for metric type
+ */
+function getMetricEmojiForComment(metricType: string): string {
+  switch (metricType) {
+    case 'cyclomatic':
+      return '🔀';
+    case 'cognitive':
+      return '🧠';
+    case 'halstead_effort':
+      return '⏱️';
+    case 'halstead_bugs':
+      return '🐛';
+    default:
+      return '📊';
+  }
+}
+
+/**
+ * Format a single metric header line for a grouped comment
+ */
+function formatMetricHeaderLine(
+  violation: ComplexityViolation,
+  deltaMap: Map<string, ComplexityDelta>,
+): string {
+  const metricType = violation.metricType || 'cyclomatic';
+  const delta = deltaMap.get(createDeltaKey(violation));
+  const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+  const severityEmoji = delta
+    ? formatSeverityEmoji(delta.severity)
+    : violation.severity === 'error'
+      ? '🔴'
+      : '🟡';
+  const emoji = getMetricEmojiForComment(metricType);
+  const metricLabel = getMetricLabel(metricType);
+  const valueDisplay = formatComplexityValue(metricType, violation.complexity);
+  const thresholdDisplay = formatThresholdValue(metricType, violation.threshold);
+
+  return `${severityEmoji} ${emoji} **${metricLabel.charAt(0).toUpperCase() + metricLabel.slice(1)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})`;
+}
+
+/**
+ * Build line comments from violations and AI comments.
+ * Groups violations by filepath::symbolName to produce one comment per function.
  */
 function buildLineComments(
   violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
@@ -690,46 +733,48 @@ function buildLineComments(
   deltaMap: Map<string, ComplexityDelta>,
   logger: Logger,
 ): LineComment[] {
-  return collect(violationsWithLines)
-    .filter(({ violation }) => aiComments.has(violation))
-    .map(({ violation, commentLine }) => {
-      const comment = aiComments.get(violation)!;
-      const delta = deltaMap.get(createDeltaKey(violation));
-      const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-      const severityEmoji = delta
-        ? formatSeverityEmoji(delta.severity)
-        : violation.severity === 'error'
-          ? '🔴'
-          : '🟡';
+  // Group violations by filepath::symbolName
+  const grouped = new Map<string, Array<{ violation: ComplexityViolation; commentLine: number }>>();
+  for (const entry of violationsWithLines) {
+    if (!aiComments.has(entry.violation)) continue;
+    const key = `${entry.violation.filepath}::${entry.violation.symbolName}`;
+    const existing = grouped.get(key) || [];
+    existing.push(entry);
+    grouped.set(key, existing);
+  }
 
-      // If comment is not on symbol's starting line, note where it actually starts
-      const lineNote =
-        commentLine !== violation.startLine
-          ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
-          : '';
+  const comments: LineComment[] = [];
+  for (const [, group] of grouped) {
+    // Use the first entry's comment line for placement
+    const { commentLine } = group[0];
+    const firstViolation = group[0].violation;
 
-      // Format human-friendly complexity display
-      const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
-      const valueDisplay = formatComplexityValue(
-        violation.metricType || 'cyclomatic',
-        violation.complexity,
-      );
-      const thresholdDisplay = formatThresholdValue(
-        violation.metricType || 'cyclomatic',
-        violation.threshold,
-      );
+    // Build multi-metric header
+    const metricHeaders = group
+      .map(({ violation }) => formatMetricHeaderLine(violation, deltaMap))
+      .join('\n');
 
-      logger.info(
-        `Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`,
-      );
+    // If comment is not on symbol's starting line, note where it actually starts
+    const lineNote =
+      commentLine !== firstViolation.startLine
+        ? ` *(\`${firstViolation.symbolName}\` starts at line ${firstViolation.startLine})*`
+        : '';
 
-      return {
-        path: violation.filepath,
-        line: commentLine,
-        body: `${severityEmoji} **${metricLabel.charAt(0).toUpperCase() + metricLabel.slice(1)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})${lineNote}\n\n${comment}`,
-      };
-    })
-    .all() as LineComment[];
+    // Use the AI comment from any violation in the group (they all share the same comment)
+    const comment = aiComments.get(firstViolation)!;
+
+    logger.info(
+      `Adding grouped comment for ${firstViolation.filepath}:${commentLine} (${firstViolation.symbolName}, ${group.length} metric${group.length === 1 ? '' : 's'})`,
+    );
+
+    comments.push({
+      path: firstViolation.filepath,
+      line: commentLine,
+      body: `${metricHeaders}${lineNote}\n\n${comment}`,
+    });
+  }
+
+  return comments;
 }
 
 /**

@@ -258,6 +258,8 @@ export function mapCommentsToViolations(
     return results;
   }
 
+  // AI responds with one comment per filepath::symbolName (grouped).
+  // Map the same comment to all violations sharing that key.
   for (const violation of violations) {
     const key = `${violation.filepath}::${violation.symbolName}`;
     const comment = commentsMap[key];

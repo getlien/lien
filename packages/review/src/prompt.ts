@@ -973,35 +973,51 @@ export function buildBatchedCommentsPrompt(
   codeSnippets: Map<string, string>,
   report: ComplexityReport,
 ): string {
-  const violationsText = violations
-    .map((v, i) => {
-      const key = `${v.filepath}::${v.symbolName}`;
+  // Group violations by filepath::symbolName so one function gets one comment
+  const grouped = new Map<string, ComplexityViolation[]>();
+  for (const v of violations) {
+    const key = `${v.filepath}::${v.symbolName}`;
+    const existing = grouped.get(key) || [];
+    existing.push(v);
+    grouped.set(key, existing);
+  }
+
+  let sectionIndex = 0;
+  const violationsText = Array.from(grouped.entries())
+    .map(([key, groupViolations]) => {
+      sectionIndex++;
+      const first = groupViolations[0];
       const snippet = codeSnippets.get(key);
       const snippetSection = snippet ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\`` : '';
 
-      const metricType = v.metricType || 'cyclomatic';
-      const metricLabel = getMetricLabel(metricType);
-      const valueDisplay = formatComplexityValue(metricType, v.complexity);
-      const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
-      const halsteadContext = formatHalsteadContext(v);
+      // Build metric lines for all violations in this group
+      const metricLines = groupViolations
+        .map(v => {
+          const metricType = v.metricType || 'cyclomatic';
+          const metricLabel = getMetricLabel(metricType);
+          const valueDisplay = formatComplexityValue(metricType, v.complexity);
+          const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
+          const halsteadContext = formatHalsteadContext(v);
+          return `- **${metricLabel}**: ${valueDisplay} (threshold: ${thresholdDisplay}) [${v.severity}]${halsteadContext}`;
+        })
+        .join('\n');
 
       // Add dependency context for this violation's file
-      const fileData = report.files[v.filepath];
+      const fileData = report.files[first.filepath];
       const dependencyContext = fileData ? buildDependencyContext(fileData) : '';
 
       // Add file-level context (language, type, other violations)
-      const fileContext = fileData ? buildFileContext(v.filepath, fileData) : '';
+      const fileContext = fileData ? buildFileContext(first.filepath, fileData) : '';
 
-      return `### ${i + 1}. ${v.filepath}::${v.symbolName}
-- **Function**: \`${v.symbolName}\` (${v.symbolType})
-- **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
-- **Severity**: ${v.severity}${fileContext}${dependencyContext}${snippetSection}`;
+      return `### ${sectionIndex}. ${key}
+- **Function**: \`${first.symbolName}\` (${first.symbolType})
+${metricLines}${fileContext}${dependencyContext}${snippetSection}`;
     })
     .join('\n\n');
 
-  // Build JSON keys for the response format
-  const jsonKeys = violations
-    .map(v => `  "${v.filepath}::${v.symbolName}": "your comment here"`)
+  // Build JSON keys for the response format (one per function, not per metric)
+  const jsonKeys = Array.from(grouped.keys())
+    .map(key => `  "${key}": "your comment here"`)
     .join(',\n');
 
   return `You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.
