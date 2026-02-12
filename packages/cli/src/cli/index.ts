@@ -45,7 +45,9 @@ program
 
 program
   .command('serve')
-  .description('Start the MCP server (works with Cursor, Claude Code, Windsurf, and any MCP client)')
+  .description(
+    'Start the MCP server (works with Cursor, Claude Code, Windsurf, and any MCP client)',
+  )
   .option('-p, --port <port>', 'Port number (for future use)', '7133')
   .option('--no-watch', 'Disable file watching for this session')
   .option('-w, --watch', '[DEPRECATED] File watching is now enabled by default')

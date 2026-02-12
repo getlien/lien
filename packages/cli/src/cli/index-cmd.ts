@@ -169,16 +169,15 @@ function displayFinalResult(
       spinner.succeed(chalk.green(`Index is up to date - no changes detected${timing}`));
     } else {
       spinner.succeed(
-        chalk.green(`Indexed ${result.filesIndexed} files, ${result.chunksCreated} chunks${timing}`),
+        chalk.green(
+          `Indexed ${result.filesIndexed} files, ${result.chunksCreated} chunks${timing}`,
+        ),
       );
     }
   }
 }
 
-export async function indexCommand(options: {
-  verbose?: boolean;
-  force?: boolean;
-}) {
+export async function indexCommand(options: { verbose?: boolean; force?: boolean }) {
   showCompactBanner();
 
   try {
@@ -217,7 +216,6 @@ export async function indexCommand(options: {
 
     // Display final result
     displayFinalResult(spinner, tracker, result, Date.now() - startTime);
-
   } catch (error) {
     console.error(chalk.red('Error during indexing:'), error);
     process.exit(1);

@@ -12,9 +12,7 @@ describe('VectorDB Query Operations', () => {
       const queryVector = new Float32Array([1, 2, 3]);
 
       await expect(search(null, queryVector, 5)).rejects.toThrow(DatabaseError);
-      await expect(search(null, queryVector, 5)).rejects.toThrow(
-        'Vector database not initialized',
-      );
+      await expect(search(null, queryVector, 5)).rejects.toThrow('Vector database not initialized');
     });
 
     it('should perform vector search with query boosting', async () => {
