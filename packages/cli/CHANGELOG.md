@@ -1,5 +1,17 @@
 # @liendev/lien
 
+## 0.38.0
+
+### Minor Changes
+
+- 6c3bd23: ### Features
+  - Add CommonJS import/export extraction — `module.exports`, `exports.X`, and `require()` patterns are now detected by the dependency analyzer, enabling full metadata for CommonJS codebases like Express (#213)
+
+### Patch Changes
+
+- Updated dependencies [6c3bd23]
+  - @liendev/core@0.38.0
+
 ## 0.37.0
 
 ### Minor Changes
