@@ -191,7 +191,7 @@ function transformBatchToRecords(batch: BatchToProcess): DatabaseRecord[] {
  * @throws {DatabaseError} If validation fails
  */
 function validateBatchInputs(
-  db: LanceDBConnection,
+  db: LanceDBConnection | null,
   vectors: Float32Array[],
   metadatas: ChunkMetadata[],
   contents: string[],
@@ -240,7 +240,7 @@ function chunkIntoBatches(
  * @throws {DatabaseError} If database not initialized or insertion fails
  */
 export async function insertBatch(
-  db: LanceDBConnection,
+  db: LanceDBConnection | null,
   table: LanceDBTable | null,
   tableName: string,
   vectors: Float32Array[],
@@ -260,7 +260,7 @@ export async function insertBatch(
   let currentTable = table;
   for (const [batchVectors, batchMetadatas, batchContents] of batches) {
     currentTable = await insertBatchInternal(
-      db,
+      db!,
       currentTable,
       tableName,
       batchVectors,

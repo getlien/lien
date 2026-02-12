@@ -52,7 +52,7 @@ describe('batch-insert', () => {
         const { vectors, metadatas, contents } = createTestData(1);
 
         await expect(
-          insertBatch(asDb(null), null, 'test_table', vectors, metadatas, contents),
+          insertBatch(null, null, 'test_table', vectors, metadatas, contents),
         ).rejects.toThrow(new DatabaseError('Vector database not initialized'));
       });
 
