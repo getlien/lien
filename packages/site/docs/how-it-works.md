@@ -51,11 +51,19 @@ For detailed technical architecture, flow diagrams, and implementation details, 
 
 ## Ecosystem-Aware & Monorepo Support
 
-Lien automatically detects your project type via **ecosystem presets**:
+Lien automatically detects your project type via **12 ecosystem presets**:
 - **Node.js/TypeScript** - via package.json
-- **Laravel/PHP** - via composer.json
 - **Python** - via pyproject.toml, setup.py, requirements.txt
+- **PHP** - via composer.json
+- **Laravel** - via artisan
+- **Django** - via manage.py
+- **Ruby** - via Gemfile
+- **Rails** - via bin/rails
 - **Rust** - via Cargo.toml
+- **JVM (Java/Kotlin/Scala)** - via pom.xml, build.gradle
+- **Swift** - via Package.swift, *.xcodeproj
+- **.NET** - via *.csproj, *.sln
+- **Astro** - via astro.config.*
 - **Monorepos** - Multiple ecosystems in one repo (e.g., Node.js frontend + Laravel backend)
 
 Each ecosystem preset applies appropriate file exclusions (e.g., ignoring `node_modules` or `vendor`). Additionally, 15+ languages (including Liquid, Go, C/C++, and more) are indexed out of the box via the default scan pattern.

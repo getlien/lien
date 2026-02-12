@@ -109,7 +109,7 @@ Lien tracks code complexity with intuitive outputs:
 
 TypeScript • JavaScript • Vue • Python • PHP • Liquid • Go • Rust • Java • C/C++ • Ruby • Swift • Kotlin • C# • Scala • Markdown
 
-**Ecosystem Presets:** Node.js, Laravel, Python, Rust (auto-detected)
+**Ecosystem Presets:** 12 ecosystem presets including Node.js, Python, PHP, Laravel, Ruby, Rails, Rust, JVM, Swift, .NET, Django, and Astro (auto-detected)
 
 ## Contributing
 

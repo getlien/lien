@@ -433,6 +433,13 @@ await service.save('/path/to/project', config);
 | enabled | boolean | - | - |
 | debounceMs | number | ≥ 0 | < 100: may cause excessive reindexing |
 
+### Chunking
+
+| Field | Type | Constraint |
+|-------|------|------------|
+| useAST | boolean | - |
+| astFallback | string | "line-based" \| "error" |
+
 ### Frameworks
 
 | Field | Type | Constraint |

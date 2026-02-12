@@ -222,6 +222,24 @@ Configure complexity analysis for the `lien complexity` command and `get_complex
 - **Error**: When value exceeds 2× threshold (e.g., testPaths ≥ 30)
 :::
 
+## Chunking
+
+Control how Lien splits your source files into semantic chunks:
+
+```json
+{
+  "chunking": {
+    "useAST": true,
+    "astFallback": "line-based"
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `useAST` | `true` | Use AST-based chunking for supported languages. When `false`, falls back to line-based chunking. |
+| `astFallback` | `"line-based"` | What to do when AST parsing fails. `"line-based"` falls back to line-based chunking; `"error"` throws an error. |
+
 ## Performance Tuning
 
 These settings go in per-project `.lien.config.json` under the `core` key:

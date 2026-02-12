@@ -36,7 +36,7 @@ features:
   
   - icon: 📦
     title: Framework-Aware
-    details: Auto-detects frameworks (Node.js, Laravel, PHP, Python, Rust) with zero config. Full monorepo support for multi-framework repos.
+    details: Auto-detects 12+ ecosystems (Node.js, Python, PHP, Rust, Ruby, and more) with zero config. Full monorepo support for multi-framework repos.
 ---
 
 ## Quick Start
