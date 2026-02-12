@@ -439,9 +439,7 @@ describe('E2E: Real Open Source Projects', () => {
           // Query for functions — every project should have at least some
           const functions = await db.querySymbols({ symbolType: 'function', limit: 10 });
 
-          console.log(
-            `🔣 ${project.name} symbols: ${functions.length} functions found`,
-          );
+          console.log(`🔣 ${project.name} symbols: ${functions.length} functions found`);
 
           expect(functions.length).toBeGreaterThan(0);
 
