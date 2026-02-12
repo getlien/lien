@@ -211,12 +211,16 @@ Follow Conventional Commits:
 ## Before EVERY Commit (MANDATORY)
 
 ```bash
-npm run typecheck  # Must pass with 0 errors
-npm run build      # Must compile successfully
-npm test           # All tests must pass
+npm run format:check  # Prettier formatting must pass
+npm run lint          # ESLint must pass with 0 errors
+npm run typecheck     # Must pass with 0 errors
+npm run build         # Must compile successfully
+npm test              # All tests must pass
 ```
 
 **No exceptions.** This prevents broken builds.
+
+**Tip:** Run `npm run fix` to auto-fix both ESLint and Prettier issues.
 
 ---
 
