@@ -650,10 +650,22 @@ Vector Table:
 Additional Metadata:
 - endLine (int)
 - language (string)
-- isTest (boolean)
-- relatedTests (string[])
-- relatedSources (string[])
-- symbols (object)
+- type (string: 'function' | 'class' | 'block' | 'template')
+- symbols (object: functions[], classes[], interfaces[])
+
+AST Metadata (v0.13.0):
+- symbolName, symbolType, parentClass
+- complexity, cognitiveComplexity
+- parameters, signature, imports
+
+Dependency Tracking (v0.23.0):
+- exports, importedSymbols, callSites
+
+Halstead Metrics (v0.19.0):
+- halsteadVolume, halsteadDifficulty, halsteadEffort, halsteadBugs
+
+Multi-Tenant (optional):
+- repoId, orgId, branch, commitSha
 ```
 
 ### Version File
@@ -778,26 +790,26 @@ graph TB
 
 ### Module Responsibilities
 
-**`lancedb.ts` (267 lines)** - Main orchestrator
+**`lancedb.ts`** - Main orchestrator
 - Initializes database connection
 - Delegates operations to sub-modules
 - Manages table state
 - Provides public API
 
-**`query.ts` (571 lines)** - Search and retrieval
+**`query.ts`** - Search and retrieval
 - `search()` - Vector similarity search with query boosting
 - `scanWithFilter()` - Filtered table scans (by language, pattern)
 - `querySymbols()` - Symbol-based queries (functions, classes, interfaces)
 - Query intent classification
 - Relevance calculation
 
-**`batch-insert.ts` (161 lines)** - Batch operations
+**`batch-insert.ts`** - Batch operations
 - `insertBatch()` - Main entry point for batch insertion
 - `insertBatchInternal()` - Internal queue-based retry logic
 - Handles batch splitting (max 1000 records per batch)
 - Automatic retry with exponential backoff
 
-**`maintenance.ts` (89 lines)** - CRUD operations
+**`maintenance.ts`** - CRUD operations
 - `clear()` - Drop table (full reindex)
 - `deleteByFile()` - Remove all chunks for a file
 - `updateFile()` - Atomic file update (delete + insert)
@@ -811,7 +823,7 @@ graph TB
 - ❌ Hard to test in isolation
 
 **After (v0.14.0):**
-- ✅ 4 focused files (267 + 571 + 161 + 89 lines)
+- ✅ 4 focused files (line counts were accurate at time of v0.14.0 split)
 - ✅ All files parse successfully with AST
 - ✅ Single responsibility per module
 - ✅ Easy to test independently

@@ -438,7 +438,7 @@ Show installed version.
 
 ```bash
 lien --version
-# Output: 0.35.0
+# Output: 0.x.x
 ```
 
 ## lien --help
