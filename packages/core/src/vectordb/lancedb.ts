@@ -96,7 +96,7 @@ export class VectorDB implements VectorDBInterface {
           return await queryOps.search(this.table, queryVector, limit, query);
         } catch (retryError: unknown) {
           throw new DatabaseError(
-            `Index appears corrupted or outdated. Please restart the MCP server or run 'lien reindex' in the project directory.`,
+            `Index appears corrupted or outdated. Please restart the MCP server or run 'lien index' in the project directory.`,
             { originalError: retryError },
           );
         }

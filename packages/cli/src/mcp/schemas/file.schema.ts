@@ -1,4 +1,14 @@
 import { z } from 'zod';
+import path from 'path';
+
+const safeFilepath = z
+  .string()
+  .min(1, 'Filepath cannot be empty')
+  .max(1000)
+  .refine(p => {
+    const normalized = p.replace(/\\/g, '/');
+    return !path.isAbsolute(normalized) && !normalized.split('/').includes('..');
+  }, 'Path must be relative and cannot contain ".." traversal');
 
 /**
  * Schema for get_files_context tool input.
@@ -9,9 +19,9 @@ import { z } from 'zod';
 export const GetFilesContextSchema = z.object({
   filepaths: z
     .union([
-      z.string().min(1, 'Filepath cannot be empty').max(1000),
+      safeFilepath,
       z
-        .array(z.string().min(1, 'Filepath cannot be empty').max(1000))
+        .array(safeFilepath)
         .min(1, 'Array must contain at least one filepath')
         .max(50, 'Maximum 50 files per request'),
     ])

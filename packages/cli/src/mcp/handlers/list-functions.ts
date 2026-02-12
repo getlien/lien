@@ -135,7 +135,7 @@ export async function handleListFunctions(args: unknown, ctx: ToolContext): Prom
       );
     }
     if (queryResult.method === 'content') {
-      notes.push('Using content search. Run "lien reindex" to enable faster symbol-based queries.');
+      notes.push('Using content search. Run "lien index" to enable faster symbol-based queries.');
     }
 
     return {

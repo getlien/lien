@@ -256,7 +256,7 @@ describe('handleListFunctions', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.method).toBe('content');
-      expect(parsed.note).toContain('lien reindex');
+      expect(parsed.note).toContain('lien index');
     });
 
     it('should pass symbolType to scanWithFilter and return DB-filtered results', async () => {

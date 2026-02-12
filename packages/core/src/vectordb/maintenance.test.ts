@@ -123,6 +123,16 @@ describe('VectorDB Maintenance Operations', () => {
         'Failed to delete file from vector database',
       );
     });
+
+    it('should escape double quotes in filepath', async () => {
+      const mockTable = {
+        delete: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await deleteByFile(asTable(mockTable), 'src/file"with"quotes.ts');
+
+      expect(mockTable.delete).toHaveBeenCalledWith('file = "src/file""with""quotes.ts"');
+    });
   });
 
   describe('updateFile', () => {

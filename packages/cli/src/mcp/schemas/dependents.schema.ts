@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import path from 'path';
 
 /**
  * Schema for get_dependents tool input.
@@ -18,6 +19,10 @@ export const GetDependentsSchema = z.object({
     .string()
     .min(1, 'Filepath cannot be empty')
     .max(1000)
+    .refine(p => {
+      const normalized = p.replace(/\\/g, '/');
+      return !path.isAbsolute(normalized) && !normalized.split('/').includes('..');
+    }, 'Path must be relative and cannot contain ".." traversal')
     .describe(
       'Path to file to find dependents for (relative to workspace root).\n\n' +
         "Example: 'src/utils/validate.ts'\n\n" +

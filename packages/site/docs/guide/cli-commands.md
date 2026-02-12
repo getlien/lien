@@ -287,9 +287,6 @@ lien complexity [options]
 |--------|-------------|
 | `--files <paths...>` | Specific files to analyze |
 | `--format <type>` | Output format: `text` (default), `json`, `sarif` |
-| `--threshold <n>` | Override both complexity thresholds (cyclomatic & cognitive) |
-| `--cyclomatic-threshold <n>` | Override cyclomatic complexity threshold only |
-| `--cognitive-threshold <n>` | Override cognitive complexity threshold only |
 | `--fail-on <severity>` | Exit with code 1 if violations found: `error`, `warning` |
 
 ### Output Formats
@@ -370,20 +367,7 @@ lien complexity --files src/api/handler.ts src/utils/parser.ts
 **Generate baseline for delta tracking:**
 
 ```bash
-lien complexity --format json --threshold 10 > baseline.json
-```
-
-**Custom threshold for strict review:**
-
-```bash
-lien complexity --threshold 10
-```
-
-**Override specific metric:**
-
-```bash
-# Stricter cognitive, lenient cyclomatic
-lien complexity --threshold 20 --cognitive-threshold 10
+lien complexity --format json > baseline.json
 ```
 
 ### Complexity Metrics
@@ -439,7 +423,7 @@ A function can have low cyclomatic but high cognitive complexity if deeply neste
 lien complexity
 
 # Strict mode for code review
-lien complexity --threshold 5 --fail-on warning
+lien complexity --fail-on warning
 
 # JSON output for CI
 lien complexity --format json --fail-on error
