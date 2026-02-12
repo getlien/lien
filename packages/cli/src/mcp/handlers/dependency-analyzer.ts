@@ -519,17 +519,6 @@ function mergeTransitiveDependents(
 }
 
 /**
- * Find all dependents of a target file.
- *
- * @param vectorDB - Vector database to scan
- * @param filepath - Path to file to find dependents for
- * @param crossRepo - Whether to search across repos
- * @param log - Logging function
- * @param symbol - Optional: specific symbol to find usages of
- * @param indexVersion - Optional: index version for cache lookup. When provided and matching
- *   the cached version, the expensive scanChunksPaginated call is skipped.
- */
-/**
  * Get scan results from cache or perform a fresh paginated scan.
  */
 async function getOrScanChunks(
@@ -589,6 +578,10 @@ function resolveTransitiveDependents(
   return reExporters;
 }
 
+/**
+ * Find all files that depend on a target file, including transitive dependents
+ * through re-export chains. Optionally tracks usages of a specific symbol.
+ */
 export async function findDependents(
   vectorDB: VectorDBInterface,
   filepath: string,
