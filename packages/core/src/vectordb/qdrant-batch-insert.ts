@@ -1,6 +1,6 @@
 import type { QdrantClient } from '@qdrant/js-client-rest';
 import type { ChunkMetadata } from '../indexer/types.js';
-import type { QdrantPayloadMapper } from './qdrant-payload-mapper.js';
+import type { QdrantPayloadMapper, QdrantPayload } from './qdrant-payload-mapper.js';
 import { DatabaseError } from '../errors/index.js';
 import { VECTOR_DB_MAX_BATCH_SIZE } from '../constants.js';
 
@@ -35,13 +35,10 @@ export function preparePoints(
   contents: string[],
   payloadMapper: QdrantPayloadMapper,
   generatePointId: (metadata: ChunkMetadata) => string,
-): Array<{ id: string; vector: number[]; payload: Record<string, unknown> }> {
+): Array<{ id: string; vector: number[]; payload: QdrantPayload }> {
   return vectors.map((vector, i) => {
     const metadata = metadatas[i];
-    const payload = payloadMapper.toPayload(metadata, contents[i]) as unknown as Record<
-      string,
-      unknown
-    >;
+    const payload = payloadMapper.toPayload(metadata, contents[i]);
 
     return {
       id: generatePointId(metadata),
@@ -57,7 +54,7 @@ export function preparePoints(
 export async function insertBatch(
   client: QdrantClient,
   collectionName: string,
-  points: Array<{ id: string; vector: number[]; payload: Record<string, unknown> }>,
+  points: Array<{ id: string; vector: number[]; payload: QdrantPayload }>,
 ): Promise<void> {
   const batchSize = VECTOR_DB_MAX_BATCH_SIZE;
   for (let i = 0; i < points.length; i += batchSize) {
