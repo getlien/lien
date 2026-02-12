@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SearchResult } from '@liendev/core';
-import { findDependents, groupDependentsByRepo } from './dependency-analyzer.js';
+import {
+  findDependents,
+  groupDependentsByRepo,
+  clearDependencyCache,
+} from './dependency-analyzer.js';
 
 /**
  * Helper to create a mock async generator that yields a single page of items.
@@ -56,6 +60,7 @@ describe('findDependents', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearDependencyCache();
     mockDB = {
       scanPaginated: vi.fn().mockReturnValue(mockAsyncGenerator([])),
       scanCrossRepo: vi.fn().mockResolvedValue([]),
@@ -438,6 +443,124 @@ describe('findDependents', () => {
       );
       expect(mockDB.scanPaginated).toHaveBeenCalled();
       expect(mockDB.scanCrossRepo).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('import index caching', () => {
+    it('should cache scan results and reuse on same indexVersion', async () => {
+      const chunks = [
+        createChunk('src/target.ts', { exports: ['foo'] }),
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+      ];
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator(chunks));
+
+      // First call: should scan
+      const result1 = await findDependents(
+        mockDB as any,
+        'src/target.ts',
+        false,
+        mockLog,
+        undefined,
+        100,
+      );
+      expect(mockDB.scanPaginated).toHaveBeenCalledTimes(1);
+      expect(result1.dependents).toHaveLength(1);
+
+      // Second call with same indexVersion: should use cache
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator([]));
+      const result2 = await findDependents(
+        mockDB as any,
+        'src/target.ts',
+        false,
+        mockLog,
+        undefined,
+        100,
+      );
+      expect(mockDB.scanPaginated).toHaveBeenCalledTimes(1); // not called again
+      expect(result2.dependents).toHaveLength(1); // same results from cache
+    });
+
+    it('should invalidate cache when indexVersion changes', async () => {
+      const chunks = [
+        createChunk('src/target.ts', { exports: ['foo'] }),
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+      ];
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator(chunks));
+
+      // First call with version 100
+      await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
+      expect(mockDB.scanPaginated).toHaveBeenCalledTimes(1);
+
+      // Second call with version 200: should re-scan
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([createChunk('src/target.ts', { exports: ['foo'] })]),
+      );
+      const result2 = await findDependents(
+        mockDB as any,
+        'src/target.ts',
+        false,
+        mockLog,
+        undefined,
+        200,
+      );
+      expect(mockDB.scanPaginated).toHaveBeenCalledTimes(2);
+      expect(result2.dependents).toHaveLength(0); // no consumers in new scan
+    });
+
+    it('should invalidate cache via clearDependencyCache()', async () => {
+      const chunks = [
+        createChunk('src/target.ts', { exports: ['foo'] }),
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+      ];
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator(chunks));
+
+      // First call: populates cache
+      await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
+      expect(mockDB.scanPaginated).toHaveBeenCalledTimes(1);
+
+      // Clear cache
+      clearDependencyCache();
+
+      // Same version but cache cleared: should re-scan
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator(chunks));
+      await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
+      expect(mockDB.scanPaginated).toHaveBeenCalledTimes(2);
+    });
+
+    it('should invalidate cache when crossRepo mode changes', async () => {
+      const chunks = [
+        createChunk('src/target.ts', { exports: ['foo'] }),
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+      ];
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator(chunks));
+
+      // First call with crossRepo=false
+      await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
+      expect(mockDB.scanPaginated).toHaveBeenCalledTimes(1);
+
+      // Second call with crossRepo=true, same indexVersion: should re-scan
+      mockDB.scanCrossRepo.mockReturnValue(mockAsyncGenerator(chunks));
+      await findDependents(mockDB as any, 'src/target.ts', true, mockLog, undefined, 100);
+      expect(mockDB.scanPaginated.mock.calls.length + mockDB.scanCrossRepo.mock.calls.length).toBe(
+        2,
+      );
+    });
+
+    it('should not cache when indexVersion is not provided', async () => {
+      const chunks = [
+        createChunk('src/target.ts', { exports: ['foo'] }),
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+      ];
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator(chunks));
+
+      // First call without indexVersion
+      await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      expect(mockDB.scanPaginated).toHaveBeenCalledTimes(1);
+
+      // Second call without indexVersion: should scan again
+      mockDB.scanPaginated.mockReturnValue(mockAsyncGenerator(chunks));
+      await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+      expect(mockDB.scanPaginated).toHaveBeenCalledTimes(2);
     });
   });
 });

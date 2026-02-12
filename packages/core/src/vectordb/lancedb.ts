@@ -1,18 +1,16 @@
 import * as lancedb from '@lancedb/lancedb';
 import path from 'path';
 import os from 'os';
-import crypto from 'crypto';
 import type { SearchResult, VectorDBInterface } from './types.js';
+import type { LanceDBConnection, LanceDBTable } from './lancedb-types.js';
 import type { ChunkMetadata } from '../indexer/types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { readVersionFile } from './version.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
+import { extractRepoId } from '../utils/repo-id.js';
 import * as queryOps from './query.js';
 import * as batchOps from './batch-insert.js';
 import * as maintenanceOps from './maintenance.js';
-
-type LanceDBConnection = Awaited<ReturnType<typeof lancedb.connect>>;
-type LanceDBTable = Awaited<ReturnType<LanceDBConnection['openTable']>>;
 
 export class VectorDB implements VectorDBInterface {
   private db: LanceDBConnection | null = null;
@@ -25,12 +23,9 @@ export class VectorDB implements VectorDBInterface {
 
   constructor(projectRoot: string) {
     // Store in user's home directory under ~/.lien/indices/{projectName-hash}
-    const projectName = path.basename(projectRoot);
+    const repoId = extractRepoId(projectRoot);
 
-    // Create unique identifier from full path to prevent collisions
-    const pathHash = crypto.createHash('md5').update(projectRoot).digest('hex').substring(0, 8);
-
-    this.dbPath = path.join(os.homedir(), '.lien', 'indices', `${projectName}-${pathHash}`);
+    this.dbPath = path.join(os.homedir(), '.lien', 'indices', repoId);
   }
 
   async initialize(): Promise<void> {

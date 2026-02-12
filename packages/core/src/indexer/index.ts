@@ -11,7 +11,6 @@
 import fs from 'fs/promises';
 import pLimit from 'p-limit';
 import path from 'path';
-import crypto from 'crypto';
 import { scanCodebase } from './scanner.js';
 import { detectEcosystems, getEcosystemExcludePatterns } from './ecosystem-presets.js';
 import type { LienConfig } from '../config/schema.js';
@@ -36,6 +35,7 @@ import { indexMultipleFiles, normalizeToRelativePath } from './incremental.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import { ChunkBatchProcessor } from './chunk-batch-processor.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
+import { extractRepoId } from '../utils/repo-id.js';
 
 /**
  * Options for indexing a codebase
@@ -88,16 +88,6 @@ interface IndexingConfig {
   astFallback: 'line-based' | 'error';
   repoId?: string;
   orgId?: string;
-}
-
-/**
- * Extract repository identifier from project root.
- * Uses project name + path hash for stable, unique identification.
- */
-function extractRepoId(projectRoot: string): string {
-  const projectName = path.basename(projectRoot);
-  const pathHash = crypto.createHash('md5').update(projectRoot).digest('hex').substring(0, 8);
-  return `${projectName}-${pathHash}`;
 }
 
 /** Extract indexing config values using defaults */

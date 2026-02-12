@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { clear, deleteByFile, updateFile } from './maintenance.js';
 import { DatabaseError } from '../errors/index.js';
+import type { LanceDBConnection, LanceDBTable } from './lancedb-types.js';
 import fs from 'fs/promises';
+
+const asDb = (obj: unknown) => obj as LanceDBConnection;
+const asTable = (obj: unknown) => obj as LanceDBTable;
 
 // Mock fs/promises
 vi.mock('fs/promises', () => ({
@@ -24,7 +28,7 @@ describe('VectorDB Maintenance Operations', () => {
         dropTable: vi.fn().mockResolvedValue(undefined),
       };
 
-      await clear(mockDb, mockTable, 'test_table');
+      await clear(asDb(mockDb), asTable(mockTable), 'test_table');
 
       expect(mockDb.dropTable).toHaveBeenCalledWith('test_table');
     });
@@ -34,14 +38,16 @@ describe('VectorDB Maintenance Operations', () => {
         dropTable: vi.fn().mockResolvedValue(undefined),
       };
 
-      await clear(mockDb, null, 'test_table');
+      await clear(asDb(mockDb), null, 'test_table');
 
       expect(mockDb.dropTable).not.toHaveBeenCalled();
     });
 
     it('should throw DatabaseError if db is not initialized', async () => {
-      await expect(clear(null, { name: 'test' }, 'test_table')).rejects.toThrow(DatabaseError);
-      await expect(clear(null, { name: 'test' }, 'test_table')).rejects.toThrow(
+      await expect(clear(asDb(null), asTable({ name: 'test' }), 'test_table')).rejects.toThrow(
+        DatabaseError,
+      );
+      await expect(clear(asDb(null), asTable({ name: 'test' }), 'test_table')).rejects.toThrow(
         'Vector database not initialized',
       );
     });
@@ -51,7 +57,7 @@ describe('VectorDB Maintenance Operations', () => {
         dropTable: vi.fn().mockRejectedValue(new Error('Drop failed')),
       };
 
-      await expect(clear(mockDb, { name: 'test' }, 'test_table')).rejects.toThrow(
+      await expect(clear(asDb(mockDb), asTable({ name: 'test' }), 'test_table')).rejects.toThrow(
         'Failed to clear vector database',
       );
     });
@@ -61,7 +67,7 @@ describe('VectorDB Maintenance Operations', () => {
       const mockDb = { dropTable: vi.fn().mockResolvedValue(undefined) };
       vi.mocked(fs.rm).mockResolvedValue(undefined);
 
-      await clear(mockDb, mockTable, 'test_table', '/path/to/db');
+      await clear(asDb(mockDb), asTable(mockTable), 'test_table', '/path/to/db');
 
       expect(fs.rm).toHaveBeenCalledWith('/path/to/db/test_table.lance', {
         recursive: true,
@@ -73,7 +79,7 @@ describe('VectorDB Maintenance Operations', () => {
       const mockTable = { name: 'test_table' };
       const mockDb = { dropTable: vi.fn().mockResolvedValue(undefined) };
 
-      await clear(mockDb, mockTable, 'test_table');
+      await clear(asDb(mockDb), asTable(mockTable), 'test_table');
 
       expect(fs.rm).not.toHaveBeenCalled();
     });
@@ -84,7 +90,9 @@ describe('VectorDB Maintenance Operations', () => {
       vi.mocked(fs.rm).mockRejectedValue(new Error('Directory not found'));
 
       // Should not throw
-      await expect(clear(mockDb, mockTable, 'test_table', '/path/to/db')).resolves.toBeUndefined();
+      await expect(
+        clear(asDb(mockDb), asTable(mockTable), 'test_table', '/path/to/db'),
+      ).resolves.toBeUndefined();
     });
   });
 
@@ -94,14 +102,14 @@ describe('VectorDB Maintenance Operations', () => {
         delete: vi.fn().mockResolvedValue(undefined),
       };
 
-      await deleteByFile(mockTable, 'src/test.ts');
+      await deleteByFile(asTable(mockTable), 'src/test.ts');
 
       expect(mockTable.delete).toHaveBeenCalledWith('file = "src/test.ts"');
     });
 
     it('should throw DatabaseError if table is null', async () => {
-      await expect(deleteByFile(null, 'src/test.ts')).rejects.toThrow(DatabaseError);
-      await expect(deleteByFile(null, 'src/test.ts')).rejects.toThrow(
+      await expect(deleteByFile(asTable(null), 'src/test.ts')).rejects.toThrow(DatabaseError);
+      await expect(deleteByFile(asTable(null), 'src/test.ts')).rejects.toThrow(
         'Vector database not initialized',
       );
     });
@@ -111,7 +119,7 @@ describe('VectorDB Maintenance Operations', () => {
         delete: vi.fn().mockRejectedValue(new Error('Delete failed')),
       };
 
-      await expect(deleteByFile(mockTable, 'src/test.ts')).rejects.toThrow(
+      await expect(deleteByFile(asTable(mockTable), 'src/test.ts')).rejects.toThrow(
         'Failed to delete file from vector database',
       );
     });
@@ -140,8 +148,8 @@ describe('VectorDB Maintenance Operations', () => {
       const contents = ['function test() {}'];
 
       const result = await updateFile(
-        mockDb,
-        mockTable,
+        asDb(mockDb),
+        asTable(mockTable),
         'test_table',
         '/path/to/db',
         'src/test.ts',
@@ -169,7 +177,7 @@ describe('VectorDB Maintenance Operations', () => {
 
       await expect(
         updateFile(
-          {},
+          asDb({}),
           null,
           'test_table',
           '/path/to/db',
@@ -188,8 +196,8 @@ describe('VectorDB Maintenance Operations', () => {
       const mockDb = {};
 
       const result = await updateFile(
-        mockDb,
-        mockTable,
+        asDb(mockDb),
+        asTable(mockTable),
         'test_table',
         '/path/to/db',
         'src/test.ts',
@@ -224,8 +232,8 @@ describe('VectorDB Maintenance Operations', () => {
 
       await expect(
         updateFile(
-          mockDb,
-          mockTable,
+          asDb(mockDb),
+          asTable(mockTable),
           'test_table',
           '/path/to/db',
           'src/test.ts',

@@ -1,6 +1,5 @@
 import fs from 'fs/promises';
 import path from 'path';
-import crypto from 'crypto';
 import pLimit from 'p-limit';
 import { chunkFile } from './chunker.js';
 import type { EmbeddingService } from '../embeddings/types.js';
@@ -16,16 +15,7 @@ import { computeContentHash } from './content-hash.js';
 import type { CodeChunk } from './types.js';
 import type { Result } from '../utils/result.js';
 import { Ok, Err, isOk } from '../utils/result.js';
-
-/**
- * Extract repository identifier from project root.
- * Uses project name + path hash for stable, unique identification.
- */
-function extractRepoId(projectRoot: string): string {
-  const projectName = path.basename(projectRoot);
-  const pathHash = crypto.createHash('md5').update(projectRoot).digest('hex').substring(0, 8);
-  return `${projectName}-${pathHash}`;
-}
+import { extractRepoId } from '../utils/repo-id.js';
 
 /**
  * Normalize a file path to a consistent relative format.

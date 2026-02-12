@@ -1,12 +1,7 @@
+import type { LanceDBConnection, LanceDBTable } from './lancedb-types.js';
 import type { ChunkMetadata } from '../indexer/types.js';
 import { DatabaseError } from '../errors/index.js';
 import { VECTOR_DB_MAX_BATCH_SIZE, VECTOR_DB_MIN_BATCH_SIZE } from '../constants.js';
-
-// TODO: Replace with proper types from lancedb-types.ts
-// Currently using 'any' because tests use incomplete mocks that don't satisfy full LanceDB interface
-// Proper types: Awaited<ReturnType<typeof lancedb.connect>> and Awaited<ReturnType<Connection['openTable']>>
-type LanceDBConnection = any;
-type LanceDBTable = any;
 
 /**
  * Batch of data to be inserted into the vector database
@@ -342,11 +337,12 @@ async function tryInsertBatch(
   try {
     const records = transformBatchToRecords(batch);
 
+    const data = records as unknown as Record<string, unknown>[];
     if (!currentTable) {
-      const newTable = await db.createTable(tableName, records);
+      const newTable = await db.createTable(tableName, data);
       return { success: true, table: newTable };
     } else {
-      await currentTable.add(records);
+      await currentTable.add(data);
       return { success: true, table: currentTable };
     }
   } catch (error) {

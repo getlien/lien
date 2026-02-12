@@ -1,3 +1,4 @@
+import type { LanceDBTable } from './lancedb-types.js';
 import type { SearchResult } from './types.js';
 import { SYMBOL_TYPE_MATCHES } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
@@ -12,11 +13,6 @@ import {
   FileTypeBoostingStrategy,
 } from './boosting/index.js';
 import { safeRegex } from '../utils/safe-regex.js';
-
-// TODO: Replace with proper type from lancedb-types.ts
-// Currently using 'any' because tests use incomplete mocks that don't satisfy full LanceDB interface
-// See: https://github.com/getlien/lien/issues/XXX
-type LanceDBTable = any;
 
 /**
  * Cached strategy instances to avoid repeated instantiation overhead.
