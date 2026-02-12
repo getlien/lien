@@ -38,9 +38,14 @@ export async function initCommand(options: InitOptions = {}) {
     // Already configured
     console.log(chalk.green('\n✓ Already configured — .cursor/mcp.json contains lien entry'));
   } else if (existingConfig) {
-    // Merge lien into existing config
-    existingConfig.mcpServers = existingConfig.mcpServers || {};
-    existingConfig.mcpServers.lien = MCP_CONFIG;
+    // Merge lien into existing config, validating mcpServers is a plain object
+    const servers = existingConfig.mcpServers;
+    const safeServers =
+      servers && typeof servers === 'object' && !Array.isArray(servers)
+        ? (servers as Record<string, unknown>)
+        : {};
+    safeServers.lien = MCP_CONFIG;
+    existingConfig.mcpServers = safeServers;
     await fs.writeFile(mcpConfigPath, JSON.stringify(existingConfig, null, 2) + '\n');
     console.log(chalk.green('\n✓ Added lien to existing .cursor/mcp.json'));
   } else {
