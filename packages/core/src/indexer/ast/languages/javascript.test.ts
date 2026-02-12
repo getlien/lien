@@ -211,6 +211,20 @@ export const baz = 42;`;
       expect(exports).toEqual(['default']);
     });
 
+    it('should extract module.exports = class Name {}', () => {
+      const code = 'module.exports = class MyClass { method() {} };';
+      const tree = parser.parse(code);
+      const exports = exportExtractor.extractExports(tree.rootNode);
+      expect(exports).toEqual(['default', 'MyClass']);
+    });
+
+    it('should extract module.exports = class {} (anonymous)', () => {
+      const code = 'module.exports = class {};';
+      const tree = parser.parse(code);
+      const exports = exportExtractor.extractExports(tree.rootNode);
+      expect(exports).toEqual(['default']);
+    });
+
     it('should extract exports.foo and exports.bar', () => {
       const code = `exports.foo = function() {};
 exports.bar = 42;`;

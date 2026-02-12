@@ -118,11 +118,16 @@ export class JavaScriptTraverser extends TypeScriptTraverser {}
 /**
  * JavaScript/TypeScript export extractor
  *
- * Handles explicit export statements:
+ * Handles ES module exports:
  * - Named exports: export { foo, bar }
  * - Declaration exports: export function foo() {}, export const bar = ...
  * - Default exports: export default ...
  * - Re-exports: export { foo } from './module'
+ *
+ * Handles CommonJS exports:
+ * - module.exports = { foo, bar }
+ * - module.exports = function/class
+ * - exports.foo = ... / module.exports.bar = ...
  */
 export class JavaScriptExportExtractor implements LanguageExportExtractor {
   extractExports(rootNode: Parser.SyntaxNode): string[] {
@@ -309,11 +314,17 @@ export class TypeScriptExportExtractor extends JavaScriptExportExtractor {}
 /**
  * JavaScript/TypeScript import extractor
  *
- * Handles:
+ * Handles ES module imports:
  * - Named imports: import { foo, bar } from './module'
  * - Default imports: import foo from './module'
  * - Namespace imports: import * as utils from './module'
  * - Re-exports: export { foo } from './module'
+ *
+ * Handles CommonJS require():
+ * - const x = require('module')
+ * - const { a, b } = require('module')
+ * - const { a: alias } = require('module')
+ * - require('./side-effect')
  */
 export class JavaScriptImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = [
