@@ -195,7 +195,7 @@ function validateBatchInputs(
   vectors: Float32Array[],
   metadatas: ChunkMetadata[],
   contents: string[],
-): void {
+): asserts db is LanceDBConnection {
   if (!db) {
     throw new DatabaseError('Vector database not initialized');
   }
@@ -260,7 +260,7 @@ export async function insertBatch(
   let currentTable = table;
   for (const [batchVectors, batchMetadatas, batchContents] of batches) {
     currentTable = await insertBatchInternal(
-      db!,
+      db,
       currentTable,
       tableName,
       batchVectors,

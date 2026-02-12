@@ -155,25 +155,26 @@ function createProgressCallback(
 }
 
 /**
- * Displays final result if not already shown via progress callback.
+ * Displays final result with timing information.
+ * If progress callback already showed a message, appends timing as a separate line.
  */
 function displayFinalResult(
   spinner: Ora,
   tracker: ProgressTracker,
   result: { filesIndexed: number; chunksCreated: number },
-  elapsedMs: number,
+  durationMs: number,
 ): void {
-  const timing = ` in ${formatDuration(elapsedMs)}`;
-  if (!tracker.completedViaProgress) {
-    if (result.filesIndexed === 0) {
-      spinner.succeed(chalk.green(`Index is up to date - no changes detected${timing}`));
-    } else {
-      spinner.succeed(
-        chalk.green(
-          `Indexed ${result.filesIndexed} files, ${result.chunksCreated} chunks${timing}`,
-        ),
-      );
-    }
+  const timing = formatDuration(durationMs);
+  if (tracker.completedViaProgress) {
+    console.log(chalk.dim(`  Completed in ${timing}`));
+  } else if (result.filesIndexed === 0) {
+    spinner.succeed(chalk.green(`Index is up to date - no changes detected in ${timing}`));
+  } else {
+    spinner.succeed(
+      chalk.green(
+        `Indexed ${result.filesIndexed} files, ${result.chunksCreated} chunks in ${timing}`,
+      ),
+    );
   }
 }
 
@@ -185,8 +186,6 @@ export async function indexCommand(options: { verbose?: boolean; force?: boolean
     if (options.force) {
       await clearExistingIndex();
     }
-
-    const startTime = Date.now();
 
     // Create spinner and progress tracker
     const spinner = ora({
@@ -215,7 +214,7 @@ export async function indexCommand(options: { verbose?: boolean; force?: boolean
     }
 
     // Display final result
-    displayFinalResult(spinner, tracker, result, Date.now() - startTime);
+    displayFinalResult(spinner, tracker, result, result.durationMs);
   } catch (error) {
     console.error(chalk.red('Error during indexing:'), error);
     process.exit(1);

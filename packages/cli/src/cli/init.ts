@@ -25,7 +25,11 @@ export async function initCommand(options: InitOptions = {}) {
   let existingConfig: { mcpServers?: Record<string, unknown> } | null = null;
   try {
     const raw = await fs.readFile(mcpConfigPath, 'utf-8');
-    existingConfig = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    // Validate parsed JSON is a plain object we can merge into
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      existingConfig = parsed;
+    }
   } catch {
     // File doesn't exist or isn't valid JSON
   }
