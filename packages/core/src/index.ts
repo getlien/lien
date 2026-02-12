@@ -49,6 +49,7 @@ export {
   groupChunksByNormalizedPath,
   findTransitiveDependents,
 } from './indexer/dependency-analyzer.js';
+export { findTestAssociationsFromChunks } from './indexer/test-associations.js';
 export {
   detectEcosystems,
   getEcosystemExcludePatterns,

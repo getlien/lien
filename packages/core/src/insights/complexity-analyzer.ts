@@ -9,6 +9,7 @@ import type {
 import { RISK_ORDER } from './types.js';
 import type { ChunkMetadata, CodeChunk } from '../indexer/types.js';
 import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
+import { findTestAssociationsFromChunks } from '../indexer/test-associations.js';
 import type { SearchResult } from '../vectordb/types.js';
 
 /**
@@ -97,6 +98,19 @@ export class ComplexityAnalyzer {
     const violations = instance.findViolations(filtered);
     const report = instance.buildReport(violations, filtered);
     instance.enrichWithDependencies(report, allResults);
+
+    // Enrich files with violations with test association data
+    const filesWithViolations = Object.keys(report.files).filter(
+      f => report.files[f].violations.length > 0,
+    );
+    if (filesWithViolations.length > 0) {
+      const testMap = findTestAssociationsFromChunks(filesWithViolations, chunks);
+      for (const [filepath, testFiles] of testMap) {
+        if (report.files[filepath]) {
+          report.files[filepath].testAssociations = testFiles;
+        }
+      }
+    }
 
     return report;
   }

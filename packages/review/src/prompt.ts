@@ -1010,6 +1010,14 @@ export function buildBatchedCommentsPrompt(
       // Add file-level context (language, type, other violations)
       const fileContext = fileData ? buildFileContext(first.filepath, fileData) : '';
 
+      // Add test context
+      const testContext =
+        fileData && fileData.testAssociations && fileData.testAssociations.length > 0
+          ? `\n- **Test files**: ${fileData.testAssociations.join(', ')}`
+          : fileData
+            ? '\n- **Tests**: None found — consider adding tests'
+            : '';
+
       // Add diff hunk showing what changed in this PR
       const hunk = diffHunks?.get(key);
       const diffSection = hunk
@@ -1018,7 +1026,7 @@ export function buildBatchedCommentsPrompt(
 
       return `### ${sectionIndex}. ${key}
 - **Function**: \`${first.symbolName}\` (${first.symbolType})
-${metricLines}${fileContext}${dependencyContext}${snippetSection}${diffSection}`;
+${metricLines}${fileContext}${testContext}${dependencyContext}${snippetSection}${diffSection}`;
     })
     .join('\n\n');
 
@@ -1069,6 +1077,12 @@ Be direct and specific to THIS code. Avoid generic advice like "break into small
 Write comments of similar quality and specificity for each violation below.
 
 IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
+
+**GitHub Suggestions**: When the fix is small and self-contained (< 10 lines, replaces specific lines visible in the diff), include a GitHub suggestion block:
+\`\`\`suggestion
+// replacement code
+\`\`\`
+Only use suggestion blocks when the replacement is complete, runnable code — not pseudocode. GitHub renders these as one-click apply buttons.
 
 ## Response Format
 

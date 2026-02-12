@@ -802,6 +802,7 @@ function buildLineComments(
   violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
   aiComments: Map<ComplexityViolation, string>,
   deltaMap: Map<string, ComplexityDelta>,
+  report: ComplexityReport,
   logger: Logger,
 ): LineComment[] {
   // Group violations by filepath::symbolName
@@ -834,6 +835,13 @@ function buildLineComments(
     // Use the AI comment from any violation in the group (they all share the same comment)
     const comment = aiComments.get(firstViolation)!;
 
+    // Add test coverage note if no tests found for this file
+    const fileData = report.files[firstViolation.filepath];
+    const testNote =
+      fileData && (!fileData.testAssociations || fileData.testAssociations.length === 0)
+        ? '\n\n> No test files found for this function.'
+        : '';
+
     logger.info(
       `Adding grouped comment for ${firstViolation.filepath}:${commentLine} (${firstViolation.symbolName}, ${group.length} metric${group.length === 1 ? '' : 's'})`,
     );
@@ -841,7 +849,7 @@ function buildLineComments(
     comments.push({
       path: firstViolation.filepath,
       line: commentLine,
-      body: `${metricHeaders}${lineNote}\n\n${comment}`,
+      body: `${metricHeaders}${lineNote}\n\n${comment}${testNote}`,
     });
   }
 
@@ -983,7 +991,13 @@ async function generateAndPostReview(
     diffHunks,
   );
 
-  const lineComments = buildLineComments(processed.newOrDegraded, aiComments, deltaMap, logger);
+  const lineComments = buildLineComments(
+    processed.newOrDegraded,
+    aiComments,
+    deltaMap,
+    report,
+    logger,
+  );
   logger.info(`Built ${lineComments.length} line comments for new/degraded violations`);
 
   const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
