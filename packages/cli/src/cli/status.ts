@@ -5,7 +5,6 @@ import path from 'path';
 import os from 'os';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import {
   isGitRepo,
   getCurrentBranch,
@@ -52,12 +51,12 @@ async function getLastReindex(indexPath: string): Promise<number | null> {
 
 function getPackageVersion(): string | undefined {
   const __filename = fileURLToPath(import.meta.url);
-  const __dirname = dirname(__filename);
+  const __dirname = path.dirname(__filename);
   const require = createRequire(import.meta.url);
   try {
-    return require(join(__dirname, '../package.json')).version;
+    return require(path.join(__dirname, '../package.json')).version;
   } catch {
-    return require(join(__dirname, '../../package.json')).version;
+    return require(path.join(__dirname, '../../package.json')).version;
   }
 }
 
