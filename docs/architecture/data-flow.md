@@ -647,25 +647,29 @@ Vector Table:
 │ [0.2, ...]   │ "class..."    │ "user.ts"  │ 45          │
 └──────────────┴─────────────┴────────────┴─────────────┘
 
-Additional Metadata:
+Additional Columns:
 - endLine (int)
 - language (string)
 - type (string: 'function' | 'class' | 'block' | 'template')
-- symbols (object: functions[], classes[], interfaces[])
+- functionNames, classNames, interfaceNames (string[])
 
-AST Metadata (v0.13.0):
-- symbolName, symbolType, parentClass
-- complexity, cognitiveComplexity
-- parameters, signature, imports
+AST Columns (v0.13.0):
+- symbolName, symbolType, parentClass (string)
+- complexity, cognitiveComplexity (number)
+- parameters, imports (string[])
+- signature (string)
 
-Dependency Tracking (v0.23.0):
-- exports, importedSymbols, callSites
+Halstead Columns (v0.19.0):
+- halsteadVolume, halsteadDifficulty, halsteadEffort, halsteadBugs (number)
 
-Halstead Metrics (v0.19.0):
-- halsteadVolume, halsteadDifficulty, halsteadEffort, halsteadBugs
+Dependency Columns (v0.23.0):
+- exports (string[])
+- importedSymbolPaths, importedSymbolNames (string[] — parallel arrays)
+- callSiteSymbols (string[]), callSiteLines (number[] — parallel arrays)
 
-Multi-Tenant (optional):
-- repoId, orgId, branch, commitSha
+Note: Nested ChunkMetadata fields (symbols, importedSymbols, callSites) are
+flattened into parallel arrays for Arrow/LanceDB storage. Multi-tenant fields
+(repoId, orgId, branch, commitSha) are only stored in the Qdrant backend.
 ```
 
 ### Version File
