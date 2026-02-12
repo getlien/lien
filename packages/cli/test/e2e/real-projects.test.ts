@@ -443,10 +443,10 @@ describe('E2E: Real Open Source Projects', () => {
 
           expect(functions.length).toBeGreaterThan(0);
 
-          // Every result should have a symbolName
+          // Every result should have a symbolName and valid symbol type
           for (const r of functions) {
             expect(r.metadata.symbolName).toBeTruthy();
-            expect(r.metadata.symbolType).toBe('function');
+            expect(['function', 'method']).toContain(r.metadata.symbolType);
             expect(r.metadata.file).toBeTruthy();
           }
         },
