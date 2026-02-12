@@ -9,9 +9,6 @@ import type { OutputFormat } from '@liendev/core';
 interface ComplexityOptions {
   files?: string[];
   format: OutputFormat;
-  threshold?: string;
-  cyclomaticThreshold?: string;
-  cognitiveThreshold?: string;
   failOn?: 'error' | 'warning';
 }
 
@@ -54,9 +51,6 @@ function validateFilesExist(files: string[] | undefined, rootDir: string): void 
   }
 }
 
-// Threshold overrides via CLI flags are not supported without config
-// Use MCP tool with threshold parameter for custom thresholds
-
 /** Check if index exists */
 async function ensureIndexExists(vectorDB: VectorDB): Promise<void> {
   try {
@@ -83,14 +77,6 @@ export async function complexityCommand(options: ComplexityOptions) {
     validateFailOn(options.failOn);
     validateFormat(options.format);
     validateFilesExist(options.files, rootDir);
-
-    // Warn if threshold flags are used (not supported without config)
-    if (options.threshold || options.cyclomaticThreshold || options.cognitiveThreshold) {
-      console.warn(chalk.yellow('Warning: Threshold overrides via CLI flags are not supported.'));
-      console.warn(
-        chalk.yellow('Use the MCP tool with threshold parameter for custom thresholds.'),
-      );
-    }
 
     // Initialize database (no config needed)
     const vectorDB = new VectorDB(rootDir);

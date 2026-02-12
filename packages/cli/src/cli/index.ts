@@ -40,13 +40,12 @@ program
   .command('index')
   .description('Index the codebase for semantic search')
   .option('-f, --force', 'Force full reindex (skip incremental)')
-  .option('-w, --watch', 'Watch for changes and re-index automatically')
   .option('-v, --verbose', 'Show detailed logging during indexing')
   .action(indexCommand);
 
 program
   .command('serve')
-  .description('Start the MCP server for Cursor integration')
+  .description('Start the MCP server (works with Cursor, Claude Code, Windsurf, and any MCP client)')
   .option('-p, --port <port>', 'Port number (for future use)', '7133')
   .option('--no-watch', 'Disable file watching for this session')
   .option('-w, --watch', '[DEPRECATED] File watching is now enabled by default')
@@ -60,9 +59,6 @@ program
   .description('Analyze code complexity')
   .option('--files <paths...>', 'Specific files to analyze')
   .option('--format <type>', 'Output format: text, json, sarif', 'text')
-  .option('--threshold <n>', 'Override both complexity thresholds (cyclomatic & cognitive)')
-  .option('--cyclomatic-threshold <n>', 'Override cyclomatic complexity threshold only')
-  .option('--cognitive-threshold <n>', 'Override cognitive complexity threshold only')
   .option('--fail-on <severity>', 'Exit 1 if violations: error, warning')
   .action(complexityCommand);
 
@@ -78,3 +74,5 @@ configCmd
 configCmd.command('get <key>').description('Get a config value').action(configGetCommand);
 
 configCmd.command('list').description('Show all current config').action(configListCommand);
+
+program.addHelpText('beforeAll', `Quick start: run 'lien serve' in your project directory\n`);

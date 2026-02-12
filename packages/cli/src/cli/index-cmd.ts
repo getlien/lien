@@ -9,6 +9,7 @@ import {
   getEmbeddingMessage,
   getModelLoadingMessage,
 } from '../utils/loading-messages.js';
+import { formatDuration } from './utils.js';
 
 /**
  * Clears the existing index and manifest (for --force flag).
@@ -160,20 +161,21 @@ function displayFinalResult(
   spinner: Ora,
   tracker: ProgressTracker,
   result: { filesIndexed: number; chunksCreated: number },
+  elapsedMs: number,
 ): void {
+  const timing = ` in ${formatDuration(elapsedMs)}`;
   if (!tracker.completedViaProgress) {
     if (result.filesIndexed === 0) {
-      spinner.succeed(chalk.green('Index is up to date - no changes detected'));
+      spinner.succeed(chalk.green(`Index is up to date - no changes detected${timing}`));
     } else {
       spinner.succeed(
-        chalk.green(`Indexed ${result.filesIndexed} files, ${result.chunksCreated} chunks`),
+        chalk.green(`Indexed ${result.filesIndexed} files, ${result.chunksCreated} chunks${timing}`),
       );
     }
   }
 }
 
 export async function indexCommand(options: {
-  watch?: boolean;
   verbose?: boolean;
   force?: boolean;
 }) {
@@ -184,6 +186,8 @@ export async function indexCommand(options: {
     if (options.force) {
       await clearExistingIndex();
     }
+
+    const startTime = Date.now();
 
     // Create spinner and progress tracker
     const spinner = ora({
@@ -212,11 +216,8 @@ export async function indexCommand(options: {
     }
 
     // Display final result
-    displayFinalResult(spinner, tracker, result);
+    displayFinalResult(spinner, tracker, result, Date.now() - startTime);
 
-    if (options.watch) {
-      console.log(chalk.yellow('\n⚠️  Watch mode not yet implemented'));
-    }
   } catch (error) {
     console.error(chalk.red('Error during indexing:'), error);
     process.exit(1);
