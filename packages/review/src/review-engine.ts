@@ -753,6 +753,7 @@ function buildReviewSummary(
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
   uncoveredNote: string,
+  model: string,
 ): string {
   const { summary } = report;
   const costDisplay = formatCostDisplay(getTokenUsage());
@@ -769,6 +770,7 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
 <details>
 <summary>📊 Analysis Details</summary>
 
+- Model: \`${model}\`
 - Files analyzed: ${summary.filesAnalyzed}
 - Average complexity: ${summary.avgComplexity.toFixed(1)}
 - Max complexity: ${summary.maxComplexity}${costDisplay}
@@ -995,6 +997,7 @@ async function handleNoNewViolations(
   deltaMap: Map<string, ComplexityDelta>,
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
+  model: string,
   logger: Logger,
 ): Promise<void> {
   if (violationsWithLines.length === 0) {
@@ -1004,7 +1007,7 @@ async function handleNoNewViolations(
   const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
   const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
   const skippedNote = buildSkippedNote(skippedInDiff);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote, model);
   await postPRComment(octokit, prContext, summaryBody, logger);
 }
 
@@ -1049,7 +1052,7 @@ async function generateAndPostReview(
 
   const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
   const skippedNote = buildSkippedNote(processed.skipped);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote, config.model);
 
   // Determine review event: REQUEST_CHANGES if blocking is enabled and
   // any new/degraded violation has error severity
@@ -1111,6 +1114,7 @@ async function postLineReview(
       deltaMap,
       report,
       deltas,
+      config.model,
       logger,
     );
     return;

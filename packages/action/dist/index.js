@@ -9304,7 +9304,7 @@ function formatDeltaDisplay(deltas) {
   if (deltaSummary.degraded > 0) display += ` (${deltaSummary.degraded} degraded)`;
   return display;
 }
-function buildReviewSummary(report, deltas, uncoveredNote) {
+function buildReviewSummary(report, deltas, uncoveredNote, model) {
   const { summary } = report;
   const costDisplay = formatCostDisplay(getTokenUsage());
   const deltaDisplay = formatDeltaDisplay(deltas);
@@ -9319,6 +9319,7 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
 <details>
 <summary>\u{1F4CA} Analysis Details</summary>
 
+- Model: \`${model}\`
 - Files analyzed: ${summary.filesAnalyzed}
 - Average complexity: ${summary.avgComplexity.toFixed(1)}
 - Max complexity: ${summary.maxComplexity}${costDisplay}
@@ -9423,14 +9424,14 @@ function processViolationsForReview(violations, diffLines, deltaMap) {
   const skipped = getSkippedViolations(withLines, deltaMap);
   return { withLines, uncovered, newOrDegraded, skipped };
 }
-async function handleNoNewViolations(octokit, prContext, violationsWithLines, uncoveredViolations, deltaMap, report, deltas, logger) {
+async function handleNoNewViolations(octokit, prContext, violationsWithLines, uncoveredViolations, deltaMap, report, deltas, model, logger) {
   if (violationsWithLines.length === 0) {
     return;
   }
   const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
   const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
   const skippedNote = buildSkippedNote(skippedInDiff);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote, model);
   await postPRComment(octokit, prContext, summaryBody, logger);
 }
 async function generateAndPostReview(octokit, prContext, processed, deltaMap, codeSnippets, config, report, deltas, logger, diffHunks) {
@@ -9457,7 +9458,7 @@ async function generateAndPostReview(octokit, prContext, processed, deltaMap, co
   logger.info(`Built ${lineComments.length} line comments for new/degraded violations`);
   const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
   const skippedNote = buildSkippedNote(processed.skipped);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote, config.model);
   const hasNewErrors = config.blockOnNewErrors && processed.newOrDegraded.some(({ violation }) => {
     const delta = deltaMap.get(createDeltaKey(violation));
     return violation.severity === "error" && (!delta || delta.severity === "new" || delta.delta > 0);
@@ -9491,6 +9492,7 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
       deltaMap,
       report,
       deltas,
+      config.model,
       logger
     );
     return;
