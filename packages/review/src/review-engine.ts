@@ -1104,9 +1104,15 @@ async function generateAndPostReview(
   diffHunks?: Map<string, string>,
   archContext?: ArchitecturalContext,
 ): Promise<void> {
-  const commentableViolations = processed.newOrDegraded.map(v => v.violation);
+  // Send ALL violations (including marginal) to LLM for full cross-file context,
+  // but only create inline comments for non-marginal violations
+  const allViolationsForLLM = [
+    ...processed.newOrDegraded.map(v => v.violation),
+    ...processed.marginal,
+  ];
   logger.info(
-    `Generating AI comments for ${commentableViolations.length} new/degraded violations...`,
+    `Generating AI comments for ${allViolationsForLLM.length} violations ` +
+      `(${processed.newOrDegraded.length} will get inline comments, ${processed.marginal.length} for context only)...`,
   );
 
   // Use enriched path when architectural context is available
@@ -1116,7 +1122,7 @@ async function generateAndPostReview(
 
   if (archContext) {
     const result = await generateEnrichedComments(
-      commentableViolations,
+      allViolationsForLLM,
       codeSnippets,
       config.openrouterApiKey,
       config.model,
@@ -1130,7 +1136,7 @@ async function generateAndPostReview(
     prSummary = result.prSummary;
   } else {
     aiComments = await generateLineComments(
-      commentableViolations,
+      allViolationsForLLM,
       codeSnippets,
       config.openrouterApiKey,
       config.model,
@@ -1140,6 +1146,7 @@ async function generateAndPostReview(
     );
   }
 
+  // Only create inline comments for non-marginal violations
   const lineComments = buildLineComments(
     processed.newOrDegraded,
     aiComments,
@@ -1215,7 +1222,7 @@ async function postLineReview(
 
   if (processed.marginal.length > 0) {
     logger.info(
-      `Skipping ${processed.marginal.length} near-threshold violations (summary only, no inline comments)`,
+      `${processed.marginal.length} near-threshold violations (included in LLM context, no inline comments)`,
     );
   }
 
@@ -1236,9 +1243,12 @@ async function postLineReview(
     return;
   }
 
-  // Build diff hunks for the commentable violations so AI can see what changed
-  const commentableViolations = processed.newOrDegraded.map(v => v.violation);
-  const diffHunks = buildDiffHunks(patches, commentableViolations);
+  // Build diff hunks for all violations (including marginal) so the LLM has full context
+  const allReviewViolations = [
+    ...processed.newOrDegraded.map(v => v.violation),
+    ...processed.marginal,
+  ];
+  const diffHunks = buildDiffHunks(patches, allReviewViolations);
   logger.info(`Extracted diff hunks for ${diffHunks.size} functions`);
 
   await generateAndPostReview(
