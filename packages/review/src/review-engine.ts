@@ -12,6 +12,7 @@ import {
   RISK_ORDER,
   type ComplexityReport,
   type ComplexityViolation,
+  type CodeChunk,
 } from '@liendev/core';
 
 import type { Octokit } from '@octokit/rest';
@@ -25,7 +26,14 @@ import {
   getPRPatchData,
   updatePRDescription,
 } from './github-api.js';
-import { generateLineComments, resetTokenUsage, getTokenUsage } from './openrouter.js';
+import {
+  generateLineComments,
+  generateLogicComments,
+  resetTokenUsage,
+  getTokenUsage,
+} from './openrouter.js';
+import { detectLogicFindings } from './logic-review.js';
+import { isFindingSuppressed } from './suppression.js';
 import {
   buildNoViolationsMessage,
   getViolationKey,
@@ -55,6 +63,7 @@ export interface AnalysisResult {
   baselineReport: ComplexityReport | null;
   deltas: ComplexityDelta[] | null;
   filesToAnalyze: string[];
+  chunks: CodeChunk[];
 }
 
 /**
@@ -131,7 +140,7 @@ export async function runComplexityAnalysis(
   threshold: string,
   rootDir: string,
   logger: Logger,
-): Promise<ComplexityReport | null> {
+): Promise<{ report: ComplexityReport; chunks: CodeChunk[] } | null> {
   if (files.length === 0) {
     logger.info('No files to analyze');
     return null;
@@ -156,7 +165,7 @@ export async function runComplexityAnalysis(
     const report = ComplexityAnalyzer.analyzeFromChunks(indexResult.chunks, files);
     logger.info(`Found ${report.summary.totalViolations} violations`);
 
-    return report;
+    return { report, chunks: indexResult.chunks };
   } catch (error) {
     logger.error(`Failed to run complexity analysis: ${error}`);
     return null;
@@ -278,7 +287,8 @@ async function analyzeBaseBranch(
 
     // Analyze base
     logger.info('Analyzing base branch complexity...');
-    const baseReport = await runComplexityAnalysis(filesToAnalyze, threshold, rootDir, logger);
+    const baseResult = await runComplexityAnalysis(filesToAnalyze, threshold, rootDir, logger);
+    const baseReport = baseResult?.report ?? null;
 
     // Restore HEAD
     execFileSync('git', ['checkout', '--force', originalHead], { stdio: 'pipe' });
@@ -354,17 +364,19 @@ export async function orchestrateAnalysis(setup: ReviewSetup): Promise<AnalysisR
     rootDir,
     logger,
   );
-  const currentReport = await runComplexityAnalysis(
+  const analysisResult = await runComplexityAnalysis(
     filesToAnalyze,
     config.threshold,
     rootDir,
     logger,
   );
 
-  if (!currentReport) {
+  if (!analysisResult) {
     logger.warning('Failed to get complexity report');
     return null;
   }
+
+  const { report: currentReport, chunks } = analysisResult;
 
   logger.info(`Analysis complete: ${currentReport.summary.totalViolations} violations found`);
 
@@ -377,6 +389,7 @@ export async function orchestrateAnalysis(setup: ReviewSetup): Promise<AnalysisR
     baselineReport,
     deltas,
     filesToAnalyze,
+    chunks,
   };
 }
 
@@ -1127,4 +1140,71 @@ export async function postReviewIfNeeded(
     logger,
     result.deltas,
   );
+
+  // Logic review pass (beta)
+  if (config.enableLogicReview && result.chunks.length > 0) {
+    logger.info('Running logic review (beta)...');
+    try {
+      let logicFindings = detectLogicFindings(
+        result.chunks,
+        result.currentReport,
+        result.baselineReport,
+        config.logicReviewCategories,
+      );
+
+      // Filter suppressed findings
+      const codeSnippetsForSuppression = new Map<string, string>();
+      for (const chunk of result.chunks) {
+        if (chunk.metadata.symbolName) {
+          codeSnippetsForSuppression.set(
+            `${chunk.metadata.file}::${chunk.metadata.symbolName}`,
+            chunk.content,
+          );
+        }
+      }
+
+      logicFindings = logicFindings.filter(finding => {
+        const key = `${finding.filepath}::${finding.symbolName}`;
+        const snippet = codeSnippetsForSuppression.get(key);
+        if (snippet && isFindingSuppressed(finding, snippet)) {
+          logger.info(`Suppressed finding: ${key} (${finding.category})`);
+          return false;
+        }
+        return true;
+      });
+
+      if (logicFindings.length > 0) {
+        logger.info(`${logicFindings.length} logic findings after filtering`);
+
+        // Collect code snippets for findings
+        const logicCodeSnippets = new Map<string, string>();
+        for (const finding of logicFindings) {
+          const key = `${finding.filepath}::${finding.symbolName}`;
+          const snippet = codeSnippetsForSuppression.get(key);
+          if (snippet) {
+            logicCodeSnippets.set(key, snippet);
+          }
+        }
+
+        // Generate LLM-validated comments
+        const validatedComments = await generateLogicComments(
+          logicFindings,
+          logicCodeSnippets,
+          config.openrouterApiKey,
+          config.model,
+          result.currentReport,
+          logger,
+        );
+
+        if (validatedComments.length > 0) {
+          logger.info(`Posting ${validatedComments.length} logic review comments`);
+          await postPRReview(octokit, prContext, validatedComments, '', logger);
+        }
+      } else {
+        logger.info('No logic findings to report');
+      }
+    } catch (error) {
+      logger.warning(`Logic review failed (non-blocking): ${error}`);
+    }
+  }
 }

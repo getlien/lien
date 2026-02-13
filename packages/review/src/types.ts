@@ -27,6 +27,10 @@ export interface ReviewConfig {
   baselineComplexityPath: string;
   /** Post REQUEST_CHANGES instead of COMMENT when new error-level violations are found */
   blockOnNewErrors: boolean;
+  /** Enable AST-powered logic review (beta) */
+  enableLogicReview: boolean;
+  /** Finding categories to enable */
+  logicReviewCategories: string[];
 }
 
 /**
@@ -36,4 +40,17 @@ export interface LineComment {
   path: string;
   line: number;
   body: string;
+}
+
+/**
+ * A logic review finding backed by AST evidence
+ */
+export interface LogicFinding {
+  filepath: string;
+  symbolName: string;
+  line: number;
+  category: 'breaking_change' | 'unchecked_return' | 'missing_tests';
+  severity: 'error' | 'warning';
+  message: string;
+  evidence: string;
 }

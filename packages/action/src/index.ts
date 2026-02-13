@@ -39,6 +39,12 @@ function getConfig(): ReviewConfig {
     enableDeltaTracking: core.getInput('enable_delta_tracking') === 'true',
     baselineComplexityPath: core.getInput('baseline_complexity') || '',
     blockOnNewErrors: core.getInput('block_on_new_errors') === 'true',
+    enableLogicReview: core.getInput('enable_logic_review') === 'true',
+    logicReviewCategories: (
+      core.getInput('logic_review_categories') || 'breaking_change,unchecked_return,missing_tests'
+    )
+      .split(',')
+      .map(s => s.trim()),
   };
 }
 

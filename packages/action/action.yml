@@ -27,6 +27,12 @@ inputs:
   block_on_new_errors:
     description: 'Post REQUEST_CHANGES when new error-level violations are found'
     default: 'false'
+  enable_logic_review:
+    description: 'Enable AST-powered logic review (beta) for bug and breaking change detection'
+    default: 'false'
+  logic_review_categories:
+    description: 'Comma-separated finding categories (breaking_change,unchecked_return,missing_tests)'
+    default: 'breaking_change,unchecked_return,missing_tests'
 
 outputs:
   violations:

@@ -11,6 +11,7 @@ export type {
   PRContext,
   ReviewConfig,
   LineComment,
+  LogicFinding,
   ComplexityReport,
   ComplexityViolation,
 } from './types.js';
@@ -54,7 +55,14 @@ export {
   parseCommentsResponse,
   mapCommentsToViolations,
   generateLineComments,
+  generateLogicComments,
 } from './openrouter.js';
+
+// Logic review
+export { detectLogicFindings } from './logic-review.js';
+export { isFindingSuppressed, parseSuppressionComments } from './suppression.js';
+export { buildLogicReviewPrompt } from './logic-prompt.js';
+export { parseLogicReviewResponse, type LogicReviewEntry } from './logic-response.js';
 
 // Prompt building
 export {
