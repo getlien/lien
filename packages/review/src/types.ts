@@ -31,6 +31,10 @@ export interface ReviewConfig {
   enableLogicReview: boolean;
   /** Finding categories to enable */
   logicReviewCategories: string[];
+  /** Architectural review mode: "auto" | "always" | "off" */
+  enableArchitecturalReview: 'auto' | 'always' | 'off';
+  /** Architectural review categories to enable */
+  archReviewCategories: string[];
 }
 
 /**

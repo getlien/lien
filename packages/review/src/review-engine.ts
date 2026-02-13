@@ -42,7 +42,14 @@ import {
   getMetricLabel,
   formatComplexityValue,
   formatThresholdValue,
+  type ArchitecturalContext,
 } from './prompt.js';
+import {
+  shouldActivateArchReview,
+  computeArchitecturalContext,
+  generateEnrichedComments,
+  type ArchitecturalNote,
+} from './architectural-review.js';
 import { formatDeltaValue } from './format.js';
 import { assertValidSha } from './git-utils.js';
 import {
@@ -747,6 +754,29 @@ function formatDeltaDisplay(deltas: ComplexityDelta[] | null): string {
 }
 
 /**
+ * Format architectural notes as a markdown section for the review summary.
+ */
+function buildArchitecturalNotesSection(notes: ArchitecturalNote[]): string {
+  if (notes.length === 0) return '';
+
+  const noteBlocks = notes
+    .map(
+      note => `> **${note.observation}**\n> ${note.evidence}\n> *Suggestion: ${note.suggestion}*`,
+    )
+    .join('\n\n');
+
+  return `\n\n### Architectural observations (beta)\n\n${noteBlocks}`;
+}
+
+/**
+ * Format PR summary line for the review summary.
+ */
+function buildPrSummaryLine(prSummary: string | null | undefined): string {
+  if (!prSummary) return '';
+  return `\n\n---\n*PR Summary: ${prSummary}*`;
+}
+
+/**
  * Build review summary body for line comments mode
  */
 function buildReviewSummary(
@@ -754,19 +784,23 @@ function buildReviewSummary(
   deltas: ComplexityDelta[] | null,
   uncoveredNote: string,
   model: string,
+  archNotes?: ArchitecturalNote[],
+  prSummary?: string | null,
 ): string {
   const { summary } = report;
   const costDisplay = formatCostDisplay(getTokenUsage());
   const deltaDisplay = formatDeltaDisplay(deltas);
   const headerLine = buildHeaderLine(summary.totalViolations, deltas);
+  const archNotesSection = archNotes ? buildArchitecturalNotesSection(archNotes) : '';
+  const prSummaryLine = buildPrSummaryLine(prSummary);
 
   return `<!-- lien-ai-review -->
 ## 👁️ Veille
 
 ${headerLine}${deltaDisplay}
-
+${archNotesSection}
 See inline comments on the diff for specific suggestions.${uncoveredNote}
-
+${prSummaryLine}
 <details>
 <summary>📊 Analysis Details</summary>
 
@@ -1025,21 +1059,43 @@ async function generateAndPostReview(
   deltas: ComplexityDelta[] | null,
   logger: Logger,
   diffHunks?: Map<string, string>,
+  archContext?: ArchitecturalContext,
 ): Promise<void> {
   const commentableViolations = processed.newOrDegraded.map(v => v.violation);
   logger.info(
     `Generating AI comments for ${commentableViolations.length} new/degraded violations...`,
   );
 
-  const aiComments = await generateLineComments(
-    commentableViolations,
-    codeSnippets,
-    config.openrouterApiKey,
-    config.model,
-    report,
-    logger,
-    diffHunks,
-  );
+  // Use enriched path when architectural context is available
+  let aiComments: Map<ComplexityViolation, string>;
+  let architecturalNotes: ArchitecturalNote[] = [];
+  let prSummary: string | null = null;
+
+  if (archContext) {
+    const result = await generateEnrichedComments(
+      commentableViolations,
+      codeSnippets,
+      config.openrouterApiKey,
+      config.model,
+      report,
+      logger,
+      diffHunks,
+      archContext,
+    );
+    aiComments = result.aiComments;
+    architecturalNotes = result.architecturalNotes;
+    prSummary = result.prSummary;
+  } else {
+    aiComments = await generateLineComments(
+      commentableViolations,
+      codeSnippets,
+      config.openrouterApiKey,
+      config.model,
+      report,
+      logger,
+      diffHunks,
+    );
+  }
 
   const lineComments = buildLineComments(
     processed.newOrDegraded,
@@ -1052,7 +1108,14 @@ async function generateAndPostReview(
 
   const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
   const skippedNote = buildSkippedNote(processed.skipped);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote, config.model);
+  const summaryBody = buildReviewSummary(
+    report,
+    deltas,
+    uncoveredNote + skippedNote,
+    config.model,
+    architecturalNotes,
+    prSummary,
+  );
 
   // Determine review event: REQUEST_CHANGES if blocking is enabled and
   // any new/degraded violation has error severity
@@ -1087,6 +1150,7 @@ async function postLineReview(
   config: ReviewConfig,
   logger: Logger,
   deltas: ComplexityDelta[] | null = null,
+  archContext?: ArchitecturalContext,
 ): Promise<void> {
   const { diffLines, patches } = await getPRPatchData(octokit, prContext);
   logger.info(`Diff covers ${diffLines.size} files`);
@@ -1136,6 +1200,7 @@ async function postLineReview(
     deltas,
     logger,
     diffHunks,
+    archContext,
   );
 }
 
@@ -1243,6 +1308,18 @@ export async function postReviewIfNeeded(
   );
 
   resetTokenUsage();
+
+  // Compute architectural context (non-blocking — review proceeds without it on failure)
+  let archContext: ArchitecturalContext | undefined;
+  if (shouldActivateArchReview(result, config)) {
+    logger.info('Architectural review activated — computing context...');
+    try {
+      archContext = computeArchitecturalContext(result, logger);
+    } catch (error) {
+      logger.warning(`Architectural context computation failed (non-blocking): ${error}`);
+    }
+  }
+
   await postLineReview(
     octokit,
     prContext,
@@ -1252,6 +1329,7 @@ export async function postReviewIfNeeded(
     config,
     logger,
     result.deltas,
+    archContext,
   );
 
   // Logic review pass (beta)
