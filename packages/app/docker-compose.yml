@@ -2,8 +2,8 @@ services:
   caddy:
     image: caddy:2-alpine
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./certs:/etc/ssl/certs:ro
@@ -17,13 +17,13 @@ services:
       context: ../..
       dockerfile: packages/app/Dockerfile
     expose:
-      - "3000"
+      - '3000'
     environment:
       - GITHUB_APP_ID=${GITHUB_APP_ID}
       - GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.0-flash-001}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.5-flash}
       - ALLOWED_ORG_IDS=${ALLOWED_ORG_IDS:-}
       - PORT=3000
     restart: unless-stopped
