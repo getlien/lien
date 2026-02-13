@@ -1106,6 +1106,85 @@ async function postLineReview(
 }
 
 /**
+ * Build a map of chunk key -> content for suppression checks and code snippets.
+ */
+function buildChunkSnippetsMap(chunks: CodeChunk[]): Map<string, string> {
+  const snippets = new Map<string, string>();
+  for (const chunk of chunks) {
+    if (chunk.metadata.symbolName) {
+      snippets.set(`${chunk.metadata.file}::${chunk.metadata.symbolName}`, chunk.content);
+    }
+  }
+  return snippets;
+}
+
+/**
+ * Run logic review pass: detect findings, filter suppressions, validate via LLM, post comments.
+ */
+async function runLogicReviewPass(result: AnalysisResult, setup: ReviewSetup): Promise<void> {
+  const { config, prContext, octokit, logger } = setup;
+
+  logger.info('Running logic review (beta)...');
+  try {
+    const snippetsMap = buildChunkSnippetsMap(result.chunks);
+
+    let logicFindings = detectLogicFindings(
+      result.chunks,
+      result.currentReport,
+      result.baselineReport,
+      config.logicReviewCategories,
+    );
+
+    logicFindings = logicFindings.filter(finding => {
+      const key = `${finding.filepath}::${finding.symbolName}`;
+      const snippet = snippetsMap.get(key);
+      if (snippet && isFindingSuppressed(finding, snippet)) {
+        logger.info(`Suppressed finding: ${key} (${finding.category})`);
+        return false;
+      }
+      return true;
+    });
+
+    if (logicFindings.length === 0) {
+      logger.info('No logic findings to report');
+      return;
+    }
+
+    logger.info(`${logicFindings.length} logic findings after filtering`);
+
+    // Collect code snippets for the remaining findings
+    const logicCodeSnippets = new Map<string, string>();
+    for (const finding of logicFindings) {
+      const key = `${finding.filepath}::${finding.symbolName}`;
+      const snippet = snippetsMap.get(key);
+      if (snippet) logicCodeSnippets.set(key, snippet);
+    }
+
+    const validatedComments = await generateLogicComments(
+      logicFindings,
+      logicCodeSnippets,
+      config.openrouterApiKey,
+      config.model,
+      result.currentReport,
+      logger,
+    );
+
+    if (validatedComments.length > 0) {
+      logger.info(`Posting ${validatedComments.length} logic review comments`);
+      await postPRReview(
+        octokit,
+        prContext,
+        validatedComments,
+        '**Logic Review** (beta) — see inline comments.',
+        logger,
+      );
+    }
+  } catch (error) {
+    logger.warning(`Logic review failed (non-blocking): ${error}`);
+  }
+}
+
+/**
  * Post review if violations are found, or success message if none
  */
 export async function postReviewIfNeeded(
@@ -1143,74 +1222,6 @@ export async function postReviewIfNeeded(
 
   // Logic review pass (beta)
   if (config.enableLogicReview && result.chunks.length > 0) {
-    logger.info('Running logic review (beta)...');
-    try {
-      let logicFindings = detectLogicFindings(
-        result.chunks,
-        result.currentReport,
-        result.baselineReport,
-        config.logicReviewCategories,
-      );
-
-      // Filter suppressed findings
-      const codeSnippetsForSuppression = new Map<string, string>();
-      for (const chunk of result.chunks) {
-        if (chunk.metadata.symbolName) {
-          codeSnippetsForSuppression.set(
-            `${chunk.metadata.file}::${chunk.metadata.symbolName}`,
-            chunk.content,
-          );
-        }
-      }
-
-      logicFindings = logicFindings.filter(finding => {
-        const key = `${finding.filepath}::${finding.symbolName}`;
-        const snippet = codeSnippetsForSuppression.get(key);
-        if (snippet && isFindingSuppressed(finding, snippet)) {
-          logger.info(`Suppressed finding: ${key} (${finding.category})`);
-          return false;
-        }
-        return true;
-      });
-
-      if (logicFindings.length > 0) {
-        logger.info(`${logicFindings.length} logic findings after filtering`);
-
-        // Collect code snippets for findings
-        const logicCodeSnippets = new Map<string, string>();
-        for (const finding of logicFindings) {
-          const key = `${finding.filepath}::${finding.symbolName}`;
-          const snippet = codeSnippetsForSuppression.get(key);
-          if (snippet) {
-            logicCodeSnippets.set(key, snippet);
-          }
-        }
-
-        // Generate LLM-validated comments
-        const validatedComments = await generateLogicComments(
-          logicFindings,
-          logicCodeSnippets,
-          config.openrouterApiKey,
-          config.model,
-          result.currentReport,
-          logger,
-        );
-
-        if (validatedComments.length > 0) {
-          logger.info(`Posting ${validatedComments.length} logic review comments`);
-          await postPRReview(
-            octokit,
-            prContext,
-            validatedComments,
-            '**Logic Review** (beta) — see inline comments.',
-            logger,
-          );
-        }
-      } else {
-        logger.info('No logic findings to report');
-      }
-    } catch (error) {
-      logger.warning(`Logic review failed (non-blocking): ${error}`);
-    }
+    await runLogicReviewPass(result, setup);
   }
 }

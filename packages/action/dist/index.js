@@ -8367,51 +8367,62 @@ var LogicReviewEntrySchema = external_exports.object({
   category: external_exports.enum(["breaking_change", "unchecked_return", "missing_tests"])
 });
 var LogicReviewResponseSchema = external_exports.record(external_exports.string(), LogicReviewEntrySchema);
-function parseLogicReviewResponse(content, logger) {
+function extractJsonString(content) {
   const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
-  logger.info(`Parsing logic review response (${jsonStr.length} chars)`);
+  return (codeBlockMatch ? codeBlockMatch[1] : content).trim();
+}
+function tryStrictParse(jsonStr) {
+  try {
+    return LogicReviewResponseSchema.parse(JSON.parse(jsonStr));
+  } catch {
+    return null;
+  }
+}
+function tryPartialRecovery(jsonStr) {
   try {
     const parsed = JSON.parse(jsonStr);
-    const result = LogicReviewResponseSchema.parse(parsed);
-    logger.info(`Validated ${Object.keys(result).length} logic review entries`);
-    return result;
-  } catch (error2) {
-    logger.warning(`Zod validation failed: ${error2}`);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const partial = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "object" && value !== null && "valid" in value && "comment" in value) {
+        const v = value;
+        partial[key] = {
+          valid: Boolean(v.valid),
+          comment: String(v.comment),
+          category: String(v.category || "unknown")
+        };
+      }
+    }
+    return Object.keys(partial).length > 0 ? partial : null;
+  } catch {
+    return null;
+  }
+}
+function parseLogicReviewResponse(content, logger) {
+  const jsonStr = extractJsonString(content);
+  logger.info(`Parsing logic review response (${jsonStr.length} chars)`);
+  const strict = tryStrictParse(jsonStr);
+  if (strict) {
+    logger.info(`Validated ${Object.keys(strict).length} logic review entries`);
+    return strict;
   }
   const objectMatch = content.match(/\{[\s\S]*\}/);
-  if (objectMatch) {
-    try {
-      const parsed = JSON.parse(objectMatch[0]);
-      const result = LogicReviewResponseSchema.parse(parsed);
-      logger.info(`Recovered ${Object.keys(result).length} logic review entries with retry`);
-      return result;
-    } catch (retryError) {
-      logger.warning(`Retry parsing also failed: ${retryError}`);
-    }
-    try {
-      const parsed = JSON.parse(objectMatch[0]);
-      if (typeof parsed === "object" && parsed !== null) {
-        const partial = {};
-        for (const [key, value] of Object.entries(parsed)) {
-          if (typeof value === "object" && value !== null && "valid" in value && "comment" in value) {
-            const v = value;
-            partial[key] = {
-              valid: Boolean(v.valid),
-              comment: String(v.comment),
-              category: String(v.category || "unknown")
-            };
-          }
-        }
-        if (Object.keys(partial).length > 0) {
-          logger.info(
-            `Partially recovered ${Object.keys(partial).length} entries without strict validation`
-          );
-          return partial;
-        }
-      }
-    } catch {
-    }
+  if (!objectMatch) {
+    logger.warning(`Could not parse logic review response:
+${content}`);
+    return null;
+  }
+  const recovered = tryStrictParse(objectMatch[0]);
+  if (recovered) {
+    logger.info(`Recovered ${Object.keys(recovered).length} logic review entries with retry`);
+    return recovered;
+  }
+  const partial = tryPartialRecovery(objectMatch[0]);
+  if (partial) {
+    logger.info(
+      `Partially recovered ${Object.keys(partial).length} entries without strict validation`
+    );
+    return partial;
   }
   logger.warning(`Could not parse logic review response:
 ${content}`);
@@ -8538,6 +8549,26 @@ async function generateLineComments(violations, codeSnippets, apiKey, model, rep
   const commentsMap = parseCommentsResponse(data.choices[0].message.content, logger);
   return mapCommentsToViolations(commentsMap, violations, logger);
 }
+function mapFindingsToComments(findings, parsed, logger) {
+  const comments = [];
+  for (const finding of findings) {
+    const key = `${finding.filepath}::${finding.symbolName}`;
+    const entry = parsed[key];
+    if (entry && entry.valid) {
+      const categoryLabel = finding.category.replace(/_/g, " ");
+      comments.push({
+        path: finding.filepath,
+        line: finding.line,
+        body: `**Logic Review** (beta) \u2014 ${categoryLabel}
+
+${entry.comment}`
+      });
+    } else if (entry && !entry.valid) {
+      logger.info(`Finding ${key} marked as false positive by LLM`);
+    }
+  }
+  return comments;
+}
 async function generateLogicComments(findings, codeSnippets, apiKey, model, report, logger, diffHunks) {
   if (findings.length === 0) {
     return [];
@@ -8557,23 +8588,7 @@ async function generateLogicComments(findings, codeSnippets, apiKey, model, repo
     logger.warning("Failed to parse logic review response, skipping");
     return [];
   }
-  const comments = [];
-  for (const finding of findings) {
-    const key = `${finding.filepath}::${finding.symbolName}`;
-    const entry = parsed[key];
-    if (entry && entry.valid) {
-      const categoryLabel = finding.category.replace(/_/g, " ");
-      comments.push({
-        path: finding.filepath,
-        line: finding.line,
-        body: `**Logic Review** (beta) \u2014 ${categoryLabel}
-
-${entry.comment}`
-      });
-    } else if (entry && !entry.valid) {
-      logger.info(`Finding ${key} marked as false positive by LLM`);
-    }
-  }
+  const comments = mapFindingsToComments(findings, parsed, logger);
   logger.info(`${comments.length}/${findings.length} findings validated as real issues`);
   return comments;
 }
@@ -8591,18 +8606,22 @@ function detectLogicFindings(chunks, report, baselineReport, categories) {
   }
   return prioritizeFindings(findings, report);
 }
-function detectBreakingChanges(chunks, report, baselineReport) {
-  const findings = [];
-  const currentExports = /* @__PURE__ */ new Map();
+function buildExportsMap(chunks) {
+  const exports = /* @__PURE__ */ new Map();
   for (const chunk of chunks) {
     if (chunk.metadata.exports && chunk.metadata.exports.length > 0) {
-      const existing = currentExports.get(chunk.metadata.file) || /* @__PURE__ */ new Set();
+      const existing = exports.get(chunk.metadata.file) || /* @__PURE__ */ new Set();
       for (const exp of chunk.metadata.exports) {
         existing.add(exp);
       }
-      currentExports.set(chunk.metadata.file, existing);
+      exports.set(chunk.metadata.file, existing);
     }
   }
+  return exports;
+}
+function detectBreakingChanges(chunks, report, baselineReport) {
+  const findings = [];
+  const currentExports = buildExportsMap(chunks);
   for (const [filepath, baseFileData] of Object.entries(baselineReport.files)) {
     const currentFileData = report.files[filepath];
     if (!currentFileData) continue;
@@ -8617,7 +8636,6 @@ function detectBreakingChanges(chunks, report, baselineReport) {
           filepath,
           symbolName: symbol,
           line: 1,
-          // We don't know the exact line since the symbol is gone
           category: "breaking_change",
           severity: "error",
           message: `Exported symbol \`${symbol}\` was removed or renamed. ${dependentCount} file(s) depend on this module.`,
@@ -8628,28 +8646,30 @@ function detectBreakingChanges(chunks, report, baselineReport) {
   }
   return findings;
 }
+function checkCallSite(chunk, callSite, lines, startLine) {
+  const lineIndex = callSite.line - startLine;
+  if (lineIndex < 0 || lineIndex >= lines.length) return null;
+  const lineContent = lines[lineIndex].trim();
+  if (!isLikelyUncheckedCall(lineContent, callSite.symbol)) return null;
+  return {
+    filepath: chunk.metadata.file,
+    symbolName: chunk.metadata.symbolName,
+    line: callSite.line,
+    category: "unchecked_return",
+    severity: "warning",
+    message: `Return value of \`${callSite.symbol}()\` is not captured. If it returns an error or important data, this could lead to silent failures.`,
+    evidence: `Call to "${callSite.symbol}" at line ${callSite.line} appears to discard its return value. Line: "${lineContent}"`
+  };
+}
 function detectUncheckedReturns(chunks) {
   const findings = [];
   for (const chunk of chunks) {
     if (!chunk.metadata.callSites || chunk.metadata.callSites.length === 0) continue;
     if (!chunk.metadata.symbolName) continue;
     const lines = chunk.content.split("\n");
-    const startLine = chunk.metadata.startLine;
     for (const callSite of chunk.metadata.callSites) {
-      const lineIndex = callSite.line - startLine;
-      if (lineIndex < 0 || lineIndex >= lines.length) continue;
-      const lineContent = lines[lineIndex].trim();
-      if (isLikelyUncheckedCall(lineContent, callSite.symbol)) {
-        findings.push({
-          filepath: chunk.metadata.file,
-          symbolName: chunk.metadata.symbolName,
-          line: callSite.line,
-          category: "unchecked_return",
-          severity: "warning",
-          message: `Return value of \`${callSite.symbol}()\` is not captured. If it returns an error or important data, this could lead to silent failures.`,
-          evidence: `Call to "${callSite.symbol}" at line ${callSite.line} appears to discard its return value. Line: "${lineContent}"`
-        });
-      }
+      const finding = checkCallSite(chunk, callSite, lines, chunk.metadata.startLine);
+      if (finding) findings.push(finding);
     }
   }
   return findings;
@@ -9466,6 +9486,68 @@ async function postLineReview(octokit, prContext, report, violations, codeSnippe
     diffHunks
   );
 }
+function buildChunkSnippetsMap(chunks) {
+  const snippets = /* @__PURE__ */ new Map();
+  for (const chunk of chunks) {
+    if (chunk.metadata.symbolName) {
+      snippets.set(`${chunk.metadata.file}::${chunk.metadata.symbolName}`, chunk.content);
+    }
+  }
+  return snippets;
+}
+async function runLogicReviewPass(result, setup) {
+  const { config, prContext, octokit, logger } = setup;
+  logger.info("Running logic review (beta)...");
+  try {
+    const snippetsMap = buildChunkSnippetsMap(result.chunks);
+    let logicFindings = detectLogicFindings(
+      result.chunks,
+      result.currentReport,
+      result.baselineReport,
+      config.logicReviewCategories
+    );
+    logicFindings = logicFindings.filter((finding) => {
+      const key = `${finding.filepath}::${finding.symbolName}`;
+      const snippet = snippetsMap.get(key);
+      if (snippet && isFindingSuppressed(finding, snippet)) {
+        logger.info(`Suppressed finding: ${key} (${finding.category})`);
+        return false;
+      }
+      return true;
+    });
+    if (logicFindings.length === 0) {
+      logger.info("No logic findings to report");
+      return;
+    }
+    logger.info(`${logicFindings.length} logic findings after filtering`);
+    const logicCodeSnippets = /* @__PURE__ */ new Map();
+    for (const finding of logicFindings) {
+      const key = `${finding.filepath}::${finding.symbolName}`;
+      const snippet = snippetsMap.get(key);
+      if (snippet) logicCodeSnippets.set(key, snippet);
+    }
+    const validatedComments = await generateLogicComments(
+      logicFindings,
+      logicCodeSnippets,
+      config.openrouterApiKey,
+      config.model,
+      result.currentReport,
+      logger
+    );
+    if (validatedComments.length > 0) {
+      logger.info(`Posting ${validatedComments.length} logic review comments`);
+      await postPRReview(
+        octokit,
+        prContext,
+        validatedComments,
+        "**Logic Review** (beta) \u2014 see inline comments.",
+        logger
+      );
+    }
+  } catch (error2) {
+    logger.warning(`Logic review failed (non-blocking): ${error2}`);
+  }
+}
 async function postReviewIfNeeded(result, setup) {
   const { config, prContext, octokit, logger } = setup;
   if (result.currentReport.summary.totalViolations === 0) {
@@ -9492,66 +9574,7 @@ async function postReviewIfNeeded(result, setup) {
     result.deltas
   );
   if (config.enableLogicReview && result.chunks.length > 0) {
-    logger.info("Running logic review (beta)...");
-    try {
-      let logicFindings = detectLogicFindings(
-        result.chunks,
-        result.currentReport,
-        result.baselineReport,
-        config.logicReviewCategories
-      );
-      const codeSnippetsForSuppression = /* @__PURE__ */ new Map();
-      for (const chunk of result.chunks) {
-        if (chunk.metadata.symbolName) {
-          codeSnippetsForSuppression.set(
-            `${chunk.metadata.file}::${chunk.metadata.symbolName}`,
-            chunk.content
-          );
-        }
-      }
-      logicFindings = logicFindings.filter((finding) => {
-        const key = `${finding.filepath}::${finding.symbolName}`;
-        const snippet = codeSnippetsForSuppression.get(key);
-        if (snippet && isFindingSuppressed(finding, snippet)) {
-          logger.info(`Suppressed finding: ${key} (${finding.category})`);
-          return false;
-        }
-        return true;
-      });
-      if (logicFindings.length > 0) {
-        logger.info(`${logicFindings.length} logic findings after filtering`);
-        const logicCodeSnippets = /* @__PURE__ */ new Map();
-        for (const finding of logicFindings) {
-          const key = `${finding.filepath}::${finding.symbolName}`;
-          const snippet = codeSnippetsForSuppression.get(key);
-          if (snippet) {
-            logicCodeSnippets.set(key, snippet);
-          }
-        }
-        const validatedComments = await generateLogicComments(
-          logicFindings,
-          logicCodeSnippets,
-          config.openrouterApiKey,
-          config.model,
-          result.currentReport,
-          logger
-        );
-        if (validatedComments.length > 0) {
-          logger.info(`Posting ${validatedComments.length} logic review comments`);
-          await postPRReview(
-            octokit,
-            prContext,
-            validatedComments,
-            "**Logic Review** (beta) \u2014 see inline comments.",
-            logger
-          );
-        }
-      } else {
-        logger.info("No logic findings to report");
-      }
-    } catch (error2) {
-      logger.warning(`Logic review failed (non-blocking): ${error2}`);
-    }
+    await runLogicReviewPass(result, setup);
   }
 }
 

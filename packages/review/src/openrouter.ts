@@ -250,6 +250,33 @@ export async function generateLineComments(
 }
 
 /**
+ * Map validated LLM response entries to line comments, filtering false positives.
+ */
+function mapFindingsToComments(
+  findings: LogicFinding[],
+  parsed: Record<string, { valid: boolean; comment: string }>,
+  logger: Logger,
+): LineComment[] {
+  const comments: LineComment[] = [];
+  for (const finding of findings) {
+    const key = `${finding.filepath}::${finding.symbolName}`;
+    const entry = parsed[key];
+
+    if (entry && entry.valid) {
+      const categoryLabel = finding.category.replace(/_/g, ' ');
+      comments.push({
+        path: finding.filepath,
+        line: finding.line,
+        body: `**Logic Review** (beta) — ${categoryLabel}\n\n${entry.comment}`,
+      });
+    } else if (entry && !entry.valid) {
+      logger.info(`Finding ${key} marked as false positive by LLM`);
+    }
+  }
+  return comments;
+}
+
+/**
  * Generate validated logic review comments via LLM.
  * Takes raw findings, sends to LLM for validation, returns line comments for valid ones.
  */
@@ -285,23 +312,7 @@ export async function generateLogicComments(
     return [];
   }
 
-  const comments: LineComment[] = [];
-  for (const finding of findings) {
-    const key = `${finding.filepath}::${finding.symbolName}`;
-    const entry = parsed[key];
-
-    if (entry && entry.valid) {
-      const categoryLabel = finding.category.replace(/_/g, ' ');
-      comments.push({
-        path: finding.filepath,
-        line: finding.line,
-        body: `**Logic Review** (beta) — ${categoryLabel}\n\n${entry.comment}`,
-      });
-    } else if (entry && !entry.valid) {
-      logger.info(`Finding ${key} marked as false positive by LLM`);
-    }
-  }
-
+  const comments = mapFindingsToComments(findings, parsed, logger);
   logger.info(`${comments.length}/${findings.length} findings validated as real issues`);
   return comments;
 }

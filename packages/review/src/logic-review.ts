@@ -35,6 +35,23 @@ export function detectLogicFindings(
 }
 
 /**
+ * Build a map of file -> Set<exportName> from chunks metadata.
+ */
+function buildExportsMap(chunks: CodeChunk[]): Map<string, Set<string>> {
+  const exports = new Map<string, Set<string>>();
+  for (const chunk of chunks) {
+    if (chunk.metadata.exports && chunk.metadata.exports.length > 0) {
+      const existing = exports.get(chunk.metadata.file) || new Set();
+      for (const exp of chunk.metadata.exports) {
+        existing.add(exp);
+      }
+      exports.set(chunk.metadata.file, existing);
+    }
+  }
+  return exports;
+}
+
+/**
  * Detect breaking changes: exported symbols removed or renamed between baseline and current.
  */
 function detectBreakingChanges(
@@ -43,42 +60,25 @@ function detectBreakingChanges(
   baselineReport: ComplexityReport,
 ): LogicFinding[] {
   const findings: LogicFinding[] = [];
+  const currentExports = buildExportsMap(chunks);
 
-  // Build current exports map: file -> Set<exportName>
-  const currentExports = new Map<string, Set<string>>();
-  for (const chunk of chunks) {
-    if (chunk.metadata.exports && chunk.metadata.exports.length > 0) {
-      const existing = currentExports.get(chunk.metadata.file) || new Set();
-      for (const exp of chunk.metadata.exports) {
-        existing.add(exp);
-      }
-      currentExports.set(chunk.metadata.file, existing);
-    }
-  }
-
-  // Check each file in baseline that also appears in current analysis
   for (const [filepath, baseFileData] of Object.entries(baselineReport.files)) {
     const currentFileData = report.files[filepath];
-    if (!currentFileData) continue; // File was deleted entirely — different concern
+    if (!currentFileData) continue;
 
     const dependentCount = currentFileData.dependentCount || 0;
-    if (dependentCount === 0) continue; // No dependents, not a breaking change risk
+    if (dependentCount === 0) continue;
 
-    // Get baseline exports for this file from baseline report violations' symbolNames
-    // Since baseline report doesn't store raw exports, we compare at symbol level
     const baseViolationSymbols = new Set(baseFileData.violations.map(v => v.symbolName));
     const currentViolationSymbols = new Set(currentFileData.violations.map(v => v.symbolName));
-
-    // Also use chunks' exports metadata for more accurate comparison
     const currentFileExports = currentExports.get(filepath) || new Set();
 
-    // Check if any baseline exports are missing from current
     for (const symbol of baseViolationSymbols) {
       if (!currentViolationSymbols.has(symbol) && !currentFileExports.has(symbol)) {
         findings.push({
           filepath,
           symbolName: symbol,
-          line: 1, // We don't know the exact line since the symbol is gone
+          line: 1,
           category: 'breaking_change',
           severity: 'error',
           message: `Exported symbol \`${symbol}\` was removed or renamed. ${dependentCount} file(s) depend on this module.`,
@@ -89,6 +89,32 @@ function detectBreakingChanges(
   }
 
   return findings;
+}
+
+/**
+ * Check a single call site for unchecked return value and return a finding if applicable.
+ */
+function checkCallSite(
+  chunk: CodeChunk,
+  callSite: { symbol: string; line: number },
+  lines: string[],
+  startLine: number,
+): LogicFinding | null {
+  const lineIndex = callSite.line - startLine;
+  if (lineIndex < 0 || lineIndex >= lines.length) return null;
+
+  const lineContent = lines[lineIndex].trim();
+  if (!isLikelyUncheckedCall(lineContent, callSite.symbol)) return null;
+
+  return {
+    filepath: chunk.metadata.file,
+    symbolName: chunk.metadata.symbolName!,
+    line: callSite.line,
+    category: 'unchecked_return',
+    severity: 'warning',
+    message: `Return value of \`${callSite.symbol}()\` is not captured. If it returns an error or important data, this could lead to silent failures.`,
+    evidence: `Call to "${callSite.symbol}" at line ${callSite.line} appears to discard its return value. Line: "${lineContent}"`,
+  };
 }
 
 /**
@@ -103,28 +129,9 @@ function detectUncheckedReturns(chunks: CodeChunk[]): LogicFinding[] {
     if (!chunk.metadata.symbolName) continue;
 
     const lines = chunk.content.split('\n');
-    const startLine = chunk.metadata.startLine;
-
     for (const callSite of chunk.metadata.callSites) {
-      // Get the line content where the call happens
-      const lineIndex = callSite.line - startLine;
-      if (lineIndex < 0 || lineIndex >= lines.length) continue;
-
-      const lineContent = lines[lineIndex].trim();
-
-      // Heuristic: if the line starts with the call (not assigned to a variable),
-      // and doesn't start with return/await followed by assignment, it might be unchecked
-      if (isLikelyUncheckedCall(lineContent, callSite.symbol)) {
-        findings.push({
-          filepath: chunk.metadata.file,
-          symbolName: chunk.metadata.symbolName,
-          line: callSite.line,
-          category: 'unchecked_return',
-          severity: 'warning',
-          message: `Return value of \`${callSite.symbol}()\` is not captured. If it returns an error or important data, this could lead to silent failures.`,
-          evidence: `Call to "${callSite.symbol}" at line ${callSite.line} appears to discard its return value. Line: "${lineContent}"`,
-        });
-      }
+      const finding = checkCallSite(chunk, callSite, lines, chunk.metadata.startLine);
+      if (finding) findings.push(finding);
     }
   }
 
