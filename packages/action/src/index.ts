@@ -45,6 +45,11 @@ function getConfig(): ReviewConfig {
     )
       .split(',')
       .map(s => s.trim()),
+    enableArchitecturalReview:
+      (core.getInput('enable_architectural_review') as 'auto' | 'always' | 'off') || 'off',
+    archReviewCategories: (core.getInput('arch_review_categories') || 'coherence,impact')
+      .split(',')
+      .map(s => s.trim()),
   };
 }
 

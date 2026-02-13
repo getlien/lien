@@ -76,7 +76,7 @@ export function getTokenUsage(): TokenUsage {
  * Accumulate token usage from API response
  * Cost is returned in usage.cost when usage accounting is enabled
  */
-function trackUsage(
+export function trackUsage(
   usage:
     | { prompt_tokens: number; completion_tokens: number; total_tokens: number; cost?: number }
     | undefined,
@@ -131,7 +131,7 @@ export function parseCommentsResponse(
 /**
  * Call OpenRouter API with batched comments prompt
  */
-async function callBatchedCommentsAPI(
+export async function callBatchedCommentsAPI(
   prompt: string,
   apiKey: string,
   model: string,

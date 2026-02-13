@@ -249,6 +249,17 @@ All analyzed functions are within the configured complexity threshold.${deltaMes
 }
 
 /**
+ * Architectural context for enriched reviews.
+ * Provided by fingerprint.ts and dependent-context.ts.
+ */
+export interface ArchitecturalContext {
+  /** Pre-formatted codebase fingerprint block (markdown) */
+  fingerprint: string;
+  /** Dependent usage snippets keyed by "filepath::symbolName" */
+  dependentSnippets: Map<string, string>;
+}
+
+/**
  * Token usage info for display
  */
 export interface TokenUsageInfo {
@@ -606,6 +617,7 @@ function buildViolationSection(
   codeSnippets: Map<string, string>,
   report: ComplexityReport,
   diffHunks?: Map<string, string>,
+  dependentSnippets?: Map<string, string>,
 ): string {
   const first = groupViolations[0];
   const snippet = codeSnippets.get(key);
@@ -627,9 +639,11 @@ function buildViolationSection(
   const hunk = diffHunks?.get(key);
   const diffSection = hunk ? `\n**Changes in this PR (diff):**\n\`\`\`diff\n${hunk}\n\`\`\`` : '';
 
+  const dependentSection = dependentSnippets?.get(key) ? `\n\n${dependentSnippets.get(key)}` : '';
+
   return `### ${index}. ${key}
 - **Function**: \`${first.symbolName}\` (${first.symbolType})
-${metricLines}${fileContext}${testContext}${dependencyContext}${snippetSection}${diffSection}`;
+${metricLines}${fileContext}${testContext}${dependencyContext}${snippetSection}${diffSection}${dependentSection}`;
 }
 
 /**
@@ -644,6 +658,7 @@ export function buildBatchedCommentsPrompt(
   codeSnippets: Map<string, string>,
   report: ComplexityReport,
   diffHunks?: Map<string, string>,
+  archContext?: ArchitecturalContext,
 ): string {
   // Group violations by filepath::symbolName so one function gets one comment
   const grouped = new Map<string, ComplexityViolation[]>();
@@ -665,6 +680,7 @@ export function buildBatchedCommentsPrompt(
         codeSnippets,
         report,
         diffHunks,
+        archContext?.dependentSnippets,
       );
     })
     .join('\n\n');
@@ -674,8 +690,92 @@ export function buildBatchedCommentsPrompt(
     .map(key => `  "${key}": "your comment here"`)
     .join(',\n');
 
-  return `You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.
+  // Conditional sections when architectural context is provided
+  const systemRole = archContext
+    ? 'You are a senior engineer reviewing code for complexity and architectural coherence. Generate thoughtful, context-aware review comments.'
+    : 'You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.';
 
+  const fingerprintSection = archContext?.fingerprint ? `\n${archContext.fingerprint}\n` : '';
+
+  const coherenceInstructions = archContext
+    ? `
+**Cross-file coherence — flag these only when clearly wrong:**
+- Pattern conflicts: class-based service in a functional codebase, callbacks in async/await code
+- Naming convention violations: snake_case function in a camelCase codebase
+- Do NOT flag minor style variations within a single file
+- Do NOT flag intentional deviations (test utilities, generated code, vendor files)
+
+`
+    : '';
+
+  const prSummaryInstructions = archContext
+    ? `
+**PR-level summary**: After reviewing all functions, produce a brief PR-level summary:
+- 1-2 sentences: overall assessment and any cross-cutting concerns
+- If the PR touches 3+ files: whether changes are cohesive or could be split
+- If nothing notable at PR level, set \`pr_summary\` to null
+
+`
+    : '';
+
+  const archExamples = archContext
+    ? `
+**Example of a good architectural observation:**
+"This function's return type changed from \`string\` to \`string | null\`. Looking at dependents: \`auth-service.ts:34\` assigns directly without null check — this will cause a runtime error when the function returns null. Consider: either keep the non-nullable return type, or update the 3 highest-complexity dependents listed above."
+
+**Example of a BAD architectural observation (do NOT produce):**
+"Consider using the repository pattern for data access." — Generic advice not grounded in specific code or dependency context.
+
+`
+    : '';
+
+  const responseFormatSection = archContext
+    ? `## Response Format
+
+Respond with ONLY valid JSON. Structure:
+
+\`\`\`json
+{
+  "comments": {
+${jsonKeys}
+  },
+  "architectural_notes": [
+    {
+      "scope": "filepath::symbolName or PR-level",
+      "observation": "1 sentence describing the issue",
+      "evidence": "specific file/line/metric backing it",
+      "suggestion": "what to do about it"
+    }
+  ],
+  "pr_summary": "1-2 sentences or null"
+}
+\`\`\`
+
+Rules for \`comments\`: Use \\n for newlines within comments.
+
+Rules for \`architectural_notes\`:
+- ONLY include notes backed by specific evidence (line numbers, dependent files, metric values)
+- Maximum 3 notes per review — quality over quantity
+- Each note must reference the codebase fingerprint or the dependent context
+- If no architectural issues found, return an empty array
+
+Rules for \`pr_summary\`:
+- 1-2 sentences maximum
+- Focus on cross-cutting concerns, not per-function details
+- If nothing notable at PR level, set to null`
+    : `## Response Format
+
+Respond with ONLY valid JSON. Each key is "filepath::symbolName", value is the comment text.
+Use \\n for newlines within comments.
+
+\`\`\`json
+{
+${jsonKeys}
+}
+\`\`\``;
+
+  return `${systemRole}
+${fingerprintSection}
 ## Violations to Review
 
 ${violationsText}
@@ -712,15 +812,13 @@ For each violation, write a code review comment that:
 - **Suggesting a design pattern (strategy, visitor, builder, etc.) for a problem that can be solved with a conditional, a lookup table, or a simple loop.** Patterns earn their cost only when there's real variation to model.
 - **Replacing straightforward imperative code with an abstraction that's equally long.** If the "after" isn't shorter, clearer, or more testable than the "before", don't suggest it.
 - **Ignoring the threshold margin.** If the metric is barely over the threshold (within ~10%), say so and suggest a light touch (e.g., extracting one expression, adding an early return) rather than a full rewrite.
-
-**IMPORTANT**: When a diff is provided, focus your review on the CHANGED lines shown in the diff. Pre-existing complexity is context, not the primary target. If the complexity was introduced or worsened in this PR, say so. If it's pre-existing, note that and suggest improvements the author could make while they're already in the file.
+${coherenceInstructions}${prSummaryInstructions}**IMPORTANT**: When a diff is provided, focus your review on the CHANGED lines shown in the diff. Pre-existing complexity is context, not the primary target. If the complexity was introduced or worsened in this PR, say so. If it's pre-existing, note that and suggest improvements the author could make while they're already in the file.
 
 Be direct and specific to THIS code. Avoid generic advice like "break into smaller functions."
 
 **Example of a good comment:**
 "${getExampleForPrimaryMetric(violations)}"
-
-Write comments of similar quality and specificity for each violation below.
+${archExamples}Write comments of similar quality and specificity for each violation below.
 
 IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
 
@@ -735,14 +833,5 @@ Rules:
 - Only use \`\`\`suggestion when you have a clear, complete replacement
 - For structural advice without a concrete replacement, use plain text (no code block)
 
-## Response Format
-
-Respond with ONLY valid JSON. Each key is "filepath::symbolName", value is the comment text.
-Use \\n for newlines within comments.
-
-\`\`\`json
-{
-${jsonKeys}
-}
-\`\`\``;
+${responseFormatSection}`;
 }

@@ -74,10 +74,35 @@ export {
   formatComplexityValue,
   formatThresholdValue,
   type TokenUsageInfo,
+  type ArchitecturalContext,
   buildLineCommentPrompt,
   buildLineSummaryComment,
   buildBatchedCommentsPrompt,
 } from './prompt.js';
+
+// Architectural review
+export {
+  type ArchitecturalNote,
+  type EnrichedCommentsResult,
+  shouldActivateArchReview,
+  computeArchitecturalContext,
+  generateEnrichedComments,
+  parseEnrichedResponse,
+} from './architectural-review.js';
+
+// Fingerprint
+export {
+  type CodebaseFingerprint,
+  computeFingerprint,
+  serializeFingerprint,
+} from './fingerprint.js';
+
+// Dependent context
+export {
+  type DependentSnippet,
+  type DependentContext,
+  assembleDependentContext,
+} from './dependent-context.js';
 
 // Delta calculation
 export {
