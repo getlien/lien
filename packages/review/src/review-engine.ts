@@ -996,6 +996,17 @@ function getSkippedViolations(
 }
 
 /**
+ * Check if a violation is only marginally over its threshold.
+ * Marginal = within 15% of the threshold value.
+ * These still appear in the summary but don't get inline comments.
+ */
+function isMarginalViolation(v: ComplexityViolation): boolean {
+  if (v.threshold <= 0) return false;
+  const overage = (v.complexity - v.threshold) / v.threshold;
+  return overage <= 0.15;
+}
+
+/**
  * Violation processing result
  */
 interface ViolationProcessingResult {
@@ -1003,6 +1014,7 @@ interface ViolationProcessingResult {
   uncovered: ComplexityViolation[];
   newOrDegraded: ViolationWithLines[];
   skipped: ComplexityViolation[];
+  marginal: ComplexityViolation[];
 }
 
 /**
@@ -1014,10 +1026,34 @@ function processViolationsForReview(
   deltaMap: Map<string, ComplexityDelta>,
 ): ViolationProcessingResult {
   const { withLines, uncovered } = partitionViolationsByDiff(violations, diffLines);
-  const newOrDegraded = filterNewOrDegraded(withLines, deltaMap);
+  const allNewOrDegraded = filterNewOrDegraded(withLines, deltaMap);
   const skipped = getSkippedViolations(withLines, deltaMap);
 
-  return { withLines, uncovered, newOrDegraded, skipped };
+  // Separate marginal violations (barely over threshold) — summary only, no inline comments
+  const marginal = allNewOrDegraded
+    .filter(({ violation }) => isMarginalViolation(violation))
+    .map(v => v.violation);
+  const newOrDegraded = allNewOrDegraded.filter(({ violation }) => !isMarginalViolation(violation));
+
+  return { withLines, uncovered, newOrDegraded, skipped, marginal };
+}
+
+/**
+ * Build note for marginal violations (near threshold, no inline comment)
+ */
+function buildMarginalNote(marginalViolations: ComplexityViolation[]): string {
+  if (marginalViolations.length === 0) return '';
+
+  const list = marginalViolations
+    .map(v => {
+      const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
+      const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
+      const thresholdDisplay = formatThresholdValue(v.metricType || 'cyclomatic', v.threshold);
+      return `  - \`${v.symbolName}\` in \`${v.filepath}\`: ${metricLabel} ${valueDisplay} (threshold: ${thresholdDisplay})`;
+    })
+    .join('\n');
+
+  return `\n\n<details>\n<summary>ℹ️ ${marginalViolations.length} near-threshold violation${marginalViolations.length === 1 ? '' : 's'} (no inline comment)</summary>\n\n${list}\n\n> *These functions are within 15% of the threshold. A light-touch refactoring (early return, extract one expression) may bring them under.*\n\n</details>`;
 }
 
 /**
@@ -1028,20 +1064,27 @@ async function handleNoNewViolations(
   prContext: PRContext,
   violationsWithLines: ViolationWithLines[],
   uncoveredViolations: ComplexityViolation[],
+  marginalViolations: ComplexityViolation[],
   deltaMap: Map<string, ComplexityDelta>,
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
   model: string,
   logger: Logger,
 ): Promise<void> {
-  if (violationsWithLines.length === 0) {
+  if (violationsWithLines.length === 0 && marginalViolations.length === 0) {
     return;
   }
 
   const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
   const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
   const skippedNote = buildSkippedNote(skippedInDiff);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote, model);
+  const marginalNote = buildMarginalNote(marginalViolations);
+  const summaryBody = buildReviewSummary(
+    report,
+    deltas,
+    uncoveredNote + skippedNote + marginalNote,
+    model,
+  );
   await postPRComment(octokit, prContext, summaryBody, logger);
 }
 
@@ -1108,10 +1151,11 @@ async function generateAndPostReview(
 
   const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
   const skippedNote = buildSkippedNote(processed.skipped);
+  const marginalNote = buildMarginalNote(processed.marginal);
   const summaryBody = buildReviewSummary(
     report,
     deltas,
-    uncoveredNote + skippedNote,
+    uncoveredNote + skippedNote + marginalNote,
     config.model,
     architecturalNotes,
     prSummary,
@@ -1163,9 +1207,16 @@ async function postLineReview(
       `(${processed.uncovered.length} outside diff)`,
   );
 
-  const skippedCount = processed.withLines.length - processed.newOrDegraded.length;
+  const skippedCount =
+    processed.withLines.length - processed.newOrDegraded.length - processed.marginal.length;
   if (skippedCount > 0) {
     logger.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
+  }
+
+  if (processed.marginal.length > 0) {
+    logger.info(
+      `Skipping ${processed.marginal.length} near-threshold violations (summary only, no inline comments)`,
+    );
   }
 
   if (processed.newOrDegraded.length === 0) {
@@ -1175,6 +1226,7 @@ async function postLineReview(
       prContext,
       processed.withLines,
       processed.uncovered,
+      processed.marginal,
       deltaMap,
       report,
       deltas,
