@@ -6,8 +6,7 @@ import collect from 'collect.js';
 import type { ComplexityReport, ComplexityViolation } from '@liendev/core';
 import type { PRContext } from './types.js';
 import type { ComplexityDelta, DeltaSummary } from './delta.js';
-import { formatDelta } from './delta.js';
-import { formatTime, formatDeltaValue } from './format.js';
+import { formatTime } from './format.js';
 
 /**
  * Few-shot examples for each complexity metric type.
@@ -31,27 +30,6 @@ const COMMENT_EXAMPLES: Record<string, string> = {
 
 // Default to cyclomatic if metric type not found
 const DEFAULT_EXAMPLE = COMMENT_EXAMPLES.cyclomatic;
-
-/**
- * Create a unique key for delta lookups
- * Includes metricType since a function can have multiple metric violations
- */
-function createDeltaKey(v: { filepath: string; symbolName: string; metricType: string }): string {
-  return `${v.filepath}::${v.symbolName}::${v.metricType}`;
-}
-
-/**
- * Build a lookup map from deltas for quick access
- */
-function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, ComplexityDelta> {
-  if (!deltas) return new Map();
-
-  return new Map(
-    collect(deltas)
-      .map(d => [createDeltaKey(d), d] as [string, ComplexityDelta])
-      .all(),
-  );
-}
 
 /**
  * Get human-readable label for a metric type
@@ -99,21 +77,6 @@ export function formatThresholdValue(metricType: string, value: number): string 
     default:
       return value.toString();
   }
-}
-
-/**
- * Format a single violation line with optional delta
- */
-function formatViolationLine(
-  v: ComplexityViolation,
-  deltaMap: Map<string, ComplexityDelta>,
-): string {
-  const delta = deltaMap.get(createDeltaKey(v));
-  const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-  const metricLabel = getMetricLabel(v.metricType);
-  const valueDisplay = formatComplexityValue(v.metricType, v.complexity);
-  const thresholdDisplay = formatThresholdValue(v.metricType, v.threshold);
-  return `  - ${v.symbolName} (${v.symbolType}): ${metricLabel} ${valueDisplay}${deltaStr} (threshold: ${thresholdDisplay}) [${v.severity}]`;
 }
 
 /**
@@ -262,204 +225,6 @@ function buildFileContext(filepath: string, fileData: ComplexityReport['files'][
 }
 
 /**
- * Check if a violation is new or worsened based on delta data
- */
-function isNewOrWorsened(v: ComplexityViolation, deltaMap: Map<string, ComplexityDelta>): boolean {
-  const delta = deltaMap.get(createDeltaKey(v));
-  return !!delta && (delta.severity === 'new' || delta.delta > 0);
-}
-
-/**
- * Group violations by filepath
- */
-function groupViolationsByFile(
-  violations: ComplexityViolation[],
-): Map<string, ComplexityViolation[]> {
-  const byFile = new Map<string, ComplexityViolation[]>();
-  for (const v of violations) {
-    const existing = byFile.get(v.filepath) || [];
-    existing.push(v);
-    byFile.set(v.filepath, existing);
-  }
-  return byFile;
-}
-
-/**
- * Format a group of violations organized by file
- */
-function formatFileGroup(
-  violations: ComplexityViolation[],
-  files: ComplexityReport['files'],
-  deltaMap: Map<string, ComplexityDelta>,
-): string {
-  return Array.from(groupViolationsByFile(violations).entries())
-    .map(([filepath, vs]) => {
-      const fileData = files[filepath];
-      const violationList = vs.map(v => formatViolationLine(v, deltaMap)).join('\n');
-      const dependencyContext = fileData ? buildDependencyContext(fileData) : '';
-      const fileContext = fileData ? buildFileContext(filepath, fileData) : '';
-      return `**${filepath}** (risk: ${fileData?.riskLevel || 'unknown'})${fileContext}\n${violationList}${dependencyContext}`;
-    })
-    .join('\n\n');
-}
-
-/**
- * Build violations summary grouped by file
- * When delta data is available, separates new/worsened from pre-existing
- */
-function buildViolationsSummary(
-  files: ComplexityReport['files'],
-  deltaMap: Map<string, ComplexityDelta>,
-): string {
-  if (deltaMap.size === 0) {
-    const allViolations = Object.values(files).flatMap(data => data.violations);
-    return formatFileGroup(allViolations, files, deltaMap);
-  }
-
-  const allViolations = Object.values(files)
-    .filter(data => data.violations.length > 0)
-    .flatMap(data => data.violations);
-
-  const newViolations = allViolations.filter(v => isNewOrWorsened(v, deltaMap));
-  const preExisting = allViolations.filter(v => !isNewOrWorsened(v, deltaMap));
-
-  const sections: string[] = [];
-
-  if (newViolations.length > 0) {
-    sections.push(
-      `### New/Worsened Violations (introduced or worsened in this PR)\n\n${formatFileGroup(newViolations, files, deltaMap)}`,
-    );
-  }
-
-  if (preExisting.length > 0) {
-    sections.push(
-      `### Pre-existing Violations (in files touched by this PR)\n\n${formatFileGroup(preExisting, files, deltaMap)}`,
-    );
-  }
-
-  return sections.join('\n\n');
-}
-
-/**
- * Format a single delta change for display
- */
-function formatDeltaChange(d: ComplexityDelta): string {
-  const from = d.baseComplexity ?? 'new';
-  const to = d.headComplexity ?? 'removed';
-  return `  - ${d.symbolName}: ${from} → ${to} (${formatDelta(d.delta)})`;
-}
-
-/**
- * Build delta context section showing complexity changes
- */
-function buildDeltaContext(deltas: ComplexityDelta[] | null): string {
-  if (!deltas || deltas.length === 0) return '';
-
-  const improved = deltas.filter(d => d.severity === 'improved');
-  const degraded = deltas.filter(
-    d => (d.severity === 'error' || d.severity === 'warning') && d.delta > 0,
-  );
-  const newFuncs = deltas.filter(d => d.severity === 'new');
-  const deleted = deltas.filter(d => d.severity === 'deleted');
-
-  const sections = [
-    `\n## Complexity Changes (vs base branch)`,
-    `- **Degraded**: ${degraded.length} function(s) got more complex`,
-    `- **Improved**: ${improved.length} function(s) got simpler`,
-    `- **New**: ${newFuncs.length} new complex function(s)`,
-    `- **Removed**: ${deleted.length} complex function(s) deleted`,
-  ];
-
-  if (degraded.length > 0) {
-    sections.push(`\nFunctions that got worse:\n${degraded.map(formatDeltaChange).join('\n')}`);
-  }
-  if (improved.length > 0) {
-    sections.push(`\nFunctions that improved:\n${improved.map(formatDeltaChange).join('\n')}`);
-  }
-  if (newFuncs.length > 0) {
-    sections.push(
-      `\nNew complex functions:\n${newFuncs.map(d => `  - ${d.symbolName}: complexity ${d.headComplexity}`).join('\n')}`,
-    );
-  }
-
-  return sections.join('\n');
-}
-
-/**
- * Build code snippets section
- */
-function buildSnippetsSection(codeSnippets: Map<string, string>): string {
-  return Array.from(codeSnippets.entries())
-    .map(([key, code]) => {
-      const [filepath, symbolName] = key.split('::');
-      return `### ${filepath} - ${symbolName}\n\`\`\`\n${code}\n\`\`\``;
-    })
-    .join('\n\n');
-}
-
-/**
- * Build the review prompt from complexity report
- */
-export function buildReviewPrompt(
-  report: ComplexityReport,
-  prContext: PRContext,
-  codeSnippets: Map<string, string>,
-  deltas: ComplexityDelta[] | null = null,
-): string {
-  const { summary, files } = report;
-  const deltaMap = buildDeltaMap(deltas);
-  const violationsByFile = Object.entries(files).filter(([_, data]) => data.violations.length > 0);
-  const violationsSummary = buildViolationsSummary(files, deltaMap);
-  const snippetsSection = buildSnippetsSection(codeSnippets);
-  const deltaContext = buildDeltaContext(deltas);
-
-  return `# Code Complexity Review Request
-
-## Context
-- **Repository**: ${prContext.owner}/${prContext.repo}
-- **PR**: #${prContext.pullNumber} - ${prContext.title}
-- **Files with violations**: ${violationsByFile.length}
-- **Total violations**: ${summary.totalViolations} (${summary.bySeverity.error} errors, ${summary.bySeverity.warning} warnings)
-${deltaContext}
-## Complexity Violations Found
-
-${violationsSummary}
-
-## Code Snippets
-
-${snippetsSection || '_No code snippets available_'}
-
-## Your Task
-
-**IMPORTANT**: Before suggesting refactorings, analyze the code snippets below to identify the codebase's patterns:
-- Are utilities implemented as functions or classes?
-- How are similar refactorings done elsewhere in the codebase?
-- What naming conventions are used?
-- How is code organized (modules, files, exports)?
-
-For each violation:
-1. **Explain** why this complexity is problematic in this specific context
-   - Consider the file type (controller, service, component, etc.) and language
-   - Note if this is the only violation in the file or one of many
-   - Consider dependency impact - high-risk files need extra scrutiny
-2. **Suggest** concrete refactoring steps (not generic advice like "break into smaller functions")
-   - Be specific to the language and framework patterns
-   - Consider file type conventions (e.g., controllers often delegate to services)
-   - **Match the existing codebase patterns** - if utilities are functions, suggest functions; if they're classes, suggest classes
-3. **Prioritize** which violations are most important to address - focus on functions that got WORSE (higher delta)
-4. If the complexity seems justified for the use case, say so
-   - Some patterns (orchestration, state machines) may legitimately be complex
-5. Celebrate improvements! If a function got simpler, acknowledge it.
-
-Format your response as a PR review comment with:
-- A brief summary at the top (2-3 sentences)
-- File-by-file breakdown with specific suggestions
-- Prioritized list of recommended changes
-
-Be concise but actionable. Focus on the highest-impact improvements.`;
-}
-
-/**
  * Build a minimal prompt when there are no violations
  */
 export function buildNoViolationsMessage(
@@ -489,107 +254,6 @@ All analyzed functions are within the configured complexity threshold.${deltaMes
 export interface TokenUsageInfo {
   totalTokens: number;
   cost: number;
-}
-
-/**
- * Group deltas by metric type and sum their values
- */
-function groupDeltasByMetric(deltas: ComplexityDelta[]): Record<string, number> {
-  return (
-    collect(deltas)
-      .groupBy('metricType')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .map((group: any) => group.sum('delta'))
-      .all() as unknown as Record<string, number>
-  );
-}
-
-/**
- * Build metric breakdown string with emojis
- * Note: getMetricEmoji is defined below (line ~441) to avoid duplication
- */
-function buildMetricBreakdownForDisplay(deltaByMetric: Record<string, number>): string {
-  const metricOrder = ['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'];
-  const emojiMap: Record<string, string> = {
-    cyclomatic: '🔀',
-    cognitive: '🧠',
-    halstead_effort: '⏱️',
-    halstead_bugs: '🐛',
-  };
-  return collect(metricOrder)
-    .map(metricType => {
-      const metricDelta = deltaByMetric[metricType] || 0;
-      const emoji = emojiMap[metricType] || '📊';
-      const sign = metricDelta >= 0 ? '+' : '';
-      return `${emoji} ${sign}${formatDeltaValue(metricType, metricDelta)}`;
-    })
-    .all()
-    .join(' | ');
-}
-
-/**
- * Categorize deltas into improved vs degraded counts
- */
-function categorizeDeltas(deltas: ComplexityDelta[]): { improved: number; degraded: number } {
-  return deltas.reduce(
-    (acc, d) => {
-      if (['improved', 'deleted'].includes(d.severity)) acc.improved++;
-      else if (['warning', 'error', 'new'].includes(d.severity)) acc.degraded++;
-      return acc;
-    },
-    { improved: 0, degraded: 0 },
-  );
-}
-
-/**
- * Determine trend emoji based on total delta
- */
-function getTrendEmoji(totalDelta: number): string {
-  if (totalDelta > 0) return '⬆️';
-  if (totalDelta < 0) return '⬇️';
-  return '➡️';
-}
-
-/**
- * Format delta display with per-metric breakdown
- * When all deltas are zero, shows a simple "no change" message
- */
-function formatDeltaDisplay(deltas: ComplexityDelta[] | null | undefined): string {
-  if (!deltas || deltas.length === 0) return '';
-
-  const { improved, degraded } = categorizeDeltas(deltas);
-  const deltaByMetric = groupDeltasByMetric(deltas);
-  const totalDelta = Object.values(deltaByMetric).reduce((sum, v) => sum + v, 0);
-
-  // When nothing changed, keep it simple
-  // Note: pre-existing violations may have severity 'warning' but delta=0
-  if (totalDelta === 0 && improved === 0) {
-    return '\n\n**Complexity:** No change from this PR.';
-  }
-
-  const metricBreakdown = buildMetricBreakdownForDisplay(deltaByMetric);
-  const trend = getTrendEmoji(totalDelta);
-
-  let display = `\n\n**Complexity Change:** ${metricBreakdown} ${trend}`;
-  if (improved > 0) display += ` | ${improved} improved`;
-  if (degraded > 0) display += ` | ${degraded} degraded`;
-  return display;
-}
-
-/**
- * Format token usage stats for display
- */
-function formatTokenStats(tokenUsage: TokenUsageInfo | undefined): string {
-  if (!tokenUsage || tokenUsage.totalTokens <= 0) return '';
-  return `\n- Tokens: ${tokenUsage.totalTokens.toLocaleString()} ($${tokenUsage.cost.toFixed(4)})`;
-}
-
-/**
- * Format fallback note for boy scout rule
- */
-function formatFallbackNote(isFallback: boolean): string {
-  if (!isFallback) return '';
-  return `\n\n> 💡 *These violations exist in files touched by this PR but not on changed lines. Consider the [boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html): leave the code cleaner than you found it!*\n`;
 }
 
 /**
@@ -650,47 +314,6 @@ export function buildHeaderLine(
   }
 
   return parts.join(' ');
-}
-
-/**
- * Format the AI review as a GitHub comment
- */
-export function formatReviewComment(
-  aiReview: string,
-  report: ComplexityReport,
-  isFallback = false,
-  tokenUsage?: TokenUsageInfo,
-  deltas?: ComplexityDelta[] | null,
-  uncoveredNote: string = '',
-): string {
-  const { summary } = report;
-  const deltaDisplay = formatDeltaDisplay(deltas);
-  const fallbackNote = formatFallbackNote(isFallback);
-  const tokenStats = formatTokenStats(tokenUsage);
-
-  const headerLine = buildHeaderLine(summary.totalViolations, deltas);
-
-  return `<!-- lien-ai-review -->
-## 👁️ Veille
-
-${headerLine}${deltaDisplay}${fallbackNote}
-
----
-
-${aiReview}
-
----${uncoveredNote}
-
-<details>
-<summary>📊 Analysis Details</summary>
-
-- Files analyzed: ${summary.filesAnalyzed}
-- Average complexity: ${summary.avgComplexity.toFixed(1)}
-- Max complexity: ${summary.maxComplexity}${tokenStats}
-
-</details>
-
-*[Veille](https://lien.dev) by Lien*`;
 }
 
 /**
@@ -962,6 +585,54 @@ function getExampleForPrimaryMetric(violations: ComplexityViolation[]): string {
 }
 
 /**
+ * Format a single metric line for a violation
+ */
+function formatMetricLine(v: ComplexityViolation): string {
+  const metricType = v.metricType || 'cyclomatic';
+  const metricLabel = getMetricLabel(metricType);
+  const valueDisplay = formatComplexityValue(metricType, v.complexity);
+  const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
+  const halsteadContext = formatHalsteadContext(v);
+  return `- **${metricLabel}**: ${valueDisplay} (threshold: ${thresholdDisplay}) [${v.severity}]${halsteadContext}`;
+}
+
+/**
+ * Build a prompt section for a single function's violations
+ */
+function buildViolationSection(
+  index: number,
+  key: string,
+  groupViolations: ComplexityViolation[],
+  codeSnippets: Map<string, string>,
+  report: ComplexityReport,
+  diffHunks?: Map<string, string>,
+): string {
+  const first = groupViolations[0];
+  const snippet = codeSnippets.get(key);
+  const snippetSection = snippet ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\`` : '';
+
+  const metricLines = groupViolations.map(formatMetricLine).join('\n');
+
+  const fileData = report.files[first.filepath];
+  const dependencyContext = fileData ? buildDependencyContext(fileData) : '';
+  const fileContext = fileData ? buildFileContext(first.filepath, fileData) : '';
+
+  const testContext =
+    fileData && fileData.testAssociations && fileData.testAssociations.length > 0
+      ? `\n- **Test files**: ${fileData.testAssociations.join(', ')}`
+      : fileData
+        ? '\n- **Tests**: None found — consider adding tests'
+        : '';
+
+  const hunk = diffHunks?.get(key);
+  const diffSection = hunk ? `\n**Changes in this PR (diff):**\n\`\`\`diff\n${hunk}\n\`\`\`` : '';
+
+  return `### ${index}. ${key}
+- **Function**: \`${first.symbolName}\` (${first.symbolType})
+${metricLines}${fileContext}${testContext}${dependencyContext}${snippetSection}${diffSection}`;
+}
+
+/**
  * Build a batched prompt for generating multiple line comments at once
  * This is more efficient than individual prompts as:
  * - System prompt only sent once
@@ -972,36 +643,35 @@ export function buildBatchedCommentsPrompt(
   violations: ComplexityViolation[],
   codeSnippets: Map<string, string>,
   report: ComplexityReport,
+  diffHunks?: Map<string, string>,
 ): string {
-  const violationsText = violations
-    .map((v, i) => {
-      const key = `${v.filepath}::${v.symbolName}`;
-      const snippet = codeSnippets.get(key);
-      const snippetSection = snippet ? `\nCode:\n\`\`\`\n${snippet}\n\`\`\`` : '';
+  // Group violations by filepath::symbolName so one function gets one comment
+  const grouped = new Map<string, ComplexityViolation[]>();
+  for (const v of violations) {
+    const key = `${v.filepath}::${v.symbolName}`;
+    const existing = grouped.get(key) || [];
+    existing.push(v);
+    grouped.set(key, existing);
+  }
 
-      const metricType = v.metricType || 'cyclomatic';
-      const metricLabel = getMetricLabel(metricType);
-      const valueDisplay = formatComplexityValue(metricType, v.complexity);
-      const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
-      const halsteadContext = formatHalsteadContext(v);
-
-      // Add dependency context for this violation's file
-      const fileData = report.files[v.filepath];
-      const dependencyContext = fileData ? buildDependencyContext(fileData) : '';
-
-      // Add file-level context (language, type, other violations)
-      const fileContext = fileData ? buildFileContext(v.filepath, fileData) : '';
-
-      return `### ${i + 1}. ${v.filepath}::${v.symbolName}
-- **Function**: \`${v.symbolName}\` (${v.symbolType})
-- **Complexity**: ${valueDisplay} ${metricLabel} (threshold: ${thresholdDisplay})${halsteadContext}
-- **Severity**: ${v.severity}${fileContext}${dependencyContext}${snippetSection}`;
+  let sectionIndex = 0;
+  const violationsText = Array.from(grouped.entries())
+    .map(([key, groupViolations]) => {
+      sectionIndex++;
+      return buildViolationSection(
+        sectionIndex,
+        key,
+        groupViolations,
+        codeSnippets,
+        report,
+        diffHunks,
+      );
     })
     .join('\n\n');
 
-  // Build JSON keys for the response format
-  const jsonKeys = violations
-    .map(v => `  "${v.filepath}::${v.symbolName}": "your comment here"`)
+  // Build JSON keys for the response format (one per function, not per metric)
+  const jsonKeys = Array.from(grouped.keys())
+    .map(key => `  "${key}": "your comment here"`)
     .join(',\n');
 
   return `You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.
@@ -1036,6 +706,8 @@ For each violation, write a code review comment that:
    - If the logic is inherently complex (state machines, parsers), say so
    - Don't suggest over-engineering for marginal gains
 
+**IMPORTANT**: When a diff is provided, focus your review on the CHANGED lines shown in the diff. Pre-existing complexity is context, not the primary target. If the complexity was introduced or worsened in this PR, say so. If it's pre-existing, note that and suggest improvements the author could make while they're already in the file.
+
 Be direct and specific to THIS code. Avoid generic advice like "break into smaller functions."
 
 **Example of a good comment:**
@@ -1044,6 +716,12 @@ Be direct and specific to THIS code. Avoid generic advice like "break into small
 Write comments of similar quality and specificity for each violation below.
 
 IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
+
+**GitHub Suggestions**: When the fix is small and self-contained (< 10 lines, replaces specific lines visible in the diff), include a GitHub suggestion block:
+\`\`\`suggestion
+// replacement code
+\`\`\`
+Only use suggestion blocks when the replacement is complete, runnable code — not pseudocode. GitHub renders these as one-click apply buttons.
 
 ## Response Format
 

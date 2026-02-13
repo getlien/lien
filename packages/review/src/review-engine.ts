@@ -22,19 +22,12 @@ import {
   getFileContent,
   postPRComment,
   postPRReview,
-  getPRDiffLines,
+  getPRPatchData,
   updatePRDescription,
 } from './github-api.js';
+import { generateLineComments, resetTokenUsage, getTokenUsage } from './openrouter.js';
 import {
-  generateReview,
-  generateLineComments,
-  resetTokenUsage,
-  getTokenUsage,
-} from './openrouter.js';
-import {
-  buildReviewPrompt,
   buildNoViolationsMessage,
-  formatReviewComment,
   getViolationKey,
   buildDescriptionBadge,
   buildHeaderLine,
@@ -146,8 +139,9 @@ export async function runComplexityAnalysis(
 
   try {
     // Use skipEmbeddings for fast chunk-only indexing (no VectorDB needed)
-    logger.info('Indexing codebase (chunk-only)...');
-    const indexResult = await indexCodebase({ rootDir, skipEmbeddings: true });
+    // Pass filesToIndex to skip full repo scan — only chunk the changed files
+    logger.info(`Indexing ${files.length} files (chunk-only)...`);
+    const indexResult = await indexCodebase({ rootDir, skipEmbeddings: true, filesToIndex: files });
 
     logger.info(
       `Indexing complete: ${indexResult.chunksCreated} chunks from ${indexResult.filesIndexed} files (success: ${indexResult.success})`,
@@ -443,6 +437,79 @@ function createDeltaKey(v: { filepath: string; symbolName: string; metricType: s
 }
 
 /**
+ * Check if a line number falls within a range
+ */
+function inRange(line: number, start: number, end: number): boolean {
+  return line >= start && line <= end;
+}
+
+/**
+ * Check if a patch line is a meaningful added or context line (not a file header).
+ */
+function isLineRelevant(patchLine: string): boolean {
+  return patchLine.startsWith('+') ? !patchLine.startsWith('+++') : patchLine.startsWith(' ');
+}
+
+/**
+ * Extract the portion of a unified diff patch that overlaps with a given line range.
+ * Returns the relevant diff hunk lines, or null if no overlap.
+ */
+export function extractRelevantHunk(
+  patch: string,
+  startLine: number,
+  endLine: number,
+): string | null {
+  const lines: string[] = [];
+  let currentLine = 0;
+
+  for (const patchLine of patch.split('\n')) {
+    const hunkMatch = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunkMatch) {
+      currentLine = parseInt(hunkMatch[1], 10);
+      continue;
+    }
+
+    // Deleted lines don't advance the line counter
+    if (patchLine.startsWith('-')) {
+      if (inRange(currentLine, startLine, endLine)) lines.push(patchLine);
+      continue;
+    }
+
+    if (isLineRelevant(patchLine)) {
+      if (inRange(currentLine, startLine, endLine)) lines.push(patchLine);
+      currentLine++;
+    }
+  }
+
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
+/**
+ * Build diff hunks map keyed by filepath::symbolName from patches and violations
+ */
+function buildDiffHunks(
+  patches: Map<string, string>,
+  violations: ComplexityViolation[],
+): Map<string, string> {
+  const diffHunks = new Map<string, string>();
+
+  for (const v of violations) {
+    const key = `${v.filepath}::${v.symbolName}`;
+    if (diffHunks.has(key)) continue; // Already extracted for this function
+
+    const patch = patches.get(v.filepath);
+    if (!patch) continue;
+
+    const hunk = extractRelevantHunk(patch, v.startLine, v.endLine);
+    if (hunk) {
+      diffHunks.set(key, hunk);
+    }
+  }
+
+  return diffHunks;
+}
+
+/**
  * Build delta lookup map from deltas array
  */
 function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, ComplexityDelta> {
@@ -682,54 +749,115 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
 }
 
 /**
- * Build line comments from violations and AI comments
+ * Get emoji for metric type
+ */
+function getMetricEmojiForComment(metricType: string): string {
+  switch (metricType) {
+    case 'cyclomatic':
+      return '🔀';
+    case 'cognitive':
+      return '🧠';
+    case 'halstead_effort':
+      return '⏱️';
+    case 'halstead_bugs':
+      return '🐛';
+    default:
+      return '📊';
+  }
+}
+
+/**
+ * Format a single metric header line for a grouped comment
+ */
+function formatMetricHeaderLine(
+  violation: ComplexityViolation,
+  deltaMap: Map<string, ComplexityDelta>,
+): string {
+  const metricType = violation.metricType || 'cyclomatic';
+  const delta = deltaMap.get(createDeltaKey(violation));
+  const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
+  const severityEmoji = delta
+    ? formatSeverityEmoji(delta.severity)
+    : violation.severity === 'error'
+      ? '🔴'
+      : '🟡';
+  const emoji = getMetricEmojiForComment(metricType);
+  const metricLabel = getMetricLabel(metricType);
+  const valueDisplay = formatComplexityValue(metricType, violation.complexity);
+  const thresholdDisplay = formatThresholdValue(metricType, violation.threshold);
+
+  return `${severityEmoji} ${emoji} **${metricLabel.charAt(0).toUpperCase() + metricLabel.slice(1)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})`;
+}
+
+/**
+ * Build the body of a grouped comment for a single function.
+ */
+function buildGroupedCommentBody(
+  group: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  aiComments: Map<ComplexityViolation, string>,
+  deltaMap: Map<string, ComplexityDelta>,
+  report: ComplexityReport,
+): string {
+  const firstViolation = group[0].violation;
+  const { commentLine } = group[0];
+
+  const metricHeaders = group
+    .map(({ violation }) => formatMetricHeaderLine(violation, deltaMap))
+    .join('\n');
+
+  const lineNote =
+    commentLine !== firstViolation.startLine
+      ? ` *(\`${firstViolation.symbolName}\` starts at line ${firstViolation.startLine})*`
+      : '';
+
+  const comment = aiComments.get(firstViolation)!;
+
+  const fileData = report.files[firstViolation.filepath];
+  const testNote =
+    fileData && (!fileData.testAssociations || fileData.testAssociations.length === 0)
+      ? '\n\n> No test files found for this function.'
+      : '';
+
+  return `${metricHeaders}${lineNote}\n\n${comment}${testNote}`;
+}
+
+/**
+ * Build line comments from violations and AI comments.
+ * Groups violations by filepath::symbolName to produce one comment per function.
  */
 function buildLineComments(
   violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
   aiComments: Map<ComplexityViolation, string>,
   deltaMap: Map<string, ComplexityDelta>,
+  report: ComplexityReport,
   logger: Logger,
 ): LineComment[] {
-  return collect(violationsWithLines)
-    .filter(({ violation }) => aiComments.has(violation))
-    .map(({ violation, commentLine }) => {
-      const comment = aiComments.get(violation)!;
-      const delta = deltaMap.get(createDeltaKey(violation));
-      const deltaStr = delta ? ` (${formatDelta(delta.delta)})` : '';
-      const severityEmoji = delta
-        ? formatSeverityEmoji(delta.severity)
-        : violation.severity === 'error'
-          ? '🔴'
-          : '🟡';
+  // Group violations by filepath::symbolName
+  const grouped = new Map<string, Array<{ violation: ComplexityViolation; commentLine: number }>>();
+  for (const entry of violationsWithLines) {
+    if (!aiComments.has(entry.violation)) continue;
+    const key = `${entry.violation.filepath}::${entry.violation.symbolName}`;
+    const existing = grouped.get(key) || [];
+    existing.push(entry);
+    grouped.set(key, existing);
+  }
 
-      // If comment is not on symbol's starting line, note where it actually starts
-      const lineNote =
-        commentLine !== violation.startLine
-          ? ` *(\`${violation.symbolName}\` starts at line ${violation.startLine})*`
-          : '';
+  const comments: LineComment[] = [];
+  for (const [, group] of grouped) {
+    const firstViolation = group[0].violation;
 
-      // Format human-friendly complexity display
-      const metricLabel = getMetricLabel(violation.metricType || 'cyclomatic');
-      const valueDisplay = formatComplexityValue(
-        violation.metricType || 'cyclomatic',
-        violation.complexity,
-      );
-      const thresholdDisplay = formatThresholdValue(
-        violation.metricType || 'cyclomatic',
-        violation.threshold,
-      );
+    logger.info(
+      `Adding grouped comment for ${firstViolation.filepath}:${group[0].commentLine} (${firstViolation.symbolName}, ${group.length} metric${group.length === 1 ? '' : 's'})`,
+    );
 
-      logger.info(
-        `Adding comment for ${violation.filepath}:${commentLine} (${violation.symbolName})${deltaStr}`,
-      );
+    comments.push({
+      path: firstViolation.filepath,
+      line: group[0].commentLine,
+      body: buildGroupedCommentBody(group, aiComments, deltaMap, report),
+    });
+  }
 
-      return {
-        path: violation.filepath,
-        line: commentLine,
-        body: `${severityEmoji} **${metricLabel.charAt(0).toUpperCase() + metricLabel.slice(1)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})${lineNote}\n\n${comment}`,
-      };
-    })
-    .all() as LineComment[];
+  return comments;
 }
 
 /**
@@ -850,6 +978,7 @@ async function generateAndPostReview(
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
   logger: Logger,
+  diffHunks?: Map<string, string>,
 ): Promise<void> {
   const commentableViolations = processed.newOrDegraded.map(v => v.violation);
   logger.info(
@@ -863,16 +992,40 @@ async function generateAndPostReview(
     config.model,
     report,
     logger,
+    diffHunks,
   );
 
-  const lineComments = buildLineComments(processed.newOrDegraded, aiComments, deltaMap, logger);
+  const lineComments = buildLineComments(
+    processed.newOrDegraded,
+    aiComments,
+    deltaMap,
+    report,
+    logger,
+  );
   logger.info(`Built ${lineComments.length} line comments for new/degraded violations`);
 
   const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
   const skippedNote = buildSkippedNote(processed.skipped);
   const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
 
-  await postPRReview(octokit, prContext, lineComments, summaryBody, logger);
+  // Determine review event: REQUEST_CHANGES if blocking is enabled and
+  // any new/degraded violation has error severity
+  const hasNewErrors =
+    config.blockOnNewErrors &&
+    processed.newOrDegraded.some(({ violation }) => {
+      const delta = deltaMap.get(createDeltaKey(violation));
+      // Block on new violations or worsened-to-error violations
+      return (
+        violation.severity === 'error' && (!delta || delta.severity === 'new' || delta.delta > 0)
+      );
+    });
+  const event = hasNewErrors ? 'REQUEST_CHANGES' : 'COMMENT';
+
+  if (hasNewErrors) {
+    logger.info('New error-level violations detected — posting REQUEST_CHANGES review');
+  }
+
+  await postPRReview(octokit, prContext, lineComments, summaryBody, logger, event);
   logger.info(`Posted review with ${lineComments.length} line comments`);
 }
 
@@ -889,7 +1042,7 @@ async function postLineReview(
   logger: Logger,
   deltas: ComplexityDelta[] | null = null,
 ): Promise<void> {
-  const diffLines = await getPRDiffLines(octokit, prContext);
+  const { diffLines, patches } = await getPRPatchData(octokit, prContext);
   logger.info(`Diff covers ${diffLines.size} files`);
 
   const deltaMap = buildDeltaMap(deltas);
@@ -920,6 +1073,11 @@ async function postLineReview(
     return;
   }
 
+  // Build diff hunks for the commentable violations so AI can see what changed
+  const commentableViolations = processed.newOrDegraded.map(v => v.violation);
+  const diffHunks = buildDiffHunks(patches, commentableViolations);
+  logger.info(`Extracted diff hunks for ${diffHunks.size} functions`);
+
   await generateAndPostReview(
     octokit,
     prContext,
@@ -930,37 +1088,12 @@ async function postLineReview(
     report,
     deltas,
     logger,
+    diffHunks,
   );
 }
 
 /**
- * Post review as a single summary comment
- */
-async function postSummaryReview(
-  octokit: Octokit,
-  prContext: PRContext,
-  report: ComplexityReport,
-  codeSnippets: Map<string, string>,
-  config: ReviewConfig,
-  logger: Logger,
-  isFallback = false,
-  deltas: ComplexityDelta[] | null = null,
-  uncoveredNote: string = '',
-): Promise<void> {
-  const prompt = buildReviewPrompt(report, prContext, codeSnippets, deltas);
-  logger.debug(`Prompt length: ${prompt.length} characters`);
-
-  const aiReview = await generateReview(prompt, config.openrouterApiKey, config.model, logger);
-
-  const usage = getTokenUsage();
-  const comment = formatReviewComment(aiReview, report, isFallback, usage, deltas, uncoveredNote);
-  await postPRComment(octokit, prContext, comment, logger);
-  logger.info('Successfully posted AI review summary comment');
-}
-
-/**
  * Post review if violations are found, or success message if none
- * Handles both summary and line-by-line review modes
  */
 export async function postReviewIfNeeded(
   result: AnalysisResult,
@@ -984,34 +1117,14 @@ export async function postReviewIfNeeded(
   );
 
   resetTokenUsage();
-  if (config.reviewStyle === 'summary') {
-    // Get diff lines to identify uncovered violations
-    const diffLines = await getPRDiffLines(octokit, prContext);
-    const deltaMap = buildDeltaMap(result.deltas);
-    const { uncovered } = partitionViolationsByDiff(violations, diffLines);
-    const uncoveredNote = buildUncoveredNote(uncovered, deltaMap);
-
-    await postSummaryReview(
-      octokit,
-      prContext,
-      result.currentReport,
-      codeSnippets,
-      config,
-      logger,
-      false,
-      result.deltas,
-      uncoveredNote,
-    );
-  } else {
-    await postLineReview(
-      octokit,
-      prContext,
-      result.currentReport,
-      violations,
-      codeSnippets,
-      config,
-      logger,
-      result.deltas,
-    );
-  }
+  await postLineReview(
+    octokit,
+    prContext,
+    result.currentReport,
+    violations,
+    codeSnippets,
+    config,
+    logger,
+    result.deltas,
+  );
 }

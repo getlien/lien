@@ -126,73 +126,6 @@ export function parseCommentsResponse(
 }
 
 /**
- * Generate an AI review using OpenRouter
- */
-export async function generateReview(
-  prompt: string,
-  apiKey: string,
-  model: string,
-  logger: Logger,
-): Promise<string> {
-  logger.info(`Calling OpenRouter with model: ${model}`);
-
-  const response = await fetch(OPENROUTER_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://github.com/getlien/lien',
-      'X-Title': 'Veille by Lien',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: 'system',
-          content:
-            "You are an expert code reviewer. Provide actionable, specific feedback on code complexity issues. Be concise but thorough. Before suggesting refactorings, analyze the code snippets provided to identify the codebase's architectural patterns (e.g., functions vs classes, module organization, naming conventions). Then suggest refactorings that match those existing patterns.",
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      max_tokens: 2000,
-      temperature: 0.3, // Lower temperature for more consistent reviews
-      // Enable usage accounting to get cost data
-      // https://openrouter.ai/docs/guides/guides/usage-accounting
-      usage: {
-        include: true,
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenRouter API error (${response.status}): ${errorText}`);
-  }
-
-  const data = (await response.json()) as OpenRouterResponse;
-
-  if (!data.choices || data.choices.length === 0) {
-    throw new Error('No response from OpenRouter');
-  }
-
-  const review = data.choices[0].message.content;
-
-  // Cost is in usage.cost when usage accounting is enabled
-  if (data.usage) {
-    trackUsage(data.usage);
-    const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
-    logger.info(
-      `Tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`,
-    );
-  }
-
-  return review;
-}
-
-/**
  * Call OpenRouter API with batched comments prompt
  */
 async function callBatchedCommentsAPI(
@@ -258,6 +191,8 @@ export function mapCommentsToViolations(
     return results;
   }
 
+  // AI responds with one comment per filepath::symbolName (grouped).
+  // Map the same comment to all violations sharing that key.
   for (const violation of violations) {
     const key = `${violation.filepath}::${violation.symbolName}`;
     const comment = commentsMap[key];
@@ -288,6 +223,7 @@ export async function generateLineComments(
   model: string,
   report: ComplexityReport,
   logger: Logger,
+  diffHunks?: Map<string, string>,
 ): Promise<Map<ComplexityViolation, string>> {
   if (violations.length === 0) {
     return new Map();
@@ -295,7 +231,7 @@ export async function generateLineComments(
 
   logger.info(`Generating comments for ${violations.length} violations in single batch`);
 
-  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets, report);
+  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets, report, diffHunks);
   const data = await callBatchedCommentsAPI(prompt, apiKey, model);
 
   if (data.usage) {

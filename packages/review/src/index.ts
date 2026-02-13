@@ -10,7 +10,6 @@
 export type {
   PRContext,
   ReviewConfig,
-  ReviewStyle,
   LineComment,
   ComplexityReport,
   ComplexityViolation,
@@ -28,11 +27,13 @@ export {
   orchestrateAnalysis,
   handleAnalysisOutputs,
   postReviewIfNeeded,
+  extractRelevantHunk,
 } from './review-engine.js';
 
 // GitHub API (portable, uses @octokit/rest)
 export {
   type Octokit,
+  type PRPatchData,
   createOctokit,
   getPRChangedFiles,
   postPRComment,
@@ -41,6 +42,7 @@ export {
   updatePRDescription,
   parsePatchLines,
   getPRDiffLines,
+  getPRPatchData,
 } from './github-api.js';
 
 // OpenRouter API
@@ -50,16 +52,13 @@ export {
   resetTokenUsage,
   getTokenUsage,
   parseCommentsResponse,
-  generateReview,
   mapCommentsToViolations,
   generateLineComments,
 } from './openrouter.js';
 
 // Prompt building
 export {
-  buildReviewPrompt,
   buildNoViolationsMessage,
-  formatReviewComment,
   getViolationKey,
   buildDescriptionBadge,
   buildHeaderLine,

@@ -12,7 +12,6 @@ import {
   type Logger,
   type ReviewConfig,
   type ReviewSetup,
-  type ReviewStyle,
   createOctokit,
   orchestrateAnalysis,
   handleAnalysisOutputs,
@@ -33,15 +32,13 @@ const actionsLogger: Logger = {
  * Read action inputs into ReviewConfig
  */
 function getConfig(): ReviewConfig {
-  const reviewStyle = core.getInput('review_style') || 'line';
-
   return {
     openrouterApiKey: core.getInput('openrouter_api_key', { required: true }),
     model: core.getInput('model') || 'anthropic/claude-sonnet-4',
     threshold: core.getInput('threshold') || '15',
-    reviewStyle: (reviewStyle === 'summary' ? 'summary' : 'line') as ReviewStyle,
     enableDeltaTracking: core.getInput('enable_delta_tracking') === 'true',
     baselineComplexityPath: core.getInput('baseline_complexity') || '',
+    blockOnNewErrors: core.getInput('block_on_new_errors') === 'true',
   };
 }
 
@@ -98,7 +95,6 @@ async function run(): Promise<void> {
     const config = getConfig();
     core.info(`Using model: ${config.model}`);
     core.info(`Complexity threshold: ${config.threshold}`);
-    core.info(`Review style: ${config.reviewStyle}`);
 
     const githubToken = core.getInput('github_token') || process.env.GITHUB_TOKEN || '';
     if (!githubToken) {
