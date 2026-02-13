@@ -80,7 +80,7 @@ jobs:
         uses: ./packages/action
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          model: 'anthropic/claude-sonnet-4-5'
+          model: 'minimax/minimax-m2.5'
           threshold: '15'
           github_token: ${{ secrets.GITHUB_TOKEN }}
           enable_delta_tracking: true # Automatic base vs head comparison
