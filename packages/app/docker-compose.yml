@@ -23,7 +23,7 @@ services:
       - GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-anthropic/claude-sonnet-4-5}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-minimax/minimax-m2.5}
       - ALLOWED_ORG_IDS=${ALLOWED_ORG_IDS:-}
       - PORT=3000
     restart: unless-stopped
