@@ -55,6 +55,8 @@ COPY --from=builder /app/packages/review/dist/ packages/review/dist/
 COPY --from=builder /app/packages/app/package.json packages/app/
 COPY --from=builder /app/packages/app/dist/ packages/app/dist/
 
+ENV OPENROUTER_MODEL=google/gemini-2.5-flash
+
 EXPOSE 3000
 
 CMD ["node", "packages/app/dist/index.js"]

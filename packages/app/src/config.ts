@@ -48,7 +48,7 @@ export function loadConfig(): AppConfig {
     privateKey,
     webhookSecret: required('WEBHOOK_SECRET'),
     openRouterApiKey: required('OPENROUTER_API_KEY'),
-    openRouterModel: process.env.OPENROUTER_MODEL ?? 'google/gemini-2.5-flash',
+    openRouterModel: required('OPENROUTER_MODEL'),
     port: parsePort(process.env.PORT),
     allowedOrgIds,
   };
