@@ -175,6 +175,47 @@ describe('detectLogicFindings', () => {
       expect(findings).toHaveLength(0);
     });
 
+    it('does not flag property assignment', () => {
+      const content =
+        'function processData() {\n  obj.result = validateInput(data);\n  return obj;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/process.ts',
+            symbolName: 'processData',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'validateInput', line: 2 }],
+          },
+          content,
+        ),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(0);
+    });
+
+    it('does not flag chained method calls', () => {
+      const content = 'function processData() {\n  fetchItems().then(handleResult);\n  return;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/process.ts',
+            symbolName: 'processData',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'fetchItems', line: 2 }],
+          },
+          content,
+        ),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(0);
+    });
+
     it('does not flag return statements', () => {
       const content = 'function processData() {\n  return validateInput(data);\n}';
       const chunks = [

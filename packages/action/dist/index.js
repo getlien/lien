@@ -8272,7 +8272,7 @@ Example in the JSON response:
 
 Rules:
 - Use \`\`\`suggestion for ANY concrete code fix (not \`\`\`typescript or \`\`\`ts)
-- The suggestion must be complete, runnable code that replaces the function
+- The suggestion must be complete, runnable code that replaces the lines the comment is attached to
 - Only use \`\`\`suggestion when you have a clear, complete replacement
 - For structural advice without a concrete replacement, use plain text (no code block)
 
@@ -8606,6 +8606,9 @@ async function generateLogicComments(findings, codeSnippets, apiKey, model, repo
   logger.info(`${comments.length}/${findings.length} findings validated as real issues`);
   return comments;
 }
+var MAX_FINDINGS = 15;
+var MIN_COMPLEXITY_FOR_TESTS = 10;
+var MIN_DEPENDENTS_FOR_TESTS = 3;
 function detectLogicFindings(chunks, report, baselineReport, categories) {
   const findings = [];
   const enabledCategories = new Set(categories);
@@ -8691,7 +8694,7 @@ function detectUncheckedReturns(chunks) {
 function isLikelyUncheckedCall(lineContent, symbol) {
   if (lineContent.startsWith("return ")) return false;
   if (/^(?:const|let|var|this\.\w+)\s/.test(lineContent)) return false;
-  if (/^\w+\s*=/.test(lineContent)) return false;
+  if (/^[\w$.[\]]+\s*=/.test(lineContent)) return false;
   const callIndex = lineContent.indexOf(symbol + "(");
   if (callIndex === -1) return false;
   if (lineContent.startsWith("void ")) return false;
@@ -8700,6 +8703,7 @@ function isLikelyUncheckedCall(lineContent, symbol) {
   }
   const stripped = lineContent.replace(/^await\s+/, "");
   if (stripped.startsWith(symbol + "(") || stripped.startsWith(`this.${symbol}(`)) {
+    if (/\)\s*\./.test(stripped)) return false;
     return true;
   }
   return false;
@@ -8717,7 +8721,7 @@ function detectMissingTestCoverage(chunks, report) {
     const fileData = report.files[chunk.metadata.file];
     const dependentCount = fileData?.dependentCount || 0;
     const hasTests = fileData?.testAssociations && fileData.testAssociations.length > 0;
-    if (complexity >= 10 && dependentCount >= 3 && !hasTests) {
+    if (complexity >= MIN_COMPLEXITY_FOR_TESTS && dependentCount >= MIN_DEPENDENTS_FOR_TESTS && !hasTests) {
       findings.push({
         filepath: chunk.metadata.file,
         symbolName: chunk.metadata.symbolName,
@@ -8732,7 +8736,6 @@ function detectMissingTestCoverage(chunks, report) {
   return findings;
 }
 function prioritizeFindings(findings, report) {
-  const MAX_FINDINGS = 15;
   const severityWeight = { error: 10, warning: 5 };
   return findings.sort((a, b) => {
     const fileA = report.files[a.filepath];

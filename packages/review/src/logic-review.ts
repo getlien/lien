@@ -6,6 +6,15 @@
 import type { CodeChunk, ComplexityReport } from '@liendev/core';
 import type { LogicFinding } from './types.js';
 
+/** Maximum findings returned to avoid review fatigue */
+const MAX_FINDINGS = 15;
+
+/** Minimum cyclomatic complexity to consider a function high-risk for missing tests */
+const MIN_COMPLEXITY_FOR_TESTS = 10;
+
+/** Minimum number of dependents to consider a function high-risk for missing tests */
+const MIN_DEPENDENTS_FOR_TESTS = 3;
+
 /**
  * Detect logic findings from AST data.
  * Runs enabled category detectors and returns prioritized findings.
@@ -61,6 +70,9 @@ function findRemovedSymbols(
   currentFileExports: Set<string>,
 ): LogicFinding[] {
   const dependentCount = currentFileData.dependentCount || 0;
+  // NOTE: baseline symbols are derived from violations (complexity-gated), so
+  // simple exported functions that never exceeded the threshold won't be tracked.
+  // We don't have baseline AST chunks to get the full export list.
   const baseSymbols = new Set(baseFileData.violations.map(v => v.symbolName));
   const currentSymbols = new Set(currentFileData.violations.map(v => v.symbolName));
 
@@ -156,11 +168,11 @@ function isLikelyUncheckedCall(lineContent: string, symbol: string): boolean {
   if (lineContent.startsWith('return ')) return false;
 
   // Skip if line has an assignment before the call
+  // Covers: const/let/var, this.x, obj.prop, arr[idx], simple var
   if (/^(?:const|let|var|this\.\w+)\s/.test(lineContent)) return false;
-  if (/^\w+\s*=/.test(lineContent)) return false;
+  if (/^[\w$.[\]]+\s*=/.test(lineContent)) return false;
 
-  // Skip if it's a chained call (e.g., foo().bar())
-  // — the intermediate result is consumed by the chain
+  // Verify the symbol call actually appears in the line
   const callIndex = lineContent.indexOf(symbol + '(');
   if (callIndex === -1) return false;
 
@@ -179,6 +191,9 @@ function isLikelyUncheckedCall(lineContent: string, symbol: string): boolean {
   // (allowing for `await` prefix)
   const stripped = lineContent.replace(/^await\s+/, '');
   if (stripped.startsWith(symbol + '(') || stripped.startsWith(`this.${symbol}(`)) {
+    // Skip chained calls — the return value IS consumed by the chain
+    // e.g., foo().then(cb), bar().map(fn)
+    if (/\)\s*\./.test(stripped)) return false;
     return true;
   }
 
@@ -209,7 +224,11 @@ function detectMissingTestCoverage(chunks: CodeChunk[], report: ComplexityReport
     const hasTests = fileData?.testAssociations && fileData.testAssociations.length > 0;
 
     // Only flag high-risk functions: complex + depended-upon + no tests
-    if (complexity >= 10 && dependentCount >= 3 && !hasTests) {
+    if (
+      complexity >= MIN_COMPLEXITY_FOR_TESTS &&
+      dependentCount >= MIN_DEPENDENTS_FOR_TESTS &&
+      !hasTests
+    ) {
       findings.push({
         filepath: chunk.metadata.file,
         symbolName: chunk.metadata.symbolName,
@@ -230,8 +249,6 @@ function detectMissingTestCoverage(chunks: CodeChunk[], report: ComplexityReport
  * Returns the top 15 findings to avoid review fatigue.
  */
 function prioritizeFindings(findings: LogicFinding[], report: ComplexityReport): LogicFinding[] {
-  const MAX_FINDINGS = 15;
-
   const severityWeight = { error: 10, warning: 5 };
 
   return findings

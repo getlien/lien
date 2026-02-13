@@ -731,7 +731,7 @@ Example in the JSON response:
 
 Rules:
 - Use \`\`\`suggestion for ANY concrete code fix (not \`\`\`typescript or \`\`\`ts)
-- The suggestion must be complete, runnable code that replaces the function
+- The suggestion must be complete, runnable code that replaces the lines the comment is attached to
 - Only use \`\`\`suggestion when you have a clear, complete replacement
 - For structural advice without a concrete replacement, use plain text (no code block)
 
