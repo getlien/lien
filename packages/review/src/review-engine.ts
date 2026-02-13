@@ -12,6 +12,7 @@ import {
   RISK_ORDER,
   type ComplexityReport,
   type ComplexityViolation,
+  type CodeChunk,
 } from '@liendev/core';
 
 import type { Octokit } from '@octokit/rest';
@@ -25,7 +26,14 @@ import {
   getPRPatchData,
   updatePRDescription,
 } from './github-api.js';
-import { generateLineComments, resetTokenUsage, getTokenUsage } from './openrouter.js';
+import {
+  generateLineComments,
+  generateLogicComments,
+  resetTokenUsage,
+  getTokenUsage,
+} from './openrouter.js';
+import { detectLogicFindings } from './logic-review.js';
+import { isFindingSuppressed } from './suppression.js';
 import {
   buildNoViolationsMessage,
   getViolationKey,
@@ -55,6 +63,7 @@ export interface AnalysisResult {
   baselineReport: ComplexityReport | null;
   deltas: ComplexityDelta[] | null;
   filesToAnalyze: string[];
+  chunks: CodeChunk[];
 }
 
 /**
@@ -131,7 +140,7 @@ export async function runComplexityAnalysis(
   threshold: string,
   rootDir: string,
   logger: Logger,
-): Promise<ComplexityReport | null> {
+): Promise<{ report: ComplexityReport; chunks: CodeChunk[] } | null> {
   if (files.length === 0) {
     logger.info('No files to analyze');
     return null;
@@ -156,7 +165,7 @@ export async function runComplexityAnalysis(
     const report = ComplexityAnalyzer.analyzeFromChunks(indexResult.chunks, files);
     logger.info(`Found ${report.summary.totalViolations} violations`);
 
-    return report;
+    return { report, chunks: indexResult.chunks };
   } catch (error) {
     logger.error(`Failed to run complexity analysis: ${error}`);
     return null;
@@ -278,7 +287,8 @@ async function analyzeBaseBranch(
 
     // Analyze base
     logger.info('Analyzing base branch complexity...');
-    const baseReport = await runComplexityAnalysis(filesToAnalyze, threshold, rootDir, logger);
+    const baseResult = await runComplexityAnalysis(filesToAnalyze, threshold, rootDir, logger);
+    const baseReport = baseResult?.report ?? null;
 
     // Restore HEAD
     execFileSync('git', ['checkout', '--force', originalHead], { stdio: 'pipe' });
@@ -354,17 +364,19 @@ export async function orchestrateAnalysis(setup: ReviewSetup): Promise<AnalysisR
     rootDir,
     logger,
   );
-  const currentReport = await runComplexityAnalysis(
+  const analysisResult = await runComplexityAnalysis(
     filesToAnalyze,
     config.threshold,
     rootDir,
     logger,
   );
 
-  if (!currentReport) {
+  if (!analysisResult) {
     logger.warning('Failed to get complexity report');
     return null;
   }
+
+  const { report: currentReport, chunks } = analysisResult;
 
   logger.info(`Analysis complete: ${currentReport.summary.totalViolations} violations found`);
 
@@ -377,6 +389,7 @@ export async function orchestrateAnalysis(setup: ReviewSetup): Promise<AnalysisR
     baselineReport,
     deltas,
     filesToAnalyze,
+    chunks,
   };
 }
 
@@ -426,6 +439,23 @@ function findCommentLine(
     }
   }
 
+  return null;
+}
+
+/**
+ * Find the last diff line within a violation's function range.
+ * Used as the end of the multi-line comment range for GitHub suggestions.
+ */
+function findCommentEndLine(
+  violation: ComplexityViolation,
+  diffLines: Map<string, Set<number>>,
+): number | null {
+  const fileLines = diffLines.get(violation.filepath);
+  if (!fileLines) return null;
+
+  for (let line = violation.endLine; line >= violation.startLine; line--) {
+    if (fileLines.has(line)) return line;
+  }
   return null;
 }
 
@@ -723,6 +753,7 @@ function buildReviewSummary(
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
   uncoveredNote: string,
+  model: string,
 ): string {
   const { summary } = report;
   const costDisplay = formatCostDisplay(getTokenUsage());
@@ -739,6 +770,7 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
 <details>
 <summary>📊 Analysis Details</summary>
 
+- Model: \`${model}\`
 - Files analyzed: ${summary.filesAnalyzed}
 - Average complexity: ${summary.avgComplexity.toFixed(1)}
 - Max complexity: ${summary.maxComplexity}${costDisplay}
@@ -790,10 +822,19 @@ function formatMetricHeaderLine(
 }
 
 /**
+ * A violation matched to its diff line range for inline commenting.
+ */
+type ViolationWithLines = {
+  violation: ComplexityViolation;
+  commentLine: number;
+  commentEndLine: number | null;
+};
+
+/**
  * Build the body of a grouped comment for a single function.
  */
 function buildGroupedCommentBody(
-  group: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  group: ViolationWithLines[],
   aiComments: Map<ComplexityViolation, string>,
   deltaMap: Map<string, ComplexityDelta>,
   report: ComplexityReport,
@@ -826,14 +867,14 @@ function buildGroupedCommentBody(
  * Groups violations by filepath::symbolName to produce one comment per function.
  */
 function buildLineComments(
-  violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  violationsWithLines: ViolationWithLines[],
   aiComments: Map<ComplexityViolation, string>,
   deltaMap: Map<string, ComplexityDelta>,
   report: ComplexityReport,
   logger: Logger,
 ): LineComment[] {
   // Group violations by filepath::symbolName
-  const grouped = new Map<string, Array<{ violation: ComplexityViolation; commentLine: number }>>();
+  const grouped = new Map<string, ViolationWithLines[]>();
   for (const entry of violationsWithLines) {
     if (!aiComments.has(entry.violation)) continue;
     const key = `${entry.violation.filepath}::${entry.violation.symbolName}`;
@@ -845,14 +886,17 @@ function buildLineComments(
   const comments: LineComment[] = [];
   for (const [, group] of grouped) {
     const firstViolation = group[0].violation;
+    const { commentLine, commentEndLine } = group[0];
 
     logger.info(
-      `Adding grouped comment for ${firstViolation.filepath}:${group[0].commentLine} (${firstViolation.symbolName}, ${group.length} metric${group.length === 1 ? '' : 's'})`,
+      `Adding grouped comment for ${firstViolation.filepath}:${commentLine} (${firstViolation.symbolName}, ${group.length} metric${group.length === 1 ? '' : 's'})`,
     );
 
+    // GitHub API: line = end of range, start_line = start of range
     comments.push({
       path: firstViolation.filepath,
-      line: group[0].commentLine,
+      line: commentEndLine ?? commentLine,
+      start_line: commentLine,
       body: buildGroupedCommentBody(group, aiComments, deltaMap, report),
     });
   }
@@ -867,16 +911,17 @@ function partitionViolationsByDiff(
   violations: ComplexityViolation[],
   diffLines: Map<string, Set<number>>,
 ): {
-  withLines: Array<{ violation: ComplexityViolation; commentLine: number }>;
+  withLines: ViolationWithLines[];
   uncovered: ComplexityViolation[];
 } {
-  const withLines: Array<{ violation: ComplexityViolation; commentLine: number }> = [];
+  const withLines: ViolationWithLines[] = [];
   const uncovered: ComplexityViolation[] = [];
 
   for (const v of violations) {
     const commentLine = findCommentLine(v, diffLines);
     if (commentLine !== null) {
-      withLines.push({ violation: v, commentLine });
+      const commentEndLine = findCommentEndLine(v, diffLines);
+      withLines.push({ violation: v, commentLine, commentEndLine });
     } else {
       uncovered.push(v);
     }
@@ -889,9 +934,9 @@ function partitionViolationsByDiff(
  * Filter violations to only new or degraded ones (skip unchanged pre-existing)
  */
 function filterNewOrDegraded(
-  violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  violationsWithLines: ViolationWithLines[],
   deltaMap: Map<string, ComplexityDelta>,
-): Array<{ violation: ComplexityViolation; commentLine: number }> {
+): ViolationWithLines[] {
   return violationsWithLines.filter(({ violation }) => {
     const key = createDeltaKey(violation);
     const delta = deltaMap.get(key);
@@ -904,7 +949,7 @@ function filterNewOrDegraded(
  * Get list of skipped (unchanged) violations
  */
 function getSkippedViolations(
-  violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  violationsWithLines: ViolationWithLines[],
   deltaMap: Map<string, ComplexityDelta>,
 ): ComplexityViolation[] {
   return violationsWithLines
@@ -920,9 +965,9 @@ function getSkippedViolations(
  * Violation processing result
  */
 interface ViolationProcessingResult {
-  withLines: Array<{ violation: ComplexityViolation; commentLine: number }>;
+  withLines: ViolationWithLines[];
   uncovered: ComplexityViolation[];
-  newOrDegraded: Array<{ violation: ComplexityViolation; commentLine: number }>;
+  newOrDegraded: ViolationWithLines[];
   skipped: ComplexityViolation[];
 }
 
@@ -947,11 +992,12 @@ function processViolationsForReview(
 async function handleNoNewViolations(
   octokit: Octokit,
   prContext: PRContext,
-  violationsWithLines: Array<{ violation: ComplexityViolation; commentLine: number }>,
+  violationsWithLines: ViolationWithLines[],
   uncoveredViolations: ComplexityViolation[],
   deltaMap: Map<string, ComplexityDelta>,
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
+  model: string,
   logger: Logger,
 ): Promise<void> {
   if (violationsWithLines.length === 0) {
@@ -961,7 +1007,7 @@ async function handleNoNewViolations(
   const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
   const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
   const skippedNote = buildSkippedNote(skippedInDiff);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote, model);
   await postPRComment(octokit, prContext, summaryBody, logger);
 }
 
@@ -1006,7 +1052,7 @@ async function generateAndPostReview(
 
   const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
   const skippedNote = buildSkippedNote(processed.skipped);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote);
+  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote, config.model);
 
   // Determine review event: REQUEST_CHANGES if blocking is enabled and
   // any new/degraded violation has error severity
@@ -1068,6 +1114,7 @@ async function postLineReview(
       deltaMap,
       report,
       deltas,
+      config.model,
       logger,
     );
     return;
@@ -1090,6 +1137,85 @@ async function postLineReview(
     logger,
     diffHunks,
   );
+}
+
+/**
+ * Build a map of chunk key -> content for suppression checks and code snippets.
+ */
+function buildChunkSnippetsMap(chunks: CodeChunk[]): Map<string, string> {
+  const snippets = new Map<string, string>();
+  for (const chunk of chunks) {
+    if (chunk.metadata.symbolName) {
+      snippets.set(`${chunk.metadata.file}::${chunk.metadata.symbolName}`, chunk.content);
+    }
+  }
+  return snippets;
+}
+
+/**
+ * Run logic review pass: detect findings, filter suppressions, validate via LLM, post comments.
+ */
+async function runLogicReviewPass(result: AnalysisResult, setup: ReviewSetup): Promise<void> {
+  const { config, prContext, octokit, logger } = setup;
+
+  logger.info('Running logic review (beta)...');
+  try {
+    const snippetsMap = buildChunkSnippetsMap(result.chunks);
+
+    let logicFindings = detectLogicFindings(
+      result.chunks,
+      result.currentReport,
+      result.baselineReport,
+      config.logicReviewCategories,
+    );
+
+    logicFindings = logicFindings.filter(finding => {
+      const key = `${finding.filepath}::${finding.symbolName}`;
+      const snippet = snippetsMap.get(key);
+      if (snippet && isFindingSuppressed(finding, snippet)) {
+        logger.info(`Suppressed finding: ${key} (${finding.category})`);
+        return false;
+      }
+      return true;
+    });
+
+    if (logicFindings.length === 0) {
+      logger.info('No logic findings to report');
+      return;
+    }
+
+    logger.info(`${logicFindings.length} logic findings after filtering`);
+
+    // Collect code snippets for the remaining findings
+    const logicCodeSnippets = new Map<string, string>();
+    for (const finding of logicFindings) {
+      const key = `${finding.filepath}::${finding.symbolName}`;
+      const snippet = snippetsMap.get(key);
+      if (snippet) logicCodeSnippets.set(key, snippet);
+    }
+
+    const validatedComments = await generateLogicComments(
+      logicFindings,
+      logicCodeSnippets,
+      config.openrouterApiKey,
+      config.model,
+      result.currentReport,
+      logger,
+    );
+
+    if (validatedComments.length > 0) {
+      logger.info(`Posting ${validatedComments.length} logic review comments`);
+      await postPRReview(
+        octokit,
+        prContext,
+        validatedComments,
+        '**Logic Review** (beta) — see inline comments.',
+        logger,
+      );
+    }
+  } catch (error) {
+    logger.warning(`Logic review failed (non-blocking): ${error}`);
+  }
 }
 
 /**
@@ -1127,4 +1253,9 @@ export async function postReviewIfNeeded(
     logger,
     result.deltas,
   );
+
+  // Logic review pass (beta)
+  if (config.enableLogicReview && result.chunks.length > 0) {
+    await runLogicReviewPass(result, setup);
+  }
 }

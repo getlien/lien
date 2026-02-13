@@ -706,6 +706,13 @@ For each violation, write a code review comment that:
    - If the logic is inherently complex (state machines, parsers), say so
    - Don't suggest over-engineering for marginal gains
 
+**Anti-patterns — do NOT suggest these:**
+- **Extracting a helper that needs 5+ parameters.** If you have to pass most of the parent's state to a new function/method, you're moving complexity, not reducing it. Prefer restructuring the data flow (e.g., grouping parameters into a single object, using built-in collection methods) over mechanical extraction.
+- **Wrapping a single-use block in a new function/method with no independent testability benefit.** Three clear lines inline are better than one opaque call plus a new definition elsewhere.
+- **Suggesting a design pattern (strategy, visitor, builder, etc.) for a problem that can be solved with a conditional, a lookup table, or a simple loop.** Patterns earn their cost only when there's real variation to model.
+- **Replacing straightforward imperative code with an abstraction that's equally long.** If the "after" isn't shorter, clearer, or more testable than the "before", don't suggest it.
+- **Ignoring the threshold margin.** If the metric is barely over the threshold (within ~10%), say so and suggest a light touch (e.g., extracting one expression, adding an early return) rather than a full rewrite.
+
 **IMPORTANT**: When a diff is provided, focus your review on the CHANGED lines shown in the diff. Pre-existing complexity is context, not the primary target. If the complexity was introduced or worsened in this PR, say so. If it's pre-existing, note that and suggest improvements the author could make while they're already in the file.
 
 Be direct and specific to THIS code. Avoid generic advice like "break into smaller functions."
@@ -717,11 +724,16 @@ Write comments of similar quality and specificity for each violation below.
 
 IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
 
-**GitHub Suggestions**: When the fix is small and self-contained (< 10 lines, replaces specific lines visible in the diff), include a GitHub suggestion block:
-\`\`\`suggestion
-// replacement code
-\`\`\`
-Only use suggestion blocks when the replacement is complete, runnable code — not pseudocode. GitHub renders these as one-click apply buttons.
+**GitHub Suggestions**: You MUST use \`\`\`suggestion blocks (not \`\`\`typescript) when proposing a concrete code replacement. The suggestion block replaces the lines the comment is attached to.
+
+Example in the JSON response:
+"src/utils.ts::processItems": "The nested loop increases mental load. Use early return to flatten.\\n\\n\`\`\`suggestion\\nfunction processItems(items: Item[]) {\\n  if (items.length === 0) return [];\\n  return items.filter(isValid).map(transform);\\n}\\n\`\`\`"
+
+Rules:
+- Use \`\`\`suggestion for ANY concrete code fix (not \`\`\`typescript or \`\`\`ts)
+- The suggestion must be complete, runnable code that replaces the lines the comment is attached to
+- Only use \`\`\`suggestion when you have a clear, complete replacement
+- For structural advice without a concrete replacement, use plain text (no code block)
 
 ## Response Format
 

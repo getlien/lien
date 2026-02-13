@@ -42,7 +42,7 @@ jobs:
             packages/action/dist
             node_modules
             packages/*/node_modules
-          key: lien-build-v5-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/*/package.json', 'packages/*/tsconfig.json', 'packages/core/src/**/*', 'packages/review/src/**/*', 'packages/action/src/**/*') }}
+          key: lien-build-v6-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/*/package.json', 'packages/*/tsconfig.json', 'packages/core/src/**/*', 'packages/review/src/**/*', 'packages/action/src/**/*') }}
 
       # Always install deps if not cached - native modules need to be present
       - name: Install dependencies
@@ -80,8 +80,9 @@ jobs:
         uses: ./packages/action
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-          model: 'google/gemini-2.5-flash'
+          model: 'minimax/minimax-m2.5'
           threshold: '15'
           github_token: ${{ secrets.GITHUB_TOKEN }}
           enable_delta_tracking: true # Automatic base vs head comparison
+          enable_logic_review: true # AST-powered logic review (beta)
 

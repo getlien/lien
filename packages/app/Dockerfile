@@ -55,7 +55,7 @@ COPY --from=builder /app/packages/review/dist/ packages/review/dist/
 COPY --from=builder /app/packages/app/package.json packages/app/
 COPY --from=builder /app/packages/app/dist/ packages/app/dist/
 
-ENV OPENROUTER_MODEL=google/gemini-2.5-flash
+ENV OPENROUTER_MODEL=minimax/minimax-m2.5
 
 EXPOSE 3000
 
