@@ -444,6 +444,13 @@ function inRange(line: number, start: number, end: number): boolean {
 }
 
 /**
+ * Check if a patch line is a meaningful added or context line (not a file header).
+ */
+function isLineRelevant(patchLine: string): boolean {
+  return patchLine.startsWith('+') ? !patchLine.startsWith('+++') : patchLine.startsWith(' ');
+}
+
+/**
  * Extract the portion of a unified diff patch that overlaps with a given line range.
  * Returns the relevant diff hunk lines, or null if no overlap.
  */
@@ -468,12 +475,7 @@ export function extractRelevantHunk(
       continue;
     }
 
-    // Added or context lines advance the line counter
-    const isRelevant = patchLine.startsWith('+')
-      ? !patchLine.startsWith('+++')
-      : patchLine.startsWith(' ');
-
-    if (isRelevant) {
+    if (isLineRelevant(patchLine)) {
       if (inRange(currentLine, startLine, endLine)) lines.push(patchLine);
       currentLine++;
     }
