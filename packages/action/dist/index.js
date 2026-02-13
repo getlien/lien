@@ -9538,7 +9538,13 @@ async function postReviewIfNeeded(result, setup) {
         );
         if (validatedComments.length > 0) {
           logger.info(`Posting ${validatedComments.length} logic review comments`);
-          await postPRReview(octokit, prContext, validatedComments, "", logger);
+          await postPRReview(
+            octokit,
+            prContext,
+            validatedComments,
+            "**Logic Review** (beta) \u2014 see inline comments.",
+            logger
+          );
         }
       } else {
         logger.info("No logic findings to report");
