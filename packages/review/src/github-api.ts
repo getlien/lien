@@ -168,6 +168,8 @@ export async function postPRReview(
       comments: comments.map(c => ({
         path: c.path,
         line: c.line,
+        ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' } : {}),
+        side: 'RIGHT' as const,
         body: c.body,
       })),
     });

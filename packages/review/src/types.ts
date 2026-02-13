@@ -39,6 +39,7 @@ export interface ReviewConfig {
 export interface LineComment {
   path: string;
   line: number;
+  start_line?: number;
   body: string;
 }
 

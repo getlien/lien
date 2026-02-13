@@ -7743,6 +7743,8 @@ async function postPRReview(octokit, prContext, comments, summaryBody, logger, e
       comments: comments.map((c) => ({
         path: c.path,
         line: c.line,
+        ...c.start_line ? { start_line: c.start_line, start_side: "RIGHT" } : {},
+        side: "RIGHT",
         body: c.body
       }))
     });
@@ -8256,11 +8258,16 @@ Write comments of similar quality and specificity for each violation below.
 
 IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
 
-**GitHub Suggestions**: When the fix is small and self-contained (< 10 lines, replaces specific lines visible in the diff), include a GitHub suggestion block:
-\`\`\`suggestion
-// replacement code
-\`\`\`
-Only use suggestion blocks when the replacement is complete, runnable code \u2014 not pseudocode. GitHub renders these as one-click apply buttons.
+**GitHub Suggestions**: You MUST use \`\`\`suggestion blocks (not \`\`\`typescript) when proposing a concrete code replacement. The suggestion block replaces the lines the comment is attached to.
+
+Example in the JSON response:
+"src/utils.ts::processItems": "The nested loop increases mental load. Use early return to flatten.\\n\\n\`\`\`suggestion\\nfunction processItems(items: Item[]) {\\n  if (items.length === 0) return [];\\n  return items.filter(isValid).map(transform);\\n}\\n\`\`\`"
+
+Rules:
+- Use \`\`\`suggestion for ANY concrete code fix (not \`\`\`typescript or \`\`\`ts)
+- The suggestion must be complete, runnable code that replaces the function
+- Only use \`\`\`suggestion when you have a clear, complete replacement
+- For structural advice without a concrete replacement, use plain text (no code block)
 
 ## Response Format
 
@@ -9106,6 +9113,14 @@ function findCommentLine(violation, diffLines) {
   }
   return null;
 }
+function findCommentEndLine(violation, diffLines) {
+  const fileLines = diffLines.get(violation.filepath);
+  if (!fileLines) return null;
+  for (let line = violation.endLine; line >= violation.startLine; line--) {
+    if (fileLines.has(line)) return line;
+  }
+  return null;
+}
 function createDeltaKey(v) {
   return `${v.filepath}::${v.symbolName}::${v.metricType}`;
 }
@@ -9354,14 +9369,20 @@ function buildLineComments(violationsWithLines, aiComments, deltaMap, report, lo
   const comments = [];
   for (const [, group] of grouped) {
     const firstViolation = group[0].violation;
+    const { commentLine, commentEndLine } = group[0];
     logger.info(
-      `Adding grouped comment for ${firstViolation.filepath}:${group[0].commentLine} (${firstViolation.symbolName}, ${group.length} metric${group.length === 1 ? "" : "s"})`
+      `Adding grouped comment for ${firstViolation.filepath}:${commentLine} (${firstViolation.symbolName}, ${group.length} metric${group.length === 1 ? "" : "s"})`
     );
-    comments.push({
+    const endLine = commentEndLine ?? commentLine;
+    const comment = {
       path: firstViolation.filepath,
-      line: group[0].commentLine,
+      line: endLine,
       body: buildGroupedCommentBody(group, aiComments, deltaMap, report)
-    });
+    };
+    if (commentEndLine && commentEndLine !== commentLine) {
+      comment.start_line = commentLine;
+    }
+    comments.push(comment);
   }
   return comments;
 }
@@ -9371,7 +9392,8 @@ function partitionViolationsByDiff(violations, diffLines) {
   for (const v of violations) {
     const commentLine = findCommentLine(v, diffLines);
     if (commentLine !== null) {
-      withLines.push({ violation: v, commentLine });
+      const commentEndLine = findCommentEndLine(v, diffLines);
+      withLines.push({ violation: v, commentLine, commentEndLine });
     } else {
       uncovered.push(v);
     }

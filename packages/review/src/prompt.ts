@@ -717,11 +717,16 @@ Write comments of similar quality and specificity for each violation below.
 
 IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
 
-**GitHub Suggestions**: When the fix is small and self-contained (< 10 lines, replaces specific lines visible in the diff), include a GitHub suggestion block:
-\`\`\`suggestion
-// replacement code
-\`\`\`
-Only use suggestion blocks when the replacement is complete, runnable code — not pseudocode. GitHub renders these as one-click apply buttons.
+**GitHub Suggestions**: You MUST use \`\`\`suggestion blocks (not \`\`\`typescript) when proposing a concrete code replacement. The suggestion block replaces the lines the comment is attached to.
+
+Example in the JSON response:
+"src/utils.ts::processItems": "The nested loop increases mental load. Use early return to flatten.\\n\\n\`\`\`suggestion\\nfunction processItems(items: Item[]) {\\n  if (items.length === 0) return [];\\n  return items.filter(isValid).map(transform);\\n}\\n\`\`\`"
+
+Rules:
+- Use \`\`\`suggestion for ANY concrete code fix (not \`\`\`typescript or \`\`\`ts)
+- The suggestion must be complete, runnable code that replaces the function
+- Only use \`\`\`suggestion when you have a clear, complete replacement
+- For structural advice without a concrete replacement, use plain text (no code block)
 
 ## Response Format
 
