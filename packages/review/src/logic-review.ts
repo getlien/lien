@@ -52,6 +52,32 @@ function buildExportsMap(chunks: CodeChunk[]): Map<string, Set<string>> {
 }
 
 /**
+ * Find symbols that exist in the baseline but are missing from the current version.
+ */
+function findRemovedSymbols(
+  filepath: string,
+  baseFileData: ComplexityReport['files'][string],
+  currentFileData: ComplexityReport['files'][string],
+  currentFileExports: Set<string>,
+): LogicFinding[] {
+  const dependentCount = currentFileData.dependentCount || 0;
+  const baseSymbols = new Set(baseFileData.violations.map(v => v.symbolName));
+  const currentSymbols = new Set(currentFileData.violations.map(v => v.symbolName));
+
+  return [...baseSymbols]
+    .filter(symbol => !currentSymbols.has(symbol) && !currentFileExports.has(symbol))
+    .map(symbol => ({
+      filepath,
+      symbolName: symbol,
+      line: 1,
+      category: 'breaking_change' as const,
+      severity: 'error' as const,
+      message: `Exported symbol \`${symbol}\` was removed or renamed. ${dependentCount} file(s) depend on this module.`,
+      evidence: `Symbol "${symbol}" exists in baseline but not in current. ${dependentCount} dependent(s).`,
+    }));
+}
+
+/**
  * Detect breaking changes: exported symbols removed or renamed between baseline and current.
  */
 function detectBreakingChanges(
@@ -59,36 +85,19 @@ function detectBreakingChanges(
   report: ComplexityReport,
   baselineReport: ComplexityReport,
 ): LogicFinding[] {
-  const findings: LogicFinding[] = [];
   const currentExports = buildExportsMap(chunks);
 
-  for (const [filepath, baseFileData] of Object.entries(baselineReport.files)) {
+  return Object.entries(baselineReport.files).flatMap(([filepath, baseFileData]) => {
     const currentFileData = report.files[filepath];
-    if (!currentFileData) continue;
+    if (!currentFileData || (currentFileData.dependentCount || 0) === 0) return [];
 
-    const dependentCount = currentFileData.dependentCount || 0;
-    if (dependentCount === 0) continue;
-
-    const baseViolationSymbols = new Set(baseFileData.violations.map(v => v.symbolName));
-    const currentViolationSymbols = new Set(currentFileData.violations.map(v => v.symbolName));
-    const currentFileExports = currentExports.get(filepath) || new Set();
-
-    for (const symbol of baseViolationSymbols) {
-      if (!currentViolationSymbols.has(symbol) && !currentFileExports.has(symbol)) {
-        findings.push({
-          filepath,
-          symbolName: symbol,
-          line: 1,
-          category: 'breaking_change',
-          severity: 'error',
-          message: `Exported symbol \`${symbol}\` was removed or renamed. ${dependentCount} file(s) depend on this module.`,
-          evidence: `Symbol "${symbol}" exists in baseline but not in current. ${dependentCount} dependent(s).`,
-        });
-      }
-    }
-  }
-
-  return findings;
+    return findRemovedSymbols(
+      filepath,
+      baseFileData,
+      currentFileData,
+      currentExports.get(filepath) || new Set(),
+    );
+  });
 }
 
 /**

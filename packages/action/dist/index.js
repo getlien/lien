@@ -8619,32 +8619,32 @@ function buildExportsMap(chunks) {
   }
   return exports;
 }
+function findRemovedSymbols(filepath, baseFileData, currentFileData, currentFileExports) {
+  const dependentCount = currentFileData.dependentCount || 0;
+  const baseSymbols = new Set(baseFileData.violations.map((v) => v.symbolName));
+  const currentSymbols = new Set(currentFileData.violations.map((v) => v.symbolName));
+  return [...baseSymbols].filter((symbol) => !currentSymbols.has(symbol) && !currentFileExports.has(symbol)).map((symbol) => ({
+    filepath,
+    symbolName: symbol,
+    line: 1,
+    category: "breaking_change",
+    severity: "error",
+    message: `Exported symbol \`${symbol}\` was removed or renamed. ${dependentCount} file(s) depend on this module.`,
+    evidence: `Symbol "${symbol}" exists in baseline but not in current. ${dependentCount} dependent(s).`
+  }));
+}
 function detectBreakingChanges(chunks, report, baselineReport) {
-  const findings = [];
   const currentExports = buildExportsMap(chunks);
-  for (const [filepath, baseFileData] of Object.entries(baselineReport.files)) {
+  return Object.entries(baselineReport.files).flatMap(([filepath, baseFileData]) => {
     const currentFileData = report.files[filepath];
-    if (!currentFileData) continue;
-    const dependentCount = currentFileData.dependentCount || 0;
-    if (dependentCount === 0) continue;
-    const baseViolationSymbols = new Set(baseFileData.violations.map((v) => v.symbolName));
-    const currentViolationSymbols = new Set(currentFileData.violations.map((v) => v.symbolName));
-    const currentFileExports = currentExports.get(filepath) || /* @__PURE__ */ new Set();
-    for (const symbol of baseViolationSymbols) {
-      if (!currentViolationSymbols.has(symbol) && !currentFileExports.has(symbol)) {
-        findings.push({
-          filepath,
-          symbolName: symbol,
-          line: 1,
-          category: "breaking_change",
-          severity: "error",
-          message: `Exported symbol \`${symbol}\` was removed or renamed. ${dependentCount} file(s) depend on this module.`,
-          evidence: `Symbol "${symbol}" exists in baseline but not in current. ${dependentCount} dependent(s).`
-        });
-      }
-    }
-  }
-  return findings;
+    if (!currentFileData || (currentFileData.dependentCount || 0) === 0) return [];
+    return findRemovedSymbols(
+      filepath,
+      baseFileData,
+      currentFileData,
+      currentExports.get(filepath) || /* @__PURE__ */ new Set()
+    );
+  });
 }
 function checkCallSite(chunk, callSite, lines, startLine) {
   const lineIndex = callSite.line - startLine;
