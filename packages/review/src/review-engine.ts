@@ -820,14 +820,19 @@ function formatMetricHeaderLine(
 }
 
 /**
+ * A violation matched to its diff line range for inline commenting.
+ */
+type ViolationWithLines = {
+  violation: ComplexityViolation;
+  commentLine: number;
+  commentEndLine: number | null;
+};
+
+/**
  * Build the body of a grouped comment for a single function.
  */
 function buildGroupedCommentBody(
-  group: Array<{
-    violation: ComplexityViolation;
-    commentLine: number;
-    commentEndLine: number | null;
-  }>,
+  group: ViolationWithLines[],
   aiComments: Map<ComplexityViolation, string>,
   deltaMap: Map<string, ComplexityDelta>,
   report: ComplexityReport,
@@ -860,25 +865,14 @@ function buildGroupedCommentBody(
  * Groups violations by filepath::symbolName to produce one comment per function.
  */
 function buildLineComments(
-  violationsWithLines: Array<{
-    violation: ComplexityViolation;
-    commentLine: number;
-    commentEndLine: number | null;
-  }>,
+  violationsWithLines: ViolationWithLines[],
   aiComments: Map<ComplexityViolation, string>,
   deltaMap: Map<string, ComplexityDelta>,
   report: ComplexityReport,
   logger: Logger,
 ): LineComment[] {
   // Group violations by filepath::symbolName
-  const grouped = new Map<
-    string,
-    Array<{
-      violation: ComplexityViolation;
-      commentLine: number;
-      commentEndLine: number | null;
-    }>
-  >();
+  const grouped = new Map<string, ViolationWithLines[]>();
   for (const entry of violationsWithLines) {
     if (!aiComments.has(entry.violation)) continue;
     const key = `${entry.violation.filepath}::${entry.violation.symbolName}`;
@@ -897,18 +891,12 @@ function buildLineComments(
     );
 
     // GitHub API: line = end of range, start_line = start of range
-    const endLine = commentEndLine ?? commentLine;
-    const comment: LineComment = {
+    comments.push({
       path: firstViolation.filepath,
-      line: endLine,
+      line: commentEndLine ?? commentLine,
+      start_line: commentLine,
       body: buildGroupedCommentBody(group, aiComments, deltaMap, report),
-    };
-
-    if (commentEndLine && commentEndLine !== commentLine) {
-      comment.start_line = commentLine;
-    }
-
-    comments.push(comment);
+    });
   }
 
   return comments;
@@ -921,18 +909,10 @@ function partitionViolationsByDiff(
   violations: ComplexityViolation[],
   diffLines: Map<string, Set<number>>,
 ): {
-  withLines: Array<{
-    violation: ComplexityViolation;
-    commentLine: number;
-    commentEndLine: number | null;
-  }>;
+  withLines: ViolationWithLines[];
   uncovered: ComplexityViolation[];
 } {
-  const withLines: Array<{
-    violation: ComplexityViolation;
-    commentLine: number;
-    commentEndLine: number | null;
-  }> = [];
+  const withLines: ViolationWithLines[] = [];
   const uncovered: ComplexityViolation[] = [];
 
   for (const v of violations) {
@@ -952,17 +932,9 @@ function partitionViolationsByDiff(
  * Filter violations to only new or degraded ones (skip unchanged pre-existing)
  */
 function filterNewOrDegraded(
-  violationsWithLines: Array<{
-    violation: ComplexityViolation;
-    commentLine: number;
-    commentEndLine: number | null;
-  }>,
+  violationsWithLines: ViolationWithLines[],
   deltaMap: Map<string, ComplexityDelta>,
-): Array<{
-  violation: ComplexityViolation;
-  commentLine: number;
-  commentEndLine: number | null;
-}> {
+): ViolationWithLines[] {
   return violationsWithLines.filter(({ violation }) => {
     const key = createDeltaKey(violation);
     const delta = deltaMap.get(key);
@@ -975,11 +947,7 @@ function filterNewOrDegraded(
  * Get list of skipped (unchanged) violations
  */
 function getSkippedViolations(
-  violationsWithLines: Array<{
-    violation: ComplexityViolation;
-    commentLine: number;
-    commentEndLine: number | null;
-  }>,
+  violationsWithLines: ViolationWithLines[],
   deltaMap: Map<string, ComplexityDelta>,
 ): ComplexityViolation[] {
   return violationsWithLines
@@ -995,17 +963,9 @@ function getSkippedViolations(
  * Violation processing result
  */
 interface ViolationProcessingResult {
-  withLines: Array<{
-    violation: ComplexityViolation;
-    commentLine: number;
-    commentEndLine: number | null;
-  }>;
+  withLines: ViolationWithLines[];
   uncovered: ComplexityViolation[];
-  newOrDegraded: Array<{
-    violation: ComplexityViolation;
-    commentLine: number;
-    commentEndLine: number | null;
-  }>;
+  newOrDegraded: ViolationWithLines[];
   skipped: ComplexityViolation[];
 }
 
@@ -1030,11 +990,7 @@ function processViolationsForReview(
 async function handleNoNewViolations(
   octokit: Octokit,
   prContext: PRContext,
-  violationsWithLines: Array<{
-    violation: ComplexityViolation;
-    commentLine: number;
-    commentEndLine: number | null;
-  }>,
+  violationsWithLines: ViolationWithLines[],
   uncoveredViolations: ComplexityViolation[],
   deltaMap: Map<string, ComplexityDelta>,
   report: ComplexityReport,

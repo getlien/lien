@@ -9380,16 +9380,12 @@ function buildLineComments(violationsWithLines, aiComments, deltaMap, report, lo
     logger.info(
       `Adding grouped comment for ${firstViolation.filepath}:${commentLine} (${firstViolation.symbolName}, ${group.length} metric${group.length === 1 ? "" : "s"})`
     );
-    const endLine = commentEndLine ?? commentLine;
-    const comment = {
+    comments.push({
       path: firstViolation.filepath,
-      line: endLine,
+      line: commentEndLine ?? commentLine,
+      start_line: commentLine,
       body: buildGroupedCommentBody(group, aiComments, deltaMap, report)
-    };
-    if (commentEndLine && commentEndLine !== commentLine) {
-      comment.start_line = commentLine;
-    }
-    comments.push(comment);
+    });
   }
   return comments;
 }
