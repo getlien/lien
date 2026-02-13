@@ -84,4 +84,5 @@ jobs:
           threshold: '15'
           github_token: ${{ secrets.GITHUB_TOKEN }}
           enable_delta_tracking: true # Automatic base vs head comparison
+          enable_logic_review: true # AST-powered logic review (beta)
 
