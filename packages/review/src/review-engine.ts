@@ -1332,13 +1332,27 @@ async function runLogicReviewPass(result: AnalysisResult, setup: ReviewSetup): P
 
     if (validatedComments.length > 0) {
       logger.info(`Posting ${validatedComments.length} logic review comments`);
-      await postPRReview(
-        octokit,
-        prContext,
-        validatedComments,
-        '**Logic Review** (beta) — see inline comments.',
-        logger,
-      );
+      // Only post as a review with inline comments — skip summary-only fallback
+      // to avoid "see inline comments" when there are none visible
+      try {
+        await octokit.pulls.createReview({
+          owner: prContext.owner,
+          repo: prContext.repo,
+          pull_number: prContext.pullNumber,
+          commit_id: prContext.headSha,
+          event: 'COMMENT',
+          body: '**Logic Review** (beta) — see inline comments.',
+          comments: validatedComments.map(c => ({
+            path: c.path,
+            line: c.line,
+            ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' } : {}),
+            side: 'RIGHT' as const,
+            body: c.body,
+          })),
+        });
+      } catch (reviewError) {
+        logger.warning(`Logic review inline comments failed (lines not in diff): ${reviewError}`);
+      }
     }
   } catch (error) {
     logger.warning(`Logic review failed (non-blocking): ${error}`);
