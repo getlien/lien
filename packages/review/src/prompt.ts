@@ -828,7 +828,7 @@ For each violation, write a code review comment that:
 - **Wrapping a single-use block in a new function/method with no independent testability benefit.** Three clear lines inline are better than one opaque call plus a new definition elsewhere.
 - **Suggesting a design pattern (strategy, visitor, builder, etc.) for a problem that can be solved with a conditional, a lookup table, or a simple loop.** Patterns earn their cost only when there's real variation to model.
 - **Replacing straightforward imperative code with an abstraction that's equally long.** If the "after" isn't shorter, clearer, or more testable than the "before", don't suggest it.
-- **Ignoring the threshold margin.** If the metric is barely over the threshold (within ~10%), say so and suggest a light touch (e.g., extracting one expression, adding an early return) rather than a full rewrite.
+- **Ignoring the threshold margin.** If the metric is barely over the threshold (within ~5%), say so and suggest a light touch (e.g., extracting one expression, adding an early return) rather than a full rewrite.
 
 **Refactoring correctness:**
 - When suggesting to split or extract a function, ensure ALL branches of the original code are preserved in the refactored version. Do not drop else-branches, error paths, or edge case handling.

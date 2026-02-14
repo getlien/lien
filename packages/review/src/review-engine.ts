@@ -1127,13 +1127,14 @@ function getSkippedViolations(
 
 /**
  * Check if a violation is only marginally over its threshold.
- * Marginal = within 15% of the threshold value.
+ * Marginal = strictly above threshold but within 5%.
+ * Exact-threshold hits (0% overage) are real violations, not marginal.
  * These still appear in the summary but don't get inline comments.
  */
 export function isMarginalViolation(v: ComplexityViolation): boolean {
   if (v.threshold <= 0) return false;
   const overage = (v.complexity - v.threshold) / v.threshold;
-  return overage <= 0.15;
+  return overage > 0 && overage <= 0.05;
 }
 
 /**
@@ -1176,7 +1177,7 @@ function buildMarginalNote(marginalViolations: ComplexityViolation[]): string {
 
   const list = marginalViolations.map(formatViolationListItem).join('\n');
 
-  return `\n\n<details>\n<summary>ℹ️ ${marginalViolations.length} near-threshold violation${marginalViolations.length === 1 ? '' : 's'} (no inline comment)</summary>\n\n${list}\n\n> *These functions are within 15% of the threshold. A light-touch refactoring (early return, extract one expression) may bring them under.*\n\n</details>`;
+  return `\n\n<details>\n<summary>ℹ️ ${marginalViolations.length} near-threshold violation${marginalViolations.length === 1 ? '' : 's'} (no inline comment)</summary>\n\n${list}\n\n> *These functions are within 5% of the threshold. A light-touch refactoring (early return, extract one expression) may bring them under.*\n\n</details>`;
 }
 
 /**
