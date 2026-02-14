@@ -64,23 +64,23 @@ function makeProcessed(
 // ---------------------------------------------------------------------------
 
 describe('isMarginalViolation', () => {
-  it('returns true when violation is exactly at threshold', () => {
-    expect(isMarginalViolation(makeViolation({ complexity: 15, threshold: 15 }))).toBe(true);
+  it('returns false when violation is exactly at threshold (real violation)', () => {
+    expect(isMarginalViolation(makeViolation({ complexity: 15, threshold: 15 }))).toBe(false);
   });
 
-  it('returns true when violation is within 15% of threshold', () => {
-    // 17 / 15 = 13% over
-    expect(isMarginalViolation(makeViolation({ complexity: 17, threshold: 15 }))).toBe(true);
+  it('returns true when violation is within 5% of threshold', () => {
+    // 15.5 / 15 = 3.3% over
+    expect(isMarginalViolation(makeViolation({ complexity: 15.5, threshold: 15 }))).toBe(true);
   });
 
-  it('returns true at exactly 15% over', () => {
-    // 17.25 / 15 = 15% over
-    expect(isMarginalViolation(makeViolation({ complexity: 17.25, threshold: 15 }))).toBe(true);
+  it('returns true at exactly 5% over', () => {
+    // 15.75 / 15 = 5% over
+    expect(isMarginalViolation(makeViolation({ complexity: 15.75, threshold: 15 }))).toBe(true);
   });
 
-  it('returns false when violation is more than 15% over threshold', () => {
-    // 18 / 15 = 20% over
-    expect(isMarginalViolation(makeViolation({ complexity: 18, threshold: 15 }))).toBe(false);
+  it('returns false when violation is more than 5% over threshold', () => {
+    // 16 / 15 = 6.7% over
+    expect(isMarginalViolation(makeViolation({ complexity: 16, threshold: 15 }))).toBe(false);
   });
 
   it('returns false when violation is well over threshold', () => {
