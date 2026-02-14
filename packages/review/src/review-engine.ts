@@ -704,10 +704,42 @@ function formatViolationListItem(v: ComplexityViolation): string {
 }
 
 /**
+ * Format a single metric line with severity and metric emojis.
+ */
+function formatDedupMetricLine(v: ComplexityViolation): string {
+  const metricType = v.metricType || 'cyclomatic';
+  const severityEmoji = v.severity === 'error' ? '🔴' : '🟡';
+  return `    - ${severityEmoji} ${getMetricEmojiForComment(metricType)} ${getMetricLabel(metricType)}: ${formatComplexityValue(metricType, v.complexity)} (threshold: ${formatThresholdValue(metricType, v.threshold)})`;
+}
+
+/**
+ * Format a single dedup key as a grouped list item with optional comment link and metric sub-items.
+ */
+function formatDedupSymbol(
+  key: string,
+  violationsByKey: Map<string, ComplexityViolation[]>,
+  commentUrls: Map<string, string>,
+): string {
+  const sep = key.lastIndexOf('::');
+  const symbol = sep !== -1 ? key.slice(sep + 2) : key;
+  const file = sep !== -1 ? key.slice(0, sep) : '';
+  const url = commentUrls.get(key);
+  const symbolRef = url
+    ? `\`${symbol}\` in \`${file}\` ([review comment](${url}))`
+    : `\`${symbol}\` in \`${file}\``;
+
+  const vs = violationsByKey.get(key);
+  if (!vs || vs.length === 0) return `  - ${symbolRef}`;
+
+  const metricLines = vs.map(formatDedupMetricLine).join('\n');
+  return `  - ${symbolRef}\n${metricLines}`;
+}
+
+/**
  * Build note for violations already commented on in a previous review round.
  * Groups all metrics under one symbol heading with severity and comment links.
  */
-function buildDedupNote(
+export function buildDedupNote(
   skippedKeys: string[],
   violations: ComplexityViolation[],
   commentUrls: Map<string, string>,
@@ -727,32 +759,7 @@ function buildDedupNote(
   }
 
   const list = skippedKeys
-    .map(key => {
-      const sep = key.lastIndexOf('::');
-      const symbol = sep !== -1 ? key.slice(sep + 2) : key;
-      const file = sep !== -1 ? key.slice(0, sep) : '';
-      const url = commentUrls.get(key);
-      const symbolRef = url
-        ? `\`${symbol}\` in \`${file}\` ([review comment](${url}))`
-        : `\`${symbol}\` in \`${file}\``;
-
-      const vs = violationsByKey.get(key);
-      if (!vs || vs.length === 0) return `  - ${symbolRef}`;
-
-      const metricLines = vs
-        .map(v => {
-          const metricType = v.metricType || 'cyclomatic';
-          const severityEmoji = v.severity === 'error' ? '🔴' : '🟡';
-          const metricEmoji = getMetricEmojiForComment(metricType);
-          const metricLabel = getMetricLabel(metricType);
-          const valueDisplay = formatComplexityValue(metricType, v.complexity);
-          const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
-          return `    - ${severityEmoji} ${metricEmoji} ${metricLabel}: ${valueDisplay} (threshold: ${thresholdDisplay})`;
-        })
-        .join('\n');
-
-      return `  - ${symbolRef}\n${metricLines}`;
-    })
+    .map(key => formatDedupSymbol(key, violationsByKey, commentUrls))
     .join('\n');
 
   return `\n\n<details>\n<summary>ℹ️ ${skippedKeys.length} violation${skippedKeys.length === 1 ? '' : 's'} already reviewed in a previous round — not re-posted</summary>\n\n${list}\n\n</details>`;
