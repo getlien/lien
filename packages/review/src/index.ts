@@ -106,6 +106,13 @@ export {
   serializeFingerprint,
 } from './fingerprint.js';
 
+// Simplicity signals
+export {
+  type FileSimplicitySignal,
+  computeSimplicitySignals,
+  serializeSimplicitySignals,
+} from './simplicity-signals.js';
+
 // Dependent context
 export {
   type DependentSnippet,

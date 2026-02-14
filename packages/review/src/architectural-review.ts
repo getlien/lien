@@ -18,6 +18,7 @@ import {
 } from './openrouter.js';
 import { computeFingerprint, serializeFingerprint } from './fingerprint.js';
 import { assembleDependentContext } from './dependent-context.js';
+import { computeSimplicitySignals, serializeSimplicitySignals } from './simplicity-signals.js';
 
 import type { AnalysisResult } from './review-engine.js';
 
@@ -133,9 +134,20 @@ export function computeArchitecturalContext(
   const dependentSnippets = assembleDependentContext(result.currentReport, result.chunks);
   logger.info(`Assembled dependent context for ${dependentSnippets.size} functions`);
 
+  // 3. Compute per-file simplicity signals for KISS detection
+  const signals = computeSimplicitySignals(result.chunks, result.filesToAnalyze);
+  const simplicitySignals = serializeSimplicitySignals(signals);
+  if (signals.length > 0) {
+    const flaggedCount = signals.filter(s => s.flagged).length;
+    logger.info(
+      `Computed simplicity signals for ${signals.length} files (${flaggedCount} flagged)`,
+    );
+  }
+
   return {
     fingerprint: fingerprintText,
     dependentSnippets,
+    simplicitySignals,
   };
 }
 
