@@ -129,6 +129,17 @@ export function parseCommentsResponse(
   return null;
 }
 
+/**
+ * Estimate prompt token count using ~4 chars/token heuristic.
+ * Exported for testing.
+ */
+export function estimatePromptTokens(prompt: string): number {
+  return Math.ceil(prompt.length / 4);
+}
+
+/** Max tokens to reserve for the prompt (leaves room for output within 128K context) */
+const PROMPT_TOKEN_BUDGET = 100_000;
+
 /** Models known to support OpenRouter's extended reasoning parameter */
 const REASONING_MODELS = /deepseek|minimax|o1|o3|qwq/i;
 
@@ -241,7 +252,29 @@ export async function generateLineComments(
 
   logger.info(`Generating comments for ${violations.length} violations in single batch`);
 
-  const prompt = buildBatchedCommentsPrompt(violations, codeSnippets, report, diffHunks);
+  let prompt = buildBatchedCommentsPrompt(violations, codeSnippets, report, diffHunks);
+  let estimatedTokens = estimatePromptTokens(prompt);
+  logger.info(`Estimated prompt tokens: ${estimatedTokens.toLocaleString()}`);
+
+  // If prompt exceeds budget, rebuild with fewer violations (keep top N by priority order)
+  let usedViolations = violations;
+  if (estimatedTokens > PROMPT_TOKEN_BUDGET) {
+    logger.warning(
+      `Prompt exceeds token budget (${estimatedTokens.toLocaleString()} > ${PROMPT_TOKEN_BUDGET.toLocaleString()}). Truncating violations...`,
+    );
+    // Binary-ish search: halve until under budget
+    let count = violations.length;
+    while (count > 1 && estimatedTokens > PROMPT_TOKEN_BUDGET) {
+      count = Math.ceil(count / 2);
+      usedViolations = violations.slice(0, count);
+      prompt = buildBatchedCommentsPrompt(usedViolations, codeSnippets, report, diffHunks);
+      estimatedTokens = estimatePromptTokens(prompt);
+    }
+    logger.warning(
+      `Truncated to ${usedViolations.length}/${violations.length} violations (${estimatedTokens.toLocaleString()} tokens)`,
+    );
+  }
+
   const data = await callBatchedCommentsAPI(prompt, apiKey, model);
 
   if (data.usage) {
@@ -253,7 +286,7 @@ export async function generateLineComments(
   }
 
   const commentsMap = parseCommentsResponse(data.choices[0].message.content, logger);
-  return mapCommentsToViolations(commentsMap, violations, logger);
+  return mapCommentsToViolations(commentsMap, usedViolations, logger);
 }
 
 /**

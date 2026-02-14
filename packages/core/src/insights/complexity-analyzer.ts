@@ -77,9 +77,18 @@ export class ComplexityAnalyzer {
    * Analyze complexity from in-memory chunks (no VectorDB needed).
    * Use with indexCodebase({ skipEmbeddings: true }) for fast complexity-only analysis.
    */
-  static analyzeFromChunks(chunks: CodeChunk[], files?: string[]): ComplexityReport {
+  static analyzeFromChunks(
+    chunks: CodeChunk[],
+    files?: string[],
+    thresholdOverrides?: { testPaths?: number; mentalLoad?: number },
+  ): ComplexityReport {
     // Create a lightweight instance to access private analysis methods
     const instance = new ComplexityAnalyzer(null as unknown as VectorDBInterface);
+
+    if (thresholdOverrides) {
+      // Merge overrides into the instance's default thresholds
+      Object.assign(instance.thresholds, thresholdOverrides);
+    }
 
     // Map CodeChunk → SearchResult
     const allResults: SearchResult[] = chunks.map(chunk => ({

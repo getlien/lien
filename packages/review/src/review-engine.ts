@@ -174,7 +174,12 @@ export async function runComplexityAnalysis(
 
     // Run complexity analysis from in-memory chunks (no VectorDB needed)
     logger.info('Analyzing complexity...');
-    const report = ComplexityAnalyzer.analyzeFromChunks(indexResult.chunks, files);
+    const thresholdNum = parseInt(threshold, 10);
+    const report = ComplexityAnalyzer.analyzeFromChunks(
+      indexResult.chunks,
+      files,
+      !isNaN(thresholdNum) ? { testPaths: thresholdNum, mentalLoad: thresholdNum } : undefined,
+    );
     logger.info(`Found ${report.summary.totalViolations} violations`);
 
     return { report, chunks: indexResult.chunks };
@@ -188,7 +193,7 @@ export async function runComplexityAnalysis(
  * Prioritize violations by impact (dependents + severity)
  * High dependents + High severity = Highest priority
  */
-function prioritizeViolations(
+export function prioritizeViolations(
   violations: ComplexityViolation[],
   report: ComplexityReport,
 ): ComplexityViolation[] {
@@ -221,11 +226,13 @@ async function prepareViolationsForReview(
   const allViolations = Object.values(report.files).flatMap(fileData => fileData.violations);
 
   // Prioritize by impact (dependents + severity)
-  const violations = prioritizeViolations(allViolations, report).slice(0, 10);
+  const violations = prioritizeViolations(allViolations, report);
 
-  // Collect code snippets
+  // Collect code snippets (deduplicate: same key shares one API call)
   const codeSnippets = new Map<string, string>();
   for (const violation of violations) {
+    const key = getViolationKey(violation);
+    if (codeSnippets.has(key)) continue;
     const snippet = await getFileContent(
       octokit,
       prContext,
@@ -235,7 +242,7 @@ async function prepareViolationsForReview(
       logger,
     );
     if (snippet) {
-      codeSnippets.set(getViolationKey(violation), snippet);
+      codeSnippets.set(key, snippet);
     }
   }
   logger.info(`Collected ${codeSnippets.size} code snippets for review`);
