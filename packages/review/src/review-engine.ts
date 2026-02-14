@@ -1229,6 +1229,57 @@ export function determineReviewEvent(
   return hasNewErrors ? 'REQUEST_CHANGES' : 'COMMENT';
 }
 
+/**
+ * Partition violations into already-reviewed (dedup) and new ones.
+ * Returns the full list as toReview on failure (graceful degradation).
+ */
+async function partitionDedupViolations(
+  violations: ViolationWithLines[],
+  octokit: Octokit,
+  prContext: PRContext,
+  logger: Logger,
+): Promise<{ toReview: ViolationWithLines[]; skippedKeys: string[] }> {
+  try {
+    const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
+    const toReview: ViolationWithLines[] = [];
+    const skippedKeys: string[] = [];
+    for (const item of violations) {
+      const key = `${item.violation.filepath}::${item.violation.symbolName}`;
+      if (existing.complexity.has(key)) {
+        skippedKeys.push(key);
+      } else {
+        toReview.push(item);
+      }
+    }
+    if (skippedKeys.length > 0) {
+      logger.info(`Dedup: ${skippedKeys.length} violations already reviewed in previous rounds`);
+    }
+    return { toReview, skippedKeys };
+  } catch (error) {
+    logger.warning(`Failed to fetch existing comments for dedup: ${error}`);
+    return { toReview: violations, skippedKeys: [] };
+  }
+}
+
+/**
+ * Build the combined notes string for the review summary footer.
+ */
+function buildReviewNotes(
+  processed: ViolationProcessingResult,
+  deltaMap: Map<string, ComplexityDelta>,
+  dedupSkippedKeys: string[],
+): string {
+  return (
+    buildUncoveredNote(processed.uncovered, deltaMap) +
+    buildSkippedNote(processed.skipped) +
+    buildMarginalNote(processed.marginal) +
+    buildDedupNote(
+      dedupSkippedKeys,
+      processed.newOrDegraded.map(v => v.violation),
+    )
+  );
+}
+
 async function generateAndPostReview(
   octokit: Octokit,
   prContext: PRContext,
@@ -1243,43 +1294,20 @@ async function generateAndPostReview(
   archContext?: ArchitecturalContext,
 ): Promise<void> {
   // Early dedup: check which violations already have review comments before calling the LLM
-  const dedupSkippedKeys: string[] = [];
-  let newOrDegradedToReview = processed.newOrDegraded;
-  try {
-    const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
-    const toReview: ViolationWithLines[] = [];
-    for (const item of processed.newOrDegraded) {
-      const key = `${item.violation.filepath}::${item.violation.symbolName}`;
-      if (existing.complexity.has(key)) {
-        dedupSkippedKeys.push(key);
-      } else {
-        toReview.push(item);
-      }
-    }
-    newOrDegradedToReview = toReview;
-    if (dedupSkippedKeys.length > 0) {
-      logger.info(
-        `Dedup: ${dedupSkippedKeys.length} violations already reviewed in previous rounds`,
-      );
-    }
-  } catch (error) {
-    logger.warning(`Failed to fetch existing comments for dedup: ${error}`);
-    // Fall through — treat all as new (graceful degradation)
-  }
+  const { toReview, skippedKeys } = await partitionDedupViolations(
+    processed.newOrDegraded,
+    octokit,
+    prContext,
+    logger,
+  );
 
   // If all violations were already reviewed, skip LLM calls and just update the summary comment
-  if (newOrDegradedToReview.length === 0) {
+  if (toReview.length === 0) {
     logger.info('All violations already reviewed — updating summary only (no LLM calls needed)');
     const summaryBody = buildReviewSummary(
       report,
       deltas,
-      buildUncoveredNote(processed.uncovered, deltaMap) +
-        buildSkippedNote(processed.skipped) +
-        buildMarginalNote(processed.marginal) +
-        buildDedupNote(
-          dedupSkippedKeys,
-          processed.newOrDegraded.map(v => v.violation),
-        ),
+      buildReviewNotes(processed, deltaMap, skippedKeys),
       config.model,
     );
     await postPRComment(octokit, prContext, summaryBody, logger);
@@ -1287,13 +1315,10 @@ async function generateAndPostReview(
   }
 
   // Generate AI comments only for violations that haven't been posted yet
-  const allViolationsForLLM = [
-    ...newOrDegradedToReview.map(v => v.violation),
-    ...processed.marginal,
-  ];
+  const allViolationsForLLM = [...toReview.map(v => v.violation), ...processed.marginal];
   logger.info(
     `Generating AI comments for ${allViolationsForLLM.length} violations ` +
-      `(${newOrDegradedToReview.length} will get inline comments, ${processed.marginal.length} for context only)...`,
+      `(${toReview.length} will get inline comments, ${processed.marginal.length} for context only)...`,
   );
 
   const { aiComments, architecturalNotes, prSummary } = await generateAIComments(
@@ -1306,35 +1331,20 @@ async function generateAndPostReview(
     archContext,
   );
 
-  const lineComments = buildLineComments(
-    newOrDegradedToReview,
-    aiComments,
-    deltaMap,
-    report,
-    logger,
-  );
+  const lineComments = buildLineComments(toReview, aiComments, deltaMap, report, logger);
   logger.info(`Built ${lineComments.length} line comments for new/degraded violations`);
 
   const summaryBody = buildReviewSummary(
     report,
     deltas,
-    buildUncoveredNote(processed.uncovered, deltaMap) +
-      buildSkippedNote(processed.skipped) +
-      buildMarginalNote(processed.marginal) +
-      buildDedupNote(
-        dedupSkippedKeys,
-        processed.newOrDegraded.map(v => v.violation),
-      ),
+    buildReviewNotes(processed, deltaMap, skippedKeys),
     config.model,
     architecturalNotes,
     prSummary,
   );
 
   // Only check for REQUEST_CHANGES based on non-deduped violations
-  const processedForEvent: ViolationProcessingResult = {
-    ...processed,
-    newOrDegraded: newOrDegradedToReview,
-  };
+  const processedForEvent: ViolationProcessingResult = { ...processed, newOrDegraded: toReview };
   const event = determineReviewEvent(processedForEvent, deltaMap, config.blockOnNewErrors);
   if (event === 'REQUEST_CHANGES') {
     logger.info('New error-level violations detected — posting REQUEST_CHANGES review');
