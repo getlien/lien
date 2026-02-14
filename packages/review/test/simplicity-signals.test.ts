@@ -161,6 +161,20 @@ describe('computeSimplicitySignals', () => {
     expect(signals).toEqual([]);
   });
 
+  it('does NOT flag classes-only file with zero methods', () => {
+    const chunks = [
+      makeChunk({ file: 'a.ts', symbolType: 'class', symbolName: 'A' }),
+      makeChunk({ file: 'a.ts', symbolType: 'class', symbolName: 'B' }),
+      makeChunk({ file: 'a.ts', symbolType: 'class', symbolName: 'C' }),
+      makeChunk({ file: 'a.ts', symbolType: 'interface', symbolName: 'D' }),
+    ];
+    const signals = computeSimplicitySignals(chunks, ['a.ts']);
+    expect(signals).toHaveLength(1);
+    expect(signals[0].flagged).toBe(false);
+    expect(signals[0].classCount).toBe(4);
+    expect(signals[0].methodCount).toBe(0);
+  });
+
   it('counts interfaces as classes', () => {
     const chunks = [
       makeChunk({ file: 'a.ts', symbolType: 'interface', symbolName: 'IFoo' }),

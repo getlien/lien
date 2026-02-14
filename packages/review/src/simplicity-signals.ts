@@ -106,6 +106,7 @@ export function computeSimplicitySignals(
     const avgMethodLines = arrayAvg(methodLineCounts);
 
     const flagged =
+      methodCount > 0 &&
       classCount >= OVER_ABSTRACTION_CLASSES &&
       avgMethodComplexity <= TRIVIAL_COMPLEXITY &&
       avgMethodLines <= TRIVIAL_METHOD_LINES;
