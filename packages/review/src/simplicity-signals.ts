@@ -20,6 +20,15 @@ export interface FileSimplicitySignal {
   reason: string;
 }
 
+/** Minimum classes to emit a signal (even if not flagged) */
+const SIGNAL_CLASS_THRESHOLD = 2;
+/** Minimum classes to consider flagging as over-abstraction */
+const OVER_ABSTRACTION_CLASSES = 3;
+/** Max avg method complexity to be considered "trivial" */
+const TRIVIAL_COMPLEXITY = 2;
+/** Max avg method lines to be considered "trivial" */
+const TRIVIAL_METHOD_LINES = 5;
+
 /**
  * Group chunks by file path (same pattern as fingerprint.ts).
  */
@@ -31,6 +40,43 @@ function groupChunksByFile(chunks: CodeChunk[]): Map<string, CodeChunk[]> {
     else map.set(chunk.metadata.file, [chunk]);
   }
   return map;
+}
+
+function arrayAvg(arr: number[]): number {
+  return arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+}
+
+function arrayMax(arr: number[]): number {
+  return arr.length > 0 ? Math.max(...arr) : 0;
+}
+
+/**
+ * Count symbol types and collect method metrics for a single file's chunks.
+ */
+function analyzeFileChunks(fileChunks: CodeChunk[]): {
+  classCount: number;
+  functionCount: number;
+  methodComplexities: number[];
+  methodLineCounts: number[];
+} {
+  let classCount = 0;
+  let functionCount = 0;
+  const methodComplexities: number[] = [];
+  const methodLineCounts: number[] = [];
+
+  for (const chunk of fileChunks) {
+    const st = chunk.metadata.symbolType;
+    if (st === 'class' || st === 'interface') {
+      classCount++;
+    } else if (st === 'function') {
+      functionCount++;
+    } else if (st === 'method') {
+      methodComplexities.push(chunk.metadata.complexity ?? 1);
+      methodLineCounts.push(chunk.metadata.endLine - chunk.metadata.startLine + 1);
+    }
+  }
+
+  return { classCount, functionCount, methodComplexities, methodLineCounts };
 }
 
 /**
@@ -51,38 +97,24 @@ export function computeSimplicitySignals(
   for (const [file, fileChunks] of byFile) {
     if (!analyzeSet.has(file)) continue;
 
-    let classCount = 0;
-    let functionCount = 0;
-    const methodComplexities: number[] = [];
-    const methodLineCounts: number[] = [];
-
-    for (const chunk of fileChunks) {
-      const st = chunk.metadata.symbolType;
-      if (st === 'class' || st === 'interface') {
-        classCount++;
-      } else if (st === 'function') {
-        functionCount++;
-      } else if (st === 'method') {
-        const complexity = chunk.metadata.complexity ?? 1;
-        const lines = chunk.metadata.endLine - chunk.metadata.startLine + 1;
-        methodComplexities.push(complexity);
-        methodLineCounts.push(lines);
-      }
-    }
+    const { classCount, functionCount, methodComplexities, methodLineCounts } =
+      analyzeFileChunks(fileChunks);
 
     const methodCount = methodComplexities.length;
-    const avgMethodComplexity =
-      methodCount > 0 ? methodComplexities.reduce((a, b) => a + b, 0) / methodCount : 0;
-    const maxMethodComplexity = methodCount > 0 ? Math.max(...methodComplexities) : 0;
-    const avgMethodLines =
-      methodCount > 0 ? methodLineCounts.reduce((a, b) => a + b, 0) / methodCount : 0;
+    const avgMethodComplexity = arrayAvg(methodComplexities);
+    const maxMethodComplexity = arrayMax(methodComplexities);
+    const avgMethodLines = arrayAvg(methodLineCounts);
 
-    const flagged = classCount >= 3 && avgMethodComplexity <= 2 && avgMethodLines <= 5;
+    const flagged =
+      classCount >= OVER_ABSTRACTION_CLASSES &&
+      avgMethodComplexity <= TRIVIAL_COMPLEXITY &&
+      avgMethodLines <= TRIVIAL_METHOD_LINES;
+
     const reason = flagged
       ? `${classCount} classes with avg method complexity ${avgMethodComplexity.toFixed(1)} and avg ${Math.round(avgMethodLines)} lines — possible over-abstraction`
       : '';
 
-    if (classCount >= 2 || flagged) {
+    if (classCount >= SIGNAL_CLASS_THRESHOLD || flagged) {
       signals.push({
         file,
         classCount,
