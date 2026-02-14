@@ -26,6 +26,9 @@ import {
   getPRPatchData,
   getPRDiffLines,
   updatePRDescription,
+  getExistingVeilleCommentKeys,
+  VEILLE_COMMENT_MARKER_PREFIX,
+  VEILLE_LOGIC_MARKER_PREFIX,
 } from './github-api.js';
 import {
   generateLineComments,
@@ -858,6 +861,28 @@ function formatMetricHeaderLine(
 }
 
 /**
+ * Filter line comments that already have a matching Veille comment on the PR.
+ * Uses the hidden HTML marker to extract the dedup key from each comment body.
+ */
+export function filterDuplicateComments(
+  comments: LineComment[],
+  existingKeys: Set<string>,
+  markerPrefix: string,
+): LineComment[] {
+  if (existingKeys.size === 0) return comments;
+
+  return comments.filter(c => {
+    const markerStart = c.body.indexOf(markerPrefix);
+    if (markerStart === -1) return true; // no marker — keep it
+    const keyStart = markerStart + markerPrefix.length;
+    const markerEnd = c.body.indexOf(' -->', keyStart);
+    if (markerEnd === -1) return true;
+    const key = c.body.slice(keyStart, markerEnd);
+    return !existingKeys.has(key);
+  });
+}
+
+/**
  * A violation matched to its diff line range for inline commenting.
  */
 type ViolationWithLines = {
@@ -895,7 +920,8 @@ function buildGroupedCommentBody(
       ? '\n\n> ⚠️ **No test files found for this function.**'
       : '';
 
-  return `${metricHeaders}${testNote}${lineNote}\n\n${comment}`;
+  const marker = `${VEILLE_COMMENT_MARKER_PREFIX}${firstViolation.filepath}::${firstViolation.symbolName} -->`;
+  return `${marker}\n${metricHeaders}${testNote}${lineNote}\n\n${comment}`;
 }
 
 /**
@@ -1182,7 +1208,7 @@ async function generateAndPostReview(
     archContext,
   );
 
-  const lineComments = buildLineComments(
+  let lineComments = buildLineComments(
     processed.newOrDegraded,
     aiComments,
     deltaMap,
@@ -1190,6 +1216,23 @@ async function generateAndPostReview(
     logger,
   );
   logger.info(`Built ${lineComments.length} line comments for new/degraded violations`);
+
+  // Deduplicate: skip comments already posted in previous review rounds
+  try {
+    const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
+    const before = lineComments.length;
+    lineComments = filterDuplicateComments(
+      lineComments,
+      existing.complexity,
+      VEILLE_COMMENT_MARKER_PREFIX,
+    );
+    if (before > lineComments.length) {
+      logger.info(`Dedup: skipped ${before - lineComments.length} already-posted comments`);
+    }
+  } catch (error) {
+    logger.warning(`Failed to fetch existing comments for dedup: ${error}`);
+    // Fall through — post all comments (graceful degradation)
+  }
 
   const summaryBody = buildReviewSummary(
     report,
@@ -1385,11 +1428,29 @@ async function postLogicReviewComments(
 
   if (inDiff.length === 0) return;
 
-  logger.info(`Posting ${inDiff.length} logic review comments`);
+  // Deduplicate logic review comments against existing ones
+  let toPost = inDiff;
+  try {
+    const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
+    const before = toPost.length;
+    toPost = filterDuplicateComments(toPost, existing.logic, VEILLE_LOGIC_MARKER_PREFIX);
+    if (before > toPost.length) {
+      logger.info(`Dedup: skipped ${before - toPost.length} already-posted logic comments`);
+    }
+  } catch (error) {
+    logger.warning(`Failed to fetch existing comments for logic dedup: ${error}`);
+  }
+
+  if (toPost.length === 0) {
+    logger.info('All logic review comments already posted — skipping');
+    return;
+  }
+
+  logger.info(`Posting ${toPost.length} logic review comments`);
   await postPRReview(
     octokit,
     prContext,
-    inDiff,
+    toPost,
     '**Logic Review** (beta) — see inline comments.',
     logger,
     'COMMENT',
