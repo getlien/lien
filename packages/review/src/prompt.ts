@@ -699,11 +699,13 @@ export function buildBatchedCommentsPrompt(
 
   const coherenceInstructions = archContext
     ? `
-**Cross-file coherence — flag these only when clearly wrong:**
-- Pattern conflicts: class-based service in a functional codebase, callbacks in async/await code
-- Naming convention violations: snake_case function in a camelCase codebase
-- Do NOT flag minor style variations within a single file
-- Do NOT flag intentional deviations (test utilities, generated code, vendor files)
+**Architectural observations — look for these across the changed files:**
+- **DRY violations**: duplicated logic, repeated patterns, or copy-pasted code across functions/files that should be shared
+- **Single Responsibility**: functions or files doing too many unrelated things (mixing I/O with business logic, orchestration with computation)
+- **Coupling issues**: functions that know too much about each other's internals, or tight coupling between modules that should be independent
+- **Missing abstractions**: repeated conditional patterns that should be a lookup table, strategy, or shared helper
+- **Cross-file coherence**: pattern conflicts (class-based service in a functional codebase), naming convention violations
+- Do NOT flag minor style variations, metric values already covered by inline comments, or intentional deviations (test utilities, generated code)
 
 `
     : '';
@@ -720,11 +722,15 @@ export function buildBatchedCommentsPrompt(
 
   const archExamples = archContext
     ? `
-**Example of a good architectural observation:**
-"This function's return type changed from \`string\` to \`string | null\`. Looking at dependents: \`auth-service.ts:34\` assigns directly without null check — this will cause a runtime error when the function returns null. Consider: either keep the non-nullable return type, or update the 3 highest-complexity dependents listed above."
+**Examples of GOOD architectural observations:**
+- "Both \`computeNaming()\` and \`computeAsyncPattern()\` iterate all chunks filtering by symbolType — extract a shared \`filterFunctionChunks(chunks)\` helper to eliminate the duplication."
+- "\`hasExportChanges()\` builds a Map, iterates baseline, then iterates chunks again. This mixes 3 responsibilities (data building, comparison, detection) — split into \`buildExportMap()\`, \`hasRemovedSymbols()\`, \`hasNewExports()\`."
+- "The return type of \`computeFingerprint()\` changed but its 3 dependents still expect the old shape — this will cause runtime errors."
 
-**Example of a BAD architectural observation (do NOT produce):**
-"Consider using the repository pattern for data access." — Generic advice not grounded in specific code or dependency context.
+**Examples of BAD architectural observations (do NOT produce):**
+- "Consider using the repository pattern for data access." — Generic advice not grounded in specific code.
+- "Halstead Volume of 3,056 indicates many unique operations." — Just restating metric values already shown in inline comments.
+- "This function has HIGH risk dependency impact." — Restating metadata without actionable insight.
 
 `
     : '';
@@ -754,9 +760,9 @@ ${jsonKeys}
 Rules for \`comments\`: Use \\n for newlines within comments.
 
 Rules for \`architectural_notes\`:
-- ONLY include notes backed by specific evidence (line numbers, dependent files, metric values)
+- ONLY include notes backed by specific evidence (file names, function names, code patterns)
+- Focus on design principles (DRY, SRP, coupling) — do NOT restate complexity metrics already in inline comments
 - Maximum 3 notes per review — quality over quantity
-- Each note must reference the codebase fingerprint or the dependent context
 - If no architectural issues found, return an empty array
 
 Rules for \`pr_summary\`:
