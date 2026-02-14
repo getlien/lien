@@ -1242,13 +1242,58 @@ async function generateAndPostReview(
   diffHunks?: Map<string, string>,
   archContext?: ArchitecturalContext,
 ): Promise<void> {
+  // Early dedup: check which violations already have review comments before calling the LLM
+  const dedupSkippedKeys: string[] = [];
+  let newOrDegradedToReview = processed.newOrDegraded;
+  try {
+    const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
+    const toReview: ViolationWithLines[] = [];
+    for (const item of processed.newOrDegraded) {
+      const key = `${item.violation.filepath}::${item.violation.symbolName}`;
+      if (existing.complexity.has(key)) {
+        dedupSkippedKeys.push(key);
+      } else {
+        toReview.push(item);
+      }
+    }
+    newOrDegradedToReview = toReview;
+    if (dedupSkippedKeys.length > 0) {
+      logger.info(
+        `Dedup: ${dedupSkippedKeys.length} violations already reviewed in previous rounds`,
+      );
+    }
+  } catch (error) {
+    logger.warning(`Failed to fetch existing comments for dedup: ${error}`);
+    // Fall through — treat all as new (graceful degradation)
+  }
+
+  // If all violations were already reviewed, skip LLM calls and just update the summary comment
+  if (newOrDegradedToReview.length === 0) {
+    logger.info('All violations already reviewed — updating summary only (no LLM calls needed)');
+    const summaryBody = buildReviewSummary(
+      report,
+      deltas,
+      buildUncoveredNote(processed.uncovered, deltaMap) +
+        buildSkippedNote(processed.skipped) +
+        buildMarginalNote(processed.marginal) +
+        buildDedupNote(
+          dedupSkippedKeys,
+          processed.newOrDegraded.map(v => v.violation),
+        ),
+      config.model,
+    );
+    await postPRComment(octokit, prContext, summaryBody, logger);
+    return;
+  }
+
+  // Generate AI comments only for violations that haven't been posted yet
   const allViolationsForLLM = [
-    ...processed.newOrDegraded.map(v => v.violation),
+    ...newOrDegradedToReview.map(v => v.violation),
     ...processed.marginal,
   ];
   logger.info(
     `Generating AI comments for ${allViolationsForLLM.length} violations ` +
-      `(${processed.newOrDegraded.length} will get inline comments, ${processed.marginal.length} for context only)...`,
+      `(${newOrDegradedToReview.length} will get inline comments, ${processed.marginal.length} for context only)...`,
   );
 
   const { aiComments, architecturalNotes, prSummary } = await generateAIComments(
@@ -1261,33 +1306,14 @@ async function generateAndPostReview(
     archContext,
   );
 
-  let lineComments = buildLineComments(
-    processed.newOrDegraded,
+  const lineComments = buildLineComments(
+    newOrDegradedToReview,
     aiComments,
     deltaMap,
     report,
     logger,
   );
   logger.info(`Built ${lineComments.length} line comments for new/degraded violations`);
-
-  // Deduplicate: skip comments already posted in previous review rounds
-  let dedupSkippedKeys: string[] = [];
-  try {
-    const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
-    const dedup = filterDuplicateComments(
-      lineComments,
-      existing.complexity,
-      VEILLE_COMMENT_MARKER_PREFIX,
-    );
-    dedupSkippedKeys = dedup.skippedKeys;
-    lineComments = dedup.kept;
-    if (dedupSkippedKeys.length > 0) {
-      logger.info(`Dedup: skipped ${dedupSkippedKeys.length} already-posted comments`);
-    }
-  } catch (error) {
-    logger.warning(`Failed to fetch existing comments for dedup: ${error}`);
-    // Fall through — post all comments (graceful degradation)
-  }
 
   const summaryBody = buildReviewSummary(
     report,
@@ -1304,7 +1330,12 @@ async function generateAndPostReview(
     prSummary,
   );
 
-  const event = determineReviewEvent(processed, deltaMap, config.blockOnNewErrors);
+  // Only check for REQUEST_CHANGES based on non-deduped violations
+  const processedForEvent: ViolationProcessingResult = {
+    ...processed,
+    newOrDegraded: newOrDegradedToReview,
+  };
+  const event = determineReviewEvent(processedForEvent, deltaMap, config.blockOnNewErrors);
   if (event === 'REQUEST_CHANGES') {
     logger.info('New error-level violations detected — posting REQUEST_CHANGES review');
   }
