@@ -65,7 +65,7 @@ function buildContexts(
       blockOnNewErrors: false,
       enableLogicReview: false,
       logicReviewCategories: [],
-      enableArchitecturalReview: 'auto',
+      enableArchitecturalReview: 'always',
       archReviewCategories: [],
     },
   };
