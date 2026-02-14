@@ -695,6 +695,15 @@ function buildSkippedNote(skippedViolations: ComplexityViolation[]): string {
 }
 
 /**
+ * Build note for violations already commented on in a previous review round.
+ */
+function buildDedupNote(dedupedCount: number): string {
+  if (dedupedCount === 0) return '';
+
+  return `\n\nℹ️ ${dedupedCount} violation${dedupedCount === 1 ? '' : 's'} already reviewed in a previous round — not re-posted.`;
+}
+
+/**
  * Format token usage cost display
  */
 function formatCostDisplay(usage: { totalTokens: number; cost: number }): string {
@@ -1218,6 +1227,7 @@ async function generateAndPostReview(
   logger.info(`Built ${lineComments.length} line comments for new/degraded violations`);
 
   // Deduplicate: skip comments already posted in previous review rounds
+  let dedupedCount = 0;
   try {
     const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
     const before = lineComments.length;
@@ -1226,8 +1236,9 @@ async function generateAndPostReview(
       existing.complexity,
       VEILLE_COMMENT_MARKER_PREFIX,
     );
-    if (before > lineComments.length) {
-      logger.info(`Dedup: skipped ${before - lineComments.length} already-posted comments`);
+    dedupedCount = before - lineComments.length;
+    if (dedupedCount > 0) {
+      logger.info(`Dedup: skipped ${dedupedCount} already-posted comments`);
     }
   } catch (error) {
     logger.warning(`Failed to fetch existing comments for dedup: ${error}`);
@@ -1239,7 +1250,8 @@ async function generateAndPostReview(
     deltas,
     buildUncoveredNote(processed.uncovered, deltaMap) +
       buildSkippedNote(processed.skipped) +
-      buildMarginalNote(processed.marginal),
+      buildMarginalNote(processed.marginal) +
+      buildDedupNote(dedupedCount),
     config.model,
     architecturalNotes,
     prSummary,
