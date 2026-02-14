@@ -1515,8 +1515,9 @@ export async function postReviewIfNeeded(
 /**
  * TEMPORARY: Deliberately complex function to trigger a Veille violation for dedup testing.
  * Remove after verifying dedup works on PR #253.
+ * Push 3: testing dedup — this comment should NOT produce a new inline review.
  */
- 
+
 function _testComplexityTrigger(input: Record<string, unknown>): string {
   let result = '';
   const type = typeof input.value;
