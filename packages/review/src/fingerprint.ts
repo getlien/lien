@@ -28,6 +28,8 @@ export interface CodebaseFingerprint {
   totalChunks: number;
 }
 
+const BARREL_BASENAME = /^(index|__init__|mod)\./;
+
 const NAMING_PATTERNS = {
   SCREAMING_SNAKE: /^[A-Z][A-Z0-9_]+$/,
   PascalCase: /^[A-Z][a-zA-Z0-9]*$/,
@@ -124,30 +126,37 @@ function computeNaming(chunks: CodeChunk[]): CodebaseFingerprint['naming'] {
   const functions = dominantConvention(fnCounts);
   const classes = dominantConvention(clsCounts);
 
-  let summary: string;
-  if (functions === 'mixed' && classes === 'mixed') {
-    summary = 'mixed naming conventions';
-  } else if (functions === classes) {
-    summary = `${functions} functions and classes`;
-  } else {
-    summary = `${functions} functions, ${classes} classes`;
-  }
+  return { functions, classes, summary: buildNamingSummary(functions, classes) };
+}
 
-  return { functions, classes, summary };
+function buildNamingSummary(functions: string, classes: string): string {
+  if (functions === 'mixed' && classes === 'mixed') return 'mixed naming conventions';
+  if (functions === classes) return `${functions} functions and classes`;
+  return `${functions} functions, ${classes} classes`;
 }
 
 function computeModuleStructure(chunks: CodeChunk[]): CodebaseFingerprint['moduleStructure'] {
-  // Group chunks by file
-  const chunksByFile = new Map<string, CodeChunk[]>();
-  for (const chunk of chunks) {
-    const file = chunk.metadata.file;
-    const existing = chunksByFile.get(file);
-    if (existing) existing.push(chunk);
-    else chunksByFile.set(file, [chunk]);
-  }
+  const chunksByFile = groupChunksByFile(chunks);
+  const barrelFileCount = countBarrelFiles(chunksByFile);
+  const averageImportDepth = computeAverageImportDepth(chunks);
+  const structure =
+    averageImportDepth < 2.0 ? 'flat' : averageImportDepth > 3.0 ? 'nested' : 'moderate';
 
-  let barrelFileCount = 0;
-  const BARREL_BASENAME = /^(index|__init__|mod)\./;
+  return { barrelFileCount, averageImportDepth, structure };
+}
+
+function groupChunksByFile(chunks: CodeChunk[]): Map<string, CodeChunk[]> {
+  const map = new Map<string, CodeChunk[]>();
+  for (const chunk of chunks) {
+    const existing = map.get(chunk.metadata.file);
+    if (existing) existing.push(chunk);
+    else map.set(chunk.metadata.file, [chunk]);
+  }
+  return map;
+}
+
+function countBarrelFiles(chunksByFile: Map<string, CodeChunk[]>): number {
+  let count = 0;
 
   for (const [file, fileChunks] of chunksByFile) {
     const allExports = new Set<string>();
@@ -167,40 +176,28 @@ function computeModuleStructure(chunks: CodeChunk[]): CodebaseFingerprint['modul
     if (allExports.size === 0) continue;
 
     const basename = file.split('/').pop() || '';
-    const isBarrelByName = BARREL_BASENAME.test(basename);
-
-    if (isBarrelByName) {
-      barrelFileCount++;
+    if (BARREL_BASENAME.test(basename)) {
+      count++;
       continue;
     }
 
-    // Check re-export: intersection of exports and imported symbols
-    let hasReExport = false;
-    for (const exp of allExports) {
-      if (allImportedSymbols.has(exp)) {
-        hasReExport = true;
-        break;
-      }
-    }
-    if (hasReExport) barrelFileCount++;
+    // Re-export: file exports a symbol it also imports
+    const hasReExport = [...allExports].some(exp => allImportedSymbols.has(exp));
+    if (hasReExport) count++;
   }
 
-  // Import depth
+  return count;
+}
+
+function computeAverageImportDepth(chunks: CodeChunk[]): number {
   const depths: number[] = [];
   for (const chunk of chunks) {
     if (!chunk.metadata.imports) continue;
     for (const imp of chunk.metadata.imports) {
-      if (!imp.startsWith('.')) continue; // skip package imports
-      depths.push(imp.split('/').length - 1);
+      if (imp.startsWith('.')) depths.push(imp.split('/').length - 1);
     }
   }
-
-  const averageImportDepth =
-    depths.length > 0 ? depths.reduce((a, b) => a + b, 0) / depths.length : 0;
-  const structure =
-    averageImportDepth < 2.0 ? 'flat' : averageImportDepth > 3.0 ? 'nested' : 'moderate';
-
-  return { barrelFileCount, averageImportDepth, structure };
+  return depths.length > 0 ? depths.reduce((a, b) => a + b, 0) / depths.length : 0;
 }
 
 function computeAsyncPattern(chunks: CodeChunk[]): CodebaseFingerprint['asyncPattern'] {
@@ -213,22 +210,28 @@ function computeAsyncPattern(chunks: CodeChunk[]): CodebaseFingerprint['asyncPat
     if (st !== 'function' && st !== 'method') continue;
 
     const sig = chunk.metadata.signature || '';
-    const content = chunk.content;
-
     if (sig.includes('async ')) {
       asyncAwaitCount++;
-    } else if (/Promise</.test(sig) || /\.then\(/.test(content)) {
+    } else if (/Promise</.test(sig) || /\.then\(/.test(chunk.content)) {
       promiseCount++;
     } else if (/callback|cb\b|done\b|next\b/.test(sig) && /function/.test(sig)) {
       callbackCount++;
     }
   }
 
-  const asyncTotal = asyncAwaitCount + promiseCount + callbackCount;
-  if (asyncTotal === 0) return 'sync';
-  if (asyncAwaitCount > 0.6 * asyncTotal) return 'async/await';
-  if (promiseCount > 0.6 * asyncTotal) return 'promises';
-  if (callbackCount > 0.6 * asyncTotal) return 'callbacks';
+  return classifyAsyncPattern(asyncAwaitCount, promiseCount, callbackCount);
+}
+
+function classifyAsyncPattern(
+  asyncAwait: number,
+  promises: number,
+  callbacks: number,
+): CodebaseFingerprint['asyncPattern'] {
+  const total = asyncAwait + promises + callbacks;
+  if (total === 0) return 'sync';
+  if (asyncAwait > 0.6 * total) return 'async/await';
+  if (promises > 0.6 * total) return 'promises';
+  if (callbacks > 0.6 * total) return 'callbacks';
   return 'mixed';
 }
 

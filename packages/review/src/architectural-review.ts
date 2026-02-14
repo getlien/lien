@@ -10,7 +10,12 @@ import type { ReviewConfig } from './types.js';
 import type { Logger } from './logger.js';
 import type { ArchitecturalContext } from './prompt.js';
 import { buildBatchedCommentsPrompt } from './prompt.js';
-import { callBatchedCommentsAPI, trackUsage, mapCommentsToViolations } from './openrouter.js';
+import {
+  type OpenRouterResponse,
+  callBatchedCommentsAPI,
+  trackUsage,
+  mapCommentsToViolations,
+} from './openrouter.js';
 import { computeFingerprint, serializeFingerprint } from './fingerprint.js';
 import { assembleDependentContext } from './dependent-context.js';
 
@@ -61,38 +66,42 @@ export function shouldActivateArchReview(result: AnalysisResult, config: ReviewC
 function hasExportChanges(result: AnalysisResult): boolean {
   if (!result.baselineReport) return false;
 
-  // Build current exports map: file -> Set<export>
-  const currentExports = new Map<string, Set<string>>();
-  for (const chunk of result.chunks) {
-    if (chunk.metadata.exports && chunk.metadata.exports.length > 0) {
-      const existing = currentExports.get(chunk.metadata.file) || new Set();
-      for (const exp of chunk.metadata.exports) existing.add(exp);
-      currentExports.set(chunk.metadata.file, existing);
-    }
-  }
+  const currentExports = buildExportsMap(result.chunks);
 
+  // Check if any baseline symbol disappeared
   for (const [filepath, baseFileData] of Object.entries(result.baselineReport.files)) {
-    const currentFileData = result.currentReport.files[filepath];
-    if (!currentFileData) continue;
+    if (!result.currentReport.files[filepath]) continue;
 
-    const baseSymbols = new Set(baseFileData.violations.map(v => v.symbolName));
-    const currentSymbols = new Set(currentFileData.violations.map(v => v.symbolName));
-    const currentFileExports = currentExports.get(filepath) || new Set();
+    const currentSymbols = new Set(
+      result.currentReport.files[filepath].violations.map(v => v.symbolName),
+    );
+    const fileExports = currentExports.get(filepath) || new Set();
 
-    // Check if any baseline symbol is gone from both violations and exports
-    for (const sym of baseSymbols) {
-      if (!currentSymbols.has(sym) && !currentFileExports.has(sym)) return true;
+    for (const sym of baseFileData.violations.map(v => v.symbolName)) {
+      if (!currentSymbols.has(sym) && !fileExports.has(sym)) return true;
     }
   }
 
   // Check for new files with exports
-  for (const chunk of result.chunks) {
-    if (!chunk.metadata.exports || chunk.metadata.exports.length === 0) continue;
-    const baseFile = result.baselineReport.files[chunk.metadata.file];
-    if (!baseFile && chunk.metadata.exports.length > 0) return true;
-  }
+  return result.chunks.some(
+    chunk =>
+      chunk.metadata.exports &&
+      chunk.metadata.exports.length > 0 &&
+      !result.baselineReport!.files[chunk.metadata.file],
+  );
+}
 
-  return false;
+function buildExportsMap(
+  chunks: { metadata: { file: string; exports?: string[] } }[],
+): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  for (const chunk of chunks) {
+    if (!chunk.metadata.exports || chunk.metadata.exports.length === 0) continue;
+    const existing = map.get(chunk.metadata.file) || new Set();
+    for (const exp of chunk.metadata.exports) existing.add(exp);
+    map.set(chunk.metadata.file, existing);
+  }
+  return map;
 }
 
 /**
@@ -256,6 +265,52 @@ function isPlainStringRecord(val: unknown): val is Record<string, string> {
  * Generate line comments with architectural context in a single API call.
  * Returns both per-function comments and architectural observations.
  */
+/**
+ * Call LLM and parse enriched response, retrying once on parse failure.
+ */
+async function callAndParseEnriched(
+  prompt: string,
+  apiKey: string,
+  model: string,
+  logger: Logger,
+): Promise<{ content: string; response: EnrichedReviewResponse | null }> {
+  const data = await callBatchedCommentsAPI(prompt, apiKey, model);
+  logTokenUsage(data, 'Arch review', logger);
+
+  let content = data.choices[0].message.content;
+  let response = parseEnrichedResponse(content, logger);
+
+  if (!response) {
+    logger.warning(`LLM response (${content.length} chars) could not be parsed, retrying...`);
+    logger.info(`Response preview: ${content.slice(0, 200)}`);
+
+    const retryData = await callBatchedCommentsAPI(prompt, apiKey, model);
+    logTokenUsage(retryData, 'Retry', logger);
+
+    content = retryData.choices[0].message.content;
+    response = parseEnrichedResponse(content, logger);
+
+    if (!response) {
+      logger.warning(`Response after retry (${content.length} chars): ${content.slice(0, 300)}`);
+    }
+  }
+
+  return { content, response };
+}
+
+function logTokenUsage(data: OpenRouterResponse, label: string, logger: Logger): void {
+  if (!data.usage) return;
+  trackUsage(data.usage);
+  const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
+  logger.info(
+    `${label} tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`,
+  );
+}
+
+/**
+ * Generate line comments with architectural context in a single API call.
+ * Returns both per-function comments and architectural observations.
+ */
 export async function generateEnrichedComments(
   violations: ComplexityViolation[],
   codeSnippets: Map<string, string>,
@@ -279,56 +334,35 @@ export async function generateEnrichedComments(
     diffHunks,
     archContext,
   );
-  const data = await callBatchedCommentsAPI(prompt, apiKey, model);
 
-  if (data.usage) {
-    trackUsage(data.usage);
-    const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
-    logger.info(
-      `Arch review tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`,
-    );
-  }
-
-  let content = data.choices[0].message.content;
-
-  // Parse with extended schema when archContext is provided
   if (archContext) {
-    let archResponse = parseEnrichedResponse(content, logger);
-
-    // Retry once if parsing fails (reasoning models sometimes produce truncated output)
-    if (!archResponse) {
-      logger.warning(`LLM response (${content.length} chars) could not be parsed, retrying...`);
-      logger.info(`Response preview: ${content.slice(0, 200)}`);
-
-      const retryData = await callBatchedCommentsAPI(prompt, apiKey, model);
-      if (retryData.usage) {
-        trackUsage(retryData.usage);
-        const costStr = retryData.usage.cost ? ` ($${retryData.usage.cost.toFixed(6)})` : '';
-        logger.info(
-          `Retry tokens: ${retryData.usage.prompt_tokens} in, ${retryData.usage.completion_tokens} out${costStr}`,
-        );
-      }
-      content = retryData.choices[0].message.content;
-      archResponse = parseEnrichedResponse(content, logger);
-    }
-
-    if (archResponse) {
-      const aiComments = mapCommentsToViolations(archResponse.comments, violations, logger);
+    const { content, response } = await callAndParseEnriched(prompt, apiKey, model, logger);
+    if (response) {
       return {
-        aiComments,
-        architecturalNotes: archResponse.architecturalNotes,
-        prSummary: archResponse.prSummary,
+        aiComments: mapCommentsToViolations(response.comments, violations, logger),
+        architecturalNotes: response.architecturalNotes,
+        prSummary: response.prSummary,
       };
     }
-
-    // Both attempts failed — log for debugging
-    logger.warning(`Response after retry (${content.length} chars): ${content.slice(0, 300)}`);
+    // Fall through to flat parsing with last response content
+    return parseFlatComments(content, violations, logger);
   }
 
-  // Fallback: parse as flat comments (existing behavior)
+  const data = await callBatchedCommentsAPI(prompt, apiKey, model);
+  logTokenUsage(data, 'Batch', logger);
+
+  return parseFlatComments(data.choices[0].message.content, violations, logger);
+}
+
+function parseFlatComments(
+  content: string,
+  violations: ComplexityViolation[],
+  logger: Logger,
+): EnrichedCommentsResult {
   const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*)```/);
   const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
   let commentsMap: Record<string, string> | null = null;
+
   try {
     commentsMap = JSON.parse(jsonStr);
   } catch {

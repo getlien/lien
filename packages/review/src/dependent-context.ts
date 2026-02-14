@@ -117,17 +117,10 @@ export function findCallSitesForSymbol(
 
   for (const chunk of chunks) {
     const file = chunk.metadata.file;
-    if (!dependentSet.has(file)) continue;
-    if (seenFiles.has(file)) continue;
-    if (!chunk.metadata.callSites || chunk.metadata.callSites.length === 0) continue;
+    if (!dependentSet.has(file) || seenFiles.has(file)) continue;
 
-    const callSite = chunk.metadata.callSites.find(cs => cs.symbol === symbolName);
+    const callSite = findMatchingCallSite(chunk, symbolName);
     if (!callSite) continue;
-
-    // Validate call site is within chunk range
-    if (callSite.line < chunk.metadata.startLine || callSite.line > chunk.metadata.endLine) {
-      continue;
-    }
 
     const snippet = extractSnippetWindow(chunk, callSite.line);
     if (!snippet) continue;
@@ -145,6 +138,20 @@ export function findCallSitesForSymbol(
   // Sort by caller complexity descending (undefined treated as 0)
   results.sort((a, b) => (b.callerComplexity ?? 0) - (a.callerComplexity ?? 0));
   return results.slice(0, MAX_SNIPPETS_PER_FUNCTION);
+}
+
+function findMatchingCallSite(chunk: CodeChunk, symbolName: string): { line: number } | undefined {
+  if (!chunk.metadata.callSites || chunk.metadata.callSites.length === 0) return undefined;
+
+  const callSite = chunk.metadata.callSites.find(cs => cs.symbol === symbolName);
+  if (!callSite) return undefined;
+
+  // Validate call site is within chunk range
+  if (callSite.line < chunk.metadata.startLine || callSite.line > chunk.metadata.endLine) {
+    return undefined;
+  }
+
+  return callSite;
 }
 
 /**
