@@ -152,28 +152,42 @@ function formatViolation(
 }
 
 /**
+ * Format the summary section (header, file count, violation counts, avg/max complexity)
+ */
+function formatSummarySection(report: ComplexityReport): string[] {
+  const errorText = `${report.summary.bySeverity.error} error${report.summary.bySeverity.error !== 1 ? 's' : ''}`;
+  const warningText = `${report.summary.bySeverity.warning} warning${report.summary.bySeverity.warning !== 1 ? 's' : ''}`;
+
+  return [
+    chalk.bold('🔍 Complexity Analysis\n'),
+    chalk.bold('Summary:'),
+    chalk.dim('  Files analyzed: ') + report.summary.filesAnalyzed.toString(),
+    chalk.dim('  Violations: ') +
+      `${report.summary.totalViolations} (${errorText}, ${warningText})`,
+    chalk.dim('  Average complexity: ') + report.summary.avgComplexity.toString(),
+    chalk.dim('  Max complexity: ') + report.summary.maxComplexity.toString(),
+    '',
+  ];
+}
+
+/**
+ * Collect violations of a given severity across all files, tagged with file path
+ */
+function collectViolationsBySection(
+  filesWithViolations: [string, FileComplexityData][],
+  severity: ComplexityViolation['severity'],
+): ViolationWithFile[] {
+  return filesWithViolations.flatMap(([file, data]) =>
+    data.violations.filter(v => v.severity === severity).map(v => ({ file, ...v })),
+  );
+}
+
+/**
  * Format complexity report as human-readable text with colors
  */
 export function formatTextReport(report: ComplexityReport): string {
-  const lines: string[] = [];
+  const lines = formatSummarySection(report);
 
-  // Header
-  lines.push(chalk.bold('🔍 Complexity Analysis\n'));
-
-  // Summary
-  lines.push(chalk.bold('Summary:'));
-  lines.push(chalk.dim('  Files analyzed: ') + report.summary.filesAnalyzed.toString());
-  const errorText = `${report.summary.bySeverity.error} error${report.summary.bySeverity.error !== 1 ? 's' : ''}`;
-  const warningText = `${report.summary.bySeverity.warning} warning${report.summary.bySeverity.warning !== 1 ? 's' : ''}`;
-  lines.push(
-    chalk.dim('  Violations: ') +
-      `${report.summary.totalViolations} (${errorText}, ${warningText})`,
-  );
-  lines.push(chalk.dim('  Average complexity: ') + report.summary.avgComplexity.toString());
-  lines.push(chalk.dim('  Max complexity: ') + report.summary.maxComplexity.toString());
-  lines.push('');
-
-  // Group violations by file
   const filesWithViolations = Object.entries(report.files)
     .filter(([_, data]) => data.violations.length > 0)
     .sort((a, b) => b[1].violations.length - a[1].violations.length);
@@ -183,11 +197,7 @@ export function formatTextReport(report: ComplexityReport): string {
     return lines.join('\n');
   }
 
-  // Errors section
-  const errors = filesWithViolations.flatMap(([file, data]) =>
-    data.violations.filter(v => v.severity === 'error').map(v => ({ file, ...v })),
-  );
-
+  const errors = collectViolationsBySection(filesWithViolations, 'error');
   if (errors.length > 0) {
     lines.push(chalk.red.bold('❌ Errors:\n'));
     for (const error of errors) {
@@ -195,11 +205,7 @@ export function formatTextReport(report: ComplexityReport): string {
     }
   }
 
-  // Warnings section
-  const warnings = filesWithViolations.flatMap(([file, data]) =>
-    data.violations.filter(v => v.severity === 'warning').map(v => ({ file, ...v })),
-  );
-
+  const warnings = collectViolationsBySection(filesWithViolations, 'warning');
   if (warnings.length > 0) {
     lines.push(chalk.yellow.bold('⚠️  Warnings:\n'));
     for (const warning of warnings) {
