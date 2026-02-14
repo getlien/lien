@@ -697,10 +697,20 @@ function buildSkippedNote(skippedViolations: ComplexityViolation[]): string {
 /**
  * Build note for violations already commented on in a previous review round.
  */
-function buildDedupNote(dedupedCount: number): string {
-  if (dedupedCount === 0) return '';
+function buildDedupNote(skippedKeys: string[]): string {
+  if (skippedKeys.length === 0) return '';
 
-  return `\n\nℹ️ ${dedupedCount} violation${dedupedCount === 1 ? '' : 's'} already reviewed in a previous round — not re-posted.`;
+  const list = skippedKeys
+    .map(key => {
+      // key is "filepath::symbolName" — extract just the symbol
+      const sep = key.lastIndexOf('::');
+      const symbol = sep !== -1 ? key.slice(sep + 2) : key;
+      const file = sep !== -1 ? key.slice(0, sep) : '';
+      return `  - \`${symbol}\` in \`${file}\``;
+    })
+    .join('\n');
+
+  return `\n\n<details>\n<summary>ℹ️ ${skippedKeys.length} violation${skippedKeys.length === 1 ? '' : 's'} already reviewed in a previous round — not re-posted</summary>\n\n${list}\n\n</details>`;
 }
 
 /**
@@ -871,6 +881,14 @@ function formatMetricHeaderLine(
 }
 
 /**
+ * Result of filtering duplicate comments.
+ */
+export interface DedupResult {
+  kept: LineComment[];
+  skippedKeys: string[];
+}
+
+/**
  * Filter line comments that already have a matching Veille comment on the PR.
  * Uses the hidden HTML marker to extract the dedup key from each comment body.
  */
@@ -878,18 +896,33 @@ export function filterDuplicateComments(
   comments: LineComment[],
   existingKeys: Set<string>,
   markerPrefix: string,
-): LineComment[] {
-  if (existingKeys.size === 0) return comments;
+): DedupResult {
+  if (existingKeys.size === 0) return { kept: comments, skippedKeys: [] };
 
-  return comments.filter(c => {
+  const kept: LineComment[] = [];
+  const skippedKeys: string[] = [];
+
+  for (const c of comments) {
     const markerStart = c.body.indexOf(markerPrefix);
-    if (markerStart === -1) return true; // no marker — keep it
+    if (markerStart === -1) {
+      kept.push(c);
+      continue;
+    }
     const keyStart = markerStart + markerPrefix.length;
     const markerEnd = c.body.indexOf(' -->', keyStart);
-    if (markerEnd === -1) return true;
+    if (markerEnd === -1) {
+      kept.push(c);
+      continue;
+    }
     const key = c.body.slice(keyStart, markerEnd);
-    return !existingKeys.has(key);
-  });
+    if (existingKeys.has(key)) {
+      skippedKeys.push(key);
+    } else {
+      kept.push(c);
+    }
+  }
+
+  return { kept, skippedKeys };
 }
 
 /**
@@ -1228,18 +1261,18 @@ async function generateAndPostReview(
   logger.info(`Built ${lineComments.length} line comments for new/degraded violations`);
 
   // Deduplicate: skip comments already posted in previous review rounds
-  let dedupedCount = 0;
+  let dedupSkippedKeys: string[] = [];
   try {
     const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
-    const before = lineComments.length;
-    lineComments = filterDuplicateComments(
+    const dedup = filterDuplicateComments(
       lineComments,
       existing.complexity,
       VEILLE_COMMENT_MARKER_PREFIX,
     );
-    dedupedCount = before - lineComments.length;
-    if (dedupedCount > 0) {
-      logger.info(`Dedup: skipped ${dedupedCount} already-posted comments`);
+    dedupSkippedKeys = dedup.skippedKeys;
+    lineComments = dedup.kept;
+    if (dedupSkippedKeys.length > 0) {
+      logger.info(`Dedup: skipped ${dedupSkippedKeys.length} already-posted comments`);
     }
   } catch (error) {
     logger.warning(`Failed to fetch existing comments for dedup: ${error}`);
@@ -1252,7 +1285,7 @@ async function generateAndPostReview(
     buildUncoveredNote(processed.uncovered, deltaMap) +
       buildSkippedNote(processed.skipped) +
       buildMarginalNote(processed.marginal) +
-      buildDedupNote(dedupedCount),
+      buildDedupNote(dedupSkippedKeys),
     config.model,
     architecturalNotes,
     prSummary,
@@ -1445,10 +1478,10 @@ async function postLogicReviewComments(
   let toPost = inDiff;
   try {
     const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
-    const before = toPost.length;
-    toPost = filterDuplicateComments(toPost, existing.logic, VEILLE_LOGIC_MARKER_PREFIX);
-    if (before > toPost.length) {
-      logger.info(`Dedup: skipped ${before - toPost.length} already-posted logic comments`);
+    const dedup = filterDuplicateComments(toPost, existing.logic, VEILLE_LOGIC_MARKER_PREFIX);
+    toPost = dedup.kept;
+    if (dedup.skippedKeys.length > 0) {
+      logger.info(`Dedup: skipped ${dedup.skippedKeys.length} already-posted logic comments`);
     }
   } catch (error) {
     logger.warning(`Failed to fetch existing comments for logic dedup: ${error}`);

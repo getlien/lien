@@ -32,6 +32,7 @@ export {
   determineReviewEvent,
   isMarginalViolation,
   filterDuplicateComments,
+  type DedupResult,
 } from './review-engine.js';
 
 // GitHub API (portable, uses @octokit/rest)
