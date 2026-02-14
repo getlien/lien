@@ -24,6 +24,7 @@ import {
   postPRComment,
   postPRReview,
   getPRPatchData,
+  getPRDiffLines,
   updatePRDescription,
 } from './github-api.js';
 import {
@@ -1331,10 +1332,21 @@ async function runLogicReviewPass(result: AnalysisResult, setup: ReviewSetup): P
     );
 
     if (validatedComments.length > 0) {
-      logger.info(`Posting ${validatedComments.length} logic review comments`);
-      // Only post as a review with inline comments — skip summary-only fallback
-      // to avoid "see inline comments" when there are none visible
-      try {
+      // Filter to only lines present in the PR diff
+      const diffLines = await getPRDiffLines(octokit, prContext);
+      const inDiff = validatedComments.filter(c => {
+        const fileLines = diffLines.get(c.path);
+        return fileLines?.has(c.line);
+      });
+
+      if (inDiff.length < validatedComments.length) {
+        logger.info(
+          `${validatedComments.length - inDiff.length} logic comments skipped (lines not in diff)`,
+        );
+      }
+
+      if (inDiff.length > 0) {
+        logger.info(`Posting ${inDiff.length} logic review comments`);
         await octokit.pulls.createReview({
           owner: prContext.owner,
           repo: prContext.repo,
@@ -1342,7 +1354,7 @@ async function runLogicReviewPass(result: AnalysisResult, setup: ReviewSetup): P
           commit_id: prContext.headSha,
           event: 'COMMENT',
           body: '**Logic Review** (beta) — see inline comments.',
-          comments: validatedComments.map(c => ({
+          comments: inDiff.map(c => ({
             path: c.path,
             line: c.line,
             ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' } : {}),
@@ -1350,8 +1362,6 @@ async function runLogicReviewPass(result: AnalysisResult, setup: ReviewSetup): P
             body: c.body,
           })),
         });
-      } catch (reviewError) {
-        logger.warning(`Logic review inline comments failed (lines not in diff): ${reviewError}`);
       }
     }
   } catch (error) {
