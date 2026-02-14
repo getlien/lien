@@ -891,10 +891,10 @@ function buildGroupedCommentBody(
   const fileData = report.files[firstViolation.filepath];
   const testNote =
     fileData && (!fileData.testAssociations || fileData.testAssociations.length === 0)
-      ? '\n\n> No test files found for this function.'
+      ? '\n\n> ⚠️ **No test files found for this function.**'
       : '';
 
-  return `${metricHeaders}${lineNote}\n\n${comment}${testNote}`;
+  return `${metricHeaders}${testNote}${lineNote}\n\n${comment}`;
 }
 
 /**
