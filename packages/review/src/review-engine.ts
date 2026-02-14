@@ -10,6 +10,7 @@ import {
   indexCodebase,
   ComplexityAnalyzer,
   RISK_ORDER,
+  getSupportedExtensions,
   type ComplexityReport,
   type ComplexityViolation,
   type CodeChunk,
@@ -94,7 +95,7 @@ export interface ReviewSetup {
  * (excludes non-code files, vendor, node_modules, etc.)
  */
 export function filterAnalyzableFiles(files: string[]): string[] {
-  const codeExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.py', '.php']);
+  const codeExtensions = new Set(getSupportedExtensions().map(ext => `.${ext}`));
 
   const excludePatterns = [
     /node_modules\//,
