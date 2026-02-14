@@ -812,9 +812,10 @@ function buildReviewSummary(
 ## 👁️ Veille
 
 ${headerLine}${deltaDisplay}
+${prSummaryLine}
 ${archNotesSection}
 See inline comments on the diff for specific suggestions.${uncoveredNote}
-${prSummaryLine}
+
 <details>
 <summary>📊 Analysis Details</summary>
 
