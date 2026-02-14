@@ -29,6 +29,8 @@ export {
   handleAnalysisOutputs,
   postReviewIfNeeded,
   extractRelevantHunk,
+  determineReviewEvent,
+  isMarginalViolation,
 } from './review-engine.js';
 
 // GitHub API (portable, uses @octokit/rest)

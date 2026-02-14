@@ -210,17 +210,19 @@ function computeAsyncPattern(chunks: CodeChunk[]): CodebaseFingerprint['asyncPat
     if (st !== 'function' && st !== 'method') continue;
 
     const sig = chunk.metadata.signature || '';
-    if (sig.includes('async ')) {
-      asyncAwaitCount++;
-    } else if (/Promise</.test(sig) || /\.then\(/.test(chunk.content)) {
-      promiseCount++;
-    } else if (/callback|cb\b|done\b|next\b/.test(sig) && /function/.test(sig)) {
-      callbackCount++;
-    }
+    if (sig.includes('async ')) asyncAwaitCount++;
+    else if (isPromisePattern(sig, chunk.content)) promiseCount++;
+    else if (isCallbackPattern(sig)) callbackCount++;
   }
 
   return classifyAsyncPattern(asyncAwaitCount, promiseCount, callbackCount);
 }
+
+const isPromisePattern = (sig: string, content: string): boolean =>
+  /Promise</.test(sig) || /\.then\(/.test(content);
+
+const isCallbackPattern = (sig: string): boolean =>
+  /callback|cb\b|done\b|next\b/.test(sig) && /function/.test(sig);
 
 function classifyAsyncPattern(
   asyncAwait: number,

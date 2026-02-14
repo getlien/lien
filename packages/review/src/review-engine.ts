@@ -50,6 +50,7 @@ import {
   computeArchitecturalContext,
   generateEnrichedComments,
   type ArchitecturalNote,
+  type EnrichedCommentsResult,
 } from './architectural-review.js';
 import { formatDeltaValue } from './format.js';
 import { assertValidSha } from './git-utils.js';
@@ -1001,7 +1002,7 @@ function getSkippedViolations(
  * Marginal = within 15% of the threshold value.
  * These still appear in the summary but don't get inline comments.
  */
-function isMarginalViolation(v: ComplexityViolation): boolean {
+export function isMarginalViolation(v: ComplexityViolation): boolean {
   if (v.threshold <= 0) return false;
   const overage = (v.complexity - v.threshold) / v.threshold;
   return overage <= 0.15;
@@ -1092,6 +1093,63 @@ async function handleNoNewViolations(
 /**
  * Generate AI comments and post review
  */
+/**
+ * Call the appropriate LLM path (enriched or standard) for comment generation.
+ */
+async function generateAIComments(
+  violations: ComplexityViolation[],
+  codeSnippets: Map<string, string>,
+  config: ReviewConfig,
+  report: ComplexityReport,
+  logger: Logger,
+  diffHunks?: Map<string, string>,
+  archContext?: ArchitecturalContext,
+): Promise<EnrichedCommentsResult> {
+  if (archContext) {
+    return generateEnrichedComments(
+      violations,
+      codeSnippets,
+      config.openrouterApiKey,
+      config.model,
+      report,
+      logger,
+      diffHunks,
+      archContext,
+    );
+  }
+
+  const aiComments = await generateLineComments(
+    violations,
+    codeSnippets,
+    config.openrouterApiKey,
+    config.model,
+    report,
+    logger,
+    diffHunks,
+  );
+  return { aiComments, architecturalNotes: [], prSummary: null };
+}
+
+/**
+ * Determine whether to post REQUEST_CHANGES based on new error-level violations.
+ */
+export function determineReviewEvent(
+  processed: ViolationProcessingResult,
+  deltaMap: Map<string, ComplexityDelta>,
+  blockOnNewErrors: boolean,
+): 'COMMENT' | 'REQUEST_CHANGES' {
+  if (!blockOnNewErrors) return 'COMMENT';
+
+  const hasNewErrors = processed.newOrDegraded.some(({ violation }) => {
+    const delta = deltaMap.get(createDeltaKey(violation));
+    return (
+      violation.severity === 'error' && (!delta || delta.severity === 'new' || delta.delta > 0)
+    );
+  });
+
+  return hasNewErrors ? 'REQUEST_CHANGES' : 'COMMENT';
+}
+
 async function generateAndPostReview(
   octokit: Octokit,
   prContext: PRContext,
@@ -1105,8 +1163,6 @@ async function generateAndPostReview(
   diffHunks?: Map<string, string>,
   archContext?: ArchitecturalContext,
 ): Promise<void> {
-  // Send ALL violations (including marginal) to LLM for full cross-file context,
-  // but only create inline comments for non-marginal violations
   const allViolationsForLLM = [
     ...processed.newOrDegraded.map(v => v.violation),
     ...processed.marginal,
@@ -1116,38 +1172,16 @@ async function generateAndPostReview(
       `(${processed.newOrDegraded.length} will get inline comments, ${processed.marginal.length} for context only)...`,
   );
 
-  // Use enriched path when architectural context is available
-  let aiComments: Map<ComplexityViolation, string>;
-  let architecturalNotes: ArchitecturalNote[] = [];
-  let prSummary: string | null = null;
+  const { aiComments, architecturalNotes, prSummary } = await generateAIComments(
+    allViolationsForLLM,
+    codeSnippets,
+    config,
+    report,
+    logger,
+    diffHunks,
+    archContext,
+  );
 
-  if (archContext) {
-    const result = await generateEnrichedComments(
-      allViolationsForLLM,
-      codeSnippets,
-      config.openrouterApiKey,
-      config.model,
-      report,
-      logger,
-      diffHunks,
-      archContext,
-    );
-    aiComments = result.aiComments;
-    architecturalNotes = result.architecturalNotes;
-    prSummary = result.prSummary;
-  } else {
-    aiComments = await generateLineComments(
-      allViolationsForLLM,
-      codeSnippets,
-      config.openrouterApiKey,
-      config.model,
-      report,
-      logger,
-      diffHunks,
-    );
-  }
-
-  // Only create inline comments for non-marginal violations
   const lineComments = buildLineComments(
     processed.newOrDegraded,
     aiComments,
@@ -1157,32 +1191,19 @@ async function generateAndPostReview(
   );
   logger.info(`Built ${lineComments.length} line comments for new/degraded violations`);
 
-  const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
-  const skippedNote = buildSkippedNote(processed.skipped);
-  const marginalNote = buildMarginalNote(processed.marginal);
   const summaryBody = buildReviewSummary(
     report,
     deltas,
-    uncoveredNote + skippedNote + marginalNote,
+    buildUncoveredNote(processed.uncovered, deltaMap) +
+      buildSkippedNote(processed.skipped) +
+      buildMarginalNote(processed.marginal),
     config.model,
     architecturalNotes,
     prSummary,
   );
 
-  // Determine review event: REQUEST_CHANGES if blocking is enabled and
-  // any new/degraded violation has error severity
-  const hasNewErrors =
-    config.blockOnNewErrors &&
-    processed.newOrDegraded.some(({ violation }) => {
-      const delta = deltaMap.get(createDeltaKey(violation));
-      // Block on new violations or worsened-to-error violations
-      return (
-        violation.severity === 'error' && (!delta || delta.severity === 'new' || delta.delta > 0)
-      );
-    });
-  const event = hasNewErrors ? 'REQUEST_CHANGES' : 'COMMENT';
-
-  if (hasNewErrors) {
+  const event = determineReviewEvent(processed, deltaMap, config.blockOnNewErrors);
+  if (event === 'REQUEST_CHANGES') {
     logger.info('New error-level violations detected — posting REQUEST_CHANGES review');
   }
 
@@ -1332,41 +1353,47 @@ async function runLogicReviewPass(result: AnalysisResult, setup: ReviewSetup): P
     );
 
     if (validatedComments.length > 0) {
-      // Filter to only lines present in the PR diff
-      const diffLines = await getPRDiffLines(octokit, prContext);
-      const inDiff = validatedComments.filter(c => {
-        const fileLines = diffLines.get(c.path);
-        return fileLines?.has(c.line);
-      });
-
-      if (inDiff.length < validatedComments.length) {
-        logger.info(
-          `${validatedComments.length - inDiff.length} logic comments skipped (lines not in diff)`,
-        );
-      }
-
-      if (inDiff.length > 0) {
-        logger.info(`Posting ${inDiff.length} logic review comments`);
-        await octokit.pulls.createReview({
-          owner: prContext.owner,
-          repo: prContext.repo,
-          pull_number: prContext.pullNumber,
-          commit_id: prContext.headSha,
-          event: 'COMMENT',
-          body: '**Logic Review** (beta) — see inline comments.',
-          comments: inDiff.map(c => ({
-            path: c.path,
-            line: c.line,
-            ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' } : {}),
-            side: 'RIGHT' as const,
-            body: c.body,
-          })),
-        });
-      }
+      await postLogicReviewComments(validatedComments, octokit, prContext, logger);
     }
   } catch (error) {
     logger.warning(`Logic review failed (non-blocking): ${error}`);
   }
+}
+
+/**
+ * Filter logic review comments to diff lines and post as a review.
+ */
+async function postLogicReviewComments(
+  comments: LineComment[],
+  octokit: Octokit,
+  prContext: PRContext,
+  logger: Logger,
+): Promise<void> {
+  const diffLines = await getPRDiffLines(octokit, prContext);
+  const inDiff = comments.filter(c => diffLines.get(c.path)?.has(c.line));
+
+  if (inDiff.length < comments.length) {
+    logger.info(`${comments.length - inDiff.length} logic comments skipped (lines not in diff)`);
+  }
+
+  if (inDiff.length === 0) return;
+
+  logger.info(`Posting ${inDiff.length} logic review comments`);
+  await octokit.pulls.createReview({
+    owner: prContext.owner,
+    repo: prContext.repo,
+    pull_number: prContext.pullNumber,
+    commit_id: prContext.headSha,
+    event: 'COMMENT',
+    body: '**Logic Review** (beta) — see inline comments.',
+    comments: inDiff.map(c => ({
+      path: c.path,
+      line: c.line,
+      ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' } : {}),
+      side: 'RIGHT' as const,
+      body: c.body,
+    })),
+  });
 }
 
 /**
