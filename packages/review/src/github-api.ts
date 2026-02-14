@@ -231,7 +231,7 @@ export function parseVeilleLogicMarker(body: string): string | null {
 /**
  * Fetch existing Veille inline comment keys from the PR.
  * Returns a Set of dedup keys (e.g. "filepath::symbolName") for complexity comments
- * and a Set of logic keys (e.g. "filepath::line") for logic review comments.
+ * and a Set of logic keys (e.g. "filepath::line::category") for logic review comments.
  */
 export async function getExistingVeilleCommentKeys(
   octokit: Octokit,

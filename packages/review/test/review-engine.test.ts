@@ -205,8 +205,8 @@ describe('parseVeilleMarker', () => {
   });
 
   it('extracts key from logic marker', () => {
-    const body = '<!-- veille-logic:src/api.ts::42 -->\n**Logic Review** (beta)';
-    expect(parseVeilleLogicMarker(body)).toBe('src/api.ts::42');
+    const body = '<!-- veille-logic:src/api.ts::42::unchecked_error -->\n**Logic Review** (beta)';
+    expect(parseVeilleLogicMarker(body)).toBe('src/api.ts::42::unchecked_error');
   });
 
   it('returns null for logic marker on complexity body', () => {
@@ -228,11 +228,15 @@ describe('filterDuplicateComments', () => {
     };
   }
 
-  function makeLogicComment(filepath: string, line: number): LineComment {
+  function makeLogicComment(
+    filepath: string,
+    line: number,
+    category = 'unchecked_error',
+  ): LineComment {
     return {
       path: filepath,
       line,
-      body: `${VEILLE_LOGIC_MARKER_PREFIX}${filepath}::${line} -->\n**Logic Review** (beta)`,
+      body: `${VEILLE_LOGIC_MARKER_PREFIX}${filepath}::${line}::${category} -->\n**Logic Review** (beta)`,
     };
   }
 
@@ -283,7 +287,7 @@ describe('filterDuplicateComments', () => {
 
   it('filters logic comments with logic marker prefix', () => {
     const comments = [makeLogicComment('a.ts', 10), makeLogicComment('b.ts', 20)];
-    const existing = new Set(['a.ts::10']);
+    const existing = new Set(['a.ts::10::unchecked_error']);
     const { kept } = filterDuplicateComments(comments, existing, VEILLE_LOGIC_MARKER_PREFIX);
     expect(kept).toHaveLength(1);
     expect(kept[0].path).toBe('b.ts');
@@ -294,5 +298,16 @@ describe('filterDuplicateComments', () => {
     const complexityKeys = new Set(['a.ts::foo']);
     const { kept } = filterDuplicateComments(comments, complexityKeys, VEILLE_LOGIC_MARKER_PREFIX);
     expect(kept).toHaveLength(1); // no match — different marker prefix
+  });
+
+  it('does not dedup logic comments with different categories on the same line', () => {
+    const comments = [
+      makeLogicComment('a.ts', 10, 'unchecked_error'),
+      makeLogicComment('a.ts', 10, 'null_deref'),
+    ];
+    const existing = new Set(['a.ts::10::unchecked_error']);
+    const { kept } = filterDuplicateComments(comments, existing, VEILLE_LOGIC_MARKER_PREFIX);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].body).toContain('null_deref');
   });
 });

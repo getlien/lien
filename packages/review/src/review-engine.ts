@@ -709,17 +709,22 @@ function formatViolationListItem(v: ComplexityViolation): string {
 function buildDedupNote(skippedKeys: string[], violations: ComplexityViolation[]): string {
   if (skippedKeys.length === 0) return '';
 
-  // Build a lookup from violation key → violation for metric details
-  const violationsByKey = new Map<string, ComplexityViolation>();
+  // Group all violations by key so we show all triggered metrics per function
+  const violationsByKey = new Map<string, ComplexityViolation[]>();
   for (const v of violations) {
     const key = `${v.filepath}::${v.symbolName}`;
-    if (!violationsByKey.has(key)) violationsByKey.set(key, v);
+    const existing = violationsByKey.get(key);
+    if (existing) {
+      existing.push(v);
+    } else {
+      violationsByKey.set(key, [v]);
+    }
   }
 
   const list = skippedKeys
     .map(key => {
-      const v = violationsByKey.get(key);
-      if (v) return formatViolationListItem(v);
+      const vs = violationsByKey.get(key);
+      if (vs) return vs.map(formatViolationListItem).join('\n');
       const sep = key.lastIndexOf('::');
       const symbol = sep !== -1 ? key.slice(sep + 2) : key;
       const file = sep !== -1 ? key.slice(0, sep) : '';
@@ -1242,15 +1247,16 @@ async function partitionDedupViolations(
   try {
     const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
     const toReview: ViolationWithLines[] = [];
-    const skippedKeys: string[] = [];
+    const skippedKeySet = new Set<string>();
     for (const item of violations) {
       const key = `${item.violation.filepath}::${item.violation.symbolName}`;
       if (existing.complexity.has(key)) {
-        skippedKeys.push(key);
+        skippedKeySet.add(key);
       } else {
         toReview.push(item);
       }
     }
+    const skippedKeys = Array.from(skippedKeySet);
     if (skippedKeys.length > 0) {
       logger.info(`Dedup: ${skippedKeys.length} violations already reviewed in previous rounds`);
     }

@@ -274,7 +274,7 @@ function mapFindingsToComments(
       comments.push({
         path: finding.filepath,
         line: finding.line,
-        body: `${VEILLE_LOGIC_MARKER_PREFIX}${finding.filepath}::${finding.line} -->\n**Logic Review** (beta) — ${categoryLabel}\n\n${entry.comment}`,
+        body: `${VEILLE_LOGIC_MARKER_PREFIX}${finding.filepath}::${finding.line}::${finding.category} -->\n**Logic Review** (beta) — ${categoryLabel}\n\n${entry.comment}`,
       });
     } else if (entry && !entry.valid) {
       logger.info(`Finding ${key} marked as false positive by LLM`);
