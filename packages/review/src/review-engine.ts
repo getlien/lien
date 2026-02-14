@@ -704,9 +704,46 @@ function formatViolationListItem(v: ComplexityViolation): string {
 }
 
 /**
- * Build note for violations already commented on in a previous review round.
+ * Format a single metric line with severity and metric emojis.
  */
-function buildDedupNote(skippedKeys: string[], violations: ComplexityViolation[]): string {
+function formatDedupMetricLine(v: ComplexityViolation): string {
+  const metricType = v.metricType || 'cyclomatic';
+  const severityEmoji = v.severity === 'error' ? '🔴' : '🟡';
+  return `    - ${severityEmoji} ${getMetricEmojiForComment(metricType)} ${getMetricLabel(metricType)}: ${formatComplexityValue(metricType, v.complexity)} (threshold: ${formatThresholdValue(metricType, v.threshold)})`;
+}
+
+/**
+ * Format a single dedup key as a grouped list item with optional comment link and metric sub-items.
+ */
+function formatDedupSymbol(
+  key: string,
+  violationsByKey: Map<string, ComplexityViolation[]>,
+  commentUrls: Map<string, string>,
+): string {
+  const sep = key.lastIndexOf('::');
+  const symbol = sep !== -1 ? key.slice(sep + 2) : key;
+  const file = sep !== -1 ? key.slice(0, sep) : '';
+  const url = commentUrls.get(key);
+  const symbolRef = url
+    ? `\`${symbol}\` in \`${file}\` ([review comment](${url}))`
+    : `\`${symbol}\` in \`${file}\``;
+
+  const vs = violationsByKey.get(key);
+  if (!vs || vs.length === 0) return `  - ${symbolRef}`;
+
+  const metricLines = vs.map(formatDedupMetricLine).join('\n');
+  return `  - ${symbolRef}\n${metricLines}`;
+}
+
+/**
+ * Build note for violations already commented on in a previous review round.
+ * Groups all metrics under one symbol heading with severity and comment links.
+ */
+export function buildDedupNote(
+  skippedKeys: string[],
+  violations: ComplexityViolation[],
+  commentUrls: Map<string, string>,
+): string {
   if (skippedKeys.length === 0) return '';
 
   // Group all violations by key so we show all triggered metrics per function
@@ -722,14 +759,7 @@ function buildDedupNote(skippedKeys: string[], violations: ComplexityViolation[]
   }
 
   const list = skippedKeys
-    .map(key => {
-      const vs = violationsByKey.get(key);
-      if (vs) return vs.map(formatViolationListItem).join('\n');
-      const sep = key.lastIndexOf('::');
-      const symbol = sep !== -1 ? key.slice(sep + 2) : key;
-      const file = sep !== -1 ? key.slice(0, sep) : '';
-      return `  - \`${symbol}\` in \`${file}\``;
-    })
+    .map(key => formatDedupSymbol(key, violationsByKey, commentUrls))
     .join('\n');
 
   return `\n\n<details>\n<summary>ℹ️ ${skippedKeys.length} violation${skippedKeys.length === 1 ? '' : 's'} already reviewed in a previous round — not re-posted</summary>\n\n${list}\n\n</details>`;
@@ -1243,7 +1273,11 @@ async function partitionDedupViolations(
   octokit: Octokit,
   prContext: PRContext,
   logger: Logger,
-): Promise<{ toReview: ViolationWithLines[]; skippedKeys: string[] }> {
+): Promise<{
+  toReview: ViolationWithLines[];
+  skippedKeys: string[];
+  commentUrls: Map<string, string>;
+}> {
   try {
     const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
     const toReview: ViolationWithLines[] = [];
@@ -1260,10 +1294,10 @@ async function partitionDedupViolations(
     if (skippedKeys.length > 0) {
       logger.info(`Dedup: ${skippedKeys.length} violations already reviewed in previous rounds`);
     }
-    return { toReview, skippedKeys };
+    return { toReview, skippedKeys, commentUrls: existing.complexity };
   } catch (error) {
     logger.warning(`Failed to fetch existing comments for dedup: ${error}`);
-    return { toReview: violations, skippedKeys: [] };
+    return { toReview: violations, skippedKeys: [], commentUrls: new Map() };
   }
 }
 
@@ -1274,6 +1308,7 @@ function buildReviewNotes(
   processed: ViolationProcessingResult,
   deltaMap: Map<string, ComplexityDelta>,
   dedupSkippedKeys: string[],
+  commentUrls: Map<string, string>,
 ): string {
   return (
     buildUncoveredNote(processed.uncovered, deltaMap) +
@@ -1282,6 +1317,7 @@ function buildReviewNotes(
     buildDedupNote(
       dedupSkippedKeys,
       processed.newOrDegraded.map(v => v.violation),
+      commentUrls,
     )
   );
 }
@@ -1300,7 +1336,7 @@ async function generateAndPostReview(
   archContext?: ArchitecturalContext,
 ): Promise<void> {
   // Early dedup: check which violations already have review comments before calling the LLM
-  const { toReview, skippedKeys } = await partitionDedupViolations(
+  const { toReview, skippedKeys, commentUrls } = await partitionDedupViolations(
     processed.newOrDegraded,
     octokit,
     prContext,
@@ -1313,7 +1349,7 @@ async function generateAndPostReview(
     const summaryBody = buildReviewSummary(
       report,
       deltas,
-      buildReviewNotes(processed, deltaMap, skippedKeys),
+      buildReviewNotes(processed, deltaMap, skippedKeys, commentUrls),
       config.model,
     );
     await postPRComment(octokit, prContext, summaryBody, logger);
@@ -1343,7 +1379,7 @@ async function generateAndPostReview(
   const summaryBody = buildReviewSummary(
     report,
     deltas,
-    buildReviewNotes(processed, deltaMap, skippedKeys),
+    buildReviewNotes(processed, deltaMap, skippedKeys, commentUrls),
     config.model,
     architecturalNotes,
     prSummary,

@@ -230,15 +230,15 @@ export function parseVeilleLogicMarker(body: string): string | null {
 
 /**
  * Fetch existing Veille inline comment keys from the PR.
- * Returns a Set of dedup keys (e.g. "filepath::symbolName") for complexity comments
+ * Returns a Map of dedup keys → comment URLs for complexity comments
  * and a Set of logic keys (e.g. "filepath::line::category") for logic review comments.
  */
 export async function getExistingVeilleCommentKeys(
   octokit: Octokit,
   prContext: PRContext,
   logger: Logger,
-): Promise<{ complexity: Set<string>; logic: Set<string> }> {
-  const complexity = new Set<string>();
+): Promise<{ complexity: Map<string, string>; logic: Set<string> }> {
+  const complexity = new Map<string, string>();
   const logic = new Set<string>();
 
   const iterator = octokit.paginate.iterator(octokit.pulls.listReviewComments, {
@@ -254,7 +254,7 @@ export async function getExistingVeilleCommentKeys(
 
       const complexityKey = parseVeilleMarker(comment.body);
       if (complexityKey) {
-        complexity.add(complexityKey);
+        complexity.set(complexityKey, comment.html_url);
         continue;
       }
 

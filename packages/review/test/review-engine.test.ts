@@ -5,6 +5,7 @@ import {
   determineReviewEvent,
   isMarginalViolation,
   filterDuplicateComments,
+  buildDedupNote,
 } from '../src/review-engine.js';
 import {
   parseVeilleMarker,
@@ -309,5 +310,116 @@ describe('filterDuplicateComments', () => {
     const { kept } = filterDuplicateComments(comments, existing, VEILLE_LOGIC_MARKER_PREFIX);
     expect(kept).toHaveLength(1);
     expect(kept[0].body).toContain('null_deref');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDedupNote
+// ---------------------------------------------------------------------------
+
+describe('buildDedupNote', () => {
+  it('returns empty string when no skipped keys', () => {
+    expect(buildDedupNote([], [], new Map())).toBe('');
+  });
+
+  it('renders a single violation with severity and metric emojis', () => {
+    const violation = makeViolation({
+      filepath: 'src/auth.ts',
+      symbolName: 'login',
+      metricType: 'cognitive',
+      complexity: 25,
+      threshold: 15,
+      severity: 'warning',
+    });
+    const result = buildDedupNote(['src/auth.ts::login'], [violation], new Map());
+    expect(result).toContain('`login` in `src/auth.ts`');
+    expect(result).toContain('🟡 🧠 mental load: 25');
+    expect(result).toContain('(threshold: 15)');
+    expect(result).toContain('1 violation already reviewed');
+  });
+
+  it('groups multiple metrics under one symbol heading', () => {
+    const v1 = makeViolation({
+      filepath: 'src/api.ts',
+      symbolName: 'process',
+      metricType: 'cyclomatic',
+      complexity: 44,
+      threshold: 30,
+      severity: 'error',
+    });
+    const v2 = makeViolation({
+      filepath: 'src/api.ts',
+      symbolName: 'process',
+      metricType: 'cognitive',
+      complexity: 105,
+      threshold: 30,
+      severity: 'warning',
+    });
+    const result = buildDedupNote(['src/api.ts::process'], [v1, v2], new Map());
+
+    // Symbol heading appears once
+    const symbolMatches = result.match(/`process` in `src\/api\.ts`/g);
+    expect(symbolMatches).toHaveLength(1);
+
+    // Both metrics present as sub-items
+    expect(result).toContain('🔴 🔀 test paths: 44 tests');
+    expect(result).toContain('🟡 🧠 mental load: 105');
+  });
+
+  it('includes comment link when URL is available', () => {
+    const violation = makeViolation({
+      filepath: 'src/auth.ts',
+      symbolName: 'login',
+    });
+    const urls = new Map([
+      ['src/auth.ts::login', 'https://github.com/org/repo/pull/1#comment-123'],
+    ]);
+    const result = buildDedupNote(['src/auth.ts::login'], [violation], urls);
+    expect(result).toContain('[review comment](https://github.com/org/repo/pull/1#comment-123)');
+  });
+
+  it('omits comment link when URL is not available', () => {
+    const violation = makeViolation({
+      filepath: 'src/auth.ts',
+      symbolName: 'login',
+    });
+    const result = buildDedupNote(['src/auth.ts::login'], [violation], new Map());
+    expect(result).not.toContain('review comment');
+    expect(result).toContain('`login` in `src/auth.ts`');
+  });
+
+  it('renders fallback for skipped key with no matching violation', () => {
+    const result = buildDedupNote(['src/old.ts::removed'], [], new Map());
+    expect(result).toContain('`removed` in `src/old.ts`');
+    // No metric sub-items
+    expect(result).not.toContain('🔴');
+    expect(result).not.toContain('🟡');
+  });
+
+  it('uses error emoji for error severity violations', () => {
+    const violation = makeViolation({
+      filepath: 'src/x.ts',
+      symbolName: 'fn',
+      severity: 'error',
+      metricType: 'halstead_effort',
+      complexity: 500000,
+      threshold: 200000,
+    });
+    const result = buildDedupNote(['src/x.ts::fn'], [violation], new Map());
+    expect(result).toContain('🔴 ⏱️');
+  });
+
+  it('pluralises correctly for multiple violations', () => {
+    const v1 = makeViolation({ filepath: 'a.ts', symbolName: 'f1' });
+    const v2 = makeViolation({ filepath: 'b.ts', symbolName: 'f2' });
+    const result = buildDedupNote(['a.ts::f1', 'b.ts::f2'], [v1, v2], new Map());
+    expect(result).toContain('2 violations already reviewed');
+  });
+
+  it('uses singular for exactly one violation', () => {
+    const violation = makeViolation({ filepath: 'a.ts', symbolName: 'f1' });
+    const result = buildDedupNote(['a.ts::f1'], [violation], new Map());
+    expect(result).toContain('1 violation already reviewed');
+    expect(result).not.toContain('1 violations');
   });
 });
