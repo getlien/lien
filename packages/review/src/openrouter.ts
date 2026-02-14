@@ -98,8 +98,8 @@ export function parseCommentsResponse(
   content: string,
   logger: Logger,
 ): Record<string, string> | null {
-  // Try extracting JSON from markdown code block first
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  // Greedy match: LLM responses may contain inner ``` blocks (code suggestions)
+  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*)```/);
   const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
 
   logger.info(`Parsing JSON response (${jsonStr.length} chars)`);

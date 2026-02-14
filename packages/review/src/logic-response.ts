@@ -32,7 +32,8 @@ export interface LogicReviewEntry {
  * Extract JSON string from LLM response, stripping markdown code blocks if present.
  */
 function extractJsonString(content: string): string {
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  // Greedy match: LLM responses may contain inner ``` blocks
+  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*)```/);
   return (codeBlockMatch ? codeBlockMatch[1] : content).trim();
 }
 
