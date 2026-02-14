@@ -398,7 +398,7 @@ Based on Halstead's software science metrics. Estimates reading time:
 
 #### Halstead Bugs (Estimated Bugs)
 Predicted bug count based on code complexity:
-- Formula: `Bugs = Volume / 3000`
+- Formula: `Bugs = Effort^(2/3) / 3000`
 - Default threshold: 1.5 (functions likely to have >1.5 bugs)
 
 | Complexity | Severity | Interpretation |

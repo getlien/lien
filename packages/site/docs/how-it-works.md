@@ -90,7 +90,7 @@ Lien tracks four complementary complexity metrics:
 | **Cyclomatic** | Decision paths (if, for, switch) | Testability - how many tests needed? |
 | **Cognitive** | Mental effort (nesting depth, breaks) | Understandability - how hard to read? |
 | **Halstead Effort** | Reading time based on operators/operands | Learning curve - how long to understand? |
-| **Halstead Bugs** | Predicted bug count (Volume / 3000) | Reliability - how bug-prone is this? |
+| **Halstead Bugs** | Predicted bug count (Effort^(2/3) / 3000) | Reliability - how bug-prone is this? |
 
 All metrics are calculated during indexing using Tree-sitter AST parsing. Cognitive complexity is based on [SonarSource's specification](https://www.sonarsource.com/docs/CognitiveComplexity.pdf), Halstead metrics are based on Maurice Halstead's "Elements of Software Science" (1977).
 
