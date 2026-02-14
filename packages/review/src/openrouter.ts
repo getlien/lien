@@ -154,7 +154,7 @@ export async function callBatchedCommentsAPI(
         },
         { role: 'user', content: prompt },
       ],
-      max_tokens: 16384,
+      max_tokens: 32768,
       temperature: 0.3,
       reasoning: { effort: 'high' },
       usage: { include: true },
