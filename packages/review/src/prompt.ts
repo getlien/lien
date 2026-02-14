@@ -257,6 +257,8 @@ export interface ArchitecturalContext {
   fingerprint: string;
   /** Dependent usage snippets keyed by "filepath::symbolName" */
   dependentSnippets: Map<string, string>;
+  /** Pre-formatted per-file structural signals (markdown), may be empty */
+  simplicitySignals: string;
 }
 
 /**
@@ -696,6 +698,9 @@ export function buildBatchedCommentsPrompt(
     : 'You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.';
 
   const fingerprintSection = archContext?.fingerprint ? `\n${archContext.fingerprint}\n` : '';
+  const simplicitySection = archContext?.simplicitySignals
+    ? `\n${archContext.simplicitySignals}\n`
+    : '';
 
   const coherenceInstructions = archContext
     ? `
@@ -704,7 +709,11 @@ export function buildBatchedCommentsPrompt(
 - **Single Responsibility**: functions or files doing too many unrelated things (mixing I/O with business logic, orchestration with computation)
 - **Coupling issues**: functions that know too much about each other's internals, or tight coupling between modules that should be independent
 - **Missing abstractions**: repeated conditional patterns that should be a lookup table, strategy, or shared helper
-- **KISS violations**: over-engineered solutions where a simpler approach exists — unnecessary abstractions, premature generalization, wrapper functions that add no value
+- **KISS violations**: over-engineered solutions where a simpler approach exists.
+  Check the File Structure Signals: when a file has many classes/interfaces but
+  each method is trivial (low complexity, few lines), the abstractions likely
+  exceed the problem complexity. Also flag: premature generalization, wrapper
+  functions that add no value, strategy/factory patterns for non-varying behavior
 - **Cross-file coherence**: pattern conflicts (class-based service in a functional codebase), naming convention violations
 - Do NOT flag minor style variations, metric values already covered by inline comments, or intentional deviations (test utilities, generated code)
 
@@ -727,6 +736,7 @@ export function buildBatchedCommentsPrompt(
 - "Both \`computeNaming()\` and \`computeAsyncPattern()\` iterate all chunks filtering by symbolType — extract a shared \`filterFunctionChunks(chunks)\` helper to eliminate the duplication."
 - "\`hasExportChanges()\` builds a Map, iterates baseline, then iterates chunks again. This mixes 3 responsibilities (data building, comparison, detection) — split into \`buildExportMap()\`, \`hasRemovedSymbols()\`, \`hasNewExports()\`."
 - "The return type of \`computeFingerprint()\` changed but its 3 dependents still expect the old shape — this will cause runtime errors."
+- "\`kiss-violations.ts\` has 6 classes + 1 interface but every method has complexity 1 and averages 3 lines — the factory + class hierarchy can be replaced with a lookup object: \`const TRANSFORMERS: Record<string, (s: string) => string> = { uppercase: s => s.toUpperCase(), ... }\`. This eliminates 6 class definitions and the factory."
 
 **Examples of BAD architectural observations (do NOT produce):**
 - "Consider using the repository pattern for data access." — Generic advice not grounded in specific code.
@@ -782,7 +792,7 @@ ${jsonKeys}
 \`\`\``;
 
   return `${systemRole}
-${fingerprintSection}
+${fingerprintSection}${simplicitySection}
 ## Violations to Review
 
 ${violationsText}
