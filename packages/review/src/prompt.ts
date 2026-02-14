@@ -704,6 +704,7 @@ export function buildBatchedCommentsPrompt(
 - **Single Responsibility**: functions or files doing too many unrelated things (mixing I/O with business logic, orchestration with computation)
 - **Coupling issues**: functions that know too much about each other's internals, or tight coupling between modules that should be independent
 - **Missing abstractions**: repeated conditional patterns that should be a lookup table, strategy, or shared helper
+- **KISS violations**: over-engineered solutions where a simpler approach exists — unnecessary abstractions, premature generalization, wrapper functions that add no value
 - **Cross-file coherence**: pattern conflicts (class-based service in a functional codebase), naming convention violations
 - Do NOT flag minor style variations, metric values already covered by inline comments, or intentional deviations (test utilities, generated code)
 
