@@ -33,6 +33,12 @@ inputs:
   logic_review_categories:
     description: 'Comma-separated finding categories (breaking_change,unchecked_return,missing_tests)'
     default: 'breaking_change,unchecked_return,missing_tests'
+  enable_architectural_review:
+    description: 'Enable architectural review (auto|always|off). "auto" activates on 3+ files, export changes, or high-risk files'
+    default: 'off'
+  arch_review_categories:
+    description: 'Comma-separated architectural review categories (coherence,impact,decomposition)'
+    default: 'coherence,impact'
 
 outputs:
   violations:

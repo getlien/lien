@@ -24,6 +24,7 @@ import {
   postPRComment,
   postPRReview,
   getPRPatchData,
+  getPRDiffLines,
   updatePRDescription,
 } from './github-api.js';
 import {
@@ -42,7 +43,15 @@ import {
   getMetricLabel,
   formatComplexityValue,
   formatThresholdValue,
+  type ArchitecturalContext,
 } from './prompt.js';
+import {
+  shouldActivateArchReview,
+  computeArchitecturalContext,
+  generateEnrichedComments,
+  type ArchitecturalNote,
+  type EnrichedCommentsResult,
+} from './architectural-review.js';
 import { formatDeltaValue } from './format.js';
 import { assertValidSha } from './git-utils.js';
 import {
@@ -747,6 +756,29 @@ function formatDeltaDisplay(deltas: ComplexityDelta[] | null): string {
 }
 
 /**
+ * Format architectural notes as a markdown section for the review summary.
+ */
+function buildArchitecturalNotesSection(notes: ArchitecturalNote[]): string {
+  if (notes.length === 0) return '';
+
+  const noteBlocks = notes
+    .map(
+      note => `> **${note.observation}**\n> ${note.evidence}\n> *Suggestion: ${note.suggestion}*`,
+    )
+    .join('\n\n');
+
+  return `\n\n### Architectural observations (beta)\n\n${noteBlocks}`;
+}
+
+/**
+ * Format PR summary line for the review summary.
+ */
+function buildPrSummaryLine(prSummary: string | null | undefined): string {
+  if (!prSummary) return '';
+  return `\n\n---\n*PR Summary: ${prSummary}*`;
+}
+
+/**
  * Build review summary body for line comments mode
  */
 function buildReviewSummary(
@@ -754,19 +786,23 @@ function buildReviewSummary(
   deltas: ComplexityDelta[] | null,
   uncoveredNote: string,
   model: string,
+  archNotes?: ArchitecturalNote[],
+  prSummary?: string | null,
 ): string {
   const { summary } = report;
   const costDisplay = formatCostDisplay(getTokenUsage());
   const deltaDisplay = formatDeltaDisplay(deltas);
   const headerLine = buildHeaderLine(summary.totalViolations, deltas);
+  const archNotesSection = archNotes ? buildArchitecturalNotesSection(archNotes) : '';
+  const prSummaryLine = buildPrSummaryLine(prSummary);
 
   return `<!-- lien-ai-review -->
 ## 👁️ Veille
 
 ${headerLine}${deltaDisplay}
-
+${archNotesSection}
 See inline comments on the diff for specific suggestions.${uncoveredNote}
-
+${prSummaryLine}
 <details>
 <summary>📊 Analysis Details</summary>
 
@@ -856,10 +892,10 @@ function buildGroupedCommentBody(
   const fileData = report.files[firstViolation.filepath];
   const testNote =
     fileData && (!fileData.testAssociations || fileData.testAssociations.length === 0)
-      ? '\n\n> No test files found for this function.'
+      ? '\n\n> ⚠️ **No test files found for this function.**'
       : '';
 
-  return `${metricHeaders}${lineNote}\n\n${comment}${testNote}`;
+  return `${metricHeaders}${testNote}${lineNote}\n\n${comment}`;
 }
 
 /**
@@ -962,6 +998,17 @@ function getSkippedViolations(
 }
 
 /**
+ * Check if a violation is only marginally over its threshold.
+ * Marginal = within 15% of the threshold value.
+ * These still appear in the summary but don't get inline comments.
+ */
+export function isMarginalViolation(v: ComplexityViolation): boolean {
+  if (v.threshold <= 0) return false;
+  const overage = (v.complexity - v.threshold) / v.threshold;
+  return overage <= 0.15;
+}
+
+/**
  * Violation processing result
  */
 interface ViolationProcessingResult {
@@ -969,6 +1016,7 @@ interface ViolationProcessingResult {
   uncovered: ComplexityViolation[];
   newOrDegraded: ViolationWithLines[];
   skipped: ComplexityViolation[];
+  marginal: ComplexityViolation[];
 }
 
 /**
@@ -980,10 +1028,34 @@ function processViolationsForReview(
   deltaMap: Map<string, ComplexityDelta>,
 ): ViolationProcessingResult {
   const { withLines, uncovered } = partitionViolationsByDiff(violations, diffLines);
-  const newOrDegraded = filterNewOrDegraded(withLines, deltaMap);
+  const allNewOrDegraded = filterNewOrDegraded(withLines, deltaMap);
   const skipped = getSkippedViolations(withLines, deltaMap);
 
-  return { withLines, uncovered, newOrDegraded, skipped };
+  // Separate marginal violations (barely over threshold) — summary only, no inline comments
+  const marginal = allNewOrDegraded
+    .filter(({ violation }) => isMarginalViolation(violation))
+    .map(v => v.violation);
+  const newOrDegraded = allNewOrDegraded.filter(({ violation }) => !isMarginalViolation(violation));
+
+  return { withLines, uncovered, newOrDegraded, skipped, marginal };
+}
+
+/**
+ * Build note for marginal violations (near threshold, no inline comment)
+ */
+function buildMarginalNote(marginalViolations: ComplexityViolation[]): string {
+  if (marginalViolations.length === 0) return '';
+
+  const list = marginalViolations
+    .map(v => {
+      const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
+      const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
+      const thresholdDisplay = formatThresholdValue(v.metricType || 'cyclomatic', v.threshold);
+      return `  - \`${v.symbolName}\` in \`${v.filepath}\`: ${metricLabel} ${valueDisplay} (threshold: ${thresholdDisplay})`;
+    })
+    .join('\n');
+
+  return `\n\n<details>\n<summary>ℹ️ ${marginalViolations.length} near-threshold violation${marginalViolations.length === 1 ? '' : 's'} (no inline comment)</summary>\n\n${list}\n\n> *These functions are within 15% of the threshold. A light-touch refactoring (early return, extract one expression) may bring them under.*\n\n</details>`;
 }
 
 /**
@@ -994,26 +1066,90 @@ async function handleNoNewViolations(
   prContext: PRContext,
   violationsWithLines: ViolationWithLines[],
   uncoveredViolations: ComplexityViolation[],
+  marginalViolations: ComplexityViolation[],
   deltaMap: Map<string, ComplexityDelta>,
   report: ComplexityReport,
   deltas: ComplexityDelta[] | null,
   model: string,
   logger: Logger,
 ): Promise<void> {
-  if (violationsWithLines.length === 0) {
+  if (violationsWithLines.length === 0 && marginalViolations.length === 0) {
     return;
   }
 
   const skippedInDiff = getSkippedViolations(violationsWithLines, deltaMap);
   const uncoveredNote = buildUncoveredNote(uncoveredViolations, deltaMap);
   const skippedNote = buildSkippedNote(skippedInDiff);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote, model);
+  const marginalNote = buildMarginalNote(marginalViolations);
+  const summaryBody = buildReviewSummary(
+    report,
+    deltas,
+    uncoveredNote + skippedNote + marginalNote,
+    model,
+  );
   await postPRComment(octokit, prContext, summaryBody, logger);
 }
 
 /**
  * Generate AI comments and post review
  */
+/**
+ * Call the appropriate LLM path (enriched or standard) for comment generation.
+ */
+async function generateAIComments(
+  violations: ComplexityViolation[],
+  codeSnippets: Map<string, string>,
+  config: ReviewConfig,
+  report: ComplexityReport,
+  logger: Logger,
+  diffHunks?: Map<string, string>,
+  archContext?: ArchitecturalContext,
+): Promise<EnrichedCommentsResult> {
+  if (archContext) {
+    return generateEnrichedComments(
+      violations,
+      codeSnippets,
+      config.openrouterApiKey,
+      config.model,
+      report,
+      logger,
+      diffHunks,
+      archContext,
+    );
+  }
+
+  const aiComments = await generateLineComments(
+    violations,
+    codeSnippets,
+    config.openrouterApiKey,
+    config.model,
+    report,
+    logger,
+    diffHunks,
+  );
+  return { aiComments, architecturalNotes: [], prSummary: null };
+}
+
+/**
+ * Determine whether to post REQUEST_CHANGES based on new error-level violations.
+ */
+export function determineReviewEvent(
+  processed: ViolationProcessingResult,
+  deltaMap: Map<string, ComplexityDelta>,
+  blockOnNewErrors: boolean,
+): 'COMMENT' | 'REQUEST_CHANGES' {
+  if (!blockOnNewErrors) return 'COMMENT';
+
+  const hasNewErrors = processed.newOrDegraded.some(({ violation }) => {
+    const delta = deltaMap.get(createDeltaKey(violation));
+    return (
+      violation.severity === 'error' && (!delta || delta.severity === 'new' || delta.delta > 0)
+    );
+  });
+
+  return hasNewErrors ? 'REQUEST_CHANGES' : 'COMMENT';
+}
+
 async function generateAndPostReview(
   octokit: Octokit,
   prContext: PRContext,
@@ -1025,20 +1161,25 @@ async function generateAndPostReview(
   deltas: ComplexityDelta[] | null,
   logger: Logger,
   diffHunks?: Map<string, string>,
+  archContext?: ArchitecturalContext,
 ): Promise<void> {
-  const commentableViolations = processed.newOrDegraded.map(v => v.violation);
+  const allViolationsForLLM = [
+    ...processed.newOrDegraded.map(v => v.violation),
+    ...processed.marginal,
+  ];
   logger.info(
-    `Generating AI comments for ${commentableViolations.length} new/degraded violations...`,
+    `Generating AI comments for ${allViolationsForLLM.length} violations ` +
+      `(${processed.newOrDegraded.length} will get inline comments, ${processed.marginal.length} for context only)...`,
   );
 
-  const aiComments = await generateLineComments(
-    commentableViolations,
+  const { aiComments, architecturalNotes, prSummary } = await generateAIComments(
+    allViolationsForLLM,
     codeSnippets,
-    config.openrouterApiKey,
-    config.model,
+    config,
     report,
     logger,
     diffHunks,
+    archContext,
   );
 
   const lineComments = buildLineComments(
@@ -1050,24 +1191,19 @@ async function generateAndPostReview(
   );
   logger.info(`Built ${lineComments.length} line comments for new/degraded violations`);
 
-  const uncoveredNote = buildUncoveredNote(processed.uncovered, deltaMap);
-  const skippedNote = buildSkippedNote(processed.skipped);
-  const summaryBody = buildReviewSummary(report, deltas, uncoveredNote + skippedNote, config.model);
+  const summaryBody = buildReviewSummary(
+    report,
+    deltas,
+    buildUncoveredNote(processed.uncovered, deltaMap) +
+      buildSkippedNote(processed.skipped) +
+      buildMarginalNote(processed.marginal),
+    config.model,
+    architecturalNotes,
+    prSummary,
+  );
 
-  // Determine review event: REQUEST_CHANGES if blocking is enabled and
-  // any new/degraded violation has error severity
-  const hasNewErrors =
-    config.blockOnNewErrors &&
-    processed.newOrDegraded.some(({ violation }) => {
-      const delta = deltaMap.get(createDeltaKey(violation));
-      // Block on new violations or worsened-to-error violations
-      return (
-        violation.severity === 'error' && (!delta || delta.severity === 'new' || delta.delta > 0)
-      );
-    });
-  const event = hasNewErrors ? 'REQUEST_CHANGES' : 'COMMENT';
-
-  if (hasNewErrors) {
+  const event = determineReviewEvent(processed, deltaMap, config.blockOnNewErrors);
+  if (event === 'REQUEST_CHANGES') {
     logger.info('New error-level violations detected — posting REQUEST_CHANGES review');
   }
 
@@ -1078,6 +1214,29 @@ async function generateAndPostReview(
 /**
  * Post review with line-specific comments for all violations
  */
+function logProcessedViolations(
+  processed: ViolationProcessingResult,
+  totalCount: number,
+  logger: Logger,
+): void {
+  logger.info(
+    `${processed.withLines.length}/${totalCount} violations can have inline comments ` +
+      `(${processed.uncovered.length} outside diff)`,
+  );
+
+  const skippedCount =
+    processed.withLines.length - processed.newOrDegraded.length - processed.marginal.length;
+  if (skippedCount > 0) {
+    logger.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
+  }
+
+  if (processed.marginal.length > 0) {
+    logger.info(
+      `${processed.marginal.length} near-threshold violations (included in LLM context, no inline comments)`,
+    );
+  }
+}
+
 async function postLineReview(
   octokit: Octokit,
   prContext: PRContext,
@@ -1087,22 +1246,14 @@ async function postLineReview(
   config: ReviewConfig,
   logger: Logger,
   deltas: ComplexityDelta[] | null = null,
+  archContext?: ArchitecturalContext,
 ): Promise<void> {
   const { diffLines, patches } = await getPRPatchData(octokit, prContext);
   logger.info(`Diff covers ${diffLines.size} files`);
 
   const deltaMap = buildDeltaMap(deltas);
   const processed = processViolationsForReview(violations, diffLines, deltaMap);
-
-  logger.info(
-    `${processed.withLines.length}/${violations.length} violations can have inline comments ` +
-      `(${processed.uncovered.length} outside diff)`,
-  );
-
-  const skippedCount = processed.withLines.length - processed.newOrDegraded.length;
-  if (skippedCount > 0) {
-    logger.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
-  }
+  logProcessedViolations(processed, violations.length, logger);
 
   if (processed.newOrDegraded.length === 0) {
     logger.info('No new or degraded violations to comment on');
@@ -1111,6 +1262,7 @@ async function postLineReview(
       prContext,
       processed.withLines,
       processed.uncovered,
+      processed.marginal,
       deltaMap,
       report,
       deltas,
@@ -1120,9 +1272,12 @@ async function postLineReview(
     return;
   }
 
-  // Build diff hunks for the commentable violations so AI can see what changed
-  const commentableViolations = processed.newOrDegraded.map(v => v.violation);
-  const diffHunks = buildDiffHunks(patches, commentableViolations);
+  // Build diff hunks for all violations (including marginal) so the LLM has full context
+  const allReviewViolations = [
+    ...processed.newOrDegraded.map(v => v.violation),
+    ...processed.marginal,
+  ];
+  const diffHunks = buildDiffHunks(patches, allReviewViolations);
   logger.info(`Extracted diff hunks for ${diffHunks.size} functions`);
 
   await generateAndPostReview(
@@ -1136,6 +1291,7 @@ async function postLineReview(
     deltas,
     logger,
     diffHunks,
+    archContext,
   );
 }
 
@@ -1204,18 +1360,40 @@ async function runLogicReviewPass(result: AnalysisResult, setup: ReviewSetup): P
     );
 
     if (validatedComments.length > 0) {
-      logger.info(`Posting ${validatedComments.length} logic review comments`);
-      await postPRReview(
-        octokit,
-        prContext,
-        validatedComments,
-        '**Logic Review** (beta) — see inline comments.',
-        logger,
-      );
+      await postLogicReviewComments(validatedComments, octokit, prContext, logger);
     }
   } catch (error) {
     logger.warning(`Logic review failed (non-blocking): ${error}`);
   }
+}
+
+/**
+ * Filter logic review comments to diff lines and post as a review.
+ */
+async function postLogicReviewComments(
+  comments: LineComment[],
+  octokit: Octokit,
+  prContext: PRContext,
+  logger: Logger,
+): Promise<void> {
+  const diffLines = await getPRDiffLines(octokit, prContext);
+  const inDiff = comments.filter(c => diffLines.get(c.path)?.has(c.line));
+
+  if (inDiff.length < comments.length) {
+    logger.info(`${comments.length - inDiff.length} logic comments skipped (lines not in diff)`);
+  }
+
+  if (inDiff.length === 0) return;
+
+  logger.info(`Posting ${inDiff.length} logic review comments`);
+  await postPRReview(
+    octokit,
+    prContext,
+    inDiff,
+    '**Logic Review** (beta) — see inline comments.',
+    logger,
+    'COMMENT',
+  );
 }
 
 /**
@@ -1243,6 +1421,18 @@ export async function postReviewIfNeeded(
   );
 
   resetTokenUsage();
+
+  // Compute architectural context (non-blocking — review proceeds without it on failure)
+  let archContext: ArchitecturalContext | undefined;
+  if (shouldActivateArchReview(result, config)) {
+    logger.info('Architectural review activated — computing context...');
+    try {
+      archContext = computeArchitecturalContext(result, logger);
+    } catch (error) {
+      logger.warning(`Architectural context computation failed (non-blocking): ${error}`);
+    }
+  }
+
   await postLineReview(
     octokit,
     prContext,
@@ -1252,6 +1442,7 @@ export async function postReviewIfNeeded(
     config,
     logger,
     result.deltas,
+    archContext,
   );
 
   // Logic review pass (beta)

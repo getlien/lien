@@ -63,6 +63,10 @@ function buildContexts(
       enableDeltaTracking: true,
       baselineComplexityPath: '',
       blockOnNewErrors: false,
+      enableLogicReview: false,
+      logicReviewCategories: [],
+      enableArchitecturalReview: 'auto',
+      archReviewCategories: [],
     },
   };
 }
@@ -90,17 +94,19 @@ async function runPRAnalysis(
     return null;
   }
 
-  const currentReport = await runComplexityAnalysis(
+  const headResult = await runComplexityAnalysis(
     filesToAnalyze,
     reviewConfig.threshold,
     headClone.dir,
     logger,
   );
 
-  if (!currentReport) {
+  if (!headResult) {
     logger.warning('Failed to get complexity report for head');
     return null;
   }
+
+  const { report: currentReport, chunks } = headResult;
 
   // Clone and analyze base branch for delta tracking
   let baselineReport = null;
@@ -112,12 +118,13 @@ async function runPRAnalysis(
       token,
       logger,
     );
-    baselineReport = await runComplexityAnalysis(
+    const baseResult = await runComplexityAnalysis(
       filesToAnalyze,
       reviewConfig.threshold,
       baseClone.dir,
       logger,
     );
+    baselineReport = baseResult?.report ?? null;
   } catch (error) {
     logger.warning(
       `Failed to analyze base branch: ${error instanceof Error ? error.message : String(error)}`,
@@ -129,7 +136,7 @@ async function runPRAnalysis(
     : null;
 
   return {
-    result: { currentReport, baselineReport, deltas, filesToAnalyze },
+    result: { currentReport, baselineReport, deltas, filesToAnalyze, chunks },
     baseClone,
   };
 }

@@ -76,7 +76,7 @@ export function getTokenUsage(): TokenUsage {
  * Accumulate token usage from API response
  * Cost is returned in usage.cost when usage accounting is enabled
  */
-function trackUsage(
+export function trackUsage(
   usage:
     | { prompt_tokens: number; completion_tokens: number; total_tokens: number; cost?: number }
     | undefined,
@@ -98,8 +98,8 @@ export function parseCommentsResponse(
   content: string,
   logger: Logger,
 ): Record<string, string> | null {
-  // Try extracting JSON from markdown code block first
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  // Greedy match: LLM responses may contain inner ``` blocks (code suggestions)
+  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*)```/);
   const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
 
   logger.info(`Parsing JSON response (${jsonStr.length} chars)`);
@@ -128,14 +128,19 @@ export function parseCommentsResponse(
   return null;
 }
 
+/** Models known to support OpenRouter's extended reasoning parameter */
+const REASONING_MODELS = /deepseek|minimax|o1|o3|qwq/i;
+
 /**
  * Call OpenRouter API with batched comments prompt
  */
-async function callBatchedCommentsAPI(
+export async function callBatchedCommentsAPI(
   prompt: string,
   apiKey: string,
   model: string,
 ): Promise<OpenRouterResponse> {
+  const supportsReasoning = REASONING_MODELS.test(model);
+
   const response = await fetch(OPENROUTER_API_URL, {
     method: 'POST',
     headers: {
@@ -154,8 +159,9 @@ async function callBatchedCommentsAPI(
         },
         { role: 'user', content: prompt },
       ],
-      max_tokens: 4096,
+      max_tokens: 32768,
       temperature: 0.3,
+      ...(supportsReasoning ? { reasoning: { effort: 'high' } } : {}),
       usage: { include: true },
     }),
   });

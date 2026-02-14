@@ -249,6 +249,17 @@ All analyzed functions are within the configured complexity threshold.${deltaMes
 }
 
 /**
+ * Architectural context for enriched reviews.
+ * Provided by fingerprint.ts and dependent-context.ts.
+ */
+export interface ArchitecturalContext {
+  /** Pre-formatted codebase fingerprint block (markdown) */
+  fingerprint: string;
+  /** Dependent usage snippets keyed by "filepath::symbolName" */
+  dependentSnippets: Map<string, string>;
+}
+
+/**
  * Token usage info for display
  */
 export interface TokenUsageInfo {
@@ -606,6 +617,7 @@ function buildViolationSection(
   codeSnippets: Map<string, string>,
   report: ComplexityReport,
   diffHunks?: Map<string, string>,
+  dependentSnippets?: Map<string, string>,
 ): string {
   const first = groupViolations[0];
   const snippet = codeSnippets.get(key);
@@ -627,9 +639,11 @@ function buildViolationSection(
   const hunk = diffHunks?.get(key);
   const diffSection = hunk ? `\n**Changes in this PR (diff):**\n\`\`\`diff\n${hunk}\n\`\`\`` : '';
 
+  const dependentSection = dependentSnippets?.get(key) ? `\n\n${dependentSnippets.get(key)}` : '';
+
   return `### ${index}. ${key}
 - **Function**: \`${first.symbolName}\` (${first.symbolType})
-${metricLines}${fileContext}${testContext}${dependencyContext}${snippetSection}${diffSection}`;
+${metricLines}${fileContext}${testContext}${dependencyContext}${snippetSection}${diffSection}${dependentSection}`;
 }
 
 /**
@@ -644,6 +658,7 @@ export function buildBatchedCommentsPrompt(
   codeSnippets: Map<string, string>,
   report: ComplexityReport,
   diffHunks?: Map<string, string>,
+  archContext?: ArchitecturalContext,
 ): string {
   // Group violations by filepath::symbolName so one function gets one comment
   const grouped = new Map<string, ComplexityViolation[]>();
@@ -665,6 +680,7 @@ export function buildBatchedCommentsPrompt(
         codeSnippets,
         report,
         diffHunks,
+        archContext?.dependentSnippets,
       );
     })
     .join('\n\n');
@@ -674,8 +690,99 @@ export function buildBatchedCommentsPrompt(
     .map(key => `  "${key}": "your comment here"`)
     .join(',\n');
 
-  return `You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.
+  // Conditional sections when architectural context is provided
+  const systemRole = archContext
+    ? 'You are a senior engineer reviewing code for complexity and architectural coherence. Generate thoughtful, context-aware review comments.'
+    : 'You are a senior engineer reviewing code for complexity. Generate thoughtful, context-aware review comments.';
 
+  const fingerprintSection = archContext?.fingerprint ? `\n${archContext.fingerprint}\n` : '';
+
+  const coherenceInstructions = archContext
+    ? `
+**Architectural observations — look for these across the changed files:**
+- **DRY violations**: duplicated logic, repeated patterns, or copy-pasted code across functions/files that should be shared
+- **Single Responsibility**: functions or files doing too many unrelated things (mixing I/O with business logic, orchestration with computation)
+- **Coupling issues**: functions that know too much about each other's internals, or tight coupling between modules that should be independent
+- **Missing abstractions**: repeated conditional patterns that should be a lookup table, strategy, or shared helper
+- **KISS violations**: over-engineered solutions where a simpler approach exists — unnecessary abstractions, premature generalization, wrapper functions that add no value
+- **Cross-file coherence**: pattern conflicts (class-based service in a functional codebase), naming convention violations
+- Do NOT flag minor style variations, metric values already covered by inline comments, or intentional deviations (test utilities, generated code)
+
+`
+    : '';
+
+  const prSummaryInstructions = archContext
+    ? `
+**PR-level summary**: After reviewing all functions, produce a brief PR-level summary:
+- 1-2 sentences: overall assessment and any cross-cutting concerns
+- If the PR touches 3+ files: whether changes are cohesive or could be split
+- If nothing notable at PR level, set \`pr_summary\` to null
+
+`
+    : '';
+
+  const archExamples = archContext
+    ? `
+**Examples of GOOD architectural observations:**
+- "Both \`computeNaming()\` and \`computeAsyncPattern()\` iterate all chunks filtering by symbolType — extract a shared \`filterFunctionChunks(chunks)\` helper to eliminate the duplication."
+- "\`hasExportChanges()\` builds a Map, iterates baseline, then iterates chunks again. This mixes 3 responsibilities (data building, comparison, detection) — split into \`buildExportMap()\`, \`hasRemovedSymbols()\`, \`hasNewExports()\`."
+- "The return type of \`computeFingerprint()\` changed but its 3 dependents still expect the old shape — this will cause runtime errors."
+
+**Examples of BAD architectural observations (do NOT produce):**
+- "Consider using the repository pattern for data access." — Generic advice not grounded in specific code.
+- "Halstead Volume of 3,056 indicates many unique operations." — Just restating metric values already shown in inline comments.
+- "This function has HIGH risk dependency impact." — Restating metadata without actionable insight.
+
+`
+    : '';
+
+  const responseFormatSection = archContext
+    ? `## Response Format
+
+Respond with ONLY valid JSON. Structure:
+
+\`\`\`json
+{
+  "comments": {
+${jsonKeys}
+  },
+  "architectural_notes": [
+    {
+      "scope": "filepath::symbolName or PR-level",
+      "observation": "1 sentence describing the issue",
+      "evidence": "specific file/line/metric backing it",
+      "suggestion": "what to do about it"
+    }
+  ],
+  "pr_summary": "1-2 sentences or null"
+}
+\`\`\`
+
+Rules for \`comments\`: Use \\n for newlines within comments.
+
+Rules for \`architectural_notes\`:
+- ONLY include notes backed by specific evidence (file names, function names, code patterns)
+- Focus on design principles (DRY, SRP, coupling) — do NOT restate complexity metrics already in inline comments
+- Maximum 3 notes per review — quality over quantity
+- If no architectural issues found, return an empty array
+
+Rules for \`pr_summary\`:
+- 1-2 sentences maximum
+- Focus on cross-cutting concerns, not per-function details
+- If nothing notable at PR level, set to null`
+    : `## Response Format
+
+Respond with ONLY valid JSON. Each key is "filepath::symbolName", value is the comment text.
+Use \\n for newlines within comments.
+
+\`\`\`json
+{
+${jsonKeys}
+}
+\`\`\``;
+
+  return `${systemRole}
+${fingerprintSection}
 ## Violations to Review
 
 ${violationsText}
@@ -713,14 +820,16 @@ For each violation, write a code review comment that:
 - **Replacing straightforward imperative code with an abstraction that's equally long.** If the "after" isn't shorter, clearer, or more testable than the "before", don't suggest it.
 - **Ignoring the threshold margin.** If the metric is barely over the threshold (within ~10%), say so and suggest a light touch (e.g., extracting one expression, adding an early return) rather than a full rewrite.
 
-**IMPORTANT**: When a diff is provided, focus your review on the CHANGED lines shown in the diff. Pre-existing complexity is context, not the primary target. If the complexity was introduced or worsened in this PR, say so. If it's pre-existing, note that and suggest improvements the author could make while they're already in the file.
+**Refactoring correctness:**
+- When suggesting to split or extract a function, ensure ALL branches of the original code are preserved in the refactored version. Do not drop else-branches, error paths, or edge case handling.
+- When your code suggestion introduces new types, interfaces, or imported symbols, include the necessary import statements.
+${coherenceInstructions}${prSummaryInstructions}**IMPORTANT**: When a diff is provided, focus your review on the CHANGED lines shown in the diff. Pre-existing complexity is context, not the primary target. If the complexity was introduced or worsened in this PR, say so. If it's pre-existing, note that and suggest improvements the author could make while they're already in the file.
 
 Be direct and specific to THIS code. Avoid generic advice like "break into smaller functions."
 
 **Example of a good comment:**
 "${getExampleForPrimaryMetric(violations)}"
-
-Write comments of similar quality and specificity for each violation below.
+${archExamples}Write comments of similar quality and specificity for each violation below.
 
 IMPORTANT: Do NOT include headers like "Complexity: X" or emojis - we add those.
 
@@ -735,14 +844,5 @@ Rules:
 - Only use \`\`\`suggestion when you have a clear, complete replacement
 - For structural advice without a concrete replacement, use plain text (no code block)
 
-## Response Format
-
-Respond with ONLY valid JSON. Each key is "filepath::symbolName", value is the comment text.
-Use \\n for newlines within comments.
-
-\`\`\`json
-{
-${jsonKeys}
-}
-\`\`\``;
+${responseFormatSection}`;
 }

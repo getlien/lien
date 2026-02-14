@@ -148,38 +148,47 @@ export async function postPRReview(
   logger: Logger,
   event: 'COMMENT' | 'REQUEST_CHANGES' = 'COMMENT',
 ): Promise<void> {
-  if (comments.length === 0) {
-    // No line comments, just post summary as regular comment
-    await postPRComment(octokit, prContext, summaryBody, logger);
-    return;
-  }
-
   logger.info(`Creating review with ${comments.length} line comments (event: ${event})`);
 
-  try {
-    // Create a review with line comments
-    await octokit.pulls.createReview({
-      owner: prContext.owner,
-      repo: prContext.repo,
-      pull_number: prContext.pullNumber,
-      commit_id: prContext.headSha,
-      event,
-      body: summaryBody,
-      comments: comments.map(c => ({
-        path: c.path,
-        line: c.line,
-        ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' } : {}),
-        side: 'RIGHT' as const,
-        body: c.body,
-      })),
-    });
+  const reviewParams = {
+    owner: prContext.owner,
+    repo: prContext.repo,
+    pull_number: prContext.pullNumber,
+    commit_id: prContext.headSha,
+    event,
+    body: summaryBody,
+    ...(comments.length > 0
+      ? {
+          comments: comments.map(c => ({
+            path: c.path,
+            line: c.line,
+            ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' } : {}),
+            side: 'RIGHT' as const,
+            body: c.body,
+          })),
+        }
+      : {}),
+  };
 
+  try {
+    await octokit.pulls.createReview(reviewParams);
     logger.info('Review posted successfully');
   } catch (error) {
-    // If line comments fail (e.g., lines not in diff), fall back to regular comment
-    logger.warning(`Failed to post line comments: ${error}`);
-    logger.info('Falling back to regular PR comment');
-    await postPRComment(octokit, prContext, summaryBody, logger);
+    if (comments.length > 0) {
+      // Line comments failed (e.g., lines not in diff) — retry as body-only review
+      logger.warning(`Failed to post line comments: ${error}`);
+      logger.info('Retrying as body-only review');
+      await octokit.pulls.createReview({
+        owner: prContext.owner,
+        repo: prContext.repo,
+        pull_number: prContext.pullNumber,
+        commit_id: prContext.headSha,
+        event,
+        body: summaryBody,
+      });
+    } else {
+      throw error;
+    }
   }
 }
 

@@ -9,44 +9,52 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    
+
     strategy:
       matrix:
         node-version: [22.x]
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
-      
+
       - name: Install dependencies
         run: npm ci
 
       - name: Format check
         run: npm run format:check
 
-      - name: Build Core (required by CLI)
-        run: npm run build -w @liendev/core
+      - name: Build Core & Review (required by CLI and App)
+        run: npm run build -w @liendev/core && npm run build -w @liendev/review
 
       - name: Lint
         run: npm run lint
 
-      - name: Type check
+      - name: Type check (CLI)
         run: npm run typecheck --workspace=packages/cli
-      
-      - name: Run tests
+
+      - name: Type check (Review)
+        run: npm run typecheck --workspace=packages/review
+
+      - name: Type check (App)
+        run: npm run typecheck --workspace=packages/app
+
+      - name: Run tests (CLI)
         run: npm run test --workspace=packages/cli
-      
+
+      - name: Run tests (Review)
+        run: npm run test --workspace=packages/review
+
       - name: Build all packages
         run: npm run build
-      
+
       - name: Test CLI
         run: |
           node packages/cli/dist/index.js --version
           node packages/cli/dist/index.js --help
-
