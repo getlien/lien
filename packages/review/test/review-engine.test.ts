@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import type { ComplexityViolation, ComplexityDelta } from '@liendev/core';
+import type { ComplexityViolation, ComplexityDelta, ComplexityReport } from '@liendev/core';
 import type { LineComment } from '../src/types.js';
 import {
   determineReviewEvent,
   isMarginalViolation,
   filterDuplicateComments,
   buildDedupNote,
+  prioritizeViolations,
 } from '../src/review-engine.js';
 import {
   parseVeilleMarker,
@@ -421,5 +422,73 @@ describe('buildDedupNote', () => {
     const result = buildDedupNote(['a.ts::f1'], [violation], new Map());
     expect(result).toContain('1 violation already reviewed');
     expect(result).not.toContain('1 violations');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// prioritizeViolations
+// ---------------------------------------------------------------------------
+
+function makeReport(
+  fileEntries: Array<{
+    filepath: string;
+    dependentCount?: number;
+    riskLevel?: string;
+  }>,
+): ComplexityReport {
+  const files: Record<string, any> = {};
+  for (const entry of fileEntries) {
+    files[entry.filepath] = {
+      violations: [],
+      dependents: [],
+      testAssociations: [],
+      riskLevel: entry.riskLevel || 'low',
+      dependentCount: entry.dependentCount ?? 0,
+    };
+  }
+  return {
+    summary: {
+      filesAnalyzed: fileEntries.length,
+      totalViolations: 0,
+      bySeverity: { error: 0, warning: 0 },
+      avgComplexity: 0,
+      maxComplexity: 0,
+    },
+    files,
+  };
+}
+
+describe('prioritizeViolations', () => {
+  it('sorts errors before warnings', () => {
+    const warning = makeViolation({ filepath: 'a.ts', symbolName: 'w', severity: 'warning' });
+    const error = makeViolation({ filepath: 'a.ts', symbolName: 'e', severity: 'error' });
+    const report = makeReport([{ filepath: 'a.ts' }]);
+
+    const result = prioritizeViolations([warning, error], report);
+    expect(result[0].symbolName).toBe('e');
+    expect(result[1].symbolName).toBe('w');
+  });
+
+  it('sorts higher dependent count first', () => {
+    const low = makeViolation({ filepath: 'low.ts', symbolName: 'low', severity: 'warning' });
+    const high = makeViolation({ filepath: 'high.ts', symbolName: 'high', severity: 'warning' });
+    const report = makeReport([
+      { filepath: 'low.ts', dependentCount: 1, riskLevel: 'low' },
+      { filepath: 'high.ts', dependentCount: 10, riskLevel: 'low' },
+    ]);
+
+    const result = prioritizeViolations([low, high], report);
+    expect(result[0].symbolName).toBe('high');
+    expect(result[1].symbolName).toBe('low');
+  });
+
+  it('falls back to severity when impact is equal', () => {
+    const warning = makeViolation({ filepath: 'a.ts', symbolName: 'w', severity: 'warning' });
+    const error = makeViolation({ filepath: 'a.ts', symbolName: 'e', severity: 'error' });
+    const report = makeReport([{ filepath: 'a.ts', dependentCount: 5 }]);
+
+    const result = prioritizeViolations([warning, error], report);
+    expect(result[0].symbolName).toBe('e');
+    expect(result[1].symbolName).toBe('w');
   });
 });
