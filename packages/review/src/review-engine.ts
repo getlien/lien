@@ -1214,6 +1214,29 @@ async function generateAndPostReview(
 /**
  * Post review with line-specific comments for all violations
  */
+function logProcessedViolations(
+  processed: ViolationProcessingResult,
+  totalCount: number,
+  logger: Logger,
+): void {
+  logger.info(
+    `${processed.withLines.length}/${totalCount} violations can have inline comments ` +
+      `(${processed.uncovered.length} outside diff)`,
+  );
+
+  const skippedCount =
+    processed.withLines.length - processed.newOrDegraded.length - processed.marginal.length;
+  if (skippedCount > 0) {
+    logger.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
+  }
+
+  if (processed.marginal.length > 0) {
+    logger.info(
+      `${processed.marginal.length} near-threshold violations (included in LLM context, no inline comments)`,
+    );
+  }
+}
+
 async function postLineReview(
   octokit: Octokit,
   prContext: PRContext,
@@ -1230,23 +1253,7 @@ async function postLineReview(
 
   const deltaMap = buildDeltaMap(deltas);
   const processed = processViolationsForReview(violations, diffLines, deltaMap);
-
-  logger.info(
-    `${processed.withLines.length}/${violations.length} violations can have inline comments ` +
-      `(${processed.uncovered.length} outside diff)`,
-  );
-
-  const skippedCount =
-    processed.withLines.length - processed.newOrDegraded.length - processed.marginal.length;
-  if (skippedCount > 0) {
-    logger.info(`Skipping ${skippedCount} unchanged pre-existing violations (no LLM calls needed)`);
-  }
-
-  if (processed.marginal.length > 0) {
-    logger.info(
-      `${processed.marginal.length} near-threshold violations (included in LLM context, no inline comments)`,
-    );
-  }
+  logProcessedViolations(processed, violations.length, logger);
 
   if (processed.newOrDegraded.length === 0) {
     logger.info('No new or degraded violations to comment on');

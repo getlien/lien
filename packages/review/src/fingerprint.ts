@@ -61,17 +61,21 @@ export function computeFingerprint(chunks: CodeChunk[]): CodebaseFingerprint {
   };
 }
 
-function computeParadigm(chunks: CodeChunk[]): CodebaseFingerprint['paradigm'] {
-  let functionCount = 0;
-  let methodCount = 0;
-  let classCount = 0;
+const PARADIGM_TYPES = new Set(['function', 'method', 'class', 'interface']);
 
+function countSymbolTypes(chunks: CodeChunk[]): Record<string, number> {
+  const counts: Record<string, number> = { function: 0, method: 0, class: 0 };
   for (const chunk of chunks) {
     const st = chunk.metadata.symbolType;
-    if (st === 'function') functionCount++;
-    else if (st === 'method') methodCount++;
-    else if (st === 'class' || st === 'interface') classCount++;
+    if (st === 'class' || st === 'interface') counts.class++;
+    else if (st && PARADIGM_TYPES.has(st)) counts[st]++;
   }
+  return counts;
+}
+
+function computeParadigm(chunks: CodeChunk[]): CodebaseFingerprint['paradigm'] {
+  const counts = countSymbolTypes(chunks);
+  const { function: functionCount, method: methodCount, class: classCount } = counts;
 
   const total = functionCount + methodCount + classCount;
   const ratio = total === 0 ? 0.5 : functionCount / total;
@@ -155,35 +159,40 @@ function groupChunksByFile(chunks: CodeChunk[]): Map<string, CodeChunk[]> {
   return map;
 }
 
+function collectFileSymbols(fileChunks: CodeChunk[]): {
+  exports: Set<string>;
+  imports: Set<string>;
+} {
+  const exports = new Set<string>();
+  const imports = new Set<string>();
+
+  for (const chunk of fileChunks) {
+    if (chunk.metadata.exports) {
+      for (const exp of chunk.metadata.exports) exports.add(exp);
+    }
+    if (chunk.metadata.importedSymbols) {
+      for (const syms of Object.values(chunk.metadata.importedSymbols)) {
+        for (const sym of syms) imports.add(sym);
+      }
+    }
+  }
+
+  return { exports, imports };
+}
+
+function isBarrelFile(file: string, exports: Set<string>, imports: Set<string>): boolean {
+  const basename = file.split('/').pop() || '';
+  if (BARREL_BASENAME.test(basename)) return true;
+  return [...exports].some(exp => imports.has(exp));
+}
+
 function countBarrelFiles(chunksByFile: Map<string, CodeChunk[]>): number {
   let count = 0;
 
   for (const [file, fileChunks] of chunksByFile) {
-    const allExports = new Set<string>();
-    const allImportedSymbols = new Set<string>();
-
-    for (const chunk of fileChunks) {
-      if (chunk.metadata.exports) {
-        for (const exp of chunk.metadata.exports) allExports.add(exp);
-      }
-      if (chunk.metadata.importedSymbols) {
-        for (const syms of Object.values(chunk.metadata.importedSymbols)) {
-          for (const sym of syms) allImportedSymbols.add(sym);
-        }
-      }
-    }
-
-    if (allExports.size === 0) continue;
-
-    const basename = file.split('/').pop() || '';
-    if (BARREL_BASENAME.test(basename)) {
-      count++;
-      continue;
-    }
-
-    // Re-export: file exports a symbol it also imports
-    const hasReExport = [...allExports].some(exp => allImportedSymbols.has(exp));
-    if (hasReExport) count++;
+    const { exports, imports } = collectFileSymbols(fileChunks);
+    if (exports.size === 0) continue;
+    if (isBarrelFile(file, exports, imports)) count++;
   }
 
   return count;
@@ -200,19 +209,28 @@ function computeAverageImportDepth(chunks: CodeChunk[]): number {
   return depths.length > 0 ? depths.reduce((a, b) => a + b, 0) / depths.length : 0;
 }
 
+function classifyChunkAsync(chunk: CodeChunk): 'async' | 'promise' | 'callback' | null {
+  const sig = chunk.metadata.signature || '';
+  if (sig.includes('async ')) return 'async';
+  if (isPromisePattern(sig, chunk.content)) return 'promise';
+  if (isCallbackPattern(sig)) return 'callback';
+  return null;
+}
+
 function computeAsyncPattern(chunks: CodeChunk[]): CodebaseFingerprint['asyncPattern'] {
   let asyncAwaitCount = 0;
   let promiseCount = 0;
   let callbackCount = 0;
 
-  for (const chunk of chunks) {
-    const st = chunk.metadata.symbolType;
-    if (st !== 'function' && st !== 'method') continue;
+  const fnChunks = chunks.filter(
+    c => c.metadata.symbolType === 'function' || c.metadata.symbolType === 'method',
+  );
 
-    const sig = chunk.metadata.signature || '';
-    if (sig.includes('async ')) asyncAwaitCount++;
-    else if (isPromisePattern(sig, chunk.content)) promiseCount++;
-    else if (isCallbackPattern(sig)) callbackCount++;
+  for (const chunk of fnChunks) {
+    const kind = classifyChunkAsync(chunk);
+    if (kind === 'async') asyncAwaitCount++;
+    else if (kind === 'promise') promiseCount++;
+    else if (kind === 'callback') callbackCount++;
   }
 
   return classifyAsyncPattern(asyncAwaitCount, promiseCount, callbackCount);
