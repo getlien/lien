@@ -687,22 +687,39 @@ function buildUncoveredNote(
 function buildSkippedNote(skippedViolations: ComplexityViolation[]): string {
   if (skippedViolations.length === 0) return '';
 
-  const skippedList = skippedViolations
-    .map(v => `  - \`${v.symbolName}\` in \`${v.filepath}\`: complexity ${v.complexity}`)
-    .join('\n');
+  const skippedList = skippedViolations.map(formatViolationListItem).join('\n');
 
   return `\n\n<details>\n<summary>ℹ️ ${skippedViolations.length} pre-existing violation${skippedViolations.length === 1 ? '' : 's'} (unchanged)</summary>\n\n${skippedList}\n\n> *These violations existed before this PR and haven't changed. No inline comments added to reduce noise.*\n\n</details>`;
 }
 
 /**
+ * Format a violation as a summary list item.
+ * Shared by marginal, skipped, and dedup notes.
+ */
+function formatViolationListItem(v: ComplexityViolation): string {
+  const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
+  const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
+  const thresholdDisplay = formatThresholdValue(v.metricType || 'cyclomatic', v.threshold);
+  return `  - \`${v.symbolName}\` in \`${v.filepath}\`: ${metricLabel} ${valueDisplay} (threshold: ${thresholdDisplay})`;
+}
+
+/**
  * Build note for violations already commented on in a previous review round.
  */
-function buildDedupNote(skippedKeys: string[]): string {
+function buildDedupNote(skippedKeys: string[], violations: ComplexityViolation[]): string {
   if (skippedKeys.length === 0) return '';
+
+  // Build a lookup from violation key → violation for metric details
+  const violationsByKey = new Map<string, ComplexityViolation>();
+  for (const v of violations) {
+    const key = `${v.filepath}::${v.symbolName}`;
+    if (!violationsByKey.has(key)) violationsByKey.set(key, v);
+  }
 
   const list = skippedKeys
     .map(key => {
-      // key is "filepath::symbolName" — extract just the symbol
+      const v = violationsByKey.get(key);
+      if (v) return formatViolationListItem(v);
       const sep = key.lastIndexOf('::');
       const symbol = sep !== -1 ? key.slice(sep + 2) : key;
       const file = sep !== -1 ? key.slice(0, sep) : '';
@@ -1115,14 +1132,7 @@ function processViolationsForReview(
 function buildMarginalNote(marginalViolations: ComplexityViolation[]): string {
   if (marginalViolations.length === 0) return '';
 
-  const list = marginalViolations
-    .map(v => {
-      const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
-      const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
-      const thresholdDisplay = formatThresholdValue(v.metricType || 'cyclomatic', v.threshold);
-      return `  - \`${v.symbolName}\` in \`${v.filepath}\`: ${metricLabel} ${valueDisplay} (threshold: ${thresholdDisplay})`;
-    })
-    .join('\n');
+  const list = marginalViolations.map(formatViolationListItem).join('\n');
 
   return `\n\n<details>\n<summary>ℹ️ ${marginalViolations.length} near-threshold violation${marginalViolations.length === 1 ? '' : 's'} (no inline comment)</summary>\n\n${list}\n\n> *These functions are within 15% of the threshold. A light-touch refactoring (early return, extract one expression) may bring them under.*\n\n</details>`;
 }
@@ -1285,7 +1295,10 @@ async function generateAndPostReview(
     buildUncoveredNote(processed.uncovered, deltaMap) +
       buildSkippedNote(processed.skipped) +
       buildMarginalNote(processed.marginal) +
-      buildDedupNote(dedupSkippedKeys),
+      buildDedupNote(
+        dedupSkippedKeys,
+        processed.newOrDegraded.map(v => v.violation),
+      ),
     config.model,
     architecturalNotes,
     prSummary,
