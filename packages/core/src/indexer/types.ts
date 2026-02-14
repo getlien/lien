@@ -32,6 +32,7 @@ export interface ChunkMetadata {
   cognitiveComplexity?: number; // Cognitive complexity (penalizes nesting)
   parameters?: string[]; // Function parameters
   signature?: string; // Full signature
+  returnType?: string; // Return type (e.g. 'void', 'string', 'Promise<void>')
   imports?: string[]; // File imports (for context)
 
   // Symbol-level dependency tracking (v0.23.0)

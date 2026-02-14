@@ -36,6 +36,7 @@ export interface SemanticMetadata {
   cognitiveComplexity?: number;
   parameters?: string[];
   signature?: string;
+  returnType?: string;
   imports?: string[];
 
   // Halstead metrics (v0.19.0)
