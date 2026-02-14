@@ -170,11 +170,8 @@ function collectFileSymbols(fileChunks: CodeChunk[]): {
     if (chunk.metadata.exports) {
       for (const exp of chunk.metadata.exports) exports.add(exp);
     }
-    if (chunk.metadata.importedSymbols) {
-      for (const syms of Object.values(chunk.metadata.importedSymbols)) {
-        for (const sym of syms) imports.add(sym);
-      }
-    }
+    const allImported = Object.values(chunk.metadata.importedSymbols ?? {}).flat();
+    for (const sym of allImported) imports.add(sym);
   }
 
   return { exports, imports };
