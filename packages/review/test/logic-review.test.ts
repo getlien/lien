@@ -291,6 +291,33 @@ describe('detectLogicFindings', () => {
       expect(findings).toHaveLength(0);
     });
 
+    it('does not flag calls to Promise<void>-returning async functions', () => {
+      const content = 'async function handler() {\n  await sendEmail(user);\n  return;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/handler.ts',
+            symbolName: 'handler',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'sendEmail', line: 2 }],
+          },
+          content,
+        ),
+        createChunk({
+          file: 'src/handler.ts',
+          symbolName: 'sendEmail',
+          returnType: 'Promise<void>',
+          startLine: 5,
+          endLine: 10,
+        }),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(0);
+    });
+
     it('still flags calls to non-void functions', () => {
       const content = 'function caller() {\n  getValue();\n  return;\n}';
       const chunks = [

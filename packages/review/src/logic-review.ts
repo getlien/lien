@@ -118,11 +118,16 @@ function detectBreakingChanges(
  */
 function buildVoidSymbolSet(chunks: CodeChunk[]): Set<string> {
   const voidSymbols = new Set<string>();
-  const voidReturnTypes = new Set(['void', ': void', 'Promise<void>', ': Promise<void>']);
+  const voidReturnTypes = new Set(['void', 'Promise<void>']);
 
   for (const chunk of chunks) {
     if (!chunk.metadata.symbolName || !chunk.metadata.returnType) continue;
-    if (voidReturnTypes.has(chunk.metadata.returnType)) {
+    // Normalize: strip leading ':' and whitespace to handle ': void', ':void', etc.
+    let normalized = chunk.metadata.returnType.trim();
+    if (normalized.startsWith(':')) {
+      normalized = normalized.slice(1).trimStart();
+    }
+    if (voidReturnTypes.has(normalized)) {
       voidSymbols.add(chunk.metadata.symbolName);
     }
   }

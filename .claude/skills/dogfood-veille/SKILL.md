@@ -942,7 +942,7 @@ This is the complete set of expected violations. Use this to score the review ou
 | `_dogfood-veille/coupling-smells.ts` | `processRecordPipeline` | halstead_effort | warning+ | Long function, many operands |
 | `_dogfood-veille/coupling-smells.ts` | `processRecordPipeline` | halstead_bugs | warning+ | High volume |
 
-**Total expected symbols:** 5 unique (`handleRequest`, `filterSortFormatUsers`, `filterSortFormatProducts`, `filterSortFormatOrders`, `processEvent`, `sendNotification`, `createTransformer`, `processRecordPipeline` = 8 unique symbols)
+**Total expected symbols:** 8 unique (`handleRequest`, `filterSortFormatUsers`, `filterSortFormatProducts`, `filterSortFormatOrders`, `processEvent`, `sendNotification`, `createTransformer`, `processRecordPipeline`)
 
 **Total expected metric violations:** ~13-15 (some symbols trigger multiple metrics)
 
