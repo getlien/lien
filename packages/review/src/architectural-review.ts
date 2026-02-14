@@ -289,11 +289,29 @@ export async function generateEnrichedComments(
     );
   }
 
-  const content = data.choices[0].message.content;
+  let content = data.choices[0].message.content;
 
   // Parse with extended schema when archContext is provided
   if (archContext) {
-    const archResponse = parseEnrichedResponse(content, logger);
+    let archResponse = parseEnrichedResponse(content, logger);
+
+    // Retry once if parsing fails (reasoning models sometimes produce truncated output)
+    if (!archResponse) {
+      logger.warning(`LLM response (${content.length} chars) could not be parsed, retrying...`);
+      logger.info(`Response preview: ${content.slice(0, 200)}`);
+
+      const retryData = await callBatchedCommentsAPI(prompt, apiKey, model);
+      if (retryData.usage) {
+        trackUsage(retryData.usage);
+        const costStr = retryData.usage.cost ? ` ($${retryData.usage.cost.toFixed(6)})` : '';
+        logger.info(
+          `Retry tokens: ${retryData.usage.prompt_tokens} in, ${retryData.usage.completion_tokens} out${costStr}`,
+        );
+      }
+      content = retryData.choices[0].message.content;
+      archResponse = parseEnrichedResponse(content, logger);
+    }
+
     if (archResponse) {
       const aiComments = mapCommentsToViolations(archResponse.comments, violations, logger);
       return {
@@ -302,6 +320,9 @@ export async function generateEnrichedComments(
         prSummary: archResponse.prSummary,
       };
     }
+
+    // Both attempts failed — log for debugging
+    logger.warning(`Response after retry (${content.length} chars): ${content.slice(0, 300)}`);
   }
 
   // Fallback: parse as flat comments (existing behavior)
