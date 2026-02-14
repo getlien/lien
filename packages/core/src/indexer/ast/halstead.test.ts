@@ -213,7 +213,7 @@ describe('Halstead Metrics', () => {
       expect(Math.abs(metrics.effort - expectedEffort)).toBeLessThan(1);
     });
 
-    it('should estimate bugs as V / 3000 (rounded)', () => {
+    it('should estimate bugs as E^(2/3) / 3000 (rounded)', () => {
       const counts = {
         n1: 4,
         n2: 6,
@@ -225,9 +225,32 @@ describe('Halstead Metrics', () => {
 
       const metrics = calculateHalsteadMetrics(counts);
 
-      // B = V / 3000 (implementation rounds to 3 decimal places)
-      const expectedBugs = metrics.volume / 3000;
+      // B = E^(2/3) / 3000 (implementation rounds to 3 decimal places)
+      const expectedBugs = Math.pow(metrics.effort, 2 / 3) / 3000;
       expect(Math.abs(metrics.bugs - expectedBugs)).toBeLessThan(0.001);
+    });
+
+    it('should flag high-difficulty functions even with moderate volume', () => {
+      // Regression (#258): high difficulty with moderate volume produces high effort
+      // but old V/3000 formula gave bugs < 1.5 (missed the warning threshold).
+      // New E^(2/3)/3000 formula correctly flags these functions.
+      const counts = {
+        n1: 12, // distinct operators
+        n2: 5, // few distinct operands (reused heavily)
+        N1: 80, // total operators
+        N2: 300, // many total operands (high reuse → high difficulty)
+        operators: new Map<string, number>(),
+        operands: new Map<string, number>(),
+      };
+
+      const metrics = calculateHalsteadMetrics(counts);
+
+      // D = (12/2) × (300/5) = 6 × 60 = 360 — very high difficulty
+      expect(metrics.difficulty).toBe(360);
+      // V ≈ 1553 — moderate volume, old formula would give ~0.52 bugs
+      expect(metrics.volume / 3000).toBeLessThan(1.5);
+      // New formula uses effort, which incorporates difficulty: bugs > 1.5
+      expect(metrics.bugs).toBeGreaterThan(1.5);
     });
 
     it('should handle edge case with zero operands', () => {

@@ -61,7 +61,7 @@ export interface ChunkMetadata {
   halsteadVolume?: number; // V = N × log₂(n) - size of implementation
   halsteadDifficulty?: number; // D = (n1/2) × (N2/n2) - error-proneness
   halsteadEffort?: number; // E = D × V - mental effort required
-  halsteadBugs?: number; // B = V / 3000 - estimated delivered bugs
+  halsteadBugs?: number; // B = E^(2/3) / 3000 - estimated delivered bugs
 
   // Multi-tenant fields (optional for backward compatibility)
   /**

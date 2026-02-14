@@ -357,7 +357,7 @@ Analyze code complexity for tech debt identification and refactoring prioritizat
 - **Test paths**: Number of test cases needed (cyclomatic complexity)
 - **Mental load**: How hard to follow (penalizes nesting)
 - **Time to understand**: Estimated reading time (Halstead effort)
-- **Estimated bugs**: Predicted bug count (Halstead volume / 3000)
+- **Estimated bugs**: Predicted bug count (Halstead effort-based)
 
 ### Parameters
 
@@ -442,7 +442,7 @@ Analyze complexity of src/api/
 | `cyclomatic` | Test cases needed for full branch coverage |
 | `cognitive` | Mental load - how hard to follow (penalizes nesting) |
 | `halstead_effort` | Time to understand (shown as human-readable duration) |
-| `halstead_bugs` | Estimated bug count (Volume / 3000) |
+| `halstead_bugs` | Estimated bug count (Effort^(2/3) / 3000) |
 
 ::: tip Halstead Metrics
 Both Halstead metrics use intuitive thresholds:

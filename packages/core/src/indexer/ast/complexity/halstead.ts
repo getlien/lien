@@ -26,7 +26,7 @@ export interface HalsteadMetrics {
   difficulty: number; // D = (n1/2) × (N2/n2)
   effort: number; // E = D × V
   time: number; // T = E / 18 (seconds to understand)
-  bugs: number; // B = V / 3000 (estimated delivered bugs)
+  bugs: number; // B = E^(2/3) / 3000 (estimated delivered bugs)
 }
 
 /**
@@ -208,7 +208,7 @@ export function countHalstead(
  * - Difficulty (D) = (n1/2) × (N2/n2) - error-proneness
  * - Effort (E) = D × V - mental effort required
  * - Time (T) = E / 18 - seconds to understand (Stroud number)
- * - Bugs (B) = V / 3000 - estimated delivered bugs
+ * - Bugs (B) = E^(2/3) / 3000 - estimated delivered bugs (effort-based variant)
  *
  * @param counts - Raw Halstead counts from countHalstead()
  * @returns Calculated HalsteadMetrics
@@ -224,7 +224,7 @@ export function calculateHalsteadMetrics(counts: HalsteadCounts): HalsteadMetric
   const difficulty = n2 > 0 ? (n1 / 2) * (N2 / n2) : 0;
   const effort = difficulty * volume;
   const time = effort / 18; // Stroud number (18 mental discriminations per second)
-  const bugs = volume / 3000;
+  const bugs = Math.pow(effort, 2 / 3) / 3000;
 
   return {
     vocabulary: Math.round(vocabulary),
