@@ -1386,21 +1386,14 @@ async function postLogicReviewComments(
   if (inDiff.length === 0) return;
 
   logger.info(`Posting ${inDiff.length} logic review comments`);
-  await octokit.pulls.createReview({
-    owner: prContext.owner,
-    repo: prContext.repo,
-    pull_number: prContext.pullNumber,
-    commit_id: prContext.headSha,
-    event: 'COMMENT',
-    body: '**Logic Review** (beta) — see inline comments.',
-    comments: inDiff.map(c => ({
-      path: c.path,
-      line: c.line,
-      ...(c.start_line ? { start_line: c.start_line, start_side: 'RIGHT' } : {}),
-      side: 'RIGHT' as const,
-      body: c.body,
-    })),
-  });
+  await postPRReview(
+    octokit,
+    prContext,
+    inDiff,
+    '**Logic Review** (beta) — see inline comments.',
+    logger,
+    'COMMENT',
+  );
 }
 
 /**

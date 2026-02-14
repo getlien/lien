@@ -128,6 +128,9 @@ export function parseCommentsResponse(
   return null;
 }
 
+/** Models known to support OpenRouter's extended reasoning parameter */
+const REASONING_MODELS = /deepseek|minimax|o1|o3|qwq/i;
+
 /**
  * Call OpenRouter API with batched comments prompt
  */
@@ -136,6 +139,8 @@ export async function callBatchedCommentsAPI(
   apiKey: string,
   model: string,
 ): Promise<OpenRouterResponse> {
+  const supportsReasoning = REASONING_MODELS.test(model);
+
   const response = await fetch(OPENROUTER_API_URL, {
     method: 'POST',
     headers: {
@@ -156,7 +161,7 @@ export async function callBatchedCommentsAPI(
       ],
       max_tokens: 32768,
       temperature: 0.3,
-      reasoning: { effort: 'high' },
+      ...(supportsReasoning ? { reasoning: { effort: 'high' } } : {}),
       usage: { include: true },
     }),
   });
