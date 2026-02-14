@@ -270,9 +270,15 @@ export async function generateLineComments(
       prompt = buildBatchedCommentsPrompt(usedViolations, codeSnippets, report, diffHunks);
       estimatedTokens = estimatePromptTokens(prompt);
     }
-    logger.warning(
-      `Truncated to ${usedViolations.length}/${violations.length} violations (${estimatedTokens.toLocaleString()} tokens)`,
-    );
+    if (estimatedTokens > PROMPT_TOKEN_BUDGET && usedViolations.length === 1) {
+      logger.warning(
+        `Even a single violation exceeds the token budget (${estimatedTokens.toLocaleString()} > ${PROMPT_TOKEN_BUDGET.toLocaleString()}). Proceeding with minimal prompt.`,
+      );
+    } else {
+      logger.warning(
+        `Truncated to ${usedViolations.length}/${violations.length} violations (${estimatedTokens.toLocaleString()} tokens)`,
+      );
+    }
   }
 
   const data = await callBatchedCommentsAPI(prompt, apiKey, model);

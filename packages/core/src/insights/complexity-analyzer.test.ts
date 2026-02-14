@@ -813,5 +813,35 @@ describe('ComplexityAnalyzer', () => {
       expect(report.summary.avgComplexity).toBe(0);
       expect(report.summary.maxComplexity).toBe(0);
     });
+
+    it('should apply threshold overrides', () => {
+      const chunks: CodeChunk[] = [
+        {
+          content: 'function borderline() { }',
+          metadata: {
+            file: 'src/test.ts',
+            startLine: 1,
+            endLine: 10,
+            type: 'function',
+            language: 'typescript',
+            symbolName: 'borderline',
+            symbolType: 'function',
+            complexity: 12, // Below default 15, above override 10
+            cognitiveComplexity: 12,
+          } as ChunkMetadata,
+        },
+      ];
+
+      // Default thresholds (15): no violations
+      const defaultReport = ComplexityAnalyzer.analyzeFromChunks(chunks);
+      expect(defaultReport.summary.totalViolations).toBe(0);
+
+      // Lower thresholds (10): should trigger violations
+      const customReport = ComplexityAnalyzer.analyzeFromChunks(chunks, undefined, {
+        testPaths: 10,
+        mentalLoad: 10,
+      });
+      expect(customReport.summary.totalViolations).toBe(2); // cyclomatic + cognitive
+    });
   });
 });
