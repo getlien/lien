@@ -8,6 +8,7 @@ import type { Logger } from './logger.js';
 import { buildBatchedCommentsPrompt } from './prompt.js';
 import { buildLogicReviewPrompt } from './logic-prompt.js';
 import { parseLogicReviewResponse } from './logic-response.js';
+import { VEILLE_LOGIC_MARKER_PREFIX } from './github-api.js';
 
 /**
  * OpenRouter API response structure
@@ -273,7 +274,7 @@ function mapFindingsToComments(
       comments.push({
         path: finding.filepath,
         line: finding.line,
-        body: `**Logic Review** (beta) — ${categoryLabel}\n\n${entry.comment}`,
+        body: `${VEILLE_LOGIC_MARKER_PREFIX}${finding.filepath}::${finding.line}::${finding.category} -->\n**Logic Review** (beta) — ${categoryLabel}\n\n${entry.comment}`,
       });
     } else if (entry && !entry.valid) {
       logger.info(`Finding ${key} marked as false positive by LLM`);

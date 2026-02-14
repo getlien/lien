@@ -193,6 +193,85 @@ export async function postPRReview(
 }
 
 /**
+ * Marker prefix for Veille inline review comments.
+ * Format: <!-- veille:filepath::symbolName -->
+ */
+export const VEILLE_COMMENT_MARKER_PREFIX = '<!-- veille:';
+
+/**
+ * Marker prefix for Veille logic review comments.
+ * Format: <!-- veille-logic:filepath::line -->
+ */
+export const VEILLE_LOGIC_MARKER_PREFIX = '<!-- veille-logic:';
+
+/**
+ * Parse a Veille marker from a comment body, returning the dedup key or null.
+ */
+export function parseVeilleMarker(body: string): string | null {
+  const start = body.indexOf(VEILLE_COMMENT_MARKER_PREFIX);
+  if (start === -1) return null;
+  const keyStart = start + VEILLE_COMMENT_MARKER_PREFIX.length;
+  const end = body.indexOf(' -->', keyStart);
+  if (end === -1) return null;
+  return body.slice(keyStart, end);
+}
+
+/**
+ * Parse a Veille logic marker from a comment body, returning the dedup key or null.
+ */
+export function parseVeilleLogicMarker(body: string): string | null {
+  const start = body.indexOf(VEILLE_LOGIC_MARKER_PREFIX);
+  if (start === -1) return null;
+  const keyStart = start + VEILLE_LOGIC_MARKER_PREFIX.length;
+  const end = body.indexOf(' -->', keyStart);
+  if (end === -1) return null;
+  return body.slice(keyStart, end);
+}
+
+/**
+ * Fetch existing Veille inline comment keys from the PR.
+ * Returns a Set of dedup keys (e.g. "filepath::symbolName") for complexity comments
+ * and a Set of logic keys (e.g. "filepath::line::category") for logic review comments.
+ */
+export async function getExistingVeilleCommentKeys(
+  octokit: Octokit,
+  prContext: PRContext,
+  logger: Logger,
+): Promise<{ complexity: Set<string>; logic: Set<string> }> {
+  const complexity = new Set<string>();
+  const logic = new Set<string>();
+
+  const iterator = octokit.paginate.iterator(octokit.pulls.listReviewComments, {
+    owner: prContext.owner,
+    repo: prContext.repo,
+    pull_number: prContext.pullNumber,
+    per_page: 100,
+  });
+
+  for await (const response of iterator) {
+    for (const comment of response.data) {
+      if (!comment.body) continue;
+
+      const complexityKey = parseVeilleMarker(comment.body);
+      if (complexityKey) {
+        complexity.add(complexityKey);
+        continue;
+      }
+
+      const logicKey = parseVeilleLogicMarker(comment.body);
+      if (logicKey) {
+        logic.add(logicKey);
+      }
+    }
+  }
+
+  logger.info(
+    `Found ${complexity.size} existing complexity comments and ${logic.size} logic comments`,
+  );
+  return { complexity, logic };
+}
+
+/**
  * Marker comments for the PR description stats badge
  */
 const DESCRIPTION_START_MARKER = '<!-- lien-stats -->';

@@ -31,6 +31,8 @@ export {
   extractRelevantHunk,
   determineReviewEvent,
   isMarginalViolation,
+  filterDuplicateComments,
+  type DedupResult,
 } from './review-engine.js';
 
 // GitHub API (portable, uses @octokit/rest)
@@ -46,6 +48,11 @@ export {
   parsePatchLines,
   getPRDiffLines,
   getPRPatchData,
+  getExistingVeilleCommentKeys,
+  parseVeilleMarker,
+  parseVeilleLogicMarker,
+  VEILLE_COMMENT_MARKER_PREFIX,
+  VEILLE_LOGIC_MARKER_PREFIX,
 } from './github-api.js';
 
 // OpenRouter API

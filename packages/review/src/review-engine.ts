@@ -1,5 +1,5 @@
 /**
- * Review engine — orchestrates complexity analysis, delta tracking, and review posting.
+ * Review engine — orchestrates complexity analysis, delta tracking, review posting, and dedup.
  * Extracted from packages/action/src/index.ts for reuse across Action and App.
  */
 
@@ -26,6 +26,9 @@ import {
   getPRPatchData,
   getPRDiffLines,
   updatePRDescription,
+  getExistingVeilleCommentKeys,
+  VEILLE_COMMENT_MARKER_PREFIX,
+  VEILLE_LOGIC_MARKER_PREFIX,
 } from './github-api.js';
 import {
   generateLineComments,
@@ -684,11 +687,52 @@ function buildUncoveredNote(
 function buildSkippedNote(skippedViolations: ComplexityViolation[]): string {
   if (skippedViolations.length === 0) return '';
 
-  const skippedList = skippedViolations
-    .map(v => `  - \`${v.symbolName}\` in \`${v.filepath}\`: complexity ${v.complexity}`)
-    .join('\n');
+  const skippedList = skippedViolations.map(formatViolationListItem).join('\n');
 
   return `\n\n<details>\n<summary>ℹ️ ${skippedViolations.length} pre-existing violation${skippedViolations.length === 1 ? '' : 's'} (unchanged)</summary>\n\n${skippedList}\n\n> *These violations existed before this PR and haven't changed. No inline comments added to reduce noise.*\n\n</details>`;
+}
+
+/**
+ * Format a violation as a summary list item.
+ * Shared by marginal, skipped, and dedup notes.
+ */
+function formatViolationListItem(v: ComplexityViolation): string {
+  const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
+  const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
+  const thresholdDisplay = formatThresholdValue(v.metricType || 'cyclomatic', v.threshold);
+  return `  - \`${v.symbolName}\` in \`${v.filepath}\`: ${metricLabel} ${valueDisplay} (threshold: ${thresholdDisplay})`;
+}
+
+/**
+ * Build note for violations already commented on in a previous review round.
+ */
+function buildDedupNote(skippedKeys: string[], violations: ComplexityViolation[]): string {
+  if (skippedKeys.length === 0) return '';
+
+  // Group all violations by key so we show all triggered metrics per function
+  const violationsByKey = new Map<string, ComplexityViolation[]>();
+  for (const v of violations) {
+    const key = `${v.filepath}::${v.symbolName}`;
+    const existing = violationsByKey.get(key);
+    if (existing) {
+      existing.push(v);
+    } else {
+      violationsByKey.set(key, [v]);
+    }
+  }
+
+  const list = skippedKeys
+    .map(key => {
+      const vs = violationsByKey.get(key);
+      if (vs) return vs.map(formatViolationListItem).join('\n');
+      const sep = key.lastIndexOf('::');
+      const symbol = sep !== -1 ? key.slice(sep + 2) : key;
+      const file = sep !== -1 ? key.slice(0, sep) : '';
+      return `  - \`${symbol}\` in \`${file}\``;
+    })
+    .join('\n');
+
+  return `\n\n<details>\n<summary>ℹ️ ${skippedKeys.length} violation${skippedKeys.length === 1 ? '' : 's'} already reviewed in a previous round — not re-posted</summary>\n\n${list}\n\n</details>`;
 }
 
 /**
@@ -800,9 +844,10 @@ function buildReviewSummary(
 ## 👁️ Veille
 
 ${headerLine}${deltaDisplay}
+${prSummaryLine}
 ${archNotesSection}
 See inline comments on the diff for specific suggestions.${uncoveredNote}
-${prSummaryLine}
+
 <details>
 <summary>📊 Analysis Details</summary>
 
@@ -858,6 +903,51 @@ function formatMetricHeaderLine(
 }
 
 /**
+ * Result of filtering duplicate comments.
+ */
+export interface DedupResult {
+  kept: LineComment[];
+  skippedKeys: string[];
+}
+
+/**
+ * Filter line comments that already have a matching Veille comment on the PR.
+ * Uses the hidden HTML marker to extract the dedup key from each comment body.
+ */
+export function filterDuplicateComments(
+  comments: LineComment[],
+  existingKeys: Set<string>,
+  markerPrefix: string,
+): DedupResult {
+  if (existingKeys.size === 0) return { kept: comments, skippedKeys: [] };
+
+  const kept: LineComment[] = [];
+  const skippedKeys: string[] = [];
+
+  for (const c of comments) {
+    const markerStart = c.body.indexOf(markerPrefix);
+    if (markerStart === -1) {
+      kept.push(c);
+      continue;
+    }
+    const keyStart = markerStart + markerPrefix.length;
+    const markerEnd = c.body.indexOf(' -->', keyStart);
+    if (markerEnd === -1) {
+      kept.push(c);
+      continue;
+    }
+    const key = c.body.slice(keyStart, markerEnd);
+    if (existingKeys.has(key)) {
+      skippedKeys.push(key);
+    } else {
+      kept.push(c);
+    }
+  }
+
+  return { kept, skippedKeys };
+}
+
+/**
  * A violation matched to its diff line range for inline commenting.
  */
 type ViolationWithLines = {
@@ -895,7 +985,8 @@ function buildGroupedCommentBody(
       ? '\n\n> ⚠️ **No test files found for this function.**'
       : '';
 
-  return `${metricHeaders}${testNote}${lineNote}\n\n${comment}`;
+  const marker = `${VEILLE_COMMENT_MARKER_PREFIX}${firstViolation.filepath}::${firstViolation.symbolName} -->`;
+  return `${marker}\n${metricHeaders}${testNote}${lineNote}\n\n${comment}`;
 }
 
 /**
@@ -1046,14 +1137,7 @@ function processViolationsForReview(
 function buildMarginalNote(marginalViolations: ComplexityViolation[]): string {
   if (marginalViolations.length === 0) return '';
 
-  const list = marginalViolations
-    .map(v => {
-      const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
-      const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
-      const thresholdDisplay = formatThresholdValue(v.metricType || 'cyclomatic', v.threshold);
-      return `  - \`${v.symbolName}\` in \`${v.filepath}\`: ${metricLabel} ${valueDisplay} (threshold: ${thresholdDisplay})`;
-    })
-    .join('\n');
+  const list = marginalViolations.map(formatViolationListItem).join('\n');
 
   return `\n\n<details>\n<summary>ℹ️ ${marginalViolations.length} near-threshold violation${marginalViolations.length === 1 ? '' : 's'} (no inline comment)</summary>\n\n${list}\n\n> *These functions are within 15% of the threshold. A light-touch refactoring (early return, extract one expression) may bring them under.*\n\n</details>`;
 }
@@ -1150,6 +1234,58 @@ export function determineReviewEvent(
   return hasNewErrors ? 'REQUEST_CHANGES' : 'COMMENT';
 }
 
+/**
+ * Partition violations into already-reviewed (dedup) and new ones.
+ * Returns the full list as toReview on failure (graceful degradation).
+ */
+async function partitionDedupViolations(
+  violations: ViolationWithLines[],
+  octokit: Octokit,
+  prContext: PRContext,
+  logger: Logger,
+): Promise<{ toReview: ViolationWithLines[]; skippedKeys: string[] }> {
+  try {
+    const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
+    const toReview: ViolationWithLines[] = [];
+    const skippedKeySet = new Set<string>();
+    for (const item of violations) {
+      const key = `${item.violation.filepath}::${item.violation.symbolName}`;
+      if (existing.complexity.has(key)) {
+        skippedKeySet.add(key);
+      } else {
+        toReview.push(item);
+      }
+    }
+    const skippedKeys = Array.from(skippedKeySet);
+    if (skippedKeys.length > 0) {
+      logger.info(`Dedup: ${skippedKeys.length} violations already reviewed in previous rounds`);
+    }
+    return { toReview, skippedKeys };
+  } catch (error) {
+    logger.warning(`Failed to fetch existing comments for dedup: ${error}`);
+    return { toReview: violations, skippedKeys: [] };
+  }
+}
+
+/**
+ * Build the combined notes string for the review summary footer.
+ */
+function buildReviewNotes(
+  processed: ViolationProcessingResult,
+  deltaMap: Map<string, ComplexityDelta>,
+  dedupSkippedKeys: string[],
+): string {
+  return (
+    buildUncoveredNote(processed.uncovered, deltaMap) +
+    buildSkippedNote(processed.skipped) +
+    buildMarginalNote(processed.marginal) +
+    buildDedupNote(
+      dedupSkippedKeys,
+      processed.newOrDegraded.map(v => v.violation),
+    )
+  );
+}
+
 async function generateAndPostReview(
   octokit: Octokit,
   prContext: PRContext,
@@ -1163,13 +1299,32 @@ async function generateAndPostReview(
   diffHunks?: Map<string, string>,
   archContext?: ArchitecturalContext,
 ): Promise<void> {
-  const allViolationsForLLM = [
-    ...processed.newOrDegraded.map(v => v.violation),
-    ...processed.marginal,
-  ];
+  // Early dedup: check which violations already have review comments before calling the LLM
+  const { toReview, skippedKeys } = await partitionDedupViolations(
+    processed.newOrDegraded,
+    octokit,
+    prContext,
+    logger,
+  );
+
+  // If all violations were already reviewed, skip LLM calls and just update the summary comment
+  if (toReview.length === 0) {
+    logger.info('All violations already reviewed — updating summary only (no LLM calls needed)');
+    const summaryBody = buildReviewSummary(
+      report,
+      deltas,
+      buildReviewNotes(processed, deltaMap, skippedKeys),
+      config.model,
+    );
+    await postPRComment(octokit, prContext, summaryBody, logger);
+    return;
+  }
+
+  // Generate AI comments only for violations that haven't been posted yet
+  const allViolationsForLLM = [...toReview.map(v => v.violation), ...processed.marginal];
   logger.info(
     `Generating AI comments for ${allViolationsForLLM.length} violations ` +
-      `(${processed.newOrDegraded.length} will get inline comments, ${processed.marginal.length} for context only)...`,
+      `(${toReview.length} will get inline comments, ${processed.marginal.length} for context only)...`,
   );
 
   const { aiComments, architecturalNotes, prSummary } = await generateAIComments(
@@ -1182,27 +1337,21 @@ async function generateAndPostReview(
     archContext,
   );
 
-  const lineComments = buildLineComments(
-    processed.newOrDegraded,
-    aiComments,
-    deltaMap,
-    report,
-    logger,
-  );
+  const lineComments = buildLineComments(toReview, aiComments, deltaMap, report, logger);
   logger.info(`Built ${lineComments.length} line comments for new/degraded violations`);
 
   const summaryBody = buildReviewSummary(
     report,
     deltas,
-    buildUncoveredNote(processed.uncovered, deltaMap) +
-      buildSkippedNote(processed.skipped) +
-      buildMarginalNote(processed.marginal),
+    buildReviewNotes(processed, deltaMap, skippedKeys),
     config.model,
     architecturalNotes,
     prSummary,
   );
 
-  const event = determineReviewEvent(processed, deltaMap, config.blockOnNewErrors);
+  // Only check for REQUEST_CHANGES based on non-deduped violations
+  const processedForEvent: ViolationProcessingResult = { ...processed, newOrDegraded: toReview };
+  const event = determineReviewEvent(processedForEvent, deltaMap, config.blockOnNewErrors);
   if (event === 'REQUEST_CHANGES') {
     logger.info('New error-level violations detected — posting REQUEST_CHANGES review');
   }
@@ -1385,11 +1534,29 @@ async function postLogicReviewComments(
 
   if (inDiff.length === 0) return;
 
-  logger.info(`Posting ${inDiff.length} logic review comments`);
+  // Deduplicate logic review comments against existing ones
+  let toPost = inDiff;
+  try {
+    const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
+    const dedup = filterDuplicateComments(toPost, existing.logic, VEILLE_LOGIC_MARKER_PREFIX);
+    toPost = dedup.kept;
+    if (dedup.skippedKeys.length > 0) {
+      logger.info(`Dedup: skipped ${dedup.skippedKeys.length} already-posted logic comments`);
+    }
+  } catch (error) {
+    logger.warning(`Failed to fetch existing comments for logic dedup: ${error}`);
+  }
+
+  if (toPost.length === 0) {
+    logger.info('All logic review comments already posted — skipping');
+    return;
+  }
+
+  logger.info(`Posting ${toPost.length} logic review comments`);
   await postPRReview(
     octokit,
     prContext,
-    inDiff,
+    toPost,
     '**Logic Review** (beta) — see inline comments.',
     logger,
     'COMMENT',
