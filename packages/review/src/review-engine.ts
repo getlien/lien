@@ -1,5 +1,5 @@
 /**
- * Review engine — orchestrates complexity analysis, delta tracking, and review posting.
+ * Review engine — orchestrates complexity analysis, delta tracking, review posting, and dedup.
  * Extracted from packages/action/src/index.ts for reuse across Action and App.
  */
 
