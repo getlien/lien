@@ -113,6 +113,24 @@ function detectBreakingChanges(
 }
 
 /**
+ * Build a set of symbol names that are known to return void (or Promise<void>).
+ * Used to skip false positives in unchecked_return detection.
+ */
+function buildVoidSymbolSet(chunks: CodeChunk[]): Set<string> {
+  const voidSymbols = new Set<string>();
+  const voidReturnTypes = new Set(['void', ': void', 'Promise<void>', ': Promise<void>']);
+
+  for (const chunk of chunks) {
+    if (!chunk.metadata.symbolName || !chunk.metadata.returnType) continue;
+    if (voidReturnTypes.has(chunk.metadata.returnType)) {
+      voidSymbols.add(chunk.metadata.symbolName);
+    }
+  }
+
+  return voidSymbols;
+}
+
+/**
  * Check a single call site for unchecked return value and return a finding if applicable.
  */
 function checkCallSite(
@@ -120,7 +138,11 @@ function checkCallSite(
   callSite: { symbol: string; line: number },
   lines: string[],
   startLine: number,
+  voidSymbols: Set<string>,
 ): LogicFinding | null {
+  // Skip calls to functions known to return void
+  if (voidSymbols.has(callSite.symbol)) return null;
+
   const lineIndex = callSite.line - startLine;
   if (lineIndex < 0 || lineIndex >= lines.length) return null;
 
@@ -144,6 +166,7 @@ function checkCallSite(
  */
 function detectUncheckedReturns(chunks: CodeChunk[]): LogicFinding[] {
   const findings: LogicFinding[] = [];
+  const voidSymbols = buildVoidSymbolSet(chunks);
 
   for (const chunk of chunks) {
     if (!chunk.metadata.callSites || chunk.metadata.callSites.length === 0) continue;
@@ -151,7 +174,7 @@ function detectUncheckedReturns(chunks: CodeChunk[]): LogicFinding[] {
 
     const lines = chunk.content.split('\n');
     for (const callSite of chunk.metadata.callSites) {
-      const finding = checkCallSite(chunk, callSite, lines, chunk.metadata.startLine);
+      const finding = checkCallSite(chunk, callSite, lines, chunk.metadata.startLine, voidSymbols);
       if (finding) findings.push(finding);
     }
   }

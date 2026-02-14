@@ -235,6 +235,114 @@ describe('detectLogicFindings', () => {
       const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
       expect(findings).toHaveLength(0);
     });
+
+    it('does not flag calls to void-returning functions', () => {
+      const content = 'function caller() {\n  doSomething(data);\n  return;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/process.ts',
+            symbolName: 'caller',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'doSomething', line: 2 }],
+          },
+          content,
+        ),
+        createChunk({
+          file: 'src/process.ts',
+          symbolName: 'doSomething',
+          returnType: 'void',
+          startLine: 5,
+          endLine: 8,
+        }),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(0);
+    });
+
+    it('does not flag this.method() calls to void-returning methods', () => {
+      const content = 'function processEvent() {\n  this.notify(event);\n  return;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/events.ts',
+            symbolName: 'processEvent',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'notify', line: 2 }],
+          },
+          content,
+        ),
+        createChunk({
+          file: 'src/events.ts',
+          symbolName: 'notify',
+          parentClass: 'EventManager',
+          returnType: ': void',
+          startLine: 5,
+          endLine: 10,
+        }),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(0);
+    });
+
+    it('still flags calls to non-void functions', () => {
+      const content = 'function caller() {\n  getValue();\n  return;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/process.ts',
+            symbolName: 'caller',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'getValue', line: 2 }],
+          },
+          content,
+        ),
+        createChunk({
+          file: 'src/process.ts',
+          symbolName: 'getValue',
+          returnType: 'string',
+          startLine: 5,
+          endLine: 8,
+        }),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(1);
+    });
+
+    it('still flags calls with unknown return type', () => {
+      const content = 'function caller() {\n  mystery();\n  return;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/process.ts',
+            symbolName: 'caller',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'mystery', line: 2 }],
+          },
+          content,
+        ),
+        createChunk({
+          file: 'src/process.ts',
+          symbolName: 'mystery',
+          startLine: 5,
+          endLine: 8,
+        }),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(1);
+    });
   });
 
   describe('breaking_change detection', () => {

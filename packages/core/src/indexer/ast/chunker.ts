@@ -344,6 +344,7 @@ function createChunk(
       cognitiveComplexity,
       parameters: symbolInfo?.parameters,
       signature: symbolInfo?.signature,
+      returnType: symbolInfo?.returnType,
       imports,
       // Symbol-level dependency tracking
       // NOTE: `exports` and `importedSymbols` are file-level concepts, but we deliberately
