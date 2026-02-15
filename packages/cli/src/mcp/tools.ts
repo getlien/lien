@@ -160,7 +160,7 @@ Use for tech debt analysis and refactoring prioritization:
 
 Examples:
   get_complexity({ top: 10 })
-  get_complexity({ files: ["src/auth.ts", "src/api/user.ts"] })
+  get_complexity({ files: ["src/auth.ts"], metricType: "cognitive" })
   get_complexity({ threshold: 15 })
 
 Returns:

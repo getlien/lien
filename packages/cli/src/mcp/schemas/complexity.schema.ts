@@ -48,6 +48,11 @@ export const GetComplexitySchema = z.object({
         'Setting threshold below the config threshold will not show additional functions.',
     ),
 
+  metricType: z
+    .enum(['cyclomatic', 'cognitive', 'halstead_effort', 'halstead_bugs'])
+    .optional()
+    .describe('Filter violations to a specific metric type. If omitted, returns all types.'),
+
   crossRepo: z
     .boolean()
     .default(false)
