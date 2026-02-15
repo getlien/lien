@@ -111,6 +111,7 @@ function processViolations(
   report: ComplexityReport,
   threshold: number | undefined,
   top: number,
+  metricType?: string,
 ): ProcessedViolations {
   const allViolations: TransformedViolation[] = collect(Object.entries(report.files))
     .flatMap(([, /* filepath unused */ fileData]) =>
@@ -119,8 +120,12 @@ function processViolations(
     .sortByDesc('complexity')
     .all() as unknown as TransformedViolation[];
 
-  const violations =
-    threshold !== undefined ? allViolations.filter(v => v.complexity >= threshold) : allViolations;
+  let violations = metricType
+    ? allViolations.filter(v => v.metricType === metricType)
+    : allViolations;
+
+  violations =
+    threshold !== undefined ? violations.filter(v => v.complexity >= threshold) : violations;
 
   const severityCounts = collect(violations).countBy('severity').all() as {
     error?: number;
@@ -158,7 +163,7 @@ export async function handleGetComplexity(args: unknown, ctx: ToolContext): Prom
   const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
   return await wrapToolHandler(GetComplexitySchema, async validatedArgs => {
-    const { crossRepo, repoIds, files, top, threshold } = validatedArgs;
+    const { crossRepo, repoIds, files, top, threshold, metricType } = validatedArgs;
     log(`Analyzing complexity${crossRepo ? ' (cross-repo)' : ''}...`);
     await checkAndReconnect();
 
@@ -180,6 +185,7 @@ export async function handleGetComplexity(args: unknown, ctx: ToolContext): Prom
       report,
       threshold,
       top ?? 10,
+      metricType,
     );
 
     // Step 4: Build response

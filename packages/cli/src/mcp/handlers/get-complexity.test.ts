@@ -421,6 +421,107 @@ describe('handleGetComplexity', () => {
     });
   });
 
+  describe('metricType filtering', () => {
+    const mockReportWithMixedMetrics: ComplexityReport = {
+      summary: {
+        filesAnalyzed: 1,
+        avgComplexity: 20,
+        maxComplexity: 30,
+        totalViolations: 4,
+        bySeverity: {
+          error: 2,
+          warning: 2,
+        },
+      },
+      files: {
+        'src/file1.ts': {
+          violations: [
+            {
+              filepath: 'src/file1.ts',
+              symbolName: 'func1',
+              symbolType: 'function',
+              startLine: 1,
+              endLine: 10,
+              complexity: 30,
+              metricType: 'cyclomatic',
+              threshold: 15,
+              severity: 'error',
+              language: 'typescript',
+              message: 'Complexity 30 exceeds threshold 15',
+            },
+            {
+              filepath: 'src/file1.ts',
+              symbolName: 'func1',
+              symbolType: 'function',
+              startLine: 1,
+              endLine: 10,
+              complexity: 25,
+              metricType: 'cognitive',
+              threshold: 15,
+              severity: 'error',
+              language: 'typescript',
+              message: 'Complexity 25 exceeds threshold 15',
+            },
+            {
+              filepath: 'src/file1.ts',
+              symbolName: 'func2',
+              symbolType: 'function',
+              startLine: 11,
+              endLine: 20,
+              complexity: 20,
+              metricType: 'halstead_effort',
+              threshold: 15,
+              severity: 'warning',
+              language: 'typescript',
+              message: 'Complexity 20 exceeds threshold 15',
+            },
+            {
+              filepath: 'src/file1.ts',
+              symbolName: 'func2',
+              symbolType: 'function',
+              startLine: 11,
+              endLine: 20,
+              complexity: 18,
+              metricType: 'halstead_bugs',
+              threshold: 15,
+              severity: 'warning',
+              language: 'typescript',
+              message: 'Complexity 18 exceeds threshold 15',
+            },
+          ],
+          dependents: [],
+          testAssociations: [],
+          dependentCount: 0,
+          riskLevel: 'low',
+        },
+      },
+    };
+
+    it('should return only violations of the specified metricType', async () => {
+      getMockAnalyze().mockResolvedValue(mockReportWithMixedMetrics);
+
+      const result = await handleGetComplexity({ metricType: 'cognitive', top: 10 }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+
+      expect(parsed.violations).toHaveLength(1);
+      expect(parsed.violations[0].metricType).toBe('cognitive');
+      expect(parsed.violations[0].symbolName).toBe('func1');
+      expect(parsed.summary.violationCount).toBe(1);
+    });
+
+    it('should return all violations when metricType is omitted', async () => {
+      getMockAnalyze().mockResolvedValue(mockReportWithMixedMetrics);
+
+      const result = await handleGetComplexity({ top: 10 }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+
+      expect(parsed.violations).toHaveLength(4);
+      expect(parsed.summary.violationCount).toBe(4);
+    });
+  });
+
   describe('index metadata', () => {
     it('should include index metadata in response', async () => {
       const mockReport: ComplexityReport = {
