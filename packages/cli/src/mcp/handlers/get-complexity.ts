@@ -1,6 +1,7 @@
 import collect from 'collect.js';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetComplexitySchema } from '../schemas/index.js';
+import type { GetComplexityInput } from '../schemas/index.js';
 import { ComplexityAnalyzer } from '@liendev/core';
 import type {
   ComplexityViolation,
@@ -111,21 +112,19 @@ function processViolations(
   report: ComplexityReport,
   threshold: number | undefined,
   top: number,
-  metricType?: string,
+  metricType?: GetComplexityInput['metricType'],
 ): ProcessedViolations {
   const allViolations: TransformedViolation[] = collect(Object.entries(report.files))
     .flatMap(([, /* filepath unused */ fileData]) =>
-      fileData.violations.map(v => transformViolation(v, fileData)),
+      fileData.violations
+        .filter(v => !metricType || v.metricType === metricType)
+        .filter(v => threshold === undefined || v.complexity >= threshold)
+        .map(v => transformViolation(v, fileData)),
     )
     .sortByDesc('complexity')
     .all() as unknown as TransformedViolation[];
 
-  let violations = metricType
-    ? allViolations.filter(v => v.metricType === metricType)
-    : allViolations;
-
-  violations =
-    threshold !== undefined ? violations.filter(v => v.complexity >= threshold) : violations;
+  const violations = allViolations;
 
   const severityCounts = collect(violations).countBy('severity').all() as {
     error?: number;
