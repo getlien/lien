@@ -207,6 +207,23 @@ describe('initCommand', () => {
     expect(config.mcp.other).toEqual({ type: 'local', command: ['other'] });
   });
 
+  it('should skip when opencode already configured', async () => {
+    const configPath = path.join(testDir, 'opencode.json');
+    const existingConfig = {
+      mcp: { lien: { type: 'local', command: ['lien', 'serve'] } },
+    };
+    await fs.writeFile(configPath, JSON.stringify(existingConfig));
+
+    const logSpy = vi.spyOn(console, 'log');
+    await initCommand({ editor: 'opencode' });
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Already configured'));
+
+    // File should not have been rewritten
+    const raw = await fs.readFile(configPath, 'utf-8');
+    expect(raw).toBe(JSON.stringify(existingConfig));
+  });
+
   it('should show OpenCode restart message', async () => {
     const logSpy = vi.spyOn(console, 'log');
     await initCommand({ editor: 'opencode' });
@@ -287,7 +304,7 @@ describe('initCommand', () => {
 
   // --- Edge cases ---
 
-  it('should handle permission errors gracefully', async () => {
+  it('should complete without throwing errors', async () => {
     await expect(initCommand({ editor: 'cursor' })).resolves.not.toThrow();
   });
 
