@@ -582,7 +582,11 @@ Use paths relative to project root, not absolute paths.
 Lien works with any MCP-compatible AI assistant:
 
 - **Cursor** ✅ (per-project `.cursor/mcp.json`)
-- **Claude Code** ✅ (global `claude_desktop_config.json`)
+- **Claude Code** ✅ (per-project `.mcp.json`)
+- **Windsurf** ✅ (global `~/.codeium/windsurf/mcp_config.json`)
+- **OpenCode** ✅ (per-project `opencode.json`)
+- **Kilo Code** ✅ (per-project `.kilocode/mcp.json`)
+- **Antigravity** ✅ (manual config)
 - **Other MCP clients** ✅ (see [Getting Started](/guide/getting-started) for setup)
 
 

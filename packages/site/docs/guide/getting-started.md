@@ -2,100 +2,44 @@
 
 This guide walks you through setting up Lien with Cursor or Claude Code in under 2 minutes.
 
-## Step 1: Configure Your AI Assistant
+## Step 1: Configure Your Editor
 
-Choose your AI assistant below:
+Run `lien init` and select your editor:
 
-### Option A: Cursor (Recommended)
-
-Create `.cursor/mcp.json` in your project root:
-
-```json
-{
-  "mcpServers": {
-    "lien": {
-      "command": "lien",
-      "args": ["serve"]
-    }
-  }
-}
+```bash
+lien init
 ```
 
-That's it! Lien works with **zero configuration**.
+Or specify it directly:
 
-::: tip Per-Project Configuration
-The `.cursor/mcp.json` file is per-project, so each project automatically gets its own Lien instance. When you switch projects in Cursor, the right Lien server starts automatically.
-:::
-
-::: warning Global MCP Config
-If you're using a **global** `~/.cursor/mcp.json` instead, you must specify the project path:
-
-```json
-{
-  "mcpServers": {
-    "my-project": {
-      "command": "lien",
-      "args": ["serve", "--root", "/path/to/your/project"]
-    }
-  }
-}
+```bash
+lien init --editor cursor
+lien init --editor claude-code
+lien init --editor windsurf
+lien init --editor opencode
+lien init --editor kilo-code
+lien init --editor antigravity
 ```
 
-We recommend per-project `.cursor/mcp.json` for simplicity.
+This writes the correct MCP config for your editor. That's it—Lien works with **zero configuration**.
+
+::: details What does `lien init` create?
+
+| Editor | Config File | Scope |
+|--------|-------------|-------|
+| Cursor | `.cursor/mcp.json` | Per-project |
+| Claude Code | `.mcp.json` | Per-project |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | Global (with `--root`) |
+| OpenCode | `opencode.json` | Per-project |
+| Kilo Code | `.kilocode/mcp.json` | Per-project |
+| Antigravity | Prints snippet to copy | Manual |
+
+Per-project configs automatically detect the project root. Windsurf uses a global config, so `lien init` includes the absolute project path via `--root`.
 :::
 
-### Option B: Claude Code
+## Step 2: Restart Your Editor
 
-Claude Code uses a global configuration file. Create or edit `claude_desktop_config.json`:
-
-**Location:**
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
-
-**Configuration:**
-
-```json
-{
-  "mcpServers": {
-    "lien-myproject": {
-      "command": "lien",
-      "args": ["serve", "--root", "/absolute/path/to/your/project"]
-    }
-  }
-}
-```
-
-::: warning Absolute Paths Required
-Claude Code requires **absolute paths** in the `--root` argument. Replace `/absolute/path/to/your/project` with your actual project path (e.g., `/Users/yourname/code/myproject` or `C:\Users\yourname\code\myproject`).
-:::
-
-::: tip Multiple Projects
-For multiple projects, add separate entries:
-
-```json
-{
-  "mcpServers": {
-    "lien-project1": {
-      "command": "lien",
-      "args": ["serve", "--root", "/path/to/project1"]
-    },
-    "lien-project2": {
-      "command": "lien",
-      "args": ["serve", "--root", "/path/to/project2"]
-    }
-  }
-}
-```
-
-Claude will show all projects' tools, so you can switch contexts by asking about different projects.
-:::
-
-## Step 2: Restart Your AI Assistant
-
-**For Cursor**: Restart Cursor completely (Quit and reopen, not just reload window).
-
-**For Claude Code**: Restart Claude Desktop completely.
+Restart your editor completely (quit and reopen, not just reload window).
 
 After restarting, your AI assistant will automatically:
 - Start the Lien MCP server
@@ -135,7 +79,7 @@ Lien automatically detects and indexes multiple frameworks:
 my-app/
   ├── src/                  # Node.js/TypeScript (auto-detected)
   ├── backend/              # Laravel (auto-detected)
-  └── .cursor/mcp.json      # Just add this!
+  └── .cursor/mcp.json      # Created by `lien init`
 ```
 
 Lien scans your project structure and applies appropriate patterns for each detected framework—no configuration needed.
@@ -144,16 +88,10 @@ Lien scans your project structure and applies appropriate patterns for each dete
 
 ### AI assistant doesn't show Lien tools
 
-**For Cursor:**
-1. Check `.cursor/mcp.json` in your project root exists and is valid JSON
-2. Restart Cursor completely (Quit, not just reload)
-3. Check Cursor's developer console for errors
-
-**For Claude Code:**
-1. Verify `claude_desktop_config.json` is in the correct location
-2. Ensure paths are absolute (e.g., `/Users/name/project`, not `~/project`)
-3. Restart Claude Desktop completely
-4. Check Claude's logs: View → Developer → Show Logs
+1. Run `lien init` to verify the config file was created for your editor
+2. Restart your editor completely (quit, not just reload)
+3. Check your editor's developer console or logs for errors
+4. For Windsurf: ensure the `--root` path in `~/.codeium/windsurf/mcp_config.json` is correct
 
 ::: tip Manual Server Start
 You don't need to manually run `lien serve`—it starts automatically. You can run it manually for debugging:
