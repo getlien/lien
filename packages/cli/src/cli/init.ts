@@ -1,32 +1,95 @@
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import chalk from 'chalk';
 import { showCompactBanner } from '../utils/banner.js';
 
+export type EditorId =
+  | 'cursor'
+  | 'claude-code'
+  | 'windsurf'
+  | 'opencode'
+  | 'kilo-code'
+  | 'antigravity';
+
+interface EditorDefinition {
+  name: string;
+  configPath: ((rootDir: string) => string) | null; // null = snippet-only
+  configKey: string; // 'mcpServers' or 'mcp'
+  buildEntry: (rootDir: string) => Record<string, unknown>;
+  restartMessage: string;
+}
+
+const EDITORS: Record<EditorId, EditorDefinition> = {
+  cursor: {
+    name: 'Cursor',
+    configPath: rootDir => path.join(rootDir, '.cursor', 'mcp.json'),
+    configKey: 'mcpServers',
+    buildEntry: () => ({ command: 'lien', args: ['serve'] }),
+    restartMessage: 'Restart Cursor to activate.',
+  },
+  'claude-code': {
+    name: 'Claude Code',
+    configPath: rootDir => path.join(rootDir, '.mcp.json'),
+    configKey: 'mcpServers',
+    buildEntry: () => ({ command: 'lien', args: ['serve'] }),
+    restartMessage: 'Restart Claude Code to activate.',
+  },
+  windsurf: {
+    name: 'Windsurf',
+    configPath: () => path.join(os.homedir(), '.codeium', 'windsurf', 'mcp_config.json'),
+    configKey: 'mcpServers',
+    buildEntry: rootDir => ({
+      command: 'lien',
+      args: ['serve', '--root', path.resolve(rootDir)],
+    }),
+    restartMessage: 'Restart Windsurf to activate.',
+  },
+  opencode: {
+    name: 'OpenCode',
+    configPath: rootDir => path.join(rootDir, 'opencode.json'),
+    configKey: 'mcp',
+    buildEntry: () => ({ type: 'local', command: ['lien', 'serve'] }),
+    restartMessage: 'Restart OpenCode to activate.',
+  },
+  'kilo-code': {
+    name: 'Kilo Code',
+    configPath: rootDir => path.join(rootDir, '.kilocode', 'mcp.json'),
+    configKey: 'mcpServers',
+    buildEntry: () => ({ command: 'lien', args: ['serve'] }),
+    restartMessage: 'Restart VS Code to activate.',
+  },
+  antigravity: {
+    name: 'Antigravity',
+    configPath: null,
+    configKey: 'mcpServers',
+    buildEntry: () => ({ command: 'lien', args: ['serve'] }),
+    restartMessage: 'Add this to your Antigravity MCP settings.',
+  },
+};
+
 export interface InitOptions {
-  upgrade?: boolean;
-  yes?: boolean;
+  editor?: EditorId;
   path?: string;
 }
 
-const MCP_CONFIG = {
-  command: 'lien',
-  args: ['serve'],
-};
+function displayPath(configPath: string, rootDir: string): string {
+  const rel = path.relative(rootDir, configPath);
+  if (!rel.startsWith('..')) return rel;
+  const home = os.homedir();
+  if (configPath.startsWith(home)) return '~' + configPath.slice(home.length);
+  return configPath;
+}
 
-export async function initCommand(options: InitOptions = {}) {
-  showCompactBanner();
+async function writeEditorConfig(editor: EditorDefinition, rootDir: string): Promise<void> {
+  const configPath = editor.configPath!(rootDir);
+  const entry = editor.buildEntry(rootDir);
+  const key = editor.configKey;
 
-  const rootDir = options.path || process.cwd();
-  const cursorDir = path.join(rootDir, '.cursor');
-  const mcpConfigPath = path.join(cursorDir, 'mcp.json');
-
-  // Check if .cursor/mcp.json exists
-  let existingConfig: { mcpServers?: Record<string, unknown> } | null = null;
+  let existingConfig: Record<string, unknown> | null = null;
   try {
-    const raw = await fs.readFile(mcpConfigPath, 'utf-8');
+    const raw = await fs.readFile(configPath, 'utf-8');
     const parsed = JSON.parse(raw);
-    // Validate parsed JSON is a plain object we can merge into
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       existingConfig = parsed;
     }
@@ -34,29 +97,83 @@ export async function initCommand(options: InitOptions = {}) {
     // File doesn't exist or isn't valid JSON
   }
 
-  if (existingConfig?.mcpServers?.lien) {
-    // Already configured
-    console.log(chalk.green('\n✓ Already configured — .cursor/mcp.json contains lien entry'));
-  } else if (existingConfig) {
-    // Merge lien into existing config, validating mcpServers is a plain object
-    const servers = existingConfig.mcpServers;
-    const safeServers =
-      servers && typeof servers === 'object' && !Array.isArray(servers)
-        ? (servers as Record<string, unknown>)
-        : {};
-    safeServers.lien = MCP_CONFIG;
-    existingConfig.mcpServers = safeServers;
-    await fs.writeFile(mcpConfigPath, JSON.stringify(existingConfig, null, 2) + '\n');
-    console.log(chalk.green('\n✓ Added lien to existing .cursor/mcp.json'));
-  } else {
-    // Create new .cursor/mcp.json
-    await fs.mkdir(cursorDir, { recursive: true });
-    const config = { mcpServers: { lien: MCP_CONFIG } };
-    await fs.writeFile(mcpConfigPath, JSON.stringify(config, null, 2) + '\n');
-    console.log(chalk.green('\n✓ Created .cursor/mcp.json'));
+  const existingSection = existingConfig?.[key] as Record<string, unknown> | undefined;
+
+  if (existingSection?.lien) {
+    console.log(
+      chalk.green(
+        `\n✓ Already configured — ${displayPath(configPath, rootDir)} contains lien entry`,
+      ),
+    );
+    return;
   }
 
-  console.log(chalk.dim('  Restart Cursor to activate.\n'));
+  if (existingConfig) {
+    const section =
+      existingSection && typeof existingSection === 'object' && !Array.isArray(existingSection)
+        ? { ...existingSection }
+        : {};
+    section.lien = entry;
+    existingConfig[key] = section;
+    await fs.writeFile(configPath, JSON.stringify(existingConfig, null, 2) + '\n');
+    console.log(chalk.green(`\n✓ Added lien to existing ${displayPath(configPath, rootDir)}`));
+  } else {
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    const config = { [key]: { lien: entry } };
+    await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n');
+    console.log(chalk.green(`\n✓ Created ${displayPath(configPath, rootDir)}`));
+  }
+}
+
+async function promptForEditor(): Promise<EditorId> {
+  const { default: inquirer } = await import('inquirer');
+  const { editor } = await inquirer.prompt<{ editor: EditorId }>([
+    {
+      type: 'list',
+      name: 'editor',
+      message: 'Which editor are you using?',
+      choices: [
+        { name: 'Cursor', value: 'cursor' },
+        { name: 'Claude Code', value: 'claude-code' },
+        { name: 'Windsurf', value: 'windsurf' },
+        { name: 'OpenCode', value: 'opencode' },
+        { name: 'Kilo Code', value: 'kilo-code' },
+        { name: 'Antigravity', value: 'antigravity' },
+      ],
+      default: 'cursor',
+    },
+  ]);
+  return editor;
+}
+
+export async function initCommand(options: InitOptions = {}) {
+  showCompactBanner();
+
+  const rootDir = options.path || process.cwd();
+
+  // Resolve editor
+  let editorId: EditorId;
+  if (options.editor) {
+    editorId = options.editor;
+  } else if (!process.stdout.isTTY) {
+    console.error(chalk.red('Error: Use --editor to specify your editor in non-interactive mode.'));
+    process.exit(1);
+  } else {
+    editorId = await promptForEditor();
+  }
+
+  const editor = EDITORS[editorId];
+
+  if (editor.configPath) {
+    await writeEditorConfig(editor, rootDir);
+    console.log(chalk.dim(`  ${editor.restartMessage}\n`));
+  } else {
+    // Snippet-only editor (e.g. Antigravity)
+    const entry = editor.buildEntry(rootDir);
+    const snippet = { [editor.configKey]: { lien: entry } };
+    console.log(chalk.yellow(`\n${editor.restartMessage}`));
+    console.log(JSON.stringify(snippet, null, 2));
+  }
 
   // Check if old config exists and warn
   const legacyConfigPath = path.join(rootDir, '.lien.config.json');
