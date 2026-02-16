@@ -1,5 +1,6 @@
-import type { SearchResult, VectorDBInterface, EmbeddingService } from '@liendev/core';
+import type { VectorDBInterface, EmbeddingService } from '@liendev/core';
 import type { ReindexState } from './reindex-state-manager.js';
+import type { ToolResult } from './utils/metadata-shaper.js';
 
 /**
  * MCP log levels matching the protocol specification.
@@ -73,7 +74,9 @@ export interface IndexMetadata {
  */
 export interface SearchResultResponse {
   indexInfo: IndexMetadata;
-  results: SearchResult[];
+  results: ToolResult[];
+  /** Results grouped by repository when cross-repo search is used */
+  groupedByRepo?: Record<string, ToolResult[]>;
   /** Warning note when cross-repo fallback occurs or other issues */
   note?: string;
 }
@@ -84,7 +87,7 @@ export interface SearchResultResponse {
 export interface FilesContextResponse {
   indexInfo: IndexMetadata;
   file: string;
-  chunks: SearchResult[];
+  chunks: ToolResult[];
   testAssociations: string[];
   note?: string;
 }
@@ -97,7 +100,7 @@ export interface FilesContextMultiResponse {
   files: Record<
     string,
     {
-      chunks: SearchResult[];
+      chunks: ToolResult[];
       testAssociations: string[];
     }
   >;
@@ -110,19 +113,15 @@ export interface FilesContextMultiResponse {
  */
 export interface SimilarCodeResponse {
   indexInfo: IndexMetadata;
-  results: SearchResult[];
+  results: ToolResult[];
+  /** Applied filters with pruned count */
+  filtersApplied?: {
+    language?: string;
+    pathHint?: string;
+    prunedLowRelevance: number;
+  };
   /** Diagnostic note when no results are found */
   note?: string;
-}
-
-/**
- * Symbol information
- */
-export interface SymbolInfo {
-  name: string;
-  file: string;
-  language: string;
-  type: 'function' | 'class' | 'interface';
 }
 
 /**
@@ -130,8 +129,10 @@ export interface SymbolInfo {
  */
 export interface SymbolListResponse {
   indexInfo: IndexMetadata;
-  symbols: SymbolInfo[];
+  results: ToolResult[];
   method: 'symbols' | 'content';
+  hasMore: boolean;
+  nextOffset?: number;
   note?: string;
 }
 
