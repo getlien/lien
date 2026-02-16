@@ -31,8 +31,16 @@ program
 program
   .command('init')
   .description('Initialize Lien in the current directory')
-  .option('-u, --upgrade', 'Upgrade existing config with new options')
-  .option('-y, --yes', 'Skip interactive prompts and use defaults')
+  .addOption(
+    new Option('-e, --editor <editor>', 'Editor to configure MCP for').choices([
+      'cursor',
+      'claude-code',
+      'windsurf',
+      'opencode',
+      'kilo-code',
+      'antigravity',
+    ]),
+  )
   .option('-p, --path <path>', 'Path to initialize (defaults to current directory)')
   .action(initCommand);
 

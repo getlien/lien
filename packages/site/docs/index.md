@@ -47,53 +47,17 @@ features:
 npm install -g @liendev/lien
 ```
 
-**2. Configure your AI assistant:**
+**2. Configure your editor:**
 
-- **For Cursor**: Create `.cursor/mcp.json` in your project root
-- **For Claude Code**: Create `claude_desktop_config.json` in your config folder
-
-<details>
-<summary>Cursor Setup (.cursor/mcp.json)</summary>
-
-```json
-{
-  "mcpServers": {
-    "lien": {
-      "command": "lien",
-      "args": ["serve"]
-    }
-  }
-}
-```
-</details>
-
-<details>
-<summary>Claude Code Setup (claude_desktop_config.json)</summary>
-
-**Location:**
-- macOS: `~/Library/Application Support/Claude/`
-- Windows: `%APPDATA%\Claude\`
-- Linux: `~/.config/Claude/`
-
-```json
-{
-  "mcpServers": {
-    "lien": {
-      "command": "lien",
-      "args": ["serve", "--root", "/path/to/your/project"]
-    }
-  }
-}
+```bash
+lien init
 ```
 
-Replace `/path/to/your/project` with your actual project path.
-</details>
+This writes the correct MCP config for your editor (Cursor, Claude Code, Windsurf, OpenCode, Kilo Code, or Antigravity).
 
-**3. Restart your AI assistant** and start asking questions about your codebase!
+**3. Restart your editor** and start asking questions about your codebase!
 
 That's it—no configuration files needed. Lien auto-detects your project structure and indexes on first use.
-
-> **Note:** Cursor's per-project `.cursor/mcp.json` approach is recommended for automatic project switching. Claude Code requires global configuration with explicit `--root` paths. See [Getting Started](/guide/getting-started) for details.
 
 ## How It Works
 
