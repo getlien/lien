@@ -73,6 +73,10 @@ export interface InitOptions {
   path?: string;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 function displayPath(configPath: string, rootDir: string): string {
   const rel = path.relative(rootDir, configPath);
   if (!rel.startsWith('..')) return rel;
@@ -90,7 +94,7 @@ async function writeEditorConfig(editor: EditorDefinition, rootDir: string): Pro
   try {
     const raw = await fs.readFile(configPath, 'utf-8');
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    if (isPlainObject(parsed)) {
       existingConfig = parsed;
     }
   } catch {
@@ -109,10 +113,7 @@ async function writeEditorConfig(editor: EditorDefinition, rootDir: string): Pro
   }
 
   if (existingConfig) {
-    const section =
-      existingSection && typeof existingSection === 'object' && !Array.isArray(existingSection)
-        ? { ...existingSection }
-        : {};
+    const section = isPlainObject(existingSection) ? { ...existingSection } : {};
     section.lien = entry;
     existingConfig[key] = section;
     await fs.writeFile(configPath, JSON.stringify(existingConfig, null, 2) + '\n');
