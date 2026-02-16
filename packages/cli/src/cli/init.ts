@@ -85,30 +85,27 @@ function displayPath(configPath: string, rootDir: string): string {
   return configPath;
 }
 
+async function readJsonFile(filePath: string): Promise<Record<string, unknown> | null> {
+  try {
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 async function writeEditorConfig(editor: EditorDefinition, rootDir: string): Promise<void> {
   const configPath = editor.configPath!(rootDir);
   const entry = editor.buildEntry(rootDir);
   const key = editor.configKey;
+  const label = displayPath(configPath, rootDir);
 
-  let existingConfig: Record<string, unknown> | null = null;
-  try {
-    const raw = await fs.readFile(configPath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (isPlainObject(parsed)) {
-      existingConfig = parsed;
-    }
-  } catch {
-    // File doesn't exist or isn't valid JSON
-  }
-
+  const existingConfig = await readJsonFile(configPath);
   const existingSection = existingConfig?.[key] as Record<string, unknown> | undefined;
 
   if (existingSection?.lien) {
-    console.log(
-      chalk.green(
-        `\n✓ Already configured — ${displayPath(configPath, rootDir)} contains lien entry`,
-      ),
-    );
+    console.log(chalk.green(`\n✓ Already configured — ${label} contains lien entry`));
     return;
   }
 
@@ -117,12 +114,12 @@ async function writeEditorConfig(editor: EditorDefinition, rootDir: string): Pro
     section.lien = entry;
     existingConfig[key] = section;
     await fs.writeFile(configPath, JSON.stringify(existingConfig, null, 2) + '\n');
-    console.log(chalk.green(`\n✓ Added lien to existing ${displayPath(configPath, rootDir)}`));
+    console.log(chalk.green(`\n✓ Added lien to existing ${label}`));
   } else {
     await fs.mkdir(path.dirname(configPath), { recursive: true });
     const config = { [key]: { lien: entry } };
     await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n');
-    console.log(chalk.green(`\n✓ Created ${displayPath(configPath, rootDir)}`));
+    console.log(chalk.green(`\n✓ Created ${label}`));
   }
 }
 
