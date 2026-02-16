@@ -1,5 +1,34 @@
 # @liendev/lien
 
+## 0.39.0
+
+### Minor Changes
+
+- 844ceab: ### Features
+  - Add `--editor` flag to `lien init` for multi-editor support (#272)
+  - Add `metricType` filter to `get_complexity` MCP tool (#270)
+  - Detect KISS violations via per-file simplicity signals in Veille reviews (#263)
+  - Architectural review with codebase fingerprint (#251)
+  - AST-powered logic review with GitHub suggestion diffs (#249)
+  - Veille review system improvements (#248)
+
+  ### Fixes
+  - Use language registry for analyzable file extensions in reviews (#269)
+  - Tighten marginal violation threshold from 15% to 5% (#267)
+  - Remove hard violation cap, add token-budget-aware fallback (#265)
+  - Use effort-based Halstead bugs formula (#262)
+  - Improve dedup note with severity, grouped metrics, and comment links (#261)
+  - Skip unchecked_return for void-returning functions (#260)
+  - Deduplicate Veille review comments across push rounds (#253)
+
+  ### Refactors
+  - Reduce formatTextReport complexity (#254)
+
+### Patch Changes
+
+- Updated dependencies [844ceab]
+  - @liendev/core@0.39.0
+
 ## 0.38.1
 
 ### Patch Changes
