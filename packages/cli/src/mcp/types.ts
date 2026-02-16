@@ -29,14 +29,7 @@ export interface ToolContext {
   /** Check if index has been updated and reconnect if needed */
   checkAndReconnect: () => Promise<void>;
   /** Get current index metadata for responses */
-  getIndexMetadata: () => {
-    indexVersion: number;
-    indexDate: string;
-    reindexInProgress?: boolean;
-    pendingFileCount?: number;
-    lastReindexDurationMs?: number | null;
-    msSinceLastReindex?: number | null;
-  };
+  getIndexMetadata: () => IndexMetadata;
   /** Get current reindex state */
   getReindexState: () => ReindexState;
 }
@@ -56,13 +49,11 @@ export interface MCPToolResult {
 export type ToolHandler = (args: unknown, ctx: ToolContext) => Promise<MCPToolResult>;
 
 /**
- * Metadata about the index state
+ * Metadata about the index state, returned by getIndexMetadata().
  */
 export interface IndexMetadata {
-  lastIndexed: string | null;
-  version: number;
-  hasData: boolean;
-  // Reindex status fields
+  indexVersion: number;
+  indexDate: string;
   reindexInProgress?: boolean;
   pendingFileCount?: number;
   lastReindexDurationMs?: number | null;
@@ -134,19 +125,4 @@ export interface SymbolListResponse {
   hasMore: boolean;
   nextOffset?: number;
   note?: string;
-}
-
-/**
- * Helper to create index metadata
- */
-export function createIndexMetadata(
-  lastIndexed: string | null,
-  version: number,
-  hasData: boolean,
-): IndexMetadata {
-  return {
-    lastIndexed,
-    version,
-    hasData,
-  };
 }
