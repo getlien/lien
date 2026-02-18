@@ -23,7 +23,7 @@ export async function cloneRepo(
   token: string,
   logger: Logger,
 ): Promise<CloneResult> {
-  const dir = await mkdtemp(join(tmpdir(), 'veille-'));
+  const dir = await mkdtemp(join(tmpdir(), 'lien-review-'));
 
   // Token is in the URL but never logged — only passed to git directly
   const cloneUrl = `https://x-access-token:${token}@github.com/${repoFullName}.git`;

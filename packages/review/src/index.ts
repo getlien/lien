@@ -1,8 +1,7 @@
 /**
- * @liendev/review — Shared review logic for Veille
+ * @liendev/review — Shared review logic for Lien Review
  *
- * Used by both the GitHub Action (@liendev/action) and
- * the GitHub App (@liendev/app) to analyze PR complexity
+ * Used by the GitHub App (@liendev/app) to analyze PR complexity
  * and post review comments.
  */
 
@@ -48,11 +47,13 @@ export {
   parsePatchLines,
   getPRDiffLines,
   getPRPatchData,
-  getExistingVeilleCommentKeys,
-  parseVeilleMarker,
-  parseVeilleLogicMarker,
-  VEILLE_COMMENT_MARKER_PREFIX,
-  VEILLE_LOGIC_MARKER_PREFIX,
+  getExistingCommentKeys,
+  parseCommentMarker,
+  parseLogicMarker,
+  COMMENT_MARKER_PREFIX,
+  LOGIC_MARKER_PREFIX,
+  LEGACY_COMMENT_MARKER_PREFIX,
+  LEGACY_LOGIC_MARKER_PREFIX,
 } from './github-api.js';
 
 // OpenRouter API

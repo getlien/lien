@@ -495,11 +495,11 @@ export function buildDescriptionBadge(
   const metricTable = buildMetricTable(report, deltas);
   const impactSummary = buildImpactSummary(report);
 
-  return `### 👁️ Veille
+  return `### Lien Review
 
 ${status.emoji} ${status.message}${impactSummary}
 ${metricTable}
-*[Veille](https://lien.dev) by Lien*`;
+*[Lien Review](https://lien.dev)*`;
 }
 
 /**
@@ -560,7 +560,7 @@ export function buildLineSummaryComment(report: ComplexityReport, _prContext: PR
   const emoji = summary.bySeverity.error > 0 ? '🔴' : '🟡';
 
   return `<!-- lien-ai-review -->
-## ${emoji} Veille
+## ${emoji} Lien Review
 
 ${summary.totalViolations} issue${summary.totalViolations === 1 ? '' : 's'} spotted in this PR.
 
@@ -575,7 +575,7 @@ See inline comments below for specific suggestions.
 
 </details>
 
-*[Veille](https://lien.dev) by Lien*`;
+*[Lien Review](https://lien.dev)*`;
 }
 
 /**

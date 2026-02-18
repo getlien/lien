@@ -15,7 +15,6 @@
     "packages/core",
     "packages/review",
     "packages/cli",
-    "packages/action",
     "packages/app",
     "packages/site"
   ],

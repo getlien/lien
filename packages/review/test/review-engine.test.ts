@@ -9,10 +9,12 @@ import {
   prioritizeViolations,
 } from '../src/review-engine.js';
 import {
-  parseVeilleMarker,
-  parseVeilleLogicMarker,
-  VEILLE_COMMENT_MARKER_PREFIX,
-  VEILLE_LOGIC_MARKER_PREFIX,
+  parseCommentMarker,
+  parseLogicMarker,
+  COMMENT_MARKER_PREFIX,
+  LOGIC_MARKER_PREFIX,
+  LEGACY_COMMENT_MARKER_PREFIX,
+  LEGACY_LOGIC_MARKER_PREFIX,
 } from '../src/github-api.js';
 
 // ---------------------------------------------------------------------------
@@ -189,31 +191,42 @@ describe('determineReviewEvent', () => {
 });
 
 // ---------------------------------------------------------------------------
-// parseVeilleMarker / parseVeilleLogicMarker
+// parseCommentMarker / parseLogicMarker
 // ---------------------------------------------------------------------------
 
-describe('parseVeilleMarker', () => {
-  it('extracts key from a valid complexity marker', () => {
+describe('parseCommentMarker', () => {
+  it('extracts key from a new lien-review marker', () => {
+    const body = '<!-- lien-review:src/auth.ts::handleLogin -->\n🟡 🧠 **Mental load: 25**';
+    expect(parseCommentMarker(body)).toBe('src/auth.ts::handleLogin');
+  });
+
+  it('extracts key from a legacy veille marker (backward compat)', () => {
     const body = '<!-- veille:src/auth.ts::handleLogin -->\n🟡 🧠 **Mental load: 25**';
-    expect(parseVeilleMarker(body)).toBe('src/auth.ts::handleLogin');
+    expect(parseCommentMarker(body)).toBe('src/auth.ts::handleLogin');
   });
 
   it('returns null when no marker is present', () => {
-    expect(parseVeilleMarker('🟡 some comment without marker')).toBeNull();
+    expect(parseCommentMarker('🟡 some comment without marker')).toBeNull();
   });
 
   it('returns null when marker is malformed (missing closing)', () => {
-    expect(parseVeilleMarker('<!-- veille:src/auth.ts::handleLogin')).toBeNull();
+    expect(parseCommentMarker('<!-- lien-review:src/auth.ts::handleLogin')).toBeNull();
   });
 
-  it('extracts key from logic marker', () => {
+  it('extracts key from new logic marker', () => {
+    const body =
+      '<!-- lien-review-logic:src/api.ts::42::unchecked_error -->\n**Logic Review** (beta)';
+    expect(parseLogicMarker(body)).toBe('src/api.ts::42::unchecked_error');
+  });
+
+  it('extracts key from legacy logic marker (backward compat)', () => {
     const body = '<!-- veille-logic:src/api.ts::42::unchecked_error -->\n**Logic Review** (beta)';
-    expect(parseVeilleLogicMarker(body)).toBe('src/api.ts::42::unchecked_error');
+    expect(parseLogicMarker(body)).toBe('src/api.ts::42::unchecked_error');
   });
 
   it('returns null for logic marker on complexity body', () => {
-    const body = '<!-- veille:src/auth.ts::handleLogin -->\n🟡 comment';
-    expect(parseVeilleLogicMarker(body)).toBeNull();
+    const body = '<!-- lien-review:src/auth.ts::handleLogin -->\n🟡 comment';
+    expect(parseLogicMarker(body)).toBeNull();
   });
 });
 
@@ -226,7 +239,7 @@ describe('filterDuplicateComments', () => {
     return {
       path: filepath,
       line: 10,
-      body: `${VEILLE_COMMENT_MARKER_PREFIX}${filepath}::${symbolName} -->\n🟡 comment${extra}`,
+      body: `${COMMENT_MARKER_PREFIX}${filepath}::${symbolName} -->\n🟡 comment${extra}`,
     };
   }
 
@@ -238,7 +251,7 @@ describe('filterDuplicateComments', () => {
     return {
       path: filepath,
       line,
-      body: `${VEILLE_LOGIC_MARKER_PREFIX}${filepath}::${line}::${category} -->\n**Logic Review** (beta)`,
+      body: `${LOGIC_MARKER_PREFIX}${filepath}::${line}::${category} -->\n**Logic Review** (beta)`,
     };
   }
 
@@ -247,7 +260,7 @@ describe('filterDuplicateComments', () => {
     const { kept, skippedKeys } = filterDuplicateComments(
       comments,
       new Set(),
-      VEILLE_COMMENT_MARKER_PREFIX,
+      COMMENT_MARKER_PREFIX,
     );
     expect(kept).toHaveLength(2);
     expect(skippedKeys).toHaveLength(0);
@@ -259,7 +272,7 @@ describe('filterDuplicateComments', () => {
     const { kept, skippedKeys } = filterDuplicateComments(
       comments,
       existing,
-      VEILLE_COMMENT_MARKER_PREFIX,
+      COMMENT_MARKER_PREFIX,
     );
     expect(kept).toHaveLength(1);
     expect(kept[0].path).toBe('b.ts');
@@ -272,7 +285,7 @@ describe('filterDuplicateComments', () => {
     const { kept, skippedKeys } = filterDuplicateComments(
       comments,
       existing,
-      VEILLE_COMMENT_MARKER_PREFIX,
+      COMMENT_MARKER_PREFIX,
     );
     expect(kept).toHaveLength(0);
     expect(skippedKeys).toHaveLength(2);
@@ -282,7 +295,7 @@ describe('filterDuplicateComments', () => {
     const noMarker: LineComment = { path: 'c.ts', line: 5, body: 'plain comment' };
     const comments = [makeComment('a.ts', 'foo'), noMarker];
     const existing = new Set(['a.ts::foo']);
-    const { kept } = filterDuplicateComments(comments, existing, VEILLE_COMMENT_MARKER_PREFIX);
+    const { kept } = filterDuplicateComments(comments, existing, COMMENT_MARKER_PREFIX);
     expect(kept).toHaveLength(1);
     expect(kept[0]).toBe(noMarker);
   });
@@ -290,15 +303,29 @@ describe('filterDuplicateComments', () => {
   it('filters logic comments with logic marker prefix', () => {
     const comments = [makeLogicComment('a.ts', 10), makeLogicComment('b.ts', 20)];
     const existing = new Set(['a.ts::10::unchecked_error']);
-    const { kept } = filterDuplicateComments(comments, existing, VEILLE_LOGIC_MARKER_PREFIX);
+    const { kept } = filterDuplicateComments(comments, existing, LOGIC_MARKER_PREFIX);
     expect(kept).toHaveLength(1);
     expect(kept[0].path).toBe('b.ts');
+  });
+
+  it('filters legacy veille-prefixed comments too', () => {
+    const legacyComment: LineComment = {
+      path: 'a.ts',
+      line: 10,
+      body: `${LEGACY_COMMENT_MARKER_PREFIX}a.ts::foo -->\n🟡 comment`,
+    };
+    const { kept } = filterDuplicateComments(
+      [legacyComment],
+      new Set(['a.ts::foo']),
+      LEGACY_COMMENT_MARKER_PREFIX,
+    );
+    expect(kept).toHaveLength(0);
   });
 
   it('does not cross-match complexity keys against logic comments', () => {
     const comments = [makeLogicComment('a.ts', 10)];
     const complexityKeys = new Set(['a.ts::foo']);
-    const { kept } = filterDuplicateComments(comments, complexityKeys, VEILLE_LOGIC_MARKER_PREFIX);
+    const { kept } = filterDuplicateComments(comments, complexityKeys, LOGIC_MARKER_PREFIX);
     expect(kept).toHaveLength(1); // no match — different marker prefix
   });
 
@@ -308,7 +335,7 @@ describe('filterDuplicateComments', () => {
       makeLogicComment('a.ts', 10, 'null_deref'),
     ];
     const existing = new Set(['a.ts::10::unchecked_error']);
-    const { kept } = filterDuplicateComments(comments, existing, VEILLE_LOGIC_MARKER_PREFIX);
+    const { kept } = filterDuplicateComments(comments, existing, LOGIC_MARKER_PREFIX);
     expect(kept).toHaveLength(1);
     expect(kept[0].body).toContain('null_deref');
   });

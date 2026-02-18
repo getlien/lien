@@ -10,9 +10,9 @@ services:
       - caddy_data:/data
     restart: unless-stopped
     depends_on:
-      - veille
+      - lien-review
 
-  veille:
+  lien-review:
     build:
       context: ../..
       dockerfile: packages/app/Dockerfile

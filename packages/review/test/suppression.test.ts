@@ -14,7 +14,36 @@ const createFinding = (overrides: Partial<LogicFinding> = {}): LogicFinding => (
 });
 
 describe('parseSuppressionComments', () => {
-  it('parses single category suppression', () => {
+  it('parses lien-ignore single category suppression', () => {
+    const code = '// lien-ignore: breaking-change\nfunction foo() {}';
+    const result = parseSuppressionComments(code);
+    expect(result).toHaveLength(1);
+    expect(result[0].line).toBe(1);
+    expect(result[0].categories).toEqual(['breaking-change']);
+  });
+
+  it('parses lien-ignore comma-separated categories', () => {
+    const code = '// lien-ignore: breaking-change, unchecked-return\nfunction foo() {}';
+    const result = parseSuppressionComments(code);
+    expect(result).toHaveLength(1);
+    expect(result[0].categories).toEqual(['breaking-change', 'unchecked-return']);
+  });
+
+  it('parses lien-ignore "all" suppression', () => {
+    const code = '// lien-ignore: all\nfunction foo() {}';
+    const result = parseSuppressionComments(code);
+    expect(result[0].categories).toEqual(['all']);
+  });
+
+  it('parses lien-ignore Python-style comments', () => {
+    const code = '# lien-ignore: missing-tests\ndef foo(): pass';
+    const result = parseSuppressionComments(code);
+    expect(result).toHaveLength(1);
+    expect(result[0].categories).toEqual(['missing-tests']);
+  });
+
+  // Backward compat: legacy veille-ignore still works
+  it('parses legacy veille-ignore single category suppression', () => {
     const code = '// veille-ignore: breaking-change\nfunction foo() {}';
     const result = parseSuppressionComments(code);
     expect(result).toHaveLength(1);
@@ -22,20 +51,14 @@ describe('parseSuppressionComments', () => {
     expect(result[0].categories).toEqual(['breaking-change']);
   });
 
-  it('parses comma-separated categories', () => {
+  it('parses legacy veille-ignore comma-separated categories', () => {
     const code = '// veille-ignore: breaking-change, unchecked-return\nfunction foo() {}';
     const result = parseSuppressionComments(code);
     expect(result).toHaveLength(1);
     expect(result[0].categories).toEqual(['breaking-change', 'unchecked-return']);
   });
 
-  it('parses "all" suppression', () => {
-    const code = '// veille-ignore: all\nfunction foo() {}';
-    const result = parseSuppressionComments(code);
-    expect(result[0].categories).toEqual(['all']);
-  });
-
-  it('parses Python-style comments', () => {
+  it('parses legacy veille-ignore Python-style comments', () => {
     const code = '# veille-ignore: missing-tests\ndef foo(): pass';
     const result = parseSuppressionComments(code);
     expect(result).toHaveLength(1);
@@ -47,22 +70,35 @@ describe('parseSuppressionComments', () => {
     expect(parseSuppressionComments(code)).toHaveLength(0);
   });
 
-  it('handles multiple suppression comments', () => {
+  it('handles mixed lien-ignore and veille-ignore comments', () => {
     const code =
-      '// veille-ignore: breaking-change\nfunction foo() {}\n// veille-ignore: missing-tests\nfunction bar() {}';
+      '// lien-ignore: breaking-change\nfunction foo() {}\n// veille-ignore: missing-tests\nfunction bar() {}';
     const result = parseSuppressionComments(code);
     expect(result).toHaveLength(2);
   });
 });
 
 describe('isFindingSuppressed', () => {
-  it('suppresses finding on the same line', () => {
+  it('suppresses finding with lien-ignore on the same line', () => {
+    const finding = createFinding({ line: 1 });
+    const code = '// lien-ignore: breaking-change\nexport function validateToken() {}';
+    expect(isFindingSuppressed(finding, code)).toBe(true);
+  });
+
+  it('suppresses finding with lien-ignore on the next line', () => {
+    const finding = createFinding({ line: 2 });
+    const code = '// lien-ignore: breaking-change\nexport function validateToken() {}';
+    expect(isFindingSuppressed(finding, code)).toBe(true);
+  });
+
+  // Backward compat: legacy veille-ignore still suppresses
+  it('suppresses finding with legacy veille-ignore on the same line', () => {
     const finding = createFinding({ line: 1 });
     const code = '// veille-ignore: breaking-change\nexport function validateToken() {}';
     expect(isFindingSuppressed(finding, code)).toBe(true);
   });
 
-  it('suppresses finding on the next line', () => {
+  it('suppresses finding with legacy veille-ignore on the next line', () => {
     const finding = createFinding({ line: 2 });
     const code = '// veille-ignore: breaking-change\nexport function validateToken() {}';
     expect(isFindingSuppressed(finding, code)).toBe(true);
@@ -70,25 +106,25 @@ describe('isFindingSuppressed', () => {
 
   it('does not suppress finding far from comment', () => {
     const finding = createFinding({ line: 5 });
-    const code = '// veille-ignore: breaking-change\n\n\n\nexport function validateToken() {}';
+    const code = '// lien-ignore: breaking-change\n\n\n\nexport function validateToken() {}';
     expect(isFindingSuppressed(finding, code)).toBe(false);
   });
 
   it('does not suppress with wrong category', () => {
     const finding = createFinding({ category: 'unchecked_return', line: 2 });
-    const code = '// veille-ignore: breaking-change\nfunction foo() {}';
+    const code = '// lien-ignore: breaking-change\nfunction foo() {}';
     expect(isFindingSuppressed(finding, code)).toBe(false);
   });
 
   it('suppresses with "all" category', () => {
     const finding = createFinding({ category: 'missing_tests', line: 2 });
-    const code = '// veille-ignore: all\nfunction foo() {}';
+    const code = '// lien-ignore: all\nfunction foo() {}';
     expect(isFindingSuppressed(finding, code)).toBe(true);
   });
 
   it('converts underscore categories to hyphens for matching', () => {
     const finding = createFinding({ category: 'unchecked_return', line: 2 });
-    const code = '// veille-ignore: unchecked-return\nfunction foo() {}';
+    const code = '// lien-ignore: unchecked-return\nfunction foo() {}';
     expect(isFindingSuppressed(finding, code)).toBe(true);
   });
 

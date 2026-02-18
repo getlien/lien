@@ -1,4 +1,4 @@
-name: Deploy Veille App
+name: Deploy Lien Review App
 
 on:
   push:
