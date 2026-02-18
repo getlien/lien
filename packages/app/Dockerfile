@@ -12,7 +12,6 @@ COPY packages/core/package.json packages/core/
 COPY packages/review/package.json packages/review/
 COPY packages/app/package.json packages/app/
 COPY packages/cli/package.json packages/cli/
-COPY packages/action/package.json packages/action/
 COPY packages/site/package.json packages/site/
 
 # Install all workspace dependencies (core depends on hoisted packages like chalk)
