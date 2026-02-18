@@ -1,6 +1,7 @@
 /**
  * Inline suppression for logic review findings.
- * Detects `// veille-ignore:` comments to suppress specific finding categories.
+ * Detects `// lien-ignore:` comments to suppress specific finding categories.
+ * Also recognizes legacy `// veille-ignore:` for backward compatibility.
  */
 
 import type { LogicFinding } from './types.js';
@@ -14,19 +15,20 @@ interface SuppressionComment {
 }
 
 /**
- * Parse veille-ignore comments from source code.
+ * Parse lien-ignore (and legacy veille-ignore) comments from source code.
  * Supports:
- * - `// veille-ignore: breaking-change`
- * - `// veille-ignore: all`
- * - `// veille-ignore: breaking-change, unchecked-return`
- * - `# veille-ignore: missing-tests` (Python-style)
+ * - `// lien-ignore: breaking-change`
+ * - `// lien-ignore: all`
+ * - `// lien-ignore: breaking-change, unchecked-return`
+ * - `# lien-ignore: missing-tests` (Python-style)
+ * - `// veille-ignore: ...` (legacy, still recognized)
  */
 export function parseSuppressionComments(code: string): SuppressionComment[] {
   const results: SuppressionComment[] = [];
   const lines = code.split('\n');
 
   for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(/(?:\/\/|#)\s*veille-ignore:\s*(.+)/);
+    const match = lines[i].match(/(?:\/\/|#)\s*(?:lien|veille)-ignore:\s*(.+)/);
     if (match) {
       const categories = match[1].split(',').map(s => s.trim().toLowerCase());
       results.push({ line: i + 1, categories });
@@ -45,8 +47,8 @@ function categoryToSuppressionKey(category: string): string {
 
 /**
  * Check if a finding is suppressed by inline comments.
- * A finding is suppressed if there's a veille-ignore comment on the same line,
- * the line before the finding, or the line before the function start.
+ * A finding is suppressed if there's a lien-ignore (or legacy veille-ignore) comment
+ * on the same line, the line before the finding, or the line before the function start.
  */
 export function isFindingSuppressed(finding: LogicFinding, codeSnippet: string): boolean {
   const suppressions = parseSuppressionComments(codeSnippet);

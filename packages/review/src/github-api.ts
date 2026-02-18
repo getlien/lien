@@ -193,47 +193,69 @@ export async function postPRReview(
 }
 
 /**
- * Marker prefix for Veille inline review comments.
- * Format: <!-- veille:filepath::symbolName -->
+ * Marker prefix for Lien Review inline review comments.
+ * Format: <!-- lien-review:filepath::symbolName -->
  */
-export const VEILLE_COMMENT_MARKER_PREFIX = '<!-- veille:';
+export const COMMENT_MARKER_PREFIX = '<!-- lien-review:';
 
 /**
- * Marker prefix for Veille logic review comments.
- * Format: <!-- veille-logic:filepath::line -->
+ * Marker prefix for Lien Review logic review comments.
+ * Format: <!-- lien-review-logic:filepath::line -->
  */
-export const VEILLE_LOGIC_MARKER_PREFIX = '<!-- veille-logic:';
+export const LOGIC_MARKER_PREFIX = '<!-- lien-review-logic:';
+
+/** @deprecated Legacy prefix — kept for 6 months to recognize old PR comments */
+export const LEGACY_COMMENT_MARKER_PREFIX = '<!-- veille:';
+
+/** @deprecated Legacy prefix — kept for 6 months to recognize old PR comments */
+export const LEGACY_LOGIC_MARKER_PREFIX = '<!-- veille-logic:';
 
 /**
- * Parse a Veille marker from a comment body, returning the dedup key or null.
+ * Parse a comment marker from a comment body, returning the dedup key or null.
+ * Checks for the new `lien-review:` prefix first, then falls back to legacy `veille:`.
  */
-export function parseVeilleMarker(body: string): string | null {
-  const start = body.indexOf(VEILLE_COMMENT_MARKER_PREFIX);
+export function parseCommentMarker(body: string): string | null {
+  // Try new prefix first
+  let start = body.indexOf(COMMENT_MARKER_PREFIX);
+  let prefix = COMMENT_MARKER_PREFIX;
+  if (start === -1) {
+    // Fall back to legacy prefix
+    start = body.indexOf(LEGACY_COMMENT_MARKER_PREFIX);
+    prefix = LEGACY_COMMENT_MARKER_PREFIX;
+  }
   if (start === -1) return null;
-  const keyStart = start + VEILLE_COMMENT_MARKER_PREFIX.length;
+  const keyStart = start + prefix.length;
   const end = body.indexOf(' -->', keyStart);
   if (end === -1) return null;
   return body.slice(keyStart, end);
 }
 
 /**
- * Parse a Veille logic marker from a comment body, returning the dedup key or null.
+ * Parse a logic marker from a comment body, returning the dedup key or null.
+ * Checks for the new `lien-review-logic:` prefix first, then falls back to legacy `veille-logic:`.
  */
-export function parseVeilleLogicMarker(body: string): string | null {
-  const start = body.indexOf(VEILLE_LOGIC_MARKER_PREFIX);
+export function parseLogicMarker(body: string): string | null {
+  // Try new prefix first
+  let start = body.indexOf(LOGIC_MARKER_PREFIX);
+  let prefix = LOGIC_MARKER_PREFIX;
+  if (start === -1) {
+    // Fall back to legacy prefix
+    start = body.indexOf(LEGACY_LOGIC_MARKER_PREFIX);
+    prefix = LEGACY_LOGIC_MARKER_PREFIX;
+  }
   if (start === -1) return null;
-  const keyStart = start + VEILLE_LOGIC_MARKER_PREFIX.length;
+  const keyStart = start + prefix.length;
   const end = body.indexOf(' -->', keyStart);
   if (end === -1) return null;
   return body.slice(keyStart, end);
 }
 
 /**
- * Fetch existing Veille inline comment keys from the PR.
+ * Fetch existing Lien Review inline comment keys from the PR.
  * Returns a Map of dedup keys → comment URLs for complexity comments
  * and a Set of logic keys (e.g. "filepath::line::category") for logic review comments.
  */
-export async function getExistingVeilleCommentKeys(
+export async function getExistingCommentKeys(
   octokit: Octokit,
   prContext: PRContext,
   logger: Logger,
@@ -252,13 +274,13 @@ export async function getExistingVeilleCommentKeys(
     for (const comment of response.data) {
       if (!comment.body) continue;
 
-      const complexityKey = parseVeilleMarker(comment.body);
+      const complexityKey = parseCommentMarker(comment.body);
       if (complexityKey) {
         complexity.set(complexityKey, comment.html_url);
         continue;
       }
 
-      const logicKey = parseVeilleLogicMarker(comment.body);
+      const logicKey = parseLogicMarker(comment.body);
       if (logicKey) {
         logic.add(logicKey);
       }

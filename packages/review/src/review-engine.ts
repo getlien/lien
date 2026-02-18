@@ -1,6 +1,5 @@
 /**
  * Review engine — orchestrates complexity analysis, delta tracking, review posting, and dedup.
- * Extracted from packages/action/src/index.ts for reuse across Action and App.
  */
 
 import * as fs from 'fs';
@@ -27,9 +26,9 @@ import {
   getPRPatchData,
   getPRDiffLines,
   updatePRDescription,
-  getExistingVeilleCommentKeys,
-  VEILLE_COMMENT_MARKER_PREFIX,
-  VEILLE_LOGIC_MARKER_PREFIX,
+  getExistingCommentKeys,
+  COMMENT_MARKER_PREFIX,
+  LOGIC_MARKER_PREFIX,
 } from './github-api.js';
 import {
   generateLineComments,
@@ -879,7 +878,7 @@ function buildReviewSummary(
   const prSummaryLine = buildPrSummaryLine(prSummary);
 
   return `<!-- lien-ai-review -->
-## 👁️ Veille
+## Lien Review
 
 ${headerLine}${deltaDisplay}
 ${prSummaryLine}
@@ -896,7 +895,7 @@ See inline comments on the diff for specific suggestions.${uncoveredNote}
 
 </details>
 
-*[Veille](https://lien.dev) by Lien*`;
+*[Lien Review](https://lien.dev)*`;
 }
 
 /**
@@ -949,7 +948,7 @@ export interface DedupResult {
 }
 
 /**
- * Filter line comments that already have a matching Veille comment on the PR.
+ * Filter line comments that already have a matching Lien Review comment on the PR.
  * Uses the hidden HTML marker to extract the dedup key from each comment body.
  */
 export function filterDuplicateComments(
@@ -1023,7 +1022,7 @@ function buildGroupedCommentBody(
       ? '\n\n> ⚠️ **No test files found for this function.**'
       : '';
 
-  const marker = `${VEILLE_COMMENT_MARKER_PREFIX}${firstViolation.filepath}::${firstViolation.symbolName} -->`;
+  const marker = `${COMMENT_MARKER_PREFIX}${firstViolation.filepath}::${firstViolation.symbolName} -->`;
   return `${marker}\n${metricHeaders}${testNote}${lineNote}\n\n${comment}`;
 }
 
@@ -1288,7 +1287,7 @@ async function partitionDedupViolations(
   commentUrls: Map<string, string>;
 }> {
   try {
-    const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
+    const existing = await getExistingCommentKeys(octokit, prContext, logger);
     const toReview: ViolationWithLines[] = [];
     const skippedKeySet = new Set<string>();
     for (const item of violations) {
@@ -1582,8 +1581,8 @@ async function postLogicReviewComments(
   // Deduplicate logic review comments against existing ones
   let toPost = inDiff;
   try {
-    const existing = await getExistingVeilleCommentKeys(octokit, prContext, logger);
-    const dedup = filterDuplicateComments(toPost, existing.logic, VEILLE_LOGIC_MARKER_PREFIX);
+    const existing = await getExistingCommentKeys(octokit, prContext, logger);
+    const dedup = filterDuplicateComments(toPost, existing.logic, LOGIC_MARKER_PREFIX);
     toPost = dedup.kept;
     if (dedup.skippedKeys.length > 0) {
       logger.info(`Dedup: skipped ${dedup.skippedKeys.length} already-posted logic comments`);

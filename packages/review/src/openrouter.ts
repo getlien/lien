@@ -8,7 +8,7 @@ import type { Logger } from './logger.js';
 import { buildBatchedCommentsPrompt } from './prompt.js';
 import { buildLogicReviewPrompt } from './logic-prompt.js';
 import { parseLogicReviewResponse } from './logic-response.js';
-import { VEILLE_LOGIC_MARKER_PREFIX } from './github-api.js';
+import { LOGIC_MARKER_PREFIX } from './github-api.js';
 
 /**
  * OpenRouter API response structure
@@ -159,7 +159,7 @@ export async function callBatchedCommentsAPI(
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://github.com/getlien/lien',
-      'X-Title': 'Veille by Lien',
+      'X-Title': 'Lien Review',
     },
     body: JSON.stringify({
       model,
@@ -313,7 +313,7 @@ function mapFindingsToComments(
       comments.push({
         path: finding.filepath,
         line: finding.line,
-        body: `${VEILLE_LOGIC_MARKER_PREFIX}${finding.filepath}::${finding.line}::${finding.category} -->\n**Logic Review** (beta) — ${categoryLabel}\n\n${entry.comment}`,
+        body: `${LOGIC_MARKER_PREFIX}${finding.filepath}::${finding.line}::${finding.category} -->\n**Logic Review** (beta) — ${categoryLabel}\n\n${entry.comment}`,
       });
     } else if (entry && !entry.valid) {
       logger.info(`Finding ${key} marked as false positive by LLM`);

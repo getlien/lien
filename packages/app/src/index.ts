@@ -1,5 +1,5 @@
 /**
- * Veille GitHub App server
+ * Lien Review GitHub App server
  *
  * Receives PR webhook events and runs automated complexity reviews.
  * Uses @octokit/app for authentication and @octokit/webhooks for event handling.
@@ -80,7 +80,7 @@ function startServer(app: App, config: AppConfig, queue: JobQueue): http.Server 
   });
 
   server.listen(config.port, () => {
-    logger.info(`Veille app listening on port ${config.port}`);
+    logger.info(`Lien Review app listening on port ${config.port}`);
     logger.info(`Webhook endpoint: POST /api/webhooks`);
     logger.info(`Health check: GET /health`);
   });
@@ -133,7 +133,7 @@ try {
   const server = startServer(app, config, queue);
   setupGracefulShutdown(server, queue);
 
-  logger.info('Veille GitHub App started');
+  logger.info('Lien Review GitHub App started');
   if (config.allowedOrgIds.length > 0) {
     logger.info(`Allowed orgs: ${config.allowedOrgIds.join(', ')}`);
   } else {

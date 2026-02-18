@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Shared review logic for Veille — complexity analysis and PR review posting",
+  "description": "Shared review logic for Lien Review — complexity analysis and PR review posting",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
