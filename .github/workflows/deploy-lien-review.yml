@@ -6,7 +6,7 @@ on:
     paths:
       - 'packages/app/**'
       - 'packages/review/**'
-      - 'packages/core/**'
+      - 'packages/parser/**'
 
 jobs:
   deploy:
