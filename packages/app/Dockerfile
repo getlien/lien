@@ -8,6 +8,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 
 # Copy all workspace package manifests (npm ci needs the full workspace graph)
+COPY packages/parser/package.json packages/parser/
 COPY packages/core/package.json packages/core/
 COPY packages/review/package.json packages/review/
 COPY packages/app/package.json packages/app/
@@ -18,12 +19,14 @@ COPY packages/site/package.json packages/site/
 RUN npm ci
 
 # Copy source code
+COPY packages/parser/ packages/parser/
 COPY packages/core/ packages/core/
 COPY packages/review/ packages/review/
 COPY packages/app/ packages/app/
 
 # Build packages in dependency order
-RUN npm run build -w packages/core && \
+RUN npm run build -w packages/parser && \
+    npm run build -w packages/core && \
     npm run build -w packages/review && \
     npm run build -w packages/app
 
@@ -43,10 +46,13 @@ WORKDIR /app
 
 # Copy pre-built node_modules (with native addons already compiled)
 COPY --from=pruner /app/node_modules/ node_modules/
+COPY --from=pruner /app/packages/parser/node_modules/ packages/parser/node_modules/
 COPY --from=pruner /app/packages/core/node_modules/ packages/core/node_modules/
 
 # Copy built dist and package manifests
 COPY --from=builder /app/package.json ./
+COPY --from=builder /app/packages/parser/package.json packages/parser/
+COPY --from=builder /app/packages/parser/dist/ packages/parser/dist/
 COPY --from=builder /app/packages/core/package.json packages/core/
 COPY --from=builder /app/packages/core/dist/ packages/core/dist/
 COPY --from=builder /app/packages/review/package.json packages/review/
