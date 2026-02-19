@@ -1,16 +1,16 @@
-import type { VectorDBInterface } from '../vectordb/types.js';
+import type { VectorDBInterface, SearchResult } from '../vectordb/types.js';
 import type {
   ComplexityViolation,
   ComplexityReport,
   FileComplexityData,
   RiskLevel,
   HalsteadDetails,
-} from './types.js';
-import { RISK_ORDER } from './types.js';
-import type { ChunkMetadata, CodeChunk } from '../indexer/types.js';
-import { analyzeDependencies } from '../indexer/dependency-analyzer.js';
-import { findTestAssociationsFromChunks } from '../indexer/test-associations.js';
-import type { SearchResult } from '../vectordb/types.js';
+  ChunkMetadata,
+  CodeChunk,
+} from '@liendev/lien-parser';
+import { RISK_ORDER } from '@liendev/lien-parser';
+import { analyzeDependencies } from '@liendev/lien-parser';
+import { analyzeComplexityFromChunks } from '@liendev/lien-parser';
 
 /**
  * Hardcoded severity multipliers:
@@ -82,46 +82,7 @@ export class ComplexityAnalyzer {
     files?: string[],
     thresholdOverrides?: { testPaths?: number; mentalLoad?: number },
   ): ComplexityReport {
-    // Create a lightweight instance to access private analysis methods
-    const instance = new ComplexityAnalyzer(null as unknown as VectorDBInterface);
-
-    if (thresholdOverrides) {
-      // Merge overrides into the instance's default thresholds
-      Object.assign(instance.thresholds, thresholdOverrides);
-    }
-
-    // Map CodeChunk → SearchResult
-    const allResults: SearchResult[] = chunks.map(chunk => ({
-      content: chunk.content,
-      metadata: chunk.metadata,
-      score: 0,
-      relevance: 'not_relevant' as const,
-    }));
-
-    // Filter to specified files if provided
-    const filtered = files
-      ? allResults.filter(c => instance.matchesAnyFile(c.metadata.file, files))
-      : allResults;
-
-    // Find violations, build report, enrich with dependencies
-    const violations = instance.findViolations(filtered);
-    const report = instance.buildReport(violations, filtered);
-    instance.enrichWithDependencies(report, allResults);
-
-    // Enrich files with violations with test association data
-    const filesWithViolations = Object.keys(report.files).filter(
-      f => report.files[f].violations.length > 0,
-    );
-    if (filesWithViolations.length > 0) {
-      const testMap = findTestAssociationsFromChunks(filesWithViolations, chunks);
-      for (const [filepath, testFiles] of testMap) {
-        if (report.files[filepath]) {
-          report.files[filepath].testAssociations = testFiles;
-        }
-      }
-    }
-
-    return report;
+    return analyzeComplexityFromChunks(chunks, files, thresholdOverrides);
   }
 
   /**

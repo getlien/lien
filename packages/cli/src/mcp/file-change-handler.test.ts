@@ -17,7 +17,6 @@ vi.mock('@liendev/core', async () => {
       callOrder.push('indexMultipleFiles');
       return 1;
     }),
-    createGitignoreFilter: vi.fn(async () => () => false),
     ManifestManager: vi.fn().mockImplementation(function () {
       return {
         load: vi.fn().mockResolvedValue({ files: {} }),
@@ -25,8 +24,18 @@ vi.mock('@liendev/core', async () => {
         transaction: vi.fn().mockResolvedValue(null),
       };
     }),
-    computeContentHash: vi.fn().mockResolvedValue('hash123'),
     normalizeToRelativePath: vi.fn((filepath: string, _rootDir: string) => filepath),
+  };
+});
+
+// Mock @liendev/lien-parser
+vi.mock('@liendev/lien-parser', async () => {
+  const actual =
+    await vi.importActual<typeof import('@liendev/lien-parser')>('@liendev/lien-parser');
+  return {
+    ...actual,
+    createGitignoreFilter: vi.fn(async () => () => false),
+    computeContentHash: vi.fn().mockResolvedValue('hash123'),
   };
 });
 
@@ -40,7 +49,7 @@ vi.mock('fs/promises', () => ({
 }));
 
 import { isFileIgnored, isGitignoreFile, createFileChangeHandler } from './file-change-handler.js';
-import { createGitignoreFilter } from '@liendev/core';
+import { createGitignoreFilter } from '@liendev/lien-parser';
 
 function createMockVectorDB(dbPath = '/project/.lien/indices/abc') {
   return {

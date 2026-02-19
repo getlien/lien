@@ -1,4 +1,4 @@
-import type { ChunkMetadata } from '../indexer/types.js';
+import type { ChunkMetadata } from '@liendev/lien-parser';
 import type { RelevanceCategory } from './relevance.js';
 
 export interface SearchResult {

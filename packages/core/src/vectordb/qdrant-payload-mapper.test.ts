@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ChunkMetadata } from '../indexer/types.js';
+import type { ChunkMetadata } from '@liendev/lien-parser';
 import { QdrantPayloadMapper } from './qdrant-payload-mapper.js';
 
 const ORG_ID = 'test-org';

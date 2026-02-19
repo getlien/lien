@@ -4,10 +4,9 @@ import {
   indexMultipleFiles,
   indexSingleFile,
   ManifestManager,
-  computeContentHash,
   normalizeToRelativePath,
-  createGitignoreFilter,
 } from '@liendev/core';
+import { computeContentHash, createGitignoreFilter } from '@liendev/lien-parser';
 import type { FileChangeHandler, FileChangeEvent } from '../watcher/index.js';
 import type { createReindexStateManager } from './reindex-state-manager.js';
 import type { LogFn } from './types.js';

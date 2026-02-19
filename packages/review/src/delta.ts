@@ -4,7 +4,7 @@
  */
 
 import collect from 'collect.js';
-import type { ComplexityReport, ComplexityViolation } from '@liendev/core';
+import type { ComplexityReport, ComplexityViolation } from '@liendev/lien-parser';
 import type { Logger } from './logger.js';
 
 /**

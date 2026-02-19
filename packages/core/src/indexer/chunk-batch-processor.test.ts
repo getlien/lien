@@ -3,7 +3,7 @@ import { ChunkBatchProcessor, processEmbeddingMicroBatches } from './chunk-batch
 import type { VectorDB } from '../vectordb/lancedb.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import type { IndexingProgressTracker } from './progress-tracker.js';
-import type { CodeChunk } from './types.js';
+import type { CodeChunk } from '@liendev/lien-parser';
 
 // Mock implementations
 function createMockVectorDB(): VectorDB {

@@ -9,6 +9,14 @@ vi.mock('@liendev/core', async () => {
     getCurrentBranch: vi.fn().mockResolvedValue('main'),
     getCurrentCommit: vi.fn().mockResolvedValue('abc12345def67890'),
     readVersionFile: vi.fn().mockResolvedValue(0),
+  };
+});
+
+vi.mock('@liendev/lien-parser', async () => {
+  const actual =
+    await vi.importActual<typeof import('@liendev/lien-parser')>('@liendev/lien-parser');
+  return {
+    ...actual,
     extractRepoId: vi.fn().mockReturnValue('test-repo-id'),
   };
 });

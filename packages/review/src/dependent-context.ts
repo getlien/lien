@@ -6,7 +6,7 @@
  * are used in dependent files within the same PR.
  */
 
-import type { CodeChunk } from '@liendev/core';
+import type { CodeChunk } from '@liendev/lien-parser';
 import type { ComplexityReport } from './types.js';
 
 // ---------------------------------------------------------------------------

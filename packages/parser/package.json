@@ -1,7 +1,7 @@
 {
-  "name": "@liendev/core",
+  "name": "@liendev/lien-parser",
   "version": "0.39.0",
-  "description": "Core indexing and analysis engine for Lien",
+  "description": "AST parsing, complexity analysis, and semantic chunking for Lien",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,11 +10,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.js"
-    },
-    "./test": {
-      "types": "./dist/test/index.d.ts",
-      "import": "./dist/test/index.js",
-      "require": "./dist/test/index.js"
     }
   },
   "scripts": {
@@ -24,18 +19,18 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.8.1",
-    "@liendev/lien-parser": "*",
-    "@lancedb/lancedb": "^0.23.0",
-    "@qdrant/js-client-rest": "^1.16.2",
-    "chalk": "^5.6.2",
-    "collect.js": "^4.36.1",
+    "glob": "^10.5.0",
+    "ignore": "5.3.0",
     "p-limit": "5.0.0",
-    "zod": "^3.25.76"
+    "tree-sitter": "^0.25.0",
+    "tree-sitter-javascript": "0.23.1",
+    "tree-sitter-php": "^0.24.2",
+    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-rust": "^0.24.0",
+    "tree-sitter-typescript": "0.23.2"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@vitest/coverage-v8": "^4.0.8",
     "typescript": "^5.3.0",
     "vitest": "^4.0.8"
   },
@@ -49,18 +44,19 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getlien/lien.git",
-    "directory": "packages/core"
+    "directory": "packages/parser"
   },
   "homepage": "https://lien.dev",
   "bugs": {
     "url": "https://github.com/getlien/lien/issues"
   },
   "keywords": [
-    "semantic-search",
+    "ast",
+    "parser",
     "code-analysis",
-    "embeddings",
-    "vector-search",
-    "complexity-analysis"
+    "complexity-analysis",
+    "tree-sitter",
+    "semantic-chunking"
   ],
   "author": "Alf Henderson",
   "license": "AGPL-3.0-only",

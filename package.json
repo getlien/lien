@@ -12,6 +12,7 @@
     "url": "https://github.com/getlien/lien/issues"
   },
   "workspaces": [
+    "packages/parser",
     "packages/core",
     "packages/review",
     "packages/cli",
@@ -19,10 +20,10 @@
     "packages/site"
   ],
   "scripts": {
-    "build": "npm run build -w @liendev/core && npm run build -w packages/cli",
-    "build:core": "npm run build -w @liendev/core",
+    "build": "npm run build -w @liendev/lien-parser && npm run build -w @liendev/core && npm run build -w packages/cli",
+    "build:core": "npm run build -w @liendev/lien-parser && npm run build -w @liendev/core",
     "dev": "npm run dev -w packages/cli",
-    "typecheck": "npm run build -w @liendev/core -w @liendev/review && npm run typecheck -w packages/cli -w packages/review -w packages/app",
+    "typecheck": "npm run build -w @liendev/lien-parser -w @liendev/core -w @liendev/review && npm run typecheck -w packages/cli -w packages/review -w packages/app",
     "clean": "rm -rf packages/*/dist",
     "changeset": "changeset",
     "version": "changeset version",

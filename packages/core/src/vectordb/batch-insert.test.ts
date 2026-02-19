@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { insertBatch } from './batch-insert.js';
 import { DatabaseError } from '../errors/index.js';
 import type { LanceDBConnection, LanceDBTable } from './lancedb-types.js';
-import type { ChunkMetadata } from '../indexer/types.js';
+import type { ChunkMetadata } from '@liendev/lien-parser';
 import { VECTOR_DB_MAX_BATCH_SIZE, VECTOR_DB_MIN_BATCH_SIZE } from '../constants.js';
 
 const asDb = (obj: unknown) => obj as LanceDBConnection;

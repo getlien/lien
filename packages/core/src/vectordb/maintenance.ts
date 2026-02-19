@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import type { LanceDBConnection, LanceDBTable } from './lancedb-types.js';
-import type { ChunkMetadata } from '../indexer/types.js';
+import type { ChunkMetadata } from '@liendev/lien-parser';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { writeVersionFile } from './version.js';
 import { insertBatch } from './batch-insert.js';

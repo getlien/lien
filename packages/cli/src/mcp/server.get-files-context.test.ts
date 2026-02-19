@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { getCanonicalPath, normalizePath, matchesFile, isTestFile } from '@liendev/core';
+import { getCanonicalPath, normalizePath, matchesFile, isTestFile } from '@liendev/lien-parser';
 import {
   searchFileChunks,
   findRelatedChunks,

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ComplexityAnalyzer } from './complexity-analyzer.js';
 import type { VectorDB } from '../vectordb/lancedb.js';
-import type { ChunkMetadata, CodeChunk } from '../indexer/types.js';
+import type { ChunkMetadata, CodeChunk } from '@liendev/lien-parser';
 import type { SearchResult } from '../vectordb/types.js';
 
 describe('ComplexityAnalyzer', () => {

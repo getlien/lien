@@ -5,7 +5,7 @@
  * the get_dependents tool to find reverse dependencies.
  */
 
-import { getSupportedExtensions } from '../indexer/ast/languages/registry.js';
+import { getSupportedExtensions } from '../ast/languages/registry.js';
 
 /**
  * Escape special regex characters in a string.

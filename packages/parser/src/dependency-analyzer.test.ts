@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { analyzeDependencies, COMPLEXITY_THRESHOLDS } from './dependency-analyzer.js';
-import type { SearchResult } from '../vectordb/types.js';
-import type { ChunkMetadata } from './types.js';
+import type { CodeChunk, ChunkMetadata } from './types.js';
 
 describe('analyzeDependencies', () => {
   const workspaceRoot = '/test/workspace';
@@ -14,7 +13,7 @@ describe('analyzeDependencies', () => {
       exports?: string[];
       importedSymbols?: Record<string, string[]>;
     },
-  ): SearchResult {
+  ): CodeChunk {
     return {
       content: 'test content',
       metadata: {
@@ -28,13 +27,11 @@ describe('analyzeDependencies', () => {
         ...(options?.exports && { exports: options.exports }),
         ...(options?.importedSymbols && { importedSymbols: options.importedSymbols }),
       } as ChunkMetadata,
-      score: 1.0,
-      relevance: 'highly_relevant' as const,
     };
   }
 
   it('should find direct dependents', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       createChunk('src/app.ts', ['src/utils.ts']),
       createChunk('src/config.ts', ['src/utils.ts']),
@@ -49,7 +46,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should calculate risk level based on dependent count', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       // Add dependents up to LOW threshold (5)
       ...Array.from({ length: 3 }, (_, i) => createChunk(`src/dep${i}.ts`, ['src/utils.ts'])),
@@ -60,7 +57,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should boost risk level to medium with more dependents', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       // Add dependents between LOW and MEDIUM threshold (5-15)
       ...Array.from({ length: 10 }, (_, i) => createChunk(`src/dep${i}.ts`, ['src/utils.ts'])),
@@ -71,7 +68,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should boost risk level to high with many dependents', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       // Add dependents between MEDIUM and HIGH threshold (15-30)
       ...Array.from({ length: 20 }, (_, i) => createChunk(`src/dep${i}.ts`, ['src/utils.ts'])),
@@ -82,7 +79,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should boost risk level to critical with very many dependents', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       // Add more than HIGH threshold (30+)
       ...Array.from({ length: 35 }, (_, i) => createChunk(`src/dep${i}.ts`, ['src/utils.ts'])),
@@ -93,7 +90,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should calculate complexity metrics for dependents', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       createChunk('src/app.ts', ['src/utils.ts'], 15),
       createChunk('src/config.ts', ['src/utils.ts'], 25),
@@ -109,7 +106,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should boost risk level based on complexity metrics', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       // Only 3 dependents (LOW risk by count), but high complexity
       createChunk('src/app.ts', ['src/utils.ts'], 30), // High complexity
@@ -128,7 +125,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should identify high-complexity dependents', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       createChunk('src/app.ts', ['src/utils.ts'], 25),
       createChunk('src/config.ts', ['src/utils.ts'], 15),
@@ -151,7 +148,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should handle files with no dependents', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       createChunk('src/app.ts', ['src/other.ts']),
     ];
@@ -164,7 +161,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should identify test files correctly', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       createChunk('src/app.ts', ['src/utils.ts']),
       createChunk('src/utils.test.ts', ['src/utils.ts']),
@@ -183,7 +180,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should deduplicate chunks from the same file', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       // Multiple chunks from same dependent file
       {
@@ -224,7 +221,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should handle chunks without complexity data', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       createChunk('src/app.ts', ['src/utils.ts']), // No complexity
       createChunk('src/config.ts', ['src/utils.ts'], 15),
@@ -238,7 +235,7 @@ describe('analyzeDependencies', () => {
   });
 
   it('should return low risk when no complexity data available', () => {
-    const chunks: SearchResult[] = [
+    const chunks: CodeChunk[] = [
       createChunk('src/utils.ts', []),
       createChunk('src/app.ts', ['src/utils.ts']), // No complexity
       createChunk('src/config.ts', ['src/utils.ts']), // No complexity
@@ -254,7 +251,7 @@ describe('analyzeDependencies', () => {
   describe('barrel re-export tracking', () => {
     it('should find transitive dependents through barrel files', () => {
       // auth.ts → index.ts (re-exports) → handler.ts (imports from index)
-      const chunks: SearchResult[] = [
+      const chunks: CodeChunk[] = [
         // Target file
         createChunk('src/auth.ts', [], undefined, {
           exports: ['AuthService'],
@@ -281,7 +278,7 @@ describe('analyzeDependencies', () => {
 
     it('should find dependents through chained re-exports', () => {
       // target → barrel1 → barrel2 → consumer
-      const chunks: SearchResult[] = [
+      const chunks: CodeChunk[] = [
         createChunk('src/core/validate.ts', [], undefined, {
           exports: ['validateEmail'],
         }),
@@ -312,7 +309,7 @@ describe('analyzeDependencies', () => {
 
     it('should handle circular re-exports without infinite loops', () => {
       // a.ts → b.ts → a.ts (circular) → c.ts imports from b.ts
-      const chunks: SearchResult[] = [
+      const chunks: CodeChunk[] = [
         createChunk('src/a.ts', ['src/b.ts'], undefined, {
           exports: ['foo'],
           importedSymbols: { './b': ['bar'] },
@@ -336,7 +333,7 @@ describe('analyzeDependencies', () => {
 
     it('should not produce false positives for unrelated barrel exports', () => {
       // barrel exports from different source, not target
-      const chunks: SearchResult[] = [
+      const chunks: CodeChunk[] = [
         createChunk('src/target.ts', [], undefined, {
           exports: ['targetFn'],
         }),
@@ -358,7 +355,7 @@ describe('analyzeDependencies', () => {
     });
 
     it('should deduplicate mixed direct and transitive dependents', () => {
-      const chunks: SearchResult[] = [
+      const chunks: CodeChunk[] = [
         createChunk('src/auth.ts', [], undefined, {
           exports: ['AuthService'],
         }),
@@ -383,7 +380,7 @@ describe('analyzeDependencies', () => {
 
     it('should find dependents through barrel re-exports with imports array', () => {
       // auth.ts → index.ts (barrel with imports + exports) → handler.ts
-      const chunks: SearchResult[] = [
+      const chunks: CodeChunk[] = [
         createChunk('src/auth.ts', [], undefined, {
           exports: ['AuthService'],
         }),
@@ -408,7 +405,7 @@ describe('analyzeDependencies', () => {
 
     it('should behave the same when no re-exporters exist', () => {
       // No barrel files — regression test
-      const chunks: SearchResult[] = [
+      const chunks: CodeChunk[] = [
         createChunk('src/utils.ts', [], undefined, {
           exports: ['helper'],
         }),

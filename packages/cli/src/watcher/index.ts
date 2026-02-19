@@ -4,7 +4,7 @@ import {
   detectEcosystems,
   getEcosystemExcludePatterns,
   ALWAYS_IGNORE_PATTERNS,
-} from '@liendev/core';
+} from '@liendev/lien-parser';
 
 /**
  * File change event emitted by the watcher.

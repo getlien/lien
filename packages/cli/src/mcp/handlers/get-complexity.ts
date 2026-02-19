@@ -3,12 +3,12 @@ import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetComplexitySchema } from '../schemas/index.js';
 import type { GetComplexityInput } from '../schemas/index.js';
 import { ComplexityAnalyzer } from '@liendev/core';
+import type { VectorDBInterface } from '@liendev/core';
 import type {
   ComplexityViolation,
   FileComplexityData,
   ComplexityReport,
-  VectorDBInterface,
-} from '@liendev/core';
+} from '@liendev/lien-parser';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 
 // ============================================================================

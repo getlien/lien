@@ -5,7 +5,7 @@ import os from 'os';
 import chokidar from 'chokidar';
 import type { FileChangeEvent } from './index.js';
 import { FileWatcher } from './index.js';
-import { ALWAYS_IGNORE_PATTERNS } from '@liendev/core';
+import { ALWAYS_IGNORE_PATTERNS } from '@liendev/lien-parser';
 
 describe('FileWatcher', () => {
   let testDir: string;
@@ -309,9 +309,9 @@ describe('FileWatcher', () => {
     });
 
     async function mockEcosystems(ecosystems: string[], excludePatterns: string[]) {
-      const coreModule = await import('@liendev/core');
-      vi.spyOn(coreModule, 'detectEcosystems').mockResolvedValue(ecosystems);
-      vi.spyOn(coreModule, 'getEcosystemExcludePatterns').mockReturnValue(excludePatterns);
+      const parserModule = await import('@liendev/lien-parser');
+      vi.spyOn(parserModule, 'detectEcosystems').mockResolvedValue(ecosystems);
+      vi.spyOn(parserModule, 'getEcosystemExcludePatterns').mockReturnValue(excludePatterns);
     }
 
     it('should pass ALWAYS_IGNORE_PATTERNS to chokidar when no ecosystems detected', async () => {

@@ -33,29 +33,30 @@ export { indexCodebase } from './indexer/index.js';
 export type { IndexingOptions, IndexingProgress, IndexingResult } from './indexer/index.js';
 export { ManifestManager } from './indexer/manifest.js';
 export type { IndexManifest, FileEntry } from './indexer/manifest.js';
-export { chunkFile } from './indexer/chunker.js';
-export { scanCodebase, detectFileType } from './indexer/scanner.js';
+export {
+  chunkFile,
+  scanCodebase,
+  detectFileType,
+  createGitignoreFilter,
+  ALWAYS_IGNORE_PATTERNS,
+  extractSymbols,
+  computeContentHash,
+  isHashAlgorithmCompatible,
+  groupChunksByNormalizedPath,
+  findTransitiveDependents,
+  findTestAssociationsFromChunks,
+  detectEcosystems,
+  getEcosystemExcludePatterns,
+  ECOSYSTEM_PRESETS,
+} from '@liendev/lien-parser';
+export type { EcosystemPreset, ChunkOptions } from '@liendev/lien-parser';
 /** @deprecated Use {@link detectFileType} instead. */
-export { detectFileType as detectLanguage } from './indexer/scanner.js';
+export { detectFileType as detectLanguage } from '@liendev/lien-parser';
 export {
   indexSingleFile,
   indexMultipleFiles,
   normalizeToRelativePath,
 } from './indexer/incremental.js';
-export { createGitignoreFilter, ALWAYS_IGNORE_PATTERNS } from './indexer/gitignore.js';
-export { extractSymbols } from './indexer/symbol-extractor.js';
-export { computeContentHash, isHashAlgorithmCompatible } from './indexer/content-hash.js';
-export {
-  groupChunksByNormalizedPath,
-  findTransitiveDependents,
-} from './indexer/dependency-analyzer.js';
-export { findTestAssociationsFromChunks } from './indexer/test-associations.js';
-export {
-  detectEcosystems,
-  getEcosystemExcludePatterns,
-  ECOSYSTEM_PRESETS,
-} from './indexer/ecosystem-presets.js';
-export type { EcosystemPreset } from './indexer/ecosystem-presets.js';
 
 // =============================================================================
 // EMBEDDINGS
@@ -85,6 +86,7 @@ export { readVersionFile, writeVersionFile } from './vectordb/version.js';
 // =============================================================================
 
 export { ComplexityAnalyzer } from './insights/complexity-analyzer.js';
+export { analyzeComplexityFromChunks } from '@liendev/lien-parser';
 export {
   formatReport,
   formatTextReport,
@@ -192,12 +194,12 @@ export {
 // =============================================================================
 
 export { Result, Ok, Err, isOk, isErr, unwrap, unwrapOr } from './utils/result.js';
-export { normalizePath, matchesFile, getCanonicalPath, isTestFile } from './utils/path-matching.js';
+export { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '@liendev/lien-parser';
 export { safeRegex } from './utils/safe-regex.js';
-export { extractRepoId } from './utils/repo-id.js';
+export { extractRepoId } from '@liendev/lien-parser';
 
 // =============================================================================
-// AST LANGUAGE REGISTRY
+// AST LANGUAGE REGISTRY (re-export from parser)
 // =============================================================================
 
-export { getSupportedExtensions } from './indexer/ast/languages/registry.js';
+export { getSupportedExtensions } from '@liendev/lien-parser';

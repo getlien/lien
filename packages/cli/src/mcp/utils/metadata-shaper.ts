@@ -1,5 +1,6 @@
 import { normalizeToRelativePath } from '@liendev/core';
-import type { SearchResult, ChunkMetadata, RelevanceCategory } from '@liendev/core';
+import type { SearchResult, RelevanceCategory } from '@liendev/core';
+import type { ChunkMetadata } from '@liendev/lien-parser';
 
 /**
  * Tool names that support metadata shaping.

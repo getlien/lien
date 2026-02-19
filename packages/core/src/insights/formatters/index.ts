@@ -1,4 +1,4 @@
-import type { ComplexityReport } from '../types.js';
+import type { ComplexityReport } from '@liendev/lien-parser';
 import { formatTextReport } from './text.js';
 import { formatJsonReport } from './json.js';
 import { formatSarifReport } from './sarif.js';
