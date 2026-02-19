@@ -4,11 +4,7 @@
  */
 
 // Re-export parser constants for backward compatibility
-export {
-  DEFAULT_CHUNK_SIZE,
-  DEFAULT_CHUNK_OVERLAP,
-  MAX_CHUNKS_PER_FILE,
-} from '@liendev/parser';
+export { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, MAX_CHUNKS_PER_FILE } from '@liendev/parser';
 
 // Concurrency and batching
 export const DEFAULT_CONCURRENCY = 4;

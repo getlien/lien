@@ -1,9 +1,5 @@
 import chalk from 'chalk';
-import type {
-  ComplexityReport,
-  ComplexityViolation,
-  FileComplexityData,
-} from '@liendev/parser';
+import type { ComplexityReport, ComplexityViolation, FileComplexityData } from '@liendev/parser';
 
 /**
  * Violation with associated file path for rendering

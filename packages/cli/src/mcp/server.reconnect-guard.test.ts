@@ -20,8 +20,7 @@ vi.mock('@liendev/core', async () => {
 
 // Mock @liendev/parser
 vi.mock('@liendev/parser', async () => {
-  const actual =
-    await vi.importActual<typeof import('@liendev/parser')>('@liendev/parser');
+  const actual = await vi.importActual<typeof import('@liendev/parser')>('@liendev/parser');
   return {
     ...actual,
     createGitignoreFilter: vi.fn(async () => () => false),
