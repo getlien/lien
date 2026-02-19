@@ -1,5 +1,5 @@
 import type { QdrantClient } from '@qdrant/js-client-rest';
-import type { ChunkMetadata } from '../indexer/types.js';
+import type { ChunkMetadata } from '@liendev/parser';
 import { DatabaseError } from '../errors/index.js';
 import { readVersionFile } from './version.js';
 

@@ -3,7 +3,7 @@ import path from 'path';
 import { INDEX_FORMAT_VERSION } from '../constants.js';
 import type { GitState } from '../git/tracker.js';
 import { getPackageVersion } from '../utils/version.js';
-import { computeContentHash, isHashAlgorithmCompatible } from './content-hash.js';
+import { computeContentHash, isHashAlgorithmCompatible } from '@liendev/parser';
 
 const MANIFEST_FILE = 'manifest.json';
 

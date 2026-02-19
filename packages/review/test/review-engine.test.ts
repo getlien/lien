@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { ComplexityViolation, ComplexityDelta, ComplexityReport } from '@liendev/core';
+import type { ComplexityViolation, ComplexityReport } from '@liendev/parser';
+import type { ComplexityDelta } from '../src/delta.js';
 import type { LineComment } from '../src/types.js';
 import {
   determineReviewEvent,

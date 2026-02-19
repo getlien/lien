@@ -3,7 +3,7 @@
   "changelog": "@changesets/cli/changelog",
   "commit": false,
   "fixed": [],
-  "linked": [["@liendev/core", "@liendev/lien"]],
+  "linked": [["@liendev/parser", "@liendev/core", "@liendev/lien"]],
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",

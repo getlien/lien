@@ -297,7 +297,7 @@ describe('E2E: Real Open Source Projects', () => {
       it(
         'should initialize Lien successfully',
         async () => {
-          const output = runLienCommand(projectDir, 'init --yes');
+          const output = runLienCommand(projectDir, 'init --editor cursor');
 
           // init creates .cursor/mcp.json with lien MCP server entry
           expect(output).toContain('.cursor/mcp.json');

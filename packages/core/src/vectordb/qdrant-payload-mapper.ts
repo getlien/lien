@@ -1,4 +1,4 @@
-import type { ChunkMetadata } from '../indexer/types.js';
+import type { ChunkMetadata } from '@liendev/parser';
 
 /**
  * Qdrant payload structure for storing chunk metadata.

@@ -30,8 +30,8 @@ jobs:
       - name: Format check
         run: npm run format:check
 
-      - name: Build Core & Review (required by CLI and App)
-        run: npm run build -w @liendev/core && npm run build -w @liendev/review
+      - name: Build Parser, Core & Review (required by CLI and App)
+        run: npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review
 
       - name: Lint
         run: npm run lint

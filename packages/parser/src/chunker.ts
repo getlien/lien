@@ -68,6 +68,32 @@ export function chunkFile(
 }
 
 /**
+ * Build a single line-based code chunk with metadata
+ */
+function buildLineChunk(
+  chunkContent: string,
+  filepath: string,
+  startLine: number,
+  endLine: number,
+  fileType: string,
+  tenantContext?: { repoId?: string; orgId?: string },
+): CodeChunk {
+  return {
+    content: chunkContent,
+    metadata: {
+      file: filepath,
+      startLine,
+      endLine,
+      type: 'block',
+      language: fileType,
+      symbols: extractSymbols(chunkContent, fileType),
+      ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
+      ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
+    },
+  };
+}
+
+/**
  * Original line-based chunking implementation
  */
 function chunkByLines(
@@ -78,46 +104,23 @@ function chunkByLines(
   tenantContext?: { repoId?: string; orgId?: string },
 ): CodeChunk[] {
   const lines = content.split('\n');
-  const chunks: CodeChunk[] = [];
-  const fileType = detectFileType(filepath);
-
-  // Handle empty files
   if (lines.length === 0 || (lines.length === 1 && lines[0].trim() === '')) {
-    return chunks;
+    return [];
   }
 
-  // Chunk by lines with overlap
-  for (let i = 0; i < lines.length; i += chunkSize - chunkOverlap) {
+  const chunks: CodeChunk[] = [];
+  const fileType = detectFileType(filepath);
+  const step = chunkSize - chunkOverlap;
+
+  for (let i = 0; i < lines.length; i += step) {
     const endLine = Math.min(i + chunkSize, lines.length);
-    const chunkLines = lines.slice(i, endLine);
-    const chunkContent = chunkLines.join('\n');
+    const chunkContent = lines.slice(i, endLine).join('\n');
 
-    // Skip empty chunks
-    if (chunkContent.trim().length === 0) {
-      continue;
+    if (chunkContent.trim().length > 0) {
+      chunks.push(buildLineChunk(chunkContent, filepath, i + 1, endLine, fileType, tenantContext));
     }
 
-    // Extract symbols from the chunk
-    const symbols = extractSymbols(chunkContent, fileType);
-
-    chunks.push({
-      content: chunkContent,
-      metadata: {
-        file: filepath,
-        startLine: i + 1,
-        endLine: endLine,
-        type: 'block', // MVP: all chunks are 'block' type
-        language: fileType,
-        symbols,
-        ...(tenantContext?.repoId && { repoId: tenantContext.repoId }),
-        ...(tenantContext?.orgId && { orgId: tenantContext.orgId }),
-      },
-    });
-
-    // If we've reached the end, break
-    if (endLine >= lines.length) {
-      break;
-    }
+    if (endLine >= lines.length) break;
   }
 
   return chunks;

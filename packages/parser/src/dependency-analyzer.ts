@@ -1,12 +1,7 @@
-import type { SearchResult } from '../vectordb/types.js';
-import {
-  normalizePath,
-  getCanonicalPath,
-  matchesFile,
-  isTestFile,
-} from '../utils/path-matching.js';
-import type { RiskLevel } from '../insights/types.js';
-import { RISK_ORDER } from '../insights/types.js';
+import type { CodeChunk } from './types.js';
+import type { RiskLevel } from './insights/types.js';
+import { normalizePath, getCanonicalPath, matchesFile, isTestFile } from './utils/path-matching.js';
+import { RISK_ORDER } from './insights/types.js';
 
 /**
  * Risk level thresholds for dependent count.
@@ -86,10 +81,10 @@ function createPathNormalizer(workspaceRoot: string): (path: string) => string {
  * @returns Map of normalized import paths to chunks that import them
  */
 function buildImportIndex(
-  chunks: SearchResult[],
+  chunks: CodeChunk[],
   normalizePathCached: (path: string) => string,
-): Map<string, SearchResult[]> {
-  const importIndex = new Map<string, SearchResult[]>();
+): Map<string, CodeChunk[]> {
+  const importIndex = new Map<string, CodeChunk[]>();
 
   for (const chunk of chunks) {
     const imports = chunk.metadata.imports || [];
@@ -116,12 +111,12 @@ function buildImportIndex(
  */
 function findDependentChunks(
   normalizedTarget: string,
-  importIndex: Map<string, SearchResult[]>,
-): SearchResult[] {
-  const dependentChunks: SearchResult[] = [];
+  importIndex: Map<string, CodeChunk[]>,
+): CodeChunk[] {
+  const dependentChunks: CodeChunk[] = [];
   const seenChunkIds = new Set<string>();
 
-  const addChunk = (chunk: SearchResult): void => {
+  const addChunk = (chunk: CodeChunk): void => {
     const chunkId = `${chunk.metadata.file}:${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
     if (!seenChunkIds.has(chunkId)) {
       dependentChunks.push(chunk);
@@ -158,11 +153,8 @@ function findDependentChunks(
  * @param workspaceRoot - The workspace root directory
  * @returns Map of canonical file paths to their chunks
  */
-function groupChunksByFile(
-  chunks: SearchResult[],
-  workspaceRoot: string,
-): Map<string, SearchResult[]> {
-  const chunksByFile = new Map<string, SearchResult[]>();
+function groupChunksByFile(chunks: CodeChunk[], workspaceRoot: string): Map<string, CodeChunk[]> {
+  const chunksByFile = new Map<string, CodeChunk[]>();
 
   for (const chunk of chunks) {
     const canonical = getCanonicalPath(chunk.metadata.file, workspaceRoot);
@@ -183,9 +175,7 @@ function groupChunksByFile(
  * @param chunksByFile - Map of file paths to their chunks
  * @returns Array of complexity info for files with complexity data
  */
-function calculateFileComplexities(
-  chunksByFile: Map<string, SearchResult[]>,
-): FileComplexityInfo[] {
+function calculateFileComplexities(chunksByFile: Map<string, CodeChunk[]>): FileComplexityInfo[] {
   const fileComplexities: FileComplexityInfo[] = [];
 
   for (const [filepath, chunks] of chunksByFile.entries()) {
@@ -312,7 +302,7 @@ const MAX_REEXPORT_DEPTH = 3;
  * Checks both `importedSymbols` keys and raw `imports` array.
  */
 export function chunkImportsFrom(
-  chunk: SearchResult,
+  chunk: CodeChunk,
   sourcePath: string,
   normalizePathCached: (path: string) => string,
 ): boolean {
@@ -334,7 +324,7 @@ export function chunkImportsFrom(
 /**
  * Check if a chunk has any exports.
  */
-function chunkHasExports(chunk: SearchResult): boolean {
+function chunkHasExports(chunk: CodeChunk): boolean {
   return chunk.metadata.exports != null && chunk.metadata.exports.length > 0;
 }
 
@@ -342,10 +332,10 @@ function chunkHasExports(chunk: SearchResult): boolean {
  * Group chunks by their normalized file path.
  */
 export function groupChunksByNormalizedPath(
-  chunks: SearchResult[],
+  chunks: CodeChunk[],
   normalizePathCached: (path: string) => string,
-): Map<string, SearchResult[]> {
-  const grouped = new Map<string, SearchResult[]>();
+): Map<string, CodeChunk[]> {
+  const grouped = new Map<string, CodeChunk[]>();
   for (const chunk of chunks) {
     const canonical = normalizePathCached(chunk.metadata.file);
     let list = grouped.get(canonical);
@@ -363,7 +353,7 @@ export function groupChunksByNormalizedPath(
  * A re-exporter has both imports from the source and exports.
  */
 export function fileIsReExporter(
-  chunks: SearchResult[],
+  chunks: CodeChunk[],
   sourcePath: string,
   normalizePathCached: (path: string) => string,
 ): boolean {
@@ -388,7 +378,7 @@ export function fileIsReExporter(
  * `importedSymbols[targetPath]` (or raw `imports`) AND `exports`.
  */
 function buildReExportGraph(
-  allChunksByFile: Map<string, SearchResult[]>,
+  allChunksByFile: Map<string, CodeChunk[]>,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string,
 ): string[] {
@@ -410,14 +400,14 @@ function buildReExportGraph(
  * If the chunk's file is itself a re-exporter, adds it to the BFS queue.
  */
 function processTransitiveChunk(
-  chunk: SearchResult,
+  chunk: CodeChunk,
   reExporterPath: string,
   depth: number,
   visited: Set<string>,
-  allChunksByFile: Map<string, SearchResult[]>,
+  allChunksByFile: Map<string, CodeChunk[]>,
   normalizePathCached: (path: string) => string,
   queue: Array<[string, number]>,
-): SearchResult | null {
+): CodeChunk | null {
   const chunkFile = normalizePathCached(chunk.metadata.file);
   if (visited.has(chunkFile)) return null;
 
@@ -439,13 +429,13 @@ function processTransitiveChunk(
  */
 export function findTransitiveDependents(
   reExporterPaths: string[],
-  importIndex: Map<string, SearchResult[]>,
+  importIndex: Map<string, CodeChunk[]>,
   normalizedTarget: string,
   normalizePathCached: (path: string) => string,
-  allChunksByFile: Map<string, SearchResult[]>,
+  allChunksByFile: Map<string, CodeChunk[]>,
   existingFiles: Set<string>,
-): SearchResult[] {
-  const transitiveChunks: SearchResult[] = [];
+): CodeChunk[] {
+  const transitiveChunks: CodeChunk[] = [];
   const visited = new Set<string>([normalizedTarget, ...existingFiles]);
 
   const queue: Array<[string, number]> = [];
@@ -487,7 +477,7 @@ export function findTransitiveDependents(
  */
 export function analyzeDependencies(
   targetFilepath: string,
-  allChunks: SearchResult[],
+  allChunks: CodeChunk[],
   workspaceRoot: string,
 ): DependencyAnalysisResult {
   // Create cached path normalizer

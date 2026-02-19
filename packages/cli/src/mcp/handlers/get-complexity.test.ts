@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleGetComplexity } from './get-complexity.js';
 import type { ToolContext } from '../types.js';
-import type { ComplexityReport } from '@liendev/core';
+import type { ComplexityReport } from '@liendev/parser';
 
 // Mock ComplexityAnalyzer - must be defined inside mock factory
 

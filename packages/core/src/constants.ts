@@ -3,9 +3,8 @@
  * This file contains all magic numbers and configuration defaults.
  */
 
-// Chunking settings
-export const DEFAULT_CHUNK_SIZE = 75;
-export const DEFAULT_CHUNK_OVERLAP = 10;
+// Re-export parser constants for backward compatibility
+export { DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, MAX_CHUNKS_PER_FILE } from '@liendev/parser';
 
 // Concurrency and batching
 export const DEFAULT_CONCURRENCY = 4;
@@ -36,11 +35,6 @@ export const DEFAULT_GIT_POLL_INTERVAL_MS = 10000; // Check every 10 seconds
 
 // File watching
 export const DEFAULT_DEBOUNCE_MS = 1000;
-
-// File query estimation
-// Maximum chunks expected per file when sizing scan queries.
-// Used by both the LanceDB query layer and MCP handler to avoid full table scans.
-export const MAX_CHUNKS_PER_FILE = 100;
 
 // Index format version - bump on ANY breaking change to indexing
 // Examples that require version bump:

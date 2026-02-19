@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { complexityCommand } from './complexity.js';
 import * as coreModule from '@liendev/core';
-import type { ChunkMetadata } from '@liendev/core';
+import type { ChunkMetadata } from '@liendev/parser';
 
 // Mock dependencies
 vi.mock('@liendev/core', async () => {

@@ -14,8 +14,16 @@ vi.mock('@liendev/core', async () => {
       callOrder.push('indexMultipleFiles');
       return 1;
     }),
-    createGitignoreFilter: vi.fn(async () => () => false),
     DEFAULT_GIT_POLL_INTERVAL_MS: 1000,
+  };
+});
+
+// Mock @liendev/parser
+vi.mock('@liendev/parser', async () => {
+  const actual = await vi.importActual<typeof import('@liendev/parser')>('@liendev/parser');
+  return {
+    ...actual,
+    createGitignoreFilter: vi.fn(async () => () => false),
   };
 });
 

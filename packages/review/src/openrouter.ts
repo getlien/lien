@@ -2,7 +2,7 @@
  * OpenRouter API client for LLM access
  */
 
-import type { ComplexityViolation, ComplexityReport } from '@liendev/core';
+import type { ComplexityViolation, ComplexityReport } from '@liendev/parser';
 import type { LogicFinding, LineComment } from './types.js';
 import type { Logger } from './logger.js';
 import { buildBatchedCommentsPrompt } from './prompt.js';

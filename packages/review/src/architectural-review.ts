@@ -5,7 +5,7 @@
  * enabling cross-file architectural observations alongside per-function complexity comments.
  */
 
-import type { ComplexityReport, ComplexityViolation } from '@liendev/core';
+import type { ComplexityReport, ComplexityViolation } from '@liendev/parser';
 import type { ReviewConfig } from './types.js';
 import type { Logger } from './logger.js';
 import type { ArchitecturalContext } from './prompt.js';

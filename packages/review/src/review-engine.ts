@@ -6,14 +6,14 @@ import * as fs from 'fs';
 import { execFileSync } from 'child_process';
 import collect from 'collect.js';
 import {
-  indexCodebase,
-  ComplexityAnalyzer,
+  performChunkOnlyIndex,
+  analyzeComplexityFromChunks,
   RISK_ORDER,
   getSupportedExtensions,
   type ComplexityReport,
   type ComplexityViolation,
   type CodeChunk,
-} from '@liendev/core';
+} from '@liendev/parser';
 
 import type { Octokit } from '@octokit/rest';
 import type { PRContext, ReviewConfig, LineComment } from './types.js';
@@ -145,7 +145,7 @@ async function getFilesToAnalyze(
 }
 
 /**
- * Run complexity analysis using @liendev/core
+ * Run complexity analysis using @liendev/parser
  */
 export async function runComplexityAnalysis(
   files: string[],
@@ -159,10 +159,10 @@ export async function runComplexityAnalysis(
   }
 
   try {
-    // Use skipEmbeddings for fast chunk-only indexing (no VectorDB needed)
+    // Use performChunkOnlyIndex for fast chunk-only indexing (no VectorDB needed)
     // Pass filesToIndex to skip full repo scan — only chunk the changed files
     logger.info(`Indexing ${files.length} files (chunk-only)...`);
-    const indexResult = await indexCodebase({ rootDir, skipEmbeddings: true, filesToIndex: files });
+    const indexResult = await performChunkOnlyIndex(rootDir, { filesToIndex: files });
 
     logger.info(
       `Indexing complete: ${indexResult.chunksCreated} chunks from ${indexResult.filesIndexed} files (success: ${indexResult.success})`,
@@ -175,7 +175,7 @@ export async function runComplexityAnalysis(
     // Run complexity analysis from in-memory chunks (no VectorDB needed)
     logger.info('Analyzing complexity...');
     const thresholdNum = parseInt(threshold, 10);
-    const report = ComplexityAnalyzer.analyzeFromChunks(
+    const report = analyzeComplexityFromChunks(
       indexResult.chunks,
       files,
       !isNaN(thresholdNum) ? { testPaths: thresholdNum, mentalLoad: thresholdNum } : undefined,

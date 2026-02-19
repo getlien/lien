@@ -1,7 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
 import pLimit from 'p-limit';
-import { chunkFile } from './chunker.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
 import {
@@ -11,11 +10,10 @@ import {
   EMBEDDING_MICRO_BATCH_SIZE,
 } from '../constants.js';
 import { ManifestManager } from './manifest.js';
-import { computeContentHash } from './content-hash.js';
-import type { CodeChunk } from './types.js';
 import type { Result } from '../utils/result.js';
 import { Ok, Err, isOk } from '../utils/result.js';
-import { extractRepoId } from '../utils/repo-id.js';
+import { chunkFile, computeContentHash, extractRepoId } from '@liendev/parser';
+import type { CodeChunk } from '@liendev/parser';
 
 /**
  * Normalize a file path to a consistent relative format.

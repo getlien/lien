@@ -5,7 +5,7 @@
  */
 
 // Re-export from modules
-export type { ChunkMetadata, CodeChunk, ScanOptions } from '../indexer/types.js';
+export type { ChunkMetadata, CodeChunk, ScanOptions } from '@liendev/parser';
 export type { SearchResult, VectorDBInterface } from '../vectordb/types.js';
 export type { EmbeddingService } from '../embeddings/types.js';
 export type {
@@ -25,7 +25,7 @@ export type {
   ComplexityViolation,
   FileComplexityData,
   ComplexityReport,
-} from '../insights/types.js';
+} from '@liendev/parser';
 
 // Re-export risk order constant
-export { RISK_ORDER } from '../insights/types.js';
+export { RISK_ORDER } from '@liendev/parser';

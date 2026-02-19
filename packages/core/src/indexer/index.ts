@@ -11,8 +11,6 @@
 import fs from 'fs/promises';
 import pLimit from 'p-limit';
 import path from 'path';
-import { scanCodebase } from './scanner.js';
-import { detectEcosystems, getEcosystemExcludePatterns } from './ecosystem-presets.js';
 import type { LienConfig } from '../config/schema.js';
 import type { ProgressTracker } from './progress-tracker.js';
 import {
@@ -21,8 +19,6 @@ import {
   DEFAULT_CONCURRENCY,
   DEFAULT_EMBEDDING_BATCH_SIZE,
 } from '../constants.js';
-import { chunkFile } from './chunker.js';
-import { computeContentHash } from './content-hash.js';
 import { WorkerEmbeddings } from '../embeddings/worker-embeddings.js';
 import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
@@ -35,8 +31,15 @@ import { indexMultipleFiles, normalizeToRelativePath } from './incremental.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import { ChunkBatchProcessor } from './chunk-batch-processor.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
-import { extractRepoId } from '../utils/repo-id.js';
-import type { CodeChunk } from './types.js';
+import {
+  extractRepoId,
+  scanCodebase,
+  detectEcosystems,
+  getEcosystemExcludePatterns,
+  chunkFile,
+  computeContentHash,
+} from '@liendev/parser';
+import type { CodeChunk } from '@liendev/parser';
 
 /**
  * Options for indexing a codebase

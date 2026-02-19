@@ -16,7 +16,7 @@
 import type { VectorDBInterface } from '../vectordb/types.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import type { ProgressTracker } from './progress-tracker.js';
-import type { CodeChunk } from './types.js';
+import type { CodeChunk } from '@liendev/parser';
 import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
 
 /** A chunk with its content ready for embedding */

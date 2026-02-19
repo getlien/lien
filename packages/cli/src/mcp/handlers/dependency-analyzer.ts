@@ -5,7 +5,7 @@ import {
   matchesFile,
   getCanonicalPath,
   isTestFile,
-} from '@liendev/core';
+} from '@liendev/parser';
 
 /**
  * Complexity metrics for a single dependent file.
@@ -512,7 +512,8 @@ function mergeTransitiveDependents(
     existingFiles,
   );
   if (transitiveChunks.length > 0) {
-    const transitiveByFile = groupChunksByFile(transitiveChunks);
+    // Cast is safe: runtime values are SearchResult objects from VectorDB scan
+    const transitiveByFile = groupChunksByFile(transitiveChunks as SearchResult[]);
     mergeChunksByFile(chunksByFile, transitiveByFile);
     log(`Found ${transitiveByFile.size} additional dependents via re-export chains`);
   }

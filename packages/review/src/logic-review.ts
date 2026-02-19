@@ -3,7 +3,7 @@
  * Analyzes CodeChunks and ComplexityReport to find logic issues backed by AST evidence.
  */
 
-import type { CodeChunk, ComplexityReport } from '@liendev/core';
+import type { CodeChunk, ComplexityReport } from '@liendev/parser';
 import type { LogicFinding } from './types.js';
 
 /** Maximum findings returned to avoid review fatigue */

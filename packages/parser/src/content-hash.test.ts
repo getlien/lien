@@ -1,8 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import { computeContentHash, isHashAlgorithmCompatible } from './content-hash.js';
-import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
+
+async function createTestDir(): Promise<string> {
+  const tmpBase = path.join(os.tmpdir(), 'lien-test');
+  await fs.mkdir(tmpBase, { recursive: true });
+  const testDir = path.join(
+    tmpBase,
+    `test-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  );
+  await fs.mkdir(testDir, { recursive: true });
+  return testDir;
+}
+
+async function cleanupTestDir(testDir: string): Promise<void> {
+  try {
+    await fs.rm(testDir, { recursive: true, force: true });
+  } catch {
+    // Ignore cleanup errors
+  }
+}
 
 describe('computeContentHash', () => {
   let testDir: string;

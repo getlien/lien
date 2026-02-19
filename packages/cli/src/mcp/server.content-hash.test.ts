@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { ManifestManager, computeContentHash } from '@liendev/core';
+import { ManifestManager } from '@liendev/core';
+import { computeContentHash } from '@liendev/parser';
 
 describe('Stage 4: Content-Hash Based Change Detection', () => {
   let testDir: string;

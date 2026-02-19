@@ -3,7 +3,7 @@
  * Finds test files that import given source files by analyzing chunk metadata.
  */
 
-import { isTestFile, normalizePath, matchesFile } from '../utils/path-matching.js';
+import { isTestFile, normalizePath, matchesFile } from './utils/path-matching.js';
 import type { CodeChunk } from './types.js';
 
 /**

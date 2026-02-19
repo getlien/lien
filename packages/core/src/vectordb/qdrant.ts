@@ -3,12 +3,12 @@ import crypto from 'crypto';
 import path from 'path';
 import os from 'os';
 import type { SearchResult, VectorDBInterface } from './types.js';
-import type { ChunkMetadata } from '../indexer/types.js';
+import type { ChunkMetadata } from '@liendev/parser';
+import { extractRepoId } from '@liendev/parser';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import { DatabaseError } from '../errors/index.js';
 import { readVersionFile } from './version.js';
 import { QdrantPayloadMapper } from './qdrant-payload-mapper.js';
-import { extractRepoId } from '../utils/repo-id.js';
 import {
   QdrantFilterBuilder,
   validateFilterOptions,
