@@ -28,10 +28,10 @@ vi.mock('@liendev/core', async () => {
   };
 });
 
-// Mock @liendev/lien-parser
-vi.mock('@liendev/lien-parser', async () => {
+// Mock @liendev/parser
+vi.mock('@liendev/parser', async () => {
   const actual =
-    await vi.importActual<typeof import('@liendev/lien-parser')>('@liendev/lien-parser');
+    await vi.importActual<typeof import('@liendev/parser')>('@liendev/parser');
   return {
     ...actual,
     createGitignoreFilter: vi.fn(async () => () => false),
@@ -49,7 +49,7 @@ vi.mock('fs/promises', () => ({
 }));
 
 import { isFileIgnored, isGitignoreFile, createFileChangeHandler } from './file-change-handler.js';
-import { createGitignoreFilter } from '@liendev/lien-parser';
+import { createGitignoreFilter } from '@liendev/parser';
 
 function createMockVectorDB(dbPath = '/project/.lien/indices/abc') {
   return {

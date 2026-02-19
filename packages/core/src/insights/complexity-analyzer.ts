@@ -7,10 +7,10 @@ import type {
   HalsteadDetails,
   ChunkMetadata,
   CodeChunk,
-} from '@liendev/lien-parser';
-import { RISK_ORDER } from '@liendev/lien-parser';
-import { analyzeDependencies } from '@liendev/lien-parser';
-import { analyzeComplexityFromChunks } from '@liendev/lien-parser';
+} from '@liendev/parser';
+import { RISK_ORDER } from '@liendev/parser';
+import { analyzeDependencies } from '@liendev/parser';
+import { analyzeComplexityFromChunks } from '@liendev/parser';
 
 /**
  * Hardcoded severity multipliers:

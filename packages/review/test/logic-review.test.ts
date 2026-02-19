@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { detectLogicFindings } from '../src/logic-review.js';
-import type { CodeChunk } from '@liendev/lien-parser';
+import type { CodeChunk } from '@liendev/parser';
 import type { ComplexityReport } from '../src/types.js';
 
 function createChunk(overrides: Partial<CodeChunk['metadata']> = {}, content = ''): CodeChunk {

@@ -31,7 +31,7 @@ jobs:
         run: npm run format:check
 
       - name: Build Parser, Core & Review (required by CLI and App)
-        run: npm run build -w @liendev/lien-parser && npm run build -w @liendev/core && npm run build -w @liendev/review
+        run: npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review
 
       - name: Lint
         run: npm run lint

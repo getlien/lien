@@ -1,6 +1,6 @@
 /**
  * Constants used by the parser/chunking layer.
- * These will move to @liendev/lien-parser during extraction.
+ * These will move to @liendev/parser during extraction.
  */
 
 // Chunking settings

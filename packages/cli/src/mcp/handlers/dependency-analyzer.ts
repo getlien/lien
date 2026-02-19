@@ -5,7 +5,7 @@ import {
   matchesFile,
   getCanonicalPath,
   isTestFile,
-} from '@liendev/lien-parser';
+} from '@liendev/parser';
 
 /**
  * Complexity metrics for a single dependent file.

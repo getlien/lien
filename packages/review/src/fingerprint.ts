@@ -1,4 +1,4 @@
-import type { CodeChunk } from '@liendev/lien-parser';
+import type { CodeChunk } from '@liendev/parser';
 
 /**
  * Compact codebase fingerprint derived from AST chunk metadata.

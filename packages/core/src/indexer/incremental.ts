@@ -12,8 +12,8 @@ import {
 import { ManifestManager } from './manifest.js';
 import type { Result } from '../utils/result.js';
 import { Ok, Err, isOk } from '../utils/result.js';
-import { chunkFile, computeContentHash, extractRepoId } from '@liendev/lien-parser';
-import type { CodeChunk } from '@liendev/lien-parser';
+import { chunkFile, computeContentHash, extractRepoId } from '@liendev/parser';
+import type { CodeChunk } from '@liendev/parser';
 
 /**
  * Normalize a file path to a consistent relative format.

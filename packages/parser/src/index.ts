@@ -1,4 +1,4 @@
-// @liendev/lien-parser - AST parsing, complexity analysis, and semantic chunking
+// @liendev/parser - AST parsing, complexity analysis, and semantic chunking
 
 // =============================================================================
 // TYPES

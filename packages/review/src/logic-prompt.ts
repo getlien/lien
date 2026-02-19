@@ -2,7 +2,7 @@
  * Prompt builder for logic review LLM validation
  */
 
-import type { ComplexityReport } from '@liendev/lien-parser';
+import type { ComplexityReport } from '@liendev/parser';
 import type { LogicFinding } from './types.js';
 
 /**

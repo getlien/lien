@@ -3,7 +3,7 @@ import type {
   ComplexityReport,
   ComplexityViolation,
   FileComplexityData,
-} from '@liendev/lien-parser';
+} from '@liendev/parser';
 
 /**
  * Violation with associated file path for rendering

@@ -38,8 +38,8 @@ import {
   getEcosystemExcludePatterns,
   chunkFile,
   computeContentHash,
-} from '@liendev/lien-parser';
-import type { CodeChunk } from '@liendev/lien-parser';
+} from '@liendev/parser';
+import type { CodeChunk } from '@liendev/parser';
 
 /**
  * Options for indexing a codebase

@@ -48,10 +48,10 @@ export {
   detectEcosystems,
   getEcosystemExcludePatterns,
   ECOSYSTEM_PRESETS,
-} from '@liendev/lien-parser';
-export type { EcosystemPreset, ChunkOptions } from '@liendev/lien-parser';
+} from '@liendev/parser';
+export type { EcosystemPreset, ChunkOptions } from '@liendev/parser';
 /** @deprecated Use {@link detectFileType} instead. */
-export { detectFileType as detectLanguage } from '@liendev/lien-parser';
+export { detectFileType as detectLanguage } from '@liendev/parser';
 export {
   indexSingleFile,
   indexMultipleFiles,
@@ -86,7 +86,7 @@ export { readVersionFile, writeVersionFile } from './vectordb/version.js';
 // =============================================================================
 
 export { ComplexityAnalyzer } from './insights/complexity-analyzer.js';
-export { analyzeComplexityFromChunks } from '@liendev/lien-parser';
+export { analyzeComplexityFromChunks } from '@liendev/parser';
 export {
   formatReport,
   formatTextReport,
@@ -194,12 +194,12 @@ export {
 // =============================================================================
 
 export { Result, Ok, Err, isOk, isErr, unwrap, unwrapOr } from './utils/result.js';
-export { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '@liendev/lien-parser';
+export { normalizePath, matchesFile, getCanonicalPath, isTestFile } from '@liendev/parser';
 export { safeRegex } from './utils/safe-regex.js';
-export { extractRepoId } from '@liendev/lien-parser';
+export { extractRepoId } from '@liendev/parser';
 
 // =============================================================================
 // AST LANGUAGE REGISTRY (re-export from parser)
 // =============================================================================
 
-export { getSupportedExtensions } from '@liendev/lien-parser';
+export { getSupportedExtensions } from '@liendev/parser';

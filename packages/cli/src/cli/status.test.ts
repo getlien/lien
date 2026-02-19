@@ -12,9 +12,9 @@ vi.mock('@liendev/core', async () => {
   };
 });
 
-vi.mock('@liendev/lien-parser', async () => {
+vi.mock('@liendev/parser', async () => {
   const actual =
-    await vi.importActual<typeof import('@liendev/lien-parser')>('@liendev/lien-parser');
+    await vi.importActual<typeof import('@liendev/parser')>('@liendev/parser');
   return {
     ...actual,
     extractRepoId: vi.fn().mockReturnValue('test-repo-id'),

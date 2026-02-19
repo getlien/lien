@@ -14,7 +14,7 @@ import {
   DEFAULT_EMBEDDING_BATCH_SIZE,
   DEFAULT_GIT_POLL_INTERVAL_MS,
 } from '@liendev/core';
-import { extractRepoId, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from '@liendev/lien-parser';
+import { extractRepoId, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from '@liendev/parser';
 import { showCompactBanner } from '../utils/banner.js';
 
 const VALID_FORMATS = ['text', 'json'];

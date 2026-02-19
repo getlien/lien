@@ -8,7 +8,7 @@ import type {
   ComplexityViolation,
   FileComplexityData,
   ComplexityReport,
-} from '@liendev/lien-parser';
+} from '@liendev/parser';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 
 // ============================================================================

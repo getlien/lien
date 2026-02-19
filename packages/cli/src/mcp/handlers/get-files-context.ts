@@ -8,7 +8,7 @@ import {
   getCanonicalPath,
   isTestFile,
   MAX_CHUNKS_PER_FILE,
-} from '@liendev/lien-parser';
+} from '@liendev/parser';
 import type { SearchResult, EmbeddingService, VectorDBInterface } from '@liendev/core';
 
 /**

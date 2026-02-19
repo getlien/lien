@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { CodeChunk } from '@liendev/lien-parser';
+import type { CodeChunk } from '@liendev/parser';
 import type { ComplexityReport } from '../src/types.js';
 import type { DependentContext } from '../src/dependent-context.js';
 import {

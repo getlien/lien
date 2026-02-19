@@ -2,7 +2,7 @@
  * Shared types for the review package
  */
 
-export type { ComplexityReport, ComplexityViolation } from '@liendev/lien-parser';
+export type { ComplexityReport, ComplexityViolation } from '@liendev/parser';
 
 /**
  * PR context for review — the minimum info needed to post a review

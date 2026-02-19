@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { CodeChunk } from '@liendev/lien-parser';
+import type { CodeChunk } from '@liendev/parser';
 import { computeFingerprint, serializeFingerprint } from '../src/fingerprint.js';
 
 function makeChunk(

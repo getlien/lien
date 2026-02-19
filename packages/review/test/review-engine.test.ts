@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ComplexityViolation, ComplexityReport } from '@liendev/lien-parser';
+import type { ComplexityViolation, ComplexityReport } from '@liendev/parser';
 import type { ComplexityDelta } from '../src/delta.js';
 import type { LineComment } from '../src/types.js';
 import {

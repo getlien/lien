@@ -13,7 +13,7 @@ import {
   type ComplexityReport,
   type ComplexityViolation,
   type CodeChunk,
-} from '@liendev/lien-parser';
+} from '@liendev/parser';
 
 import type { Octokit } from '@octokit/rest';
 import type { PRContext, ReviewConfig, LineComment } from './types.js';
@@ -145,7 +145,7 @@ async function getFilesToAnalyze(
 }
 
 /**
- * Run complexity analysis using @liendev/lien-parser
+ * Run complexity analysis using @liendev/parser
  */
 export async function runComplexityAnalysis(
   files: string[],

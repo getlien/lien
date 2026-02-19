@@ -6,7 +6,7 @@ import {
   ManifestManager,
   normalizeToRelativePath,
 } from '@liendev/core';
-import { computeContentHash, createGitignoreFilter } from '@liendev/lien-parser';
+import { computeContentHash, createGitignoreFilter } from '@liendev/parser';
 import type { FileChangeHandler, FileChangeEvent } from '../watcher/index.js';
 import type { createReindexStateManager } from './reindex-state-manager.js';
 import type { LogFn } from './types.js';

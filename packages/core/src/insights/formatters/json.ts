@@ -1,4 +1,4 @@
-import type { ComplexityReport } from '@liendev/lien-parser';
+import type { ComplexityReport } from '@liendev/parser';
 
 /**
  * Format complexity report as JSON for consumption by GitHub Action.

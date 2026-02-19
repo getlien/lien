@@ -1,5 +1,5 @@
 import type { QdrantClient } from '@qdrant/js-client-rest';
-import type { ChunkMetadata } from '@liendev/lien-parser';
+import type { ChunkMetadata } from '@liendev/parser';
 import type { QdrantPayloadMapper, QdrantPayload } from './qdrant-payload-mapper.js';
 import { DatabaseError } from '../errors/index.js';
 import { VECTOR_DB_MAX_BATCH_SIZE } from '../constants.js';

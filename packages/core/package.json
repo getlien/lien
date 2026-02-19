@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
-    "@liendev/lien-parser": "*",
+    "@liendev/parser": "*",
     "@lancedb/lancedb": "^0.23.0",
     "@qdrant/js-client-rest": "^1.16.2",
     "chalk": "^5.6.2",

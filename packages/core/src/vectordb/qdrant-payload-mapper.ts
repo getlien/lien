@@ -1,4 +1,4 @@
-import type { ChunkMetadata } from '@liendev/lien-parser';
+import type { ChunkMetadata } from '@liendev/parser';
 
 /**
  * Qdrant payload structure for storing chunk metadata.

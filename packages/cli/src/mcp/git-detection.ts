@@ -7,7 +7,7 @@ import {
   isGitRepo,
   DEFAULT_GIT_POLL_INTERVAL_MS,
 } from '@liendev/core';
-import { createGitignoreFilter } from '@liendev/lien-parser';
+import { createGitignoreFilter } from '@liendev/parser';
 import type { FileWatcher } from '../watcher/index.js';
 import type { createReindexStateManager } from './reindex-state-manager.js';
 import type { LogFn } from './types.js';
