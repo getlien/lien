@@ -231,7 +231,6 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     node: Parser.SyntaxNode,
     addExport: (name: string) => void,
   ): void {
-    // Look for assignment_expression inside expression_statement
     const expr = node.namedChild(0);
     if (expr?.type !== 'assignment_expression') return;
 
@@ -245,21 +244,16 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
       return;
     }
 
-    // exports.foo = ...
-    if (left.type === 'member_expression' && left.childForFieldName('object')?.text === 'exports') {
-      const prop = left.childForFieldName('property');
-      if (prop) addExport(prop.text);
-      return;
-    }
+    // exports.foo = ... or module.exports.bar = ...
+    if (left.type !== 'member_expression') return;
 
-    // module.exports.bar = ...
-    if (left.type === 'member_expression') {
-      const objectNode = left.childForFieldName('object');
-      if (objectNode && this.isModuleExports(objectNode)) {
-        const prop = left.childForFieldName('property');
-        if (prop) addExport(prop.text);
-      }
-    }
+    const objectNode = left.childForFieldName('object');
+    const prop = left.childForFieldName('property');
+    if (!prop) return;
+
+    const isExportsProperty =
+      objectNode?.text === 'exports' || (objectNode != null && this.isModuleExports(objectNode));
+    if (isExportsProperty) addExport(prop.text);
   }
 
   private extractModuleExportsValue(

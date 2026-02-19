@@ -343,43 +343,32 @@ function processTemplateContent(
   let currentChunk: string[] = [];
   let chunkStartLine = 0;
 
+  const flush = (endLine: number) => {
+    const chunk = flushTemplateChunk(currentChunk, chunkStartLine, endLine, ctx, tenantContext);
+    if (chunk) chunks.push(chunk);
+  };
+
   for (let i = 0; i < lines.length; i++) {
-    // Skip lines covered by special blocks
     if (coveredLines.has(i)) {
-      const chunk = flushTemplateChunk(currentChunk, chunkStartLine, i, ctx, tenantContext);
-      if (chunk) chunks.push(chunk);
+      flush(i);
       currentChunk = [];
       continue;
     }
 
-    // Start new chunk if needed
     if (currentChunk.length === 0) {
       chunkStartLine = i;
     }
 
     currentChunk.push(lines[i]);
 
-    // Flush if chunk is full
     if (currentChunk.length >= chunkSize) {
-      const chunk = flushTemplateChunk(currentChunk, chunkStartLine, i + 1, ctx, tenantContext);
-      if (chunk) chunks.push(chunk);
-
-      // Add overlap for next chunk
+      flush(i + 1);
       currentChunk = currentChunk.slice(-chunkOverlap);
       chunkStartLine = Math.max(0, i + 1 - chunkOverlap);
     }
   }
 
-  // Flush remaining chunk
-  const finalChunk = flushTemplateChunk(
-    currentChunk,
-    chunkStartLine,
-    lines.length,
-    ctx,
-    tenantContext,
-  );
-  if (finalChunk) chunks.push(finalChunk);
-
+  flush(lines.length);
   return chunks;
 }
 

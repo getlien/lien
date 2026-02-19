@@ -9,6 +9,55 @@ export interface ExtractedSymbols {
   interfaces: string[];
 }
 
+interface LanguageExtractors {
+  functions: (content: string) => string[];
+  classes?: (content: string) => string[];
+  interfaces?: (content: string) => string[];
+}
+
+const LANGUAGE_EXTRACTORS: Record<string, LanguageExtractors> = {
+  typescript: {
+    functions: extractTSFunctions,
+    classes: extractTSClasses,
+    interfaces: extractTSInterfaces,
+  },
+  tsx: {
+    functions: extractTSFunctions,
+    classes: extractTSClasses,
+    interfaces: extractTSInterfaces,
+  },
+  javascript: { functions: extractJSFunctions, classes: extractJSClasses },
+  jsx: { functions: extractJSFunctions, classes: extractJSClasses },
+  python: { functions: extractPythonFunctions, classes: extractPythonClasses },
+  py: { functions: extractPythonFunctions, classes: extractPythonClasses },
+  php: {
+    functions: extractPHPFunctions,
+    classes: extractPHPClasses,
+    interfaces: extractPHPInterfaces,
+  },
+  vue: { functions: extractVueFunctions, classes: extractVueComponents },
+  go: { functions: extractGoFunctions, interfaces: extractGoInterfaces },
+  java: {
+    functions: extractJavaFunctions,
+    classes: extractJavaClasses,
+    interfaces: extractJavaInterfaces,
+  },
+  csharp: {
+    functions: extractCSharpFunctions,
+    classes: extractCSharpClasses,
+    interfaces: extractCSharpInterfaces,
+  },
+  cs: {
+    functions: extractCSharpFunctions,
+    classes: extractCSharpClasses,
+    interfaces: extractCSharpInterfaces,
+  },
+  ruby: { functions: extractRubyFunctions, classes: extractRubyClasses },
+  rb: { functions: extractRubyFunctions, classes: extractRubyClasses },
+  rust: { functions: extractRustFunctions },
+  rs: { functions: extractRustFunctions },
+};
+
 /**
  * Extract symbols (functions, classes, interfaces) from code content.
  *
@@ -17,77 +66,15 @@ export interface ExtractedSymbols {
  * @returns Extracted symbols organized by type
  */
 export function extractSymbols(content: string, language: string): ExtractedSymbols {
-  const symbols: ExtractedSymbols = {
-    functions: [],
-    classes: [],
-    interfaces: [],
-  };
-
-  const normalizedLang = language.toLowerCase();
-
-  switch (normalizedLang) {
-    case 'typescript':
-    case 'tsx':
-      symbols.functions = extractTSFunctions(content);
-      symbols.classes = extractTSClasses(content);
-      symbols.interfaces = extractTSInterfaces(content);
-      break;
-
-    case 'javascript':
-    case 'jsx':
-      symbols.functions = extractJSFunctions(content);
-      symbols.classes = extractJSClasses(content);
-      break;
-
-    case 'python':
-    case 'py':
-      symbols.functions = extractPythonFunctions(content);
-      symbols.classes = extractPythonClasses(content);
-      break;
-
-    case 'php':
-      symbols.functions = extractPHPFunctions(content);
-      symbols.classes = extractPHPClasses(content);
-      symbols.interfaces = extractPHPInterfaces(content);
-      break;
-
-    case 'vue':
-      // Extract from <script> blocks (handles both Options API and Composition API)
-      symbols.functions = extractVueFunctions(content);
-      symbols.classes = extractVueComponents(content);
-      break;
-
-    case 'go':
-      symbols.functions = extractGoFunctions(content);
-      symbols.interfaces = extractGoInterfaces(content);
-      break;
-
-    case 'java':
-      symbols.functions = extractJavaFunctions(content);
-      symbols.classes = extractJavaClasses(content);
-      symbols.interfaces = extractJavaInterfaces(content);
-      break;
-
-    case 'csharp':
-    case 'cs':
-      symbols.functions = extractCSharpFunctions(content);
-      symbols.classes = extractCSharpClasses(content);
-      symbols.interfaces = extractCSharpInterfaces(content);
-      break;
-
-    case 'ruby':
-    case 'rb':
-      symbols.functions = extractRubyFunctions(content);
-      symbols.classes = extractRubyClasses(content);
-      break;
-
-    case 'rust':
-    case 'rs':
-      symbols.functions = extractRustFunctions(content);
-      break;
+  const extractors = LANGUAGE_EXTRACTORS[language.toLowerCase()];
+  if (!extractors) {
+    return { functions: [], classes: [], interfaces: [] };
   }
-
-  return symbols;
+  return {
+    functions: extractors.functions(content),
+    classes: extractors.classes?.(content) ?? [],
+    interfaces: extractors.interfaces?.(content) ?? [],
+  };
 }
 
 // TypeScript / JavaScript Functions

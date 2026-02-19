@@ -300,19 +300,46 @@ export function calculateRiskLevel(violations: ComplexityViolation[]): RiskLevel
 }
 
 /**
+ * Compute average and max complexity from chunk metadata in a single pass.
+ */
+function computeComplexityStats(allChunks: Array<{ content: string; metadata: ChunkMetadata }>): {
+  avgComplexity: number;
+  maxComplexity: number;
+} {
+  let sum = 0;
+  let count = 0;
+  let max = 0;
+  for (const c of allChunks) {
+    const complexity = c.metadata.complexity;
+    if (complexity !== undefined && complexity > 0) {
+      sum += complexity;
+      count++;
+      if (complexity > max) max = complexity;
+    }
+  }
+  const avg = count > 0 ? Math.round((sum / count) * 10) / 10 : 0;
+  return { avgComplexity: avg, maxComplexity: max };
+}
+
+/**
  * Build the final report with summary and per-file data.
  */
 export function buildReport(
   violations: ComplexityViolation[],
   allChunks: Array<{ content: string; metadata: ChunkMetadata }>,
 ): ComplexityReport {
+  // Group violations by file and count severities in a single pass
   const fileViolationsMap = new Map<string, ComplexityViolation[]>();
+  let errorCount = 0;
+  let warningCount = 0;
   for (const violation of violations) {
     const normalizedPath = normalizeFilePath(violation.filepath);
     violation.filepath = normalizedPath;
     const existing = fileViolationsMap.get(normalizedPath) || [];
     existing.push(violation);
     fileViolationsMap.set(normalizedPath, existing);
+    if (violation.severity === 'error') errorCount++;
+    else warningCount++;
   }
 
   const analyzedFiles = new Set(allChunks.map(c => normalizeFilePath(c.metadata.file)));
@@ -328,26 +355,14 @@ export function buildReport(
     };
   }
 
-  const errorCount = violations.filter(v => v.severity === 'error').length;
-  const warningCount = violations.filter(v => v.severity === 'warning').length;
-
-  const complexityValues = allChunks
-    .filter(c => c.metadata.complexity !== undefined && c.metadata.complexity > 0)
-    .map(c => c.metadata.complexity!);
-
-  const avgComplexity =
-    complexityValues.length > 0
-      ? complexityValues.reduce((sum, val) => sum + val, 0) / complexityValues.length
-      : 0;
-
-  const maxComplexity = complexityValues.length > 0 ? Math.max(...complexityValues) : 0;
+  const { avgComplexity, maxComplexity } = computeComplexityStats(allChunks);
 
   return {
     summary: {
       filesAnalyzed: analyzedFiles.size,
       totalViolations: violations.length,
       bySeverity: { error: errorCount, warning: warningCount },
-      avgComplexity: Math.round(avgComplexity * 10) / 10,
+      avgComplexity,
       maxComplexity,
     },
     files,
