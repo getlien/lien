@@ -11,10 +11,14 @@ import type {
   ReviewPlugin,
   ReviewContext,
   ReviewFinding,
+  PresentContext,
+  CheckAnnotation,
   ComplexityFindingMetadata,
 } from '../plugin-types.js';
 import { buildBatchedCommentsPrompt, getViolationKey, getMetricLabel } from '../prompt.js';
-import { formatComplexityValue, formatThresholdValue } from '../prompt.js';
+import { formatComplexityValue, formatThresholdValue, getMetricEmoji } from '../prompt.js';
+import { formatDelta } from '../delta.js';
+import { COMMENT_MARKER_PREFIX } from '../github-api.js';
 import { estimatePromptTokens, parseJSONResponse } from '../llm-client.js';
 import type { Logger } from '../logger.js';
 
@@ -60,6 +64,46 @@ export class ComplexityPlugin implements ReviewPlugin {
     const usedSuggestionKeys = new Set<string>();
 
     return violations.map(v => violationToFinding(v, deltaMap, suggestions, usedSuggestionKeys));
+  }
+
+  /**
+   * Present complexity findings as check annotations and PR review comments.
+   */
+  async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
+    const myFindings = findings.filter(f => f.pluginId === 'complexity');
+    if (myFindings.length === 0) return;
+
+    const { logger } = context;
+
+    // Map findings to check annotations
+    const annotations: CheckAnnotation[] = myFindings.map(f => ({
+      path: f.filepath,
+      start_line: f.line,
+      end_line: f.endLine ?? f.line,
+      annotation_level: mapSeverity(f.severity),
+      message: buildAnnotationMessage(f),
+      title: buildAnnotationTitle(f),
+    }));
+    context.addAnnotations(annotations);
+
+    // Post review comment with inline comments (if available)
+    if (context.postReviewComment) {
+      const lineComments = myFindings
+        .filter(f => !isMarginalFinding(f))
+        .map(f => ({
+          path: f.filepath,
+          line: f.endLine ?? f.line,
+          start_line: f.line,
+          body: buildInlineCommentBody(f),
+        }));
+
+      if (lineComments.length > 0) {
+        const summary = buildPresentSummary(myFindings);
+        await context.postReviewComment(summary, lineComments);
+      }
+    }
+
+    logger.info(`Complexity: ${annotations.length} annotations, ${myFindings.length} findings`);
   }
 
   /**
@@ -249,4 +293,79 @@ function prioritizeViolations(
     const severityOrder = { error: 2, warning: 1 };
     return severityOrder[b.severity] - severityOrder[a.severity];
   });
+}
+
+// ---------------------------------------------------------------------------
+// present() Helpers
+// ---------------------------------------------------------------------------
+
+function getComplexityMetadata(f: ReviewFinding): ComplexityFindingMetadata | undefined {
+  const m = f.metadata as Record<string, unknown> | undefined;
+  if (!m || typeof m.complexity !== 'number' || typeof m.threshold !== 'number') return undefined;
+  return m as unknown as ComplexityFindingMetadata;
+}
+
+function mapSeverity(severity: ReviewFinding['severity']): CheckAnnotation['annotation_level'] {
+  if (severity === 'error') return 'failure';
+  if (severity === 'warning') return 'warning';
+  return 'notice';
+}
+
+function buildAnnotationMessage(f: ReviewFinding): string {
+  return f.message;
+}
+
+function buildAnnotationTitle(f: ReviewFinding): string {
+  const metadata = getComplexityMetadata(f);
+  if (!metadata) return f.symbolName ?? 'complexity';
+  const metricLabel = getMetricLabel(metadata.metricType);
+  const value = formatComplexityValue(metadata.metricType, metadata.complexity);
+  const threshold = formatThresholdValue(metadata.metricType, metadata.threshold);
+  return `${f.symbolName ?? 'unknown'}: ${metricLabel} ${value} (threshold: ${threshold})`;
+}
+
+/**
+ * Check if a finding is marginal (within 5% of threshold).
+ * Marginal findings get annotations but not inline PR comments.
+ */
+function isMarginalFinding(f: ReviewFinding): boolean {
+  const metadata = getComplexityMetadata(f);
+  if (!metadata) return false;
+  const { complexity, threshold } = metadata;
+  if (threshold <= 0) return false;
+  const overage = (complexity - threshold) / threshold;
+  return overage > 0 && overage <= 0.05;
+}
+
+function buildInlineCommentBody(f: ReviewFinding): string {
+  const metadata = getComplexityMetadata(f);
+  const metricType = metadata?.metricType ?? 'cyclomatic';
+  const complexity = metadata?.complexity ?? 0;
+  const threshold = metadata?.threshold ?? 15;
+  const delta = metadata?.delta;
+  const metricLabel = getMetricLabel(metricType);
+  const valueDisplay = formatComplexityValue(metricType, complexity);
+  const thresholdDisplay = formatThresholdValue(metricType, threshold);
+
+  const deltaStr = delta !== null && delta !== undefined ? ` (${formatDelta(delta)})` : '';
+  const severityEmoji = f.severity === 'error' ? '🔴' : '🟡';
+  const metricEmoji = getMetricEmoji(metricType);
+
+  const marker = `${COMMENT_MARKER_PREFIX}${f.filepath}::${f.symbolName ?? 'unknown'} -->`;
+  const header = `${severityEmoji} ${metricEmoji} **${capitalize(metricLabel)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})`;
+
+  return `${marker}\n${header}\n\n${f.message}`;
+}
+
+function buildPresentSummary(findings: ReviewFinding[]): string {
+  const errors = findings.filter(f => f.severity === 'error').length;
+  const warnings = findings.filter(f => f.severity === 'warning').length;
+  const parts: string[] = [];
+  if (errors > 0) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
+  if (warnings > 0) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
+  return `**Complexity Review** — ${parts.join(', ')}. See inline comments.`;
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }

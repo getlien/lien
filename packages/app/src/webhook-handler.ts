@@ -199,14 +199,23 @@ export async function handlePullRequest(
     );
     logger.info(`Engine produced ${findings.length} total findings`);
 
-    const adapter = new GitHubAdapter();
-    const adapterResult = await adapter.present(
-      findings,
-      buildGitHubAdapterContext(result, prContext, octokit, llm, reviewConfig, logger),
+    const adapterContext = buildGitHubAdapterContext(
+      result,
+      prContext,
+      octokit,
+      llm,
+      reviewConfig,
+      logger,
     );
+
+    const adapter = new GitHubAdapter();
+    const adapterResult = await adapter.present(findings, adapterContext);
     logger.info(
       `Review complete for PR #${prContext.pullNumber}: ${adapterResult.posted} posted, ${adapterResult.skipped} skipped`,
     );
+
+    // Run plugin present() hooks (creates check run + annotations)
+    await engine.present(findings, adapterContext);
   } finally {
     // Cleanup independently so one failure doesn't prevent the other
     if (headClone) await headClone.cleanup().catch(() => {});
