@@ -80,10 +80,17 @@ export function createMockLLMClient(
       }
 
       if (typeof next === 'string') {
-        return {
-          content: next,
-          usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150, cost: 0.001 },
+        const stringUsage = {
+          promptTokens: 100,
+          completionTokens: 50,
+          totalTokens: 150,
+          cost: 0.001,
         };
+        usage.promptTokens += stringUsage.promptTokens;
+        usage.completionTokens += stringUsage.completionTokens;
+        usage.totalTokens += stringUsage.totalTokens;
+        usage.cost += stringUsage.cost;
+        return { content: next, usage: stringUsage };
       }
 
       if (next.usage) {
@@ -105,6 +112,7 @@ export function createMockLLMClient(
  * Create a minimal CodeChunk for testing.
  */
 export function createTestChunk(overrides?: Partial<CodeChunk>): CodeChunk {
+  const { metadata: metadataOverrides, ...rest } = overrides ?? {};
   return {
     content: 'function test() { return true; }',
     metadata: {
@@ -114,9 +122,9 @@ export function createTestChunk(overrides?: Partial<CodeChunk>): CodeChunk {
       type: 'function',
       symbolName: 'test',
       language: 'typescript',
-      ...overrides?.metadata,
+      ...metadataOverrides,
     },
-    ...overrides,
+    ...rest,
   } as CodeChunk;
 }
 

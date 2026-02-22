@@ -86,7 +86,7 @@ program
   .option('--files <paths...>', 'Specific files to analyze (skips git diff)')
   .option('--format <type>', 'Output format: text, json, sarif', 'text')
   .option('--fail-on <severity>', 'Exit 1 if findings match: error, warning')
-  .option('--no-llm', 'Skip LLM-powered plugins (complexity only)')
+  .option('--no-llm', 'Skip plugins that require LLM')
   .option('--model <name>', 'LLM model to use (overrides config)')
   .option('-v, --verbose', 'Show detailed logging')
   .option('--plugin <name>', 'Run only a specific plugin')

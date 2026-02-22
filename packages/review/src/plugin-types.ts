@@ -217,6 +217,8 @@ export interface AdapterContext {
   logger: Logger;
   llmUsage?: { promptTokens: number; completionTokens: number; totalTokens: number; cost: number };
   model?: string;
+  /** When true, post REQUEST_CHANGES if new error-level violations are introduced. */
+  blockOnNewErrors?: boolean;
 }
 
 /**

@@ -214,7 +214,7 @@ function resolveLLMClient(
   if (!apiKey && !noLlm && options.format === 'text') {
     console.log(
       chalk.dim(
-        'No LLM API key found. Running in --no-llm mode (complexity only).\n' +
+        'No LLM API key found. Running without LLM (plugins that require LLM will be skipped).\n' +
           'Set OPENROUTER_API_KEY or configure .lien/review.yml for LLM-enriched reviews.',
       ),
     );

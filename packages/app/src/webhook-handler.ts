@@ -274,5 +274,6 @@ function buildGitHubAdapterContext(
     logger,
     llmUsage: llm?.getUsage(),
     model: config.model,
+    blockOnNewErrors: config.blockOnNewErrors,
   };
 }

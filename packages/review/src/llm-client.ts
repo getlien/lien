@@ -64,6 +64,9 @@ export class OpenRouterLLMClient implements LLMClient {
     cost: 0,
   };
 
+  /** Serializes concurrent calls so budget checks are atomic with usage tracking. */
+  private callChain: Promise<void> = Promise.resolve();
+
   constructor(opts: OpenRouterLLMClientOptions) {
     this.apiKey = opts.apiKey;
     this.model = opts.model;
@@ -73,7 +76,18 @@ export class OpenRouterLLMClient implements LLMClient {
   }
 
   async complete(prompt: string, opts?: LLMOptions): Promise<LLMResponse> {
-    // Budget enforcement
+    // Serialize calls to prevent parallel plugins from racing past the budget check.
+    // Each call waits for the previous to finish so usage is up-to-date before the next check.
+    return new Promise<LLMResponse>((resolve, reject) => {
+      this.callChain = this.callChain
+        .catch(() => {}) // don't let a prior failure block the chain
+        .then(() => this.doComplete(prompt, opts))
+        .then(resolve, reject);
+    });
+  }
+
+  private async doComplete(prompt: string, opts?: LLMOptions): Promise<LLMResponse> {
+    // Budget enforcement (now atomic — no concurrent calls can race past this)
     if (this.usage.totalTokens >= this.maxTotalTokens) {
       throw new Error(`Token budget exceeded: ${this.usage.totalTokens} >= ${this.maxTotalTokens}`);
     }

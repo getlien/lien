@@ -154,9 +154,8 @@ function resolvePluginConfig(
 }
 
 /**
- * Create an engine with the built-in plugins registered.
+ * Create a ReviewEngine instance. Plugins must be registered by the caller.
  */
 export function createDefaultEngine(opts?: EngineOptions): ReviewEngine {
-  // Lazily import to avoid circular deps — plugins are registered in the consuming code
   return new ReviewEngine(opts);
 }

@@ -153,12 +153,15 @@ export class GitHubAdapter implements OutputAdapter {
       otherFindings,
     );
 
-    // Post
+    // Determine review event type: REQUEST_CHANGES if blockOnNewErrors and new errors exist
+    const hasNewErrors = context.blockOnNewErrors && nonMarginal.some(f => f.severity === 'error');
+    const event = hasNewErrors ? 'REQUEST_CHANGES' : 'COMMENT';
+
     if (toPost.length === 0) {
       await postPRComment(octokit, pr, summaryBody, logger);
     } else {
-      await postPRReview(octokit, pr, toPost, summaryBody, logger, 'COMMENT');
-      logger.info(`Posted review with ${toPost.length} inline comments`);
+      await postPRReview(octokit, pr, toPost, summaryBody, logger, event);
+      logger.info(`Posted review with ${toPost.length} inline comments (event: ${event})`);
     }
 
     return {
@@ -186,11 +189,11 @@ export class GitHubAdapter implements OutputAdapter {
     if (inDiff.length === 0) return { posted: 0, skipped: findings.length, filtered: 0 };
 
     const comments: LineComment[] = inDiff.map(buildLogicCommentBody);
-    const { toPost } = await dedupComments(comments, octokit, pr, 'logic', logger);
+    const { toPost, skippedKeys } = await dedupComments(comments, octokit, pr, 'logic', logger);
+    const skipped = findings.length - inDiff.length + skippedKeys.length;
 
-    if (toPost.length === 0) return { posted: 0, skipped: findings.length, filtered: 0 };
+    if (toPost.length === 0) return { posted: 0, skipped, filtered: 0 };
 
-    // Post logic review with brief summary (main summary is in complexity review)
     await postPRReview(
       octokit,
       pr,
@@ -200,7 +203,7 @@ export class GitHubAdapter implements OutputAdapter {
       'COMMENT',
     );
 
-    return { posted: toPost.length, skipped: findings.length - inDiff.length, filtered: 0 };
+    return { posted: toPost.length, skipped, filtered: 0 };
   }
 
   /**
