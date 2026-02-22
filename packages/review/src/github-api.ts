@@ -16,6 +16,81 @@ export function createOctokit(token: string): Octokit {
   return new Octokit({ auth: token });
 }
 
+// ---------------------------------------------------------------------------
+// Check Run API
+// ---------------------------------------------------------------------------
+
+export interface CheckRunOutput {
+  title: string;
+  summary: string;
+  text?: string;
+  annotations?: Array<{
+    path: string;
+    start_line: number;
+    end_line: number;
+    annotation_level: 'notice' | 'warning' | 'failure';
+    message: string;
+    title?: string;
+  }>;
+}
+
+/**
+ * Create a GitHub Check Run. Returns the check_run_id.
+ */
+export async function createCheckRun(
+  octokit: Octokit,
+  params: {
+    owner: string;
+    repo: string;
+    name: string;
+    headSha: string;
+    status: 'queued' | 'in_progress' | 'completed';
+    conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled' | 'action_required';
+    output?: CheckRunOutput;
+  },
+  logger: Logger,
+): Promise<number> {
+  const { data } = await octokit.checks.create({
+    owner: params.owner,
+    repo: params.repo,
+    name: params.name,
+    head_sha: params.headSha,
+    status: params.status,
+    ...(params.conclusion ? { conclusion: params.conclusion } : {}),
+    ...(params.output ? { output: params.output } : {}),
+  });
+
+  logger.info(`Created check run "${params.name}" (id: ${data.id})`);
+  return data.id;
+}
+
+/**
+ * Update an existing GitHub Check Run.
+ */
+export async function updateCheckRun(
+  octokit: Octokit,
+  params: {
+    owner: string;
+    repo: string;
+    checkRunId: number;
+    status?: 'queued' | 'in_progress' | 'completed';
+    conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled' | 'action_required';
+    output?: CheckRunOutput;
+  },
+  logger: Logger,
+): Promise<void> {
+  await octokit.checks.update({
+    owner: params.owner,
+    repo: params.repo,
+    check_run_id: params.checkRunId,
+    ...(params.status ? { status: params.status } : {}),
+    ...(params.conclusion ? { conclusion: params.conclusion } : {}),
+    ...(params.output ? { output: params.output } : {}),
+  });
+
+  logger.debug(`Updated check run ${params.checkRunId}`);
+}
+
 /**
  * Get list of files changed in the PR
  */
