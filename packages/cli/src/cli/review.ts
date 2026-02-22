@@ -301,7 +301,7 @@ export async function reviewCommand(options: ReviewOptions): Promise<void> {
       deltaSummary: null,
       logger,
       llmUsage: llm?.getUsage(),
-      model: config.llm.model,
+      model,
     };
 
     if (options.format === 'sarif') {

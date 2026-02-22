@@ -50,7 +50,7 @@ export class TerminalAdapter implements OutputAdapter {
     this.useColor = opts?.color ?? true;
   }
 
-  async present(findings: ReviewFinding[], _context: AdapterContext): Promise<AdapterResult> {
+  async present(findings: ReviewFinding[], context: AdapterContext): Promise<AdapterResult> {
     if (findings.length === 0) {
       this.print(`\n${this.c(COLORS.bold)}No review findings.${this.c(COLORS.reset)}\n`);
       return { posted: 0, skipped: 0, filtered: 0 };
@@ -119,6 +119,17 @@ export class TerminalAdapter implements OutputAdapter {
     this.print(
       `${this.c(COLORS.bold)}${findings.length} finding${findings.length === 1 ? '' : 's'}${this.c(COLORS.reset)} (${parts.join(', ')})`,
     );
+
+    // LLM usage summary
+    const usage = context.llmUsage;
+    if (usage && usage.totalTokens > 0) {
+      const costStr = usage.cost > 0 ? ` ($${usage.cost.toFixed(4)})` : '';
+      const modelStr = context.model ? ` | model: ${context.model}` : '';
+      this.print(
+        `${this.c(COLORS.dim)}LLM: ${usage.totalTokens.toLocaleString()} tokens${costStr}${modelStr}${this.c(COLORS.reset)}`,
+      );
+    }
+
     this.print('');
 
     return { posted: findings.length, skipped: 0, filtered: 0 };
