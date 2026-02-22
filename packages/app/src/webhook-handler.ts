@@ -6,16 +6,21 @@ import {
   type PRContext,
   type ReviewConfig,
   type Logger,
+  type AnalysisResult,
   consoleLogger,
   createOctokit,
-  handleAnalysisOutputs,
-  postReviewIfNeeded,
   runComplexityAnalysis,
   filterAnalyzableFiles,
   getPRChangedFiles,
   calculateDeltas,
-  type ReviewSetup,
-  type AnalysisResult,
+  calculateDeltaSummary,
+  // New plugin architecture
+  ReviewEngine,
+  ComplexityPlugin,
+  LogicPlugin,
+  ArchitecturalPlugin,
+  OpenRouterLLMClient,
+  GitHubAdapter,
 } from '@liendev/review';
 
 import { cloneRepo, cloneBase, type CloneResult } from './clone.js';
@@ -143,7 +148,7 @@ async function runPRAnalysis(
 
 /**
  * Handle a pull_request webhook event.
- * Clones the repo, runs analysis, posts review, and cleans up.
+ * Clones the repo, runs analysis, posts review via the plugin engine, and cleans up.
  */
 export async function handlePullRequest(
   payload: PRWebhookPayload,
@@ -185,19 +190,66 @@ export async function handlePullRequest(
     if (!analysis) return;
 
     baseClone = analysis.baseClone;
+    const { result } = analysis;
 
-    const setup: ReviewSetup = {
-      config: reviewConfig,
-      prContext,
-      octokit,
+    // Build LLM client if API key is available
+    const llm = reviewConfig.openrouterApiKey
+      ? new OpenRouterLLMClient({
+          apiKey: reviewConfig.openrouterApiKey,
+          model: reviewConfig.model,
+          logger,
+        })
+      : undefined;
+
+    // Create engine and register plugins
+    const engine = new ReviewEngine();
+    engine.register(new ComplexityPlugin());
+    engine.register(new LogicPlugin());
+    engine.register(new ArchitecturalPlugin());
+
+    // Build review context
+    const deltaSummary = result.deltas ? calculateDeltaSummary(result.deltas) : null;
+    const reviewContext = {
+      chunks: result.chunks,
+      changedFiles: result.filesToAnalyze,
+      complexityReport: result.currentReport,
+      baselineReport: result.baselineReport,
+      deltas: result.deltas,
+      config: {
+        // Complexity plugin config
+        threshold: parseInt(reviewConfig.threshold, 10),
+        blockOnNewErrors: reviewConfig.blockOnNewErrors,
+        // Logic plugin config
+        categories: reviewConfig.logicReviewCategories,
+        // Architectural plugin config
+        mode: reviewConfig.enableArchitecturalReview,
+      },
+      llm,
+      pr: prContext,
       logger,
-      rootDir: headClone.dir,
     };
 
-    await handleAnalysisOutputs(analysis.result, setup);
-    await postReviewIfNeeded(analysis.result, setup);
+    // Run all plugins
+    const findings = await engine.run(reviewContext);
+    logger.info(`Engine produced ${findings.length} total findings`);
 
-    logger.info(`Review complete for PR #${prContext.pullNumber}`);
+    // Present via GitHub adapter
+    const adapter = new GitHubAdapter();
+    const adapterResult = await adapter.present(findings, {
+      complexityReport: result.currentReport,
+      baselineReport: result.baselineReport,
+      deltas: result.deltas,
+      deltaSummary,
+      pr: prContext,
+      octokit,
+      logger,
+      llmUsage: llm?.getUsage(),
+      model: reviewConfig.model,
+    });
+
+    logger.info(
+      `Review complete for PR #${prContext.pullNumber}: ${adapterResult.posted} posted, ${adapterResult.skipped} skipped`,
+    );
   } finally {
     // Cleanup independently so one failure doesn't prevent the other
     if (headClone) await headClone.cleanup().catch(() => {});
