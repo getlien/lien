@@ -18,10 +18,16 @@ import type {
 import { computeFingerprint, serializeFingerprint } from '../fingerprint.js';
 import { assembleDependentContext } from '../dependent-context.js';
 import { computeSimplicitySignals, serializeSimplicitySignals } from '../simplicity-signals.js';
+import { extractJSONFromCodeBlock } from '../llm-client.js';
 
 export const architecturalConfigSchema = z.object({
   mode: z.enum(['auto', 'always', 'off']).default('auto'),
 });
+
+/** Compute max architectural notes based on change size. */
+function maxNotes(changedFileCount: number): number {
+  return Math.min(3 + Math.floor(changedFileCount / 5), 8);
+}
 
 /**
  * Architectural note parsed from LLM response.
@@ -67,11 +73,12 @@ export class ArchitecturalPlugin implements ReviewPlugin {
     const archContext = computeArchContext(chunks, complexityReport, changedFiles, logger);
 
     // Build prompt
-    const prompt = buildArchitecturalPrompt(archContext, context);
+    const limit = maxNotes(changedFiles.length);
+    const prompt = buildArchitecturalPrompt(archContext, context, limit);
     const response = await context.llm.complete(prompt);
 
     // Parse notes from response
-    const notes = parseArchitecturalNotes(response.content, logger);
+    const notes = parseArchitecturalNotes(response.content, logger, limit);
     logger.info(`Architectural plugin: ${notes.length} observations`);
 
     return notes.map(note => {
@@ -186,7 +193,11 @@ function buildExportsMap(
 // Prompt Building
 // ---------------------------------------------------------------------------
 
-function buildArchitecturalPrompt(archContext: ArchContext, context: ReviewContext): string {
+function buildArchitecturalPrompt(
+  archContext: ArchContext,
+  context: ReviewContext,
+  limit: number,
+): string {
   const filesList = context.changedFiles.map(f => `- ${f}`).join('\n');
 
   return `You are a senior engineer reviewing code for architectural coherence.
@@ -232,7 +243,7 @@ Respond with ONLY valid JSON:
 
 Rules:
 - ONLY include notes backed by specific evidence
-- Maximum 3 notes per review — quality over quantity
+- Maximum ${limit} notes per review — quality over quantity
 - If no architectural issues found, return an empty array`;
 }
 
@@ -251,15 +262,18 @@ function isValidArchNote(note: unknown): note is ArchitecturalNote {
   );
 }
 
-function parseArchitecturalNotes(content: string, logger: Logger): ArchitecturalNote[] {
+function parseArchitecturalNotes(
+  content: string,
+  logger: Logger,
+  limit: number,
+): ArchitecturalNote[] {
   // Try to parse as JSON with architectural_notes key
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*)```/);
-  const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
+  const jsonStr = extractJSONFromCodeBlock(content);
 
   try {
     const parsed = JSON.parse(jsonStr);
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.architectural_notes)) {
-      const notes = parsed.architectural_notes.filter(isValidArchNote).slice(0, 3);
+      const notes = parsed.architectural_notes.filter(isValidArchNote).slice(0, limit);
       logger.info(`Parsed ${notes.length} architectural notes`);
       return notes;
     }
@@ -273,7 +287,7 @@ function parseArchitecturalNotes(content: string, logger: Logger): Architectural
     try {
       const parsed = JSON.parse(objectMatch[0]);
       if (parsed && Array.isArray(parsed.architectural_notes)) {
-        const notes = parsed.architectural_notes.filter(isValidArchNote).slice(0, 3);
+        const notes = parsed.architectural_notes.filter(isValidArchNote).slice(0, limit);
         logger.info(`Recovered ${notes.length} architectural notes with retry`);
         return notes;
       }
