@@ -26,7 +26,7 @@ export const architecturalConfigSchema = z.object({
 
 /** Compute max architectural notes based on change size. */
 function maxNotes(changedFileCount: number): number {
-  return Math.min(3 + Math.floor(changedFileCount / 5), 8);
+  return Math.min(3 + Math.floor(changedFileCount / 10), 5);
 }
 
 /**
