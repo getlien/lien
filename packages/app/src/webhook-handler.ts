@@ -9,6 +9,7 @@ import {
   type AnalysisResult,
   consoleLogger,
   createOctokit,
+  createCheckRun,
   runComplexityAnalysis,
   filterAnalyzableFiles,
   getPRChangedFiles,
@@ -167,6 +168,27 @@ export async function handlePullRequest(
     `Processing PR #${prContext.pullNumber} (${payload.action}) on ${payload.repository.full_name}`,
   );
 
+  // Create check run immediately so "in_progress" appears on the PR
+  let checkRunId: number | undefined;
+  try {
+    checkRunId = await createCheckRun(
+      octokit,
+      {
+        owner: prContext.owner,
+        repo: prContext.repo,
+        name: 'Lien Review',
+        headSha: prContext.headSha,
+        status: 'in_progress',
+        output: { title: 'Running...', summary: 'Analysis in progress' },
+      },
+      logger,
+    );
+  } catch (error) {
+    logger.warning(
+      `Failed to create check run: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
   let headClone: CloneResult | null = null;
   let baseClone: CloneResult | null = null;
 
@@ -214,8 +236,8 @@ export async function handlePullRequest(
       `Review complete for PR #${prContext.pullNumber}: ${adapterResult.posted} posted, ${adapterResult.skipped} skipped`,
     );
 
-    // Run plugin present() hooks (creates check run + annotations)
-    await engine.present(findings, adapterContext);
+    // Run plugin present() hooks (finalizes check run)
+    await engine.present(findings, adapterContext, { checkRunId });
   } finally {
     // Cleanup independently so one failure doesn't prevent the other
     if (headClone) await headClone.cleanup().catch(() => {});

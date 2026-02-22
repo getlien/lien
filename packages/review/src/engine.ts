@@ -138,14 +138,18 @@ export class ReviewEngine {
   /**
    * Run plugin present() hooks and manage the check run lifecycle.
    *
-   * 1. Create check run (in_progress) if GitHub context available
+   * 1. Create check run (in_progress) if not already provided
    * 2. Call each plugin's present() with PresentContext helpers
    * 3. Finalize check run (conclusion + summary + batched annotations)
+   *
+   * @param opts.checkRunId - Pre-created check run ID. If provided, the engine
+   *   reuses it instead of creating a new one. This lets callers create the check
+   *   run early (e.g., at webhook receipt) for immediate "in_progress" feedback.
    */
   async present(
     findings: ReviewFinding[],
     adapterContext: AdapterContext,
-    pluginFilter?: string,
+    opts?: { pluginFilter?: string; checkRunId?: number },
   ): Promise<void> {
     const logger = adapterContext.logger;
     const octokit = adapterContext.octokit as Octokit | undefined;
@@ -154,9 +158,9 @@ export class ReviewEngine {
     const pendingAnnotations: CheckAnnotation[] = [];
     const debugLog: string[] = [];
 
-    // Create check run if GitHub context available
-    let checkRunId: number | undefined;
-    if (octokit && pr) {
+    // Reuse pre-created check run or create a new one
+    let checkRunId: number | undefined = opts?.checkRunId;
+    if (!checkRunId && octokit && pr) {
       try {
         checkRunId = await createCheckRun(
           octokit,
@@ -196,6 +200,7 @@ export class ReviewEngine {
     };
 
     // Call each plugin's present()
+    const pluginFilter = opts?.pluginFilter;
     const plugins = pluginFilter ? this.plugins.filter(p => p.id === pluginFilter) : this.plugins;
 
     for (const plugin of plugins) {

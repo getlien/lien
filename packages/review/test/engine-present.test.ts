@@ -371,7 +371,7 @@ describe('ReviewEngine.present()', () => {
     engine.register(createTestPlugin({ id: 'alpha', present: presentA }));
     engine.register(createTestPlugin({ id: 'beta', present: presentB }));
 
-    await engine.present([], createAdapterContext(), 'alpha');
+    await engine.present([], createAdapterContext(), { pluginFilter: 'alpha' });
 
     expect(presentA).toHaveBeenCalledTimes(1);
     expect(presentB).not.toHaveBeenCalled();
@@ -383,5 +383,47 @@ describe('ReviewEngine.present()', () => {
 
     // Should not throw
     await engine.present([], createAdapterContext());
+  });
+
+  it('reuses pre-created checkRunId instead of creating a new one', async () => {
+    const engine = new ReviewEngine();
+    const octokit = {
+      checks: {
+        create: vi.fn().mockResolvedValue({ data: { id: 99 } }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+
+    await engine.present([], createAdapterContext({ octokit, pr: mockPR }), { checkRunId: 77 });
+
+    // Should NOT have created a new check run
+    expect(octokit.checks.create).not.toHaveBeenCalled();
+
+    // Should finalize the pre-created one
+    expect(octokit.checks.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        check_run_id: 77,
+        status: 'completed',
+      }),
+    );
+  });
+
+  it('creates check run if checkRunId not provided', async () => {
+    const engine = new ReviewEngine();
+    const octokit = {
+      checks: {
+        create: vi.fn().mockResolvedValue({ data: { id: 55 } }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+
+    await engine.present([], createAdapterContext({ octokit, pr: mockPR }));
+
+    expect(octokit.checks.create).toHaveBeenCalledTimes(1);
+    expect(octokit.checks.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        check_run_id: 55,
+      }),
+    );
   });
 });
