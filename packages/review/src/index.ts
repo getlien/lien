@@ -1,11 +1,68 @@
 /**
- * @liendev/review — Shared review logic for Lien Review
+ * @liendev/review — Pluggable review engine for Lien Review
  *
- * Used by the GitHub App (@liendev/app) to analyze PR complexity
- * and post review comments.
+ * Used by the GitHub App (@liendev/app) and the CLI (`lien review`)
+ * to analyze code and post reviews.
  */
 
-// Types
+// ─── Plugin Architecture (new) ──────────────────────────────────────────────
+
+// Core types
+export type {
+  ReviewPlugin,
+  ReviewContext,
+  ReviewFinding,
+  LLMClient,
+  LLMOptions,
+  LLMResponse,
+  OutputAdapter,
+  AdapterResult,
+  AdapterContext,
+  AnalysisResult,
+  ReviewSetup,
+  ComplexityFindingMetadata,
+  LogicFindingMetadata,
+  ArchitecturalFindingMetadata,
+  BuiltinFindingMetadata,
+} from './plugin-types.js';
+
+// Engine
+export { ReviewEngine, createDefaultEngine, type EngineOptions } from './engine.js';
+
+// LLM Client
+export { OpenRouterLLMClient, type OpenRouterLLMClientOptions } from './llm-client.js';
+
+// Built-in plugins
+export { ComplexityPlugin } from './plugins/complexity.js';
+export { LogicPlugin } from './plugins/logic.js';
+export { ArchitecturalPlugin } from './plugins/architectural.js';
+
+// Output adapters
+export { GitHubAdapter } from './adapters/github.js';
+export { TerminalAdapter } from './adapters/terminal.js';
+export { SARIFAdapter } from './adapters/sarif.js';
+
+// Test harness
+export {
+  createTestContext,
+  createMockLLMClient,
+  createTestChunk,
+  createTestReport,
+  silentLogger,
+} from './test-helpers.js';
+
+// Config
+export {
+  type ReviewYamlConfig,
+  loadConfig,
+  resolveLLMApiKey,
+  getPluginConfig,
+  loadPlugin,
+  loadPlugins,
+} from './config.js';
+
+// ─── Shared types ───────────────────────────────────────────────────────────
+
 export type {
   PRContext,
   ReviewConfig,
@@ -18,23 +75,25 @@ export type {
 // Logger
 export { type Logger, consoleLogger } from './logger.js';
 
-// Review engine (main orchestration)
+// ─── Legacy review engine (kept for backward compat) ────────────────────────
+
 export {
-  type AnalysisResult,
-  type ReviewSetup,
   filterAnalyzableFiles,
   runComplexityAnalysis,
   orchestrateAnalysis,
   handleAnalysisOutputs,
   postReviewIfNeeded,
+  prioritizeViolations,
   extractRelevantHunk,
   determineReviewEvent,
   isMarginalViolation,
   filterDuplicateComments,
+  buildDedupNote,
   type DedupResult,
 } from './review-engine.js';
 
-// GitHub API (portable, uses @octokit/rest)
+// ─── GitHub API ─────────────────────────────────────────────────────────────
+
 export {
   type Octokit,
   type PRPatchData,
@@ -56,7 +115,8 @@ export {
   LEGACY_LOGIC_MARKER_PREFIX,
 } from './github-api.js';
 
-// OpenRouter API
+// ─── OpenRouter API (legacy — prefer LLMClient) ────────────────────────────
+
 export {
   type OpenRouterResponse,
   type TokenUsage,
@@ -68,13 +128,15 @@ export {
   generateLogicComments,
 } from './openrouter.js';
 
-// Logic review
+// ─── Logic review ───────────────────────────────────────────────────────────
+
 export { detectLogicFindings } from './logic-review.js';
 export { isFindingSuppressed, parseSuppressionComments } from './suppression.js';
 export { buildLogicReviewPrompt } from './logic-prompt.js';
 export { parseLogicReviewResponse, type LogicReviewEntry } from './logic-response.js';
 
-// Prompt building
+// ─── Prompt building ────────────────────────────────────────────────────────
+
 export {
   buildNoViolationsMessage,
   getViolationKey,
@@ -90,7 +152,8 @@ export {
   buildBatchedCommentsPrompt,
 } from './prompt.js';
 
-// Architectural review
+// ─── Architectural review (legacy — prefer ArchitecturalPlugin) ─────────────
+
 export {
   type ArchitecturalNote,
   type EnrichedCommentsResult,
@@ -100,28 +163,32 @@ export {
   parseEnrichedResponse,
 } from './architectural-review.js';
 
-// Fingerprint
+// ─── Fingerprint ────────────────────────────────────────────────────────────
+
 export {
   type CodebaseFingerprint,
   computeFingerprint,
   serializeFingerprint,
 } from './fingerprint.js';
 
-// Simplicity signals
+// ─── Simplicity signals ─────────────────────────────────────────────────────
+
 export {
   type FileSimplicitySignal,
   computeSimplicitySignals,
   serializeSimplicitySignals,
 } from './simplicity-signals.js';
 
-// Dependent context
+// ─── Dependent context ──────────────────────────────────────────────────────
+
 export {
   type DependentSnippet,
   type DependentContext,
   assembleDependentContext,
 } from './dependent-context.js';
 
-// Delta calculation
+// ─── Delta calculation ──────────────────────────────────────────────────────
+
 export {
   type ComplexityDelta,
   type DeltaSummary,
@@ -132,5 +199,6 @@ export {
   logDeltaSummary,
 } from './delta.js';
 
-// Formatting utilities
+// ─── Formatting utilities ───────────────────────────────────────────────────
+
 export { formatTime, formatDeltaValue } from './format.js';

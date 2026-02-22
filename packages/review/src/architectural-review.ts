@@ -18,6 +18,7 @@ import {
 } from './openrouter.js';
 import { computeFingerprint, serializeFingerprint } from './fingerprint.js';
 import { assembleDependentContext } from './dependent-context.js';
+import { extractJSONFromCodeBlock } from './llm-client.js';
 import { computeSimplicitySignals, serializeSimplicitySignals } from './simplicity-signals.js';
 
 import type { AnalysisResult } from './review-engine.js';
@@ -184,9 +185,7 @@ export function parseEnrichedResponse(
   content: string,
   logger: Logger,
 ): EnrichedReviewResponse | null {
-  // Greedy match: LLM responses may contain inner ``` blocks (code suggestions)
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*)```/);
-  let jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
+  let jsonStr = extractJSONFromCodeBlock(content);
 
   logger.info(`Parsing architectural review response (${jsonStr.length} chars)`);
 
@@ -371,8 +370,7 @@ function parseFlatComments(
   violations: ComplexityViolation[],
   logger: Logger,
 ): EnrichedCommentsResult {
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*)```/);
-  const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
+  const jsonStr = extractJSONFromCodeBlock(content);
   let commentsMap: Record<string, string> | null = null;
 
   try {

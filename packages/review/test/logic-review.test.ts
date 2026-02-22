@@ -318,6 +318,66 @@ describe('detectLogicFindings', () => {
       expect(findings).toHaveLength(0);
     });
 
+    it('does not flag await calls without assignment (side-effect pattern)', () => {
+      const content = 'async function handler() {\n  await postComment(pr, body);\n  return;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/handler.ts',
+            symbolName: 'handler',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'postComment', line: 2 }],
+          },
+          content,
+        ),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(0);
+    });
+
+    it('does not flag compound assignment operators (+=, ||=)', () => {
+      const content = 'function build() {\n  notes += buildSection(data);\n  return notes;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/build.ts',
+            symbolName: 'build',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'buildSection', line: 2 }],
+          },
+          content,
+        ),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(0);
+    });
+
+    it('does not flag calls used in binary expressions', () => {
+      const content = 'function build() {\n  buildHeader(data) + buildFooter(data);\n  return;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/build.ts',
+            symbolName: 'build',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'buildHeader', line: 2 }],
+          },
+          content,
+        ),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(0);
+    });
+
     it('still flags calls to non-void functions', () => {
       const content = 'function caller() {\n  getValue();\n  return;\n}';
       const chunks = [

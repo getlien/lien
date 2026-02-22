@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import type { Logger } from './logger.js';
+import { extractJSONFromCodeBlock } from './llm-client.js';
 
 /**
  * Schema for a single logic review response entry
@@ -26,15 +27,6 @@ export interface LogicReviewEntry {
   valid: boolean;
   comment: string;
   category: string;
-}
-
-/**
- * Extract JSON string from LLM response, stripping markdown code blocks if present.
- */
-function extractJsonString(content: string): string {
-  // Greedy match: LLM responses may contain inner ``` blocks
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*)```/);
-  return (codeBlockMatch ? codeBlockMatch[1] : content).trim();
 }
 
 /**
@@ -81,7 +73,7 @@ export function parseLogicReviewResponse(
   content: string,
   logger: Logger,
 ): Record<string, LogicReviewEntry> | null {
-  const jsonStr = extractJsonString(content);
+  const jsonStr = extractJSONFromCodeBlock(content);
   logger.info(`Parsing logic review response (${jsonStr.length} chars)`);
 
   // Try strict parsing first

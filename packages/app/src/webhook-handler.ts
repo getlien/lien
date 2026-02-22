@@ -6,16 +6,21 @@ import {
   type PRContext,
   type ReviewConfig,
   type Logger,
+  type AnalysisResult,
   consoleLogger,
   createOctokit,
-  handleAnalysisOutputs,
-  postReviewIfNeeded,
   runComplexityAnalysis,
   filterAnalyzableFiles,
   getPRChangedFiles,
   calculateDeltas,
-  type ReviewSetup,
-  type AnalysisResult,
+  calculateDeltaSummary,
+  // New plugin architecture
+  ReviewEngine,
+  ComplexityPlugin,
+  LogicPlugin,
+  ArchitecturalPlugin,
+  OpenRouterLLMClient,
+  GitHubAdapter,
 } from '@liendev/review';
 
 import { cloneRepo, cloneBase, type CloneResult } from './clone.js';
@@ -143,7 +148,7 @@ async function runPRAnalysis(
 
 /**
  * Handle a pull_request webhook event.
- * Clones the repo, runs analysis, posts review, and cleans up.
+ * Clones the repo, runs analysis, posts review via the plugin engine, and cleans up.
  */
 export async function handlePullRequest(
   payload: PRWebhookPayload,
@@ -185,22 +190,90 @@ export async function handlePullRequest(
     if (!analysis) return;
 
     baseClone = analysis.baseClone;
+    const { result } = analysis;
 
-    const setup: ReviewSetup = {
-      config: reviewConfig,
-      prContext,
-      octokit,
-      logger,
-      rootDir: headClone.dir,
-    };
+    const llm = buildLLMClient(reviewConfig, logger);
+    const engine = setupEngine();
+    const findings = await engine.run(
+      buildReviewContext(result, reviewConfig, prContext, llm, logger),
+    );
+    logger.info(`Engine produced ${findings.length} total findings`);
 
-    await handleAnalysisOutputs(analysis.result, setup);
-    await postReviewIfNeeded(analysis.result, setup);
-
-    logger.info(`Review complete for PR #${prContext.pullNumber}`);
+    const adapter = new GitHubAdapter();
+    const adapterResult = await adapter.present(
+      findings,
+      buildGitHubAdapterContext(result, prContext, octokit, llm, reviewConfig, logger),
+    );
+    logger.info(
+      `Review complete for PR #${prContext.pullNumber}: ${adapterResult.posted} posted, ${adapterResult.skipped} skipped`,
+    );
   } finally {
     // Cleanup independently so one failure doesn't prevent the other
     if (headClone) await headClone.cleanup().catch(() => {});
     if (baseClone) await baseClone.cleanup().catch(() => {});
   }
+}
+
+function buildLLMClient(config: ReviewConfig, logger: Logger) {
+  return config.openrouterApiKey
+    ? new OpenRouterLLMClient({ apiKey: config.openrouterApiKey, model: config.model, logger })
+    : undefined;
+}
+
+function setupEngine() {
+  const engine = new ReviewEngine();
+  engine.register(new ComplexityPlugin());
+  engine.register(new LogicPlugin());
+  engine.register(new ArchitecturalPlugin());
+  return engine;
+}
+
+function buildReviewContext(
+  result: AnalysisResult,
+  config: ReviewConfig,
+  pr: PRContext,
+  llm: ReturnType<typeof buildLLMClient>,
+  logger: Logger,
+) {
+  return {
+    chunks: result.chunks,
+    changedFiles: result.filesToAnalyze,
+    complexityReport: result.currentReport,
+    baselineReport: result.baselineReport,
+    deltas: result.deltas,
+    pluginConfigs: {
+      complexity: {
+        threshold: parseInt(config.threshold, 10),
+        blockOnNewErrors: config.blockOnNewErrors,
+      },
+      logic: { categories: config.logicReviewCategories },
+      architectural: { mode: config.enableArchitecturalReview },
+    },
+    config: {},
+    llm,
+    pr,
+    logger,
+  };
+}
+
+function buildGitHubAdapterContext(
+  result: AnalysisResult,
+  pr: PRContext,
+  octokit: ReturnType<typeof createOctokit>,
+  llm: ReturnType<typeof buildLLMClient>,
+  config: ReviewConfig,
+  logger: Logger,
+) {
+  return {
+    complexityReport: result.currentReport,
+    baselineReport: result.baselineReport,
+    deltas: result.deltas,
+    deltaSummary: result.deltas ? calculateDeltaSummary(result.deltas) : null,
+    pr,
+    octokit,
+    logger,
+    llmUsage: llm?.getUsage(),
+    model: config.model,
+    blockOnNewErrors: config.blockOnNewErrors,
+  };
 }

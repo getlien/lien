@@ -7,6 +7,7 @@ import { statusCommand } from './status.js';
 import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
 import { complexityCommand } from './complexity.js';
+import { reviewCommand } from './review.js';
 import { configSetCommand, configGetCommand, configListCommand } from './config.js';
 
 // Get version from package.json dynamically
@@ -78,6 +79,18 @@ program
   .option('--format <type>', 'Output format: text, json, sarif', 'text')
   .option('--fail-on <severity>', 'Exit 1 if violations: error, warning')
   .action(complexityCommand);
+
+program
+  .command('review')
+  .description('Run pluggable code review on changed files')
+  .option('--files <paths...>', 'Specific files to analyze (skips git diff)')
+  .option('--format <type>', 'Output format: text, json, sarif', 'text')
+  .option('--fail-on <severity>', 'Exit 1 if findings match: error, warning')
+  .option('--no-llm', 'Skip plugins that require LLM')
+  .option('--model <name>', 'LLM model to use (overrides config)')
+  .option('-v, --verbose', 'Show detailed logging')
+  .option('--plugin <name>', 'Run only a specific plugin')
+  .action(reviewCommand);
 
 const configCmd = program
   .command('config')
