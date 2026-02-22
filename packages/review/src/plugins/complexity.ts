@@ -65,7 +65,12 @@ export class ComplexityPlugin implements ReviewPlugin {
       ? await this.generateSuggestions(violations, complexityReport, context)
       : new Map<string, string>();
 
-    // Map violations to findings
+    // Map violations to findings.
+    // LLM suggestions are per-function (not per-metric), so only attach the suggestion
+    // to the first violation for each function. The rest use the metric-specific fallback
+    // to avoid printing the same refactoring suggestion 4 times.
+    const usedSuggestionKeys = new Set<string>();
+
     return violations.map(v => {
       const key = getViolationKey(v);
       const deltaKey = `${v.filepath}::${v.symbolName}::${v.metricType}`;
@@ -74,7 +79,11 @@ export class ComplexityPlugin implements ReviewPlugin {
       const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
       const thresholdDisplay = formatThresholdValue(v.metricType || 'cyclomatic', v.threshold);
 
+      // Only use the LLM suggestion once per function
       const suggestion = suggestions.get(key);
+      const isFirstForFunction = suggestion && !usedSuggestionKeys.has(key);
+      if (isFirstForFunction) usedSuggestionKeys.add(key);
+
       const fallback = `This ${v.symbolType} has ${metricLabel} of ${valueDisplay} (threshold: ${thresholdDisplay}). Consider refactoring to improve readability and testability.`;
 
       const metadata: ComplexityFindingMetadata = {
@@ -94,7 +103,7 @@ export class ComplexityPlugin implements ReviewPlugin {
         symbolName: v.symbolName,
         severity: v.severity,
         category: v.metricType || 'cyclomatic',
-        message: suggestion ?? fallback,
+        message: isFirstForFunction ? suggestion : fallback,
         evidence: `${metricLabel}: ${valueDisplay} (threshold: ${thresholdDisplay})`,
         metadata,
       } satisfies ReviewFinding;
