@@ -27,6 +27,7 @@ interface ReviewOptions {
   format: 'text' | 'json' | 'sarif';
   failOn?: 'error' | 'warning';
   noLlm?: boolean;
+  model?: string;
   verbose?: boolean;
   plugin?: string;
 }
@@ -223,14 +224,19 @@ export async function reviewCommand(options: ReviewOptions): Promise<void> {
       }
     }
 
+    const model = options.model ?? config.llm.model;
     const llm =
       apiKey && !noLlm
         ? new OpenRouterLLMClient({
             apiKey,
-            model: config.llm.model,
+            model,
             logger,
           })
         : undefined;
+
+    if (llm && options.model) {
+      console.log(chalk.dim(`Using model: ${model}`));
+    }
 
     // 4. Index files (chunk-only, no VectorDB)
     spinner?.start('Indexing files...');
