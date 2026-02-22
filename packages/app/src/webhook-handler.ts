@@ -192,65 +192,18 @@ export async function handlePullRequest(
     baseClone = analysis.baseClone;
     const { result } = analysis;
 
-    // Build LLM client if API key is available
-    const llm = reviewConfig.openrouterApiKey
-      ? new OpenRouterLLMClient({
-          apiKey: reviewConfig.openrouterApiKey,
-          model: reviewConfig.model,
-          logger,
-        })
-      : undefined;
-
-    // Create engine and register plugins
-    const engine = new ReviewEngine();
-    engine.register(new ComplexityPlugin());
-    engine.register(new LogicPlugin());
-    engine.register(new ArchitecturalPlugin());
-
-    // Build review context with per-plugin config (namespaced to avoid collisions)
-    const deltaSummary = result.deltas ? calculateDeltaSummary(result.deltas) : null;
-    const reviewContext = {
-      chunks: result.chunks,
-      changedFiles: result.filesToAnalyze,
-      complexityReport: result.currentReport,
-      baselineReport: result.baselineReport,
-      deltas: result.deltas,
-      pluginConfigs: {
-        complexity: {
-          threshold: parseInt(reviewConfig.threshold, 10),
-          blockOnNewErrors: reviewConfig.blockOnNewErrors,
-        },
-        logic: {
-          categories: reviewConfig.logicReviewCategories,
-        },
-        architectural: {
-          mode: reviewConfig.enableArchitecturalReview,
-        },
-      },
-      config: {},
-      llm,
-      pr: prContext,
-      logger,
-    };
-
-    // Run all plugins
-    const findings = await engine.run(reviewContext);
+    const llm = buildLLMClient(reviewConfig, logger);
+    const engine = setupEngine();
+    const findings = await engine.run(
+      buildReviewContext(result, reviewConfig, prContext, llm, logger),
+    );
     logger.info(`Engine produced ${findings.length} total findings`);
 
-    // Present via GitHub adapter
     const adapter = new GitHubAdapter();
-    const adapterResult = await adapter.present(findings, {
-      complexityReport: result.currentReport,
-      baselineReport: result.baselineReport,
-      deltas: result.deltas,
-      deltaSummary,
-      pr: prContext,
-      octokit,
-      logger,
-      llmUsage: llm?.getUsage(),
-      model: reviewConfig.model,
-    });
-
+    const adapterResult = await adapter.present(
+      findings,
+      buildGitHubAdapterContext(result, prContext, octokit, llm, reviewConfig, logger),
+    );
     logger.info(
       `Review complete for PR #${prContext.pullNumber}: ${adapterResult.posted} posted, ${adapterResult.skipped} skipped`,
     );
@@ -259,4 +212,67 @@ export async function handlePullRequest(
     if (headClone) await headClone.cleanup().catch(() => {});
     if (baseClone) await baseClone.cleanup().catch(() => {});
   }
+}
+
+function buildLLMClient(config: ReviewConfig, logger: Logger) {
+  return config.openrouterApiKey
+    ? new OpenRouterLLMClient({ apiKey: config.openrouterApiKey, model: config.model, logger })
+    : undefined;
+}
+
+function setupEngine() {
+  const engine = new ReviewEngine();
+  engine.register(new ComplexityPlugin());
+  engine.register(new LogicPlugin());
+  engine.register(new ArchitecturalPlugin());
+  return engine;
+}
+
+function buildReviewContext(
+  result: AnalysisResult,
+  config: ReviewConfig,
+  pr: PRContext,
+  llm: ReturnType<typeof buildLLMClient>,
+  logger: Logger,
+) {
+  return {
+    chunks: result.chunks,
+    changedFiles: result.filesToAnalyze,
+    complexityReport: result.currentReport,
+    baselineReport: result.baselineReport,
+    deltas: result.deltas,
+    pluginConfigs: {
+      complexity: {
+        threshold: parseInt(config.threshold, 10),
+        blockOnNewErrors: config.blockOnNewErrors,
+      },
+      logic: { categories: config.logicReviewCategories },
+      architectural: { mode: config.enableArchitecturalReview },
+    },
+    config: {},
+    llm,
+    pr,
+    logger,
+  };
+}
+
+function buildGitHubAdapterContext(
+  result: AnalysisResult,
+  pr: PRContext,
+  octokit: ReturnType<typeof createOctokit>,
+  llm: ReturnType<typeof buildLLMClient>,
+  config: ReviewConfig,
+  logger: Logger,
+) {
+  return {
+    complexityReport: result.currentReport,
+    baselineReport: result.baselineReport,
+    deltas: result.deltas,
+    deltaSummary: result.deltas ? calculateDeltaSummary(result.deltas) : null,
+    pr,
+    octokit,
+    logger,
+    llmUsage: llm?.getUsage(),
+    model: config.model,
+  };
 }

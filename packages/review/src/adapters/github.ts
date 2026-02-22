@@ -36,6 +36,7 @@ import {
 import { formatDelta, calculateDeltaSummary, logDeltaSummary } from '../delta.js';
 import { formatDeltaValue } from '../format.js';
 import { updatePRDescription } from '../github-api.js';
+import type { Logger } from '../logger.js';
 
 const BOY_SCOUT_LINK =
   '[boy scout rule](https://www.oreilly.com/library/view/97-things-every/9780596809515/ch08.html)';
@@ -55,7 +56,6 @@ export class GitHubAdapter implements OutputAdapter {
       return { posted: 0, skipped: 0, filtered: 0 };
     }
 
-    // Update PR description badge
     await updatePRDescription(
       octokit,
       pr,
@@ -63,58 +63,45 @@ export class GitHubAdapter implements OutputAdapter {
       logger,
     );
 
-    // Handle no findings
     if (findings.length === 0) {
-      const successMessage = buildNoViolationsMessage(pr, context.deltas);
-      await postPRComment(octokit, pr, successMessage, logger);
+      await postPRComment(octokit, pr, buildNoViolationsMessage(pr, context.deltas), logger);
       return { posted: 0, skipped: 0, filtered: 0 };
     }
 
-    // Log delta summary
-    if (context.deltaSummary) {
-      logDeltaSummary(context.deltaSummary, logger);
-    }
+    if (context.deltaSummary) logDeltaSummary(context.deltaSummary, logger);
 
-    // Separate findings by plugin (known plugins get specialized rendering)
-    const complexityFindings = findings.filter(f => f.pluginId === 'complexity');
-    const logicFindings = findings.filter(f => f.pluginId === 'logic');
-    const architecturalFindings = findings.filter(f => f.pluginId === 'architectural');
-    const knownPluginIds = new Set(['complexity', 'logic', 'architectural']);
-    const otherFindings = findings.filter(f => !knownPluginIds.has(f.pluginId));
+    const groups = splitFindingsByPlugin(findings);
+    return this.postAllReviews(groups, octokit, pr, context);
+  }
 
-    let posted = 0;
-    let skipped = 0;
-    let filtered = 0;
+  private async postAllReviews(
+    groups: FindingGroups,
+    octokit: Octokit,
+    pr: PRContext,
+    context: AdapterContext,
+  ): Promise<AdapterResult> {
+    const totals = { posted: 0, skipped: 0, filtered: 0 };
 
-    // Post complexity review (inline comments + summary) — this is the main review
     const complexityResult = await this.postComplexityReview(
-      complexityFindings,
+      groups.complexity,
       octokit,
       pr,
       context,
-      architecturalFindings,
-      logicFindings,
-      otherFindings,
+      groups.architectural,
+      groups.logic,
+      groups.other,
     );
-    posted += complexityResult.posted;
-    skipped += complexityResult.skipped;
-    filtered += complexityResult.filtered;
+    addResult(totals, complexityResult);
 
-    // Post logic review comments (separate review, no duplicate summary)
-    if (logicFindings.length > 0) {
-      const result = await this.postLogicReview(logicFindings, octokit, pr, context);
-      posted += result.posted;
-      skipped += result.skipped;
+    if (groups.logic.length > 0) {
+      addResult(totals, await this.postLogicReview(groups.logic, octokit, pr, context));
     }
 
-    // Post findings from unknown/custom plugins as generic inline comments
-    if (otherFindings.length > 0) {
-      const result = await this.postGenericReview(otherFindings, octokit, pr, context);
-      posted += result.posted;
-      skipped += result.skipped;
+    if (groups.other.length > 0) {
+      addResult(totals, await this.postGenericReview(groups.other, octokit, pr, context));
     }
 
-    return { posted, skipped, filtered };
+    return totals;
   }
 
   private async postComplexityReview(
@@ -130,19 +117,14 @@ export class GitHubAdapter implements OutputAdapter {
     const { diffLines } = await getPRPatchData(octokit, pr);
     logger.info(`Diff covers ${diffLines.size} files`);
 
-    // Partition complexity findings by diff
+    // Partition and filter findings
     const { inDiff, outOfDiff } = partitionByDiff(findings, diffLines);
+    const { marginal, nonMarginal } = separateMarginalFindings(inDiff);
     logger.info(
-      `${inDiff.length}/${findings.length} complexity findings in diff (${outOfDiff.length} outside)`,
+      `${inDiff.length}/${findings.length} in diff, ${marginal.length} marginal, ${outOfDiff.length} outside`,
     );
 
-    // Separate marginal findings (barely over threshold — summary only, no inline comments)
-    const { marginal, nonMarginal } = separateMarginalFindings(inDiff);
-    if (marginal.length > 0) {
-      logger.info(`${marginal.length} findings near threshold (summary only)`);
-    }
-
-    // Build line comments for non-marginal in-diff findings
+    // Build and dedup line comments
     const lineComments: LineComment[] = nonMarginal.map(f => ({
       path: f.filepath,
       line: f.endLine ?? f.line,
@@ -150,65 +132,34 @@ export class GitHubAdapter implements OutputAdapter {
       body: buildComplexityCommentBody(f),
     }));
 
-    // Dedup against existing comments
-    let toPost = lineComments;
-    let skippedKeys: string[] = [];
-    let commentUrls = new Map<string, string>();
-    try {
-      const existing = await getExistingCommentKeys(octokit, pr, logger);
-      commentUrls = existing.complexity;
-      const dedup = filterDuplicateFindings(lineComments, existing.complexity);
-      toPost = dedup.kept;
-      skippedKeys = dedup.skippedKeys;
-      if (skippedKeys.length > 0) {
-        logger.info(`Dedup: ${skippedKeys.length} complexity comments already posted`);
-      }
-    } catch (error) {
-      logger.warning(`Failed to fetch existing comments for dedup: ${error}`);
-    }
+    const { toPost, skippedKeys, commentUrls } = await dedupComments(
+      lineComments,
+      octokit,
+      pr,
+      'complexity',
+      logger,
+    );
 
-    // Build combined notes for the summary
-    const notes = buildReviewNotes(
+    // Build summary
+    const summaryBody = buildComplexitySummary(
+      context,
       outOfDiff,
       marginal,
       skippedKeys,
       nonMarginal,
       commentUrls,
-      context.deltas,
+      architecturalFindings,
+      logicFindings,
+      otherFindings,
     );
 
-    // Build architectural notes
-    const archNotes = architecturalFindings.map(f => ({
-      observation: f.message,
-      evidence: f.evidence ?? '',
-      suggestion: f.suggestion ?? '',
-    }));
-
-    // Build summary body with all sections
-    const summaryBody = buildReviewSummary(
-      context.complexityReport,
-      context.deltas,
-      notes,
-      context.model ?? 'unknown',
-      archNotes.length > 0 ? archNotes : undefined,
-      context.llmUsage,
-      logicFindings.length,
-      otherFindings.length,
-    );
-
+    // Post
     if (toPost.length === 0) {
-      // No new inline comments — post summary as a regular comment
       await postPRComment(octokit, pr, summaryBody, logger);
-      return {
-        posted: 0,
-        skipped: skippedKeys.length + outOfDiff.length + marginal.length,
-        filtered: 0,
-      };
+    } else {
+      await postPRReview(octokit, pr, toPost, summaryBody, logger, 'COMMENT');
+      logger.info(`Posted review with ${toPost.length} inline comments`);
     }
-
-    // Post review with inline comments + summary
-    await postPRReview(octokit, pr, toPost, summaryBody, logger, 'COMMENT');
-    logger.info(`Posted review with ${toPost.length} inline comments`);
 
     return {
       posted: toPost.length,
@@ -234,25 +185,8 @@ export class GitHubAdapter implements OutputAdapter {
 
     if (inDiff.length === 0) return { posted: 0, skipped: findings.length, filtered: 0 };
 
-    // Build line comments
-    const comments: LineComment[] = inDiff.map(f => ({
-      path: f.filepath,
-      line: f.line,
-      body: `${LOGIC_MARKER_PREFIX}${f.filepath}::${f.line}::${f.category} -->\n**Logic Review** (beta) — ${f.category.replace(/_/g, ' ')}\n\n${f.message}`,
-    }));
-
-    // Dedup
-    let toPost = comments;
-    try {
-      const existing = await getExistingCommentKeys(octokit, pr, logger);
-      const dedup = filterDuplicateFindings(comments, existing.logic);
-      toPost = dedup.kept;
-      if (dedup.skippedKeys.length > 0) {
-        logger.info(`Dedup: skipped ${dedup.skippedKeys.length} already-posted logic comments`);
-      }
-    } catch (error) {
-      logger.warning(`Failed to fetch existing comments for logic dedup: ${error}`);
-    }
+    const comments: LineComment[] = inDiff.map(buildLogicCommentBody);
+    const { toPost } = await dedupComments(comments, octokit, pr, 'logic', logger);
 
     if (toPost.length === 0) return { posted: 0, skipped: findings.length, filtered: 0 };
 
@@ -423,6 +357,15 @@ function buildComplexityCommentBody(finding: ReviewFinding): string {
   const header = `${severityEmoji} ${metricEmoji} **${capitalize(metricLabel)}: ${valueDisplay}**${deltaStr} (threshold: ${thresholdDisplay})`;
 
   return `${marker}\n${header}\n\n${finding.message}`;
+}
+
+function buildLogicCommentBody(f: ReviewFinding): LineComment {
+  const category = f.category.replace(/_/g, ' ');
+  return {
+    path: f.filepath,
+    line: f.line,
+    body: `${LOGIC_MARKER_PREFIX}${f.filepath}::${f.line}::${f.category} -->\n**Logic Review** (beta) — ${category}\n\n${f.message}`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -734,35 +677,14 @@ function filterDuplicateFindings(
   comments: LineComment[],
   existingKeys: Map<string, string> | Set<string>,
 ): DedupResult {
-  if (
-    (existingKeys instanceof Map && existingKeys.size === 0) ||
-    (existingKeys instanceof Set && existingKeys.size === 0)
-  ) {
-    return { kept: comments, skippedKeys: [] };
-  }
+  if (existingKeys.size === 0) return { kept: comments, skippedKeys: [] };
 
   const kept: LineComment[] = [];
   const skippedKeys: string[] = [];
 
   for (const c of comments) {
-    // Try to extract key from comment marker
-    const markerPrefixes = [COMMENT_MARKER_PREFIX, LOGIC_MARKER_PREFIX];
-    let foundKey: string | null = null;
-
-    for (const prefix of markerPrefixes) {
-      const markerStart = c.body.indexOf(prefix);
-      if (markerStart === -1) continue;
-      const keyStart = markerStart + prefix.length;
-      const markerEnd = c.body.indexOf(' -->', keyStart);
-      if (markerEnd === -1) continue;
-      foundKey = c.body.slice(keyStart, markerEnd);
-      break;
-    }
-
-    if (
-      foundKey &&
-      (existingKeys instanceof Map ? existingKeys.has(foundKey) : existingKeys.has(foundKey))
-    ) {
+    const foundKey = extractCommentKey(c.body);
+    if (foundKey && existingKeys.has(foundKey)) {
       skippedKeys.push(foundKey);
     } else {
       kept.push(c);
@@ -772,10 +694,118 @@ function filterDuplicateFindings(
   return { kept, skippedKeys };
 }
 
+/** Extract the dedup key from a comment body's marker prefix. */
+function extractCommentKey(body: string): string | null {
+  for (const prefix of [COMMENT_MARKER_PREFIX, LOGIC_MARKER_PREFIX]) {
+    const markerStart = body.indexOf(prefix);
+    if (markerStart === -1) continue;
+    const keyStart = markerStart + prefix.length;
+    const markerEnd = body.indexOf(' -->', keyStart);
+    if (markerEnd === -1) continue;
+    return body.slice(keyStart, markerEnd);
+  }
+  return null;
+}
+
+/**
+ * Fetch existing comment keys from GitHub and filter out duplicates.
+ */
+async function dedupComments(
+  lineComments: LineComment[],
+  octokit: Octokit,
+  pr: PRContext,
+  type: 'complexity' | 'logic',
+  logger: Logger,
+): Promise<{ toPost: LineComment[]; skippedKeys: string[]; commentUrls: Map<string, string> }> {
+  try {
+    const existing = await getExistingCommentKeys(octokit, pr, logger);
+    const existingKeys = type === 'complexity' ? existing.complexity : existing.logic;
+    const { kept, skippedKeys } = filterDuplicateFindings(lineComments, existingKeys);
+
+    if (skippedKeys.length > 0) {
+      logger.info(`Dedup: skipped ${skippedKeys.length} already-posted ${type} comments`);
+    }
+
+    return { toPost: kept, skippedKeys, commentUrls: existing.complexity };
+  } catch (error) {
+    logger.warning(`Failed to fetch existing comments for ${type} dedup: ${error}`);
+    return { toPost: lineComments, skippedKeys: [], commentUrls: new Map() };
+  }
+}
+
+/**
+ * Assemble the full complexity review summary including architectural/logic/other notes.
+ */
+function buildComplexitySummary(
+  context: AdapterContext,
+  outOfDiff: ReviewFinding[],
+  marginal: ReviewFinding[],
+  skippedKeys: string[],
+  nonMarginal: ReviewFinding[],
+  commentUrls: Map<string, string>,
+  architecturalFindings: ReviewFinding[],
+  logicFindings: ReviewFinding[],
+  otherFindings: ReviewFinding[],
+): string {
+  const combinedNotes = buildReviewNotes(
+    outOfDiff,
+    marginal,
+    skippedKeys,
+    nonMarginal,
+    commentUrls,
+    context.deltas,
+  );
+
+  const archNotes = architecturalFindings.map(f => ({
+    observation: f.message,
+    evidence: f.evidence ?? '',
+    suggestion: f.suggestion ?? '',
+  }));
+
+  return buildReviewSummary(
+    context.complexityReport,
+    context.deltas,
+    combinedNotes,
+    context.model ?? 'unknown',
+    archNotes,
+    context.llmUsage,
+    logicFindings.length,
+    otherFindings.length,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Shared Helpers
 // ---------------------------------------------------------------------------
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ---------------------------------------------------------------------------
+// Finding Grouping
+// ---------------------------------------------------------------------------
+
+interface FindingGroups {
+  complexity: ReviewFinding[];
+  logic: ReviewFinding[];
+  architectural: ReviewFinding[];
+  other: ReviewFinding[];
+}
+
+function splitFindingsByPlugin(findings: ReviewFinding[]): FindingGroups {
+  const groups: FindingGroups = { complexity: [], logic: [], architectural: [], other: [] };
+  for (const f of findings) {
+    if (f.pluginId === 'complexity') groups.complexity.push(f);
+    else if (f.pluginId === 'logic') groups.logic.push(f);
+    else if (f.pluginId === 'architectural') groups.architectural.push(f);
+    else groups.other.push(f);
+  }
+  return groups;
+}
+
+function addResult(totals: AdapterResult, result: AdapterResult): void {
+  totals.posted += result.posted;
+  totals.skipped += result.skipped;
+  totals.filtered += result.filtered;
 }

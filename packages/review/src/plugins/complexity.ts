@@ -16,6 +16,7 @@ import type {
 import { buildBatchedCommentsPrompt, getViolationKey, getMetricLabel } from '../prompt.js';
 import { formatComplexityValue, formatThresholdValue } from '../prompt.js';
 import { estimatePromptTokens, parseJSONResponse } from '../llm-client.js';
+import type { Logger } from '../logger.js';
 
 /** Max tokens to reserve for the prompt (leaves room for output within 128K context) */
 const PROMPT_TOKEN_BUDGET = 100_000;
@@ -46,68 +47,19 @@ export class ComplexityPlugin implements ReviewPlugin {
   async analyze(context: ReviewContext): Promise<ReviewFinding[]> {
     const { complexityReport, deltas, logger } = context;
 
-    // Collect and prioritize violations
     const allViolations = Object.values(complexityReport.files).flatMap(f => f.violations);
     const violations = prioritizeViolations(allViolations, complexityReport);
-
     logger.info(`Complexity plugin: ${violations.length} violations to review`);
 
-    // Build delta lookup
-    const deltaMap = new Map<string, number>();
-    if (deltas) {
-      for (const d of deltas) {
-        deltaMap.set(`${d.filepath}::${d.symbolName}::${d.metricType}`, d.delta);
-      }
-    }
-
-    // Generate LLM suggestions if available
+    const deltaMap = buildDeltaLookup(deltas);
     const suggestions = context.llm
       ? await this.generateSuggestions(violations, complexityReport, context)
       : new Map<string, string>();
 
-    // Map violations to findings.
-    // LLM suggestions are per-function (not per-metric), so only attach the suggestion
-    // to the first violation for each function. The rest use the metric-specific fallback
-    // to avoid printing the same refactoring suggestion 4 times.
+    // Track which functions already got an LLM suggestion (avoid duplicating per-metric)
     const usedSuggestionKeys = new Set<string>();
 
-    return violations.map(v => {
-      const key = getViolationKey(v);
-      const deltaKey = `${v.filepath}::${v.symbolName}::${v.metricType}`;
-      const delta = deltaMap.get(deltaKey) ?? null;
-      const metricLabel = getMetricLabel(v.metricType || 'cyclomatic');
-      const valueDisplay = formatComplexityValue(v.metricType || 'cyclomatic', v.complexity);
-      const thresholdDisplay = formatThresholdValue(v.metricType || 'cyclomatic', v.threshold);
-
-      // Only use the LLM suggestion once per function
-      const suggestion = suggestions.get(key);
-      const isFirstForFunction = suggestion && !usedSuggestionKeys.has(key);
-      if (isFirstForFunction) usedSuggestionKeys.add(key);
-
-      const fallback = `This ${v.symbolType} has ${metricLabel} of ${valueDisplay} (threshold: ${thresholdDisplay}). Consider refactoring to improve readability and testability.`;
-
-      const metadata: ComplexityFindingMetadata = {
-        pluginType: 'complexity',
-        metricType: v.metricType || 'cyclomatic',
-        complexity: v.complexity,
-        threshold: v.threshold,
-        delta,
-        symbolType: v.symbolType,
-      };
-
-      return {
-        pluginId: 'complexity',
-        filepath: v.filepath,
-        line: v.startLine,
-        endLine: v.endLine,
-        symbolName: v.symbolName,
-        severity: v.severity,
-        category: v.metricType || 'cyclomatic',
-        message: isFirstForFunction ? suggestion : fallback,
-        evidence: `${metricLabel}: ${valueDisplay} (threshold: ${thresholdDisplay})`,
-        metadata,
-      } satisfies ReviewFinding;
-    });
+    return violations.map(v => violationToFinding(v, deltaMap, suggestions, usedSuggestionKeys));
   }
 
   /**
@@ -125,63 +77,17 @@ export class ComplexityPlugin implements ReviewPlugin {
     const { logger } = context;
     logger.info(`Generating LLM suggestions for ${violations.length} violations`);
 
-    // Collect code snippets from chunks
-    const codeSnippets = new Map<string, string>();
-    for (const chunk of context.chunks) {
-      if (chunk.metadata.symbolName) {
-        const key = `${chunk.metadata.file}::${chunk.metadata.symbolName}`;
-        if (!codeSnippets.has(key)) {
-          codeSnippets.set(key, chunk.content);
-        }
-      }
-    }
-
-    // Cap violations to prevent LLM timeouts (already sorted by priority)
-    let usedViolations = violations;
-    if (violations.length > MAX_LLM_VIOLATIONS) {
-      usedViolations = violations.slice(0, MAX_LLM_VIOLATIONS);
-      logger.info(
-        `Capping LLM suggestions to top ${MAX_LLM_VIOLATIONS}/${violations.length} violations (rest use fallback)`,
-      );
-    }
-
-    // Build prompt with token budget enforcement
-    let prompt = buildBatchedCommentsPrompt(usedViolations, codeSnippets, report);
-    let estimatedTokens = estimatePromptTokens(prompt);
-
-    if (estimatedTokens > PROMPT_TOKEN_BUDGET) {
-      logger.warning(
-        `Prompt exceeds token budget (${estimatedTokens.toLocaleString()} > ${PROMPT_TOKEN_BUDGET.toLocaleString()}). Truncating...`,
-      );
-      let count = usedViolations.length;
-      while (count > 1 && estimatedTokens > PROMPT_TOKEN_BUDGET) {
-        count = Math.ceil(count / 2);
-        usedViolations = violations.slice(0, count);
-        prompt = buildBatchedCommentsPrompt(usedViolations, codeSnippets, report);
-        estimatedTokens = estimatePromptTokens(prompt);
-      }
-      logger.warning(`Truncated to ${usedViolations.length}/${violations.length} violations`);
-    }
+    const codeSnippets = collectCodeSnippets(context.chunks);
+    const { prompt, usedViolations } = buildPromptWithBudget(
+      violations,
+      codeSnippets,
+      report,
+      logger,
+    );
 
     try {
       const response = await context.llm.complete(prompt);
-      const parsed = parseJSONResponse(response.content, logger);
-
-      if (!parsed) {
-        return new Map();
-      }
-
-      // Map AI responses to violation keys
-      const results = new Map<string, string>();
-      for (const v of usedViolations) {
-        const key = getViolationKey(v);
-        const comment = parsed[key];
-        if (comment) {
-          results.set(key, comment.replace(/\\n/g, '\n'));
-        }
-      }
-
-      return results;
+      return mapLLMResponses(response.content, usedViolations, logger);
     } catch (error) {
       logger.warning(
         `LLM suggestion generation failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -189,6 +95,138 @@ export class ComplexityPlugin implements ReviewPlugin {
       return new Map();
     }
   }
+}
+
+/**
+ * Build a delta lookup from filepath::symbolName::metricType to delta value.
+ */
+function buildDeltaLookup(deltas: ReviewContext['deltas']): Map<string, number> {
+  const map = new Map<string, number>();
+  if (!deltas) return map;
+  for (const d of deltas) {
+    map.set(`${d.filepath}::${d.symbolName}::${d.metricType}`, d.delta);
+  }
+  return map;
+}
+
+/**
+ * Convert a single ComplexityViolation into a ReviewFinding.
+ * LLM suggestions are per-function, so only the first metric for each function gets one.
+ */
+function violationToFinding(
+  v: ComplexityViolation,
+  deltaMap: Map<string, number>,
+  suggestions: Map<string, string>,
+  usedSuggestionKeys: Set<string>,
+): ReviewFinding {
+  const key = getViolationKey(v);
+  const metricType = v.metricType || 'cyclomatic';
+  const delta = deltaMap.get(`${v.filepath}::${v.symbolName}::${metricType}`) ?? null;
+  const metricLabel = getMetricLabel(metricType);
+  const valueDisplay = formatComplexityValue(metricType, v.complexity);
+  const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
+
+  const suggestion = suggestions.get(key);
+  const isFirstForFunction = suggestion && !usedSuggestionKeys.has(key);
+  if (isFirstForFunction) usedSuggestionKeys.add(key);
+
+  const fallback = `This ${v.symbolType} has ${metricLabel} of ${valueDisplay} (threshold: ${thresholdDisplay}). Consider refactoring to improve readability and testability.`;
+
+  return {
+    pluginId: 'complexity',
+    filepath: v.filepath,
+    line: v.startLine,
+    endLine: v.endLine,
+    symbolName: v.symbolName,
+    severity: v.severity,
+    category: metricType,
+    message: isFirstForFunction ? suggestion : fallback,
+    evidence: `${metricLabel}: ${valueDisplay} (threshold: ${thresholdDisplay})`,
+    metadata: {
+      pluginType: 'complexity',
+      metricType,
+      complexity: v.complexity,
+      threshold: v.threshold,
+      delta,
+      symbolType: v.symbolType,
+    } satisfies ComplexityFindingMetadata,
+  };
+}
+
+/**
+ * Collect code snippets from chunks, keyed by file::symbolName.
+ */
+function collectCodeSnippets(chunks: ReviewContext['chunks']): Map<string, string> {
+  const snippets = new Map<string, string>();
+  for (const chunk of chunks) {
+    if (chunk.metadata.symbolName) {
+      const key = `${chunk.metadata.file}::${chunk.metadata.symbolName}`;
+      if (!snippets.has(key)) {
+        snippets.set(key, chunk.content);
+      }
+    }
+  }
+  return snippets;
+}
+
+/**
+ * Build the LLM prompt, capping violations and enforcing token budget.
+ */
+function buildPromptWithBudget(
+  violations: ComplexityViolation[],
+  codeSnippets: Map<string, string>,
+  report: ComplexityReport,
+  logger: Logger,
+): { prompt: string; usedViolations: ComplexityViolation[] } {
+  let usedViolations =
+    violations.length > MAX_LLM_VIOLATIONS ? violations.slice(0, MAX_LLM_VIOLATIONS) : violations;
+
+  if (violations.length > MAX_LLM_VIOLATIONS) {
+    logger.info(
+      `Capping LLM suggestions to top ${MAX_LLM_VIOLATIONS}/${violations.length} violations (rest use fallback)`,
+    );
+  }
+
+  let prompt = buildBatchedCommentsPrompt(usedViolations, codeSnippets, report);
+  let estimatedTokens = estimatePromptTokens(prompt);
+
+  if (estimatedTokens > PROMPT_TOKEN_BUDGET) {
+    logger.warning(
+      `Prompt exceeds token budget (${estimatedTokens.toLocaleString()} > ${PROMPT_TOKEN_BUDGET.toLocaleString()}). Truncating...`,
+    );
+    let count = usedViolations.length;
+    while (count > 1 && estimatedTokens > PROMPT_TOKEN_BUDGET) {
+      count = Math.ceil(count / 2);
+      usedViolations = violations.slice(0, count);
+      prompt = buildBatchedCommentsPrompt(usedViolations, codeSnippets, report);
+      estimatedTokens = estimatePromptTokens(prompt);
+    }
+    logger.warning(`Truncated to ${usedViolations.length}/${violations.length} violations`);
+  }
+
+  return { prompt, usedViolations };
+}
+
+/**
+ * Parse the LLM response and map comments to violation keys.
+ */
+function mapLLMResponses(
+  content: string,
+  usedViolations: ComplexityViolation[],
+  logger: Logger,
+): Map<string, string> {
+  const parsed = parseJSONResponse(content, logger);
+  if (!parsed) return new Map();
+
+  const results = new Map<string, string>();
+  for (const v of usedViolations) {
+    const key = getViolationKey(v);
+    const comment = parsed[key];
+    if (comment) {
+      results.set(key, comment.replace(/\\n/g, '\n'));
+    }
+  }
+  return results;
 }
 
 /**

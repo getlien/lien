@@ -4,7 +4,11 @@ import chalk from 'chalk';
 import ora from 'ora';
 import fs from 'fs';
 import path from 'path';
-import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
+import {
+  performChunkOnlyIndex,
+  analyzeComplexityFromChunks,
+  type CodeChunk,
+} from '@liendev/parser';
 import {
   type ReviewFinding,
   type AdapterContext,
@@ -246,6 +250,79 @@ async function presentResults(
 /**
  * `lien review` — run pluggable code review on changed files.
  */
+/**
+ * Index files and run complexity analysis. Returns null on failure (exits process).
+ */
+async function indexAndAnalyze(
+  rootDir: string,
+  filesToReview: string[],
+  logger: Logger,
+  spinner: ReturnType<typeof ora> | null,
+) {
+  spinner?.start('Indexing files...');
+  const indexResult = await performChunkOnlyIndex(rootDir, { filesToIndex: filesToReview });
+
+  if (!indexResult.success || indexResult.chunks.length === 0) {
+    spinner?.fail('Failed to index files');
+    if (indexResult.error) logger.error(indexResult.error);
+    process.exit(2);
+  }
+  spinner?.succeed(
+    `Indexed ${indexResult.filesIndexed} file${indexResult.filesIndexed === 1 ? '' : 's'} (${indexResult.chunksCreated} chunks)`,
+  );
+
+  spinner?.start('Analyzing complexity...');
+  const complexityReport = analyzeComplexityFromChunks(indexResult.chunks, filesToReview);
+  spinner?.succeed(
+    `Complexity: ${complexityReport.summary.totalViolations} violation${complexityReport.summary.totalViolations === 1 ? '' : 's'}`,
+  );
+
+  return { chunks: indexResult.chunks, complexityReport };
+}
+
+/**
+ * Load plugins, build per-plugin config, and run the review engine.
+ */
+async function runReviewEngine(
+  config: ReturnType<typeof loadConfig>,
+  chunks: CodeChunk[],
+  filesToReview: string[],
+  complexityReport: ReturnType<typeof analyzeComplexityFromChunks>,
+  llm: InstanceType<typeof OpenRouterLLMClient> | undefined,
+  logger: Logger,
+  verbose: boolean,
+  pluginFilter?: string,
+) {
+  const plugins = await loadPlugins(config);
+  const engine = new ReviewEngine({ verbose });
+  for (const plugin of plugins) {
+    engine.register(plugin);
+  }
+
+  const pluginConfigs: Record<string, Record<string, unknown>> = {};
+  for (const plugin of plugins) {
+    const pluginConfig = getPluginConfig(config, plugin.id);
+    if (Object.keys(pluginConfig).length > 0) {
+      pluginConfigs[plugin.id] = pluginConfig;
+    }
+  }
+
+  return engine.run(
+    {
+      chunks,
+      changedFiles: filesToReview,
+      complexityReport,
+      baselineReport: null,
+      deltas: null,
+      pluginConfigs,
+      config: {},
+      llm,
+      logger,
+    },
+    pluginFilter,
+  );
+}
+
 export async function reviewCommand(options: ReviewOptions): Promise<void> {
   const rootDir = process.cwd();
 
@@ -256,69 +333,34 @@ export async function reviewCommand(options: ReviewOptions): Promise<void> {
     const logger = createLogger(verbose);
     const spinner = options.format === 'text' ? ora() : null;
 
-    // 1. Determine files to review
     const filesToReview = await resolveFilesToReview(options, rootDir, spinner);
     if (!filesToReview) return;
 
-    // 2. Load config and resolve LLM
     const config = loadConfig(rootDir);
     const { llm, model } = resolveLLMClient(options, config, logger);
 
-    // 3. Index files (chunk-only, no VectorDB)
-    spinner?.start('Indexing files...');
-    const indexResult = await performChunkOnlyIndex(rootDir, { filesToIndex: filesToReview });
-
-    if (!indexResult.success || indexResult.chunks.length === 0) {
-      spinner?.fail('Failed to index files');
-      if (indexResult.error) logger.error(indexResult.error);
-      process.exit(2);
-    }
-    spinner?.succeed(
-      `Indexed ${indexResult.filesIndexed} file${indexResult.filesIndexed === 1 ? '' : 's'} (${indexResult.chunksCreated} chunks)`,
+    const { chunks, complexityReport } = await indexAndAnalyze(
+      rootDir,
+      filesToReview,
+      logger,
+      spinner,
     );
 
-    // 4. Run complexity analysis
-    spinner?.start('Analyzing complexity...');
-    const complexityReport = analyzeComplexityFromChunks(indexResult.chunks, filesToReview);
-    spinner?.succeed(
-      `Complexity: ${complexityReport.summary.totalViolations} violation${complexityReport.summary.totalViolations === 1 ? '' : 's'}`,
-    );
-
-    // 5. Load plugins and run engine
     spinner?.start('Running review plugins...');
-    const plugins = await loadPlugins(config);
-    const engine = new ReviewEngine({ verbose });
-    for (const plugin of plugins) {
-      engine.register(plugin);
-    }
-
-    const pluginConfigs: Record<string, Record<string, unknown>> = {};
-    for (const plugin of plugins) {
-      const pluginConfig = getPluginConfig(config, plugin.id);
-      if (Object.keys(pluginConfig).length > 0) {
-        pluginConfigs[plugin.id] = pluginConfig;
-      }
-    }
-
-    const findings = await engine.run(
-      {
-        chunks: indexResult.chunks,
-        changedFiles: filesToReview,
-        complexityReport,
-        baselineReport: null,
-        deltas: null,
-        pluginConfigs,
-        config: {},
-        llm,
-        logger,
-      },
+    const findings = await runReviewEngine(
+      config,
+      chunks,
+      filesToReview,
+      complexityReport,
+      llm,
+      logger,
+      verbose,
       options.plugin,
     );
     spinner?.succeed(
       `Review complete: ${findings.length} finding${findings.length === 1 ? '' : 's'}`,
     );
 
-    // 6. Present results
     await presentResults(findings, options, {
       complexityReport,
       baselineReport: null,
@@ -329,7 +371,6 @@ export async function reviewCommand(options: ReviewOptions): Promise<void> {
       model,
     });
 
-    // 7. Exit code for CI
     if (options.failOn) {
       const hasMatching =
         options.failOn === 'error'
