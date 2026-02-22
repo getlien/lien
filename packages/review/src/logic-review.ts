@@ -197,8 +197,9 @@ function isLikelyUncheckedCall(lineContent: string, symbol: string): boolean {
 
   // Skip if line has an assignment before the call
   // Covers: const/let/var, this.x, obj.prop, arr[idx], simple var
+  // Also handles compound operators (+=, ||=, ??=, etc.)
   if (/^(?:const|let|var|this\.\w+)\s/.test(lineContent)) return false;
-  if (/^[\w$.[\]]+\s*=/.test(lineContent)) return false;
+  if (/^[\w$.[\]]+\s*(?:[+\-*/%&|^]|(?:\|\|)|(?:\?\?))?=/.test(lineContent)) return false;
 
   // Verify the symbol call actually appears in the line
   const callIndex = lineContent.indexOf(symbol + '(');
@@ -207,11 +208,10 @@ function isLikelyUncheckedCall(lineContent: string, symbol: string): boolean {
   // Skip common patterns that intentionally ignore returns
   // - void expressions
   if (lineContent.startsWith('void ')) return false;
-  // - await without assignment (could be intentional for side effects)
+  // - await without assignment is idiomatic for side-effect calls
+  //   e.g., await sendEmail(), await fs.promises.access(), await postComment()
   if (lineContent.startsWith('await ') && !lineContent.includes('=')) {
-    // Keep this — awaiting without capturing is a common pattern for side effects
-    // but it's still worth flagging for LLM review
-    return true;
+    return false;
   }
 
   // The call appears to be a standalone statement
@@ -222,10 +222,36 @@ function isLikelyUncheckedCall(lineContent: string, symbol: string): boolean {
     // Skip chained calls — the return value IS consumed by the chain
     // e.g., foo().then(cb), bar().map(fn)
     if (/\)\s*\./.test(stripped)) return false;
+
+    // Skip if the call result is used in a binary expression
+    // e.g., foo(...) + bar(...), foo(...) || default
+    const openParen = stripped.indexOf('(');
+    const closeParen = findMatchingParen(stripped, openParen);
+    if (closeParen !== -1 && closeParen < stripped.length - 1) {
+      const afterCall = stripped.slice(closeParen + 1).trim();
+      if (afterCall && afterCall !== ';') return false;
+    }
+
     return true;
   }
 
   return false;
+}
+
+/**
+ * Find the index of the matching closing paren for an opening paren.
+ * Returns -1 if not found.
+ */
+function findMatchingParen(str: string, openIndex: number): number {
+  let depth = 0;
+  for (let i = openIndex; i < str.length; i++) {
+    if (str[i] === '(') depth++;
+    else if (str[i] === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
 }
 
 /**
