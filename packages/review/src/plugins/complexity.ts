@@ -20,6 +20,9 @@ import { estimatePromptTokens, parseJSONResponse } from '../llm-client.js';
 /** Max tokens to reserve for the prompt (leaves room for output within 128K context) */
 const PROMPT_TOKEN_BUDGET = 100_000;
 
+/** Max violations to send to LLM in a single batch (prevents timeouts with reasoning models) */
+const MAX_LLM_VIOLATIONS = 15;
+
 export const complexityConfigSchema = z.object({
   threshold: z.number().default(15),
   blockOnNewErrors: z.boolean().default(false),
@@ -124,8 +127,16 @@ export class ComplexityPlugin implements ReviewPlugin {
       }
     }
 
-    // Build prompt with budget enforcement
+    // Cap violations to prevent LLM timeouts (already sorted by priority)
     let usedViolations = violations;
+    if (violations.length > MAX_LLM_VIOLATIONS) {
+      usedViolations = violations.slice(0, MAX_LLM_VIOLATIONS);
+      logger.info(
+        `Capping LLM suggestions to top ${MAX_LLM_VIOLATIONS}/${violations.length} violations (rest use fallback)`,
+      );
+    }
+
+    // Build prompt with token budget enforcement
     let prompt = buildBatchedCommentsPrompt(usedViolations, codeSnippets, report);
     let estimatedTokens = estimatePromptTokens(prompt);
 
@@ -133,7 +144,7 @@ export class ComplexityPlugin implements ReviewPlugin {
       logger.warning(
         `Prompt exceeds token budget (${estimatedTokens.toLocaleString()} > ${PROMPT_TOKEN_BUDGET.toLocaleString()}). Truncating...`,
       );
-      let count = violations.length;
+      let count = usedViolations.length;
       while (count > 1 && estimatedTokens > PROMPT_TOKEN_BUDGET) {
         count = Math.ceil(count / 2);
         usedViolations = violations.slice(0, count);

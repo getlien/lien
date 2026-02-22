@@ -17,8 +17,8 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 /** Models known to support OpenRouter's extended reasoning parameter */
 const REASONING_MODELS = /deepseek|minimax|o1|o3|qwq/i;
 
-/** Default timeout per LLM call (10 minutes — reasoning models with large batches need time) */
-const DEFAULT_TIMEOUT_MS = 600_000;
+/** Default timeout per LLM call (5 minutes — reasoning models need more time) */
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 /**
  * OpenRouter API response structure.
