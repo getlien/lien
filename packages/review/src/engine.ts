@@ -67,10 +67,11 @@ export class ReviewEngine {
       return findings;
     }
 
-    for (const plugin of pluginsToRun) {
-      const start = Date.now();
+    // Run all plugins in parallel for speed (they're independent)
+    const results = await Promise.allSettled(
+      pluginsToRun.map(async plugin => {
+        const start = Date.now();
 
-      try {
         // Resolve plugin config: merge defaults with user overrides
         const pluginConfig = resolvePluginConfig(plugin, context);
         const pluginContext: ReviewContext = { ...context, config: pluginConfig };
@@ -80,7 +81,7 @@ export class ReviewEngine {
           if (this.verbose) {
             logger.debug(`[engine] Skipping "${plugin.id}" — requires LLM but none configured`);
           }
-          continue;
+          return [];
         }
 
         // Activation check
@@ -89,7 +90,7 @@ export class ReviewEngine {
           if (this.verbose) {
             logger.debug(`[engine] Skipping "${plugin.id}" — shouldActivate returned false`);
           }
-          continue;
+          return [];
         }
 
         if (this.verbose) {
@@ -98,14 +99,23 @@ export class ReviewEngine {
 
         // Run analysis
         const pluginFindings = await plugin.analyze(pluginContext);
-        findings.push(...pluginFindings);
 
         const elapsed = Date.now() - start;
         logger.info(`Plugin "${plugin.id}": ${pluginFindings.length} findings (${elapsed}ms)`);
-      } catch (error) {
-        const elapsed = Date.now() - start;
+
+        return pluginFindings;
+      }),
+    );
+
+    // Collect findings, log failures
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      if (result.status === 'fulfilled') {
+        findings.push(...result.value);
+      } else {
+        const plugin = pluginsToRun[i];
         logger.warning(
-          `Plugin "${plugin.id}" failed after ${elapsed}ms (non-blocking): ${error instanceof Error ? error.message : String(error)}`,
+          `Plugin "${plugin.id}" failed (non-blocking): ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
         );
       }
     }
