@@ -171,11 +171,11 @@ describe('computeSimplicitySignals', () => {
     const signals = computeSimplicitySignals(chunks, ['a.ts']);
     expect(signals).toHaveLength(1);
     expect(signals[0].flagged).toBe(false);
-    expect(signals[0].classCount).toBe(4);
+    expect(signals[0].classCount).toBe(3); // interfaces not counted as classes
     expect(signals[0].methodCount).toBe(0);
   });
 
-  it('counts interfaces as classes', () => {
+  it('does not count interfaces as classes', () => {
     const chunks = [
       makeChunk({ file: 'a.ts', symbolType: 'interface', symbolName: 'IFoo' }),
       makeChunk({ file: 'a.ts', symbolType: 'class', symbolName: 'Foo' }),
@@ -191,8 +191,8 @@ describe('computeSimplicitySignals', () => {
     ];
     const signals = computeSimplicitySignals(chunks, ['a.ts']);
     expect(signals).toHaveLength(1);
-    expect(signals[0].classCount).toBe(3);
-    expect(signals[0].flagged).toBe(true);
+    expect(signals[0].classCount).toBe(2); // interface excluded
+    expect(signals[0].flagged).toBe(false); // only 2 classes, below threshold
   });
 
   it('defaults complexity to 1 when undefined', () => {

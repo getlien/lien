@@ -66,7 +66,7 @@ function analyzeFileChunks(fileChunks: CodeChunk[]): {
 
   for (const chunk of fileChunks) {
     const st = chunk.metadata.symbolType;
-    if (st === 'class' || st === 'interface') {
+    if (st === 'class') {
       classCount++;
     } else if (st === 'function') {
       functionCount++;
