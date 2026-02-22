@@ -56,51 +56,49 @@ export class TerminalAdapter implements OutputAdapter {
       return { posted: 0, skipped: 0, filtered: 0 };
     }
 
-    // Sort by severity, then by file
-    const sorted = [...findings].sort((a, b) => {
-      const sevDiff = (SEVERITY_ORDER[a.severity] ?? 2) - (SEVERITY_ORDER[b.severity] ?? 2);
-      if (sevDiff !== 0) return sevDiff;
-      return a.filepath.localeCompare(b.filepath);
-    });
-
-    // Group by file
-    const byFile = new Map<string, ReviewFinding[]>();
-    for (const f of sorted) {
-      const existing = byFile.get(f.filepath) || [];
-      existing.push(f);
-      byFile.set(f.filepath, existing);
-    }
+    const byFile = groupByFile(findings);
 
     this.print('');
     for (const [filepath, fileFindings] of byFile) {
-      this.print(`${this.c(COLORS.bold)}${filepath}${this.c(COLORS.reset)}`);
-
-      for (const f of fileFindings) {
-        const color = SEVERITY_COLORS[f.severity] ?? '';
-        const label = SEVERITY_LABELS[f.severity] ?? f.severity.toUpperCase();
-        const lineRef = f.line > 0 ? `:${f.line}` : '';
-        const symbolRef = f.symbolName
-          ? ` ${this.c(COLORS.dim)}(${f.symbolName})${this.c(COLORS.reset)}`
-          : '';
-
-        this.print(
-          `  ${this.c(color)}${label}${this.c(COLORS.reset)} ${this.c(COLORS.gray)}[${f.category}]${this.c(COLORS.reset)}${lineRef}${symbolRef}`,
-        );
-        this.print(`    ${f.message}`);
-
-        if (f.suggestion) {
-          this.print(`    ${this.c(COLORS.dim)}Suggestion: ${f.suggestion}${this.c(COLORS.reset)}`);
-        }
-
-        if (f.evidence) {
-          this.print(`    ${this.c(COLORS.dim)}${f.evidence}${this.c(COLORS.reset)}`);
-        }
-      }
-
-      this.print('');
+      this.printFileFindings(filepath, fileFindings);
     }
 
-    // Summary line
+    this.printSummary(findings);
+    this.printLLMUsage(context);
+    this.print('');
+
+    return { posted: findings.length, skipped: 0, filtered: 0 };
+  }
+
+  private printFileFindings(filepath: string, findings: ReviewFinding[]): void {
+    this.print(`${this.c(COLORS.bold)}${filepath}${this.c(COLORS.reset)}`);
+
+    for (const f of findings) {
+      const color = SEVERITY_COLORS[f.severity] ?? '';
+      const label = SEVERITY_LABELS[f.severity] ?? f.severity.toUpperCase();
+      const lineRef = f.line > 0 ? `:${f.line}` : '';
+      const symbolRef = f.symbolName
+        ? ` ${this.c(COLORS.dim)}(${f.symbolName})${this.c(COLORS.reset)}`
+        : '';
+
+      this.print(
+        `  ${this.c(color)}${label}${this.c(COLORS.reset)} ${this.c(COLORS.gray)}[${f.category}]${this.c(COLORS.reset)}${lineRef}${symbolRef}`,
+      );
+      this.print(`    ${f.message}`);
+
+      if (f.suggestion) {
+        this.print(`    ${this.c(COLORS.dim)}Suggestion: ${f.suggestion}${this.c(COLORS.reset)}`);
+      }
+
+      if (f.evidence) {
+        this.print(`    ${this.c(COLORS.dim)}${f.evidence}${this.c(COLORS.reset)}`);
+      }
+    }
+
+    this.print('');
+  }
+
+  private printSummary(findings: ReviewFinding[]): void {
     const errorCount = findings.filter(f => f.severity === 'error').length;
     const warningCount = findings.filter(f => f.severity === 'warning').length;
     const infoCount = findings.filter(f => f.severity === 'info').length;
@@ -119,20 +117,17 @@ export class TerminalAdapter implements OutputAdapter {
     this.print(
       `${this.c(COLORS.bold)}${findings.length} finding${findings.length === 1 ? '' : 's'}${this.c(COLORS.reset)} (${parts.join(', ')})`,
     );
+  }
 
-    // LLM usage summary
+  private printLLMUsage(context: AdapterContext): void {
     const usage = context.llmUsage;
-    if (usage && usage.totalTokens > 0) {
-      const costStr = usage.cost > 0 ? ` ($${usage.cost.toFixed(4)})` : '';
-      const modelStr = context.model ? ` | model: ${context.model}` : '';
-      this.print(
-        `${this.c(COLORS.dim)}LLM: ${usage.totalTokens.toLocaleString()} tokens${costStr}${modelStr}${this.c(COLORS.reset)}`,
-      );
-    }
+    if (!usage || usage.totalTokens === 0) return;
 
-    this.print('');
-
-    return { posted: findings.length, skipped: 0, filtered: 0 };
+    const costStr = usage.cost > 0 ? ` ($${usage.cost.toFixed(4)})` : '';
+    const modelStr = context.model ? ` | model: ${context.model}` : '';
+    this.print(
+      `${this.c(COLORS.dim)}LLM: ${usage.totalTokens.toLocaleString()} tokens${costStr}${modelStr}${this.c(COLORS.reset)}`,
+    );
   }
 
   private c(code: string): string {
@@ -142,4 +137,23 @@ export class TerminalAdapter implements OutputAdapter {
   private print(line: string): void {
     console.log(line);
   }
+}
+
+/**
+ * Sort findings by severity then file, and group by file path.
+ */
+function groupByFile(findings: ReviewFinding[]): Map<string, ReviewFinding[]> {
+  const sorted = [...findings].sort((a, b) => {
+    const sevDiff = (SEVERITY_ORDER[a.severity] ?? 2) - (SEVERITY_ORDER[b.severity] ?? 2);
+    if (sevDiff !== 0) return sevDiff;
+    return a.filepath.localeCompare(b.filepath);
+  });
+
+  const byFile = new Map<string, ReviewFinding[]>();
+  for (const f of sorted) {
+    const existing = byFile.get(f.filepath) || [];
+    existing.push(f);
+    byFile.set(f.filepath, existing);
+  }
+  return byFile;
 }
