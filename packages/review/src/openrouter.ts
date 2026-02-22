@@ -8,6 +8,7 @@ import type { Logger } from './logger.js';
 import { buildBatchedCommentsPrompt } from './prompt.js';
 import { buildLogicReviewPrompt } from './logic-prompt.js';
 import { parseLogicReviewResponse } from './logic-response.js';
+import { extractJSONFromCodeBlock } from './llm-client.js';
 import { LOGIC_MARKER_PREFIX } from './github-api.js';
 
 /**
@@ -99,9 +100,7 @@ export function parseCommentsResponse(
   content: string,
   logger: Logger,
 ): Record<string, string> | null {
-  // Greedy match: LLM responses may contain inner ``` blocks (code suggestions)
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*)```/);
-  const jsonStr = (codeBlockMatch ? codeBlockMatch[1] : content).trim();
+  const jsonStr = extractJSONFromCodeBlock(content);
 
   logger.info(`Parsing JSON response (${jsonStr.length} chars)`);
 

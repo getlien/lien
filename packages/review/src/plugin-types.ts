@@ -68,7 +68,8 @@ export interface LLMClient {
  * @property complexityReport - Complexity analysis of the current code. Always present (the parser always runs).
  * @property baselineReport - Complexity analysis of the base branch. Null when no baseline is available (CLI without git, first PR).
  * @property deltas - Computed complexity deltas between baseline and current. Null when no baseline.
- * @property config - Resolved config for the current plugin (plugin defaults merged with user overrides).
+ * @property pluginConfigs - Per-plugin config keyed by plugin ID. The engine merges each plugin's defaults with the matching entry here before passing to the plugin.
+ * @property config - Resolved config for the currently-running plugin. Set by the engine before calling shouldActivate/analyze. Callers should set pluginConfigs instead.
  * @property llm - LLM client for AI-powered analysis. Absent if no LLM configured or --no-llm flag.
  * @property pr - PR context (owner, repo, number, etc.). Absent in CLI mode.
  * @property logger - Logger for structured output.
@@ -79,6 +80,8 @@ export interface ReviewContext {
   complexityReport: ComplexityReport;
   baselineReport: ComplexityReport | null;
   deltas: ComplexityDelta[] | null;
+  pluginConfigs: Record<string, Record<string, unknown>>;
+  /** Resolved config for the current plugin. Set by the engine — callers should use pluginConfigs. */
   config: Record<string, unknown>;
   llm?: LLMClient;
   pr?: PRContext;

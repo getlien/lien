@@ -125,16 +125,32 @@ export class ReviewEngine {
 }
 
 /**
- * Resolve plugin config: merge plugin defaults with user config overrides.
+ * Resolve plugin config: merge plugin defaults with user overrides for this specific plugin.
+ * Reads from context.pluginConfigs[plugin.id] to avoid cross-plugin key collisions.
+ * Validates against the plugin's Zod schema if one is defined.
  */
 function resolvePluginConfig(
   plugin: ReviewPlugin,
   context: ReviewContext,
 ): Record<string, unknown> {
-  return {
+  const userConfig = context.pluginConfigs[plugin.id] ?? {};
+  const merged = {
     ...(plugin.defaultConfig ?? {}),
-    ...(context.config ?? {}),
+    ...userConfig,
   };
+
+  if (plugin.configSchema) {
+    const result = plugin.configSchema.safeParse(merged);
+    if (!result.success) {
+      context.logger.warning(
+        `Invalid config for plugin "${plugin.id}": ${result.error.message}. Using defaults.`,
+      );
+      return plugin.defaultConfig ?? {};
+    }
+    return result.data as Record<string, unknown>;
+  }
+
+  return merged;
 }
 
 /**

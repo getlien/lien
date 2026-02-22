@@ -267,25 +267,26 @@ export async function reviewCommand(options: ReviewOptions): Promise<void> {
       engine.register(plugin);
     }
 
-    // 7. Build review context
+    // 7. Build review context with per-plugin config (namespaced to avoid collisions)
+    const pluginConfigs: Record<string, Record<string, unknown>> = {};
+    for (const plugin of plugins) {
+      const pluginConfig = getPluginConfig(config, plugin.id);
+      if (Object.keys(pluginConfig).length > 0) {
+        pluginConfigs[plugin.id] = pluginConfig;
+      }
+    }
+
     const reviewContext: ReviewContext = {
       chunks: indexResult.chunks,
       changedFiles: filesToReview,
       complexityReport,
       baselineReport: null,
       deltas: null,
+      pluginConfigs,
       config: {},
       llm,
       logger,
     };
-
-    // Merge per-plugin config from settings
-    for (const plugin of plugins) {
-      const pluginConfig = getPluginConfig(config, plugin.id);
-      if (Object.keys(pluginConfig).length > 0) {
-        reviewContext.config = { ...reviewContext.config, ...pluginConfig };
-      }
-    }
 
     // 8. Run engine
     const findings = await engine.run(reviewContext, options.plugin);

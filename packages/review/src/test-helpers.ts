@@ -41,6 +41,7 @@ export function createTestContext(overrides?: Partial<ReviewContext>): ReviewCon
     complexityReport: defaultReport,
     baselineReport: null,
     deltas: null,
+    pluginConfigs: {},
     config: {},
     logger: silentLogger,
     ...overrides,

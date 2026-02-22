@@ -7,7 +7,6 @@
  */
 
 import { z } from 'zod';
-import type { CodeChunk } from '@liendev/parser';
 import type { LogicFinding } from '../types.js';
 import type {
   ReviewPlugin,
@@ -19,6 +18,7 @@ import { detectLogicFindings } from '../logic-review.js';
 import { isFindingSuppressed } from '../suppression.js';
 import { buildLogicReviewPrompt } from '../logic-prompt.js';
 import { parseLogicReviewResponse } from '../logic-response.js';
+import { buildChunkSnippetsMap } from '../chunk-utils.js';
 
 export const logicConfigSchema = z.object({
   categories: z.array(z.string()).default(['breaking_change', 'unchecked_return', 'missing_tests']),
@@ -138,21 +138,10 @@ export class LogicPlugin implements ReviewPlugin {
       logger.info(`${validated.length}/${findings.length} findings validated as real issues`);
       return validated;
     } catch (error) {
-      logger.warning(`LLM validation failed (keeping all findings): ${error}`);
+      logger.warning(
+        `LLM validation failed (keeping all findings): ${error instanceof Error ? error.message : String(error)}`,
+      );
       return findings;
     }
   }
-}
-
-/**
- * Build a map of chunk key -> content for suppression checks and code snippets.
- */
-function buildChunkSnippetsMap(chunks: CodeChunk[]): Map<string, string> {
-  const snippets = new Map<string, string>();
-  for (const chunk of chunks) {
-    if (chunk.metadata.symbolName) {
-      snippets.set(`${chunk.metadata.file}::${chunk.metadata.symbolName}`, chunk.content);
-    }
-  }
-  return snippets;
 }

@@ -29,6 +29,7 @@ import {
   buildHeaderLine,
   buildDescriptionBadge,
   getMetricLabel,
+  getMetricEmoji,
   formatComplexityValue,
   formatThresholdValue,
 } from '../prompt.js';
@@ -74,10 +75,12 @@ export class GitHubAdapter implements OutputAdapter {
       logDeltaSummary(context.deltaSummary, logger);
     }
 
-    // Separate findings by plugin
+    // Separate findings by plugin (known plugins get specialized rendering)
     const complexityFindings = findings.filter(f => f.pluginId === 'complexity');
     const logicFindings = findings.filter(f => f.pluginId === 'logic');
     const architecturalFindings = findings.filter(f => f.pluginId === 'architectural');
+    const knownPluginIds = new Set(['complexity', 'logic', 'architectural']);
+    const otherFindings = findings.filter(f => !knownPluginIds.has(f.pluginId));
 
     let posted = 0;
     let skipped = 0;
@@ -91,6 +94,7 @@ export class GitHubAdapter implements OutputAdapter {
       context,
       architecturalFindings,
       logicFindings,
+      otherFindings,
     );
     posted += complexityResult.posted;
     skipped += complexityResult.skipped;
@@ -99,6 +103,13 @@ export class GitHubAdapter implements OutputAdapter {
     // Post logic review comments (separate review, no duplicate summary)
     if (logicFindings.length > 0) {
       const result = await this.postLogicReview(logicFindings, octokit, pr, context);
+      posted += result.posted;
+      skipped += result.skipped;
+    }
+
+    // Post findings from unknown/custom plugins as generic inline comments
+    if (otherFindings.length > 0) {
+      const result = await this.postGenericReview(otherFindings, octokit, pr, context);
       posted += result.posted;
       skipped += result.skipped;
     }
@@ -113,6 +124,7 @@ export class GitHubAdapter implements OutputAdapter {
     context: AdapterContext,
     architecturalFindings: ReviewFinding[],
     logicFindings: ReviewFinding[],
+    otherFindings: ReviewFinding[] = [],
   ): Promise<AdapterResult> {
     const { logger } = context;
     const { diffLines } = await getPRPatchData(octokit, pr);
@@ -181,6 +193,7 @@ export class GitHubAdapter implements OutputAdapter {
       archNotes.length > 0 ? archNotes : undefined,
       context.llmUsage,
       logicFindings.length,
+      otherFindings.length,
     );
 
     if (toPost.length === 0) {
@@ -255,6 +268,66 @@ export class GitHubAdapter implements OutputAdapter {
 
     return { posted: toPost.length, skipped: findings.length - inDiff.length, filtered: 0 };
   }
+
+  /**
+   * Post findings from custom/third-party plugins as generic inline comments.
+   * Ensures new plugins are not silently dropped.
+   */
+  private async postGenericReview(
+    findings: ReviewFinding[],
+    octokit: Octokit,
+    pr: PRContext,
+    context: AdapterContext,
+  ): Promise<AdapterResult> {
+    const { logger } = context;
+    const { diffLines } = await getPRPatchData(octokit, pr);
+
+    // Filter to diff lines
+    const inDiff = findings.filter(f => {
+      if (f.line === 0) return false;
+      return diffLines.get(f.filepath)?.has(f.line);
+    });
+    if (inDiff.length < findings.length) {
+      logger.info(
+        `${findings.length - inDiff.length} custom plugin findings skipped (not in diff)`,
+      );
+    }
+
+    if (inDiff.length === 0) return { posted: 0, skipped: findings.length, filtered: 0 };
+
+    // Build line comments
+    const comments: LineComment[] = inDiff.map(f => {
+      const severityEmoji = f.severity === 'error' ? '🔴' : f.severity === 'warning' ? '🟡' : 'ℹ️';
+      const symbolRef = f.symbolName ? ` in \`${f.symbolName}\`` : '';
+      const suggestionLine = f.suggestion ? `\n\n💡 *${f.suggestion}*` : '';
+      return {
+        path: f.filepath,
+        line: f.line,
+        body: `${severityEmoji} **${f.pluginId}** — ${f.category}${symbolRef}\n\n${f.message}${suggestionLine}`,
+      };
+    });
+
+    await postPRReview(
+      octokit,
+      pr,
+      comments,
+      `**${findings[0].pluginId}** — ${inDiff.length} finding${inDiff.length === 1 ? '' : 's'}. See inline comments.`,
+      logger,
+      'COMMENT',
+    );
+
+    return { posted: comments.length, skipped: findings.length - inDiff.length, filtered: 0 };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Metadata Type Guards
+// ---------------------------------------------------------------------------
+
+function getComplexityMetadata(f: ReviewFinding): ComplexityFindingMetadata | undefined {
+  const m = f.metadata as Record<string, unknown> | undefined;
+  if (!m || typeof m.complexity !== 'number' || typeof m.threshold !== 'number') return undefined;
+  return m as unknown as ComplexityFindingMetadata;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,7 +339,7 @@ export class GitHubAdapter implements OutputAdapter {
  * Marginal findings appear in the summary but don't get inline comments.
  */
 function isMarginalFinding(f: ReviewFinding): boolean {
-  const metadata = f.metadata as ComplexityFindingMetadata | undefined;
+  const metadata = getComplexityMetadata(f);
   if (!metadata) return false;
   const { complexity, threshold } = metadata;
   if (threshold <= 0) return false;
@@ -333,7 +406,7 @@ function partitionByDiff(
 // ---------------------------------------------------------------------------
 
 function buildComplexityCommentBody(finding: ReviewFinding): string {
-  const metadata = finding.metadata as ComplexityFindingMetadata | undefined;
+  const metadata = getComplexityMetadata(finding);
   const metricType = metadata?.metricType ?? 'cyclomatic';
   const complexity = metadata?.complexity ?? 0;
   const threshold = metadata?.threshold ?? 15;
@@ -433,7 +506,7 @@ function buildFallbackUncoveredSection(
 }
 
 function formatUncoveredLine(f: ReviewFinding, deltaMap: Map<string, ComplexityDelta>): string {
-  const metadata = f.metadata as ComplexityFindingMetadata | undefined;
+  const metadata = getComplexityMetadata(f);
   const metricType = metadata?.metricType ?? 'cyclomatic';
   const complexity = metadata?.complexity ?? 0;
   const delta = findDeltaForFinding(f, deltaMap);
@@ -505,7 +578,7 @@ function formatDedupSymbol(
 }
 
 function formatDedupMetricLine(f: ReviewFinding): string {
-  const metadata = f.metadata as ComplexityFindingMetadata | undefined;
+  const metadata = getComplexityMetadata(f);
   const metricType = metadata?.metricType ?? 'cyclomatic';
   const complexity = metadata?.complexity ?? 0;
   const threshold = metadata?.threshold ?? 15;
@@ -517,7 +590,7 @@ function formatDedupMetricLine(f: ReviewFinding): string {
  * Format a finding as a summary list item (shared by marginal/skipped notes).
  */
 function formatFindingListItem(f: ReviewFinding): string {
-  const metadata = f.metadata as ComplexityFindingMetadata | undefined;
+  const metadata = getComplexityMetadata(f);
   const metricType = metadata?.metricType ?? 'cyclomatic';
   const complexity = metadata?.complexity ?? 0;
   const threshold = metadata?.threshold ?? 15;
@@ -544,7 +617,7 @@ function findDeltaForFinding(
   f: ReviewFinding,
   deltaMap: Map<string, ComplexityDelta>,
 ): ComplexityDelta | null {
-  const metadata = f.metadata as ComplexityFindingMetadata | undefined;
+  const metadata = getComplexityMetadata(f);
   const metricType = metadata?.metricType ?? 'cyclomatic';
   const key = `${f.filepath}::${f.symbolName ?? 'unknown'}::${metricType}`;
   return deltaMap.get(key) ?? null;
@@ -602,6 +675,7 @@ function buildReviewSummary(
   archNotes?: Array<{ observation: string; evidence: string; suggestion: string }>,
   llmUsage?: { promptTokens: number; completionTokens: number; totalTokens: number; cost: number },
   logicFindingsCount?: number,
+  otherFindingsCount?: number,
 ): string {
   const { summary } = report;
   const headerLine = buildHeaderLine(summary.totalViolations, deltas);
@@ -617,6 +691,11 @@ function buildReviewSummary(
       ? `\n${logicFindingsCount} logic finding${logicFindingsCount === 1 ? '' : 's'} posted as separate inline comments.`
       : '';
 
+  const otherNote =
+    otherFindingsCount && otherFindingsCount > 0
+      ? `\n${otherFindingsCount} additional finding${otherFindingsCount === 1 ? '' : 's'} from custom plugins posted as inline comments.`
+      : '';
+
   const costDisplay =
     llmUsage && llmUsage.totalTokens > 0
       ? `\n- Tokens: ${llmUsage.totalTokens.toLocaleString()} ($${llmUsage.cost.toFixed(4)})`
@@ -627,7 +706,7 @@ function buildReviewSummary(
 
 ${headerLine}${deltaDisplay}
 ${archNotesSection}
-See inline comments on the diff for specific suggestions.${logicNote}${combinedNotes}
+See inline comments on the diff for specific suggestions.${logicNote}${otherNote}${combinedNotes}
 
 <details>
 <summary>📊 Analysis Details</summary>
@@ -696,21 +775,6 @@ function filterDuplicateFindings(
 // ---------------------------------------------------------------------------
 // Shared Helpers
 // ---------------------------------------------------------------------------
-
-function getMetricEmoji(metricType: string): string {
-  switch (metricType) {
-    case 'cyclomatic':
-      return '🔀';
-    case 'cognitive':
-      return '🧠';
-    case 'halstead_effort':
-      return '⏱️';
-    case 'halstead_bugs':
-      return '🐛';
-    default:
-      return '📊';
-  }
-}
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);

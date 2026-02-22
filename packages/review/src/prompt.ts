@@ -401,7 +401,7 @@ function determineStatus(
 /**
  * Get emoji for metric type
  */
-function getMetricEmoji(metricType: string): string {
+export function getMetricEmoji(metricType: string): string {
   switch (metricType) {
     case 'cyclomatic':
       return '🔀';

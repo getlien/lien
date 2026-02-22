@@ -183,7 +183,9 @@ export class ComplexityPlugin implements ReviewPlugin {
 
       return results;
     } catch (error) {
-      logger.warning(`LLM suggestion generation failed: ${error}`);
+      logger.warning(
+        `LLM suggestion generation failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return new Map();
     }
   }

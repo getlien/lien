@@ -44,6 +44,7 @@ import {
   buildDescriptionBadge,
   buildHeaderLine,
   getMetricLabel,
+  getMetricEmoji,
   formatComplexityValue,
   formatThresholdValue,
   type ArchitecturalContext,
@@ -56,6 +57,7 @@ import {
   type EnrichedCommentsResult,
 } from './architectural-review.js';
 import { formatDeltaValue } from './format.js';
+import { buildChunkSnippetsMap } from './chunk-utils.js';
 import { assertValidSha } from './git-utils.js';
 import {
   calculateDeltas,
@@ -569,24 +571,6 @@ function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, Complexity
       .map(d => [createDeltaKey(d), d] as [string, ComplexityDelta])
       .all(),
   );
-}
-
-/**
- * Get emoji for metric type
- */
-function getMetricEmoji(metricType: string): string {
-  switch (metricType) {
-    case 'cyclomatic':
-      return '🔀';
-    case 'cognitive':
-      return '🧠';
-    case 'halstead_effort':
-      return '⏱️';
-    case 'halstead_bugs':
-      return '🐛';
-    default:
-      return '📊';
-  }
 }
 
 /**
@@ -1486,19 +1470,6 @@ async function postLineReview(
     diffHunks,
     archContext,
   );
-}
-
-/**
- * Build a map of chunk key -> content for suppression checks and code snippets.
- */
-function buildChunkSnippetsMap(chunks: CodeChunk[]): Map<string, string> {
-  const snippets = new Map<string, string>();
-  for (const chunk of chunks) {
-    if (chunk.metadata.symbolName) {
-      snippets.set(`${chunk.metadata.file}::${chunk.metadata.symbolName}`, chunk.content);
-    }
-  }
-  return snippets;
 }
 
 /**

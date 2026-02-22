@@ -207,7 +207,7 @@ export async function handlePullRequest(
     engine.register(new LogicPlugin());
     engine.register(new ArchitecturalPlugin());
 
-    // Build review context
+    // Build review context with per-plugin config (namespaced to avoid collisions)
     const deltaSummary = result.deltas ? calculateDeltaSummary(result.deltas) : null;
     const reviewContext = {
       chunks: result.chunks,
@@ -215,15 +215,19 @@ export async function handlePullRequest(
       complexityReport: result.currentReport,
       baselineReport: result.baselineReport,
       deltas: result.deltas,
-      config: {
-        // Complexity plugin config
-        threshold: parseInt(reviewConfig.threshold, 10),
-        blockOnNewErrors: reviewConfig.blockOnNewErrors,
-        // Logic plugin config
-        categories: reviewConfig.logicReviewCategories,
-        // Architectural plugin config
-        mode: reviewConfig.enableArchitecturalReview,
+      pluginConfigs: {
+        complexity: {
+          threshold: parseInt(reviewConfig.threshold, 10),
+          blockOnNewErrors: reviewConfig.blockOnNewErrors,
+        },
+        logic: {
+          categories: reviewConfig.logicReviewCategories,
+        },
+        architectural: {
+          mode: reviewConfig.enableArchitecturalReview,
+        },
       },
+      config: {},
       llm,
       pr: prContext,
       logger,
