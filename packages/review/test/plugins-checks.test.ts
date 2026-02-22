@@ -4,7 +4,6 @@ import { createTestReport, silentLogger } from '../src/test-helpers.js';
 import type {
   ReviewFinding,
   PresentContext,
-  CheckAnnotation,
   ComplexityFindingMetadata,
 } from '../src/plugin-types.js';
 
@@ -45,55 +44,10 @@ function createComplexityFinding(overrides?: Partial<ReviewFinding>): ReviewFind
 }
 
 describe('ComplexityPlugin.present()', () => {
-  it('adds annotations for its findings', async () => {
-    const plugin = new ComplexityPlugin();
-    const addAnnotations = vi.fn();
-    const ctx = createPresentContext({ addAnnotations });
-
-    const findings = [createComplexityFinding()];
-    await plugin.present!(findings, ctx);
-
-    expect(addAnnotations).toHaveBeenCalledTimes(1);
-    const annotations: CheckAnnotation[] = addAnnotations.mock.calls[0][0];
-    expect(annotations).toHaveLength(1);
-    expect(annotations[0]).toEqual(
-      expect.objectContaining({
-        path: 'src/utils.ts',
-        start_line: 10,
-        end_line: 25,
-        annotation_level: 'warning',
-      }),
-    );
-  });
-
-  it('maps error severity to failure annotation_level', async () => {
-    const plugin = new ComplexityPlugin();
-    const addAnnotations = vi.fn();
-    const ctx = createPresentContext({ addAnnotations });
-
-    const findings = [createComplexityFinding({ severity: 'error' })];
-    await plugin.present!(findings, ctx);
-
-    const annotations: CheckAnnotation[] = addAnnotations.mock.calls[0][0];
-    expect(annotations[0].annotation_level).toBe('failure');
-  });
-
-  it('maps info severity to notice annotation_level', async () => {
-    const plugin = new ComplexityPlugin();
-    const addAnnotations = vi.fn();
-    const ctx = createPresentContext({ addAnnotations });
-
-    const findings = [createComplexityFinding({ severity: 'info' })];
-    await plugin.present!(findings, ctx);
-
-    const annotations: CheckAnnotation[] = addAnnotations.mock.calls[0][0];
-    expect(annotations[0].annotation_level).toBe('notice');
-  });
-
   it('ignores other plugins findings', async () => {
     const plugin = new ComplexityPlugin();
-    const addAnnotations = vi.fn();
-    const ctx = createPresentContext({ addAnnotations });
+    const postReviewComment = vi.fn();
+    const ctx = createPresentContext({ postReviewComment });
 
     const findings: ReviewFinding[] = [
       {
@@ -107,7 +61,7 @@ describe('ComplexityPlugin.present()', () => {
     ];
 
     await plugin.present!(findings, ctx);
-    expect(addAnnotations).not.toHaveBeenCalled();
+    expect(postReviewComment).not.toHaveBeenCalled();
   });
 
   it('posts review comment with inline comments', async () => {
@@ -134,8 +88,7 @@ describe('ComplexityPlugin.present()', () => {
   it('excludes marginal findings from inline comments', async () => {
     const plugin = new ComplexityPlugin();
     const postReviewComment = vi.fn();
-    const addAnnotations = vi.fn();
-    const ctx = createPresentContext({ postReviewComment, addAnnotations });
+    const ctx = createPresentContext({ postReviewComment });
 
     // Marginal: within 5% of threshold (complexity=15.5, threshold=15 → 3.3% over)
     const marginalFinding = createComplexityFinding({
@@ -164,77 +117,101 @@ describe('ComplexityPlugin.present()', () => {
 
     await plugin.present!([marginalFinding, normalFinding], ctx);
 
-    // Both should be annotations
-    const annotations: CheckAnnotation[] = addAnnotations.mock.calls[0][0];
-    expect(annotations).toHaveLength(2);
-
     // Only non-marginal should be inline comment
     const [, lineComments] = postReviewComment.mock.calls[0];
     expect(lineComments).toHaveLength(1);
     expect(lineComments[0].body).toContain('heavyFn');
   });
 
-  it('annotation title contains symbol name and metric info', async () => {
-    const plugin = new ComplexityPlugin();
-    const addAnnotations = vi.fn();
-    const ctx = createPresentContext({ addAnnotations });
-
-    await plugin.present!([createComplexityFinding()], ctx);
-
-    const annotations: CheckAnnotation[] = addAnnotations.mock.calls[0][0];
-    const title = annotations[0].title!;
-    expect(title).toContain('processData');
-    expect(title).toContain('test paths'); // human-readable label for cyclomatic
-  });
-
   it('no-ops when no complexity findings', async () => {
     const plugin = new ComplexityPlugin();
-    const addAnnotations = vi.fn();
     const postReviewComment = vi.fn();
-    const ctx = createPresentContext({ addAnnotations, postReviewComment });
+    const ctx = createPresentContext({ postReviewComment });
 
     await plugin.present!([], ctx);
 
-    expect(addAnnotations).not.toHaveBeenCalled();
     expect(postReviewComment).not.toHaveBeenCalled();
   });
 
-  it('does not call postReviewComment when not available', async () => {
+  it('does not call postReviewComment when not available (CLI mode)', async () => {
     const plugin = new ComplexityPlugin();
-    const addAnnotations = vi.fn();
-    // postReviewComment is undefined (CLI mode)
-    const ctx = createPresentContext({ addAnnotations, postReviewComment: undefined });
+    const ctx = createPresentContext({ postReviewComment: undefined });
 
     const findings = [createComplexityFinding()];
-    await plugin.present!(findings, ctx);
 
-    // Annotations should still be added
-    expect(addAnnotations).toHaveBeenCalledTimes(1);
+    // Should not throw
+    await plugin.present!(findings, ctx);
   });
 
-  it('uses endLine for annotation end_line', async () => {
+  it('does not post review when all findings are marginal', async () => {
+    const plugin = new ComplexityPlugin();
+    const postReviewComment = vi.fn();
+    const ctx = createPresentContext({ postReviewComment });
+
+    const marginalFinding = createComplexityFinding({
+      metadata: {
+        pluginType: 'complexity',
+        metricType: 'cyclomatic',
+        complexity: 15.5,
+        threshold: 15,
+        delta: null,
+        symbolType: 'function',
+      } satisfies ComplexityFindingMetadata,
+    });
+
+    await plugin.present!([marginalFinding], ctx);
+
+    // No inline comments for marginal-only findings
+    expect(postReviewComment).not.toHaveBeenCalled();
+  });
+
+  it('does not add annotations (uses review comments instead)', async () => {
     const plugin = new ComplexityPlugin();
     const addAnnotations = vi.fn();
-    const ctx = createPresentContext({ addAnnotations });
+    const ctx = createPresentContext({ addAnnotations, postReviewComment: vi.fn() });
+
+    await plugin.present!([createComplexityFinding()], ctx);
+
+    expect(addAnnotations).not.toHaveBeenCalled();
+  });
+
+  it('inline comment body contains marker, severity, and metric info', async () => {
+    const plugin = new ComplexityPlugin();
+    const postReviewComment = vi.fn();
+    const ctx = createPresentContext({ postReviewComment });
+
+    await plugin.present!([createComplexityFinding()], ctx);
+
+    const [, lineComments] = postReviewComment.mock.calls[0];
+    const body: string = lineComments[0].body;
+    expect(body).toContain('<!-- lien-review:');
+    expect(body).toContain('processData');
+    expect(body).toContain('🟡'); // warning emoji
+  });
+
+  it('uses endLine for inline comment line position', async () => {
+    const plugin = new ComplexityPlugin();
+    const postReviewComment = vi.fn();
+    const ctx = createPresentContext({ postReviewComment });
 
     const findings = [createComplexityFinding({ line: 5, endLine: 30 })];
     await plugin.present!(findings, ctx);
 
-    const annotations: CheckAnnotation[] = addAnnotations.mock.calls[0][0];
-    expect(annotations[0].start_line).toBe(5);
-    expect(annotations[0].end_line).toBe(30);
+    const [, lineComments] = postReviewComment.mock.calls[0];
+    expect(lineComments[0].line).toBe(30);
+    expect(lineComments[0].start_line).toBe(5);
   });
 
   it('falls back to line when endLine is missing', async () => {
     const plugin = new ComplexityPlugin();
-    const addAnnotations = vi.fn();
-    const ctx = createPresentContext({ addAnnotations });
+    const postReviewComment = vi.fn();
+    const ctx = createPresentContext({ postReviewComment });
 
     const findings = [createComplexityFinding({ line: 5, endLine: undefined })];
     await plugin.present!(findings, ctx);
 
-    const annotations: CheckAnnotation[] = addAnnotations.mock.calls[0][0];
-    expect(annotations[0].start_line).toBe(5);
-    expect(annotations[0].end_line).toBe(5);
+    const [, lineComments] = postReviewComment.mock.calls[0];
+    expect(lineComments[0].line).toBe(5);
+    expect(lineComments[0].start_line).toBe(5);
   });
 });

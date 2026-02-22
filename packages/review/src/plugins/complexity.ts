@@ -12,7 +12,6 @@ import type {
   ReviewContext,
   ReviewFinding,
   PresentContext,
-  CheckAnnotation,
   ComplexityFindingMetadata,
 } from '../plugin-types.js';
 import { buildBatchedCommentsPrompt, getViolationKey, getMetricLabel } from '../prompt.js';
@@ -67,24 +66,14 @@ export class ComplexityPlugin implements ReviewPlugin {
   }
 
   /**
-   * Present complexity findings as check annotations and PR review comments.
+   * Present complexity findings as PR review comments.
+   * Annotations are not used here — review comments support markdown and threading.
    */
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     const myFindings = findings.filter(f => f.pluginId === 'complexity');
     if (myFindings.length === 0) return;
 
     const { logger } = context;
-
-    // Map findings to check annotations
-    const annotations: CheckAnnotation[] = myFindings.map(f => ({
-      path: f.filepath,
-      start_line: f.line,
-      end_line: f.endLine ?? f.line,
-      annotation_level: mapSeverity(f.severity),
-      message: buildAnnotationMessage(f),
-      title: buildAnnotationTitle(f),
-    }));
-    context.addAnnotations(annotations);
 
     // Post review comment with inline comments (if available)
     if (context.postReviewComment) {
@@ -103,7 +92,7 @@ export class ComplexityPlugin implements ReviewPlugin {
       }
     }
 
-    logger.info(`Complexity: ${annotations.length} annotations, ${myFindings.length} findings`);
+    logger.info(`Complexity: ${myFindings.length} findings`);
   }
 
   /**
@@ -305,28 +294,9 @@ function getComplexityMetadata(f: ReviewFinding): ComplexityFindingMetadata | un
   return m as unknown as ComplexityFindingMetadata;
 }
 
-function mapSeverity(severity: ReviewFinding['severity']): CheckAnnotation['annotation_level'] {
-  if (severity === 'error') return 'failure';
-  if (severity === 'warning') return 'warning';
-  return 'notice';
-}
-
-function buildAnnotationMessage(f: ReviewFinding): string {
-  return f.message;
-}
-
-function buildAnnotationTitle(f: ReviewFinding): string {
-  const metadata = getComplexityMetadata(f);
-  if (!metadata) return f.symbolName ?? 'complexity';
-  const metricLabel = getMetricLabel(metadata.metricType);
-  const value = formatComplexityValue(metadata.metricType, metadata.complexity);
-  const threshold = formatThresholdValue(metadata.metricType, metadata.threshold);
-  return `${f.symbolName ?? 'unknown'}: ${metricLabel} ${value} (threshold: ${threshold})`;
-}
-
 /**
  * Check if a finding is marginal (within 5% of threshold).
- * Marginal findings get annotations but not inline PR comments.
+ * Marginal findings are excluded from inline PR comments.
  */
 function isMarginalFinding(f: ReviewFinding): boolean {
   const metadata = getComplexityMetadata(f);
