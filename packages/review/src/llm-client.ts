@@ -103,7 +103,7 @@ export class OpenRouterLLMClient implements LLMClient {
         ],
         max_tokens: opts?.maxTokens ?? 32768,
         temperature: opts?.temperature ?? 0.3,
-        ...(supportsReasoning ? { reasoning: { effort: 'medium' } } : {}),
+        ...(supportsReasoning ? { reasoning: { effort: 'high' } } : {}),
         usage: { include: true },
       }),
       signal,
