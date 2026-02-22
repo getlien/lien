@@ -11,7 +11,6 @@
  */
 
 import type { ReviewPlugin, ReviewContext, ReviewFinding } from './plugin-types.js';
-import type { Logger } from './logger.js';
 
 export interface EngineOptions {
   /** Enable verbose debug logging of activation decisions and timing */

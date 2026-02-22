@@ -41,7 +41,7 @@ export class ComplexityPlugin implements ReviewPlugin {
   }
 
   async analyze(context: ReviewContext): Promise<ReviewFinding[]> {
-    const { complexityReport, baselineReport, changedFiles, deltas, logger } = context;
+    const { complexityReport, deltas, logger } = context;
 
     // Collect and prioritize violations
     const allViolations = Object.values(complexityReport.files).flatMap(f => f.violations);

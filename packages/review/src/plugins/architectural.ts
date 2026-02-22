@@ -14,12 +14,10 @@ import type {
   ReviewContext,
   ReviewFinding,
   ArchitecturalFindingMetadata,
-  AnalysisResult,
 } from '../plugin-types.js';
 import { computeFingerprint, serializeFingerprint } from '../fingerprint.js';
 import { assembleDependentContext } from '../dependent-context.js';
 import { computeSimplicitySignals, serializeSimplicitySignals } from '../simplicity-signals.js';
-import { parseJSONResponse } from '../llm-client.js';
 
 export const architecturalConfigSchema = z.object({
   mode: z.enum(['auto', 'always', 'off']).default('auto'),

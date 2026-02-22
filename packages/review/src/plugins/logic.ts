@@ -7,7 +7,7 @@
  */
 
 import { z } from 'zod';
-import type { CodeChunk, ComplexityReport } from '@liendev/parser';
+import type { CodeChunk } from '@liendev/parser';
 import type { LogicFinding } from '../types.js';
 import type {
   ReviewPlugin,

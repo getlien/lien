@@ -50,7 +50,7 @@ export class TerminalAdapter implements OutputAdapter {
     this.useColor = opts?.color ?? true;
   }
 
-  async present(findings: ReviewFinding[], context: AdapterContext): Promise<AdapterResult> {
+  async present(findings: ReviewFinding[], _context: AdapterContext): Promise<AdapterResult> {
     if (findings.length === 0) {
       this.print(`\n${this.c(COLORS.bold)}No review findings.${this.c(COLORS.reset)}\n`);
       return { posted: 0, skipped: 0, filtered: 0 };

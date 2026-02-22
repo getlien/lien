@@ -25,7 +25,7 @@ const SEVERITY_TO_SARIF: Record<string, string> = {
  * SARIF output adapter: produces SARIF JSON to stdout.
  */
 export class SARIFAdapter implements OutputAdapter {
-  async present(findings: ReviewFinding[], context: AdapterContext): Promise<AdapterResult> {
+  async present(findings: ReviewFinding[], _context: AdapterContext): Promise<AdapterResult> {
     const sarifOutput = buildSARIF(findings);
     console.log(JSON.stringify(sarifOutput, null, 2));
     return { posted: findings.length, skipped: 0, filtered: 0 };

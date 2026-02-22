@@ -6,7 +6,7 @@
  */
 
 import type { Octokit } from '@octokit/rest';
-import type { ComplexityReport, ComplexityViolation } from '@liendev/parser';
+import type { ComplexityReport } from '@liendev/parser';
 import type {
   OutputAdapter,
   AdapterResult,
@@ -15,7 +15,6 @@ import type {
   ComplexityFindingMetadata,
 } from '../plugin-types.js';
 import type { PRContext, LineComment } from '../types.js';
-import type { Logger } from '../logger.js';
 import type { ComplexityDelta } from '../delta.js';
 import {
   postPRComment,
@@ -33,13 +32,7 @@ import {
   formatComplexityValue,
   formatThresholdValue,
 } from '../prompt.js';
-import {
-  calculateDeltaSummary,
-  formatDelta,
-  formatSeverityEmoji,
-  logDeltaSummary,
-} from '../delta.js';
-import { formatDeltaValue } from '../format.js';
+import { formatDelta, logDeltaSummary } from '../delta.js';
 import { updatePRDescription } from '../github-api.js';
 
 /**
@@ -118,7 +111,7 @@ export class GitHubAdapter implements OutputAdapter {
     architecturalFindings: ReviewFinding[],
   ): Promise<AdapterResult> {
     const { logger } = context;
-    const { diffLines, patches } = await getPRPatchData(octokit, pr);
+    const { diffLines } = await getPRPatchData(octokit, pr);
     logger.info(`Diff covers ${diffLines.size} files`);
 
     // Filter findings to diff lines
@@ -270,14 +263,12 @@ function partitionByDiff(
   return { inDiff, outOfDiff };
 }
 
-function buildComplexityCommentBody(finding: ReviewFinding, context: AdapterContext): string {
+function buildComplexityCommentBody(finding: ReviewFinding, _context: AdapterContext): string {
   const metadata = finding.metadata as ComplexityFindingMetadata | undefined;
   const metricType = metadata?.metricType ?? 'cyclomatic';
   const complexity = metadata?.complexity ?? 0;
   const threshold = metadata?.threshold ?? 15;
   const delta = metadata?.delta;
-  const symbolType = metadata?.symbolType ?? 'function';
-
   const metricLabel = getMetricLabel(metricType);
   const valueDisplay = formatComplexityValue(metricType, complexity);
   const thresholdDisplay = formatThresholdValue(metricType, threshold);
