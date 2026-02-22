@@ -23,13 +23,57 @@ const llmConfigSchema = z
   })
   .default({});
 
+/**
+ * Plugin entry: either a plain string or an object { name: config }.
+ *
+ * YAML examples:
+ *   - complexity                    → string
+ *   - complexity:                   → object with config
+ *       threshold: 15
+ */
+const pluginEntrySchema = z.union([
+  z.string(),
+  z.record(z.string(), z.record(z.string(), z.unknown()).nullable()),
+]);
+
 const reviewConfigSchema = z.object({
-  plugins: z.array(z.string()).default(['complexity', 'logic', 'architectural']),
+  plugins: z.array(pluginEntrySchema).default(['complexity', 'logic', 'architectural']),
   llm: llmConfigSchema,
-  settings: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
 });
 
-export type ReviewYamlConfig = z.infer<typeof reviewConfigSchema>;
+/** Normalized config with plugin names and settings extracted. */
+export interface ReviewYamlConfig {
+  plugins: string[];
+  llm: { provider: string; model: string; apiKey?: string };
+  settings: Record<string, Record<string, unknown>>;
+}
+
+/**
+ * Normalize raw parsed plugins array into names + settings map.
+ */
+function normalizePlugins(raw: z.infer<typeof reviewConfigSchema>['plugins']): {
+  names: string[];
+  settings: Record<string, Record<string, unknown>>;
+} {
+  const names: string[] = [];
+  const settings: Record<string, Record<string, unknown>> = {};
+
+  for (const entry of raw) {
+    if (typeof entry === 'string') {
+      names.push(entry);
+    } else {
+      // Object: { pluginName: { ...config } }
+      for (const [name, config] of Object.entries(entry)) {
+        names.push(name);
+        if (config && typeof config === 'object') {
+          settings[name] = config as Record<string, unknown>;
+        }
+      }
+    }
+  }
+
+  return { names, settings };
+}
 
 // ---------------------------------------------------------------------------
 // Config Loading
@@ -83,7 +127,9 @@ export function loadConfig(rootDir: string): ReviewYamlConfig {
   const configPath = resolveConfigPath(rootDir);
 
   if (!fs.existsSync(configPath)) {
-    return reviewConfigSchema.parse({});
+    const defaults = reviewConfigSchema.parse({});
+    const { names, settings } = normalizePlugins(defaults.plugins);
+    return { plugins: names, llm: defaults.llm, settings };
   }
 
   try {
@@ -91,7 +137,9 @@ export function loadConfig(rootDir: string): ReviewYamlConfig {
     const parsed = parseYaml(raw);
 
     if (!parsed || typeof parsed !== 'object') {
-      return reviewConfigSchema.parse({});
+      const defaults = reviewConfigSchema.parse({});
+      const { names, settings } = normalizePlugins(defaults.plugins);
+      return { plugins: names, llm: defaults.llm, settings };
     }
 
     // Interpolate env vars (e.g., ${OPENROUTER_API_KEY})
@@ -106,7 +154,8 @@ export function loadConfig(rootDir: string): ReviewYamlConfig {
       throw new Error(`Invalid config in ${configPath}:\n${issues}`);
     }
 
-    return result.data;
+    const { names, settings } = normalizePlugins(result.data.plugins);
+    return { plugins: names, llm: result.data.llm, settings };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Invalid config')) {
       throw error;
