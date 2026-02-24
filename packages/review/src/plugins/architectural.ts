@@ -134,7 +134,7 @@ function computeArchContext(
     const file = chunk.metadata.file;
     if (!changedFilesSet.has(file)) continue;
     if (chunk.metadata.symbolType === 'method') continue;
-    if (chunk.metadata.type === 'block') continue;
+    if (chunk.metadata.type === 'block' && !chunk.metadata.symbolName) continue;
     const existing = chunksByFile.get(file) ?? [];
     existing.push(chunk);
     chunksByFile.set(file, existing);
