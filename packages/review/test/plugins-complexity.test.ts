@@ -154,6 +154,71 @@ describe('ComplexityPlugin', () => {
     expect(failure.title).toContain('fnB');
   });
 
+  it('present() emits one annotation per function, keeping the worst metric', async () => {
+    // fnA has two metrics: cyclomatic (warning) and halstead_effort (error) — keep error
+    const report = createTestReport([
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 20,
+        threshold: 15,
+        metricType: 'cyclomatic',
+        severity: 'warning',
+      },
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 5000,
+        threshold: 1000,
+        metricType: 'halstead_effort',
+        severity: 'error',
+      },
+    ]);
+
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    expect(findings).toHaveLength(2);
+
+    const addAnnotations = vi.fn();
+    const ctx = { addAnnotations } as unknown as PresentContext;
+    await plugin.present(findings, ctx);
+
+    const annotations = addAnnotations.mock.calls[0][0];
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0].annotation_level).toBe('failure');
+    expect(annotations[0].title).toContain('fnA');
+  });
+
+  it('present() breaks severity ties by overage ratio', async () => {
+    // fnA has two warnings: cyclomatic 20/15 (ratio 1.33) and cognitive 30/15 (ratio 2.0) — keep cognitive
+    const report = createTestReport([
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 20,
+        threshold: 15,
+        metricType: 'cyclomatic',
+        severity: 'warning',
+      },
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 30,
+        threshold: 15,
+        metricType: 'cognitive',
+        severity: 'warning',
+      },
+    ]);
+
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const addAnnotations = vi.fn();
+    const ctx = { addAnnotations } as unknown as PresentContext;
+    await plugin.present(findings, ctx);
+
+    const annotations = addAnnotations.mock.calls[0][0];
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0].message).toContain('cognitive complexity 30');
+  });
+
   it('present() does nothing when no complexity findings', async () => {
     const addAnnotations = vi.fn();
     const ctx = { addAnnotations } as unknown as PresentContext;

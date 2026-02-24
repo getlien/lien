@@ -52,7 +52,7 @@ export class ComplexityPlugin implements ReviewPlugin {
     if (complexityFindings.length === 0) return;
 
     context.addAnnotations(
-      complexityFindings.map(f => ({
+      worstPerFunction(complexityFindings).map(f => ({
         path: f.filepath,
         start_line: f.line,
         end_line: f.line,
@@ -62,6 +62,35 @@ export class ComplexityPlugin implements ReviewPlugin {
       })),
     );
   }
+}
+
+/**
+ * Deduplicate findings to one per function — keep the worst metric.
+ * Worst = highest severity, then highest overage ratio (complexity / threshold).
+ */
+function worstPerFunction(findings: ReviewFinding[]): ReviewFinding[] {
+  const groups = new Map<string, ReviewFinding>();
+  for (const f of findings) {
+    const key = `${f.filepath}::${f.symbolName ?? f.line}`;
+    const existing = groups.get(key);
+    if (!existing || isWorseThan(f, existing)) {
+      groups.set(key, f);
+    }
+  }
+  return Array.from(groups.values());
+}
+
+const SEVERITY_RANK: Record<string, number> = { error: 2, warning: 1, info: 0 };
+
+function isWorseThan(a: ReviewFinding, b: ReviewFinding): boolean {
+  const rankA = SEVERITY_RANK[a.severity] ?? 0;
+  const rankB = SEVERITY_RANK[b.severity] ?? 0;
+  if (rankA !== rankB) return rankA > rankB;
+  const metaA = a.metadata as ComplexityFindingMetadata | undefined;
+  const metaB = b.metadata as ComplexityFindingMetadata | undefined;
+  if (metaA && metaB)
+    return metaA.complexity / metaA.threshold > metaB.complexity / metaB.threshold;
+  return false;
 }
 
 /**
