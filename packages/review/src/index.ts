@@ -40,7 +40,6 @@ export { LogicPlugin } from './plugins/logic.js';
 export { ArchitecturalPlugin } from './plugins/architectural.js';
 
 // Output adapters
-export { GitHubAdapter } from './adapters/github.js';
 export { TerminalAdapter } from './adapters/terminal.js';
 export { SARIFAdapter } from './adapters/sarif.js';
 

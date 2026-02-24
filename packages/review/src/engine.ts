@@ -29,6 +29,7 @@ import {
   getPRDiffLines,
   PLUGIN_MARKER_PREFIX,
   getExistingPluginCommentKeys,
+  updatePRDescription,
 } from './github-api.js';
 import type { LineComment } from './types.js';
 
@@ -205,6 +206,10 @@ export class ReviewEngine {
       appendSummary: (markdown: string) => {
         summarySections.push(markdown);
       },
+      updateDescription:
+        octokit && pr
+          ? (markdown: string) => updatePRDescription(octokit, pr, markdown, logger)
+          : undefined,
       postInlineComments:
         octokit && pr
           ? async (findings: ReviewFinding[], summaryBody: string) => {

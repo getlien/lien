@@ -22,7 +22,6 @@ import {
   LogicPlugin,
   ArchitecturalPlugin,
   OpenRouterLLMClient,
-  GitHubAdapter,
 } from '@liendev/review';
 
 import { cloneRepo, cloneBase, type CloneResult } from './clone.js';
@@ -241,7 +240,7 @@ export async function handlePullRequest(
     );
     logger.info(`Engine produced ${findings.length} total findings`);
 
-    const adapterContext = buildGitHubAdapterContext(
+    const adapterContext = buildAdapterContext(
       result,
       prContext,
       octokit,
@@ -250,21 +249,7 @@ export async function handlePullRequest(
       logger,
     );
 
-    // Built-in plugins handle their own output via present() hooks:
-    // complexity → check run annotations + summary
-    // architectural → check run summary section
-    // logic → inline PR review comments
-    // Only pass through findings from custom plugins without a present() hook.
-    const adapterFindings = findings.filter(
-      f => f.pluginId !== 'complexity' && f.pluginId !== 'architectural' && f.pluginId !== 'logic',
-    );
-    const adapter = new GitHubAdapter();
-    const adapterResult = await adapter.present(adapterFindings, adapterContext);
-    logger.info(
-      `Review complete for PR #${prContext.pullNumber}: ${adapterResult.posted} posted, ${adapterResult.skipped} skipped`,
-    );
-
-    // Run plugin present() hooks (finalizes check run)
+    // Each plugin owns its output via present() hooks.
     await engine.present(findings, adapterContext, { checkRunId });
   } finally {
     // Cleanup independently so one failure doesn't prevent the other
@@ -315,7 +300,7 @@ function buildReviewContext(
   };
 }
 
-function buildGitHubAdapterContext(
+function buildAdapterContext(
   result: AnalysisResult,
   pr: PRContext,
   octokit: ReturnType<typeof createOctokit>,

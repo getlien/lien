@@ -195,6 +195,12 @@ export interface PresentContext {
   appendSummary(markdown: string): void;
 
   /**
+   * Update the PR description with a badge or stats block.
+   * Only available in GitHub App context (pr + octokit present).
+   */
+  updateDescription?(markdown: string): Promise<void>;
+
+  /**
    * Post findings as inline PR review comments.
    * Handles diff-line filtering and deduplication automatically.
    * Only available in GitHub App context (pr + octokit present).

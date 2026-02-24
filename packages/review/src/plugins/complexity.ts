@@ -14,7 +14,12 @@ import type {
   ComplexityFindingMetadata,
   PresentContext,
 } from '../plugin-types.js';
-import { getMetricLabel, formatComplexityValue, formatThresholdValue } from '../prompt.js';
+import {
+  getMetricLabel,
+  formatComplexityValue,
+  formatThresholdValue,
+  buildDescriptionBadge,
+} from '../prompt.js';
 
 export const complexityConfigSchema = z.object({
   threshold: z.number().default(15),
@@ -51,6 +56,10 @@ export class ComplexityPlugin implements ReviewPlugin {
     const complexityFindings = findings.filter(f => f.pluginId === 'complexity');
 
     context.appendSummary(buildComplexitySummary(complexityFindings, context));
+
+    await context.updateDescription?.(
+      buildDescriptionBadge(context.complexityReport, context.deltaSummary, context.deltas),
+    );
 
     if (complexityFindings.length === 0) return;
 
