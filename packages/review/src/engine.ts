@@ -21,8 +21,16 @@ import type {
 } from './plugin-types.js';
 import type { Octokit } from '@octokit/rest';
 import type { Logger } from './logger.js';
-import { createCheckRun, updateCheckRun, type CheckRunOutput } from './github-api.js';
-import { postPRReview } from './github-api.js';
+import {
+  createCheckRun,
+  updateCheckRun,
+  type CheckRunOutput,
+  postPRReview,
+  getPRDiffLines,
+  PLUGIN_MARKER_PREFIX,
+  getExistingPluginCommentKeys,
+} from './github-api.js';
+import type { LineComment } from './types.js';
 
 export interface EngineOptions {
   /** Enable verbose debug logging of activation decisions and timing */
@@ -197,6 +205,62 @@ export class ReviewEngine {
       appendSummary: (markdown: string) => {
         summarySections.push(markdown);
       },
+      postInlineComments:
+        octokit && pr
+          ? async (findings: ReviewFinding[], summaryBody: string) => {
+              if (findings.length === 0) return { posted: 0, skipped: 0 };
+              const pluginId = findings[0].pluginId;
+              const markerPrefix = `${PLUGIN_MARKER_PREFIX}${pluginId}:`;
+
+              let diffLines: Map<string, Set<number>>;
+              try {
+                diffLines = await getPRDiffLines(octokit, pr);
+              } catch (error) {
+                logger.warning(`postInlineComments: failed to get diff lines: ${error}`);
+                return { posted: 0, skipped: findings.length };
+              }
+
+              const inDiff = findings.filter(f => diffLines.get(f.filepath)?.has(f.line));
+              const outOfDiffCount = findings.length - inDiff.length;
+              if (inDiff.length === 0) return { posted: 0, skipped: findings.length };
+
+              const comments: LineComment[] = inDiff.map(f => ({
+                path: f.filepath,
+                line: f.line,
+                body: buildPluginCommentBody(f, markerPrefix),
+              }));
+
+              // Dedup: skip findings already commented in a previous run
+              let toPost = comments;
+              let dedupSkipped = 0;
+              try {
+                const existingKeys = await getExistingPluginCommentKeys(
+                  octokit,
+                  pr,
+                  pluginId,
+                  logger,
+                );
+                toPost = comments.filter(c => {
+                  const key = extractPluginCommentKey(c.body, markerPrefix);
+                  if (key && existingKeys.has(key)) {
+                    dedupSkipped++;
+                    return false;
+                  }
+                  return true;
+                });
+              } catch (error) {
+                logger.warning(
+                  `postInlineComments: failed to fetch existing ${pluginId} comments: ${error}`,
+                );
+              }
+
+              const skipped = outOfDiffCount + dedupSkipped;
+              if (toPost.length === 0) return { posted: 0, skipped };
+
+              await postPRReview(octokit, pr, toPost, summaryBody, logger, 'COMMENT');
+              return { posted: toPost.length, skipped };
+            }
+          : undefined,
       postReviewComment:
         octokit && pr
           ? (body, comments) => postPRReview(octokit, pr, comments ?? [], body, logger, 'COMMENT')
@@ -430,4 +494,31 @@ function resolvePluginConfig(
  */
 export function createDefaultEngine(opts?: EngineOptions): ReviewEngine {
   return new ReviewEngine(opts);
+}
+
+// ---------------------------------------------------------------------------
+// postInlineComments Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a generic inline comment body for a finding.
+ * Embeds a dedup marker so re-runs don't re-post the same comment.
+ */
+function buildPluginCommentBody(f: ReviewFinding, markerPrefix: string): string {
+  const key = `${f.filepath}::${f.line}::${f.category}`;
+  const marker = `${markerPrefix}${key} -->`;
+  const severityEmoji = f.severity === 'error' ? '🔴' : f.severity === 'warning' ? '🟡' : 'ℹ️';
+  const symbolRef = f.symbolName ? ` in \`${f.symbolName}\`` : '';
+  const suggestionLine = f.suggestion ? `\n\n💡 *${f.suggestion}*` : '';
+  return `${marker}\n${severityEmoji} **${f.category.replace(/_/g, ' ')}**${symbolRef}\n\n${f.message}${suggestionLine}`;
+}
+
+/** Extract the dedup key from a comment body, or null if not present. */
+function extractPluginCommentKey(body: string, markerPrefix: string): string | null {
+  const start = body.indexOf(markerPrefix);
+  if (start === -1) return null;
+  const keyStart = start + markerPrefix.length;
+  const end = body.indexOf(' -->', keyStart);
+  if (end === -1) return null;
+  return body.slice(keyStart, end);
 }

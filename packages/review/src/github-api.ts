@@ -369,6 +369,49 @@ export async function getExistingCommentKeys(
 }
 
 /**
+ * Marker prefix for plugin inline review comments posted via postInlineComments.
+ * Format: <!-- lien-plugin:{pluginId}:{key} -->
+ */
+export const PLUGIN_MARKER_PREFIX = '<!-- lien-plugin:';
+
+/**
+ * Fetch existing inline comment keys for a specific plugin (for deduplication).
+ */
+export async function getExistingPluginCommentKeys(
+  octokit: Octokit,
+  prContext: PRContext,
+  pluginId: string,
+  logger: Logger,
+): Promise<Set<string>> {
+  const prefix = `${PLUGIN_MARKER_PREFIX}${pluginId}:`;
+  const keys = new Set<string>();
+
+  try {
+    const iterator = octokit.paginate.iterator(octokit.pulls.listReviewComments, {
+      owner: prContext.owner,
+      repo: prContext.repo,
+      pull_number: prContext.pullNumber,
+      per_page: 100,
+    });
+
+    for await (const response of iterator) {
+      for (const comment of response.data) {
+        if (!comment.body) continue;
+        const start = comment.body.indexOf(prefix);
+        if (start === -1) continue;
+        const keyStart = start + prefix.length;
+        const end = comment.body.indexOf(' -->', keyStart);
+        if (end !== -1) keys.add(comment.body.slice(keyStart, end));
+      }
+    }
+  } catch (error) {
+    logger.warning(`Failed to fetch existing ${pluginId} plugin comments: ${error}`);
+  }
+
+  return keys;
+}
+
+/**
  * Marker comments for the PR description stats badge
  */
 const DESCRIPTION_START_MARKER = '<!-- lien-stats -->';

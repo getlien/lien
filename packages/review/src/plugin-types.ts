@@ -195,6 +195,16 @@ export interface PresentContext {
   appendSummary(markdown: string): void;
 
   /**
+   * Post findings as inline PR review comments.
+   * Handles diff-line filtering and deduplication automatically.
+   * Only available in GitHub App context (pr + octokit present).
+   */
+  postInlineComments?(
+    findings: ReviewFinding[],
+    summaryBody: string,
+  ): Promise<{ posted: number; skipped: number }>;
+
+  /**
    * Post a PR review with optional inline comments.
    * Only available when pr + octokit are present.
    */

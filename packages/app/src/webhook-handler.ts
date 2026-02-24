@@ -250,10 +250,13 @@ export async function handlePullRequest(
       logger,
     );
 
-    // Complexity and architectural findings are handled by engine.present() via
-    // ComplexityPlugin.present() — check run annotations + summary.
+    // Built-in plugins handle their own output via present() hooks:
+    // complexity → check run annotations + summary
+    // architectural → check run summary section
+    // logic → inline PR review comments
+    // Only pass through findings from custom plugins without a present() hook.
     const adapterFindings = findings.filter(
-      f => f.pluginId !== 'complexity' && f.pluginId !== 'architectural',
+      f => f.pluginId !== 'complexity' && f.pluginId !== 'architectural' && f.pluginId !== 'logic',
     );
     const adapter = new GitHubAdapter();
     const adapterResult = await adapter.present(adapterFindings, adapterContext);

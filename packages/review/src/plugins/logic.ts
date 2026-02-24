@@ -13,6 +13,7 @@ import type {
   ReviewContext,
   ReviewFinding,
   LogicFindingMetadata,
+  PresentContext,
 } from '../plugin-types.js';
 import { detectLogicFindings } from '../logic-review.js';
 import { isFindingSuppressed } from '../suppression.js';
@@ -91,6 +92,19 @@ export class LogicPlugin implements ReviewPlugin {
         metadata,
       } satisfies ReviewFinding;
     });
+  }
+
+  async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
+    if (!context.postInlineComments) return;
+
+    const logicFindings = findings.filter(f => f.pluginId === 'logic');
+    if (logicFindings.length === 0) return;
+
+    const { posted, skipped } = await context.postInlineComments(
+      logicFindings,
+      '**Logic Review** (beta) — see inline comments.',
+    );
+    context.logger.info(`Logic: ${posted} posted, ${skipped} skipped`);
   }
 
   /**
