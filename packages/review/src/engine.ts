@@ -157,6 +157,7 @@ export class ReviewEngine {
 
     const pendingAnnotations: CheckAnnotation[] = [];
     const debugLog: string[] = [];
+    let pluginSummary: string | undefined;
 
     // Reuse pre-created check run or create a new one
     let checkRunId: number | undefined = opts?.checkRunId;
@@ -193,6 +194,9 @@ export class ReviewEngine {
       llmUsage: adapterContext.llmUsage,
       model: adapterContext.model,
       addAnnotations: annotations => pendingAnnotations.push(...annotations),
+      setSummary: (markdown: string) => {
+        pluginSummary = markdown;
+      },
       postReviewComment:
         octokit && pr
           ? (body, comments) => postPRReview(octokit, pr, comments ?? [], body, logger, 'COMMENT')
@@ -219,7 +223,7 @@ export class ReviewEngine {
       try {
         const conclusion = determineConclusion(findings);
         const title = buildCheckTitle(findings);
-        const summary = buildCheckSummary(findings);
+        const summary = pluginSummary ?? buildCheckSummary(findings);
         const text = debugLog.length > 0 ? debugLog.join('\n') : undefined;
 
         await finalizeCheckRun(

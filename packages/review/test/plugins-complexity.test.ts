@@ -133,7 +133,7 @@ describe('ComplexityPlugin', () => {
     const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
 
     const addAnnotations = vi.fn();
-    const ctx = { addAnnotations } as unknown as PresentContext;
+    const ctx = { addAnnotations, setSummary: vi.fn() } as unknown as PresentContext;
     await plugin.present(findings, ctx);
 
     expect(addAnnotations).toHaveBeenCalledTimes(1);
@@ -179,7 +179,7 @@ describe('ComplexityPlugin', () => {
     expect(findings).toHaveLength(2);
 
     const addAnnotations = vi.fn();
-    const ctx = { addAnnotations } as unknown as PresentContext;
+    const ctx = { addAnnotations, setSummary: vi.fn() } as unknown as PresentContext;
     await plugin.present(findings, ctx);
 
     const annotations = addAnnotations.mock.calls[0][0];
@@ -211,7 +211,7 @@ describe('ComplexityPlugin', () => {
 
     const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
     const addAnnotations = vi.fn();
-    const ctx = { addAnnotations } as unknown as PresentContext;
+    const ctx = { addAnnotations, setSummary: vi.fn() } as unknown as PresentContext;
     await plugin.present(findings, ctx);
 
     const annotations = addAnnotations.mock.calls[0][0];
@@ -219,16 +219,41 @@ describe('ComplexityPlugin', () => {
     expect(annotations[0].message).toContain('cognitive complexity 30');
   });
 
-  it('present() does nothing when no complexity findings', async () => {
-    const addAnnotations = vi.fn();
-    const ctx = { addAnnotations } as unknown as PresentContext;
+  it('present() sets check run summary with violations table', async () => {
+    const report = createTestReport([
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 20,
+        threshold: 15,
+        metricType: 'cyclomatic',
+        severity: 'warning',
+      },
+    ]);
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const setSummary = vi.fn();
+    await plugin.present(findings, {
+      addAnnotations: vi.fn(),
+      setSummary,
+    } as unknown as PresentContext);
+
+    expect(setSummary).toHaveBeenCalledTimes(1);
+    const summary: string = setSummary.mock.calls[0][0];
+    expect(summary).toContain('fnA');
+    expect(summary).toContain('a.ts');
+    expect(summary).toContain('1 violation');
+  });
+
+  it('present() sets success summary when no complexity findings', async () => {
+    const setSummary = vi.fn();
+    const ctx = { addAnnotations: vi.fn(), setSummary } as unknown as PresentContext;
     await plugin.present([], ctx);
-    expect(addAnnotations).not.toHaveBeenCalled();
+    expect(setSummary).toHaveBeenCalledWith(expect.stringContaining('No complexity violations'));
   });
 
   it('present() ignores findings from other plugins', async () => {
     const addAnnotations = vi.fn();
-    const ctx = { addAnnotations } as unknown as PresentContext;
+    const ctx = { addAnnotations, setSummary: vi.fn() } as unknown as PresentContext;
     await plugin.present(
       [
         {
