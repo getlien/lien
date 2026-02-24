@@ -113,6 +113,7 @@ export {
   parseLogicMarker,
   createCheckRun,
   updateCheckRun,
+  getPRRawDiff,
   COMMENT_MARKER_PREFIX,
   LOGIC_MARKER_PREFIX,
   LEGACY_COMMENT_MARKER_PREFIX,

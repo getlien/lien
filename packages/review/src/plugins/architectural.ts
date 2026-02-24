@@ -66,9 +66,11 @@ export class ArchitecturalPlugin implements ReviewPlugin {
 
     const { complexityReport, chunks, changedFiles, logger } = context;
 
-    // Compute architectural context
+    // Prefer the raw PR diff; fall back to chunk-based code (CLI mode)
     logger.info('Computing architectural context...');
-    const archContext = computeArchContext(chunks, complexityReport, changedFiles, logger);
+    const archContext = context.diff
+      ? buildDiffContext(context.diff, logger)
+      : computeArchContext(chunks, complexityReport, changedFiles, logger);
 
     // Build prompt
     const limit = maxNotes(changedFiles.length);
@@ -115,10 +117,22 @@ export class ArchitecturalPlugin implements ReviewPlugin {
 // ---------------------------------------------------------------------------
 
 interface ArchContext {
-  changedFilesCode: string;
+  code: string;
+  /** 'diff' when built from the raw PR diff, 'chunks' when built from AST chunks (CLI fallback) */
+  source: 'diff' | 'chunks';
 }
 
 const MAX_TOTAL_CHARS = 50_000;
+
+/**
+ * Build context from the raw unified diff (GitHub App mode).
+ * Truncates at MAX_TOTAL_CHARS — the diff is already focused on what changed.
+ */
+function buildDiffContext(diff: string, logger: Logger): ArchContext {
+  const code = diff.length > MAX_TOTAL_CHARS ? diff.slice(0, MAX_TOTAL_CHARS) : diff;
+  logger.info(`Using PR diff as architectural context (${code.length} chars)`);
+  return { code, source: 'diff' };
+}
 
 function computeArchContext(
   chunks: CodeChunk[],
@@ -161,7 +175,7 @@ function computeArchContext(
   }
 
   logger.info(`Built code context for ${sections.length} files (${totalChars} chars)`);
-  return { changedFilesCode: sections.join('\n\n') };
+  return { code: sections.join('\n\n'), source: 'chunks' as const };
 }
 
 // ---------------------------------------------------------------------------
@@ -222,15 +236,17 @@ function buildArchitecturalPrompt(
   context: ReviewContext,
   limit: number,
 ): string {
+  const sectionTitle = archContext.source === 'diff' ? 'PR Diff' : 'Changed Code';
+
   return `You are a senior engineer reviewing a pull request for architectural concerns.
 
-## Changed Code
+## ${sectionTitle}
 
-${archContext.changedFilesCode}
+${archContext.code}
 
 ## Instructions
 
-Review the changed code for architectural concerns:
+Review the ${archContext.source === 'diff' ? 'diff' : 'changed code'} for architectural concerns:
 
 - **DRY violations**: duplicated logic across functions/files
 - **Single Responsibility**: functions doing too many unrelated things

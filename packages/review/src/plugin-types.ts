@@ -65,6 +65,7 @@ export interface LLMClient {
  *
  * @property chunks - AST-parsed code chunks for all changed files. Always present.
  * @property changedFiles - List of file paths changed in this review scope.
+ * @property diff - Raw unified diff for the PR. Present in GitHub App context; absent in CLI mode.
  * @property complexityReport - Complexity analysis of the current code. Always present (the parser always runs).
  * @property baselineReport - Complexity analysis of the base branch. Null when no baseline is available (CLI without git, first PR).
  * @property deltas - Computed complexity deltas between baseline and current. Null when no baseline.
@@ -77,6 +78,8 @@ export interface LLMClient {
 export interface ReviewContext {
   chunks: CodeChunk[];
   changedFiles: string[];
+  /** Raw unified diff for the PR. Present in GitHub App context; absent in CLI mode. */
+  diff?: string;
   complexityReport: ComplexityReport;
   baselineReport: ComplexityReport | null;
   deltas: ComplexityDelta[] | null;
