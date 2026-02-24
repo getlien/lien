@@ -1,10 +1,9 @@
 /**
  * Architectural review plugin.
  *
- * Computes codebase fingerprint, dependent context, and simplicity signals.
- * Uses LLM to generate cross-file architectural observations.
+ * Sends the actual changed code (sorted by dependent count) to the LLM
+ * for cross-file architectural observations.
  * Fully standalone — produces its own findings, no enrichment of complexity.
- * Inlined from architectural-review.ts.
  */
 
 import { z } from 'zod';
@@ -16,10 +15,8 @@ import type {
   ArchitecturalFindingMetadata,
   PresentContext,
 } from '../plugin-types.js';
-import { computeFingerprint, serializeFingerprint } from '../fingerprint.js';
-import { assembleDependentContext } from '../dependent-context.js';
-import { computeSimplicitySignals, serializeSimplicitySignals } from '../simplicity-signals.js';
 import { extractJSONFromCodeBlock } from '../llm-client.js';
+import type { Logger } from '../logger.js';
 
 export const architecturalConfigSchema = z.object({
   mode: z.enum(['auto', 'always', 'off']).default('auto'),
@@ -114,14 +111,16 @@ export class ArchitecturalPlugin implements ReviewPlugin {
 }
 
 // ---------------------------------------------------------------------------
-// Context Assembly (from architectural-review.ts)
+// Context Assembly
 // ---------------------------------------------------------------------------
 
 interface ArchContext {
-  fingerprint: string;
-  dependentSnippets: Map<string, string>;
-  simplicitySignals: string;
+  changedFilesCode: string;
 }
+
+const MAX_TOTAL_CHARS = 15_000;
+const MAX_FILE_CHARS = 3_000;
+const MAX_FILES = 8;
 
 function computeArchContext(
   chunks: CodeChunk[],
@@ -129,27 +128,50 @@ function computeArchContext(
   changedFiles: string[],
   logger: Logger,
 ): ArchContext {
-  const fingerprint = computeFingerprint(chunks);
-  const fingerprintText = serializeFingerprint(fingerprint);
-  logger.info(`Computed codebase fingerprint: ${fingerprint.paradigm.dominantStyle} paradigm`);
-
-  const dependentSnippets = assembleDependentContext(report, chunks);
-  logger.info(`Assembled dependent context for ${dependentSnippets.size} functions`);
-
-  const signals = computeSimplicitySignals(chunks, changedFiles);
-  const simplicitySignals = serializeSimplicitySignals(signals);
-  if (signals.length > 0) {
-    const flaggedCount = signals.filter(s => s.flagged).length;
-    logger.info(
-      `Computed simplicity signals for ${signals.length} files (${flaggedCount} flagged)`,
-    );
+  // Group chunks by file (only changed files)
+  const chunksByFile = new Map<string, CodeChunk[]>();
+  for (const chunk of chunks) {
+    const file = chunk.metadata.file;
+    if (!changedFiles.includes(file)) continue;
+    const existing = chunksByFile.get(file) ?? [];
+    existing.push(chunk);
+    chunksByFile.set(file, existing);
   }
 
-  return { fingerprint: fingerprintText, dependentSnippets, simplicitySignals };
-}
+  // Sort files by dependentCount descending — highest-impact files first
+  const sortedFiles = [...chunksByFile.keys()].sort((a, b) => {
+    const depA = report.files[a]?.dependentCount ?? 0;
+    const depB = report.files[b]?.dependentCount ?? 0;
+    return depB - depA;
+  });
 
-// We need Logger type
-import type { Logger } from '../logger.js';
+  const sections: string[] = [];
+  let totalChars = 0;
+
+  for (const file of sortedFiles.slice(0, MAX_FILES)) {
+    if (totalChars >= MAX_TOTAL_CHARS) break;
+
+    const fileChunks = chunksByFile.get(file)!;
+    const dependentCount = report.files[file]?.dependentCount ?? 0;
+
+    let fileCode = fileChunks.map(c => c.content).join('\n\n');
+    if (fileCode.length > MAX_FILE_CHARS) {
+      fileCode = fileCode.slice(0, MAX_FILE_CHARS) + '\n// ... (truncated)';
+    }
+    const remaining = MAX_TOTAL_CHARS - totalChars;
+    if (fileCode.length > remaining) {
+      fileCode = fileCode.slice(0, remaining) + '\n// ... (truncated)';
+    }
+
+    const header =
+      dependentCount > 0 ? `### ${file} (${dependentCount} dependents)` : `### ${file}`;
+    sections.push(`${header}\n\`\`\`\n${fileCode}\n\`\`\``);
+    totalChars += fileCode.length;
+  }
+
+  logger.info(`Built code context for ${sections.length} files (${totalChars} chars)`);
+  return { changedFilesCode: sections.join('\n\n') };
+}
 
 // ---------------------------------------------------------------------------
 // Trigger Helpers (from architectural-review.ts)
@@ -209,19 +231,15 @@ function buildArchitecturalPrompt(
   context: ReviewContext,
   limit: number,
 ): string {
-  const filesList = context.changedFiles.map(f => `- ${f}`).join('\n');
+  return `You are a senior engineer reviewing a pull request for architectural concerns.
 
-  return `You are a senior engineer reviewing code for architectural coherence.
+## Changed Code
 
-${archContext.fingerprint}
-${archContext.simplicitySignals}
-
-## Changed Files
-${filesList}
+${archContext.changedFilesCode}
 
 ## Instructions
 
-Review the codebase fingerprint and changed files for architectural concerns:
+Review the changed code for architectural concerns:
 
 - **DRY violations**: duplicated logic across functions/files
 - **Single Responsibility**: functions doing too many unrelated things
