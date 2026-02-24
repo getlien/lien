@@ -32,7 +32,7 @@ export class LogicPlugin implements ReviewPlugin {
   id = 'logic';
   name = 'Logic Review';
   description = 'Detects breaking changes, unchecked returns, and missing test coverage';
-  requiresLLM = false;
+  requiresLLM = true;
   configSchema = logicConfigSchema;
   defaultConfig = { categories: ['breaking_change', 'unchecked_return', 'missing_tests'] };
 

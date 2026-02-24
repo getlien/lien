@@ -290,7 +290,6 @@ function buildReviewContext(
         threshold: parseInt(config.threshold, 10),
         blockOnNewErrors: config.blockOnNewErrors,
       },
-      logic: { categories: config.logicReviewCategories },
       architectural: { mode: config.enableArchitecturalReview },
     },
     config: {},
