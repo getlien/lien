@@ -126,10 +126,11 @@ function computeArchContext(
   logger: Logger,
 ): ArchContext {
   // Group chunks by file (only changed files)
+  const changedFilesSet = new Set(changedFiles);
   const chunksByFile = new Map<string, CodeChunk[]>();
   for (const chunk of chunks) {
     const file = chunk.metadata.file;
-    if (!changedFiles.includes(file)) continue;
+    if (!changedFilesSet.has(file)) continue;
     const existing = chunksByFile.get(file) ?? [];
     existing.push(chunk);
     chunksByFile.set(file, existing);
@@ -221,9 +222,8 @@ function buildArchitecturalPrompt(
   context: ReviewContext,
   limit: number,
 ): string {
-  const prHeader = context.pr
-    ? `## PR: ${context.pr.title}${context.pr.body ? `\n\n${context.pr.body}` : ''}\n\n`
-    : '';
+  const body = context.pr?.body ? context.pr.body.slice(0, 2000) : undefined;
+  const prHeader = context.pr ? `## PR: ${context.pr.title}${body ? `\n\n${body}` : ''}\n\n` : '';
 
   return `You are a senior engineer reviewing a pull request for architectural concerns.
 

@@ -333,6 +333,13 @@ async function postPluginInlineComments(
   if (findings.length === 0) return { posted: 0, skipped: 0 };
 
   const pluginId = findings[0].pluginId;
+  if (findings.some(f => f.pluginId !== pluginId)) {
+    logger.warning(
+      `postInlineComments: mixed pluginIds in findings, skipping to avoid mis-attribution`,
+    );
+    return { posted: 0, skipped: findings.length };
+  }
+
   const markerPrefix = `${PLUGIN_MARKER_PREFIX}${pluginId}:`;
 
   let diffLines: Map<string, Set<number>>;

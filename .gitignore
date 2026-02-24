@@ -41,6 +41,9 @@ coverage/
 # Cursor (local mcp.json is machine-specific)
 .cursor/mcp.json
 
+# Claude Code (local settings are machine-specific)
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db
