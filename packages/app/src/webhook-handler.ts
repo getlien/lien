@@ -170,26 +170,7 @@ export async function handlePullRequest(
     `Processing PR #${prContext.pullNumber} (${payload.action}) on ${payload.repository.full_name}`,
   );
 
-  // Create check run immediately so "in_progress" appears on the PR
-  let checkRunId: number | undefined;
-  try {
-    checkRunId = await createCheckRun(
-      octokit,
-      {
-        owner: prContext.owner,
-        repo: prContext.repo,
-        name: 'Lien Review',
-        headSha: prContext.headSha,
-        status: 'in_progress',
-        output: { title: 'Running...', summary: 'Analysis in progress' },
-      },
-      logger,
-    );
-  } catch (error) {
-    logger.warning(
-      `Failed to create check run: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  const checkRunId = await createInitialCheckRun(octokit, prContext, logger);
 
   let headClone: CloneResult | null = null;
   let baseClone: CloneResult | null = null;
@@ -212,75 +193,131 @@ export async function handlePullRequest(
       logger,
     );
     if (!analysis) {
-      if (checkRunId) {
-        await updateCheckRun(
-          octokit,
-          {
-            owner: prContext.owner,
-            repo: prContext.repo,
-            checkRunId,
-            status: 'completed',
-            conclusion: 'success',
-            output: {
-              title: 'No code files changed',
-              summary: 'No files eligible for complexity analysis in this PR.',
-            },
-          },
-          logger,
-        ).catch(err => logger.warning(`Failed to finalize check run: ${err}`));
-      }
+      await finalizeCheckRunSkipped(octokit, prContext, checkRunId, logger);
       return;
     }
 
     baseClone = analysis.baseClone;
-    const { result } = analysis;
-
-    const llm = buildLLMClient(reviewConfig, logger);
-    const engine = setupEngine();
-    const findings = await engine.run(
-      buildReviewContext(result, reviewConfig, prContext, llm, logger),
-    );
-    logger.info(`Engine produced ${findings.length} total findings`);
-
-    const adapterContext = buildAdapterContext(
-      result,
+    await runAndPresent(
+      setupEngine(),
+      analysis.result,
+      reviewConfig,
       prContext,
       octokit,
-      llm,
-      reviewConfig,
+      checkRunId,
       logger,
     );
-
-    // Each plugin owns its output via present() hooks.
-    try {
-      await engine.present(findings, adapterContext, { checkRunId });
-    } catch (error) {
-      logger.error(
-        `engine.present() failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      if (checkRunId) {
-        await updateCheckRun(
-          octokit,
-          {
-            owner: prContext.owner,
-            repo: prContext.repo,
-            checkRunId,
-            status: 'completed',
-            conclusion: 'action_required',
-            output: {
-              title: 'Review failed',
-              summary: `An error occurred during review: ${error instanceof Error ? error.message : String(error)}`,
-            },
-          },
-          logger,
-        ).catch(err => logger.warning(`Failed to finalize check run after error: ${err}`));
-      }
-    }
   } finally {
     // Cleanup independently so one failure doesn't prevent the other
     if (headClone) await headClone.cleanup().catch(() => {});
     if (baseClone) await baseClone.cleanup().catch(() => {});
   }
+}
+
+/** Create the initial in_progress check run. Returns undefined if creation fails. */
+async function createInitialCheckRun(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  logger: Logger,
+): Promise<number | undefined> {
+  try {
+    return await createCheckRun(
+      octokit,
+      {
+        owner: prContext.owner,
+        repo: prContext.repo,
+        name: 'Lien Review',
+        headSha: prContext.headSha,
+        status: 'in_progress',
+        output: { title: 'Running...', summary: 'Analysis in progress' },
+      },
+      logger,
+    );
+  } catch (error) {
+    logger.warning(
+      `Failed to create check run: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
+  }
+}
+
+/** Finalize check run when no analyzable files were found. */
+async function finalizeCheckRunSkipped(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  checkRunId: number | undefined,
+  logger: Logger,
+): Promise<void> {
+  if (!checkRunId) return;
+  await updateCheckRun(
+    octokit,
+    {
+      owner: prContext.owner,
+      repo: prContext.repo,
+      checkRunId,
+      status: 'completed',
+      conclusion: 'success',
+      output: {
+        title: 'No code files changed',
+        summary: 'No files eligible for complexity analysis in this PR.',
+      },
+    },
+    logger,
+  ).catch(err => logger.warning(`Failed to finalize check run: ${err}`));
+}
+
+/** Run analysis findings through the engine and post results via present() hooks. */
+async function runAndPresent(
+  engine: ReturnType<typeof setupEngine>,
+  result: AnalysisResult,
+  reviewConfig: ReviewConfig,
+  prContext: PRContext,
+  octokit: ReturnType<typeof createOctokit>,
+  checkRunId: number | undefined,
+  logger: Logger,
+): Promise<void> {
+  const llm = buildLLMClient(reviewConfig, logger);
+  const findings = await engine.run(
+    buildReviewContext(result, reviewConfig, prContext, llm, logger),
+  );
+  logger.info(`Engine produced ${findings.length} total findings`);
+
+  const adapterContext = buildAdapterContext(result, prContext, octokit, llm, reviewConfig, logger);
+
+  try {
+    await engine.present(findings, adapterContext, { checkRunId });
+  } catch (error) {
+    logger.error(
+      `engine.present() failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    await finalizeFailedCheckRun(octokit, prContext, checkRunId, error, logger);
+  }
+}
+
+/** Finalize check run with action_required when engine.present() throws. */
+async function finalizeFailedCheckRun(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  checkRunId: number | undefined,
+  error: unknown,
+  logger: Logger,
+): Promise<void> {
+  if (!checkRunId) return;
+  await updateCheckRun(
+    octokit,
+    {
+      owner: prContext.owner,
+      repo: prContext.repo,
+      checkRunId,
+      status: 'completed',
+      conclusion: 'action_required',
+      output: {
+        title: 'Review failed',
+        summary: `An error occurred during review: ${error instanceof Error ? error.message : String(error)}`,
+      },
+    },
+    logger,
+  ).catch(err => logger.warning(`Failed to finalize check run after error: ${err}`));
 }
 
 function buildLLMClient(config: ReviewConfig, logger: Logger) {
