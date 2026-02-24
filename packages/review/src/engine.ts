@@ -31,7 +31,7 @@ import {
   getExistingPluginCommentKeys,
   updatePRDescription,
 } from './github-api.js';
-import type { LineComment } from './types.js';
+import type { LineComment, PRContext } from './types.js';
 
 export interface EngineOptions {
   /** Enable verbose debug logging of activation decisions and timing */
@@ -171,111 +171,34 @@ export class ReviewEngine {
     // Reuse pre-created check run or create a new one
     let checkRunId: number | undefined = opts?.checkRunId;
     if (!checkRunId && octokit && pr) {
-      try {
-        checkRunId = await createCheckRun(
-          octokit,
-          {
-            owner: pr.owner,
-            repo: pr.repo,
-            name: 'Lien Review',
-            headSha: pr.headSha,
-            status: 'in_progress',
-            output: { title: 'Running...', summary: 'Analysis in progress' },
-          },
-          logger,
-        );
-      } catch (error) {
-        logger.warning(
-          `Failed to create check run: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+      checkRunId = (await createCheckRun(
+        octokit,
+        {
+          owner: pr.owner,
+          repo: pr.repo,
+          name: 'Lien Review',
+          headSha: pr.headSha,
+          status: 'in_progress',
+          output: { title: 'Running...', summary: 'Analysis in progress' },
+        },
+        logger,
+      ).catch(err =>
+        logger.warning(`Failed to create check run: ${err instanceof Error ? err.message : err}`),
+      )) as number | undefined;
     }
 
-    // Build PresentContext with helpers
-    const debugLogger = createDebugCapturingLogger(logger, debugLog);
-    const presentContext: PresentContext = {
-      complexityReport: adapterContext.complexityReport,
-      baselineReport: adapterContext.baselineReport,
-      deltas: adapterContext.deltas,
-      deltaSummary: adapterContext.deltaSummary,
-      pr: adapterContext.pr,
-      logger: debugLogger,
-      llmUsage: adapterContext.llmUsage,
-      model: adapterContext.model,
-      addAnnotations: annotations => pendingAnnotations.push(...annotations),
-      appendSummary: (markdown: string) => {
-        summarySections.push(markdown);
-      },
-      updateDescription:
-        octokit && pr
-          ? (markdown: string) => updatePRDescription(octokit, pr, markdown, logger)
-          : undefined,
-      postInlineComments:
-        octokit && pr
-          ? async (findings: ReviewFinding[], summaryBody: string) => {
-              if (findings.length === 0) return { posted: 0, skipped: 0 };
-              const pluginId = findings[0].pluginId;
-              const markerPrefix = `${PLUGIN_MARKER_PREFIX}${pluginId}:`;
-
-              let diffLines: Map<string, Set<number>>;
-              try {
-                diffLines = await getPRDiffLines(octokit, pr);
-              } catch (error) {
-                logger.warning(`postInlineComments: failed to get diff lines: ${error}`);
-                return { posted: 0, skipped: findings.length };
-              }
-
-              const inDiff = findings.filter(f => diffLines.get(f.filepath)?.has(f.line));
-              const outOfDiffCount = findings.length - inDiff.length;
-              if (inDiff.length === 0) return { posted: 0, skipped: findings.length };
-
-              const comments: LineComment[] = inDiff.map(f => ({
-                path: f.filepath,
-                line: f.line,
-                body: buildPluginCommentBody(f, markerPrefix),
-              }));
-
-              // Dedup: skip findings already commented in a previous run
-              let toPost = comments;
-              let dedupSkipped = 0;
-              try {
-                const existingKeys = await getExistingPluginCommentKeys(
-                  octokit,
-                  pr,
-                  pluginId,
-                  logger,
-                );
-                toPost = comments.filter(c => {
-                  const key = extractPluginCommentKey(c.body, markerPrefix);
-                  if (key && existingKeys.has(key)) {
-                    dedupSkipped++;
-                    return false;
-                  }
-                  return true;
-                });
-              } catch (error) {
-                logger.warning(
-                  `postInlineComments: failed to fetch existing ${pluginId} comments: ${error}`,
-                );
-              }
-
-              const skipped = outOfDiffCount + dedupSkipped;
-              if (toPost.length === 0) return { posted: 0, skipped };
-
-              await postPRReview(octokit, pr, toPost, summaryBody, logger, 'COMMENT');
-              return { posted: toPost.length, skipped };
-            }
-          : undefined,
-      postReviewComment:
-        octokit && pr
-          ? (body, comments) => postPRReview(octokit, pr, comments ?? [], body, logger, 'COMMENT')
-          : undefined,
-    };
+    const presentContext = buildPresentContext(
+      adapterContext,
+      octokit,
+      pr,
+      pendingAnnotations,
+      summarySections,
+      debugLog,
+    );
 
     // Call each plugin's present()
     const pluginFilter = opts?.pluginFilter;
     const plugins = pluginFilter ? this.plugins.filter(p => p.id === pluginFilter) : this.plugins;
-
     for (const plugin of plugins) {
       if (!plugin.present) continue;
       try {
@@ -289,33 +212,127 @@ export class ReviewEngine {
 
     // Finalize check run
     if (octokit && pr && checkRunId != null) {
-      try {
-        const conclusion = determineConclusion(findings);
-        const title = buildCheckTitle(findings);
-        const summary =
-          summarySections.length > 0 ? summarySections.join('\n\n') : buildCheckSummary(findings);
-        const text = debugLog.length > 0 ? debugLog.join('\n') : undefined;
-
-        await finalizeCheckRun(
-          octokit,
-          pr,
-          checkRunId,
-          pendingAnnotations,
-          {
-            title,
-            summary,
-            text,
-            conclusion,
-          },
-          logger,
-        );
-      } catch (error) {
-        logger.warning(
-          `Failed to finalize check run: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+      const conclusion = determineConclusion(findings);
+      const title = buildCheckTitle(findings);
+      const summary =
+        summarySections.length > 0 ? summarySections.join('\n\n') : buildCheckSummary(findings);
+      const text = debugLog.length > 0 ? debugLog.join('\n') : undefined;
+      await finalizeCheckRun(
+        octokit,
+        pr,
+        checkRunId,
+        pendingAnnotations,
+        {
+          title,
+          summary,
+          text,
+          conclusion,
+        },
+        logger,
+      ).catch(err =>
+        logger.warning(`Failed to finalize check run: ${err instanceof Error ? err.message : err}`),
+      );
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// PresentContext Builder
+// ---------------------------------------------------------------------------
+
+function buildPresentContext(
+  adapterContext: AdapterContext,
+  octokit: Octokit | undefined,
+  pr: PRContext | undefined,
+  pendingAnnotations: CheckAnnotation[],
+  summarySections: string[],
+  debugLog: string[],
+): PresentContext {
+  const logger = adapterContext.logger;
+  const debugLogger = createDebugCapturingLogger(logger, debugLog);
+  return {
+    complexityReport: adapterContext.complexityReport,
+    baselineReport: adapterContext.baselineReport,
+    deltas: adapterContext.deltas,
+    deltaSummary: adapterContext.deltaSummary,
+    pr: adapterContext.pr,
+    logger: debugLogger,
+    llmUsage: adapterContext.llmUsage,
+    model: adapterContext.model,
+    addAnnotations: annotations => pendingAnnotations.push(...annotations),
+    appendSummary: (markdown: string) => summarySections.push(markdown),
+    updateDescription:
+      octokit && pr
+        ? (markdown: string) => updatePRDescription(octokit, pr, markdown, logger)
+        : undefined,
+    postInlineComments:
+      octokit && pr
+        ? (findings, summaryBody) =>
+            postPluginInlineComments(octokit, pr, findings, summaryBody, logger)
+        : undefined,
+    postReviewComment:
+      octokit && pr
+        ? (body, comments) => postPRReview(octokit, pr, comments ?? [], body, logger, 'COMMENT')
+        : undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Inline Comment Posting
+// ---------------------------------------------------------------------------
+
+async function postPluginInlineComments(
+  octokit: Octokit,
+  pr: PRContext,
+  findings: ReviewFinding[],
+  summaryBody: string,
+  logger: Logger,
+): Promise<{ posted: number; skipped: number }> {
+  if (findings.length === 0) return { posted: 0, skipped: 0 };
+
+  const pluginId = findings[0].pluginId;
+  const markerPrefix = `${PLUGIN_MARKER_PREFIX}${pluginId}:`;
+
+  let diffLines: Map<string, Set<number>>;
+  try {
+    diffLines = await getPRDiffLines(octokit, pr);
+  } catch (error) {
+    logger.warning(`postInlineComments: failed to get diff lines: ${error}`);
+    return { posted: 0, skipped: findings.length };
+  }
+
+  const inDiff = findings.filter(f => diffLines.get(f.filepath)?.has(f.line));
+  const outOfDiffCount = findings.length - inDiff.length;
+  if (inDiff.length === 0) return { posted: 0, skipped: findings.length };
+
+  const comments: LineComment[] = inDiff.map(f => ({
+    path: f.filepath,
+    line: f.line,
+    body: buildPluginCommentBody(f, markerPrefix),
+  }));
+
+  // Dedup: skip findings already commented in a previous run
+  let toPost = comments;
+  let dedupSkipped = 0;
+  try {
+    const existingKeys = await getExistingPluginCommentKeys(octokit, pr, pluginId, logger);
+    toPost = comments.filter(c => {
+      const key = extractPluginCommentKey(c.body, markerPrefix);
+      if (key && existingKeys.has(key)) {
+        dedupSkipped++;
+        return false;
+      }
+      return true;
+    });
+  } catch (error) {
+    logger.warning(`postInlineComments: failed to fetch existing ${pluginId} comments: ${error}`);
+  }
+
+  const skipped = outOfDiffCount + dedupSkipped;
+  if (toPost.length === 0) return { posted: 0, skipped };
+
+  await postPRReview(octokit, pr, toPost, summaryBody, logger, 'COMMENT');
+  return { posted: toPost.length, skipped };
 }
 
 // ---------------------------------------------------------------------------
