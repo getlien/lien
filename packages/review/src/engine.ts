@@ -160,33 +160,13 @@ export class ReviewEngine {
     adapterContext: AdapterContext,
     opts?: { pluginFilter?: string; checkRunId?: number },
   ): Promise<void> {
-    const logger = adapterContext.logger;
     const octokit = adapterContext.octokit as Octokit | undefined;
     const pr = adapterContext.pr;
-
     const pendingAnnotations: CheckAnnotation[] = [];
     const debugLog: string[] = [];
     const summarySections: string[] = [];
 
-    // Reuse pre-created check run or create a new one
-    let checkRunId: number | undefined = opts?.checkRunId;
-    if (!checkRunId && octokit && pr) {
-      checkRunId = (await createCheckRun(
-        octokit,
-        {
-          owner: pr.owner,
-          repo: pr.repo,
-          name: 'Lien Review',
-          headSha: pr.headSha,
-          status: 'in_progress',
-          output: { title: 'Running...', summary: 'Analysis in progress' },
-        },
-        logger,
-      ).catch(err =>
-        logger.warning(`Failed to create check run: ${err instanceof Error ? err.message : err}`),
-      )) as number | undefined;
-    }
-
+    const checkRunId = await ensureCheckRun(octokit, pr, opts?.checkRunId, adapterContext.logger);
     const presentContext = buildPresentContext(
       adapterContext,
       octokit,
@@ -195,45 +175,107 @@ export class ReviewEngine {
       summarySections,
       debugLog,
     );
+    await dispatchPresent(
+      this.plugins,
+      opts?.pluginFilter,
+      findings,
+      presentContext,
+      adapterContext.logger,
+    );
 
-    // Call each plugin's present()
-    const pluginFilter = opts?.pluginFilter;
-    const plugins = pluginFilter ? this.plugins.filter(p => p.id === pluginFilter) : this.plugins;
-    for (const plugin of plugins) {
-      if (!plugin.present) continue;
-      try {
-        await plugin.present(findings, presentContext);
-      } catch (error) {
-        logger.warning(
-          `Plugin "${plugin.id}" present() failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-
-    // Finalize check run
     if (octokit && pr && checkRunId != null) {
-      const conclusion = determineConclusion(findings);
-      const title = buildCheckTitle(findings);
-      const summary =
-        summarySections.length > 0 ? summarySections.join('\n\n') : buildCheckSummary(findings);
-      const text = debugLog.length > 0 ? debugLog.join('\n') : undefined;
-      await finalizeCheckRun(
+      await finalizePresentation(
         octokit,
         pr,
         checkRunId,
+        findings,
+        summarySections,
         pendingAnnotations,
-        {
-          title,
-          summary,
-          text,
-          conclusion,
-        },
-        logger,
-      ).catch(err =>
-        logger.warning(`Failed to finalize check run: ${err instanceof Error ? err.message : err}`),
+        debugLog,
+        adapterContext.logger,
       );
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// present() helpers
+// ---------------------------------------------------------------------------
+
+async function ensureCheckRun(
+  octokit: Octokit | undefined,
+  pr: PRContext | undefined,
+  existingId: number | undefined,
+  logger: Logger,
+): Promise<number | undefined> {
+  if (existingId || !octokit || !pr) return existingId;
+  return createCheckRun(
+    octokit,
+    {
+      owner: pr.owner,
+      repo: pr.repo,
+      name: 'Lien Review',
+      headSha: pr.headSha,
+      status: 'in_progress',
+      output: { title: 'Running...', summary: 'Analysis in progress' },
+    },
+    logger,
+  ).catch(err => {
+    logger.warning(`Failed to create check run: ${err instanceof Error ? err.message : err}`);
+    return undefined;
+  });
+}
+
+async function dispatchPresent(
+  plugins: ReviewPlugin[],
+  pluginFilter: string | undefined,
+  findings: ReviewFinding[],
+  presentContext: PresentContext,
+  logger: Logger,
+): Promise<void> {
+  const active = pluginFilter ? plugins.filter(p => p.id === pluginFilter) : plugins;
+  for (const plugin of active) {
+    if (!plugin.present) continue;
+    try {
+      await plugin.present(findings, presentContext);
+    } catch (error) {
+      logger.warning(
+        `Plugin "${plugin.id}" present() failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+}
+
+async function finalizePresentation(
+  octokit: Octokit,
+  pr: PRContext,
+  checkRunId: number,
+  findings: ReviewFinding[],
+  summarySections: string[],
+  pendingAnnotations: CheckAnnotation[],
+  debugLog: string[],
+  logger: Logger,
+): Promise<void> {
+  const conclusion = determineConclusion(findings);
+  const title = buildCheckTitle(findings);
+  const summary =
+    summarySections.length > 0 ? summarySections.join('\n\n') : buildCheckSummary(findings);
+  const text = debugLog.length > 0 ? debugLog.join('\n') : undefined;
+  await finalizeCheckRun(
+    octokit,
+    pr,
+    checkRunId,
+    pendingAnnotations,
+    {
+      title,
+      summary,
+      text,
+      conclusion,
+    },
+    logger,
+  ).catch(err =>
+    logger.warning(`Failed to finalize check run: ${err instanceof Error ? err.message : err}`),
+  );
 }
 
 // ---------------------------------------------------------------------------
