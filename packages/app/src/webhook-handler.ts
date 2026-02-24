@@ -250,8 +250,13 @@ export async function handlePullRequest(
       logger,
     );
 
+    // Complexity and architectural findings are handled by engine.present() via
+    // ComplexityPlugin.present() — check run annotations + summary.
+    const adapterFindings = findings.filter(
+      f => f.pluginId !== 'complexity' && f.pluginId !== 'architectural',
+    );
     const adapter = new GitHubAdapter();
-    const adapterResult = await adapter.present(findings, adapterContext);
+    const adapterResult = await adapter.present(adapterFindings, adapterContext);
     logger.info(
       `Review complete for PR #${prContext.pullNumber}: ${adapterResult.posted} posted, ${adapterResult.skipped} skipped`,
     );

@@ -64,7 +64,6 @@ export class GitHubAdapter implements OutputAdapter {
     );
 
     if (findings.length === 0) {
-      await postPRComment(octokit, pr, buildNoViolationsMessage(pr, context.deltas), logger);
       return { posted: 0, skipped: 0, filtered: 0 };
     }
 
@@ -82,16 +81,18 @@ export class GitHubAdapter implements OutputAdapter {
   ): Promise<AdapterResult> {
     const totals = { posted: 0, skipped: 0, filtered: 0 };
 
-    const complexityResult = await this.postComplexityReview(
-      groups.complexity,
-      octokit,
-      pr,
-      context,
-      groups.architectural,
-      groups.logic,
-      groups.other,
-    );
-    addResult(totals, complexityResult);
+    if (groups.complexity.length > 0) {
+      const complexityResult = await this.postComplexityReview(
+        groups.complexity,
+        octokit,
+        pr,
+        context,
+        groups.architectural,
+        groups.logic,
+        groups.other,
+      );
+      addResult(totals, complexityResult);
+    }
 
     if (groups.logic.length > 0) {
       addResult(totals, await this.postLogicReview(groups.logic, octokit, pr, context));
