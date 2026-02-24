@@ -92,6 +92,7 @@ Lien provides semantic code search via MCP. These tools are **not optional** —
 
 ### 4. Verification Before Done
 - Never mark a task complete without proving it works
+- Explain changes at each step with a high-level summary
 - Run tests, check logs, demonstrate correctness
 
 ### 5. Demand Elegance (Balanced)
@@ -103,13 +104,6 @@ Lien provides semantic code search via MCP. These tools are **not optional** —
 - When given a bug report: just fix it. Don't ask for hand-holding
 - Point at logs, errors, failing tests — then resolve them
 - Fix failing CI tests without being told how
-
----
-
-## Task Management
-
-1. **Explain Changes**: High-level summary at each step
-2. **Capture Lessons**: Update `.claude/lessons.md` after any corrections
 
 ---
 
