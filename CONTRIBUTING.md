@@ -339,6 +339,37 @@ cd packages/cli
 npm test -- test/integration/myframework.test.ts
 ```
 
+## Adding a New AST Language
+
+Each AST-supported language is a **single self-contained file** in `packages/core/src/indexer/ast/languages/` containing everything: traverser class, export extractor class, import extractor class, and the `LanguageDefinition` that wires them together.
+
+### Steps
+
+1. **Create definition**: `languages/newlang.ts` with traverser, extractors, and `LanguageDefinition`
+2. **Register it**: Import + add to `definitions` array in `languages/registry.ts`
+
+**2 files total.** All language-specific code (traversal logic, import/export extraction, complexity constants, symbol types) lives in one file per language.
+
+### Re-export / barrel file support
+
+The dependency analyzer tracks transitive dependents through barrel/index files by reading `imports`, `importedSymbols`, and `exports` from chunk metadata. If the new language has a re-export pattern, the export extractor must include re-exported symbols in the `exports` array.
+
+| Language | Re-export pattern | Where to handle |
+|----------|------------------|-----------------|
+| TS/JS | `export { X } from './module'` | Import extractor in `languages/javascript.ts` |
+| Python | `from .auth import X` in `__init__.py` | Export extractor in `languages/python.ts` |
+| Rust | `pub use crate::auth::X` | Export extractor in `languages/rust.ts` |
+
+### Key files
+
+- `languages/types.ts` — `LanguageDefinition` interface
+- `languages/registry.ts` — Central registry (`getLanguage()`, `detectLanguage()`, `getAllLanguages()`, `getSupportedExtensions()`)
+- `languages/{lang}.ts` — One per language; see `languages/typescript.ts` for a complete example
+- `extractors/types.ts` — `LanguageExportExtractor` and `LanguageImportExtractor` interfaces
+- `traversers/types.ts` — `LanguageTraverser` interface
+
+---
+
 ## Code Review
 
 All contributions should:
