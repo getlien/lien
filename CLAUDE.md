@@ -75,8 +75,8 @@ Lien provides semantic code search via MCP. These tools are **not optional** —
 
 ### 1. Plan Mode Default
 - Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+- Bug fixes: act autonomously. Features/architecture: plan first and get approval.
 - If something goes sideways, STOP and re-plan immediately — don't keep pushing
-- Use plan mode for verification steps, not just building
 - Write detailed specs upfront to reduce ambiguity
 
 ### 2. Subagent Strategy
@@ -92,29 +92,24 @@ Lien provides semantic code search via MCP. These tools are **not optional** —
 
 ### 4. Verification Before Done
 - Never mark a task complete without proving it works
-- Diff behavior between main and your changes when relevant
-- Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness
 
 ### 5. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
 - If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
 - Skip this for simple, obvious fixes — don't over-engineer
-- Challenge your own work before presenting it
 
 ### 6. Autonomous Bug Fixing
 - When given a bug report: just fix it. Don't ask for hand-holding
 - Point at logs, errors, failing tests — then resolve them
-- Zero context switching required from the user
 - Fix failing CI tests without being told how
 
 ---
 
 ## Task Management
 
-1. **Plan First**: Use plan mode for any non-trivial task — get approval before writing code
-2. **Explain Changes**: High-level summary at each step
-3. **Capture Lessons**: Update `.claude/lessons.md` after any corrections
+1. **Explain Changes**: High-level summary at each step
+2. **Capture Lessons**: Update `.claude/lessons.md` after any corrections
 
 ---
 
@@ -141,40 +136,6 @@ These live in project root and are tracked in git:
 - `docs/` - Architecture and design documentation
 
 **Rule:** If it's temporary or experimental -> `.wip/`. If it's permanent -> root or `docs/`.
-
----
-
-## Adding a New AST Language
-
-Each AST-supported language is a **single self-contained file** in `packages/core/src/indexer/ast/languages/` containing everything: traverser class, export extractor class, import extractor class, and the `LanguageDefinition` that wires them together.
-
-### Steps to add a new language:
-
-1. **Create definition**: `languages/newlang.ts` with traverser, extractors, and `LanguageDefinition`
-2. **Register it**: Import + add to `definitions` array in `languages/registry.ts`
-
-**2 files total.** All language-specific code (traversal logic, import/export extraction, complexity constants, symbol types) lives in one file per language. Path normalization extensions are automatically derived from the registry.
-
-### Re-export / barrel file support
-
-The dependency analyzer (`get_dependents`) tracks transitive dependents through barrel/index files. This works at the metadata level — it reads `imports`, `importedSymbols`, and `exports` from chunk metadata. The analyzer is **language-agnostic**; each language just needs to populate the metadata correctly.
-
-If the new language has a re-export pattern (e.g., Python `__init__.py`, Rust `pub use`), the **export extractor** must include re-exported symbols in the `exports` array. The **import extractor** handles import path extraction and symbol mapping. Once both sides are populated, the re-export resolution works automatically.
-
-| Language | Re-export pattern | Where to handle |
-|----------|------------------|-----------------|
-| TS/JS | `export { X } from './module'` | Import extractor in `languages/javascript.ts` |
-| Python | `from .auth import X` in `__init__.py` | Export extractor in `languages/python.ts` |
-| Rust | `pub use crate::auth::X` | Export extractor in `languages/rust.ts` |
-
-### Key files:
-- `languages/types.ts` — `LanguageDefinition` interface
-- `languages/registry.ts` — Central registry (`getLanguage()`, `detectLanguage()`, `getAllLanguages()`, `getSupportedExtensions()`)
-- `languages/{lang}.ts` — One per language (typescript, javascript, php, python, rust)
-- `extractors/types.ts` — `LanguageExportExtractor` and `LanguageImportExtractor` interfaces
-- `traversers/types.ts` — `LanguageTraverser` interface
-
-Complexity files, parser, symbol extraction, and traverser/extractor registries all consume from the central registry rather than maintaining their own language-specific constants.
 
 ---
 
@@ -207,17 +168,7 @@ Complexity files, parser, symbol extraction, and traverser/extractor registries 
 
 ## Data Transformation with collect.js
 
-Use `collect.js` for readable data transformations instead of imperative loops.
-
-### When to Use
-- Aggregating data (groupBy, countBy, sum)
-- Chaining multiple transformations (map -> filter -> sort)
-- Building lookup structures from arrays
-
-### When NOT to Use
-- Simple single operations (use native `.map()`, `.filter()`)
-- Performance-critical hot paths
-- When it adds complexity rather than reducing it
+Use `collect.js` for readable data transformations (groupBy, countBy, chained map/filter/sort). Prefer native `.map()`, `.filter()` for simple single operations or performance-critical paths.
 
 ---
 
@@ -271,47 +222,6 @@ npm test              # All tests must pass
 
 ---
 
-## Feature Decision Framework
-
-Before adding features, ask:
-1. Is this needed for MVP? (No -> defer)
-2. Can users work around this? (Yes -> defer)
-3. Is this critical for core value? (No -> defer)
-
-**Bias toward simplicity.** Defer everything that isn't absolutely necessary.
-
----
-
-## Common Commands
-
-```bash
-# Development
-npm run dev              # Watch mode
-npm run typecheck        # Type check only
-npm test                 # Run tests
-npm run build            # Build CLI
-```
-
----
-
-## Release Process
-
-**NEVER run `npm publish` manually.** CI handles npm publishing automatically.
-
-### Release Workflow
-```bash
-# 1. Run release script
-npm run release -- patch "fix: description"
-npm run release -- minor "feat: description" --changelog .wip/vX.Y.Z-release-notes.md
-npm run release -- major "BREAKING: description"
-
-# 2. Push to trigger CI (CI publishes to npm)
-git push origin main
-git push origin vX.Y.Z
-```
-
----
-
 ## When in Doubt
 
 1. **Prefer readability over cleverness**
@@ -320,6 +230,8 @@ git push origin vX.Y.Z
 4. **Ask: "Will I understand this in 6 months?"**
 5. **Ask: "Would a staff engineer approve this?"**
 6. **Test on real codebases early and often**
+
+Before adding features: Is this needed now? Can users work around it? Is it critical to core value? If no — defer it.
 
 ---
 
