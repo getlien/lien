@@ -11,7 +11,6 @@ import {
   createOctokit,
   createCheckRun,
   updateCheckRun,
-  getPRRawDiff,
   runComplexityAnalysis,
   filterAnalyzableFiles,
   getPRChangedFiles,
@@ -34,6 +33,7 @@ interface PRWebhookPayload {
   pull_request: {
     number: number;
     title: string;
+    body: string | null;
     head: { sha: string; ref: string };
     base: { sha: string; ref: string };
   };
@@ -60,6 +60,7 @@ function buildContexts(
       repo: repo.name,
       pullNumber: pr.number,
       title: pr.title,
+      body: pr.body ?? undefined,
       baseSha: pr.base.sha,
       headSha: pr.head.sha,
     },
@@ -234,17 +235,10 @@ export async function handlePullRequest(
     baseClone = analysis.baseClone;
     const { result } = analysis;
 
-    const diff = await getPRRawDiff(octokit, prContext, logger).catch(err => {
-      logger.warning(
-        `Failed to fetch PR diff: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return undefined;
-    });
-
     const llm = buildLLMClient(reviewConfig, logger);
     const engine = setupEngine();
     const findings = await engine.run(
-      buildReviewContext(result, reviewConfig, prContext, llm, logger, diff),
+      buildReviewContext(result, reviewConfig, prContext, llm, logger),
     );
     logger.info(`Engine produced ${findings.length} total findings`);
 
@@ -286,12 +280,10 @@ function buildReviewContext(
   pr: PRContext,
   llm: ReturnType<typeof buildLLMClient>,
   logger: Logger,
-  diff?: string,
 ) {
   return {
     chunks: result.chunks,
     changedFiles: result.filesToAnalyze,
-    diff,
     complexityReport: result.currentReport,
     baselineReport: result.baselineReport,
     deltas: result.deltas,

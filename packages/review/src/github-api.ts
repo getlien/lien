@@ -570,23 +570,3 @@ export async function getPRPatchData(octokit: Octokit, prContext: PRContext): Pr
 
   return { diffLines, patches };
 }
-
-/**
- * Fetch the full unified diff for a PR as a single string.
- * Uses the GitHub diff media type — one request, no pagination needed.
- */
-export async function getPRRawDiff(
-  octokit: Octokit,
-  prContext: PRContext,
-  logger: Logger,
-): Promise<string> {
-  const response = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
-    owner: prContext.owner,
-    repo: prContext.repo,
-    pull_number: prContext.pullNumber,
-    headers: { accept: 'application/vnd.github.diff' },
-  });
-  const diff = response.data as unknown as string;
-  logger.info(`Fetched PR diff (${diff.length} chars)`);
-  return diff;
-}
