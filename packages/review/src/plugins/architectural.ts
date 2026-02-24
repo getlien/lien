@@ -125,12 +125,16 @@ function computeArchContext(
   changedFiles: string[],
   logger: Logger,
 ): ArchContext {
-  // Group chunks by file (only changed files)
+  // Group chunks by file (only changed files).
+  // Exclude method chunks (already present inside their class chunk) and
+  // block chunks (comments, separators — low signal for the LLM).
   const changedFilesSet = new Set(changedFiles);
   const chunksByFile = new Map<string, CodeChunk[]>();
   for (const chunk of chunks) {
     const file = chunk.metadata.file;
     if (!changedFilesSet.has(file)) continue;
+    if (chunk.metadata.symbolType === 'method') continue;
+    if (chunk.metadata.type === 'block') continue;
     const existing = chunksByFile.get(file) ?? [];
     existing.push(chunk);
     chunksByFile.set(file, existing);
