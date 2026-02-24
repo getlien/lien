@@ -55,7 +55,7 @@ export class ComplexityPlugin implements ReviewPlugin {
       complexityFindings.map(f => ({
         path: f.filepath,
         start_line: f.line,
-        end_line: f.endLine ?? f.line,
+        end_line: f.line,
         annotation_level: f.severity === 'error' ? ('failure' as const) : ('warning' as const),
         message: f.message,
         title: f.symbolName ? `${f.symbolName} — ${f.evidence}` : (f.evidence ?? 'Complexity'),
