@@ -133,7 +133,7 @@ describe('ComplexityPlugin', () => {
     const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
 
     const addAnnotations = vi.fn();
-    const ctx = { addAnnotations, setSummary: vi.fn() } as unknown as PresentContext;
+    const ctx = { addAnnotations, appendSummary: vi.fn() } as unknown as PresentContext;
     await plugin.present(findings, ctx);
 
     expect(addAnnotations).toHaveBeenCalledTimes(1);
@@ -179,7 +179,7 @@ describe('ComplexityPlugin', () => {
     expect(findings).toHaveLength(2);
 
     const addAnnotations = vi.fn();
-    const ctx = { addAnnotations, setSummary: vi.fn() } as unknown as PresentContext;
+    const ctx = { addAnnotations, appendSummary: vi.fn() } as unknown as PresentContext;
     await plugin.present(findings, ctx);
 
     const annotations = addAnnotations.mock.calls[0][0];
@@ -211,7 +211,7 @@ describe('ComplexityPlugin', () => {
 
     const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
     const addAnnotations = vi.fn();
-    const ctx = { addAnnotations, setSummary: vi.fn() } as unknown as PresentContext;
+    const ctx = { addAnnotations, appendSummary: vi.fn() } as unknown as PresentContext;
     await plugin.present(findings, ctx);
 
     const annotations = addAnnotations.mock.calls[0][0];
@@ -231,29 +231,29 @@ describe('ComplexityPlugin', () => {
       },
     ]);
     const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
-    const setSummary = vi.fn();
+    const appendSummary = vi.fn();
     await plugin.present(findings, {
       addAnnotations: vi.fn(),
-      setSummary,
+      appendSummary,
     } as unknown as PresentContext);
 
-    expect(setSummary).toHaveBeenCalledTimes(1);
-    const summary: string = setSummary.mock.calls[0][0];
+    expect(appendSummary).toHaveBeenCalledTimes(1);
+    const summary: string = appendSummary.mock.calls[0][0];
     expect(summary).toContain('fnA');
     expect(summary).toContain('a.ts');
     expect(summary).toContain('1 violation');
   });
 
   it('present() sets success summary when no complexity findings', async () => {
-    const setSummary = vi.fn();
-    const ctx = { addAnnotations: vi.fn(), setSummary } as unknown as PresentContext;
+    const appendSummary = vi.fn();
+    const ctx = { addAnnotations: vi.fn(), appendSummary } as unknown as PresentContext;
     await plugin.present([], ctx);
-    expect(setSummary).toHaveBeenCalledWith(expect.stringContaining('No complexity violations'));
+    expect(appendSummary).toHaveBeenCalledWith(expect.stringContaining('No complexity violations'));
   });
 
   it('present() ignores findings from other plugins', async () => {
     const addAnnotations = vi.fn();
-    const ctx = { addAnnotations, setSummary: vi.fn() } as unknown as PresentContext;
+    const ctx = { addAnnotations, appendSummary: vi.fn() } as unknown as PresentContext;
     await plugin.present(
       [
         {

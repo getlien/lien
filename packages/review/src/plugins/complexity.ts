@@ -50,7 +50,7 @@ export class ComplexityPlugin implements ReviewPlugin {
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     const complexityFindings = findings.filter(f => f.pluginId === 'complexity');
 
-    context.setSummary(buildComplexitySummary(complexityFindings, findings, context));
+    context.appendSummary(buildComplexitySummary(complexityFindings, context));
 
     if (complexityFindings.length === 0) return;
 
@@ -73,54 +73,39 @@ export class ComplexityPlugin implements ReviewPlugin {
  */
 function buildComplexitySummary(
   complexityFindings: ReviewFinding[],
-  allFindings: ReviewFinding[],
   context: PresentContext,
 ): string {
-  const sections: string[] = [];
-
-  // Complexity section
   if (complexityFindings.length === 0) {
-    sections.push('✅ No complexity violations found.');
-  } else {
-    const errors = complexityFindings.filter(f => f.severity === 'error').length;
-    const warnings = complexityFindings.filter(f => f.severity === 'warning').length;
-    const functions = worstPerFunction(complexityFindings);
-
-    const parts: string[] = [];
-    if (errors > 0) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-    if (warnings > 0) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
-    const heading = `${complexityFindings.length} violation${complexityFindings.length === 1 ? '' : 's'} across ${functions.length} function${functions.length === 1 ? '' : 's'} — ${parts.join(', ')}`;
-
-    const deltaLine =
-      context.deltaSummary && context.deltaSummary.totalDelta !== 0
-        ? `\n\nComplexity change this PR: ${context.deltaSummary.totalDelta > 0 ? '+' : ''}${context.deltaSummary.totalDelta} (${context.deltaSummary.degraded} degraded, ${context.deltaSummary.improved} improved)`
-        : '';
-
-    const rows = functions
-      .map(f => {
-        const meta = f.metadata as ComplexityFindingMetadata;
-        const label = getMetricLabel(meta.metricType);
-        const value = formatComplexityValue(meta.metricType, meta.complexity);
-        const threshold = formatThresholdValue(meta.metricType, meta.threshold);
-        const sev = f.severity === 'error' ? ' 🔴' : '';
-        return `| \`${f.symbolName ?? '?'}\` | \`${f.filepath}:${f.line}\` | ${label} | ${value}${sev} | ${threshold} |`;
-      })
-      .join('\n');
-
-    const table = `| Function | Location | Metric | Value | Threshold |\n|---|---|---|---|---|\n${rows}`;
-    sections.push(`${heading}${deltaLine}\n\n${table}`);
+    return '✅ No complexity violations found.';
   }
 
-  // Architectural observations section
-  const archFindings = allFindings.filter(f => f.pluginId === 'architectural');
-  if (archFindings.length > 0) {
-    const archLines = archFindings
-      .map(f => `> **${f.message}**\n> ${f.evidence ?? ''}\n> *Suggestion: ${f.suggestion ?? ''}*`)
-      .join('\n\n');
-    sections.push(`### Architectural observations\n\n${archLines}`);
-  }
+  const errors = complexityFindings.filter(f => f.severity === 'error').length;
+  const warnings = complexityFindings.filter(f => f.severity === 'warning').length;
+  const functions = worstPerFunction(complexityFindings);
 
-  return sections.join('\n\n');
+  const parts: string[] = [];
+  if (errors > 0) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
+  if (warnings > 0) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
+  const heading = `${complexityFindings.length} violation${complexityFindings.length === 1 ? '' : 's'} across ${functions.length} function${functions.length === 1 ? '' : 's'} — ${parts.join(', ')}`;
+
+  const deltaLine =
+    context.deltaSummary && context.deltaSummary.totalDelta !== 0
+      ? `\n\nComplexity change this PR: ${context.deltaSummary.totalDelta > 0 ? '+' : ''}${context.deltaSummary.totalDelta} (${context.deltaSummary.degraded} degraded, ${context.deltaSummary.improved} improved)`
+      : '';
+
+  const rows = functions
+    .map(f => {
+      const meta = f.metadata as ComplexityFindingMetadata;
+      const label = getMetricLabel(meta.metricType);
+      const value = formatComplexityValue(meta.metricType, meta.complexity);
+      const threshold = formatThresholdValue(meta.metricType, meta.threshold);
+      const sev = f.severity === 'error' ? ' 🔴' : '';
+      return `| \`${f.symbolName ?? '?'}\` | \`${f.filepath}:${f.line}\` | ${label} | ${value}${sev} | ${threshold} |`;
+    })
+    .join('\n');
+
+  const table = `| Function | Location | Metric | Value | Threshold |\n|---|---|---|---|---|\n${rows}`;
+  return `${heading}${deltaLine}\n\n${table}`;
 }
 
 /**

@@ -189,12 +189,10 @@ export interface PresentContext {
   addAnnotations(annotations: CheckAnnotation[]): void;
 
   /**
-   * Set the check run output summary (markdown).
-   * Replaces the engine's default summary. Last call wins.
-   * Use this to provide a rich, plugin-specific summary instead of the
-   * generic "Found N issues" fallback.
+   * Append a section to the check run output summary (markdown).
+   * Each plugin contributes its own section; the engine joins them with a blank line.
    */
-  setSummary(markdown: string): void;
+  appendSummary(markdown: string): void;
 
   /**
    * Post a PR review with optional inline comments.

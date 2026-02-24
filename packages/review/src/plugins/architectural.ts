@@ -14,6 +14,7 @@ import type {
   ReviewContext,
   ReviewFinding,
   ArchitecturalFindingMetadata,
+  PresentContext,
 } from '../plugin-types.js';
 import { computeFingerprint, serializeFingerprint } from '../fingerprint.js';
 import { assembleDependentContext } from '../dependent-context.js';
@@ -99,6 +100,16 @@ export class ArchitecturalPlugin implements ReviewPlugin {
         metadata,
       } satisfies ReviewFinding;
     });
+  }
+
+  async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
+    const archFindings = findings.filter(f => f.pluginId === 'architectural');
+    if (archFindings.length === 0) return;
+
+    const lines = archFindings
+      .map(f => `> **${f.message}**\n> ${f.evidence ?? ''}\n> *Suggestion: ${f.suggestion ?? ''}*`)
+      .join('\n\n');
+    context.appendSummary(`### Architectural observations\n\n${lines}`);
   }
 }
 
