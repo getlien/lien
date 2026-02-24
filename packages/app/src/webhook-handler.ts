@@ -10,6 +10,7 @@ import {
   consoleLogger,
   createOctokit,
   createCheckRun,
+  updateCheckRun,
   runComplexityAnalysis,
   filterAnalyzableFiles,
   getPRChangedFiles,
@@ -209,7 +210,26 @@ export async function handlePullRequest(
       headClone,
       logger,
     );
-    if (!analysis) return;
+    if (!analysis) {
+      if (checkRunId) {
+        await updateCheckRun(
+          octokit,
+          {
+            owner: prContext.owner,
+            repo: prContext.repo,
+            checkRunId,
+            status: 'completed',
+            conclusion: 'success',
+            output: {
+              title: 'No code files changed',
+              summary: 'No files eligible for complexity analysis in this PR.',
+            },
+          },
+          logger,
+        ).catch(err => logger.warning(`Failed to finalize check run: ${err}`));
+      }
+      return;
+    }
 
     baseClone = analysis.baseClone;
     const { result } = analysis;
