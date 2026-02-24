@@ -25,7 +25,6 @@ import {
   LOGIC_MARKER_PREFIX,
 } from '../github-api.js';
 import {
-  buildNoViolationsMessage,
   buildHeaderLine,
   buildDescriptionBadge,
   getMetricLabel,
