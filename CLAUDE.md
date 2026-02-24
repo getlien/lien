@@ -71,6 +71,53 @@ Lien provides semantic code search via MCP. These tools are **not optional** —
 
 ---
 
+## Workflow Orchestration
+
+### 1. Plan Mode Default
+- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+- If something goes sideways, STOP and re-plan immediately — don't keep pushing
+- Use plan mode for verification steps, not just building
+- Write detailed specs upfront to reduce ambiguity
+
+### 2. Subagent Strategy
+- Use subagents liberally to keep the main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One task per subagent for focused execution
+
+### 3. Self-Improvement Loop
+- At the start of each session, read `.claude/lessons.md` if it exists
+- After ANY correction from the user: update `.claude/lessons.md` with the pattern
+- Write rules that prevent the same mistake from recurring
+
+### 4. Verification Before Done
+- Never mark a task complete without proving it works
+- Diff behavior between main and your changes when relevant
+- Ask yourself: "Would a staff engineer approve this?"
+- Run tests, check logs, demonstrate correctness
+
+### 5. Demand Elegance (Balanced)
+- For non-trivial changes: pause and ask "is there a more elegant way?"
+- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
+- Skip this for simple, obvious fixes — don't over-engineer
+- Challenge your own work before presenting it
+
+### 6. Autonomous Bug Fixing
+- When given a bug report: just fix it. Don't ask for hand-holding
+- Point at logs, errors, failing tests — then resolve them
+- Zero context switching required from the user
+- Fix failing CI tests without being told how
+
+---
+
+## Task Management
+
+1. **Plan First**: Use plan mode for any non-trivial task — get approval before writing code
+2. **Explain Changes**: High-level summary at each step
+3. **Capture Lessons**: Update `.claude/lessons.md` after any corrections
+
+---
+
 ## Documentation Organization
 
 ### Temporary Documentation Rule
@@ -271,7 +318,8 @@ git push origin vX.Y.Z
 2. **Make it work, then make it good, then (maybe) make it fast**
 3. **Delete code rather than comment it out**
 4. **Ask: "Will I understand this in 6 months?"**
-5. **Test on real codebases early and often**
+5. **Ask: "Would a staff engineer approve this?"**
+6. **Test on real codebases early and often**
 
 ---
 
