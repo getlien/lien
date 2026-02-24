@@ -325,6 +325,19 @@ export function parseLogicMarker(body: string): string | null {
   return body.slice(keyStart, end);
 }
 
+/** Paginate all review comments on a PR. */
+async function* listAllReviewComments(octokit: Octokit, prContext: PRContext) {
+  const iterator = octokit.paginate.iterator(octokit.pulls.listReviewComments, {
+    owner: prContext.owner,
+    repo: prContext.repo,
+    pull_number: prContext.pullNumber,
+    per_page: 100,
+  });
+  for await (const response of iterator) {
+    yield* response.data;
+  }
+}
+
 /**
  * Fetch existing Lien Review inline comment keys from the PR.
  * Returns a Map of dedup keys → comment URLs for complexity comments
@@ -338,27 +351,18 @@ export async function getExistingCommentKeys(
   const complexity = new Map<string, string>();
   const logic = new Set<string>();
 
-  const iterator = octokit.paginate.iterator(octokit.pulls.listReviewComments, {
-    owner: prContext.owner,
-    repo: prContext.repo,
-    pull_number: prContext.pullNumber,
-    per_page: 100,
-  });
+  for await (const comment of listAllReviewComments(octokit, prContext)) {
+    if (!comment.body) continue;
 
-  for await (const response of iterator) {
-    for (const comment of response.data) {
-      if (!comment.body) continue;
+    const complexityKey = parseCommentMarker(comment.body);
+    if (complexityKey) {
+      complexity.set(complexityKey, comment.html_url);
+      continue;
+    }
 
-      const complexityKey = parseCommentMarker(comment.body);
-      if (complexityKey) {
-        complexity.set(complexityKey, comment.html_url);
-        continue;
-      }
-
-      const logicKey = parseLogicMarker(comment.body);
-      if (logicKey) {
-        logic.add(logicKey);
-      }
+    const logicKey = parseLogicMarker(comment.body);
+    if (logicKey) {
+      logic.add(logicKey);
     }
   }
 
@@ -387,22 +391,13 @@ export async function getExistingPluginCommentKeys(
   const keys = new Set<string>();
 
   try {
-    const iterator = octokit.paginate.iterator(octokit.pulls.listReviewComments, {
-      owner: prContext.owner,
-      repo: prContext.repo,
-      pull_number: prContext.pullNumber,
-      per_page: 100,
-    });
-
-    for await (const response of iterator) {
-      for (const comment of response.data) {
-        if (!comment.body) continue;
-        const start = comment.body.indexOf(prefix);
-        if (start === -1) continue;
-        const keyStart = start + prefix.length;
-        const end = comment.body.indexOf(' -->', keyStart);
-        if (end !== -1) keys.add(comment.body.slice(keyStart, end));
-      }
+    for await (const comment of listAllReviewComments(octokit, prContext)) {
+      if (!comment.body) continue;
+      const start = comment.body.indexOf(prefix);
+      if (start === -1) continue;
+      const keyStart = start + prefix.length;
+      const end = comment.body.indexOf(' -->', keyStart);
+      if (end !== -1) keys.add(comment.body.slice(keyStart, end));
     }
   } catch (error) {
     logger.warning(`Failed to fetch existing ${pluginId} plugin comments: ${error}`);
@@ -502,34 +497,14 @@ export function parsePatchLines(patch: string): Set<number> {
 }
 
 /**
- * Get lines that are in the PR diff (only these can have line comments)
- * Handles pagination for PRs with 100+ files
+ * Get lines that are in the PR diff (only these can have line comments).
+ * Handles pagination for PRs with 100+ files.
  */
 export async function getPRDiffLines(
   octokit: Octokit,
   prContext: PRContext,
 ): Promise<Map<string, Set<number>>> {
-  const diffLines = new Map<string, Set<number>>();
-
-  // Use pagination to handle PRs with 100+ files
-  const iterator = octokit.paginate.iterator(octokit.pulls.listFiles, {
-    owner: prContext.owner,
-    repo: prContext.repo,
-    pull_number: prContext.pullNumber,
-    per_page: 100,
-  });
-
-  for await (const response of iterator) {
-    for (const file of response.data) {
-      if (!file.patch) continue;
-
-      const lines = parsePatchLines(file.patch);
-      if (lines.size > 0) {
-        diffLines.set(file.filename, lines);
-      }
-    }
-  }
-
+  const { diffLines } = await getPRPatchData(octokit, prContext);
   return diffLines;
 }
 

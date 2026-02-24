@@ -400,16 +400,32 @@ function determineConclusion(findings: ReviewFinding[]): 'success' | 'failure' |
   return 'neutral';
 }
 
+/** Count errors/warnings and group by plugin in a single pass. */
+function analyzeFindings(findings: ReviewFinding[]): {
+  errorCount: number;
+  warningCount: number;
+  byPlugin: Map<string, number>;
+} {
+  const byPlugin = new Map<string, number>();
+  let errorCount = 0;
+  let warningCount = 0;
+  for (const f of findings) {
+    if (f.severity === 'error') errorCount++;
+    else if (f.severity === 'warning') warningCount++;
+    byPlugin.set(f.pluginId, (byPlugin.get(f.pluginId) ?? 0) + 1);
+  }
+  return { errorCount, warningCount, byPlugin };
+}
+
 /**
  * Build a short check run title.
  */
 function buildCheckTitle(findings: ReviewFinding[]): string {
   if (findings.length === 0) return 'No issues found';
-  const errors = findings.filter(f => f.severity === 'error').length;
-  const warnings = findings.filter(f => f.severity === 'warning').length;
+  const { errorCount, warningCount } = analyzeFindings(findings);
   const parts: string[] = [];
-  if (errors > 0) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-  if (warnings > 0) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
+  if (errorCount > 0) parts.push(`${errorCount} error${errorCount === 1 ? '' : 's'}`);
+  if (warningCount > 0) parts.push(`${warningCount} warning${warningCount === 1 ? '' : 's'}`);
   if (parts.length === 0)
     parts.push(`${findings.length} finding${findings.length === 1 ? '' : 's'}`);
   return parts.join(', ');
@@ -420,12 +436,7 @@ function buildCheckTitle(findings: ReviewFinding[]): string {
  */
 function buildCheckSummary(findings: ReviewFinding[]): string {
   if (findings.length === 0) return 'All checks passed.';
-
-  const byPlugin = new Map<string, number>();
-  for (const f of findings) {
-    byPlugin.set(f.pluginId, (byPlugin.get(f.pluginId) ?? 0) + 1);
-  }
-
+  const { byPlugin } = analyzeFindings(findings);
   const lines = [`Found ${findings.length} issue${findings.length === 1 ? '' : 's'}:\n`];
   for (const [pluginId, count] of byPlugin) {
     lines.push(`- **${pluginId}**: ${count}`);
