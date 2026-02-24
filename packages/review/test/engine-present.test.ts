@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ReviewEngine } from '../src/engine.js';
 import { createTestContext, createTestReport, silentLogger } from '../src/test-helpers.js';
 import type {
@@ -51,6 +51,10 @@ const mockPR = {
 };
 
 describe('ReviewEngine.present()', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('creates check run when octokit and pr are present', async () => {
     const engine = new ReviewEngine();
     engine.register(createTestPlugin());
@@ -69,13 +73,12 @@ describe('ReviewEngine.present()', () => {
   });
 
   it('does not create check run when octokit is missing (CLI mode)', async () => {
-    const create = vi.fn();
     const engine = new ReviewEngine();
     engine.register(createTestPlugin());
 
     await engine.present([], createAdapterContext());
 
-    expect(create).not.toHaveBeenCalled();
+    expect(mockOctokit.checks.create).not.toHaveBeenCalled();
   });
 
   it('calls plugin present() with PresentContext', async () => {

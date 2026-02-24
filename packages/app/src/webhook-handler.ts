@@ -252,7 +252,30 @@ export async function handlePullRequest(
     );
 
     // Each plugin owns its output via present() hooks.
-    await engine.present(findings, adapterContext, { checkRunId });
+    try {
+      await engine.present(findings, adapterContext, { checkRunId });
+    } catch (error) {
+      logger.error(
+        `engine.present() failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      if (checkRunId) {
+        await updateCheckRun(
+          octokit,
+          {
+            owner: prContext.owner,
+            repo: prContext.repo,
+            checkRunId,
+            status: 'completed',
+            conclusion: 'action_required',
+            output: {
+              title: 'Review failed',
+              summary: `An error occurred during review: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          },
+          logger,
+        ).catch(err => logger.warning(`Failed to finalize check run after error: ${err}`));
+      }
+    }
   } finally {
     // Cleanup independently so one failure doesn't prevent the other
     if (headClone) await headClone.cleanup().catch(() => {});
