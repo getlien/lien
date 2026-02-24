@@ -118,9 +118,7 @@ interface ArchContext {
   changedFilesCode: string;
 }
 
-const MAX_TOTAL_CHARS = 15_000;
-const MAX_FILE_CHARS = 3_000;
-const MAX_FILES = 8;
+const MAX_TOTAL_CHARS = 50_000;
 
 function computeArchContext(
   chunks: CodeChunk[],
@@ -148,21 +146,14 @@ function computeArchContext(
   const sections: string[] = [];
   let totalChars = 0;
 
-  for (const file of sortedFiles.slice(0, MAX_FILES)) {
-    if (totalChars >= MAX_TOTAL_CHARS) break;
-
+  for (const file of sortedFiles) {
     const fileChunks = chunksByFile.get(file)!;
+    const fileCode = fileChunks.map(c => c.content).join('\n\n');
+
+    // Skip files that don't fit — never truncate
+    if (totalChars + fileCode.length > MAX_TOTAL_CHARS) continue;
+
     const dependentCount = report.files[file]?.dependentCount ?? 0;
-
-    let fileCode = fileChunks.map(c => c.content).join('\n\n');
-    if (fileCode.length > MAX_FILE_CHARS) {
-      fileCode = fileCode.slice(0, MAX_FILE_CHARS) + '\n// ... (truncated)';
-    }
-    const remaining = MAX_TOTAL_CHARS - totalChars;
-    if (fileCode.length > remaining) {
-      fileCode = fileCode.slice(0, remaining) + '\n// ... (truncated)';
-    }
-
     const header =
       dependentCount > 0 ? `### ${file} (${dependentCount} dependents)` : `### ${file}`;
     sections.push(`${header}\n\`\`\`\n${fileCode}\n\`\`\``);
