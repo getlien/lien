@@ -99,10 +99,9 @@ export class ArchitecturalPlugin implements ReviewPlugin {
   }
 
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
-    const archFindings = findings.filter(f => f.pluginId === 'architectural');
-    if (archFindings.length === 0) return;
+    if (findings.length === 0) return;
 
-    const lines = archFindings
+    const lines = findings
       .map(f => `> **${f.message}**\n> ${f.evidence ?? ''}\n> *Suggestion: ${f.suggestion ?? ''}*`)
       .join('\n\n');
     context.appendSummary(`### Architectural observations\n\n${lines}`);

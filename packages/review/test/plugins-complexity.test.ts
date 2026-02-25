@@ -251,22 +251,10 @@ describe('ComplexityPlugin', () => {
     expect(appendSummary).toHaveBeenCalledWith(expect.stringContaining('No complexity violations'));
   });
 
-  it('present() ignores findings from other plugins', async () => {
+  it('present() does not add annotations when given no findings', async () => {
     const addAnnotations = vi.fn();
     const ctx = { addAnnotations, appendSummary: vi.fn() } as unknown as PresentContext;
-    await plugin.present(
-      [
-        {
-          pluginId: 'logic',
-          filepath: 'a.ts',
-          line: 1,
-          severity: 'warning',
-          category: 'logic',
-          message: 'x',
-        },
-      ],
-      ctx,
-    );
+    await plugin.present([], ctx);
     expect(addAnnotations).not.toHaveBeenCalled();
   });
 });

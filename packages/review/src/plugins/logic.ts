@@ -97,11 +97,10 @@ export class LogicPlugin implements ReviewPlugin {
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     if (!context.postInlineComments) return;
 
-    const logicFindings = findings.filter(f => f.pluginId === 'logic');
-    if (logicFindings.length === 0) return;
+    if (findings.length === 0) return;
 
     const { posted, skipped } = await context.postInlineComments(
-      logicFindings,
+      findings,
       '**Logic Review** (beta) — see inline comments.',
     );
     context.logger.info(`Logic: ${posted} posted, ${skipped} skipped`);

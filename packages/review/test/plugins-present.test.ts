@@ -61,21 +61,18 @@ describe('LogicPlugin.present()', () => {
     const postInlineComments = vi.fn().mockResolvedValue({ posted: 0, skipped: 0 });
     const ctx = makePresentContext({ postInlineComments });
 
-    // Only a complexity finding — should be filtered out
-    const findings = [makeLogicFinding({ pluginId: 'complexity' })];
-    await plugin.present(findings, ctx);
+    await plugin.present([], ctx);
 
     expect(postInlineComments).not.toHaveBeenCalled();
   });
 
-  it('calls postInlineComments with only logic findings', async () => {
+  it('calls postInlineComments with the findings it receives', async () => {
     const plugin = new LogicPlugin();
     const postInlineComments = vi.fn().mockResolvedValue({ posted: 1, skipped: 0 });
     const ctx = makePresentContext({ postInlineComments });
 
     const logicFinding = makeLogicFinding();
-    const otherFinding = makeLogicFinding({ pluginId: 'complexity' });
-    await plugin.present([logicFinding, otherFinding], ctx);
+    await plugin.present([logicFinding], ctx);
 
     expect(postInlineComments).toHaveBeenCalledTimes(1);
     expect(postInlineComments).toHaveBeenCalledWith([logicFinding], expect.any(String));
@@ -104,12 +101,7 @@ describe('ArchitecturalPlugin.present()', () => {
     const appendSummary = vi.fn();
     const ctx = makePresentContext({ appendSummary });
 
-    // Only logic and complexity findings
-    const findings = [
-      makeLogicFinding({ pluginId: 'logic' }),
-      makeLogicFinding({ pluginId: 'complexity' }),
-    ];
-    await plugin.present(findings, ctx);
+    await plugin.present([], ctx);
 
     expect(appendSummary).not.toHaveBeenCalled();
   });
@@ -129,18 +121,18 @@ describe('ArchitecturalPlugin.present()', () => {
     expect(summary).toContain('Extract shared logic into a utility');
   });
 
-  it('filters to only architectural findings', async () => {
+  it('renders all received findings into the summary', async () => {
     const plugin = new ArchitecturalPlugin();
     const appendSummary = vi.fn();
     const ctx = makePresentContext({ appendSummary });
 
-    const archFinding = makeArchFinding({ message: 'Arch issue' });
-    const logicFinding = makeLogicFinding({ pluginId: 'logic', message: 'Logic issue' });
-    await plugin.present([archFinding, logicFinding], ctx);
+    const finding1 = makeArchFinding({ message: 'Arch issue A' });
+    const finding2 = makeArchFinding({ message: 'Arch issue B' });
+    await plugin.present([finding1, finding2], ctx);
 
     const summary: string = appendSummary.mock.calls[0][0];
-    expect(summary).toContain('Arch issue');
-    expect(summary).not.toContain('Logic issue');
+    expect(summary).toContain('Arch issue A');
+    expect(summary).toContain('Arch issue B');
   });
 
   it('handles findings with missing evidence and suggestion gracefully', async () => {

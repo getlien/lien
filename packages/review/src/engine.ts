@@ -236,8 +236,9 @@ async function dispatchPresent(
   const active = pluginFilter ? plugins.filter(p => p.id === pluginFilter) : plugins;
   for (const plugin of active) {
     if (!plugin.present) continue;
+    const pluginFindings = findings.filter(f => f.pluginId === plugin.id);
     try {
-      await plugin.present(findings, presentContext);
+      await plugin.present(pluginFindings, presentContext);
     } catch (error) {
       logger.warning(
         `Plugin "${plugin.id}" present() failed: ${error instanceof Error ? error.message : String(error)}`,

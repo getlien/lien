@@ -282,10 +282,10 @@ async function runAndPresent(
   );
   logger.info(`Engine produced ${findings.length} total findings`);
 
-  const adapterContext = buildAdapterContext(result, prContext, octokit, llm, reviewConfig, logger);
+  const engineContext = buildEngineContext(result, prContext, octokit, llm, reviewConfig, logger);
 
   try {
-    await engine.present(findings, adapterContext, { checkRunId });
+    await engine.present(findings, engineContext, { checkRunId });
   } catch (error) {
     logger.error(
       `engine.present() failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -361,7 +361,7 @@ function buildReviewContext(
   };
 }
 
-function buildAdapterContext(
+function buildEngineContext(
   result: AnalysisResult,
   pr: PRContext,
   octokit: ReturnType<typeof createOctokit>,

@@ -53,18 +53,16 @@ export class ComplexityPlugin implements ReviewPlugin {
   }
 
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
-    const complexityFindings = findings.filter(f => f.pluginId === 'complexity');
-
-    context.appendSummary(buildComplexitySummary(complexityFindings, context));
+    context.appendSummary(buildComplexitySummary(findings, context));
 
     await context.updateDescription?.(
       buildDescriptionBadge(context.complexityReport, context.deltaSummary, context.deltas),
     );
 
-    if (complexityFindings.length === 0) return;
+    if (findings.length === 0) return;
 
     context.addAnnotations(
-      worstPerFunction(complexityFindings).map(f => ({
+      worstPerFunction(findings).map(f => ({
         path: f.filepath,
         start_line: f.line,
         end_line: f.line,
