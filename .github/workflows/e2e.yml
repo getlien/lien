@@ -72,6 +72,9 @@ jobs:
           - project: Chi
             language: Go
             script: test:e2e:go
+          - project: JavaPoet
+            language: Java
+            script: test:e2e:java
 
     steps:
       - name: Checkout code
