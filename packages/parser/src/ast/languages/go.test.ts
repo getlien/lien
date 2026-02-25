@@ -325,6 +325,17 @@ import (
       expect(symbol!.signature).toBe('type User struct');
     });
 
+    it('should use actual type text for type alias signatures', () => {
+      const code = 'package main\ntype UserID int64';
+      const tree = parser.parse(code);
+      const typeNode = tree.rootNode.namedChild(1)!;
+      const symbol = symbolExtractor.extractSymbol(typeNode, code);
+      expect(symbol).not.toBeNull();
+      expect(symbol!.name).toBe('UserID');
+      expect(symbol!.type).toBe('class');
+      expect(symbol!.signature).toBe('type UserID int64');
+    });
+
     it('should extract interface as interface', () => {
       const code = 'package main\ntype Validator interface { Validate() error }';
       const tree = parser.parse(code);

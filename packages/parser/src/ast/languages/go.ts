@@ -353,14 +353,25 @@ export class GoSymbolExtractor implements LanguageSymbolExtractor {
     if (!nameNode) return null;
 
     const symbolType = typeNode?.type === 'interface_type' ? 'interface' : 'class';
-    const keyword = symbolType === 'interface' ? 'interface' : 'struct';
+
+    // Use concise keyword for struct/interface, actual type text for aliases/maps/etc.
+    let signature: string;
+    if (typeNode?.type === 'struct_type') {
+      signature = `type ${nameNode.text} struct`;
+    } else if (typeNode?.type === 'interface_type') {
+      signature = `type ${nameNode.text} interface`;
+    } else if (typeNode) {
+      signature = `type ${nameNode.text} ${typeNode.text}`;
+    } else {
+      signature = `type ${nameNode.text}`;
+    }
 
     return {
       name: nameNode.text,
       type: symbolType,
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
-      signature: `type ${nameNode.text} ${keyword}`,
+      signature,
     };
   }
 }
