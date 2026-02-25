@@ -30,6 +30,10 @@ describe('Language Registry', () => {
       expect(detectLanguage('main.go')).toBe('go');
     });
 
+    it('should detect Java files', () => {
+      expect(detectLanguage('Main.java')).toBe('java');
+    });
+
     it('should return null for unsupported extensions', () => {
       expect(detectLanguage('style.css')).toBeNull();
       expect(detectLanguage('data.json')).toBeNull();
@@ -57,6 +61,7 @@ describe('Language Registry', () => {
         'python',
         'rust',
         'go',
+        'java',
       ];
       for (const lang of languages) {
         const def = getLanguage(lang);
@@ -89,9 +94,9 @@ describe('Language Registry', () => {
   });
 
   describe('getAllLanguages', () => {
-    it('should return all 6 registered languages', () => {
+    it('should return all 7 registered languages', () => {
       const all = getAllLanguages();
-      expect(all).toHaveLength(6);
+      expect(all).toHaveLength(7);
       const ids = all.map(d => d.id);
       expect(ids).toContain('typescript');
       expect(ids).toContain('javascript');
@@ -99,6 +104,7 @@ describe('Language Registry', () => {
       expect(ids).toContain('python');
       expect(ids).toContain('rust');
       expect(ids).toContain('go');
+      expect(ids).toContain('java');
     });
 
     it('should return a defensive copy', () => {

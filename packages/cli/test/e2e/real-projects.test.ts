@@ -113,6 +113,15 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 20,
     sampleSearchQuery: 'http router middleware',
   },
+  {
+    name: 'JavaPoet',
+    repo: 'https://github.com/square/javapoet.git',
+    branch: 'master',
+    language: 'java',
+    expectedMinFiles: 10,
+    expectedMinChunks: 100,
+    sampleSearchQuery: 'generate java source code',
+  },
 ];
 
 /**

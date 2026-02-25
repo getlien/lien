@@ -6,6 +6,7 @@ import { phpDefinition } from './php.js';
 import { pythonDefinition } from './python.js';
 import { rustDefinition } from './rust.js';
 import { goDefinition } from './go.js';
+import { javaDefinition } from './java.js';
 
 /**
  * All registered language definitions.
@@ -18,6 +19,7 @@ const definitions: LanguageDefinition[] = [
   pythonDefinition,
   rustDefinition,
   goDefinition,
+  javaDefinition,
 ];
 
 /**
@@ -25,7 +27,15 @@ const definitions: LanguageDefinition[] = [
  * SupportedLanguage type is derived from this array.
  * To add a new language: add its ID here, then add its definition to `definitions` below.
  */
-export const LANGUAGE_IDS = ['typescript', 'javascript', 'php', 'python', 'rust', 'go'] as const;
+export const LANGUAGE_IDS = [
+  'typescript',
+  'javascript',
+  'php',
+  'python',
+  'rust',
+  'go',
+  'java',
+] as const;
 export type SupportedLanguage = (typeof LANGUAGE_IDS)[number];
 
 /**
