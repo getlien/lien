@@ -104,6 +104,15 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 15,
     sampleSearchQuery: 'error handling context',
   },
+  {
+    name: 'Chi',
+    repo: 'https://github.com/go-chi/chi.git',
+    branch: 'master',
+    language: 'go',
+    expectedMinFiles: 5,
+    expectedMinChunks: 20,
+    sampleSearchQuery: 'http router middleware',
+  },
 ];
 
 /**

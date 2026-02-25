@@ -20,7 +20,7 @@
     "packages/site"
   ],
   "scripts": {
-    "build": "npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w packages/cli",
+    "build": "npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review && npm run build -w packages/cli",
     "build:core": "npm run build -w @liendev/parser && npm run build -w @liendev/core",
     "dev": "npm run dev -w packages/cli",
     "typecheck": "npm run build -w @liendev/parser -w @liendev/core -w @liendev/review && npm run typecheck -w packages/cli -w packages/review -w packages/app",

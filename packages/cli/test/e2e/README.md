@@ -18,6 +18,8 @@ These tests:
 | TypeScript | Zod      | https://github.com/colinhacks/zod         | Modern TS, clean codebase, type-heavy      |
 | JavaScript | Express  | https://github.com/expressjs/express      | Most popular Node.js framework             |
 | PHP        | Monolog  | https://github.com/Seldaek/monolog        | Standard PHP logging, clear patterns       |
+| Rust       | Anyhow   | https://github.com/dtolnay/anyhow         | Error handling library, clean Rust patterns|
+| Go         | Chi      | https://github.com/go-chi/chi             | Lightweight HTTP router, clean Go patterns |
 
 ## Running Tests
 

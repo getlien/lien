@@ -26,7 +26,6 @@ describe('AST Chunker', () => {
     });
 
     it('should return false for unsupported files', () => {
-      expect(shouldUseAST('test.go')).toBe(false);
       expect(shouldUseAST('test.rb')).toBe(false);
       expect(shouldUseAST('test.txt')).toBe(false);
     });

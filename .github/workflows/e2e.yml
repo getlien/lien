@@ -69,6 +69,9 @@ jobs:
           - project: Anyhow
             language: Rust
             script: test:e2e:rust
+          - project: Chi
+            language: Go
+            script: test:e2e:go
 
     steps:
       - name: Checkout code
