@@ -26,11 +26,15 @@ describe('Language Registry', () => {
       expect(detectLanguage('main.rs')).toBe('rust');
     });
 
+    it('should detect Go files', () => {
+      expect(detectLanguage('main.go')).toBe('go');
+    });
+
     it('should return null for unsupported extensions', () => {
       expect(detectLanguage('style.css')).toBeNull();
       expect(detectLanguage('data.json')).toBeNull();
       expect(detectLanguage('README.md')).toBeNull();
-      expect(detectLanguage('main.go')).toBeNull();
+      expect(detectLanguage('main.swift')).toBeNull();
     });
 
     it('should handle paths with directories', () => {
@@ -46,7 +50,14 @@ describe('Language Registry', () => {
 
   describe('getLanguage', () => {
     it('should return a definition for each supported language', () => {
-      const languages: SupportedLanguage[] = ['typescript', 'javascript', 'php', 'python', 'rust'];
+      const languages: SupportedLanguage[] = [
+        'typescript',
+        'javascript',
+        'php',
+        'python',
+        'rust',
+        'go',
+      ];
       for (const lang of languages) {
         const def = getLanguage(lang);
         expect(def.id).toBe(lang);
@@ -59,8 +70,8 @@ describe('Language Registry', () => {
     });
 
     it('should throw for unregistered languages', () => {
-      expect(() => getLanguage('go' as SupportedLanguage)).toThrow(
-        'No language definition registered for: go',
+      expect(() => getLanguage('swift' as SupportedLanguage)).toThrow(
+        'No language definition registered for: swift',
       );
     });
   });
@@ -72,21 +83,22 @@ describe('Language Registry', () => {
     });
 
     it('should return false for unregistered languages', () => {
-      expect(languageExists('go')).toBe(false);
+      expect(languageExists('swift')).toBe(false);
       expect(languageExists('')).toBe(false);
     });
   });
 
   describe('getAllLanguages', () => {
-    it('should return all 5 registered languages', () => {
+    it('should return all 6 registered languages', () => {
       const all = getAllLanguages();
-      expect(all).toHaveLength(5);
+      expect(all).toHaveLength(6);
       const ids = all.map(d => d.id);
       expect(ids).toContain('typescript');
       expect(ids).toContain('javascript');
       expect(ids).toContain('php');
       expect(ids).toContain('python');
       expect(ids).toContain('rust');
+      expect(ids).toContain('go');
     });
 
     it('should return a defensive copy', () => {
