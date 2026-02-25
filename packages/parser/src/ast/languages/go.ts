@@ -61,34 +61,21 @@ export class GoTraverser implements LanguageTraverser {
   }
 
   findFunctionInDeclaration(node: Parser.SyntaxNode): DeclarationFunctionInfo {
+    const noFunction: DeclarationFunctionInfo = { hasFunction: false, functionNode: null };
+
     // var handler = func(...) { ... }
     if (node.type === 'var_declaration') {
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const spec = node.namedChild(i);
-        if (spec?.type === 'var_spec') {
-          const valueList = spec.childForFieldName('value');
-          if (valueList) {
-            const funcLiteral = findChildOfType(valueList, 'func_literal');
-            if (funcLiteral) {
-              return { hasFunction: true, functionNode: funcLiteral };
-            }
-          }
-        }
-      }
+      return findFuncLiteralInVarDecl(node) ?? noFunction;
     }
 
     // handler := func(...) { ... }
     if (node.type === 'short_var_declaration') {
       const right = node.childForFieldName('right');
-      if (right) {
-        const funcLiteral = findChildOfType(right, 'func_literal');
-        if (funcLiteral) {
-          return { hasFunction: true, functionNode: funcLiteral };
-        }
-      }
+      const funcLiteral = right ? findChildOfType(right, 'func_literal') : null;
+      return funcLiteral ? { hasFunction: true, functionNode: funcLiteral } : noFunction;
     }
 
-    return { hasFunction: false, functionNode: null };
+    return noFunction;
   }
 
   private hasFuncLiteral(node: Parser.SyntaxNode): boolean {
@@ -170,26 +157,10 @@ export class GoExportExtractor implements LanguageExportExtractor {
   }
 
   private extractSpecExports(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (!child) continue;
-
-      // Direct spec children (single declarations and grouped const)
-      if (child.type === 'const_spec' || child.type === 'var_spec') {
-        const nameNode = child.childForFieldName('name');
-        if (nameNode) addExport(nameNode.text);
-      }
-
-      // Grouped var uses var_spec_list as intermediate wrapper
-      if (child.type === 'var_spec_list') {
-        for (let j = 0; j < child.namedChildCount; j++) {
-          const spec = child.namedChild(j);
-          if (spec?.type === 'var_spec') {
-            const nameNode = spec.childForFieldName('name');
-            if (nameNode) addExport(nameNode.text);
-          }
-        }
-      }
+    const specs = collectSpecs(node);
+    for (const spec of specs) {
+      const nameNode = spec.childForFieldName('name');
+      if (nameNode) addExport(nameNode.text);
     }
   }
 }
@@ -478,6 +449,45 @@ function extractGoReturnType(node: Parser.SyntaxNode): string | undefined {
   const resultNode = node.childForFieldName('result');
   if (!resultNode) return undefined;
   return resultNode.text;
+}
+
+/**
+ * Find a func_literal inside a var_declaration's var_spec children.
+ */
+function findFuncLiteralInVarDecl(node: Parser.SyntaxNode): DeclarationFunctionInfo | null {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const spec = node.namedChild(i);
+    if (spec?.type !== 'var_spec') continue;
+
+    const valueList = spec.childForFieldName('value');
+    if (!valueList) continue;
+
+    const funcLiteral = findChildOfType(valueList, 'func_literal');
+    if (funcLiteral) return { hasFunction: true, functionNode: funcLiteral };
+  }
+  return null;
+}
+
+/**
+ * Collect all const_spec or var_spec nodes from a declaration,
+ * handling the var_spec_list wrapper for grouped var blocks.
+ */
+function collectSpecs(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
+  const specs: Parser.SyntaxNode[] = [];
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (!child) continue;
+
+    if (child.type === 'const_spec' || child.type === 'var_spec') {
+      specs.push(child);
+    } else if (child.type === 'var_spec_list') {
+      for (let j = 0; j < child.namedChildCount; j++) {
+        const spec = child.namedChild(j);
+        if (spec?.type === 'var_spec') specs.push(spec);
+      }
+    }
+  }
+  return specs;
 }
 
 /**
