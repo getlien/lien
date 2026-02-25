@@ -343,16 +343,10 @@ async function postPluginInlineComments(
 
   const markerPrefix = `${PLUGIN_MARKER_PREFIX}${pluginId}:`;
 
-  let diffLines: Map<string, Set<number>>;
-  try {
-    diffLines = await getPRDiffLines(octokit, pr);
-  } catch (error) {
-    logger.warning(`postInlineComments: failed to get diff lines: ${error}`);
-    return { posted: 0, skipped: findings.length };
-  }
+  const diffResult = await filterToDiffLines(octokit, pr, findings, logger);
+  if (!diffResult) return { posted: 0, skipped: findings.length };
 
-  const inDiff = findings.filter(f => diffLines.get(f.filepath)?.has(f.line));
-  const outOfDiffCount = findings.length - inDiff.length;
+  const { inDiff, outOfDiffCount } = diffResult;
   if (inDiff.length === 0) return { posted: 0, skipped: findings.length };
 
   const comments: LineComment[] = inDiff.map(f => ({
@@ -361,12 +355,53 @@ async function postPluginInlineComments(
     body: buildPluginCommentBody(f, markerPrefix),
   }));
 
-  // Dedup: skip findings already commented in a previous run
-  let toPost = comments;
-  let dedupSkipped = 0;
+  const { toPost, dedupSkipped } = await deduplicateComments(
+    octokit,
+    pr,
+    pluginId,
+    comments,
+    markerPrefix,
+    logger,
+  );
+
+  const skipped = outOfDiffCount + dedupSkipped;
+  if (toPost.length === 0) return { posted: 0, skipped };
+
+  await postPRReview(octokit, pr, toPost, summaryBody, logger, 'COMMENT');
+  return { posted: toPost.length, skipped };
+}
+
+/** Fetch diff lines and filter findings to those within the diff. Returns null on API failure. */
+async function filterToDiffLines(
+  octokit: Octokit,
+  pr: PRContext,
+  findings: ReviewFinding[],
+  logger: Logger,
+): Promise<{ inDiff: ReviewFinding[]; outOfDiffCount: number } | null> {
+  let diffLines: Map<string, Set<number>>;
+  try {
+    diffLines = await getPRDiffLines(octokit, pr);
+  } catch (error) {
+    logger.warning(`postInlineComments: failed to get diff lines: ${error}`);
+    return null;
+  }
+  const inDiff = findings.filter(f => diffLines.get(f.filepath)?.has(f.line));
+  return { inDiff, outOfDiffCount: findings.length - inDiff.length };
+}
+
+/** Filter out comments already posted in a previous run. Falls back to posting all on API failure. */
+async function deduplicateComments(
+  octokit: Octokit,
+  pr: PRContext,
+  pluginId: string,
+  comments: LineComment[],
+  markerPrefix: string,
+  logger: Logger,
+): Promise<{ toPost: LineComment[]; dedupSkipped: number }> {
   try {
     const existingKeys = await getExistingPluginCommentKeys(octokit, pr, pluginId, logger);
-    toPost = comments.filter(c => {
+    let dedupSkipped = 0;
+    const toPost = comments.filter(c => {
       const key = extractPluginCommentKey(c.body, markerPrefix);
       if (key && existingKeys.has(key)) {
         dedupSkipped++;
@@ -374,15 +409,11 @@ async function postPluginInlineComments(
       }
       return true;
     });
+    return { toPost, dedupSkipped };
   } catch (error) {
     logger.warning(`postInlineComments: failed to fetch existing ${pluginId} comments: ${error}`);
+    return { toPost: comments, dedupSkipped: 0 };
   }
-
-  const skipped = outOfDiffCount + dedupSkipped;
-  if (toPost.length === 0) return { posted: 0, skipped };
-
-  await postPRReview(octokit, pr, toPost, summaryBody, logger, 'COMMENT');
-  return { posted: toPost.length, skipped };
 }
 
 // ---------------------------------------------------------------------------
