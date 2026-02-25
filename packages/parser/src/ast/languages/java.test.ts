@@ -402,6 +402,18 @@ describe('Java Language', () => {
       expect(symbols).toContain('filter');
       expect(symbols).toContain('collect');
     });
+
+    it('should extract call site from method reference', () => {
+      const code = `public class Foo {
+    void bar() { list.stream().map(String::valueOf).collect(null); }
+}`;
+      const tree = parser.parse(code);
+      const refNodes = findAllNodes(tree.rootNode, 'method_reference');
+      expect(refNodes.length).toBeGreaterThanOrEqual(1);
+      const callSite = symbolExtractor.extractCallSite(refNodes[0]);
+      expect(callSite).not.toBeNull();
+      expect(callSite!.symbol).toBe('valueOf');
+    });
   });
 
   describe('AST Chunking Integration', () => {

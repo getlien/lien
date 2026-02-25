@@ -161,18 +161,25 @@ export class JavaExportExtractor implements LanguageExportExtractor {
     for (let i = 0; i < body.namedChildCount; i++) {
       const child = body.namedChild(i);
       if (!child) continue;
+      this.extractMemberExport(child, isInterface, addExport);
+    }
+  }
 
-      if (child.type === 'method_declaration' || child.type === 'constructor_declaration') {
-        // Interface methods are implicitly public
-        if (isInterface || hasPublicModifier(child)) {
-          const nameNode = child.childForFieldName('name');
-          if (nameNode) addExport(nameNode.text);
-        }
+  private extractMemberExport(
+    member: Parser.SyntaxNode,
+    isInterface: boolean,
+    addExport: (name: string) => void,
+  ): void {
+    if (member.type === 'method_declaration' || member.type === 'constructor_declaration') {
+      if (isInterface || hasPublicModifier(member)) {
+        const nameNode = member.childForFieldName('name');
+        if (nameNode) addExport(nameNode.text);
       }
+      return;
+    }
 
-      if (child.type === 'field_declaration' && hasPublicModifier(child)) {
-        this.extractFieldNames(child, addExport);
-      }
+    if (member.type === 'field_declaration' && hasPublicModifier(member)) {
+      this.extractFieldNames(member, addExport);
     }
   }
 
@@ -298,13 +305,24 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
   }
 
   extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
-    if (node.type !== 'method_invocation') return null;
-
     const line = node.startPosition.row + 1;
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return null;
 
-    return { symbol: nameNode.text, line, key: `${nameNode.text}:${line}` };
+    // method_invocation: foo() or obj.foo()
+    if (node.type === 'method_invocation') {
+      const nameNode = node.childForFieldName('name');
+      if (!nameNode) return null;
+      return { symbol: nameNode.text, line, key: `${nameNode.text}:${line}` };
+    }
+
+    // method_reference: String::valueOf — no field names, last named child is the method identifier
+    if (node.type === 'method_reference') {
+      const lastChild = node.namedChild(node.namedChildCount - 1);
+      if (lastChild?.type === 'identifier') {
+        return { symbol: lastChild.text, line, key: `${lastChild.text}:${line}` };
+      }
+    }
+
+    return null;
   }
 
   private extractMethodInfo(
@@ -407,12 +425,17 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
 
 /**
  * Check if a node has a `public` modifier.
+ * Iterates the modifiers node's children for an exact `public` token
+ * to avoid false positives from substring matching.
  */
 function hasPublicModifier(node: Parser.SyntaxNode): boolean {
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i);
     if (child?.type === 'modifiers') {
-      return child.text.includes('public');
+      for (let j = 0; j < child.childCount; j++) {
+        if (child.child(j)?.type === 'public') return true;
+      }
+      return false;
     }
   }
   return false;
@@ -583,6 +606,6 @@ export const javaDefinition: LanguageDefinition = {
   },
 
   symbols: {
-    callExpressionTypes: ['method_invocation'],
+    callExpressionTypes: ['method_invocation', 'method_reference'],
   },
 };
