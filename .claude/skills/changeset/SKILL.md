@@ -39,15 +39,16 @@ git log --format="%h %s" --no-merges <tag>..HEAD -- packages/
 For each commit, check which packages it touches:
 
 ```bash
+git diff --name-only <tag>..HEAD -- packages/parser/
 git diff --name-only <tag>..HEAD -- packages/core/
 git diff --name-only <tag>..HEAD -- packages/cli/
 ```
 
-- If **only** `packages/core/` changed → only `@liendev/core` in frontmatter
-- If **only** `packages/cli/` changed → only `@liendev/lien` in frontmatter
-- If **both** changed (most common) → both packages in frontmatter
+- Check **all three** published packages: `@liendev/parser`, `@liendev/core`, `@liendev/lien`
+- Include every package that has changes in the frontmatter
+- These packages are `linked` in `.changeset/config.json`, so they version together. When in doubt, include all three.
 
-Note: These packages are `linked` in `.changeset/config.json`, so they version together. When in doubt, include both.
+**IMPORTANT:** Always read `.changeset/config.json` to verify the current `linked` group. Do not assume which packages exist — check the config.
 
 ## Step 4: Determine Version Bump
 
@@ -109,6 +110,7 @@ Write the file in this exact format:
 
 ```markdown
 ---
+"@liendev/parser": <bump>
 "@liendev/core": <bump>
 "@liendev/lien": <bump>
 ---
@@ -127,10 +129,11 @@ Only include package lines for affected packages. Only include sections that hav
 
 ## Example Output
 
-For reference, here's what a real changeset looked like (v0.35.0):
+For reference, here's what a real changeset looked like (v0.41.0):
 
 ```markdown
 ---
+"@liendev/parser": minor
 "@liendev/core": minor
 "@liendev/lien": minor
 ---
@@ -150,9 +153,9 @@ For reference, here's what a real changeset looked like (v0.35.0):
 
 ## Important Notes
 
-- Do NOT include `@liendev/action` — it's ignored in changeset config
-- The packages are **linked** — they always get the same version bump
-- Commits with scope `(core)` usually affect `@liendev/core`, scope `(cli)` or `(mcp)` affect `@liendev/lien`, no scope or `(security)` may affect both
+- The three published packages are `@liendev/parser`, `@liendev/core`, and `@liendev/lien` — they are **linked** and always get the same version bump
+- Always read `.changeset/config.json` to verify the linked group — do not hardcode assumptions about which packages exist
+- Commits with scope `(parser)` affect `@liendev/parser`, scope `(core)` affect `@liendev/core`, scope `(cli)` or `(mcp)` affect `@liendev/lien`, no scope or `(security)` may affect all three
 - Skip merge commits (`chore: version packages`, `Merge pull request`)
 - Skip CI-only changes (`ci:`, workflow files)
 - When in doubt about whether to include a commit, include it — better to over-document than under-document
