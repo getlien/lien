@@ -577,7 +577,7 @@ public class App {
       expect(enumChunk).toBeDefined();
     });
 
-    it('should chunk records', () => {
+    it('should chunk records and their methods', () => {
       const content = `public record Point(int x, int y) {
     public double distance() {
         return Math.sqrt(x * x + y * y);
@@ -589,6 +589,12 @@ public class App {
         c => c.metadata.symbolName === 'Point' && c.metadata.symbolType === 'class',
       );
       expect(recordChunk).toBeDefined();
+
+      // Record bodies use class_body in tree-sitter-java, so methods are extracted
+      const distanceChunk = chunks.find(c => c.metadata.symbolName === 'distance');
+      expect(distanceChunk).toBeDefined();
+      expect(distanceChunk?.metadata.symbolType).toBe('method');
+      expect(distanceChunk?.metadata.parentClass).toBe('Point');
     });
   });
 });
