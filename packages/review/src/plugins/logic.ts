@@ -13,6 +13,7 @@ import type {
   ReviewContext,
   ReviewFinding,
   LogicFindingMetadata,
+  PresentContext,
 } from '../plugin-types.js';
 import { detectLogicFindings } from '../logic-review.js';
 import { isFindingSuppressed } from '../suppression.js';
@@ -31,7 +32,7 @@ export class LogicPlugin implements ReviewPlugin {
   id = 'logic';
   name = 'Logic Review';
   description = 'Detects breaking changes, unchecked returns, and missing test coverage';
-  requiresLLM = false;
+  requiresLLM = true;
   configSchema = logicConfigSchema;
   defaultConfig = { categories: ['breaking_change', 'unchecked_return', 'missing_tests'] };
 
@@ -91,6 +92,18 @@ export class LogicPlugin implements ReviewPlugin {
         metadata,
       } satisfies ReviewFinding;
     });
+  }
+
+  async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
+    if (!context.postInlineComments) return;
+
+    if (findings.length === 0) return;
+
+    const { posted, skipped } = await context.postInlineComments(
+      findings,
+      '**Logic Review** (beta) — see inline comments.',
+    );
+    context.logger.info(`Logic: ${posted} posted, ${skipped} skipped`);
   }
 
   /**

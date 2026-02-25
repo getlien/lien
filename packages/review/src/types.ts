@@ -12,6 +12,8 @@ export interface PRContext {
   repo: string;
   pullNumber: number;
   title: string;
+  /** PR description body (markdown). Optional — may be absent in CLI mode or empty PRs. */
+  body?: string;
   baseSha: string;
   headSha: string;
 }

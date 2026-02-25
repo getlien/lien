@@ -18,6 +18,8 @@ export type {
   OutputAdapter,
   AdapterResult,
   AdapterContext,
+  PresentContext,
+  CheckAnnotation,
   AnalysisResult,
   ReviewSetup,
   ComplexityFindingMetadata,
@@ -38,7 +40,6 @@ export { LogicPlugin } from './plugins/logic.js';
 export { ArchitecturalPlugin } from './plugins/architectural.js';
 
 // Output adapters
-export { GitHubAdapter } from './adapters/github.js';
 export { TerminalAdapter } from './adapters/terminal.js';
 export { SARIFAdapter } from './adapters/sarif.js';
 
@@ -97,6 +98,7 @@ export {
 export {
   type Octokit,
   type PRPatchData,
+  type CheckRunOutput,
   createOctokit,
   getPRChangedFiles,
   postPRComment,
@@ -109,6 +111,8 @@ export {
   getExistingCommentKeys,
   parseCommentMarker,
   parseLogicMarker,
+  createCheckRun,
+  updateCheckRun,
   COMMENT_MARKER_PREFIX,
   LOGIC_MARKER_PREFIX,
   LEGACY_COMMENT_MARKER_PREFIX,

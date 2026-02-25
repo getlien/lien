@@ -1,11 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ComplexityPlugin } from '../src/plugins/complexity.js';
-import {
-  createTestContext,
-  createTestReport,
-  createTestChunk,
-  createMockLLMClient,
-} from '../src/test-helpers.js';
+import { createTestContext, createTestReport } from '../src/test-helpers.js';
+import type { PresentContext } from '../src/plugin-types.js';
 
 describe('ComplexityPlugin', () => {
   const plugin = new ComplexityPlugin();
@@ -29,87 +25,81 @@ describe('ComplexityPlugin', () => {
     expect(plugin.shouldActivate(context)).toBe(true);
   });
 
-  it('produces findings for each violation (no LLM)', async () => {
+  it('produces findings for each violation', async () => {
     const report = createTestReport([
       { filepath: 'a.ts', symbolName: 'fnA', complexity: 20, threshold: 15 },
       { filepath: 'b.ts', symbolName: 'fnB', complexity: 25, threshold: 15, severity: 'error' },
     ]);
 
-    const context = createTestContext({
-      complexityReport: report,
-    });
-
-    const findings = await plugin.analyze(context);
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
     expect(findings).toHaveLength(2);
     expect(findings[0].pluginId).toBe('complexity');
-    // Prioritized: errors first
     const severities = findings.map(f => f.severity).sort();
     expect(severities).toEqual(['error', 'warning']);
   });
 
-  it('uses LLM suggestions when available', async () => {
+  it('uses per-metric messages for cyclomatic violations', async () => {
     const report = createTestReport([
-      { filepath: 'a.ts', symbolName: 'fnA', complexity: 20, threshold: 15 },
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 20,
+        threshold: 15,
+        metricType: 'cyclomatic',
+      },
     ]);
 
-    const llm = createMockLLMClient([
-      JSON.stringify({ 'a.ts::fnA': 'Extract helper function to reduce complexity.' }),
-    ]);
-
-    const chunks = [
-      createTestChunk({
-        content: 'function fnA() { /* complex */ }',
-        metadata: {
-          file: 'a.ts',
-          startLine: 1,
-          endLine: 10,
-          type: 'function',
-          symbolName: 'fnA',
-          language: 'typescript',
-        },
-      }),
-    ];
-
-    const context = createTestContext({
-      complexityReport: report,
-      chunks,
-      llm,
-    });
-
-    const findings = await plugin.analyze(context);
-    expect(findings).toHaveLength(1);
-    expect(findings[0].message).toBe('Extract helper function to reduce complexity.');
-    expect(llm.calls).toHaveLength(1);
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    expect(findings[0].message).toContain('branches');
+    expect(findings[0].message).toContain('20 tests');
   });
 
-  it('falls back to default message when LLM fails', async () => {
+  it('uses per-metric messages for cognitive violations', async () => {
     const report = createTestReport([
-      { filepath: 'a.ts', symbolName: 'fnA', complexity: 20, threshold: 15 },
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 20,
+        threshold: 15,
+        metricType: 'cognitive',
+      },
     ]);
 
-    const llm = createMockLLMClient(['not valid json at all']);
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    expect(findings[0].message).toContain('cognitive complexity 20');
+    expect(findings[0].message).toContain('early returns');
+  });
 
-    const context = createTestContext({
-      complexityReport: report,
-      chunks: [
-        createTestChunk({
-          metadata: {
-            file: 'a.ts',
-            startLine: 1,
-            endLine: 10,
-            type: 'function',
-            symbolName: 'fnA',
-            language: 'typescript',
-          },
-        }),
-      ],
-      llm,
-    });
+  it('uses per-metric messages for halstead_effort violations', async () => {
+    const report = createTestReport([
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 5000,
+        threshold: 1000,
+        metricType: 'halstead_effort',
+      },
+    ]);
 
-    const findings = await plugin.analyze(context);
-    expect(findings).toHaveLength(1);
-    // Should have a fallback message, not the LLM response
-    expect(findings[0].message).toContain('test paths');
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    expect(findings[0].message).toContain('to understand');
+    expect(findings[0].message).toContain('readability');
+  });
+
+  it('uses per-metric messages for halstead_bugs violations', async () => {
+    const report = createTestReport([
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 0.8,
+        threshold: 0.35,
+        metricType: 'halstead_bugs',
+      },
+    ]);
+
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    expect(findings[0].message).toContain('bug density');
+    expect(findings[0].message).toContain('error likelihood');
   });
 
   it('includes metadata on findings', async () => {
@@ -123,9 +113,7 @@ describe('ComplexityPlugin', () => {
       },
     ]);
 
-    const context = createTestContext({ complexityReport: report });
-    const findings = await plugin.analyze(context);
-
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
     expect(findings[0].metadata).toEqual({
       pluginType: 'complexity',
       metricType: 'cognitive',
@@ -134,5 +122,139 @@ describe('ComplexityPlugin', () => {
       delta: null,
       symbolType: 'function',
     });
+  });
+
+  it('present() adds annotations for complexity findings', async () => {
+    const report = createTestReport([
+      { filepath: 'a.ts', symbolName: 'fnA', complexity: 20, threshold: 15, severity: 'warning' },
+      { filepath: 'b.ts', symbolName: 'fnB', complexity: 30, threshold: 15, severity: 'error' },
+    ]);
+
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+
+    const addAnnotations = vi.fn();
+    const ctx = { addAnnotations, appendSummary: vi.fn() } as unknown as PresentContext;
+    await plugin.present(findings, ctx);
+
+    expect(addAnnotations).toHaveBeenCalledTimes(1);
+    const annotations = addAnnotations.mock.calls[0][0];
+    expect(annotations).toHaveLength(2);
+
+    const warning = annotations.find(
+      (a: { annotation_level: string }) => a.annotation_level === 'warning',
+    );
+    const failure = annotations.find(
+      (a: { annotation_level: string }) => a.annotation_level === 'failure',
+    );
+    expect(warning).toBeDefined();
+    expect(failure).toBeDefined();
+    expect(warning.path).toBe('a.ts');
+    expect(failure.path).toBe('b.ts');
+    expect(warning.title).toContain('fnA');
+    expect(failure.title).toContain('fnB');
+  });
+
+  it('present() emits one annotation per function, keeping the worst metric', async () => {
+    // fnA has two metrics: cyclomatic (warning) and halstead_effort (error) — keep error
+    const report = createTestReport([
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 20,
+        threshold: 15,
+        metricType: 'cyclomatic',
+        severity: 'warning',
+      },
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 5000,
+        threshold: 1000,
+        metricType: 'halstead_effort',
+        severity: 'error',
+      },
+    ]);
+
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    expect(findings).toHaveLength(2);
+
+    const addAnnotations = vi.fn();
+    const ctx = { addAnnotations, appendSummary: vi.fn() } as unknown as PresentContext;
+    await plugin.present(findings, ctx);
+
+    const annotations = addAnnotations.mock.calls[0][0];
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0].annotation_level).toBe('failure');
+    expect(annotations[0].title).toContain('fnA');
+  });
+
+  it('present() breaks severity ties by overage ratio', async () => {
+    // fnA has two warnings: cyclomatic 20/15 (ratio 1.33) and cognitive 30/15 (ratio 2.0) — keep cognitive
+    const report = createTestReport([
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 20,
+        threshold: 15,
+        metricType: 'cyclomatic',
+        severity: 'warning',
+      },
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 30,
+        threshold: 15,
+        metricType: 'cognitive',
+        severity: 'warning',
+      },
+    ]);
+
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const addAnnotations = vi.fn();
+    const ctx = { addAnnotations, appendSummary: vi.fn() } as unknown as PresentContext;
+    await plugin.present(findings, ctx);
+
+    const annotations = addAnnotations.mock.calls[0][0];
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0].message).toContain('cognitive complexity 30');
+  });
+
+  it('present() sets check run summary with violations table', async () => {
+    const report = createTestReport([
+      {
+        filepath: 'a.ts',
+        symbolName: 'fnA',
+        complexity: 20,
+        threshold: 15,
+        metricType: 'cyclomatic',
+        severity: 'warning',
+      },
+    ]);
+    const findings = await plugin.analyze(createTestContext({ complexityReport: report }));
+    const appendSummary = vi.fn();
+    await plugin.present(findings, {
+      addAnnotations: vi.fn(),
+      appendSummary,
+    } as unknown as PresentContext);
+
+    expect(appendSummary).toHaveBeenCalledTimes(1);
+    const summary: string = appendSummary.mock.calls[0][0];
+    expect(summary).toContain('fnA');
+    expect(summary).toContain('a.ts');
+    expect(summary).toContain('1 violation');
+  });
+
+  it('present() sets success summary when no complexity findings', async () => {
+    const appendSummary = vi.fn();
+    const ctx = { addAnnotations: vi.fn(), appendSummary } as unknown as PresentContext;
+    await plugin.present([], ctx);
+    expect(appendSummary).toHaveBeenCalledWith(expect.stringContaining('No complexity violations'));
+  });
+
+  it('present() does not add annotations when given no findings', async () => {
+    const addAnnotations = vi.fn();
+    const ctx = { addAnnotations, appendSummary: vi.fn() } as unknown as PresentContext;
+    await plugin.present([], ctx);
+    expect(addAnnotations).not.toHaveBeenCalled();
   });
 });

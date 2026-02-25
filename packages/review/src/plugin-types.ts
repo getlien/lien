@@ -11,7 +11,7 @@
 
 import type { z } from 'zod';
 import type { CodeChunk, ComplexityReport } from '@liendev/parser';
-import type { PRContext, ReviewConfig } from './types.js';
+import type { PRContext, LineComment, ReviewConfig } from './types.js';
 import type { Logger } from './logger.js';
 import type { ComplexityDelta, DeltaSummary } from './delta.js';
 
@@ -149,6 +149,75 @@ export interface ReviewFinding {
 }
 
 // ---------------------------------------------------------------------------
+// Check Annotations
+// ---------------------------------------------------------------------------
+
+/**
+ * Annotation for a GitHub Check Run.
+ * Mapped to the GitHub Checks API annotation format.
+ */
+export interface CheckAnnotation {
+  path: string;
+  start_line: number;
+  end_line: number;
+  annotation_level: 'notice' | 'warning' | 'failure';
+  message: string;
+  /** Max 255 chars — truncated by the engine if longer */
+  title?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Present Context
+// ---------------------------------------------------------------------------
+
+/**
+ * Context passed to plugin present() hooks.
+ * Provides high-level helpers for output — plugins don't manage
+ * the check run lifecycle or annotation batching.
+ */
+export interface PresentContext {
+  complexityReport: ComplexityReport;
+  baselineReport: ComplexityReport | null;
+  deltas: ComplexityDelta[] | null;
+  deltaSummary: DeltaSummary | null;
+  pr?: PRContext;
+  logger: Logger;
+  llmUsage?: { promptTokens: number; completionTokens: number; totalTokens: number; cost: number };
+  model?: string;
+
+  /** Queue check annotations. Engine batches and posts on finalize. */
+  addAnnotations(annotations: CheckAnnotation[]): void;
+
+  /**
+   * Append a section to the check run output summary (markdown).
+   * Each plugin contributes its own section; the engine joins them with a blank line.
+   */
+  appendSummary(markdown: string): void;
+
+  /**
+   * Update the PR description with a badge or stats block.
+   * Only available in GitHub App context (pr + octokit present).
+   */
+  updateDescription?(markdown: string): Promise<void>;
+
+  /**
+   * Post findings as inline PR review comments.
+   * Handles diff-line filtering and deduplication automatically.
+   * Only available in GitHub App context (pr + octokit present).
+   */
+  postInlineComments?(
+    findings: ReviewFinding[],
+    summaryBody: string,
+  ): Promise<{ posted: number; skipped: number }>;
+
+  /**
+   * Post a PR review with optional inline comments.
+   * Only available when pr + octokit are present.
+   */
+  postReviewComment?(body: string, lineComments?: LineComment[]): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
 // Review Plugin
 // ---------------------------------------------------------------------------
 
@@ -176,6 +245,13 @@ export interface ReviewPlugin {
    * Produce findings. The engine collects all findings from all active plugins.
    */
   analyze(context: ReviewContext): ReviewFinding[] | Promise<ReviewFinding[]>;
+
+  /**
+   * Optional: perform custom output after analysis.
+   * Called with all findings from all plugins + presentation helpers.
+   * Use for check annotations, PR comments, or PR description updates.
+   */
+  present?(findings: ReviewFinding[], context: PresentContext): Promise<void>;
 
   /**
    * Optional Zod schema for validating this plugin's config section.

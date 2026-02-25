@@ -16,6 +16,81 @@ export function createOctokit(token: string): Octokit {
   return new Octokit({ auth: token });
 }
 
+// ---------------------------------------------------------------------------
+// Check Run API
+// ---------------------------------------------------------------------------
+
+export interface CheckRunOutput {
+  title: string;
+  summary: string;
+  text?: string;
+  annotations?: Array<{
+    path: string;
+    start_line: number;
+    end_line: number;
+    annotation_level: 'notice' | 'warning' | 'failure';
+    message: string;
+    title?: string;
+  }>;
+}
+
+/**
+ * Create a GitHub Check Run. Returns the check_run_id.
+ */
+export async function createCheckRun(
+  octokit: Octokit,
+  params: {
+    owner: string;
+    repo: string;
+    name: string;
+    headSha: string;
+    status: 'queued' | 'in_progress' | 'completed';
+    conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled' | 'action_required';
+    output?: CheckRunOutput;
+  },
+  logger: Logger,
+): Promise<number> {
+  const { data } = await octokit.checks.create({
+    owner: params.owner,
+    repo: params.repo,
+    name: params.name,
+    head_sha: params.headSha,
+    status: params.status,
+    ...(params.conclusion ? { conclusion: params.conclusion } : {}),
+    ...(params.output ? { output: params.output } : {}),
+  });
+
+  logger.info(`Created check run "${params.name}" (id: ${data.id})`);
+  return data.id;
+}
+
+/**
+ * Update an existing GitHub Check Run.
+ */
+export async function updateCheckRun(
+  octokit: Octokit,
+  params: {
+    owner: string;
+    repo: string;
+    checkRunId: number;
+    status?: 'queued' | 'in_progress' | 'completed';
+    conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled' | 'action_required';
+    output?: CheckRunOutput;
+  },
+  logger: Logger,
+): Promise<void> {
+  await octokit.checks.update({
+    owner: params.owner,
+    repo: params.repo,
+    check_run_id: params.checkRunId,
+    ...(params.status ? { status: params.status } : {}),
+    ...(params.conclusion ? { conclusion: params.conclusion } : {}),
+    ...(params.output ? { output: params.output } : {}),
+  });
+
+  logger.debug(`Updated check run ${params.checkRunId}`);
+}
+
 /**
  * Get list of files changed in the PR
  */
@@ -250,6 +325,19 @@ export function parseLogicMarker(body: string): string | null {
   return body.slice(keyStart, end);
 }
 
+/** Paginate all review comments on a PR. */
+async function* listAllReviewComments(octokit: Octokit, prContext: PRContext) {
+  const iterator = octokit.paginate.iterator(octokit.pulls.listReviewComments, {
+    owner: prContext.owner,
+    repo: prContext.repo,
+    pull_number: prContext.pullNumber,
+    per_page: 100,
+  });
+  for await (const response of iterator) {
+    yield* response.data;
+  }
+}
+
 /**
  * Fetch existing Lien Review inline comment keys from the PR.
  * Returns a Map of dedup keys → comment URLs for complexity comments
@@ -263,27 +351,18 @@ export async function getExistingCommentKeys(
   const complexity = new Map<string, string>();
   const logic = new Set<string>();
 
-  const iterator = octokit.paginate.iterator(octokit.pulls.listReviewComments, {
-    owner: prContext.owner,
-    repo: prContext.repo,
-    pull_number: prContext.pullNumber,
-    per_page: 100,
-  });
+  for await (const comment of listAllReviewComments(octokit, prContext)) {
+    if (!comment.body) continue;
 
-  for await (const response of iterator) {
-    for (const comment of response.data) {
-      if (!comment.body) continue;
+    const complexityKey = parseCommentMarker(comment.body);
+    if (complexityKey) {
+      complexity.set(complexityKey, comment.html_url);
+      continue;
+    }
 
-      const complexityKey = parseCommentMarker(comment.body);
-      if (complexityKey) {
-        complexity.set(complexityKey, comment.html_url);
-        continue;
-      }
-
-      const logicKey = parseLogicMarker(comment.body);
-      if (logicKey) {
-        logic.add(logicKey);
-      }
+    const logicKey = parseLogicMarker(comment.body);
+    if (logicKey) {
+      logic.add(logicKey);
     }
   }
 
@@ -291,6 +370,40 @@ export async function getExistingCommentKeys(
     `Found ${complexity.size} existing complexity comments and ${logic.size} logic comments`,
   );
   return { complexity, logic };
+}
+
+/**
+ * Marker prefix for plugin inline review comments posted via postInlineComments.
+ * Format: <!-- lien-plugin:{pluginId}:{key} -->
+ */
+export const PLUGIN_MARKER_PREFIX = '<!-- lien-plugin:';
+
+/**
+ * Fetch existing inline comment keys for a specific plugin (for deduplication).
+ */
+export async function getExistingPluginCommentKeys(
+  octokit: Octokit,
+  prContext: PRContext,
+  pluginId: string,
+  logger: Logger,
+): Promise<Set<string>> {
+  const prefix = `${PLUGIN_MARKER_PREFIX}${pluginId}:`;
+  const keys = new Set<string>();
+
+  try {
+    for await (const comment of listAllReviewComments(octokit, prContext)) {
+      if (!comment.body) continue;
+      const start = comment.body.indexOf(prefix);
+      if (start === -1) continue;
+      const keyStart = start + prefix.length;
+      const end = comment.body.indexOf(' -->', keyStart);
+      if (end !== -1) keys.add(comment.body.slice(keyStart, end));
+    }
+  } catch (error) {
+    logger.warning(`Failed to fetch existing ${pluginId} plugin comments: ${error}`);
+  }
+
+  return keys;
 }
 
 /**
@@ -384,34 +497,14 @@ export function parsePatchLines(patch: string): Set<number> {
 }
 
 /**
- * Get lines that are in the PR diff (only these can have line comments)
- * Handles pagination for PRs with 100+ files
+ * Get lines that are in the PR diff (only these can have line comments).
+ * Handles pagination for PRs with 100+ files.
  */
 export async function getPRDiffLines(
   octokit: Octokit,
   prContext: PRContext,
 ): Promise<Map<string, Set<number>>> {
-  const diffLines = new Map<string, Set<number>>();
-
-  // Use pagination to handle PRs with 100+ files
-  const iterator = octokit.paginate.iterator(octokit.pulls.listFiles, {
-    owner: prContext.owner,
-    repo: prContext.repo,
-    pull_number: prContext.pullNumber,
-    per_page: 100,
-  });
-
-  for await (const response of iterator) {
-    for (const file of response.data) {
-      if (!file.patch) continue;
-
-      const lines = parsePatchLines(file.patch);
-      if (lines.size > 0) {
-        diffLines.set(file.filename, lines);
-      }
-    }
-  }
-
+  const { diffLines } = await getPRPatchData(octokit, prContext);
   return diffLines;
 }
 

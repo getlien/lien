@@ -1,8 +1,8 @@
 /**
  * Complexity review plugin.
  *
- * Detects complexity violations using @liendev/parser, optionally generates
- * LLM refactoring suggestions. Inlined from review-engine.ts.
+ * Detects complexity violations using @liendev/parser and posts them as
+ * check run annotations. Pure AST — no LLM involved.
  */
 
 import { z } from 'zod';
@@ -12,17 +12,14 @@ import type {
   ReviewContext,
   ReviewFinding,
   ComplexityFindingMetadata,
+  PresentContext,
 } from '../plugin-types.js';
-import { buildBatchedCommentsPrompt, getViolationKey, getMetricLabel } from '../prompt.js';
-import { formatComplexityValue, formatThresholdValue } from '../prompt.js';
-import { estimatePromptTokens, parseJSONResponse } from '../llm-client.js';
-import type { Logger } from '../logger.js';
-
-/** Max tokens to reserve for the prompt (leaves room for output within 128K context) */
-const PROMPT_TOKEN_BUDGET = 100_000;
-
-/** Max violations to send to LLM in a single batch (prevents timeouts with reasoning models) */
-const MAX_LLM_VIOLATIONS = 15;
+import {
+  getMetricLabel,
+  formatComplexityValue,
+  formatThresholdValue,
+  buildDescriptionBadge,
+} from '../prompt.js';
 
 export const complexityConfigSchema = z.object({
   threshold: z.number().default(15),
@@ -30,12 +27,12 @@ export const complexityConfigSchema = z.object({
 });
 
 /**
- * Complexity review plugin: detects violations and generates LLM suggestions.
+ * Complexity review plugin: detects violations and annotates the check run.
  */
 export class ComplexityPlugin implements ReviewPlugin {
   id = 'complexity';
   name = 'Complexity Review';
-  description = 'Detects complexity violations and suggests refactoring via LLM';
+  description = 'Detects complexity violations and annotates the check run';
   requiresLLM = false;
   configSchema = complexityConfigSchema;
   defaultConfig = { threshold: 15, blockOnNewErrors: false };
@@ -52,49 +49,99 @@ export class ComplexityPlugin implements ReviewPlugin {
     logger.info(`Complexity plugin: ${violations.length} violations to review`);
 
     const deltaMap = buildDeltaLookup(deltas);
-    const suggestions = context.llm
-      ? await this.generateSuggestions(violations, complexityReport, context)
-      : new Map<string, string>();
-
-    // Track which functions already got an LLM suggestion (avoid duplicating per-metric)
-    const usedSuggestionKeys = new Set<string>();
-
-    return violations.map(v => violationToFinding(v, deltaMap, suggestions, usedSuggestionKeys));
+    return violations.map(v => violationToFinding(v, deltaMap));
   }
 
-  /**
-   * Generate LLM refactoring suggestions for violations in a single batch call.
-   */
-  private async generateSuggestions(
-    violations: ComplexityViolation[],
-    report: ComplexityReport,
-    context: ReviewContext,
-  ): Promise<Map<string, string>> {
-    if (!context.llm || violations.length === 0) {
-      return new Map();
-    }
+  async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
+    context.appendSummary(buildComplexitySummary(findings, context));
 
-    const { logger } = context;
-    logger.info(`Generating LLM suggestions for ${violations.length} violations`);
-
-    const codeSnippets = collectCodeSnippets(context.chunks);
-    const { prompt, usedViolations } = buildPromptWithBudget(
-      violations,
-      codeSnippets,
-      report,
-      logger,
+    await context.updateDescription?.(
+      buildDescriptionBadge(context.complexityReport, context.deltaSummary, context.deltas),
     );
 
-    try {
-      const response = await context.llm.complete(prompt);
-      return mapLLMResponses(response.content, usedViolations, logger);
-    } catch (error) {
-      logger.warning(
-        `LLM suggestion generation failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return new Map();
+    if (findings.length === 0) return;
+
+    context.addAnnotations(
+      worstPerFunction(findings).map(f => ({
+        path: f.filepath,
+        start_line: f.line,
+        end_line: f.line,
+        annotation_level: f.severity === 'error' ? ('failure' as const) : ('warning' as const),
+        message: f.message,
+        title: f.symbolName ? `${f.symbolName} — ${f.evidence}` : (f.evidence ?? 'Complexity'),
+      })),
+    );
+  }
+}
+
+/**
+ * Build a markdown summary for the check run output.
+ * Used as the check run `summary` field — visible in the GitHub Checks tab.
+ */
+function buildComplexitySummary(
+  complexityFindings: ReviewFinding[],
+  context: PresentContext,
+): string {
+  if (complexityFindings.length === 0) {
+    return '✅ No complexity violations found.';
+  }
+
+  const errors = complexityFindings.filter(f => f.severity === 'error').length;
+  const warnings = complexityFindings.filter(f => f.severity === 'warning').length;
+  const functions = worstPerFunction(complexityFindings);
+
+  const parts: string[] = [];
+  if (errors > 0) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
+  if (warnings > 0) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
+  const heading = `${complexityFindings.length} violation${complexityFindings.length === 1 ? '' : 's'} across ${functions.length} function${functions.length === 1 ? '' : 's'} — ${parts.join(', ')}`;
+
+  const deltaLine =
+    context.deltaSummary && context.deltaSummary.totalDelta !== 0
+      ? `\n\nComplexity change this PR: ${context.deltaSummary.totalDelta > 0 ? '+' : ''}${context.deltaSummary.totalDelta} (${context.deltaSummary.degraded} degraded, ${context.deltaSummary.improved} improved)`
+      : '';
+
+  const rows = functions
+    .map(f => {
+      const meta = f.metadata as ComplexityFindingMetadata;
+      const label = getMetricLabel(meta.metricType);
+      const value = formatComplexityValue(meta.metricType, meta.complexity);
+      const threshold = formatThresholdValue(meta.metricType, meta.threshold);
+      const sev = f.severity === 'error' ? ' 🔴' : '';
+      return `| \`${f.symbolName ?? '?'}\` | \`${f.filepath}:${f.line}\` | ${label} | ${value}${sev} | ${threshold} |`;
+    })
+    .join('\n');
+
+  const table = `| Function | Location | Metric | Value | Threshold |\n|---|---|---|---|---|\n${rows}`;
+  return `${heading}${deltaLine}\n\n${table}`;
+}
+
+/**
+ * Deduplicate findings to one per function — keep the worst metric.
+ * Worst = highest severity, then highest overage ratio (complexity / threshold).
+ */
+function worstPerFunction(findings: ReviewFinding[]): ReviewFinding[] {
+  const groups = new Map<string, ReviewFinding>();
+  for (const f of findings) {
+    const key = `${f.filepath}::${f.symbolName ?? f.line}`;
+    const existing = groups.get(key);
+    if (!existing || isWorseThan(f, existing)) {
+      groups.set(key, f);
     }
   }
+  return Array.from(groups.values());
+}
+
+const SEVERITY_RANK: Record<string, number> = { error: 2, warning: 1, info: 0 };
+
+function isWorseThan(a: ReviewFinding, b: ReviewFinding): boolean {
+  const rankA = SEVERITY_RANK[a.severity] ?? 0;
+  const rankB = SEVERITY_RANK[b.severity] ?? 0;
+  if (rankA !== rankB) return rankA > rankB;
+  const metaA = a.metadata as ComplexityFindingMetadata | undefined;
+  const metaB = b.metadata as ComplexityFindingMetadata | undefined;
+  if (metaA && metaB)
+    return metaA.complexity / metaA.threshold > metaB.complexity / metaB.threshold;
+  return false;
 }
 
 /**
@@ -111,26 +158,13 @@ function buildDeltaLookup(deltas: ReviewContext['deltas']): Map<string, number> 
 
 /**
  * Convert a single ComplexityViolation into a ReviewFinding.
- * LLM suggestions are per-function, so only the first metric for each function gets one.
  */
-function violationToFinding(
-  v: ComplexityViolation,
-  deltaMap: Map<string, number>,
-  suggestions: Map<string, string>,
-  usedSuggestionKeys: Set<string>,
-): ReviewFinding {
-  const key = getViolationKey(v);
+function violationToFinding(v: ComplexityViolation, deltaMap: Map<string, number>): ReviewFinding {
   const metricType = v.metricType || 'cyclomatic';
   const delta = deltaMap.get(`${v.filepath}::${v.symbolName}::${metricType}`) ?? null;
   const metricLabel = getMetricLabel(metricType);
   const valueDisplay = formatComplexityValue(metricType, v.complexity);
   const thresholdDisplay = formatThresholdValue(metricType, v.threshold);
-
-  const suggestion = suggestions.get(key);
-  const isFirstForFunction = suggestion && !usedSuggestionKeys.has(key);
-  if (isFirstForFunction) usedSuggestionKeys.add(key);
-
-  const fallback = `This ${v.symbolType} has ${metricLabel} of ${valueDisplay} (threshold: ${thresholdDisplay}). Consider refactoring to improve readability and testability.`;
 
   return {
     pluginId: 'complexity',
@@ -140,7 +174,7 @@ function violationToFinding(
     symbolName: v.symbolName,
     severity: v.severity,
     category: metricType,
-    message: isFirstForFunction ? suggestion : fallback,
+    message: buildMessage(v, metricType, valueDisplay, thresholdDisplay),
     evidence: `${metricLabel}: ${valueDisplay} (threshold: ${thresholdDisplay})`,
     metadata: {
       pluginType: 'complexity',
@@ -154,84 +188,31 @@ function violationToFinding(
 }
 
 /**
- * Collect code snippets from chunks, keyed by file::symbolName.
+ * Build a per-metric actionable message for a violation.
  */
-function collectCodeSnippets(chunks: ReviewContext['chunks']): Map<string, string> {
-  const snippets = new Map<string, string>();
-  for (const chunk of chunks) {
-    if (chunk.metadata.symbolName) {
-      const key = `${chunk.metadata.file}::${chunk.metadata.symbolName}`;
-      if (!snippets.has(key)) {
-        snippets.set(key, chunk.content);
-      }
-    }
+function buildMessage(
+  v: ComplexityViolation,
+  metricType: string,
+  valueDisplay: string,
+  thresholdDisplay: string,
+): string {
+  const t = v.symbolType;
+  switch (metricType) {
+    case 'cyclomatic':
+      return `This ${t} requires ${valueDisplay} for full coverage (threshold: ${thresholdDisplay}). Too many branches — consider splitting into smaller, focused functions.`;
+    case 'cognitive':
+      return `This ${t} has cognitive complexity ${v.complexity} (threshold: ${v.threshold}). Deep nesting or complex control flow — consider early returns or extracting nested blocks.`;
+    case 'halstead_effort':
+      return `This ${t} takes ${valueDisplay} to understand (threshold: ${thresholdDisplay}). Reduce operator and operand variety to improve readability.`;
+    case 'halstead_bugs':
+      return `This ${t} has estimated bug density ${valueDisplay} (threshold: ${thresholdDisplay}). High algorithmic complexity increases error likelihood — consider simplifying the logic.`;
+    default:
+      return `This ${t} has complexity ${v.complexity} (threshold: ${v.threshold}). Consider refactoring to reduce complexity.`;
   }
-  return snippets;
-}
-
-/**
- * Build the LLM prompt, capping violations and enforcing token budget.
- */
-function buildPromptWithBudget(
-  violations: ComplexityViolation[],
-  codeSnippets: Map<string, string>,
-  report: ComplexityReport,
-  logger: Logger,
-): { prompt: string; usedViolations: ComplexityViolation[] } {
-  let usedViolations =
-    violations.length > MAX_LLM_VIOLATIONS ? violations.slice(0, MAX_LLM_VIOLATIONS) : violations;
-
-  if (violations.length > MAX_LLM_VIOLATIONS) {
-    logger.info(
-      `Capping LLM suggestions to top ${MAX_LLM_VIOLATIONS}/${violations.length} violations (rest use fallback)`,
-    );
-  }
-
-  let prompt = buildBatchedCommentsPrompt(usedViolations, codeSnippets, report);
-  let estimatedTokens = estimatePromptTokens(prompt);
-
-  if (estimatedTokens > PROMPT_TOKEN_BUDGET) {
-    logger.warning(
-      `Prompt exceeds token budget (${estimatedTokens.toLocaleString()} > ${PROMPT_TOKEN_BUDGET.toLocaleString()}). Truncating...`,
-    );
-    let count = usedViolations.length;
-    while (count > 1 && estimatedTokens > PROMPT_TOKEN_BUDGET) {
-      count = Math.ceil(count / 2);
-      usedViolations = violations.slice(0, count);
-      prompt = buildBatchedCommentsPrompt(usedViolations, codeSnippets, report);
-      estimatedTokens = estimatePromptTokens(prompt);
-    }
-    logger.warning(`Truncated to ${usedViolations.length}/${violations.length} violations`);
-  }
-
-  return { prompt, usedViolations };
-}
-
-/**
- * Parse the LLM response and map comments to violation keys.
- */
-function mapLLMResponses(
-  content: string,
-  usedViolations: ComplexityViolation[],
-  logger: Logger,
-): Map<string, string> {
-  const parsed = parseJSONResponse(content, logger);
-  if (!parsed) return new Map();
-
-  const results = new Map<string, string>();
-  for (const v of usedViolations) {
-    const key = getViolationKey(v);
-    const comment = parsed[key];
-    if (comment) {
-      results.set(key, comment.replace(/\\n/g, '\n'));
-    }
-  }
-  return results;
 }
 
 /**
  * Prioritize violations by impact (dependents + severity).
- * Inlined from review-engine.ts.
  */
 function prioritizeViolations(
   violations: ComplexityViolation[],
