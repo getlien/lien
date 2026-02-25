@@ -195,24 +195,10 @@ export class GoImportExtractor implements LanguageImportExtractor {
   readonly importNodeTypes = ['import_declaration'];
 
   extractImportPath(node: Parser.SyntaxNode): string | null {
-    // Single import: import "github.com/pkg/errors"
-    const spec = findChildOfType(node, 'import_spec');
-    if (spec) {
-      return this.extractSpecPath(spec);
+    for (const spec of this.collectImportSpecs(node)) {
+      const path = this.extractSpecPath(spec);
+      if (path) return path;
     }
-
-    // Grouped import: return the first non-stdlib path
-    const specList = findChildOfType(node, 'import_spec_list');
-    if (specList) {
-      for (let i = 0; i < specList.namedChildCount; i++) {
-        const child = specList.namedChild(i);
-        if (child?.type === 'import_spec') {
-          const path = this.extractSpecPath(child);
-          if (path) return path;
-        }
-      }
-    }
-
     return null;
   }
 
@@ -303,9 +289,9 @@ export class GoSymbolExtractor implements LanguageSymbolExtractor {
   extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_declaration':
-        return this.extractFunctionInfo(node, content, parentClass);
+        return this.buildFuncSymbolInfo(node, content, parentClass);
       case 'method_declaration':
-        return this.extractMethodInfo(node, content);
+        return this.buildFuncSymbolInfo(node, content, extractReceiverType(node));
       case 'type_declaration':
         return this.extractTypeInfo(node);
       default:
@@ -336,7 +322,7 @@ export class GoSymbolExtractor implements LanguageSymbolExtractor {
     return null;
   }
 
-  private extractFunctionInfo(
+  private buildFuncSymbolInfo(
     node: Parser.SyntaxNode,
     content: string,
     parentClass?: string,
@@ -350,25 +336,6 @@ export class GoSymbolExtractor implements LanguageSymbolExtractor {
       startLine: node.startPosition.row + 1,
       endLine: node.endPosition.row + 1,
       parentClass,
-      signature: extractSignature(node, content),
-      parameters: extractParameters(node, content),
-      returnType: extractGoReturnType(node),
-      complexity: calculateComplexity(node),
-    };
-  }
-
-  private extractMethodInfo(node: Parser.SyntaxNode, content: string): SymbolInfo | null {
-    const nameNode = node.childForFieldName('name');
-    if (!nameNode) return null;
-
-    const receiverType = extractReceiverType(node);
-
-    return {
-      name: nameNode.text,
-      type: 'method',
-      startLine: node.startPosition.row + 1,
-      endLine: node.endPosition.row + 1,
-      parentClass: receiverType,
       signature: extractSignature(node, content),
       parameters: extractParameters(node, content),
       returnType: extractGoReturnType(node),
@@ -469,25 +436,31 @@ function findFuncLiteralInVarDecl(node: Parser.SyntaxNode): DeclarationFunctionI
 }
 
 /**
+ * Collect all named children of specific types from a node.
+ */
+function collectChildrenOfType(node: Parser.SyntaxNode, types: Set<string>): Parser.SyntaxNode[] {
+  const result: Parser.SyntaxNode[] = [];
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child && types.has(child.type)) result.push(child);
+  }
+  return result;
+}
+
+const SPEC_TYPES = new Set(['const_spec', 'var_spec']);
+
+/**
  * Collect all const_spec or var_spec nodes from a declaration,
  * handling the var_spec_list wrapper for grouped var blocks.
  */
 function collectSpecs(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
-  const specs: Parser.SyntaxNode[] = [];
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (!child) continue;
+  // Direct spec children (single declarations and grouped const)
+  const direct = collectChildrenOfType(node, SPEC_TYPES);
+  if (direct.length > 0) return direct;
 
-    if (child.type === 'const_spec' || child.type === 'var_spec') {
-      specs.push(child);
-    } else if (child.type === 'var_spec_list') {
-      for (let j = 0; j < child.namedChildCount; j++) {
-        const spec = child.namedChild(j);
-        if (spec?.type === 'var_spec') specs.push(spec);
-      }
-    }
-  }
-  return specs;
+  // Grouped var uses var_spec_list as intermediate wrapper
+  const specList = findChildOfType(node, 'var_spec_list');
+  return specList ? collectChildrenOfType(specList, SPEC_TYPES) : [];
 }
 
 /**
