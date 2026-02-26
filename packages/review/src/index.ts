@@ -193,3 +193,7 @@ export {
 // ─── Formatting utilities ───────────────────────────────────────────────────
 
 export { formatTime, formatDeltaValue } from './format.js';
+
+// ─── Git utilities ──────────────────────────────────────────────────────────
+
+export { assertValidSha } from './git-utils.js';
