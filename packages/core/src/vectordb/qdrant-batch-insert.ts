@@ -3,6 +3,7 @@ import type { ChunkMetadata } from '@liendev/parser';
 import type { QdrantPayloadMapper, QdrantPayload } from './qdrant-payload-mapper.js';
 import { DatabaseError } from '../errors/index.js';
 import { VECTOR_DB_MAX_BATCH_SIZE } from '../constants.js';
+import { chunkArray } from '../utils/chunk-array.js';
 
 /**
  * Validate batch input arrays have matching lengths.
@@ -56,9 +57,7 @@ export async function insertBatch(
   collectionName: string,
   points: Array<{ id: string; vector: number[]; payload: QdrantPayload }>,
 ): Promise<void> {
-  const batchSize = VECTOR_DB_MAX_BATCH_SIZE;
-  for (let i = 0; i < points.length; i += batchSize) {
-    const batch = points.slice(i, Math.min(i + batchSize, points.length));
+  for (const batch of chunkArray(points, VECTOR_DB_MAX_BATCH_SIZE)) {
     await client.upsert(collectionName, {
       wait: true,
       points: batch,

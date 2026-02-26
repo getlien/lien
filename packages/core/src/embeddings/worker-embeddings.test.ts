@@ -84,10 +84,7 @@ describe('WorkerEmbeddings', () => {
     it('should produce normalized embeddings', async () => {
       const embedding = await embeddings.embed('test normalization');
 
-      let sumSquares = 0;
-      for (let i = 0; i < embedding.length; i++) {
-        sumSquares += embedding[i] * embedding[i];
-      }
+      const sumSquares = Array.from(embedding).reduce((sum, val) => sum + val * val, 0);
       const norm = Math.sqrt(sumSquares);
 
       expect(norm).toBeCloseTo(1.0, 5);
@@ -138,9 +135,9 @@ describe('WorkerEmbeddings', () => {
       const localResult = await local.embed(text);
 
       expect(workerResult.length).toBe(localResult.length);
-      for (let i = 0; i < workerResult.length; i++) {
-        expect(workerResult[i]).toBeCloseTo(localResult[i], 4);
-      }
+      Array.from(workerResult).forEach((val, i) => {
+        expect(val).toBeCloseTo(localResult[i], 4);
+      });
     });
   });
 

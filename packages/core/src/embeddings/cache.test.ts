@@ -198,7 +198,7 @@ describe('CachedEmbeddings', () => {
     it('should work with large max size', async () => {
       const largeCache = new CachedEmbeddings(mockService, 10000);
 
-      for (let i = 0; i < 100; i++) {
+      for (const i of Array.from({ length: 100 }, (_, idx) => idx)) {
         await largeCache.embed(`query${i}`);
       }
 

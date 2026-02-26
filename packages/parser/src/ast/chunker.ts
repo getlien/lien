@@ -239,9 +239,8 @@ function findTopLevelNodes(
 
     // Traverse children of traversable nodes
     if (!traverser.shouldTraverseChildren(node)) return;
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child) traverse(child, depth);
+    for (const child of node.namedChildren) {
+      traverse(child, depth);
     }
   }
 

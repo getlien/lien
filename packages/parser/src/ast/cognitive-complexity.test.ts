@@ -18,12 +18,9 @@ function getCognitiveComplexity(code: string): number {
     ) {
       return node;
     }
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child) {
-        const found = findFunction(child);
-        if (found) return found;
-      }
+    for (const child of node.namedChildren) {
+      const found = findFunction(child);
+      if (found) return found;
     }
     return null;
   };

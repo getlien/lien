@@ -186,8 +186,7 @@ function deserializeImportedSymbols(
     );
   }
   const result: Record<string, string[]> = {};
-  for (let i = 0; i < pathsArr.length; i++) {
-    const path = pathsArr[i];
+  pathsArr.forEach((path, i) => {
     const namesJson = namesArr[i];
     if (path && namesJson) {
       try {
@@ -199,7 +198,7 @@ function deserializeImportedSymbols(
         );
       }
     }
-  }
+  });
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
@@ -233,16 +232,11 @@ function deserializeCallSites(
         `This indicates data corruption. Refusing to deserialize to avoid silent data loss.`,
     );
   }
-  const result: Array<{ symbol: string; line: number }> = [];
-  for (let i = 0; i < symbolsArr.length; i++) {
-    const symbol = symbolsArr[i];
-    const line = linesArr[i];
+  const result = symbolsArr
+    .map((symbol, i) => ({ symbol, line: linesArr[i] }))
     // Note: line > 0 is intentional - we use 0 as a placeholder value for missing data
     // in serializeCallSites(). Real line numbers are 1-indexed in source files.
-    if (symbol && typeof line === 'number' && line > 0) {
-      result.push({ symbol, line });
-    }
-  }
+    .filter(({ symbol, line }) => symbol && typeof line === 'number' && line > 0);
   return result.length > 0 ? result : undefined;
 }
 

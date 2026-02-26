@@ -57,24 +57,23 @@ export class CachedEmbeddings implements EmbeddingService {
     const uncachedIndices: number[] = [];
 
     // Check cache for each text
-    for (let i = 0; i < texts.length; i++) {
-      const cached = this.cache.get(texts[i]);
+    texts.forEach((text, i) => {
+      const cached = this.cache.get(text);
       if (cached) {
         results[i] = cached;
       } else {
-        uncachedTexts.push(texts[i]);
+        uncachedTexts.push(text);
         uncachedIndices.push(i);
       }
-    }
+    });
 
     // Generate embeddings for uncached texts
     if (uncachedTexts.length > 0) {
       const newEmbeddings = await this.underlying.embedBatch(uncachedTexts);
 
       // Store in cache and results
-      for (let i = 0; i < newEmbeddings.length; i++) {
+      newEmbeddings.forEach((embedding, i) => {
         const text = uncachedTexts[i];
-        const embedding = newEmbeddings[i];
         const resultIndex = uncachedIndices[i];
 
         // Add to cache with LRU eviction
@@ -87,7 +86,7 @@ export class CachedEmbeddings implements EmbeddingService {
 
         this.cache.set(text, embedding);
         results[resultIndex] = embedding;
-      }
+      });
     }
 
     return results;
