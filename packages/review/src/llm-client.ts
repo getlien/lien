@@ -224,7 +224,7 @@ function filterStringValues(parsed: unknown): Record<string, string> {
  * Returns the trimmed content inside the first code block, or the original content if none found.
  */
 export function extractJSONFromCodeBlock(content: string): string {
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*)```/);
+  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
   return (codeBlockMatch ? codeBlockMatch[1] : content).trim();
 }
 
