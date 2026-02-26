@@ -136,25 +136,22 @@ export class CSharpExportExtractor implements LanguageExportExtractor {
   }
 
   private walkDeclarations(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (!child) continue;
-
+    node.namedChildren.forEach(child => {
       // Recurse into namespaces to find type declarations
       if (child.type === 'namespace_declaration') {
         const body = child.childForFieldName('body');
         if (body) this.walkDeclarations(body, addExport);
-        continue;
+        return;
       }
 
       // File-scoped namespaces: declarations are children of the namespace node
       if (child.type === 'file_scoped_namespace_declaration') {
         this.walkDeclarations(child, addExport);
-        continue;
+        return;
       }
 
       this.extractFromNode(child, addExport);
-    }
+    });
   }
 
   private extractFromNode(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
@@ -182,12 +179,7 @@ export class CSharpExportExtractor implements LanguageExportExtractor {
     if (!body) return;
 
     const isInterface = container.type === 'interface_declaration';
-
-    for (let i = 0; i < body.namedChildCount; i++) {
-      const child = body.namedChild(i);
-      if (!child) continue;
-      this.extractMemberExport(child, isInterface, addExport);
-    }
+    body.namedChildren.forEach(child => this.extractMemberExport(child, isInterface, addExport));
   }
 
   private extractMemberExport(
@@ -214,18 +206,14 @@ export class CSharpExportExtractor implements LanguageExportExtractor {
 
   private extractFieldNames(fieldDecl: Parser.SyntaxNode, addExport: (name: string) => void): void {
     // C# field_declaration contains variable_declaration → variable_declarator(s)
-    for (let i = 0; i < fieldDecl.namedChildCount; i++) {
-      const child = fieldDecl.namedChild(i);
-      if (child?.type === 'variable_declaration') {
-        for (let j = 0; j < child.namedChildCount; j++) {
-          const declarator = child.namedChild(j);
-          if (declarator?.type === 'variable_declarator') {
-            const nameNode = declarator.childForFieldName('name');
-            if (nameNode) addExport(nameNode.text);
-          }
-        }
-      }
-    }
+    fieldDecl.namedChildren
+      .filter(child => child.type === 'variable_declaration')
+      .flatMap(varDecl => varDecl.namedChildren)
+      .filter(declarator => declarator.type === 'variable_declarator')
+      .forEach(declarator => {
+        const nameNode = declarator.childForFieldName('name');
+        if (nameNode) addExport(nameNode.text);
+      });
   }
 }
 
@@ -283,19 +271,14 @@ export class CSharpImportExtractor implements LanguageImportExtractor {
 
   private getImportPath(node: Parser.SyntaxNode): string | null {
     // qualified_name is always the import path when present
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'qualified_name') return child.text;
-    }
+    const qualifiedName = node.namedChildren.find(c => c.type === 'qualified_name');
+    if (qualifiedName) return qualifiedName.text;
 
     // For simple using (e.g., `using System;`), the identifier is the path
     // Skip the alias identifier (it has the 'name' field in alias using)
     const aliasNode = node.childForFieldName('name');
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'identifier' && child !== aliasNode) return child.text;
-    }
-    return null;
+    const identifier = node.namedChildren.find(c => c.type === 'identifier' && c !== aliasNode);
+    return identifier?.text ?? null;
   }
 }
 
@@ -490,11 +473,7 @@ export class CSharpSymbolExtractor implements LanguageSymbolExtractor {
  * wrapper like Java). Iterates children for an exact `public` modifier.
  */
 function hasPublicModifier(node: Parser.SyntaxNode): boolean {
-  for (let i = 0; i < node.childCount; i++) {
-    const child = node.child(i);
-    if (child?.type === 'modifier' && child.text === 'public') return true;
-  }
-  return false;
+  return node.children.some(child => child.type === 'modifier' && child.text === 'public');
 }
 
 /**
@@ -512,9 +491,7 @@ function extractCSharpReturnType(node: Parser.SyntaxNode): string | undefined {
  * Find the first descendant of a specific type (breadth-first among children).
  */
 function findDescendant(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (!child) continue;
+  for (const child of node.namedChildren) {
     if (child.type === type) return child;
     const found = findDescendant(child, type);
     if (found) return found;
