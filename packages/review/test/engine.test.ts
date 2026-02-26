@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
+import { z } from 'zod';
 import { ReviewEngine } from '../src/engine.js';
-import { createTestContext } from '../src/test-helpers.js';
+import { createTestContext, silentLogger } from '../src/test-helpers.js';
 import type { ReviewPlugin, ReviewContext, ReviewFinding } from '../src/plugin-types.js';
 
 function createTestPlugin(overrides?: Partial<ReviewPlugin>): ReviewPlugin {
@@ -192,5 +193,205 @@ describe('ReviewEngine', () => {
 
     const results = await engine.run(createTestContext());
     expect(results).toHaveLength(3);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Config Resolution (resolvePluginConfig tested indirectly via run)
+  // ---------------------------------------------------------------------------
+
+  it('merges plugin defaults with user config from pluginConfigs', async () => {
+    const engine = new ReviewEngine();
+    let receivedConfig: Record<string, unknown> = {};
+
+    engine.register(
+      createTestPlugin({
+        id: 'cfg',
+        defaultConfig: { threshold: 15, mode: 'auto' },
+        analyze: (ctx: ReviewContext) => {
+          receivedConfig = ctx.config;
+          return [];
+        },
+      }),
+    );
+
+    await engine.run(
+      createTestContext({
+        pluginConfigs: { cfg: { threshold: 25 } },
+      }),
+    );
+
+    expect(receivedConfig).toEqual({ threshold: 25, mode: 'auto' });
+  });
+
+  it('user config overrides plugin defaults', async () => {
+    const engine = new ReviewEngine();
+    let receivedConfig: Record<string, unknown> = {};
+
+    engine.register(
+      createTestPlugin({
+        id: 'cfg',
+        defaultConfig: { a: 1, b: 2 },
+        analyze: (ctx: ReviewContext) => {
+          receivedConfig = ctx.config;
+          return [];
+        },
+      }),
+    );
+
+    await engine.run(
+      createTestContext({
+        pluginConfigs: { cfg: { a: 99 } },
+      }),
+    );
+
+    expect(receivedConfig.a).toBe(99);
+    expect(receivedConfig.b).toBe(2);
+  });
+
+  it('validates merged config against plugin Zod schema', async () => {
+    const engine = new ReviewEngine();
+    let receivedConfig: Record<string, unknown> = {};
+    const schema = z.object({
+      threshold: z.number().min(0).max(100),
+      mode: z.enum(['auto', 'always', 'off']).default('auto'),
+    });
+
+    engine.register(
+      createTestPlugin({
+        id: 'cfg',
+        configSchema: schema,
+        defaultConfig: { threshold: 15, mode: 'auto' },
+        analyze: (ctx: ReviewContext) => {
+          receivedConfig = ctx.config;
+          return [];
+        },
+      }),
+    );
+
+    await engine.run(
+      createTestContext({
+        pluginConfigs: { cfg: { threshold: 50, mode: 'always' } },
+      }),
+    );
+
+    expect(receivedConfig).toEqual({ threshold: 50, mode: 'always' });
+  });
+
+  it('falls back to defaults when merged config fails Zod validation', async () => {
+    const engine = new ReviewEngine();
+    let receivedConfig: Record<string, unknown> = {};
+    const schema = z.object({
+      threshold: z.number().min(0),
+    });
+
+    engine.register(
+      createTestPlugin({
+        id: 'cfg',
+        configSchema: schema,
+        defaultConfig: { threshold: 15 },
+        analyze: (ctx: ReviewContext) => {
+          receivedConfig = ctx.config;
+          return [];
+        },
+      }),
+    );
+
+    // Invalid: threshold should be a number, not a string
+    await engine.run(
+      createTestContext({
+        pluginConfigs: { cfg: { threshold: 'not-a-number' } },
+      }),
+    );
+
+    expect(receivedConfig).toEqual({ threshold: 15 });
+  });
+
+  it('logs warning when config validation fails', async () => {
+    const engine = new ReviewEngine();
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warning: (msg: string) => warnings.push(msg) };
+    const schema = z.object({ threshold: z.number() });
+
+    engine.register(
+      createTestPlugin({
+        id: 'cfg',
+        configSchema: schema,
+        defaultConfig: { threshold: 15 },
+        analyze: () => [],
+      }),
+    );
+
+    await engine.run(
+      createTestContext({
+        pluginConfigs: { cfg: { threshold: 'invalid' } },
+        logger,
+      }),
+    );
+
+    expect(warnings.some(w => w.includes('Invalid config for plugin "cfg"'))).toBe(true);
+  });
+
+  it('passes empty config when no defaults and no user config', async () => {
+    const engine = new ReviewEngine();
+    let receivedConfig: Record<string, unknown> = {};
+
+    engine.register(
+      createTestPlugin({
+        id: 'cfg',
+        // No defaultConfig, no configSchema
+        analyze: (ctx: ReviewContext) => {
+          receivedConfig = ctx.config;
+          return [];
+        },
+      }),
+    );
+
+    await engine.run(createTestContext());
+    expect(receivedConfig).toEqual({});
+  });
+
+  it('plugin receives resolved config via context.config', async () => {
+    const engine = new ReviewEngine();
+    const schema = z.object({
+      categories: z.array(z.string()).default(['a', 'b']),
+    });
+    let receivedConfig: Record<string, unknown> = {};
+
+    engine.register(
+      createTestPlugin({
+        id: 'cfg',
+        configSchema: schema,
+        defaultConfig: { categories: ['a', 'b'] },
+        analyze: (ctx: ReviewContext) => {
+          receivedConfig = ctx.config;
+          return [];
+        },
+      }),
+    );
+
+    await engine.run(
+      createTestContext({
+        pluginConfigs: { cfg: { categories: ['x', 'y', 'z'] } },
+      }),
+    );
+
+    expect(receivedConfig).toEqual({ categories: ['x', 'y', 'z'] });
+  });
+
+  it('supports async shouldActivate', async () => {
+    const engine = new ReviewEngine();
+    const analyze = vi.fn().mockReturnValue([]);
+
+    engine.register(
+      createTestPlugin({
+        shouldActivate: async () => {
+          return true;
+        },
+        analyze,
+      }),
+    );
+
+    await engine.run(createTestContext());
+    expect(analyze).toHaveBeenCalledTimes(1);
   });
 });
