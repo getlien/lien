@@ -144,50 +144,40 @@ export class PythonExportExtractor implements LanguageExportExtractor {
       }
     };
 
-    for (let i = 0; i < rootNode.namedChildCount; i++) {
-      const child = rootNode.namedChild(i);
-      if (!child) continue;
-
+    rootNode.namedChildren.forEach(child => {
       const name = this.extractExportName(child);
       if (name) {
         addExport(name);
-        continue;
+        return;
       }
 
       // Re-exports via `from .module import Symbol`
       if (child.type === 'import_from_statement') {
         this.extractReExportNames(child, addExport);
       }
-    }
+    });
 
     return exports;
   }
 
   private findModulePathIndex(node: Parser.SyntaxNode): number {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const type = node.namedChild(i)?.type;
-      if (type === 'relative_import' || type === 'dotted_name') {
-        return i;
-      }
-    }
-    return -1;
+    return node.namedChildren.findIndex(
+      child => child.type === 'relative_import' || child.type === 'dotted_name',
+    );
   }
 
   private extractReExportNames(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
     const startIndex = this.findModulePathIndex(node);
     if (startIndex === -1) return;
 
-    for (let i = startIndex + 1; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (!child) continue;
-
+    node.namedChildren.slice(startIndex + 1).forEach(child => {
       if (child.type === 'dotted_name') {
         addExport(child.text);
       } else if (child.type === 'aliased_import') {
         const name = extractAliasedSymbolName(child);
         if (name) addExport(name);
       }
-    }
+    });
   }
 }
 
@@ -250,10 +240,7 @@ export class PythonImportExtractor implements LanguageImportExtractor {
   private processPythonImport(
     node: Parser.SyntaxNode,
   ): { importPath: string; symbols: string[] } | null {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (!child) continue;
-
+    for (const child of node.namedChildren) {
       if (child.type === 'dotted_name' || child.type === 'identifier') {
         return this.processSimpleImport(child);
       }
@@ -265,28 +252,21 @@ export class PythonImportExtractor implements LanguageImportExtractor {
   }
 
   private findModulePath(node: Parser.SyntaxNode): { path: string; startIndex: number } | null {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'dotted_name') {
-        return { path: child.text, startIndex: i };
-      }
-    }
-    return null;
+    const index = node.namedChildren.findIndex(child => child.type === 'dotted_name');
+    if (index === -1) return null;
+    return { path: node.namedChildren[index].text, startIndex: index };
   }
 
   private collectImportedSymbols(node: Parser.SyntaxNode, startIndex: number): string[] {
     const symbols: string[] = [];
-    for (let i = startIndex + 1; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (!child) continue;
-
+    node.namedChildren.slice(startIndex + 1).forEach(child => {
       if (child.type === 'dotted_name') {
         symbols.push(child.text);
       } else if (child.type === 'aliased_import') {
         const symbolName = extractAliasedSymbolName(child);
         if (symbolName) symbols.push(symbolName);
       }
-    }
+    });
     return symbols;
   }
 

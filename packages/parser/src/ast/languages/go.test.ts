@@ -575,12 +575,9 @@ func Serve() {
 /** Helper to recursively find a node of a given type */
 function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
   if (node.type === type) return node;
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (child) {
-      const result = findNode(child, type);
-      if (result) return result;
-    }
+  for (const child of node.namedChildren) {
+    const result = findNode(child, type);
+    if (result) return result;
   }
   return null;
 }

@@ -30,20 +30,17 @@ describe('PHP Language', () => {
       // PHP AST: rootNode > program > php_tag, class_declaration
       const programNode = tree.rootNode;
       let classNode: Parser.SyntaxNode | null = null;
-      for (let i = 0; i < programNode.namedChildCount; i++) {
-        const child = programNode.namedChild(i);
-        if (child?.type === 'class_declaration') {
+      for (const child of programNode.namedChildren) {
+        if (child.type === 'class_declaration') {
           classNode = child;
           break;
         }
         // Traverse into php node
-        if (child?.type === 'php' || child?.type === 'program') {
-          for (let j = 0; j < child.namedChildCount; j++) {
-            const grandchild = child.namedChild(j);
-            if (grandchild?.type === 'class_declaration') {
-              classNode = grandchild;
-              break;
-            }
+        if (child.type === 'php' || child.type === 'program') {
+          const found = child.namedChildren.find(gc => gc.type === 'class_declaration');
+          if (found) {
+            classNode = found;
+            break;
           }
         }
       }
@@ -61,12 +58,9 @@ describe('PHP Language', () => {
     it('should not treat any nodes as declarations with functions', () => {
       const code = '<?php\n$x = 42;';
       const tree = parser.parse(code);
-      for (let i = 0; i < tree.rootNode.namedChildCount; i++) {
-        const child = tree.rootNode.namedChild(i);
-        if (child) {
-          expect(traverser.isDeclarationWithFunction(child)).toBe(false);
-        }
-      }
+      tree.rootNode.namedChildren.forEach(child => {
+        expect(traverser.isDeclarationWithFunction(child)).toBe(false);
+      });
     });
 
     it('should return no function from findFunctionInDeclaration', () => {
@@ -84,8 +78,8 @@ describe('PHP Language', () => {
       // Find the method_declaration node
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const result = findNode(node.namedChild(i)!, type);
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
           if (result) return result;
         }
         return null;
@@ -167,12 +161,9 @@ class User {
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }
@@ -190,12 +181,9 @@ class User {
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }
@@ -215,12 +203,9 @@ class User {
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }
@@ -241,12 +226,9 @@ class User {
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }
@@ -269,12 +251,9 @@ class User {
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }
@@ -295,12 +274,9 @@ class User {
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }
@@ -321,12 +297,9 @@ class User {
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }
@@ -345,12 +318,9 @@ class User {
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }
@@ -369,12 +339,9 @@ class User {
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }

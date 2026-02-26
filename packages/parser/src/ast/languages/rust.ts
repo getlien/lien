@@ -126,13 +126,9 @@ export class RustExportExtractor implements LanguageExportExtractor {
       }
     };
 
-    for (let i = 0; i < rootNode.namedChildCount; i++) {
-      const child = rootNode.namedChild(i);
-      if (!child) continue;
-      if (!this.hasVisibilityModifier(child)) continue;
-
-      this.extractExportName(child, addExport);
-    }
+    rootNode.namedChildren
+      .filter(child => this.hasVisibilityModifier(child))
+      .forEach(child => this.extractExportName(child, addExport));
 
     return exports;
   }
@@ -154,11 +150,7 @@ export class RustExportExtractor implements LanguageExportExtractor {
   }
 
   private hasVisibilityModifier(node: Parser.SyntaxNode): boolean {
-    for (let i = 0; i < node.childCount; i++) {
-      const child = node.child(i);
-      if (child?.type === 'visibility_modifier') return true;
-    }
-    return false;
+    return node.children.some(child => child.type === 'visibility_modifier');
   }
 
   /**
@@ -177,12 +169,8 @@ export class RustExportExtractor implements LanguageExportExtractor {
     }
     if (node.type === 'scoped_use_list') {
       // Find the use_list child and extract symbols
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child?.type === 'use_list') {
-          return extractUseListSymbols(child);
-        }
-      }
+      const useList = node.namedChildren.find(child => child.type === 'use_list');
+      if (useList) return extractUseListSymbols(useList);
     }
     return [];
   }
@@ -234,11 +222,8 @@ function extractUseAsClauseSymbol(node: Parser.SyntaxNode): string | null {
   if (alias) return alias.text;
 
   // Fallback: take the last identifier
-  for (let j = node.namedChildCount - 1; j >= 0; j--) {
-    const child = node.namedChild(j);
-    if (child?.type === 'identifier') return child.text;
-  }
-  return null;
+  const identifiers = node.namedChildren.filter(child => child.type === 'identifier');
+  return identifiers.length > 0 ? identifiers[identifiers.length - 1].text : null;
 }
 
 /**
@@ -264,17 +249,9 @@ function extractUseListItemSymbol(item: Parser.SyntaxNode): string | null {
  * Handles: identifier, scoped_identifier, use_as_clause, use_wildcard
  */
 function extractUseListSymbols(useList: Parser.SyntaxNode): string[] {
-  const symbols: string[] = [];
-
-  for (let i = 0; i < useList.namedChildCount; i++) {
-    const item = useList.namedChild(i);
-    if (!item) continue;
-
-    const symbol = extractUseListItemSymbol(item);
-    if (symbol) symbols.push(symbol);
-  }
-
-  return symbols;
+  return useList.namedChildren
+    .map(item => extractUseListItemSymbol(item))
+    .filter((symbol): symbol is string => symbol !== null);
 }
 
 /**
@@ -363,15 +340,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
     if (!modulePath) return null;
 
     // Find the use_list child
-    let useList: Parser.SyntaxNode | null = null;
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'use_list') {
-        useList = child;
-        break;
-      }
-    }
-
+    const useList = node.namedChildren.find(child => child.type === 'use_list');
     if (!useList) return null;
 
     const symbols = extractUseListSymbols(useList);
@@ -384,16 +353,7 @@ export class RustImportExtractor implements LanguageImportExtractor {
     // `use crate::auth::Service as Auth;`
     // The first child is the path (scoped_identifier), alias field has the alias
     const aliasNode = node.childForFieldName('alias');
-    let pathChild: Parser.SyntaxNode | null = null;
-
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'scoped_identifier') {
-        pathChild = child;
-        break;
-      }
-    }
-
+    const pathChild = node.namedChildren.find(child => child.type === 'scoped_identifier');
     if (!pathChild) return null;
 
     const scopePathNode = pathChild.childForFieldName('path');
@@ -416,16 +376,12 @@ export class RustImportExtractor implements LanguageImportExtractor {
     //     scoped_identifier (crate::models)
     //     *
     // Find the scoped_identifier child to get the path
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'scoped_identifier') {
-        const modulePath = convertRustModulePath(child.text);
-        if (!modulePath) return null;
-        return { importPath: modulePath, symbols: ['*'] };
-      }
-    }
+    const scopedId = node.namedChildren.find(child => child.type === 'scoped_identifier');
+    if (!scopedId) return null;
 
-    return null;
+    const modulePath = convertRustModulePath(scopedId.text);
+    if (!modulePath) return null;
+    return { importPath: modulePath, symbols: ['*'] };
   }
 
   /**
@@ -442,22 +398,13 @@ export class RustImportExtractor implements LanguageImportExtractor {
     }
     if (node.type === 'use_as_clause') {
       // Find the scoped_identifier inside
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child?.type === 'scoped_identifier') {
-          return child.text;
-        }
-      }
+      const scopedId = node.namedChildren.find(child => child.type === 'scoped_identifier');
+      return scopedId?.text ?? null;
     }
     if (node.type === 'use_wildcard') {
       // use_wildcard contains a scoped_identifier child, not a 'path' field
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child?.type === 'scoped_identifier') {
-          return child.text;
-        }
-      }
-      return null;
+      const scopedId = node.namedChildren.find(child => child.type === 'scoped_identifier');
+      return scopedId?.text ?? null;
     }
     return null;
   }

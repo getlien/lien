@@ -124,11 +124,7 @@ export class JavaExportExtractor implements LanguageExportExtractor {
       }
     };
 
-    for (let i = 0; i < rootNode.namedChildCount; i++) {
-      const child = rootNode.namedChild(i);
-      if (!child) continue;
-      this.extractFromNode(child, addExport);
-    }
+    rootNode.namedChildren.forEach(child => this.extractFromNode(child, addExport));
 
     return exports;
   }
@@ -158,11 +154,7 @@ export class JavaExportExtractor implements LanguageExportExtractor {
 
     const isInterface = container.type === 'interface_declaration';
 
-    for (let i = 0; i < body.namedChildCount; i++) {
-      const child = body.namedChild(i);
-      if (!child) continue;
-      this.extractMemberExport(child, isInterface, addExport);
-    }
+    body.namedChildren.forEach(child => this.extractMemberExport(child, isInterface, addExport));
   }
 
   private extractMemberExport(
@@ -184,13 +176,12 @@ export class JavaExportExtractor implements LanguageExportExtractor {
   }
 
   private extractFieldNames(fieldDecl: Parser.SyntaxNode, addExport: (name: string) => void): void {
-    for (let i = 0; i < fieldDecl.namedChildCount; i++) {
-      const child = fieldDecl.namedChild(i);
-      if (child?.type === 'variable_declarator') {
+    fieldDecl.namedChildren
+      .filter(child => child.type === 'variable_declarator')
+      .forEach(child => {
         const nameNode = child.childForFieldName('name');
         if (nameNode) addExport(nameNode.text);
-      }
-    }
+      });
   }
 }
 
@@ -245,16 +236,13 @@ export class JavaImportExtractor implements LanguageImportExtractor {
 
   private getImportPath(node: Parser.SyntaxNode): string | null {
     // Find the scoped_identifier or identifier child (import path)
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (!child) continue;
+    const pathChild = node.namedChildren.find(
+      child => child.type === 'scoped_identifier' || child.type === 'identifier',
+    );
+    if (!pathChild) return null;
 
-      if (child.type === 'scoped_identifier' || child.type === 'identifier') {
-        const hasWildcard = hasChildOfType(node, 'asterisk');
-        return hasWildcard ? `${child.text}.*` : child.text;
-      }
-    }
-    return null;
+    const hasWildcard = hasChildOfType(node, 'asterisk');
+    return hasWildcard ? `${pathChild.text}.*` : pathChild.text;
   }
 }
 
@@ -429,16 +417,9 @@ export class JavaSymbolExtractor implements LanguageSymbolExtractor {
  * to avoid false positives from substring matching.
  */
 function hasPublicModifier(node: Parser.SyntaxNode): boolean {
-  for (let i = 0; i < node.childCount; i++) {
-    const child = node.child(i);
-    if (child?.type === 'modifiers') {
-      for (let j = 0; j < child.childCount; j++) {
-        if (child.child(j)?.type === 'public') return true;
-      }
-      return false;
-    }
-  }
-  return false;
+  const modifiers = node.children.find(child => child.type === 'modifiers');
+  if (!modifiers) return false;
+  return modifiers.children.some(child => child.type === 'public');
 }
 
 /**
@@ -456,9 +437,7 @@ function extractJavaReturnType(node: Parser.SyntaxNode): string | undefined {
  * Find the first descendant of a specific type (breadth-first among children).
  */
 function findDescendant(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (!child) continue;
+  for (const child of node.namedChildren) {
     if (child.type === type) return child;
     const found = findDescendant(child, type);
     if (found) return found;
@@ -470,10 +449,7 @@ function findDescendant(node: Parser.SyntaxNode, type: string): Parser.SyntaxNod
  * Check if a node has a child of a specific type (including unnamed children).
  */
 function hasChildOfType(node: Parser.SyntaxNode, type: string): boolean {
-  for (let i = 0; i < node.childCount; i++) {
-    if (node.child(i)?.type === type) return true;
-  }
-  return false;
+  return node.children.some(child => child.type === type);
 }
 
 // =============================================================================

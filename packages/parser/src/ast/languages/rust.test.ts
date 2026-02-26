@@ -61,12 +61,9 @@ describe('Rust Language', () => {
     it('should not treat any nodes as declarations with functions', () => {
       const code = 'let x = 42;';
       const tree = parser.parse(code);
-      for (let i = 0; i < tree.rootNode.namedChildCount; i++) {
-        const child = tree.rootNode.namedChild(i);
-        if (child) {
-          expect(traverser.isDeclarationWithFunction(child)).toBe(false);
-        }
-      }
+      tree.rootNode.namedChildren.forEach(child => {
+        expect(traverser.isDeclarationWithFunction(child)).toBe(false);
+      });
     });
 
     it('should find parent impl name for methods', () => {
@@ -295,12 +292,9 @@ pub static COUNTER: i32 = 0;`;
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }
@@ -319,12 +313,9 @@ pub static COUNTER: i32 = 0;`;
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }
@@ -343,12 +334,9 @@ pub static COUNTER: i32 = 0;`;
 
       function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
         if (node.type === type) return node;
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child) {
-            const result = findNode(child, type);
-            if (result) return result;
-          }
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
         }
         return null;
       }

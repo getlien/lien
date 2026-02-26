@@ -118,10 +118,7 @@ export class GoExportExtractor implements LanguageExportExtractor {
       }
     };
 
-    for (let i = 0; i < rootNode.namedChildCount; i++) {
-      const child = rootNode.namedChild(i);
-      if (!child) continue;
-
+    rootNode.namedChildren.forEach(child => {
       switch (child.type) {
         case 'function_declaration': {
           const name = child.childForFieldName('name');
@@ -141,19 +138,18 @@ export class GoExportExtractor implements LanguageExportExtractor {
           this.extractSpecExports(child, addExport);
           break;
       }
-    }
+    });
 
     return exports;
   }
 
   private extractTypeExports(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const spec = node.namedChild(i);
-      if (spec?.type === 'type_spec') {
+    node.namedChildren
+      .filter(spec => spec.type === 'type_spec')
+      .forEach(spec => {
         const nameNode = spec.childForFieldName('name');
         if (nameNode) addExport(nameNode.text);
-      }
-    }
+      });
   }
 
   private extractSpecExports(node: Parser.SyntaxNode, addExport: (name: string) => void): void {
@@ -236,12 +232,7 @@ export class GoImportExtractor implements LanguageImportExtractor {
     // Grouped import
     const specList = findChildOfType(node, 'import_spec_list');
     if (specList) {
-      for (let i = 0; i < specList.namedChildCount; i++) {
-        const child = specList.namedChild(i);
-        if (child?.type === 'import_spec') {
-          specs.push(child);
-        }
-      }
+      specs.push(...specList.namedChildren.filter(child => child.type === 'import_spec'));
     }
 
     return specs;
@@ -405,10 +396,8 @@ function extractReceiverType(node: Parser.SyntaxNode): string | undefined {
 
   // Pointer receiver: *User -> strip the pointer
   if (typeNode.type === 'pointer_type') {
-    for (let i = 0; i < typeNode.namedChildCount; i++) {
-      const child = typeNode.namedChild(i);
-      if (child?.type === 'type_identifier') return child.text;
-    }
+    const typeId = typeNode.namedChildren.find(child => child.type === 'type_identifier');
+    if (typeId) return typeId.text;
   }
 
   // Value receiver: User
@@ -433,9 +422,8 @@ function extractGoReturnType(node: Parser.SyntaxNode): string | undefined {
  * Find a func_literal inside a var_declaration's var_spec children.
  */
 function findFuncLiteralInVarDecl(node: Parser.SyntaxNode): DeclarationFunctionInfo | null {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const spec = node.namedChild(i);
-    if (spec?.type !== 'var_spec') continue;
+  for (const spec of node.namedChildren) {
+    if (spec.type !== 'var_spec') continue;
 
     const valueList = spec.childForFieldName('value');
     if (!valueList) continue;
@@ -450,12 +438,7 @@ function findFuncLiteralInVarDecl(node: Parser.SyntaxNode): DeclarationFunctionI
  * Collect all named children of specific types from a node.
  */
 function collectChildrenOfType(node: Parser.SyntaxNode, types: Set<string>): Parser.SyntaxNode[] {
-  const result: Parser.SyntaxNode[] = [];
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (child && types.has(child.type)) result.push(child);
-  }
-  return result;
+  return node.namedChildren.filter(child => types.has(child.type));
 }
 
 const SPEC_TYPES = new Set(['const_spec', 'var_spec']);
@@ -478,11 +461,7 @@ function collectSpecs(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
  * Find the first child of a specific type.
  */
 function findChildOfType(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (child?.type === type) return child;
-  }
-  return null;
+  return node.namedChildren.find(child => child.type === type) ?? null;
 }
 
 // =============================================================================
