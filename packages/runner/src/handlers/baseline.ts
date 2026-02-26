@@ -154,5 +154,5 @@ async function postBaselineResult(
     logic_findings: [],
   };
 
-  await postReviewRunResult(config.laravelApiUrl, payload.auth.installation_token, result, logger);
+  await postReviewRunResult(config.laravelApiUrl, payload.auth.service_token, result, logger);
 }
