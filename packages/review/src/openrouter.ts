@@ -8,7 +8,7 @@ import type { Logger } from './logger.js';
 import { buildBatchedCommentsPrompt } from './prompt.js';
 import { buildLogicReviewPrompt } from './logic-prompt.js';
 import { parseLogicReviewResponse } from './logic-response.js';
-import { extractJSONFromCodeBlock } from './llm-client.js';
+import { extractJSONFromCodeBlock, estimatePromptTokens } from './json-utils.js';
 import { LOGIC_MARKER_PREFIX } from './github-api.js';
 
 /**
@@ -126,14 +126,6 @@ export function parseCommentsResponse(
 
   logger.warning(`Full response content:\n${content}`);
   return null;
-}
-
-/**
- * Estimate prompt token count using ~4 chars/token heuristic.
- * Exported for testing.
- */
-export function estimatePromptTokens(prompt: string): number {
-  return Math.ceil(prompt.length / 4);
 }
 
 /** Max tokens to reserve for the prompt (leaves room for output within 128K context) */

@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 import type { Logger } from './logger.js';
-import { extractJSONFromCodeBlock } from './llm-client.js';
+import { extractJSONFromCodeBlock } from './json-utils.js';
 
 /**
  * Schema for a single logic review response entry
