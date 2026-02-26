@@ -5,7 +5,10 @@
 import { assertValidSha } from '@liendev/review';
 import type { PRJobPayload, BaselineJobPayload, JobPayload } from './types.js';
 
-const REPO_NAME_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
+// GitHub: owner is alphanumeric + hyphens (no start/end hyphen),
+// repo is alphanumeric + hyphens + underscores + periods (no leading period)
+const REPO_NAME_PATTERN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
 
 export function assertValidRepoName(fullName: string): void {
   if (!REPO_NAME_PATTERN.test(fullName)) {

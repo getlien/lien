@@ -12,7 +12,7 @@ import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/par
 
 import type { BaselineJobPayload, ReviewRunResult, ComplexitySnapshotResult } from '../types.js';
 import type { RunnerConfig } from '../config.js';
-import { cloneByBranch, type CloneResult } from '../clone.js';
+import { cloneByBranch, resolveHeadSha, type CloneResult } from '../clone.js';
 import { postReviewRunResult } from '../api-client.js';
 
 export async function handleBaseline(
@@ -42,7 +42,7 @@ export async function handleBaseline(
 
     if (!indexResult.success || !indexResult.chunks || indexResult.chunks.length === 0) {
       logger.warning('Indexing produced no chunks');
-      await postBaselineResult(config, payload, startedAt, 'failed', 0, 0, 0, [], logger);
+      await postBaselineResult(config, payload, startedAt, 'failed', null, 0, 0, 0, [], logger);
       return;
     }
 
@@ -62,11 +62,15 @@ export async function handleBaseline(
 
     const snapshots = buildComplexitySnapshots(report);
 
+    // Resolve actual commit SHA (not branch name)
+    const headSha = await resolveHeadSha(clone.dir);
+
     await postBaselineResult(
       config,
       payload,
       startedAt,
       'completed',
+      headSha,
       indexResult.filesIndexed,
       report.summary.avgComplexity,
       report.summary.maxComplexity,
@@ -75,7 +79,13 @@ export async function handleBaseline(
     );
   } catch (error) {
     logger.error(`Baseline scan failed: ${error instanceof Error ? error.message : String(error)}`);
-    await postBaselineResult(config, payload, startedAt, 'failed', 0, 0, 0, [], logger);
+    try {
+      await postBaselineResult(config, payload, startedAt, 'failed', null, 0, 0, 0, [], logger);
+    } catch (postError) {
+      logger.error(
+        `Failed to post failure result: ${postError instanceof Error ? postError.message : String(postError)}`,
+      );
+    }
     throw error;
   } finally {
     if (clone) await clone.cleanup().catch(() => {});
@@ -106,26 +116,29 @@ async function postBaselineResult(
   payload: BaselineJobPayload,
   startedAt: string,
   status: 'completed' | 'failed',
+  headSha: string | null,
   filesAnalyzed: number,
   avgComplexity: number,
   maxComplexity: number,
   snapshots: ComplexitySnapshotResult[],
   logger: Logger,
 ): Promise<void> {
+  const resolvedSha = headSha ?? payload.repository.default_branch;
+
   const configHash = createHash('sha256')
     .update(JSON.stringify(payload.config))
     .digest('hex')
     .slice(0, 16);
 
   const idempotencyKey = createHash('sha256')
-    .update(`${payload.repository.id}:baseline:${payload.repository.default_branch}:${configHash}`)
+    .update(`${payload.repository.id}:baseline:${resolvedSha}:${configHash}`)
     .digest('hex');
 
   const result: ReviewRunResult = {
     idempotency_key: idempotencyKey,
     repo_id: payload.repository.id,
     pr_number: null,
-    head_sha: payload.repository.default_branch,
+    head_sha: resolvedSha,
     base_sha: null,
     started_at: startedAt,
     completed_at: new Date().toISOString(),

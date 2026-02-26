@@ -23,10 +23,10 @@ export async function postReviewRunResult(
   const url = `${apiUrl.replace(/\/$/, '')}/api/v1/review-runs`;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
+    try {
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -37,8 +37,6 @@ export async function postReviewRunResult(
         body: JSON.stringify(result),
         signal: controller.signal,
       });
-
-      clearTimeout(timeout);
 
       if (response.ok) {
         logger.info(`Posted review run result (status ${response.status})`);
@@ -61,6 +59,8 @@ export async function postReviewRunResult(
       logger.warning(
         `POST /api/v1/review-runs attempt ${attempt + 1}/${MAX_RETRIES} error: ${error instanceof Error ? error.message : String(error)}`,
       );
+    } finally {
+      clearTimeout(timeout);
     }
 
     if (attempt < MAX_RETRIES - 1) {

@@ -13,6 +13,15 @@ export interface RunnerConfig {
   jobTimeoutMs: number;
 }
 
+function parsePositiveInt(value: string | undefined, fallback: number, name: string): number {
+  if (!value) return fallback;
+  const parsed = parseInt(value, 10);
+  if (isNaN(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer, got "${value}"`);
+  }
+  return parsed;
+}
+
 export function loadConfig(): RunnerConfig {
   const laravelApiUrl = process.env.LARAVEL_API_URL;
   if (!laravelApiUrl) {
@@ -31,7 +40,7 @@ export function loadConfig(): RunnerConfig {
     laravelApiUrl,
     openrouterApiKey,
     openrouterModel: process.env.OPENROUTER_MODEL ?? 'minimax/minimax-m2.5',
-    pullTimeoutMs: parseInt(process.env.PULL_TIMEOUT_MS ?? '30000', 10),
-    jobTimeoutMs: parseInt(process.env.JOB_TIMEOUT_MS ?? '600000', 10),
+    pullTimeoutMs: parsePositiveInt(process.env.PULL_TIMEOUT_MS, 30_000, 'PULL_TIMEOUT_MS'),
+    jobTimeoutMs: parsePositiveInt(process.env.JOB_TIMEOUT_MS, 600_000, 'JOB_TIMEOUT_MS'),
   };
 }

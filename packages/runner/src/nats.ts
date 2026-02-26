@@ -22,27 +22,37 @@ export interface NatsHandle {
  * Connect to NATS, pull one message from the consumer, return it.
  * Returns null job if no message is available within the timeout.
  * Caller is responsible for msg.ack()/msg.nak() and nc.close().
+ * Closes the connection automatically on setup errors.
  */
 export async function pullOneJob(config: RunnerConfig, logger: Logger): Promise<NatsHandle> {
-  const nc = await connect({ servers: config.natsUrl });
-  logger.info(`Connected to NATS at ${config.natsUrl}`);
+  let nc: NatsConnection | undefined;
 
-  const js = nc.jetstream();
-  const consumer = await js.consumers.get(config.natsStream, config.natsConsumer);
+  try {
+    nc = await connect({ servers: config.natsUrl });
+    logger.info(`Connected to NATS at ${config.natsUrl}`);
 
-  const messages = await consumer.fetch({ max_messages: 1, expires: config.pullTimeoutMs });
+    const js = nc.jetstream();
+    const consumer = await js.consumers.get(config.natsStream, config.natsConsumer);
 
-  let job: PulledJob | null = null;
-  for await (const msg of messages) {
-    const raw = msg.json<unknown>();
-    // Caller validates the payload — we just parse JSON here
-    job = { msg, payload: raw as JobPayload };
-    break;
+    const messages = await consumer.fetch({ max_messages: 1, expires: config.pullTimeoutMs });
+
+    let job: PulledJob | null = null;
+    for await (const msg of messages) {
+      const raw = msg.json<unknown>();
+      // Caller validates the payload — we just parse JSON here
+      job = { msg, payload: raw as JobPayload };
+      break;
+    }
+
+    if (!job) {
+      logger.info('No messages available, exiting');
+    }
+
+    return { nc, job };
+  } catch (error) {
+    if (nc) {
+      await nc.close().catch(() => {});
+    }
+    throw error;
   }
-
-  if (!job) {
-    logger.info('No messages available, exiting');
-  }
-
-  return { nc, job };
 }

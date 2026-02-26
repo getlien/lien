@@ -23,15 +23,19 @@ async function main(): Promise<void> {
   }
 
   const { msg } = job;
+  let handled = false;
 
   try {
     const payload = validateJobPayload(job.payload);
     logger.info(`Received ${payload.job_type} job for ${payload.repository.full_name}`);
 
     const timeout = setTimeout(() => {
-      logger.error(`Job timed out after ${config.jobTimeoutMs}ms`);
-      msg.nak();
-      process.exit(1);
+      if (!handled) {
+        handled = true;
+        logger.error(`Job timed out after ${config.jobTimeoutMs}ms`);
+        msg.nak();
+        nc.close().then(() => process.exit(1));
+      }
     }, config.jobTimeoutMs);
 
     try {
@@ -40,6 +44,7 @@ async function main(): Promise<void> {
       } else {
         await handleBaseline(payload, config, logger);
       }
+      handled = true;
       msg.ack();
       logger.info('Job completed successfully');
     } finally {
@@ -47,7 +52,10 @@ async function main(): Promise<void> {
     }
   } catch (error) {
     logger.error(`Job failed: ${error instanceof Error ? error.message : String(error)}`);
-    msg.nak();
+    if (!handled) {
+      handled = true;
+      msg.nak();
+    }
   } finally {
     await nc.close();
   }

@@ -316,21 +316,27 @@ export async function handlePRReview(
     );
   } catch (error) {
     logger.error(`PR review failed: ${error instanceof Error ? error.message : String(error)}`);
-    await postResult(
-      config,
-      payload,
-      startedAt,
-      'failed',
-      filesAnalyzed,
-      avgComplexity,
-      maxComplexity,
-      tokenUsage,
-      cost,
-      [],
-      [],
-      [],
-      logger,
-    );
+    try {
+      await postResult(
+        config,
+        payload,
+        startedAt,
+        'failed',
+        filesAnalyzed,
+        avgComplexity,
+        maxComplexity,
+        tokenUsage,
+        cost,
+        [],
+        [],
+        [],
+        logger,
+      );
+    } catch (postError) {
+      logger.error(
+        `Failed to post failure result: ${postError instanceof Error ? postError.message : String(postError)}`,
+      );
+    }
     throw error;
   } finally {
     if (headClone) await headClone.cleanup().catch(() => {});
