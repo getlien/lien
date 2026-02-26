@@ -1367,4 +1367,150 @@ export default function main() {}
       expect(exports).toContain('default');
     });
   });
+
+  describe('extractCallSites - isResultCaptured', () => {
+    it('should mark standalone call as not captured', () => {
+      const content = `
+function process() {
+  doSomething();
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode, 'typescript');
+
+      const call = callSites.find(c => c.symbol === 'doSomething');
+      expect(call).toBeDefined();
+      expect(call!.isResultCaptured).toBe(false);
+    });
+
+    it('should mark assigned call as captured', () => {
+      const content = `
+function process() {
+  const x = foo();
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode, 'typescript');
+
+      const call = callSites.find(c => c.symbol === 'foo');
+      expect(call).toBeDefined();
+      expect(call!.isResultCaptured).toBe(true);
+    });
+
+    it('should mark standalone await call as not captured', () => {
+      const content = `
+async function process() {
+  await doSomething();
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode, 'typescript');
+
+      const call = callSites.find(c => c.symbol === 'doSomething');
+      expect(call).toBeDefined();
+      expect(call!.isResultCaptured).toBe(false);
+    });
+
+    it('should mark assigned await call as captured', () => {
+      const content = `
+async function process() {
+  const x = await foo();
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode, 'typescript');
+
+      const call = callSites.find(c => c.symbol === 'foo');
+      expect(call).toBeDefined();
+      expect(call!.isResultCaptured).toBe(true);
+    });
+
+    it('should mark call in if condition as captured', () => {
+      const content = `
+function process() {
+  if (isValid()) {
+    return true;
+  }
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode, 'typescript');
+
+      const call = callSites.find(c => c.symbol === 'isValid');
+      expect(call).toBeDefined();
+      expect(call!.isResultCaptured).toBe(true);
+    });
+
+    it('should mark return call as captured', () => {
+      const content = `
+function process() {
+  return getValue();
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode, 'typescript');
+
+      const call = callSites.find(c => c.symbol === 'getValue');
+      expect(call).toBeDefined();
+      expect(call!.isResultCaptured).toBe(true);
+    });
+
+    it('should mark chained call as captured (parent is member_expression)', () => {
+      const content = `
+function process() {
+  foo().then(handleResult);
+}
+      `.trim();
+
+      const parseResult = parseAST(content, 'typescript');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode, 'typescript');
+
+      const call = callSites.find(c => c.symbol === 'foo');
+      expect(call).toBeDefined();
+      expect(call!.isResultCaptured).toBe(true);
+    });
+
+    it('should mark standalone Python await call as not captured', () => {
+      const content = `
+async def process():
+    await do_something()
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode, 'python');
+
+      const call = callSites.find(c => c.symbol === 'do_something');
+      expect(call).toBeDefined();
+      expect(call!.isResultCaptured).toBe(false);
+    });
+
+    it('should mark assigned Python await call as captured', () => {
+      const content = `
+async def process():
+    result = await do_something()
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode, 'python');
+
+      const call = callSites.find(c => c.symbol === 'do_something');
+      expect(call).toBeDefined();
+      expect(call!.isResultCaptured).toBe(true);
+    });
+  });
 });

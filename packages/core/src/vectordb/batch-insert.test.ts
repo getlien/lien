@@ -216,6 +216,7 @@ describe('batch-insert', () => {
           importedSymbolNames: [''],
           callSiteSymbols: [''],
           callSiteLines: [0],
+          callSiteCaptured: [0],
         });
       });
 

@@ -136,11 +136,28 @@ function buildVoidSymbolSet(chunks: CodeChunk[]): Set<string> {
 }
 
 /**
+ * Determine whether a call site is unchecked (return value discarded).
+ * Prefers AST-computed `isResultCaptured` metadata when available,
+ * falling back to regex-based heuristic for legacy data.
+ */
+function isUncheckedCall(
+  callSite: { symbol: string; line: number; isResultCaptured?: boolean },
+  lineContent: string,
+): boolean {
+  // Prefer AST-computed metadata (from in-memory chunks or Qdrant)
+  if (callSite.isResultCaptured !== undefined) {
+    return !callSite.isResultCaptured;
+  }
+  // Fall back to heuristic for legacy indexed data
+  return isLikelyUncheckedCall(lineContent, callSite.symbol);
+}
+
+/**
  * Check a single call site for unchecked return value and return a finding if applicable.
  */
 function checkCallSite(
   chunk: CodeChunk,
-  callSite: { symbol: string; line: number },
+  callSite: { symbol: string; line: number; isResultCaptured?: boolean },
   lines: string[],
   startLine: number,
   voidSymbols: Set<string>,
@@ -152,7 +169,7 @@ function checkCallSite(
   if (lineIndex < 0 || lineIndex >= lines.length) return null;
 
   const lineContent = lines[lineIndex].trim();
-  if (!isLikelyUncheckedCall(lineContent, callSite.symbol)) return null;
+  if (!isUncheckedCall(callSite, lineContent)) return null;
 
   return {
     filepath: chunk.metadata.file,

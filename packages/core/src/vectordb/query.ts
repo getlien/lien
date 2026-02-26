@@ -13,6 +13,7 @@ import {
   FileTypeBoostingStrategy,
 } from './boosting/index.js';
 import { safeRegex } from '../utils/safe-regex.js';
+import { CAPTURED_TRUE, CAPTURED_UNKNOWN } from './batch-insert.js';
 
 /**
  * Cached strategy instances to avoid repeated instantiation overhead.
@@ -85,6 +86,7 @@ interface DBRecord {
   importedSymbolNames?: string[];
   callSiteSymbols?: string[];
   callSiteLines?: number[];
+  callSiteCaptured?: number[];
   _distance?: number; // Added by LanceDB for search results
 }
 
@@ -203,18 +205,32 @@ function deserializeImportedSymbols(
 }
 
 /**
+ * Decode a numeric captured flag back to an optional boolean.
+ * Returns undefined for CAPTURED_UNKNOWN or missing data.
+ */
+function decodeCaptured(capturedArr: number[] | undefined, index: number): boolean | undefined {
+  if (!capturedArr || index >= capturedArr.length || capturedArr[index] === CAPTURED_UNKNOWN) {
+    return undefined;
+  }
+  return capturedArr[index] === CAPTURED_TRUE;
+}
+
+/**
  * Deserialize callSites from parallel arrays stored in DB.
  *
  * @param symbols - Array of symbol names called at each site
  * @param lines - Array of line numbers for each call site (parallel to symbols)
- * @returns Array of call site objects with symbol and line, or undefined if no valid data
+ * @param captured - Array of captured flags. Optional for backward compat with older indexes.
+ * @returns Array of call site objects with symbol, line, and optional isResultCaptured
  */
 function deserializeCallSites(
   symbols?: unknown,
   lines?: unknown,
-): Array<{ symbol: string; line: number }> | undefined {
+  captured?: unknown,
+): Array<{ symbol: string; line: number; isResultCaptured?: boolean }> | undefined {
   const symbolsArr = toPlainArray<string>(symbols);
   const linesArr = toPlainArray<number>(lines);
+  const capturedArr = toPlainArray<number>(captured);
 
   if (
     !symbolsArr ||
@@ -233,7 +249,13 @@ function deserializeCallSites(
     );
   }
   const result = symbolsArr
-    .map((symbol, i) => ({ symbol, line: linesArr[i] }))
+    .map((symbol, i) => ({
+      symbol,
+      line: linesArr[i],
+      ...((v): { isResultCaptured?: boolean } => (v !== undefined ? { isResultCaptured: v } : {}))(
+        decodeCaptured(capturedArr, i),
+      ),
+    }))
     // Note: line > 0 is intentional - we use 0 as a placeholder value for missing data
     // in serializeCallSites(). Real line numbers are 1-indexed in source files.
     .filter(({ symbol, line }) => symbol && typeof line === 'number' && line > 0);
@@ -266,7 +288,7 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
       return hasValidStringEntries(arr) ? arr : undefined;
     })(),
     importedSymbols: deserializeImportedSymbols(r.importedSymbolPaths, r.importedSymbolNames),
-    callSites: deserializeCallSites(r.callSiteSymbols, r.callSiteLines),
+    callSites: deserializeCallSites(r.callSiteSymbols, r.callSiteLines, r.callSiteCaptured),
   };
 }
 

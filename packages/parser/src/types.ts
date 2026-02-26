@@ -55,6 +55,7 @@ export interface ChunkMetadata {
   callSites?: Array<{
     symbol: string; // The called symbol name
     line: number; // Line number of the call
+    isResultCaptured?: boolean; // Whether the return value is assigned/used (AST-derived)
   }>;
 
   // Halstead metrics (v0.19.0)

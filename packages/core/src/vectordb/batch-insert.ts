@@ -46,6 +46,7 @@ interface DatabaseRecord {
   importedSymbolNames: string[]; // JSON-encoded symbol arrays (values from importedSymbols map)
   callSiteSymbols: string[]; // Called symbol names
   callSiteLines: number[]; // Line numbers of calls (parallel array)
+  callSiteCaptured: number[]; // Whether return value is captured (parallel array: 1=captured, 0=not, -1=unknown)
 }
 
 /**
@@ -85,22 +86,46 @@ function serializeImportedSymbols(importedSymbols?: Record<string, string[]>): {
 const ARROW_EMPTY_NUMBER_PLACEHOLDER = [0];
 
 /**
+ * Numeric encoding for isResultCaptured in Arrow parallel arrays.
+ * Used by both serialization (batch-insert) and deserialization (query).
+ */
+export const CAPTURED_TRUE = 1;
+export const CAPTURED_FALSE = 0;
+export const CAPTURED_UNKNOWN = -1;
+
+/**
+ * Encode an optional boolean into its numeric representation for Arrow storage.
+ */
+function encodeCaptured(value?: boolean): number {
+  if (value === undefined) return CAPTURED_UNKNOWN;
+  return value ? CAPTURED_TRUE : CAPTURED_FALSE;
+}
+
+/**
  * Serialize callSites into parallel arrays for Arrow storage.
  *
  * Note: Uses ARROW_EMPTY_STRING_PLACEHOLDER and ARROW_EMPTY_NUMBER_PLACEHOLDER
  * for missing data. This is required for Arrow type inference - empty arrays cause
  * schema inference failures.
  */
-function serializeCallSites(callSites?: Array<{ symbol: string; line: number }>): {
+function serializeCallSites(
+  callSites?: Array<{ symbol: string; line: number; isResultCaptured?: boolean }>,
+): {
   symbols: string[];
   lines: number[];
+  captured: number[];
 } {
   if (!callSites || callSites.length === 0) {
-    return { symbols: ARROW_EMPTY_STRING_PLACEHOLDER, lines: ARROW_EMPTY_NUMBER_PLACEHOLDER };
+    return {
+      symbols: ARROW_EMPTY_STRING_PLACEHOLDER,
+      lines: ARROW_EMPTY_NUMBER_PLACEHOLDER,
+      captured: ARROW_EMPTY_NUMBER_PLACEHOLDER,
+    };
   }
   return {
     symbols: callSites.map(c => c.symbol),
     lines: callSites.map(c => c.line),
+    captured: callSites.map(c => encodeCaptured(c.isResultCaptured)),
   };
 }
 
@@ -149,6 +174,7 @@ function transformChunkToRecord(
     importedSymbolNames: importedSymbolsSerialized.names,
     callSiteSymbols: callSitesSerialized.symbols,
     callSiteLines: callSitesSerialized.lines,
+    callSiteCaptured: callSitesSerialized.captured,
   };
 }
 

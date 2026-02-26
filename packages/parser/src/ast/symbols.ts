@@ -173,7 +173,7 @@ export function extractExports(
 export function extractCallSites(
   node: Parser.SyntaxNode,
   language?: SupportedLanguage,
-): Array<{ symbol: string; line: number }> {
+): Array<{ symbol: string; line: number; isResultCaptured?: boolean }> {
   if (!language) return [];
 
   const langDef = getLanguage(language);
@@ -181,7 +181,7 @@ export function extractCallSites(
   if (!extractor) return [];
 
   const callExprTypes = new Set(langDef.symbols.callExpressionTypes);
-  const callSites: Array<{ symbol: string; line: number }> = [];
+  const callSites: Array<{ symbol: string; line: number; isResultCaptured?: boolean }> = [];
   const seen = new Set<string>();
 
   traverseForCallSites(node, callSites, seen, callExprTypes, extractor);
@@ -189,11 +189,46 @@ export function extractCallSites(
 }
 
 /**
+ * Determine whether a call expression's return value is captured (assigned/used).
+ *
+ * In tree-sitter, a standalone call like `doSomething();` parses as:
+ *   expression_statement > call_expression
+ *
+ * If the call is assigned (`const x = doSomething()`), it appears inside
+ * `variable_declarator` or similar — NOT `expression_statement`.
+ *
+ * Edge case: `await doSomething();` parses as:
+ *   expression_statement > await_expression > call_expression  (TS/JS)
+ *   expression_statement > await > call                        (Python)
+ * We walk up through transparent wrappers to handle this.
+ */
+const TRANSPARENT_WRAPPER_TYPES = new Set([
+  'await_expression', // TypeScript/JavaScript
+  'await', // Python
+  'parenthesized_expression', // All languages
+]);
+
+function isCallResultCaptured(callNode: Parser.SyntaxNode): boolean {
+  let current = callNode;
+  while (current.parent) {
+    const parentType = current.parent.type;
+    if (parentType === 'expression_statement') return false;
+    // Walk up through transparent wrappers that don't consume the value
+    if (TRANSPARENT_WRAPPER_TYPES.has(parentType)) {
+      current = current.parent;
+      continue;
+    }
+    break;
+  }
+  return true;
+}
+
+/**
  * Recursively traverse AST to find call expressions.
  */
 function traverseForCallSites(
   node: Parser.SyntaxNode,
-  callSites: Array<{ symbol: string; line: number }>,
+  callSites: Array<{ symbol: string; line: number; isResultCaptured?: boolean }>,
   seen: Set<string>,
   callExprTypes: Set<string>,
   extractor: LanguageSymbolExtractor,
@@ -202,7 +237,11 @@ function traverseForCallSites(
     const callSite = extractor.extractCallSite(node);
     if (callSite && !seen.has(callSite.key)) {
       seen.add(callSite.key);
-      callSites.push({ symbol: callSite.symbol, line: callSite.line });
+      callSites.push({
+        symbol: callSite.symbol,
+        line: callSite.line,
+        isResultCaptured: isCallResultCaptured(node),
+      });
     }
   }
 
