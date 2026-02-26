@@ -30,7 +30,7 @@ jobs:
       - name: Format check
         run: npm run format:check
 
-      - name: Build Parser, Core & Review (required by CLI and App)
+      - name: Build Parser, Core & Review (required by CLI, App & Runner)
         run: npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review
 
       - name: Lint
@@ -44,6 +44,9 @@ jobs:
 
       - name: Type check (App)
         run: npm run typecheck --workspace=packages/app
+
+      - name: Type check (Runner)
+        run: npm run typecheck --workspace=packages/runner
 
       - name: Run tests (CLI)
         run: npm run test --workspace=packages/cli
