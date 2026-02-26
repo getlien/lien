@@ -47,9 +47,8 @@ export function calculateComplexity(node: Parser.SyntaxNode): number {
     }
 
     // Traverse children
-    for (let i = 0; i < n.namedChildCount; i++) {
-      const child = n.namedChild(i);
-      if (child) traverse(child);
+    for (const child of n.namedChildren) {
+      traverse(child);
     }
   }
 

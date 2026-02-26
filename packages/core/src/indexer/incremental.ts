@@ -9,6 +9,7 @@ import {
   DEFAULT_CONCURRENCY,
   EMBEDDING_MICRO_BATCH_SIZE,
 } from '../constants.js';
+import { chunkArray } from '../utils/chunk-array.js';
 import { ManifestManager } from './manifest.js';
 import type { Result } from '../utils/result.js';
 import { Ok, Err, isOk } from '../utils/result.js';
@@ -125,8 +126,7 @@ async function processFileContent(
   const texts = chunks.map(c => c.content);
   const vectors: Float32Array[] = [];
 
-  for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
-    const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
+  for (const microBatch of chunkArray(texts, EMBEDDING_MICRO_BATCH_SIZE)) {
     const microResults = await embeddings.embedBatch(microBatch);
     vectors.push(...microResults);
 

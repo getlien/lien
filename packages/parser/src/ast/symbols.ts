@@ -40,9 +40,8 @@ function extractImportPaths(
   const imports: string[] = [];
   const nodeTypeSet = new Set(importExtractor.importNodeTypes);
 
-  for (let i = 0; i < rootNode.namedChildCount; i++) {
-    const child = rootNode.namedChild(i);
-    if (!child || !nodeTypeSet.has(child.type)) continue;
+  for (const child of rootNode.namedChildren) {
+    if (!nodeTypeSet.has(child.type)) continue;
 
     const result = importExtractor.extractImportPath(child);
     if (result) imports.push(result);
@@ -93,9 +92,8 @@ function extractSymbolsWithExtractor(
   const importedSymbols: Record<string, string[]> = {};
   const nodeTypeSet = new Set(importExtractor.importNodeTypes);
 
-  for (let i = 0; i < rootNode.namedChildCount; i++) {
-    const node = rootNode.namedChild(i);
-    if (!node || !nodeTypeSet.has(node.type)) continue;
+  for (const node of rootNode.namedChildren) {
+    if (!nodeTypeSet.has(node.type)) continue;
 
     const result = importExtractor.processImportSymbols(node);
     if (result) {
@@ -209,8 +207,7 @@ function traverseForCallSites(
   }
 
   // Recurse into named children to skip punctuation and other non-semantic nodes
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (child) traverseForCallSites(child, callSites, seen, callExprTypes, extractor);
+  for (const child of node.namedChildren) {
+    traverseForCallSites(child, callSites, seen, callExprTypes, extractor);
   }
 }

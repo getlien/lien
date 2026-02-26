@@ -151,9 +151,9 @@ describe('IndexingProgressTracker', () => {
       tracker.start();
 
       // Simulate processing files
-      for (let i = 0; i < totalFiles; i++) {
+      Array.from({ length: totalFiles }).forEach(() => {
         tracker.incrementFiles();
-      }
+      });
 
       // Change message for final phase
       tracker.setMessage('Saving manifest...');

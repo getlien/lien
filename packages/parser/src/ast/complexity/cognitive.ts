@@ -97,9 +97,8 @@ function traverseLogicalChildren(
   ctx: TraversalContext,
 ): void {
   const operator = n.childForFieldName('operator');
-  for (let i = 0; i < n.namedChildCount; i++) {
-    const child = n.namedChild(i);
-    if (child && child !== operator) ctx.traverse(child, level, op);
+  for (const child of n.namedChildren) {
+    if (child !== operator) ctx.traverse(child, level, op);
   }
 }
 
@@ -110,17 +109,15 @@ function traverseNestingChildren(
   nonNestingTypes: Set<string>,
   ctx: TraversalContext,
 ): void {
-  for (let i = 0; i < n.namedChildCount; i++) {
-    const child = n.namedChild(i);
-    if (child) ctx.traverse(child, getChildNestingLevel(n, child, level, nonNestingTypes), null);
+  for (const child of n.namedChildren) {
+    ctx.traverse(child, getChildNestingLevel(n, child, level, nonNestingTypes), null);
   }
 }
 
 /** Traverse all children at specified level */
 function traverseAllChildren(n: Parser.SyntaxNode, level: number, ctx: TraversalContext): void {
-  for (let i = 0; i < n.namedChildCount; i++) {
-    const child = n.namedChild(i);
-    if (child) ctx.traverse(child, level, null);
+  for (const child of n.namedChildren) {
+    ctx.traverse(child, level, null);
   }
 }
 

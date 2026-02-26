@@ -45,9 +45,8 @@ export function extractParameters(node: Parser.SyntaxNode, _content: string): st
   if (!paramsNode) return parameters;
 
   // Traverse parameter nodes
-  for (let i = 0; i < paramsNode.namedChildCount; i++) {
-    const param = paramsNode.namedChild(i);
-    if (param && param.text.trim()) {
+  for (const param of paramsNode.namedChildren) {
+    if (param.text.trim()) {
       parameters.push(param.text);
     }
   }

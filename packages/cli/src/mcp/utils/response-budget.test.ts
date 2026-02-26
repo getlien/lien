@@ -26,22 +26,18 @@ function makeResultsResponse(count: number, contentSize: number) {
 
 /** Create a get_files_context multi-file response. */
 function makeFilesResponse(fileCount: number, chunksPerFile: number, contentSize: number) {
-  const files: Record<
-    string,
-    {
-      chunks: Array<{ content: string; metadata: Record<string, unknown> }>;
-      testAssociations: string[];
-    }
-  > = {};
-  for (let f = 0; f < fileCount; f++) {
-    files[`src/file-${f}.ts`] = {
-      chunks: Array.from({ length: chunksPerFile }, (_, i) => ({
-        content: bigContent(contentSize),
-        metadata: { file: `src/file-${f}.ts`, startLine: i * 50, endLine: (i + 1) * 50 },
-      })),
-      testAssociations: [`src/__tests__/file-${f}.test.ts`],
-    };
-  }
+  const files = Object.fromEntries(
+    Array.from({ length: fileCount }, (_, f) => [
+      `src/file-${f}.ts`,
+      {
+        chunks: Array.from({ length: chunksPerFile }, (_, i) => ({
+          content: bigContent(contentSize),
+          metadata: { file: `src/file-${f}.ts`, startLine: i * 50, endLine: (i + 1) * 50 },
+        })),
+        testAssociations: [`src/__tests__/file-${f}.test.ts`],
+      },
+    ]),
+  );
   return { indexInfo: { indexVersion: 1, indexDate: '2025-01-01' }, files };
 }
 

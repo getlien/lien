@@ -36,11 +36,11 @@ function createTestData(count: number) {
   const metadatas: ChunkMetadata[] = [];
   const contents: string[] = [];
 
-  for (let i = 0; i < count; i++) {
+  Array.from({ length: count }).forEach((_, i) => {
     vectors.push(new Float32Array([i, i + 1, i + 2]));
     metadatas.push(createMockMetadata(`file${i}.ts`, i * 10));
     contents.push(`content ${i}`);
-  }
+  });
 
   return { vectors, metadatas, contents };
 }

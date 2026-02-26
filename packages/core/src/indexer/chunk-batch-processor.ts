@@ -18,6 +18,7 @@ import type { EmbeddingService } from '../embeddings/types.js';
 import type { ProgressTracker } from './progress-tracker.js';
 import type { CodeChunk } from '@liendev/parser';
 import { EMBEDDING_MICRO_BATCH_SIZE } from '../constants.js';
+import { chunkArray } from '../utils/chunk-array.js';
 
 /** A chunk with its content ready for embedding */
 export interface ChunkWithContent {
@@ -51,8 +52,7 @@ export async function processEmbeddingMicroBatches(
 ): Promise<Float32Array[]> {
   const results: Float32Array[] = [];
 
-  for (let j = 0; j < texts.length; j += EMBEDDING_MICRO_BATCH_SIZE) {
-    const microBatch = texts.slice(j, Math.min(j + EMBEDDING_MICRO_BATCH_SIZE, texts.length));
+  for (const microBatch of chunkArray(texts, EMBEDDING_MICRO_BATCH_SIZE)) {
     const microResults = await embeddings.embedBatch(microBatch);
     results.push(...microResults);
 
@@ -204,11 +204,7 @@ export class ChunkBatchProcessor {
       const toProcess = this.accumulator.splice(0, this.accumulator.length);
 
       // Process in batches for memory/API limits
-      for (let i = 0; i < toProcess.length; i += this.config.embeddingBatchSize) {
-        const batch = toProcess.slice(
-          i,
-          Math.min(i + this.config.embeddingBatchSize, toProcess.length),
-        );
+      for (const batch of chunkArray(toProcess, this.config.embeddingBatchSize)) {
         const texts = batch.map(item => item.content);
 
         // Generate embeddings

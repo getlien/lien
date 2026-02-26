@@ -2,6 +2,7 @@ import type { LanceDBConnection, LanceDBTable } from './lancedb-types.js';
 import type { ChunkMetadata } from '@liendev/parser';
 import { DatabaseError } from '../errors/index.js';
 import { VECTOR_DB_MAX_BATCH_SIZE, VECTOR_DB_MIN_BATCH_SIZE } from '../constants.js';
+import { chunkArray } from '../utils/chunk-array.js';
 
 /**
  * Batch of data to be inserted into the vector database
@@ -223,12 +224,11 @@ function chunkIntoBatches(
     return [[vectors, metadatas, contents]];
   }
 
-  const batches: Array<[Float32Array[], ChunkMetadata[], string[]]> = [];
-  for (let i = 0; i < vectors.length; i += batchSize) {
-    const end = Math.min(i + batchSize, vectors.length);
-    batches.push([vectors.slice(i, end), metadatas.slice(i, end), contents.slice(i, end)]);
-  }
-  return batches;
+  const vectorChunks = chunkArray(vectors, batchSize);
+  const metadataChunks = chunkArray(metadatas, batchSize);
+  const contentChunks = chunkArray(contents, batchSize);
+
+  return vectorChunks.map((v, i) => [v, metadataChunks[i], contentChunks[i]]);
 }
 
 /**

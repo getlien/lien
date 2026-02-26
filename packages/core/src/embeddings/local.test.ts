@@ -127,10 +127,7 @@ describe('LocalEmbeddings', () => {
       const embedding = await embeddings.embed('test normalization');
 
       // Calculate L2 norm - should be close to 1.0 (normalized)
-      let sumSquares = 0;
-      for (let i = 0; i < embedding.length; i++) {
-        sumSquares += embedding[i] * embedding[i];
-      }
+      const sumSquares = Array.from(embedding).reduce((sum, val) => sum + val * val, 0);
       const norm = Math.sqrt(sumSquares);
 
       expect(norm).toBeCloseTo(1.0, 5);
@@ -217,15 +214,10 @@ describe('LocalEmbeddings', () => {
 
 // Helper function to calculate cosine similarity
 function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
+  const aArr = Array.from(a);
+  const dotProduct = aArr.reduce((sum, val, i) => sum + val * b[i], 0);
+  const normA = aArr.reduce((sum, val) => sum + val * val, 0);
+  const normB = Array.from(b).reduce((sum, val) => sum + val * val, 0);
 
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
