@@ -1482,5 +1482,35 @@ function process() {
       expect(call).toBeDefined();
       expect(call!.isResultCaptured).toBe(true);
     });
+
+    it('should mark standalone Python await call as not captured', () => {
+      const content = `
+async def process():
+    await do_something()
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode, 'python');
+
+      const call = callSites.find(c => c.symbol === 'do_something');
+      expect(call).toBeDefined();
+      expect(call!.isResultCaptured).toBe(false);
+    });
+
+    it('should mark assigned Python await call as captured', () => {
+      const content = `
+async def process():
+    result = await do_something()
+      `.trim();
+
+      const parseResult = parseAST(content, 'python');
+      const funcNode = parseResult.tree!.rootNode.namedChild(0)!;
+      const callSites = extractCallSites(funcNode, 'python');
+
+      const call = callSites.find(c => c.symbol === 'do_something');
+      expect(call).toBeDefined();
+      expect(call!.isResultCaptured).toBe(true);
+    });
   });
 });

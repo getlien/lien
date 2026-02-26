@@ -198,16 +198,23 @@ export function extractCallSites(
  * `variable_declarator` or similar — NOT `expression_statement`.
  *
  * Edge case: `await doSomething();` parses as:
- *   expression_statement > await_expression > call_expression
+ *   expression_statement > await_expression > call_expression  (TS/JS)
+ *   expression_statement > await > call                        (Python)
  * We walk up through transparent wrappers to handle this.
  */
+const TRANSPARENT_WRAPPER_TYPES = new Set([
+  'await_expression', // TypeScript/JavaScript
+  'await', // Python
+  'parenthesized_expression', // All languages
+]);
+
 function isCallResultCaptured(callNode: Parser.SyntaxNode): boolean {
   let current = callNode;
   while (current.parent) {
     const parentType = current.parent.type;
     if (parentType === 'expression_statement') return false;
     // Walk up through transparent wrappers that don't consume the value
-    if (parentType === 'await_expression' || parentType === 'parenthesized_expression') {
+    if (TRANSPARENT_WRAPPER_TYPES.has(parentType)) {
       current = current.parent;
       continue;
     }
