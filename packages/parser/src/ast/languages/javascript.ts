@@ -87,12 +87,9 @@ export class TypeScriptTraverser implements LanguageTraverser {
         return n;
       }
 
-      for (let i = 0; i < n.childCount; i++) {
-        const child = n.child(i);
-        if (child) {
-          const result = search(child, depth + 1);
-          if (result) return result;
-        }
+      for (const child of n.children) {
+        const result = search(child, depth + 1);
+        if (result) return result;
       }
 
       return null;
@@ -141,14 +138,13 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
       }
     };
 
-    for (let i = 0; i < rootNode.namedChildCount; i++) {
-      const child = rootNode.namedChild(i);
-      if (child?.type === 'export_statement') {
+    rootNode.namedChildren.forEach(child => {
+      if (child.type === 'export_statement') {
         this.extractExportStatementSymbols(child, addExport);
-      } else if (child?.type === 'expression_statement') {
+      } else if (child.type === 'expression_statement') {
         this.extractCJSExportSymbols(child, addExport);
       }
-    }
+    });
 
     return exports;
   }
@@ -167,12 +163,9 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
       this.extractDeclarationExports(declaration, addExport);
     }
 
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'export_clause') {
-        this.extractExportClauseSymbols(child, addExport);
-      }
-    }
+    node.namedChildren
+      .filter(child => child.type === 'export_clause')
+      .forEach(child => this.extractExportClauseSymbols(child, addExport));
   }
 
   private extractDeclarationExports(
@@ -186,15 +179,14 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     }
 
     if (node.type === 'lexical_declaration' || node.type === 'variable_declaration') {
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (child?.type === 'variable_declarator') {
+      node.namedChildren
+        .filter(child => child.type === 'variable_declarator')
+        .forEach(child => {
           const varName = child.childForFieldName('name');
           if (varName) {
             addExport(varName.text);
           }
-        }
-      }
+        });
     }
   }
 
@@ -202,17 +194,16 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     node: Parser.SyntaxNode,
     addExport: (name: string) => void,
   ): void {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'export_specifier') {
+    node.namedChildren
+      .filter(child => child.type === 'export_specifier')
+      .forEach(child => {
         const aliasNode = child.childForFieldName('alias');
         const nameNode = child.childForFieldName('name');
         const exported = aliasNode?.text || nameNode?.text;
         if (exported) {
           addExport(exported);
         }
-      }
-    }
+      });
   }
 
   // ---------------------------------------------------------------------------
@@ -282,17 +273,14 @@ export class JavaScriptExportExtractor implements LanguageExportExtractor {
     node: Parser.SyntaxNode,
     addExport: (name: string) => void,
   ): void {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const prop = node.namedChild(i);
-      if (!prop) continue;
-
+    node.namedChildren.forEach(prop => {
       if (prop.type === 'shorthand_property_identifier') {
         addExport(prop.text);
       } else if (prop.type === 'pair') {
         const key = prop.childForFieldName('key');
         if (key) addExport(key.text);
       }
-    }
+    });
   }
 }
 
@@ -378,12 +366,9 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     const importPath = sourceNode.text.replace(/['"]/g, '');
     const symbols: string[] = [];
 
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'export_clause') {
-        symbols.push(...this.extractExportClauseSymbols(child));
-      }
-    }
+    node.namedChildren
+      .filter(child => child.type === 'export_clause')
+      .forEach(child => symbols.push(...this.extractExportClauseSymbols(child)));
 
     return symbols.length > 0 ? { importPath, symbols } : null;
   }
@@ -391,10 +376,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
   private extractImportStatementSymbols(node: Parser.SyntaxNode): string[] {
     const symbols: string[] = [];
 
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (!child) continue;
-
+    node.namedChildren.forEach(child => {
       switch (child.type) {
         case 'identifier':
           symbols.push(child.text);
@@ -409,16 +391,13 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
           this.extractNamespaceImportSymbol(child, symbols);
           break;
       }
-    }
+    });
 
     return symbols;
   }
 
   private extractImportClauseSymbols(node: Parser.SyntaxNode, symbols: string[]): void {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (!child) continue;
-
+    node.namedChildren.forEach(child => {
       if (child.type === 'identifier') {
         symbols.push(child.text);
       } else if (child.type === 'named_imports') {
@@ -426,24 +405,18 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
       } else if (child.type === 'namespace_import') {
         this.extractNamespaceImportSymbol(child, symbols);
       }
-    }
+    });
   }
 
   private extractNamespaceImportSymbol(node: Parser.SyntaxNode, symbols: string[]): void {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child?.type === 'identifier') {
-        symbols.push(`* as ${child.text}`);
-        return;
-      }
+    const identifier = node.namedChildren.find(child => child.type === 'identifier');
+    if (identifier) {
+      symbols.push(`* as ${identifier.text}`);
     }
   }
 
   private extractNamedImportSymbols(node: Parser.SyntaxNode, symbols: string[]): void {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (!child) continue;
-
+    node.namedChildren.forEach(child => {
       switch (child.type) {
         case 'import_specifier': {
           const aliasNode = child.childForFieldName('alias');
@@ -461,7 +434,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
           this.extractNamedImportSymbols(child, symbols);
           break;
       }
-    }
+    });
   }
 
   /**
@@ -470,15 +443,15 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
    */
   private extractExportClauseSymbols(clause: Parser.SyntaxNode): string[] {
     const symbols: string[] = [];
-    for (let j = 0; j < clause.namedChildCount; j++) {
-      const specifier = clause.namedChild(j);
-      if (specifier?.type !== 'export_specifier') continue;
-      const nameNode = specifier.childForFieldName('name');
-      const symbol = nameNode?.text || specifier.text;
-      if (symbol && !symbol.includes('{') && !symbol.includes('}')) {
-        symbols.push(symbol);
-      }
-    }
+    clause.namedChildren
+      .filter(specifier => specifier.type === 'export_specifier')
+      .forEach(specifier => {
+        const nameNode = specifier.childForFieldName('name');
+        const symbol = nameNode?.text || specifier.text;
+        if (symbol && !symbol.includes('{') && !symbol.includes('}')) {
+          symbols.push(symbol);
+        }
+      });
     return symbols;
   }
 
@@ -510,12 +483,9 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
   }
 
   private findRequireCallInChildren(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (child) {
-        const found = this.findRequireCall(child);
-        if (found) return found;
-      }
+    for (const child of node.namedChildren) {
+      const found = this.findRequireCall(child);
+      if (found) return found;
     }
     return null;
   }
@@ -524,9 +494,8 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
     node: Parser.SyntaxNode,
   ): { importPath: string; symbols: string[] } | null {
     // Find the variable_declarator with a require() value
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const declarator = node.namedChild(i);
-      if (declarator?.type !== 'variable_declarator') continue;
+    for (const declarator of node.namedChildren) {
+      if (declarator.type !== 'variable_declarator') continue;
 
       const value = declarator.childForFieldName('value');
       if (!value) continue;
@@ -556,10 +525,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
 
   private extractObjectPatternSymbols(node: Parser.SyntaxNode): string[] {
     const symbols: string[] = [];
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const prop = node.namedChild(i);
-      if (!prop) continue;
-
+    node.namedChildren.forEach(prop => {
       if (prop.type === 'shorthand_property_identifier_pattern') {
         symbols.push(prop.text);
       } else if (prop.type === 'pair_pattern') {
@@ -567,7 +533,7 @@ export class JavaScriptImportExtractor implements LanguageImportExtractor {
         const value = prop.childForFieldName('value');
         if (value) symbols.push(value.text);
       }
-    }
+    });
     return symbols;
   }
 

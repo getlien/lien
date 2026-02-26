@@ -184,6 +184,20 @@ import { Command } from 'commander';
 import { VectorDB } from '../vectordb/lancedb.js';
 ```
 
+### Tree-sitter Node Iteration
+Tree-sitter `SyntaxNode` exposes `.namedChildren` and `.children` as arrays. **Never use manual index loops** (`for (let i = 0; i < node.namedChildCount; i++)`). Use array methods instead:
+
+| Pattern | Use |
+|---|---|
+| Iterate all children | `.forEach()` or `for (const child of node.namedChildren)` |
+| Find first match | `.find()` |
+| Check a condition | `.some()` |
+| Filter then process | `.filter().forEach()` or `.filter().map()` |
+| Recursive search with early return | `for (const child of node.namedChildren)` |
+| Collect/transform | `.map()`, `.flatMap()`, `.filter()` |
+
+Reference: `packages/parser/src/ast/languages/csharp.ts`
+
 ### Commits
 Follow Conventional Commits:
 - `feat(scope): description` - New feature

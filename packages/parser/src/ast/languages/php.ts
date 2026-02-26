@@ -111,10 +111,7 @@ export class PHPExportExtractor implements LanguageExportExtractor {
     const exports: string[] = [];
     const seen = new Set<string>();
 
-    for (let i = 0; i < rootNode.namedChildCount; i++) {
-      const child = rootNode.namedChild(i);
-      if (!child) continue;
-
+    rootNode.namedChildren.forEach(child => {
       const childExports = this.extractExportsFromNode(child);
       childExports.forEach(exp => {
         if (exp && !seen.has(exp)) {
@@ -122,7 +119,7 @@ export class PHPExportExtractor implements LanguageExportExtractor {
           exports.push(exp);
         }
       });
-    }
+    });
 
     return exports;
   }
@@ -137,20 +134,12 @@ export class PHPExportExtractor implements LanguageExportExtractor {
   }
 
   private extractExportsFromNamespace(node: Parser.SyntaxNode): string[] {
-    const exports: string[] = [];
     const body = node.childForFieldName('body');
+    if (!body) return [];
 
-    if (body) {
-      for (let i = 0; i < body.namedChildCount; i++) {
-        const child = body.namedChild(i);
-        if (child) {
-          const name = this.extractExportableDeclaration(child);
-          if (name) exports.push(name);
-        }
-      }
-    }
-
-    return exports;
+    return body.namedChildren
+      .map(child => this.extractExportableDeclaration(child))
+      .filter((name): name is string => name !== null);
   }
 
   private extractExportableDeclaration(node: Parser.SyntaxNode): string | null {
@@ -182,9 +171,8 @@ export class PHPImportExtractor implements LanguageImportExtractor {
   }
 
   processImportSymbols(node: Parser.SyntaxNode): { importPath: string; symbols: string[] } | null {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const clause = node.namedChild(i);
-      if (clause?.type !== 'namespace_use_clause') continue;
+    for (const clause of node.namedChildren) {
+      if (clause.type !== 'namespace_use_clause') continue;
 
       const fullPath = this.extractPHPQualifiedName(clause);
       if (!fullPath) continue;
@@ -206,48 +194,28 @@ export class PHPImportExtractor implements LanguageImportExtractor {
   }
 
   private extractPHPUseDeclarationPath(node: Parser.SyntaxNode): string | null {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const clause = node.namedChild(i);
-      if (clause?.type === 'namespace_use_clause') {
-        return this.extractPHPQualifiedName(clause);
-      }
-    }
-    return null;
+    const clause = node.namedChildren.find(child => child.type === 'namespace_use_clause');
+    return clause ? this.extractPHPQualifiedName(clause) : null;
   }
 
   private extractNamespaceParts(namespaceNode: Parser.SyntaxNode): string[] {
-    const parts: string[] = [];
-    for (let k = 0; k < namespaceNode.namedChildCount; k++) {
-      const namePart = namespaceNode.namedChild(k);
-      if (namePart?.type === 'name') {
-        parts.push(namePart.text);
-      }
-    }
-    return parts;
+    return namespaceNode.namedChildren
+      .filter(child => child.type === 'name')
+      .map(child => child.text);
   }
 
   private extractQualifiedNameParts(qualifiedName: Parser.SyntaxNode): string[] {
-    const parts: string[] = [];
-    for (let j = 0; j < qualifiedName.namedChildCount; j++) {
-      const part = qualifiedName.namedChild(j);
-      if (part?.type === 'namespace_name') {
-        parts.push(...this.extractNamespaceParts(part));
-      } else if (part?.type === 'name') {
-        parts.push(part.text);
-      }
-    }
-    return parts;
+    return qualifiedName.namedChildren.flatMap(part => {
+      if (part.type === 'namespace_name') return this.extractNamespaceParts(part);
+      if (part.type === 'name') return [part.text];
+      return [];
+    });
   }
 
   private extractPHPQualifiedName(clause: Parser.SyntaxNode): string | null {
-    for (let i = 0; i < clause.namedChildCount; i++) {
-      const child = clause.namedChild(i);
-      if (child?.type === 'qualified_name') {
-        const parts = this.extractQualifiedNameParts(child);
-        return parts.join('\\');
-      }
-    }
-    return null;
+    const qualifiedName = clause.namedChildren.find(child => child.type === 'qualified_name');
+    if (!qualifiedName) return null;
+    return this.extractQualifiedNameParts(qualifiedName).join('\\');
   }
 }
 
