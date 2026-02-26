@@ -46,6 +46,7 @@ interface DatabaseRecord {
   importedSymbolNames: string[]; // JSON-encoded symbol arrays (values from importedSymbols map)
   callSiteSymbols: string[]; // Called symbol names
   callSiteLines: number[]; // Line numbers of calls (parallel array)
+  callSiteCaptured: number[]; // Whether return value is captured (parallel array: 1=captured, 0=not, -1=unknown)
 }
 
 /**
@@ -90,17 +91,29 @@ const ARROW_EMPTY_NUMBER_PLACEHOLDER = [0];
  * Note: Uses ARROW_EMPTY_STRING_PLACEHOLDER and ARROW_EMPTY_NUMBER_PLACEHOLDER
  * for missing data. This is required for Arrow type inference - empty arrays cause
  * schema inference failures.
+ *
+ * The `captured` array encodes isResultCaptured as: 1=true, 0=false, -1=undefined.
  */
-function serializeCallSites(callSites?: Array<{ symbol: string; line: number }>): {
+function serializeCallSites(
+  callSites?: Array<{ symbol: string; line: number; isResultCaptured?: boolean }>,
+): {
   symbols: string[];
   lines: number[];
+  captured: number[];
 } {
   if (!callSites || callSites.length === 0) {
-    return { symbols: ARROW_EMPTY_STRING_PLACEHOLDER, lines: ARROW_EMPTY_NUMBER_PLACEHOLDER };
+    return {
+      symbols: ARROW_EMPTY_STRING_PLACEHOLDER,
+      lines: ARROW_EMPTY_NUMBER_PLACEHOLDER,
+      captured: ARROW_EMPTY_NUMBER_PLACEHOLDER,
+    };
   }
   return {
     symbols: callSites.map(c => c.symbol),
     lines: callSites.map(c => c.line),
+    captured: callSites.map(c =>
+      c.isResultCaptured === undefined ? -1 : c.isResultCaptured ? 1 : 0,
+    ),
   };
 }
 
@@ -149,6 +162,7 @@ function transformChunkToRecord(
     importedSymbolNames: importedSymbolsSerialized.names,
     callSiteSymbols: callSitesSerialized.symbols,
     callSiteLines: callSitesSerialized.lines,
+    callSiteCaptured: callSitesSerialized.captured,
   };
 }
 

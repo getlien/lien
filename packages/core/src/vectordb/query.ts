@@ -85,6 +85,7 @@ interface DBRecord {
   importedSymbolNames?: string[];
   callSiteSymbols?: string[];
   callSiteLines?: number[];
+  callSiteCaptured?: number[];
   _distance?: number; // Added by LanceDB for search results
 }
 
@@ -207,14 +208,17 @@ function deserializeImportedSymbols(
  *
  * @param symbols - Array of symbol names called at each site
  * @param lines - Array of line numbers for each call site (parallel to symbols)
- * @returns Array of call site objects with symbol and line, or undefined if no valid data
+ * @param captured - Array of captured flags (1=true, 0=false, -1=undefined). Optional for backward compat.
+ * @returns Array of call site objects with symbol, line, and optional isResultCaptured
  */
 function deserializeCallSites(
   symbols?: unknown,
   lines?: unknown,
-): Array<{ symbol: string; line: number }> | undefined {
+  captured?: unknown,
+): Array<{ symbol: string; line: number; isResultCaptured?: boolean }> | undefined {
   const symbolsArr = toPlainArray<string>(symbols);
   const linesArr = toPlainArray<number>(lines);
+  const capturedArr = toPlainArray<number>(captured);
 
   if (
     !symbolsArr ||
@@ -233,7 +237,17 @@ function deserializeCallSites(
     );
   }
   const result = symbolsArr
-    .map((symbol, i) => ({ symbol, line: linesArr[i] }))
+    .map((symbol, i) => {
+      const entry: { symbol: string; line: number; isResultCaptured?: boolean } = {
+        symbol,
+        line: linesArr[i],
+      };
+      // Decode captured flag: 1=true, 0=false, -1 or missing=undefined
+      if (capturedArr && i < capturedArr.length && capturedArr[i] !== -1) {
+        entry.isResultCaptured = capturedArr[i] === 1;
+      }
+      return entry;
+    })
     // Note: line > 0 is intentional - we use 0 as a placeholder value for missing data
     // in serializeCallSites(). Real line numbers are 1-indexed in source files.
     .filter(({ symbol, line }) => symbol && typeof line === 'number' && line > 0);
@@ -266,7 +280,7 @@ function buildSearchResultMetadata(r: DBRecord): SearchResult['metadata'] {
       return hasValidStringEntries(arr) ? arr : undefined;
     })(),
     importedSymbols: deserializeImportedSymbols(r.importedSymbolPaths, r.importedSymbolNames),
-    callSites: deserializeCallSites(r.callSiteSymbols, r.callSiteLines),
+    callSites: deserializeCallSites(r.callSiteSymbols, r.callSiteLines, r.callSiteCaptured),
   };
 }
 

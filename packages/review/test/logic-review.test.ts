@@ -432,6 +432,90 @@ describe('detectLogicFindings', () => {
     });
   });
 
+  describe('unchecked_return with AST-based isResultCaptured', () => {
+    it('flags call with isResultCaptured: false', () => {
+      const content = 'function caller() {\n  getValue();\n  return;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/process.ts',
+            symbolName: 'caller',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'getValue', line: 2, isResultCaptured: false }],
+          },
+          content,
+        ),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].category).toBe('unchecked_return');
+    });
+
+    it('does not flag call with isResultCaptured: true', () => {
+      const content = 'function caller() {\n  const x = getValue();\n  return x;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/process.ts',
+            symbolName: 'caller',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'getValue', line: 2, isResultCaptured: true }],
+          },
+          content,
+        ),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(0);
+    });
+
+    it('falls back to heuristic when isResultCaptured is undefined', () => {
+      // Standalone call without isResultCaptured — should use heuristic and flag it
+      const content = 'function caller() {\n  getValue();\n  return;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/process.ts',
+            symbolName: 'caller',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'getValue', line: 2 }],
+          },
+          content,
+        ),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(1);
+    });
+
+    it('falls back to heuristic (not flagged) when isResultCaptured is undefined and call is assigned', () => {
+      const content = 'function caller() {\n  const x = getValue();\n  return x;\n}';
+      const chunks = [
+        createChunk(
+          {
+            file: 'src/process.ts',
+            symbolName: 'caller',
+            startLine: 1,
+            endLine: 4,
+            callSites: [{ symbol: 'getValue', line: 2 }],
+          },
+          content,
+        ),
+      ];
+      const report = createReport();
+
+      const findings = detectLogicFindings(chunks, report, null, ['unchecked_return']);
+      expect(findings).toHaveLength(0);
+    });
+  });
+
   describe('breaking_change detection', () => {
     it('detects removed symbols with dependents', () => {
       const chunks = [
