@@ -47,6 +47,9 @@ export function validatePRPayload(data: unknown): PRJobPayload {
   if (!auth?.installation_token) {
     throw new Error('Missing auth.installation_token in PR payload');
   }
+  if (!auth.service_token) {
+    throw new Error('Missing auth.service_token in PR payload');
+  }
 
   return data as PRJobPayload;
 }
@@ -71,6 +74,9 @@ export function validateBaselinePayload(data: unknown): BaselineJobPayload {
   const auth = payload.auth as BaselineJobPayload['auth'] | undefined;
   if (!auth?.installation_token) {
     throw new Error('Missing auth.installation_token in baseline payload');
+  }
+  if (!auth.service_token) {
+    throw new Error('Missing auth.service_token in baseline payload');
   }
 
   return data as BaselineJobPayload;

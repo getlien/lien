@@ -453,5 +453,5 @@ async function postResult(
     logic_findings: logicFindings,
   };
 
-  await postReviewRunResult(config.laravelApiUrl, payload.auth.installation_token, result, logger);
+  await postReviewRunResult(config.laravelApiUrl, payload.auth.service_token, result, logger);
 }

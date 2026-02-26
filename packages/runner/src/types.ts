@@ -34,6 +34,7 @@ export interface PRJobPayload {
   };
   auth: {
     installation_token: string;
+    service_token: string;
   };
 }
 
@@ -49,6 +50,7 @@ export interface BaselineJobPayload {
   };
   auth: {
     installation_token: string;
+    service_token: string;
   };
 }
 
