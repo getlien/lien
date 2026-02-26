@@ -125,7 +125,7 @@ const TEST_PROJECTS: ProjectConfig[] = [
   {
     name: 'MediatR',
     repo: 'https://github.com/jbogard/MediatR.git',
-    branch: 'master',
+    branch: 'main',
     language: 'csharp',
     expectedMinFiles: 10,
     expectedMinChunks: 30,
