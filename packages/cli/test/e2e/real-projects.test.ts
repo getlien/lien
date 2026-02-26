@@ -122,6 +122,15 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 100,
     sampleSearchQuery: 'generate java source code',
   },
+  {
+    name: 'MediatR',
+    repo: 'https://github.com/jbogard/MediatR.git',
+    branch: 'main',
+    language: 'csharp',
+    expectedMinFiles: 10,
+    expectedMinChunks: 30,
+    sampleSearchQuery: 'mediator request handler',
+  },
 ];
 
 /**

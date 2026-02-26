@@ -75,6 +75,9 @@ jobs:
           - project: JavaPoet
             language: Java
             script: test:e2e:java
+          - project: MediatR
+            language: CSharp
+            script: test:e2e:csharp
 
     steps:
       - name: Checkout code
