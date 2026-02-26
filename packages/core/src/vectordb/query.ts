@@ -13,6 +13,7 @@ import {
   FileTypeBoostingStrategy,
 } from './boosting/index.js';
 import { safeRegex } from '../utils/safe-regex.js';
+import { CAPTURED_TRUE, CAPTURED_UNKNOWN } from './batch-insert.js';
 
 /**
  * Cached strategy instances to avoid repeated instantiation overhead.
@@ -204,11 +205,22 @@ function deserializeImportedSymbols(
 }
 
 /**
+ * Decode a numeric captured flag back to an optional boolean.
+ * Returns undefined for CAPTURED_UNKNOWN or missing data.
+ */
+function decodeCaptured(capturedArr: number[] | undefined, index: number): boolean | undefined {
+  if (!capturedArr || index >= capturedArr.length || capturedArr[index] === CAPTURED_UNKNOWN) {
+    return undefined;
+  }
+  return capturedArr[index] === CAPTURED_TRUE;
+}
+
+/**
  * Deserialize callSites from parallel arrays stored in DB.
  *
  * @param symbols - Array of symbol names called at each site
  * @param lines - Array of line numbers for each call site (parallel to symbols)
- * @param captured - Array of captured flags (1=true, 0=false, -1=undefined). Optional for backward compat.
+ * @param captured - Array of captured flags. Optional for backward compat with older indexes.
  * @returns Array of call site objects with symbol, line, and optional isResultCaptured
  */
 function deserializeCallSites(
@@ -237,17 +249,13 @@ function deserializeCallSites(
     );
   }
   const result = symbolsArr
-    .map((symbol, i) => {
-      const entry: { symbol: string; line: number; isResultCaptured?: boolean } = {
-        symbol,
-        line: linesArr[i],
-      };
-      // Decode captured flag: 1=true, 0=false, -1 or missing=undefined
-      if (capturedArr && i < capturedArr.length && capturedArr[i] !== -1) {
-        entry.isResultCaptured = capturedArr[i] === 1;
-      }
-      return entry;
-    })
+    .map((symbol, i) => ({
+      symbol,
+      line: linesArr[i],
+      ...((v): { isResultCaptured?: boolean } => (v !== undefined ? { isResultCaptured: v } : {}))(
+        decodeCaptured(capturedArr, i),
+      ),
+    }))
     // Note: line > 0 is intentional - we use 0 as a placeholder value for missing data
     // in serializeCallSites(). Real line numbers are 1-indexed in source files.
     .filter(({ symbol, line }) => symbol && typeof line === 'number' && line > 0);

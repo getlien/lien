@@ -86,13 +86,27 @@ function serializeImportedSymbols(importedSymbols?: Record<string, string[]>): {
 const ARROW_EMPTY_NUMBER_PLACEHOLDER = [0];
 
 /**
+ * Numeric encoding for isResultCaptured in Arrow parallel arrays.
+ * Used by both serialization (batch-insert) and deserialization (query).
+ */
+export const CAPTURED_TRUE = 1;
+export const CAPTURED_FALSE = 0;
+export const CAPTURED_UNKNOWN = -1;
+
+/**
+ * Encode an optional boolean into its numeric representation for Arrow storage.
+ */
+function encodeCaptured(value?: boolean): number {
+  if (value === undefined) return CAPTURED_UNKNOWN;
+  return value ? CAPTURED_TRUE : CAPTURED_FALSE;
+}
+
+/**
  * Serialize callSites into parallel arrays for Arrow storage.
  *
  * Note: Uses ARROW_EMPTY_STRING_PLACEHOLDER and ARROW_EMPTY_NUMBER_PLACEHOLDER
  * for missing data. This is required for Arrow type inference - empty arrays cause
  * schema inference failures.
- *
- * The `captured` array encodes isResultCaptured as: 1=true, 0=false, -1=undefined.
  */
 function serializeCallSites(
   callSites?: Array<{ symbol: string; line: number; isResultCaptured?: boolean }>,
@@ -111,9 +125,7 @@ function serializeCallSites(
   return {
     symbols: callSites.map(c => c.symbol),
     lines: callSites.map(c => c.line),
-    captured: callSites.map(c =>
-      c.isResultCaptured === undefined ? -1 : c.isResultCaptured ? 1 : 0,
-    ),
+    captured: callSites.map(c => encodeCaptured(c.isResultCaptured)),
   };
 }
 
