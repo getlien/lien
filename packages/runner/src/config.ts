@@ -28,17 +28,12 @@ export function loadConfig(): RunnerConfig {
     throw new Error('LARAVEL_API_URL environment variable is required');
   }
 
-  const openrouterApiKey = process.env.OPENROUTER_API_KEY;
-  if (!openrouterApiKey) {
-    throw new Error('OPENROUTER_API_KEY environment variable is required');
-  }
-
   return {
     natsUrl: process.env.NATS_URL ?? 'nats://nats:4222',
     natsStream: process.env.NATS_STREAM ?? 'reviews',
     natsConsumer: process.env.NATS_CONSUMER ?? 'reviews-runner',
     laravelApiUrl,
-    openrouterApiKey,
+    openrouterApiKey: process.env.OPENROUTER_API_KEY ?? '',
     openrouterModel: process.env.OPENROUTER_MODEL ?? 'minimax/minimax-m2.5',
     pullTimeoutMs: parsePositiveInt(process.env.PULL_TIMEOUT_MS, 30_000, 'PULL_TIMEOUT_MS'),
     jobTimeoutMs: parsePositiveInt(process.env.JOB_TIMEOUT_MS, 600_000, 'JOB_TIMEOUT_MS'),

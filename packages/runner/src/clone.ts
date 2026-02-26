@@ -44,12 +44,11 @@ function makeCleanup(dir: string, logger: Logger): () => Promise<void> {
   };
 }
 
-function assertNoSymlinkEscape(dir: string): Promise<void> {
-  return realpath(dir).then(resolved => {
-    if (resolved !== dir && !resolved.startsWith(tmpdir())) {
-      throw new Error(`Symlink attack detected: ${dir} resolved to ${resolved}`);
-    }
-  });
+async function assertNoSymlinkEscape(dir: string): Promise<void> {
+  const [resolved, canonicalTmp] = await Promise.all([realpath(dir), realpath(tmpdir())]);
+  if (!resolved.startsWith(canonicalTmp)) {
+    throw new Error(`Symlink escape detected: ${dir} resolved to ${resolved}`);
+  }
 }
 
 /**

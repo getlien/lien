@@ -39,6 +39,9 @@ export function validatePRPayload(data: unknown): PRJobPayload {
   if (!config?.review_types) {
     throw new Error('Missing config.review_types in PR payload');
   }
+  if (typeof config.threshold !== 'string') {
+    throw new Error('Missing or invalid config.threshold in PR payload');
+  }
 
   const auth = payload.auth as PRJobPayload['auth'] | undefined;
   if (!auth?.installation_token) {
@@ -59,6 +62,11 @@ export function validateBaselinePayload(data: unknown): BaselineJobPayload {
     throw new Error('Missing or invalid repository in baseline payload');
   }
   assertValidRepoName(repo.full_name);
+
+  const config = payload.config as BaselineJobPayload['config'] | undefined;
+  if (!config || typeof config.threshold !== 'string') {
+    throw new Error('Missing or invalid config.threshold in baseline payload');
+  }
 
   const auth = payload.auth as BaselineJobPayload['auth'] | undefined;
   if (!auth?.installation_token) {

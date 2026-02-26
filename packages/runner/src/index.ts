@@ -44,6 +44,7 @@ async function main(): Promise<void> {
       } else {
         await handleBaseline(payload, config, logger);
       }
+      clearTimeout(timeout);
       handled = true;
       msg.ack();
       logger.info('Job completed successfully');
