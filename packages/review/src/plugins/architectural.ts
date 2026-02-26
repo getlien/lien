@@ -15,7 +15,7 @@ import type {
   ArchitecturalFindingMetadata,
   PresentContext,
 } from '../plugin-types.js';
-import { extractJSONFromCodeBlock } from '../llm-client.js';
+import { extractJSONFromCodeBlock } from '../json-utils.js';
 import type { Logger } from '../logger.js';
 
 export const architecturalConfigSchema = z.object({

@@ -18,7 +18,7 @@ import {
 } from './openrouter.js';
 import { computeFingerprint, serializeFingerprint } from './fingerprint.js';
 import { assembleDependentContext } from './dependent-context.js';
-import { extractJSONFromCodeBlock } from './llm-client.js';
+import { extractJSONFromCodeBlock } from './json-utils.js';
 import { computeSimplicitySignals, serializeSimplicitySignals } from './simplicity-signals.js';
 
 import type { AnalysisResult } from './review-engine.js';

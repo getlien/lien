@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractJSONFromCodeBlock } from '../src/llm-client.js';
+import { extractJSONFromCodeBlock, estimatePromptTokens } from '../src/json-utils.js';
 
 describe('extractJSONFromCodeBlock', () => {
   it('extracts JSON from a simple code block', () => {
@@ -37,5 +37,22 @@ describe('extractJSONFromCodeBlock', () => {
   it('trims whitespace from extracted content', () => {
     const input = '```json\n  {"key": "value"}  \n```';
     expect(extractJSONFromCodeBlock(input)).toBe('{"key": "value"}');
+  });
+});
+
+describe('estimatePromptTokens', () => {
+  it('estimates tokens at ~4 chars per token', () => {
+    expect(estimatePromptTokens('abcd')).toBe(1);
+    expect(estimatePromptTokens('abcde')).toBe(2);
+  });
+
+  it('returns 0 for empty string', () => {
+    expect(estimatePromptTokens('')).toBe(0);
+  });
+
+  it('rounds up partial tokens', () => {
+    expect(estimatePromptTokens('ab')).toBe(1); // 2/4 = 0.5 → ceil = 1
+    expect(estimatePromptTokens('abcdefgh')).toBe(2); // 8/4 = 2 exact
+    expect(estimatePromptTokens('abcdefghi')).toBe(3); // 9/4 = 2.25 → ceil = 3
   });
 });
