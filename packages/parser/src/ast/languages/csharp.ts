@@ -192,7 +192,11 @@ export class CSharpExportExtractor implements LanguageExportExtractor {
       member.type === 'constructor_declaration' ||
       member.type === 'property_declaration'
     ) {
-      if (isInterface || hasPublicModifier(member)) {
+      // Interface members without explicit modifiers are implicitly public.
+      // C# 8+ allows private/protected/internal interface members — only export
+      // those that are public or have no explicit visibility modifier.
+      const isImplicitlyPublic = isInterface && !hasExplicitAccessModifier(member);
+      if (isImplicitlyPublic || hasPublicModifier(member)) {
         const nameNode = member.childForFieldName('name');
         if (nameNode) addExport(nameNode.text);
       }
@@ -476,6 +480,16 @@ function hasPublicModifier(node: Parser.SyntaxNode): boolean {
   return node.children.some(child => child.type === 'modifier' && child.text === 'public');
 }
 
+const ACCESS_MODIFIERS = new Set(['public', 'private', 'protected', 'internal']);
+
+/**
+ * Check if a node has any explicit access modifier (public, private, protected, internal).
+ * Used to distinguish implicit public interface members from explicitly non-public ones (C# 8+).
+ */
+function hasExplicitAccessModifier(node: Parser.SyntaxNode): boolean {
+  return node.children.some(child => child.type === 'modifier' && ACCESS_MODIFIERS.has(child.text));
+}
+
 /**
  * Extract return type from a C# method_declaration.
  * C# uses a 'returns' field instead of 'type'.
@@ -488,7 +502,7 @@ function extractCSharpReturnType(node: Parser.SyntaxNode): string | undefined {
 }
 
 /**
- * Find the first descendant of a specific type (breadth-first among children).
+ * Find the first descendant of a specific type (depth-first).
  */
 function findDescendant(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
   for (const child of node.namedChildren) {

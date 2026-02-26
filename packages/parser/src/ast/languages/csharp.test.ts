@@ -109,22 +109,20 @@ describe('C# Language', () => {
       const code = 'public class Foo { void Bar() { Action a = () => Console.WriteLine("hi"); } }';
       const tree = parser.parse(code);
       const localVarDecl = findNode(tree.rootNode, 'local_declaration_statement');
-      if (localVarDecl) {
-        expect(traverser.isDeclarationWithFunction(localVarDecl)).toBe(true);
-        const result = traverser.findFunctionInDeclaration(localVarDecl);
-        expect(result.hasFunction).toBe(true);
-        expect(result.functionNode).not.toBeNull();
-        expect(result.functionNode!.type).toBe('lambda_expression');
-      }
+      expect(localVarDecl).not.toBeNull();
+      expect(traverser.isDeclarationWithFunction(localVarDecl!)).toBe(true);
+      const result = traverser.findFunctionInDeclaration(localVarDecl!);
+      expect(result.hasFunction).toBe(true);
+      expect(result.functionNode).not.toBeNull();
+      expect(result.functionNode!.type).toBe('lambda_expression');
     });
 
     it('should not detect function in non-lambda variable declaration', () => {
       const code = 'public class Foo { void Bar() { int x = 42; } }';
       const tree = parser.parse(code);
       const localVarDecl = findNode(tree.rootNode, 'local_declaration_statement');
-      if (localVarDecl) {
-        expect(traverser.isDeclarationWithFunction(localVarDecl)).toBe(false);
-      }
+      expect(localVarDecl).not.toBeNull();
+      expect(traverser.isDeclarationWithFunction(localVarDecl!)).toBe(false);
     });
   });
 
@@ -173,6 +171,19 @@ describe('C# Language', () => {
       const exports = exportExtractor.extractExports(tree.rootNode);
       expect(exports).toContain('Save');
       expect(exports).toContain('Delete');
+    });
+
+    it('should not export explicitly non-public interface members', () => {
+      const code = `public interface IService {
+    void PublicMethod();
+    private void PrivateHelper() {}
+    protected void ProtectedMethod();
+}`;
+      const tree = parser.parse(code);
+      const exports = exportExtractor.extractExports(tree.rootNode);
+      expect(exports).toContain('PublicMethod');
+      expect(exports).not.toContain('PrivateHelper');
+      expect(exports).not.toContain('ProtectedMethod');
     });
 
     it('should extract public enum', () => {
@@ -671,15 +682,12 @@ public class App {
   });
 });
 
-/** Helper to recursively find a node of a given type */
+/** Helper to recursively find a node of a given type (depth-first) */
 function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
   if (node.type === type) return node;
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (child) {
-      const result = findNode(child, type);
-      if (result) return result;
-    }
+  for (const child of node.namedChildren) {
+    const result = findNode(child, type);
+    if (result) return result;
   }
   return null;
 }
@@ -688,11 +696,8 @@ function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | nu
 function findAllNodes(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode[] {
   const results: Parser.SyntaxNode[] = [];
   if (node.type === type) results.push(node);
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (child) {
-      results.push(...findAllNodes(child, type));
-    }
+  for (const child of node.namedChildren) {
+    results.push(...findAllNodes(child, type));
   }
   return results;
 }
