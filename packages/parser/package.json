@@ -1,6 +1,6 @@
 {
   "name": "@liendev/parser",
-  "version": "0.42.0",
+  "version": "0.43.0",
   "description": "AST parsing, complexity analysis, and semantic chunking for Lien",
   "type": "module",
   "main": "./dist/index.js",

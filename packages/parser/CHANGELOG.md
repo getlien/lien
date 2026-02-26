@@ -1,5 +1,11 @@
 # @liendev/parser
 
+## 0.43.0
+
+### Minor Changes
+
+- 43e38ce: feat(parser): add C# language AST support
+
 ## 0.42.0
 
 ### Minor Changes
