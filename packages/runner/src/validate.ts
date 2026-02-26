@@ -1,0 +1,75 @@
+/**
+ * Input validation for NATS payloads.
+ */
+
+import { assertValidSha } from '@liendev/review';
+import type { PRJobPayload, BaselineJobPayload, JobPayload } from './types.js';
+
+const REPO_NAME_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/;
+
+export function assertValidRepoName(fullName: string): void {
+  if (!REPO_NAME_PATTERN.test(fullName)) {
+    throw new Error(`Invalid repository name: ${JSON.stringify(fullName.slice(0, 100))}`);
+  }
+}
+
+export function validatePRPayload(data: unknown): PRJobPayload {
+  const payload = data as Record<string, unknown>;
+  if (payload.job_type !== 'pr') {
+    throw new Error(`Expected job_type "pr", got ${JSON.stringify(payload.job_type)}`);
+  }
+
+  const repo = payload.repository as PRJobPayload['repository'] | undefined;
+  if (!repo?.full_name || typeof repo.id !== 'number') {
+    throw new Error('Missing or invalid repository in PR payload');
+  }
+  assertValidRepoName(repo.full_name);
+
+  const pr = payload.pull_request as PRJobPayload['pull_request'] | undefined;
+  if (!pr || typeof pr.number !== 'number' || !pr.head_sha || !pr.base_sha) {
+    throw new Error('Missing or invalid pull_request in PR payload');
+  }
+  assertValidSha(pr.head_sha, 'head_sha');
+  assertValidSha(pr.base_sha, 'base_sha');
+
+  const config = payload.config as PRJobPayload['config'] | undefined;
+  if (!config?.review_types) {
+    throw new Error('Missing config.review_types in PR payload');
+  }
+
+  const auth = payload.auth as PRJobPayload['auth'] | undefined;
+  if (!auth?.installation_token) {
+    throw new Error('Missing auth.installation_token in PR payload');
+  }
+
+  return data as PRJobPayload;
+}
+
+export function validateBaselinePayload(data: unknown): BaselineJobPayload {
+  const payload = data as Record<string, unknown>;
+  if (payload.job_type !== 'baseline') {
+    throw new Error(`Expected job_type "baseline", got ${JSON.stringify(payload.job_type)}`);
+  }
+
+  const repo = payload.repository as BaselineJobPayload['repository'] | undefined;
+  if (!repo?.full_name || typeof repo.id !== 'number' || !repo.default_branch) {
+    throw new Error('Missing or invalid repository in baseline payload');
+  }
+  assertValidRepoName(repo.full_name);
+
+  const auth = payload.auth as BaselineJobPayload['auth'] | undefined;
+  if (!auth?.installation_token) {
+    throw new Error('Missing auth.installation_token in baseline payload');
+  }
+
+  return data as BaselineJobPayload;
+}
+
+export function validateJobPayload(data: unknown): JobPayload {
+  const payload = data as Record<string, unknown>;
+  if (payload.job_type === 'pr') return validatePRPayload(data);
+  if (payload.job_type === 'baseline') return validateBaselinePayload(data);
+  throw new Error(`Unknown job_type: ${JSON.stringify(payload.job_type)}`);
+}
+
+export { assertValidSha };
