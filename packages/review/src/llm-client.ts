@@ -6,7 +6,6 @@
  * - Per-instance token usage tracking (no global state)
  * - Per-call timeout via AbortSignal
  * - Per-instance token budget enforcement
- * - JSON response parsing with retry
  */
 
 import type { LLMClient, LLMOptions, LLMResponse } from './plugin-types.js';
@@ -163,74 +162,4 @@ export class OpenRouterLLMClient implements LLMClient {
   getUsage() {
     return { ...this.usage };
   }
-}
-
-// ---------------------------------------------------------------------------
-// JSON parsing helpers (migrated from openrouter.ts)
-// ---------------------------------------------------------------------------
-
-/**
- * Parse JSON comments response from LLM, handling markdown code blocks.
- * Returns null if parsing fails.
- */
-export function parseJSONResponse(content: string, logger: Logger): Record<string, string> | null {
-  const jsonStr = extractJSONFromCodeBlock(content);
-
-  try {
-    const parsed = JSON.parse(jsonStr);
-    const filtered = filterStringValues(parsed);
-    logger.info(`Successfully parsed ${Object.keys(filtered).length} entries`);
-    return filtered;
-  } catch {
-    // Aggressive retry: extract any JSON object from response
-    const objectMatch = content.match(/\{[\s\S]*\}/);
-    if (objectMatch) {
-      try {
-        const parsed = JSON.parse(objectMatch[0]);
-        const filtered = filterStringValues(parsed);
-        logger.info(
-          `Recovered JSON with aggressive parsing: ${Object.keys(filtered).length} entries`,
-        );
-        return filtered;
-      } catch {
-        // Total failure
-      }
-    }
-  }
-
-  logger.warning('Failed to parse LLM JSON response');
-  return null;
-}
-
-/**
- * Filter a parsed JSON object to only include string values.
- * Non-string values (arrays, objects, numbers) are dropped.
- */
-function filterStringValues(parsed: unknown): Record<string, string> {
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return {};
-  }
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(parsed)) {
-    if (typeof value === 'string') {
-      result[key] = value;
-    }
-  }
-  return result;
-}
-
-/**
- * Extract JSON content from an LLM response that may be wrapped in markdown code blocks.
- * Returns the trimmed content inside the first code block, or the original content if none found.
- */
-export function extractJSONFromCodeBlock(content: string): string {
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  return (codeBlockMatch ? codeBlockMatch[1] : content).trim();
-}
-
-/**
- * Estimate prompt token count using ~4 chars/token heuristic.
- */
-export function estimatePromptTokens(prompt: string): number {
-  return Math.ceil(prompt.length / 4);
 }
