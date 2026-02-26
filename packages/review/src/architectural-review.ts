@@ -21,7 +21,7 @@ import { assembleDependentContext } from './dependent-context.js';
 import { extractJSONFromCodeBlock } from './json-utils.js';
 import { computeSimplicitySignals, serializeSimplicitySignals } from './simplicity-signals.js';
 
-import type { AnalysisResult } from './review-engine.js';
+import type { AnalysisResult } from './plugin-types.js';
 
 // ---------------------------------------------------------------------------
 // Types

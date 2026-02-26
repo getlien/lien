@@ -76,22 +76,9 @@ export type {
 // Logger
 export { type Logger, consoleLogger } from './logger.js';
 
-// ─── Legacy review engine (kept for backward compat) ────────────────────────
+// ─── Analysis utilities ─────────────────────────────────────────────────────
 
-export {
-  filterAnalyzableFiles,
-  runComplexityAnalysis,
-  orchestrateAnalysis,
-  handleAnalysisOutputs,
-  postReviewIfNeeded,
-  prioritizeViolations,
-  extractRelevantHunk,
-  determineReviewEvent,
-  isMarginalViolation,
-  filterDuplicateComments,
-  buildDedupNote,
-  type DedupResult,
-} from './review-engine.js';
+export { filterAnalyzableFiles, runComplexityAnalysis } from './analysis.js';
 
 // ─── GitHub API ─────────────────────────────────────────────────────────────
 
