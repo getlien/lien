@@ -31,6 +31,7 @@ export async function postReviewRunResult(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Accept: 'application/json',
           Authorization: `Bearer ${serviceToken}`,
           'Idempotency-Key': result.idempotency_key,
         },
