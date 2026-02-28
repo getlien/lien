@@ -51,6 +51,13 @@ export function validatePRPayload(data: unknown): PRJobPayload {
     throw new Error('Missing auth.service_token in PR payload');
   }
 
+  if (payload.review_run_id != null) {
+    const rid = payload.review_run_id;
+    if (typeof rid !== 'number' || !Number.isFinite(rid) || !Number.isInteger(rid) || rid <= 0) {
+      throw new Error('review_run_id must be a finite positive integer when provided');
+    }
+  }
+
   return data as PRJobPayload;
 }
 
