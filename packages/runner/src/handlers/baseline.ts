@@ -53,13 +53,31 @@ export async function handleBaseline(
     logger.info('Running chunk-only index on full repo...');
     const indexResult = await performChunkOnlyIndex(clone.dir);
 
-    if (!indexResult.success || !indexResult.chunks || indexResult.chunks.length === 0) {
-      logger.warning('Indexing produced no chunks');
+    if (!indexResult.success) {
+      logger.error('Indexing failed');
       await postBaselineResult(
         config,
         payload,
         startedAt,
         'failed',
+        sha ?? null,
+        sha ? (payload.committed_at ?? null) : null,
+        0,
+        0,
+        0,
+        [],
+        logger,
+      );
+      return;
+    }
+
+    if (!indexResult.chunks || indexResult.chunks.length === 0) {
+      logger.info('No supported files found — marking as completed with zero complexity');
+      await postBaselineResult(
+        config,
+        payload,
+        startedAt,
+        'completed',
         sha ?? null,
         sha ? (payload.committed_at ?? null) : null,
         0,
