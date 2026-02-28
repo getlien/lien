@@ -151,3 +151,15 @@ export async function resolveHeadSha(dir: string): Promise<string> {
   });
   return stdout.trim();
 }
+
+/**
+ * Resolve the HEAD commit timestamp (ISO 8601) of a cloned directory.
+ */
+export async function resolveCommitTimestamp(dir: string): Promise<string> {
+  const { stdout } = await execFileAsync(
+    'git',
+    ['-C', dir, 'log', '-1', '--format=%aI'],
+    { timeout: 10_000, env: GIT_ENV },
+  );
+  return stdout.trim();
+}

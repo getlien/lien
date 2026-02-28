@@ -34,7 +34,7 @@ import type {
   LogicFindingResult,
 } from '../types.js';
 import type { RunnerConfig } from '../config.js';
-import { cloneBySha, type CloneResult } from '../clone.js';
+import { cloneBySha, resolveCommitTimestamp, type CloneResult } from '../clone.js';
 import { postReviewRunResult } from '../api-client.js';
 
 export async function handlePRReview(
@@ -100,6 +100,7 @@ export async function handlePRReview(
   let maxComplexity = 0;
   let tokenUsage = 0;
   let cost = 0;
+  let committedAt: string | null = null;
 
   try {
     // Clone head by SHA
@@ -109,6 +110,9 @@ export async function handlePRReview(
       auth.installation_token,
       logger,
     );
+
+    // Resolve commit timestamp for the graph timeline
+    committedAt = await resolveCommitTimestamp(headClone.dir);
 
     // Get changed files from GitHub API
     const allChangedFiles = await getPRChangedFiles(octokit, prContext);
@@ -142,6 +146,7 @@ export async function handlePRReview(
         payload,
         startedAt,
         'completed',
+        committedAt,
         filesAnalyzed,
         0,
         0,
@@ -169,6 +174,7 @@ export async function handlePRReview(
         payload,
         startedAt,
         'failed',
+        committedAt,
         filesAnalyzed,
         0,
         0,
@@ -304,6 +310,7 @@ export async function handlePRReview(
       payload,
       startedAt,
       'completed',
+      committedAt,
       filesAnalyzed,
       avgComplexity,
       maxComplexity,
@@ -322,6 +329,7 @@ export async function handlePRReview(
         payload,
         startedAt,
         'failed',
+        committedAt,
         filesAnalyzed,
         avgComplexity,
         maxComplexity,
@@ -413,6 +421,7 @@ async function postResult(
   payload: PRJobPayload,
   startedAt: string,
   status: 'completed' | 'failed',
+  committedAt: string | null,
   filesAnalyzed: number,
   avgComplexity: number,
   maxComplexity: number,
@@ -438,6 +447,7 @@ async function postResult(
     repo_id: payload.repository.id,
     pr_number: payload.pull_request.number,
     head_sha: payload.pull_request.head_sha,
+    committed_at: committedAt,
     base_sha: payload.pull_request.base_sha,
     started_at: startedAt,
     completed_at: new Date().toISOString(),
