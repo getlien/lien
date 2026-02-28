@@ -12,7 +12,7 @@ import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/par
 
 import type { BaselineJobPayload, ReviewRunResult, ComplexitySnapshotResult } from '../types.js';
 import type { RunnerConfig } from '../config.js';
-import { cloneByBranch, resolveHeadSha, resolveCommitTimestamp, type CloneResult } from '../clone.js';
+import { cloneByBranch, cloneBySha, resolveHeadSha, resolveCommitTimestamp, type CloneResult } from '../clone.js';
 import { postReviewRunResult } from '../api-client.js';
 
 export async function handleBaseline(
@@ -23,18 +23,16 @@ export async function handleBaseline(
   const startedAt = new Date().toISOString();
   const { repository, auth } = payload;
 
-  logger.info(`Processing baseline for ${repository.full_name}@${repository.default_branch}`);
+  const cloneRef = payload.sha ?? repository.default_branch;
+  logger.info(`Processing baseline for ${repository.full_name}@${payload.sha ? cloneRef.slice(0, 7) : cloneRef}`);
 
   let clone: CloneResult | null = null;
 
   try {
-    // Clone default branch
-    clone = await cloneByBranch(
-      repository.full_name,
-      repository.default_branch,
-      auth.installation_token,
-      logger,
-    );
+    // Clone by SHA when available (historical baselines), otherwise by branch
+    clone = payload.sha
+      ? await cloneBySha(repository.full_name, payload.sha, auth.installation_token, logger)
+      : await cloneByBranch(repository.full_name, repository.default_branch, auth.installation_token, logger);
 
     // Full repo scan
     logger.info('Running chunk-only index on full repo...');
@@ -62,9 +60,9 @@ export async function handleBaseline(
 
     const snapshots = buildComplexitySnapshots(report);
 
-    // Resolve actual commit SHA and timestamp
-    const headSha = await resolveHeadSha(clone.dir);
-    const committedAt = await resolveCommitTimestamp(clone.dir);
+    // Use payload SHA/timestamp when available (historical baselines), otherwise resolve from git
+    const headSha = payload.sha ?? await resolveHeadSha(clone.dir);
+    const committedAt = payload.committed_at ?? await resolveCommitTimestamp(clone.dir);
 
     await postBaselineResult(
       config,
