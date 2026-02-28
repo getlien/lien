@@ -59,6 +59,9 @@ export function validatePRPayload(data: unknown): PRJobPayload {
   }
 
   if (payload.check_run_id != null) {
+    if (payload.review_run_id == null) {
+      throw new Error('review_run_id is required when check_run_id is provided');
+    }
     const cid = payload.check_run_id;
     if (typeof cid !== 'number' || !Number.isFinite(cid) || !Number.isInteger(cid) || cid <= 0) {
       throw new Error('check_run_id must be a finite positive integer when provided');
