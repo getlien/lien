@@ -37,6 +37,7 @@ export interface PRJobPayload {
     service_token: string;
   };
   review_run_id?: number | null;
+  check_run_id?: number | null;
 }
 
 export interface BaselineJobPayload {

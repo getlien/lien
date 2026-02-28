@@ -78,9 +78,15 @@ export async function handlePRReview(
   const octokit = createOctokit(auth.installation_token);
   logger.info(`Processing PR #${pr.number} on ${repository.full_name}`);
 
-  // Create initial check run (skip when platform already created one)
+  // Resolve check run: reuse platform-created one, create our own, or skip entirely
   let checkRunId: number | undefined;
-  if (reviewRunId == null) {
+  const skipCheckRun = reviewRunId != null && !payload.check_run_id;
+
+  if (reviewRunId != null && payload.check_run_id) {
+    // Platform created the check run — reuse it for annotations + conclusion
+    checkRunId = payload.check_run_id;
+  } else if (reviewRunId == null) {
+    // No platform involvement — create our own check run
     try {
       checkRunId = await createCheckRun(
         octokit,
@@ -292,7 +298,7 @@ export async function handlePRReview(
     try {
       await engine.present(findings, adapterContext, {
         checkRunId,
-        skipCheckRun: reviewRunId != null,
+        skipCheckRun,
       });
     } catch (error) {
       logger.error(
