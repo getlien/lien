@@ -12,7 +12,13 @@ import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/par
 
 import type { BaselineJobPayload, ReviewRunResult, ComplexitySnapshotResult } from '../types.js';
 import type { RunnerConfig } from '../config.js';
-import { cloneByBranch, cloneBySha, resolveHeadSha, resolveCommitTimestamp, type CloneResult } from '../clone.js';
+import {
+  cloneByBranch,
+  cloneBySha,
+  resolveHeadSha,
+  resolveCommitTimestamp,
+  type CloneResult,
+} from '../clone.js';
 import { postReviewRunResult } from '../api-client.js';
 
 export async function handleBaseline(
@@ -24,7 +30,9 @@ export async function handleBaseline(
   const { repository, auth } = payload;
 
   const cloneRef = payload.sha ?? repository.default_branch;
-  logger.info(`Processing baseline for ${repository.full_name}@${payload.sha ? cloneRef.slice(0, 7) : cloneRef}`);
+  logger.info(
+    `Processing baseline for ${repository.full_name}@${payload.sha ? cloneRef.slice(0, 7) : cloneRef}`,
+  );
 
   let clone: CloneResult | null = null;
 
@@ -32,7 +40,12 @@ export async function handleBaseline(
     // Clone by SHA when available (historical baselines), otherwise by branch
     clone = payload.sha
       ? await cloneBySha(repository.full_name, payload.sha, auth.installation_token, logger)
-      : await cloneByBranch(repository.full_name, repository.default_branch, auth.installation_token, logger);
+      : await cloneByBranch(
+          repository.full_name,
+          repository.default_branch,
+          auth.installation_token,
+          logger,
+        );
 
     // Full repo scan
     logger.info('Running chunk-only index on full repo...');
@@ -40,7 +53,19 @@ export async function handleBaseline(
 
     if (!indexResult.success || !indexResult.chunks || indexResult.chunks.length === 0) {
       logger.warning('Indexing produced no chunks');
-      await postBaselineResult(config, payload, startedAt, 'failed', null, null, 0, 0, 0, [], logger);
+      await postBaselineResult(
+        config,
+        payload,
+        startedAt,
+        'failed',
+        null,
+        null,
+        0,
+        0,
+        0,
+        [],
+        logger,
+      );
       return;
     }
 
@@ -61,8 +86,8 @@ export async function handleBaseline(
     const snapshots = buildComplexitySnapshots(report);
 
     // Use payload SHA/timestamp when available (historical baselines), otherwise resolve from git
-    const headSha = payload.sha ?? await resolveHeadSha(clone.dir);
-    const committedAt = payload.committed_at ?? await resolveCommitTimestamp(clone.dir);
+    const headSha = payload.sha ?? (await resolveHeadSha(clone.dir));
+    const committedAt = payload.committed_at ?? (await resolveCommitTimestamp(clone.dir));
 
     await postBaselineResult(
       config,
@@ -80,7 +105,19 @@ export async function handleBaseline(
   } catch (error) {
     logger.error(`Baseline scan failed: ${error instanceof Error ? error.message : String(error)}`);
     try {
-      await postBaselineResult(config, payload, startedAt, 'failed', null, null, 0, 0, 0, [], logger);
+      await postBaselineResult(
+        config,
+        payload,
+        startedAt,
+        'failed',
+        null,
+        null,
+        0,
+        0,
+        0,
+        [],
+        logger,
+      );
     } catch (postError) {
       logger.error(
         `Failed to post failure result: ${postError instanceof Error ? postError.message : String(postError)}`,
