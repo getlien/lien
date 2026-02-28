@@ -16,6 +16,7 @@ interface LogEntry {
 
 const FLUSH_INTERVAL_MS = 5_000;
 const MAX_BATCH_SIZE = 100;
+const MAX_BUFFER_SIZE = 1_000;
 const MAX_MESSAGE_LENGTH = 2_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RETRIES = 2;
@@ -24,6 +25,7 @@ export class LogBuffer {
   private entries: LogEntry[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
+  private flushing = false;
 
   constructor(
     private readonly apiUrl: string,
@@ -37,6 +39,13 @@ export class LogBuffer {
 
   add(level: LogEntry['level'], message: string, metadata?: Record<string, unknown>): void {
     if (this.disposed) return;
+
+    // Drop oldest entries when buffer is full to keep memory bounded
+    if (this.entries.length >= MAX_BUFFER_SIZE) {
+      this.entries.splice(0, this.entries.length - MAX_BUFFER_SIZE + 1);
+      this.logger.warning('Log buffer full, dropping oldest entries');
+    }
+
     this.entries.push({
       level,
       message: message.slice(0, MAX_MESSAGE_LENGTH),
@@ -46,8 +55,17 @@ export class LogBuffer {
   }
 
   async flush(): Promise<void> {
-    if (this.entries.length === 0) return;
+    if (this.entries.length === 0 || this.flushing) return;
 
+    this.flushing = true;
+    try {
+      await this.doFlush();
+    } finally {
+      this.flushing = false;
+    }
+  }
+
+  private async doFlush(): Promise<void> {
     const toSend = this.entries.splice(0, MAX_BATCH_SIZE);
     const url = `${this.apiUrl.replace(/\/$/, '')}/api/v1/review-runs/${this.reviewRunId}/logs`;
 
@@ -77,16 +95,22 @@ export class LogBuffer {
           return;
         }
 
-        this.logger.warning(`Failed to flush logs (status ${response.status}), retrying...`);
+        if (attempt < MAX_RETRIES) {
+          this.logger.warning(
+            `Failed to flush logs (status ${response.status}), attempt ${attempt + 1}/${MAX_RETRIES + 1}`,
+          );
+        }
       } catch (error) {
-        this.logger.warning(
-          `Failed to flush logs: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        if (attempt < MAX_RETRIES) {
+          this.logger.warning(
+            `Failed to flush logs (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       } finally {
         clearTimeout(timeout);
       }
 
-      // Wait before retrying (1s, 3s)
+      // Wait before retrying (2s, 4s)
       if (attempt < MAX_RETRIES) {
         await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 2_000));
       }
