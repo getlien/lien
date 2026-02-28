@@ -52,6 +52,8 @@ export interface BaselineJobPayload {
     installation_token: string;
     service_token: string;
   };
+  sha?: string;
+  committed_at?: string;
 }
 
 export type JobPayload = PRJobPayload | BaselineJobPayload;
