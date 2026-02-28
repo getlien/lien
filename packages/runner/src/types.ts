@@ -98,6 +98,7 @@ export interface ReviewRunResult {
   repo_id: number;
   pr_number: number | null;
   head_sha: string;
+  committed_at: string | null;
   base_sha: string | null;
   started_at: string;
   completed_at: string;

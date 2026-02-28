@@ -12,7 +12,7 @@ import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/par
 
 import type { BaselineJobPayload, ReviewRunResult, ComplexitySnapshotResult } from '../types.js';
 import type { RunnerConfig } from '../config.js';
-import { cloneByBranch, resolveHeadSha, type CloneResult } from '../clone.js';
+import { cloneByBranch, resolveHeadSha, resolveCommitTimestamp, type CloneResult } from '../clone.js';
 import { postReviewRunResult } from '../api-client.js';
 
 export async function handleBaseline(
@@ -42,7 +42,7 @@ export async function handleBaseline(
 
     if (!indexResult.success || !indexResult.chunks || indexResult.chunks.length === 0) {
       logger.warning('Indexing produced no chunks');
-      await postBaselineResult(config, payload, startedAt, 'failed', null, 0, 0, 0, [], logger);
+      await postBaselineResult(config, payload, startedAt, 'failed', null, null, 0, 0, 0, [], logger);
       return;
     }
 
@@ -62,8 +62,9 @@ export async function handleBaseline(
 
     const snapshots = buildComplexitySnapshots(report);
 
-    // Resolve actual commit SHA (not branch name)
+    // Resolve actual commit SHA and timestamp
     const headSha = await resolveHeadSha(clone.dir);
+    const committedAt = await resolveCommitTimestamp(clone.dir);
 
     await postBaselineResult(
       config,
@@ -71,6 +72,7 @@ export async function handleBaseline(
       startedAt,
       'completed',
       headSha,
+      committedAt,
       indexResult.filesIndexed,
       report.summary.avgComplexity,
       report.summary.maxComplexity,
@@ -80,7 +82,7 @@ export async function handleBaseline(
   } catch (error) {
     logger.error(`Baseline scan failed: ${error instanceof Error ? error.message : String(error)}`);
     try {
-      await postBaselineResult(config, payload, startedAt, 'failed', null, 0, 0, 0, [], logger);
+      await postBaselineResult(config, payload, startedAt, 'failed', null, null, 0, 0, 0, [], logger);
     } catch (postError) {
       logger.error(
         `Failed to post failure result: ${postError instanceof Error ? postError.message : String(postError)}`,
@@ -117,6 +119,7 @@ async function postBaselineResult(
   startedAt: string,
   status: 'completed' | 'failed',
   headSha: string | null,
+  committedAt: string | null,
   filesAnalyzed: number,
   avgComplexity: number,
   maxComplexity: number,
@@ -139,6 +142,7 @@ async function postBaselineResult(
     repo_id: payload.repository.id,
     pr_number: null,
     head_sha: resolvedSha,
+    committed_at: committedAt,
     base_sha: null,
     started_at: startedAt,
     completed_at: new Date().toISOString(),
