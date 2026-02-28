@@ -1,6 +1,6 @@
 /**
- * NATS JetStream one-shot pull.
- * Connect → get consumer → fetch 1 message → return it (caller handles ack/nak).
+ * NATS JetStream long-lived consumer.
+ * Connect → get consumer → loop pulling messages → invoke callback.
  */
 
 import { connect, type NatsConnection, type JsMsg } from 'nats';
@@ -12,51 +12,56 @@ function redactUrl(url: string): string {
   return url.replace(/\/\/[^@]+@/, '//***@');
 }
 
-export interface PulledJob {
-  msg: JsMsg;
-  payload: JobPayload;
-}
-
-export interface NatsHandle {
-  nc: NatsConnection;
-  job: PulledJob | null;
-}
+type JobHandler = (msg: JsMsg, payload: JobPayload) => Promise<void>;
 
 /**
- * Connect to NATS, pull one message from the consumer, return it.
- * Returns null job if no message is available within the timeout.
- * Caller is responsible for msg.ack()/msg.nak() and nc.close().
- * Closes the connection automatically on setup errors.
+ * Connect to NATS and continuously pull messages from the consumer.
+ * For each message, invoke the handler. Ack on success, nak on failure.
+ * Reconnects automatically on connection loss (built into nats.js client).
+ * Never returns under normal operation.
  */
-export async function pullOneJob(config: RunnerConfig, logger: Logger): Promise<NatsHandle> {
-  let nc: NatsConnection | undefined;
+export async function connectAndPull(
+  config: RunnerConfig,
+  logger: Logger,
+  handler: JobHandler,
+): Promise<never> {
+  const nc: NatsConnection = await connect({ servers: config.natsUrl });
+  logger.info(`Connected to NATS at ${redactUrl(config.natsUrl)}`);
 
-  try {
-    nc = await connect({ servers: config.natsUrl });
-    logger.info(`Connected to NATS at ${redactUrl(config.natsUrl)}`);
+  const js = nc.jetstream();
+  const consumer = await js.consumers.get(config.natsStream, config.natsConsumer);
 
-    const js = nc.jetstream();
-    const consumer = await js.consumers.get(config.natsStream, config.natsConsumer);
+  // Graceful shutdown on SIGTERM (K8s sends this before SIGKILL)
+  let shuttingDown = false;
+  process.on('SIGTERM', () => {
+    logger.info('Received SIGTERM, draining connection...');
+    shuttingDown = true;
+    nc.drain().then(() => process.exit(0));
+  });
 
+  while (!shuttingDown) {
     const messages = await consumer.fetch({ max_messages: 1, expires: config.pullTimeoutMs });
 
-    let job: PulledJob | null = null;
     for await (const msg of messages) {
-      const raw = msg.json<unknown>();
-      // Caller validates the payload — we just parse JSON here
-      job = { msg, payload: raw as JobPayload };
-      break;
-    }
+      const timeoutHandle = setTimeout(() => {
+        logger.error(`Job timed out after ${config.jobTimeoutMs}ms`);
+        msg.nak();
+      }, config.jobTimeoutMs);
 
-    if (!job) {
-      logger.info('No messages available, exiting');
+      try {
+        const payload = msg.json<JobPayload>();
+        await handler(msg, payload);
+        msg.ack();
+      } catch (error) {
+        logger.error(`Job failed: ${error instanceof Error ? error.message : String(error)}`);
+        msg.nak();
+      } finally {
+        clearTimeout(timeoutHandle);
+      }
     }
-
-    return { nc, job };
-  } catch (error) {
-    if (nc) {
-      await nc.close().catch(() => {});
-    }
-    throw error;
   }
+
+  // TypeScript: loop only exits on shutdown, which calls process.exit
+  await nc.close();
+  process.exit(0);
 }
