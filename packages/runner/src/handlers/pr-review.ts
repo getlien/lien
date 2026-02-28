@@ -36,6 +36,7 @@ import type {
 import type { RunnerConfig } from '../config.js';
 import { cloneBySha, resolveCommitTimestamp, type CloneResult } from '../clone.js';
 import { postReviewRunResult } from '../api-client.js';
+import { LogBuffer } from '../log-buffer.js';
 
 export async function handlePRReview(
   payload: PRJobPayload,
@@ -68,28 +69,35 @@ export async function handlePRReview(
     archReviewCategories: [],
   };
 
+  const reviewRunId = payload.review_run_id ?? null;
+  const logBuffer = reviewRunId
+    ? new LogBuffer(config.laravelApiUrl, auth.service_token, reviewRunId, logger)
+    : null;
+
   const octokit = createOctokit(auth.installation_token);
   logger.info(`Processing PR #${pr.number} on ${repository.full_name}`);
 
-  // Create initial check run
+  // Create initial check run (skip when platform already created one)
   let checkRunId: number | undefined;
-  try {
-    checkRunId = await createCheckRun(
-      octokit,
-      {
-        owner: prContext.owner,
-        repo: prContext.repo,
-        name: 'Lien Review',
-        headSha: prContext.headSha,
-        status: 'in_progress',
-        output: { title: 'Running...', summary: 'Analysis in progress' },
-      },
-      logger,
-    );
-  } catch (error) {
-    logger.warning(
-      `Failed to create check run: ${error instanceof Error ? error.message : String(error)}`,
-    );
+  if (!reviewRunId) {
+    try {
+      checkRunId = await createCheckRun(
+        octokit,
+        {
+          owner: prContext.owner,
+          repo: prContext.repo,
+          name: 'Lien Review',
+          headSha: prContext.headSha,
+          status: 'in_progress',
+          output: { title: 'Running...', summary: 'Analysis in progress' },
+        },
+        logger,
+      );
+    } catch (error) {
+      logger.warning(
+        `Failed to create check run: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   let headClone: CloneResult | null = null;
@@ -110,6 +118,7 @@ export async function handlePRReview(
       auth.installation_token,
       logger,
     );
+    logBuffer?.add('info', `Cloned head SHA ${pr.head_sha.slice(0, 7)}`);
 
     // Resolve commit timestamp for the graph timeline
     committedAt = await resolveCommitTimestamp(headClone.dir);
@@ -121,6 +130,10 @@ export async function handlePRReview(
     const filesToAnalyze = filterAnalyzableFiles(allChangedFiles);
     logger.info(`${filesToAnalyze.length} files eligible for complexity analysis`);
     filesAnalyzed = filesToAnalyze.length;
+    logBuffer?.add(
+      'info',
+      `Starting review for PR #${pr.number} (${allChangedFiles.length} files changed, ${filesToAnalyze.length} eligible)`,
+    );
 
     if (filesToAnalyze.length === 0) {
       logger.info('No analyzable files, skipping');
@@ -155,6 +168,7 @@ export async function handlePRReview(
         [],
         [],
         [],
+        reviewRunId,
         logger,
       );
       return;
@@ -183,6 +197,7 @@ export async function handlePRReview(
         [],
         [],
         [],
+        reviewRunId,
         logger,
       );
       return;
@@ -191,6 +206,10 @@ export async function handlePRReview(
     const { report: currentReport, chunks } = headResult;
     avgComplexity = currentReport.summary.avgComplexity;
     maxComplexity = currentReport.summary.maxComplexity;
+    logBuffer?.add(
+      'info',
+      `Head analysis complete: avg ${avgComplexity.toFixed(1)}, max ${maxComplexity}`,
+    );
 
     // Clone and analyze base for delta tracking
     let baselineReport = null;
@@ -253,6 +272,7 @@ export async function handlePRReview(
       logger,
     });
     logger.info(`Engine produced ${findings.length} total findings`);
+    logBuffer?.add('info', `Engine produced ${findings.length} findings`);
 
     // Present via engine (posts check run + comments)
     const adapterContext = {
@@ -269,7 +289,10 @@ export async function handlePRReview(
     };
 
     try {
-      await engine.present(findings, adapterContext, { checkRunId });
+      await engine.present(findings, adapterContext, {
+        checkRunId,
+        skipCheckRun: !!reviewRunId,
+      });
     } catch (error) {
       logger.error(
         `engine.present() failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -305,6 +328,11 @@ export async function handlePRReview(
     const reviewComments = buildReviewComments(findings);
     const logicFindings = buildLogicFindings(findings);
 
+    logBuffer?.add(
+      'info',
+      `Review completed: ${filesAnalyzed} files analyzed, ${reviewComments.length} comments, ${logicFindings.length} logic findings`,
+    );
+
     await postResult(
       config,
       payload,
@@ -319,10 +347,15 @@ export async function handlePRReview(
       complexitySnapshots,
       reviewComments,
       logicFindings,
+      reviewRunId,
       logger,
     );
   } catch (error) {
     logger.error(`PR review failed: ${error instanceof Error ? error.message : String(error)}`);
+    logBuffer?.add(
+      'error',
+      `Review failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
     try {
       await postResult(
         config,
@@ -338,6 +371,7 @@ export async function handlePRReview(
         [],
         [],
         [],
+        reviewRunId,
         logger,
       );
     } catch (postError) {
@@ -347,6 +381,7 @@ export async function handlePRReview(
     }
     throw error;
   } finally {
+    if (logBuffer) await logBuffer.dispose().catch(() => {});
     if (headClone) await headClone.cleanup().catch(() => {});
     if (baseClone) await baseClone.cleanup().catch(() => {});
   }
@@ -430,6 +465,7 @@ async function postResult(
   complexitySnapshots: ComplexitySnapshotResult[],
   reviewComments: ReviewCommentResult[],
   logicFindings: LogicFindingResult[],
+  reviewRunId: number | null,
   logger: Logger,
 ): Promise<void> {
   const configHash = createHash('sha256')
@@ -438,6 +474,7 @@ async function postResult(
     .slice(0, 16);
 
   const result: ReviewRunResult = {
+    review_run_id: reviewRunId,
     idempotency_key: buildIdempotencyKey(
       payload.repository.id,
       payload.pull_request.number,

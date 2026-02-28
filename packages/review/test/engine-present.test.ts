@@ -411,6 +411,39 @@ describe('ReviewEngine.present()', () => {
     );
   });
 
+  it('skips check run creation and finalization when skipCheckRun is true', async () => {
+    let hasPostReviewComment = false;
+    const engine = new ReviewEngine();
+    const octokit = {
+      checks: {
+        create: vi.fn().mockResolvedValue({ data: { id: 1 } }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      pulls: {
+        createReview: vi.fn().mockResolvedValue({}),
+      },
+    };
+
+    engine.register(
+      createTestPlugin({
+        present: async (_findings, ctx: PresentContext) => {
+          hasPostReviewComment = typeof ctx.postReviewComment === 'function';
+        },
+      }),
+    );
+
+    await engine.present([], createAdapterContext({ octokit, pr: mockPR }), {
+      skipCheckRun: true,
+    });
+
+    // Should NOT create or update check runs
+    expect(octokit.checks.create).not.toHaveBeenCalled();
+    expect(octokit.checks.update).not.toHaveBeenCalled();
+
+    // PresentContext helpers should still be available
+    expect(hasPostReviewComment).toBe(true);
+  });
+
   it('creates check run if checkRunId not provided', async () => {
     const engine = new ReviewEngine();
     const octokit = {

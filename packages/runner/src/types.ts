@@ -36,6 +36,7 @@ export interface PRJobPayload {
     installation_token: string;
     service_token: string;
   };
+  review_run_id?: number | null;
 }
 
 export interface BaselineJobPayload {
@@ -96,6 +97,7 @@ export interface LogicFindingResult {
 }
 
 export interface ReviewRunResult {
+  review_run_id?: number | null;
   idempotency_key: string;
   repo_id: number;
   pr_number: number | null;

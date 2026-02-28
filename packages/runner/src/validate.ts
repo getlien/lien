@@ -51,6 +51,10 @@ export function validatePRPayload(data: unknown): PRJobPayload {
     throw new Error('Missing auth.service_token in PR payload');
   }
 
+  if (payload.review_run_id != null && typeof payload.review_run_id !== 'number') {
+    throw new Error('review_run_id must be a number when provided');
+  }
+
   return data as PRJobPayload;
 }
 

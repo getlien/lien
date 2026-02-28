@@ -158,7 +158,7 @@ export class ReviewEngine {
   async present(
     findings: ReviewFinding[],
     adapterContext: AdapterContext,
-    opts?: { pluginFilter?: string; checkRunId?: number },
+    opts?: { pluginFilter?: string; checkRunId?: number; skipCheckRun?: boolean },
   ): Promise<void> {
     const octokit = adapterContext.octokit as Octokit | undefined;
     const pr = adapterContext.pr;
@@ -166,7 +166,9 @@ export class ReviewEngine {
     const debugLog: string[] = [];
     const summarySections: string[] = [];
 
-    const checkRunId = await ensureCheckRun(octokit, pr, opts?.checkRunId, adapterContext.logger);
+    const checkRunId = opts?.skipCheckRun
+      ? undefined
+      : await ensureCheckRun(octokit, pr, opts?.checkRunId, adapterContext.logger);
     const presentContext = buildPresentContext(
       adapterContext,
       octokit,
