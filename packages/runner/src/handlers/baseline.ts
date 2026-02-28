@@ -29,17 +29,19 @@ export async function handleBaseline(
   const startedAt = new Date().toISOString();
   const { repository, auth } = payload;
 
-  const cloneRef = payload.sha ?? repository.default_branch;
+  // Normalize sha: treat empty/whitespace as absent
+  const sha = payload.sha?.trim() || undefined;
+  const cloneRef = sha ?? repository.default_branch;
   logger.info(
-    `Processing baseline for ${repository.full_name}@${payload.sha ? cloneRef.slice(0, 7) : cloneRef}`,
+    `Processing baseline for ${repository.full_name}@${sha ? cloneRef.slice(0, 7) : cloneRef}`,
   );
 
   let clone: CloneResult | null = null;
 
   try {
     // Clone by SHA when available (historical baselines), otherwise by branch
-    clone = payload.sha
-      ? await cloneBySha(repository.full_name, payload.sha, auth.installation_token, logger)
+    clone = sha
+      ? await cloneBySha(repository.full_name, sha, auth.installation_token, logger)
       : await cloneByBranch(
           repository.full_name,
           repository.default_branch,
@@ -58,8 +60,8 @@ export async function handleBaseline(
         payload,
         startedAt,
         'failed',
-        null,
-        null,
+        sha ?? null,
+        sha ? (payload.committed_at ?? null) : null,
         0,
         0,
         0,
@@ -86,8 +88,9 @@ export async function handleBaseline(
     const snapshots = buildComplexitySnapshots(report);
 
     // Use payload SHA/timestamp when available (historical baselines), otherwise resolve from git
-    const headSha = payload.sha ?? (await resolveHeadSha(clone.dir));
-    const committedAt = payload.committed_at ?? (await resolveCommitTimestamp(clone.dir));
+    const headSha = sha ?? (await resolveHeadSha(clone.dir));
+    const committedAt =
+      (sha ? payload.committed_at : undefined) ?? (await resolveCommitTimestamp(clone.dir));
 
     await postBaselineResult(
       config,
@@ -110,8 +113,8 @@ export async function handleBaseline(
         payload,
         startedAt,
         'failed',
-        null,
-        null,
+        sha ?? null,
+        sha ? (payload.committed_at ?? null) : null,
         0,
         0,
         0,
