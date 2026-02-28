@@ -70,16 +70,17 @@ export async function handlePRReview(
   };
 
   const reviewRunId = payload.review_run_id ?? null;
-  const logBuffer = reviewRunId
-    ? new LogBuffer(config.laravelApiUrl, auth.service_token, reviewRunId, logger)
-    : null;
+  const logBuffer =
+    reviewRunId != null
+      ? new LogBuffer(config.laravelApiUrl, auth.service_token, reviewRunId, logger)
+      : null;
 
   const octokit = createOctokit(auth.installation_token);
   logger.info(`Processing PR #${pr.number} on ${repository.full_name}`);
 
   // Create initial check run (skip when platform already created one)
   let checkRunId: number | undefined;
-  if (!reviewRunId) {
+  if (reviewRunId == null) {
     try {
       checkRunId = await createCheckRun(
         octokit,
@@ -291,7 +292,7 @@ export async function handlePRReview(
     try {
       await engine.present(findings, adapterContext, {
         checkRunId,
-        skipCheckRun: !!reviewRunId,
+        skipCheckRun: reviewRunId != null,
       });
     } catch (error) {
       logger.error(
@@ -474,7 +475,7 @@ async function postResult(
     .slice(0, 16);
 
   const result: ReviewRunResult = {
-    review_run_id: reviewRunId,
+    ...(reviewRunId != null ? { review_run_id: reviewRunId } : {}),
     idempotency_key: buildIdempotencyKey(
       payload.repository.id,
       payload.pull_request.number,
