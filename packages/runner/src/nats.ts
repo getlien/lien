@@ -43,18 +43,29 @@ export async function connectAndPull(
     const messages = await consumer.fetch({ max_messages: 1, expires: config.pullTimeoutMs });
 
     for await (const msg of messages) {
+      let settled = false;
+
       const timeoutHandle = setTimeout(() => {
-        logger.error(`Job timed out after ${config.jobTimeoutMs}ms`);
-        msg.nak();
+        if (!settled) {
+          settled = true;
+          logger.error(`Job timed out after ${config.jobTimeoutMs}ms`);
+          msg.nak();
+        }
       }, config.jobTimeoutMs);
 
       try {
         const payload = msg.json<JobPayload>();
         await handler(msg, payload);
-        msg.ack();
+        if (!settled) {
+          settled = true;
+          msg.ack();
+        }
       } catch (error) {
-        logger.error(`Job failed: ${error instanceof Error ? error.message : String(error)}`);
-        msg.nak();
+        if (!settled) {
+          settled = true;
+          logger.error(`Job failed: ${error instanceof Error ? error.message : String(error)}`);
+          msg.nak();
+        }
       } finally {
         clearTimeout(timeoutHandle);
       }
