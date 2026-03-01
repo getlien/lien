@@ -29,7 +29,7 @@ describe('loadConfig', () => {
   it('returns defaults when no config file exists', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'architectural']);
+    expect(config.plugins).toEqual(['complexity', 'architectural', 'summary']);
     expect(config.llm.provider).toBe('openrouter');
     expect(config.llm.model).toBe('minimax/minimax-m2.5');
     expect(config.settings).toEqual({});
@@ -39,7 +39,7 @@ describe('loadConfig', () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue('null');
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'architectural']);
+    expect(config.plugins).toEqual(['complexity', 'architectural', 'summary']);
   });
 
   it('parses valid YAML config with string plugin list', () => {

@@ -37,7 +37,7 @@ const pluginEntrySchema = z.union([
 ]);
 
 const reviewConfigSchema = z.object({
-  plugins: z.array(pluginEntrySchema).default(['complexity', 'architectural']),
+  plugins: z.array(pluginEntrySchema).default(['complexity', 'architectural', 'summary']),
   llm: llmConfigSchema,
 });
 
@@ -201,6 +201,10 @@ const BUILTIN_PLUGINS: Record<string, () => Promise<ReviewPlugin>> = {
   architectural: async () => {
     const { ArchitecturalPlugin } = await import('./plugins/architectural.js');
     return new ArchitecturalPlugin();
+  },
+  summary: async () => {
+    const { SummaryPlugin } = await import('./plugins/summary.js');
+    return new SummaryPlugin();
   },
 };
 

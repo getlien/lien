@@ -27,6 +27,7 @@ export interface PRJobPayload {
     review_types: {
       complexity: boolean;
       architectural: boolean;
+      summary?: boolean;
     };
     block_on_new_errors: boolean;
     architectural_mode: 'auto' | 'always' | 'off';

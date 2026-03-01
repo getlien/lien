@@ -368,20 +368,41 @@ export async function getExistingPluginCommentKeys(
 }
 
 /**
- * Marker comments for the PR description stats badge
+ * Default marker comments for the PR description stats badge.
+ * Used when no sectionId is specified (backward compatible).
  */
 const DESCRIPTION_START_MARKER = '<!-- lien-stats -->';
 const DESCRIPTION_END_MARKER = '<!-- /lien-stats -->';
 
 /**
- * Update the PR description with a stats badge
- * Appends or replaces the stats section at the bottom of the description
+ * Build start/end marker pair for a given section.
+ * When sectionId is provided, uses `<!-- lien:{sectionId} -->` format.
+ * When omitted, uses the legacy `<!-- lien-stats -->` markers.
+ */
+function sectionMarkers(sectionId?: string): { start: string; end: string } {
+  if (sectionId) {
+    return {
+      start: `<!-- lien:${sectionId} -->`,
+      end: `<!-- /lien:${sectionId} -->`,
+    };
+  }
+  return { start: DESCRIPTION_START_MARKER, end: DESCRIPTION_END_MARKER };
+}
+
+/**
+ * Update the PR description with a stats badge or plugin section.
+ * Appends or replaces the section at the bottom of the description.
+ *
+ * @param sectionId - Optional section identifier for per-plugin markers.
+ *   When provided, uses `<!-- lien:{sectionId} -->` / `<!-- /lien:{sectionId} -->`.
+ *   When omitted, uses the default `<!-- lien-stats -->` markers (backward compat).
  */
 export async function updatePRDescription(
   octokit: Octokit,
   prContext: PRContext,
   badgeMarkdown: string,
   logger: Logger,
+  sectionId?: string,
 ): Promise<void> {
   try {
     // Get current PR
@@ -392,25 +413,26 @@ export async function updatePRDescription(
     });
 
     const currentBody = pr.body || '';
-    const wrappedBadge = `${DESCRIPTION_START_MARKER}\n${badgeMarkdown}\n${DESCRIPTION_END_MARKER}`;
+    const { start: startMarker, end: endMarker } = sectionMarkers(sectionId);
+    const wrappedBadge = `${startMarker}\n${badgeMarkdown}\n${endMarker}`;
 
     let newBody: string;
 
-    // Check if we already have a stats section
-    const startIdx = currentBody.indexOf(DESCRIPTION_START_MARKER);
-    const endIdx = currentBody.indexOf(DESCRIPTION_END_MARKER);
+    // Check if we already have this section
+    const startIdx = currentBody.indexOf(startMarker);
+    const endIdx = currentBody.indexOf(endMarker);
 
     if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
       // Replace existing section
       newBody =
         currentBody.slice(0, startIdx) +
         wrappedBadge +
-        currentBody.slice(endIdx + DESCRIPTION_END_MARKER.length);
-      logger.info('Updating existing stats badge in PR description');
+        currentBody.slice(endIdx + endMarker.length);
+      logger.info(`Updating existing ${sectionId ?? 'stats'} section in PR description`);
     } else {
       // Append to end
       newBody = currentBody.trim() + '\n\n---\n\n' + wrappedBadge;
-      logger.info('Adding stats badge to PR description');
+      logger.info(`Adding ${sectionId ?? 'stats'} section to PR description`);
     }
 
     // Update the PR
@@ -421,7 +443,7 @@ export async function updatePRDescription(
       body: newBody,
     });
 
-    logger.info('PR description updated with complexity stats');
+    logger.info(`PR description updated with ${sectionId ?? 'complexity stats'}`);
   } catch (error) {
     // Don't fail the action if we can't update the description
     logger.warning(`Failed to update PR description: ${error}`);

@@ -110,7 +110,18 @@ export interface ArchitecturalFindingMetadata {
   scope: string;
 }
 
-export type BuiltinFindingMetadata = ComplexityFindingMetadata | ArchitecturalFindingMetadata;
+export interface SummaryFindingMetadata {
+  pluginType: 'summary';
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  confidence: 'low' | 'medium' | 'high';
+  overview: string;
+  keyChanges: string[];
+}
+
+export type BuiltinFindingMetadata =
+  | ComplexityFindingMetadata
+  | ArchitecturalFindingMetadata
+  | SummaryFindingMetadata;
 
 /**
  * The universal output of a review plugin.
@@ -189,8 +200,10 @@ export interface PresentContext {
   /**
    * Update the PR description with a badge or stats block.
    * Only available in GitHub App context (pr + octokit present).
+   * @param sectionId - Optional section identifier for per-plugin markers (e.g., 'summary').
+   *   When omitted, uses the default `<!-- lien-stats -->` markers.
    */
-  updateDescription?(markdown: string): Promise<void>;
+  updateDescription?(markdown: string, sectionId?: string): Promise<void>;
 
   /**
    * Post findings as inline PR review comments.

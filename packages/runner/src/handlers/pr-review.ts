@@ -22,6 +22,7 @@ import {
   ReviewEngine,
   ComplexityPlugin,
   ArchitecturalPlugin,
+  SummaryPlugin,
   OpenRouterLLMClient,
 } from '@liendev/review';
 
@@ -242,6 +243,7 @@ export async function handlePRReview(
     const engine = new ReviewEngine();
     if (payload.config.review_types.complexity) engine.register(new ComplexityPlugin());
     if (payload.config.review_types.architectural) engine.register(new ArchitecturalPlugin());
+    if (payload.config.review_types.summary) engine.register(new SummaryPlugin());
 
     // Build LLM client
     const llm = reviewConfig.openrouterApiKey
