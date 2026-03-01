@@ -64,7 +64,8 @@ export interface LLMClient {
  * The world every plugin receives. Built by the engine before running plugins.
  *
  * @property chunks - AST-parsed code chunks for all changed files. Always present.
- * @property changedFiles - List of file paths changed in this review scope.
+ * @property changedFiles - List of file paths changed in this review scope (code files eligible for analysis).
+ * @property allChangedFiles - All files changed in the PR including non-code files (docs, config, etc.). Falls back to changedFiles when not provided.
  * @property complexityReport - Complexity analysis of the current code. Always present (the parser always runs).
  * @property baselineReport - Complexity analysis of the base branch. Null when no baseline is available (CLI without git, first PR).
  * @property deltas - Computed complexity deltas between baseline and current. Null when no baseline.
@@ -77,6 +78,8 @@ export interface LLMClient {
 export interface ReviewContext {
   chunks: CodeChunk[];
   changedFiles: string[];
+  /** All files changed in the PR, including non-code files. Used by summary plugin for full file categorization. */
+  allChangedFiles?: string[];
   complexityReport: ComplexityReport;
   baselineReport: ComplexityReport | null;
   deltas: ComplexityDelta[] | null;

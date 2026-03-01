@@ -49,6 +49,9 @@ export interface RiskSignals {
 }
 
 export function computeRiskSignals(context: ReviewContext): RiskSignals {
+  // Use allChangedFiles for categorization so we capture docs/config/infra files
+  const allFiles = context.allChangedFiles ?? context.changedFiles;
+
   const categories: Record<FileCategory, number> = {
     infra: 0,
     config: 0,
@@ -58,7 +61,7 @@ export function computeRiskSignals(context: ReviewContext): RiskSignals {
     source: 0,
   };
 
-  for (const file of context.changedFiles) {
+  for (const file of allFiles) {
     categories[categorizeFile(file)]++;
   }
 
@@ -81,7 +84,7 @@ export function computeRiskSignals(context: ReviewContext): RiskSignals {
 
   // High-risk files (files with many dependents)
   let highRiskFileCount = 0;
-  for (const file of context.changedFiles) {
+  for (const file of allFiles) {
     const fileData = context.complexityReport.files[file];
     if (fileData && (fileData.dependentCount ?? 0) > 0) highRiskFileCount++;
   }
@@ -90,7 +93,7 @@ export function computeRiskSignals(context: ReviewContext): RiskSignals {
   const hasExportChanges = detectExportChanges(context);
 
   return {
-    totalFiles: context.changedFiles.length,
+    totalFiles: allFiles.length,
     categories,
     languages: [...langSet].sort(),
     newViolations,

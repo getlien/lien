@@ -280,10 +280,11 @@ export async function handlePRReview(
         })
       : undefined;
 
-    // Run engine — pass allChangedFiles so summary plugin can categorize all files
+    // Run engine
     findings = await engine.run({
       chunks,
-      changedFiles: allChangedFiles,
+      changedFiles: filesToAnalyze,
+      allChangedFiles,
       complexityReport: currentReport,
       baselineReport,
       deltas,
