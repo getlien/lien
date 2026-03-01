@@ -199,6 +199,15 @@ export function buildSummaryPrompt(
 ): string {
   const body = context.pr?.body ? context.pr.body.slice(0, 2000) : undefined;
   const prHeader = context.pr ? `## PR: ${context.pr.title}${body ? `\n\n${body}` : ''}\n\n` : '';
+  const hasDescription = !!body && body.trim().length > 0;
+
+  const overviewGuideline = hasDescription
+    ? `- **overview**: Add context the description misses — non-obvious implications, affected areas, or architectural impact. Do NOT restate what the PR description already says. If the description is comprehensive, return an empty string \`""\``
+    : `- **overview**: Focus on intent, not implementation details`;
+
+  const keyChangesGuideline = hasDescription
+    ? `- **key_changes**: List only changes NOT already covered in the PR description. Return an empty array \`[]\` if the description already covers all key changes`
+    : `- **key_changes**: 2-5 bullets, each under 100 characters`;
 
   return `You are a senior engineer writing a concise PR summary with risk assessment.
 
@@ -219,17 +228,18 @@ Write a brief PR summary. Respond with ONLY valid JSON:
   "risk_level": "low | medium | high | critical",
   "confidence": "low | medium | high",
   "risk_explanation": "1-2 sentences explaining the risk level",
-  "overview": "1-2 sentence summary of what this PR does",
-  "key_changes": ["change 1", "change 2", "change 3"]
+  "overview": "1-2 sentence summary of what this PR does (or empty string if PR description is sufficient)",
+  "key_changes": ["change 1", "change 2"]
 }
 \`\`\`
 
 Guidelines:
 - **risk_level**: "low" for docs/tests/config-only, "medium" for source changes with moderate scope, "high" for infra/db/many dependents/export changes, "critical" for breaking changes to widely-used interfaces
 - **confidence**: "high" when the code context is clear and complete, "medium" when some files were truncated or the scope is ambiguous, "low" when the context is very limited
-- **overview**: Focus on intent, not implementation details
-- **key_changes**: 2-5 bullets, each under 100 characters
-- Be factual and specific — avoid vague language`;
+${overviewGuideline}
+${keyChangesGuideline}
+- Be factual and specific — avoid vague language
+- NEVER repeat information already present in the PR title or description — only add new insight`;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +268,6 @@ function isValidSummaryResponse(parsed: unknown): parsed is SummaryResponse {
     typeof p.risk_explanation === 'string' &&
     typeof p.overview === 'string' &&
     Array.isArray(p.key_changes) &&
-    p.key_changes.length > 0 &&
     p.key_changes.every((c: unknown) => typeof c === 'string')
   );
 }
@@ -302,20 +311,25 @@ function capitalizeFirst(s: string): string {
 export function formatSummaryMarkdown(response: SummaryResponse): string {
   const riskLabel = capitalizeFirst(response.risk_level);
   const confidenceLabel = capitalizeFirst(response.confidence);
-  const keyChanges = response.key_changes.map(c => `- ${c}`).join('\n');
 
-  return `### Lien Summary
+  let md = `### Lien Summary
 
 > **${riskLabel} Risk** · ${confidenceLabel} Confidence
 >
-> ${response.risk_explanation}
+> ${response.risk_explanation}`;
 
-**Overview** — ${response.overview}
+  if (response.overview) {
+    md += `\n\n**Overview** — ${response.overview}`;
+  }
 
-**Key Changes**
-${keyChanges}
+  if (response.key_changes.length > 0) {
+    const keyChanges = response.key_changes.map(c => `- ${c}`).join('\n');
+    md += `\n\n**Key Changes**\n${keyChanges}`;
+  }
 
-*[Lien Review](https://lien.dev)*`;
+  md += `\n\n*[Lien Review](https://lien.dev)*`;
+
+  return md;
 }
 
 // ---------------------------------------------------------------------------

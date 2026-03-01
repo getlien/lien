@@ -287,12 +287,13 @@ describe('SummaryPlugin', () => {
       expect(result).toBeNull();
     });
 
-    it('returns null for empty key_changes', () => {
+    it('accepts empty key_changes array', () => {
       const result = parseSummaryResponse(
         makeSummaryLLMResponse({ key_changes: [] }),
         silentLogger,
       );
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.key_changes).toEqual([]);
     });
   });
 
@@ -313,6 +314,53 @@ describe('SummaryPlugin', () => {
       expect(md).toContain('**Overview** — Refactors deployment pipeline.');
       expect(md).toContain('- Updated CI config');
       expect(md).toContain('- New rollback logic');
+      expect(md).toContain('*[Lien Review](https://lien.dev)*');
+    });
+
+    it('omits overview section when overview is empty', () => {
+      const md = formatSummaryMarkdown({
+        risk_level: 'low',
+        confidence: 'high',
+        risk_explanation: 'Docs-only change.',
+        overview: '',
+        key_changes: ['Updated README'],
+      });
+
+      expect(md).toContain('### Lien Summary');
+      expect(md).toContain('**Low Risk**');
+      expect(md).not.toContain('**Overview**');
+      expect(md).toContain('- Updated README');
+    });
+
+    it('omits key changes section when array is empty', () => {
+      const md = formatSummaryMarkdown({
+        risk_level: 'medium',
+        confidence: 'high',
+        risk_explanation: 'Source changes with moderate scope.',
+        overview: 'Adds retry logic to API client.',
+        key_changes: [],
+      });
+
+      expect(md).toContain('### Lien Summary');
+      expect(md).toContain('**Overview** — Adds retry logic to API client.');
+      expect(md).not.toContain('**Key Changes**');
+      expect(md).toContain('*[Lien Review](https://lien.dev)*');
+    });
+
+    it('renders only risk assessment when both overview and key_changes are empty', () => {
+      const md = formatSummaryMarkdown({
+        risk_level: 'low',
+        confidence: 'high',
+        risk_explanation: 'Config-only change, no runtime impact.',
+        overview: '',
+        key_changes: [],
+      });
+
+      expect(md).toContain('### Lien Summary');
+      expect(md).toContain('**Low Risk**');
+      expect(md).toContain('Config-only change, no runtime impact.');
+      expect(md).not.toContain('**Overview**');
+      expect(md).not.toContain('**Key Changes**');
       expect(md).toContain('*[Lien Review](https://lien.dev)*');
     });
   });
@@ -418,6 +466,49 @@ describe('SummaryPlugin', () => {
   });
 
   describe('buildSummaryPrompt', () => {
+    it('instructs LLM not to parrot when PR has a description', () => {
+      const signals = computeRiskSignals(createTestContext({ changedFiles: ['src/a.ts'] }));
+
+      const prompt = buildSummaryPrompt(signals, '### src/a.ts\n```\ncode\n```', {
+        ...createTestContext(),
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add retry logic',
+          body: 'This PR adds retry logic to the API client with exponential backoff.',
+          headSha: 'abc',
+          baseSha: 'def',
+        },
+      });
+
+      expect(prompt).toContain(
+        'NEVER repeat information already present in the PR title or description',
+      );
+      expect(prompt).toContain('NOT already covered in the PR description');
+      expect(prompt).toContain('Do NOT restate what the PR description already says');
+    });
+
+    it('uses standard guidelines when PR has no description', () => {
+      const signals = computeRiskSignals(createTestContext({ changedFiles: ['src/a.ts'] }));
+
+      const prompt = buildSummaryPrompt(signals, '### src/a.ts\n```\ncode\n```', {
+        ...createTestContext(),
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add retry logic',
+          headSha: 'abc',
+          baseSha: 'def',
+        },
+      });
+
+      expect(prompt).toContain('Focus on intent, not implementation details');
+      expect(prompt).toContain('2-5 bullets, each under 100 characters');
+      expect(prompt).not.toContain('NOT already covered in the PR description');
+    });
+
     it('includes risk signals and PR context', () => {
       const signals = computeRiskSignals(
         createTestContext({
