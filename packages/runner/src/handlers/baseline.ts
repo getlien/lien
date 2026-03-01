@@ -211,7 +211,6 @@ async function postBaselineResult(
     summary_comment_id: null,
     complexity_snapshots: snapshots,
     review_comments: [],
-    logic_findings: [],
   };
 
   await postReviewRunResult(config.laravelApiUrl, payload.auth.service_token, result, logger);

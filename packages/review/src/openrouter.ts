@@ -3,13 +3,9 @@
  */
 
 import type { ComplexityViolation, ComplexityReport } from '@liendev/parser';
-import type { LogicFinding, LineComment } from './types.js';
 import type { Logger } from './logger.js';
 import { buildBatchedCommentsPrompt } from './prompt.js';
-import { buildLogicReviewPrompt } from './logic-prompt.js';
-import { parseLogicReviewResponse } from './logic-response.js';
 import { extractJSONFromCodeBlock, estimatePromptTokens } from './json-utils.js';
-import { LOGIC_MARKER_PREFIX } from './github-api.js';
 
 /**
  * OpenRouter API response structure
@@ -284,72 +280,4 @@ export async function generateLineComments(
 
   const commentsMap = parseCommentsResponse(data.choices[0].message.content, logger);
   return mapCommentsToViolations(commentsMap, usedViolations, logger);
-}
-
-/**
- * Map validated LLM response entries to line comments, filtering false positives.
- */
-function mapFindingsToComments(
-  findings: LogicFinding[],
-  parsed: Record<string, { valid: boolean; comment: string }>,
-  logger: Logger,
-): LineComment[] {
-  const comments: LineComment[] = [];
-  for (const finding of findings) {
-    const key = `${finding.filepath}::${finding.symbolName}`;
-    const entry = parsed[key];
-
-    if (entry && entry.valid) {
-      const categoryLabel = finding.category.replace(/_/g, ' ');
-      comments.push({
-        path: finding.filepath,
-        line: finding.line,
-        body: `${LOGIC_MARKER_PREFIX}${finding.filepath}::${finding.line}::${finding.category} -->\n**Logic Review** (beta) — ${categoryLabel}\n\n${entry.comment}`,
-      });
-    } else if (entry && !entry.valid) {
-      logger.info(`Finding ${key} marked as false positive by LLM`);
-    }
-  }
-  return comments;
-}
-
-/**
- * Generate validated logic review comments via LLM.
- * Takes raw findings, sends to LLM for validation, returns line comments for valid ones.
- */
-export async function generateLogicComments(
-  findings: LogicFinding[],
-  codeSnippets: Map<string, string>,
-  apiKey: string,
-  model: string,
-  report: ComplexityReport,
-  logger: Logger,
-  diffHunks?: Map<string, string>,
-): Promise<LineComment[]> {
-  if (findings.length === 0) {
-    return [];
-  }
-
-  logger.info(`Validating ${findings.length} logic findings via LLM`);
-
-  const prompt = buildLogicReviewPrompt(findings, codeSnippets, report, diffHunks);
-  const data = await callBatchedCommentsAPI(prompt, apiKey, model);
-
-  if (data.usage) {
-    trackUsage(data.usage);
-    const costStr = data.usage.cost ? ` ($${data.usage.cost.toFixed(6)})` : '';
-    logger.info(
-      `Logic review tokens: ${data.usage.prompt_tokens} in, ${data.usage.completion_tokens} out${costStr}`,
-    );
-  }
-
-  const parsed = parseLogicReviewResponse(data.choices[0].message.content, logger);
-  if (!parsed) {
-    logger.warning('Failed to parse logic review response, skipping');
-    return [];
-  }
-
-  const comments = mapFindingsToComments(findings, parsed, logger);
-  logger.info(`${comments.length}/${findings.length} findings validated as real issues`);
-  return comments;
 }

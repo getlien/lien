@@ -19,7 +19,6 @@ import {
   // New plugin architecture
   ReviewEngine,
   ComplexityPlugin,
-  LogicPlugin,
   ArchitecturalPlugin,
   OpenRouterLLMClient,
 } from '@liendev/review';
@@ -71,8 +70,6 @@ function buildContexts(
       enableDeltaTracking: true,
       baselineComplexityPath: '',
       blockOnNewErrors: false,
-      enableLogicReview: true,
-      logicReviewCategories: ['breaking_change', 'unchecked_return', 'missing_tests'],
       enableArchitecturalReview: 'auto',
       archReviewCategories: [],
     },
@@ -329,7 +326,6 @@ function buildLLMClient(config: ReviewConfig, logger: Logger) {
 function setupEngine() {
   const engine = new ReviewEngine();
   engine.register(new ComplexityPlugin());
-  engine.register(new LogicPlugin());
   engine.register(new ArchitecturalPlugin());
   return engine;
 }
