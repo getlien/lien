@@ -308,7 +308,8 @@ function buildPresentContext(
     appendSummary: (markdown: string) => summarySections.push(markdown),
     updateDescription:
       octokit && pr
-        ? (markdown: string) => updatePRDescription(octokit, pr, markdown, logger)
+        ? (markdown: string, sectionId?: string) =>
+            updatePRDescription(octokit, pr, markdown, logger, sectionId)
         : undefined,
     postInlineComments:
       octokit && pr

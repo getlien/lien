@@ -24,6 +24,7 @@ export type {
   ReviewSetup,
   ComplexityFindingMetadata,
   ArchitecturalFindingMetadata,
+  SummaryFindingMetadata,
   BuiltinFindingMetadata,
 } from './plugin-types.js';
 
@@ -36,6 +37,7 @@ export { OpenRouterLLMClient, type OpenRouterLLMClientOptions } from './llm-clie
 // Built-in plugins
 export { ComplexityPlugin } from './plugins/complexity.js';
 export { ArchitecturalPlugin } from './plugins/architectural.js';
+export { SummaryPlugin } from './plugins/summary.js';
 
 // Output adapters
 export { TerminalAdapter } from './adapters/terminal.js';
