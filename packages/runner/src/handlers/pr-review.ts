@@ -11,6 +11,8 @@ import {
   type ReviewConfig,
   type Logger,
   type ReviewFinding,
+  type ComplexityReport,
+  type ComplexityDelta,
   createOctokit,
   createCheckRun,
   updateCheckRun,
@@ -25,6 +27,7 @@ import {
   SummaryPlugin,
   OpenRouterLLMClient,
 } from '@liendev/review';
+import type { CodeChunk } from '@liendev/parser';
 
 import type {
   PRJobPayload,
@@ -139,7 +142,9 @@ export async function handlePRReview(
       `Starting review for PR #${pr.number} (${allChangedFiles.length} files changed, ${filesToAnalyze.length} eligible)`,
     );
 
-    if (filesToAnalyze.length === 0) {
+    const summaryEnabled = !!payload.config.review_types.summary;
+
+    if (filesToAnalyze.length === 0 && !summaryEnabled) {
       logger.info('No analyzable files, skipping');
       if (checkRunId) {
         await updateCheckRun(
@@ -177,67 +182,88 @@ export async function handlePRReview(
       return;
     }
 
-    // Analyze head
-    const headResult = await runComplexityAnalysis(
-      filesToAnalyze,
-      reviewConfig.threshold,
-      headClone.dir,
-      logger,
-    );
-    if (!headResult) {
-      logger.warning('Failed to get complexity report for head');
-      await postResult(
-        config,
-        payload,
-        startedAt,
-        'failed',
-        committedAt,
-        filesAnalyzed,
-        0,
-        0,
-        0,
-        0,
-        [],
-        [],
-        reviewRunId,
-        logger,
-      );
-      return;
-    }
+    // Run complexity analysis when there are analyzable files
+    let currentReport: ComplexityReport;
+    let chunks: CodeChunk[] = [];
+    let baselineReport: ComplexityReport | null = null;
+    let deltas: ComplexityDelta[] | null = null;
 
-    const { report: currentReport, chunks } = headResult;
-    avgComplexity = currentReport.summary.avgComplexity;
-    maxComplexity = currentReport.summary.maxComplexity;
-    logBuffer?.add(
-      'info',
-      `Head analysis complete: avg ${avgComplexity.toFixed(1)}, max ${maxComplexity}`,
-    );
-
-    // Clone and analyze base for delta tracking
-    let baselineReport = null;
-    try {
-      baseClone = await cloneBySha(
-        repository.full_name,
-        pr.base_sha,
-        auth.installation_token,
-        logger,
-      );
-      const baseResult = await runComplexityAnalysis(
+    if (filesToAnalyze.length > 0) {
+      const headResult = await runComplexityAnalysis(
         filesToAnalyze,
         reviewConfig.threshold,
-        baseClone.dir,
+        headClone.dir,
         logger,
       );
-      baselineReport = baseResult?.report ?? null;
-    } catch (error) {
-      logger.warning(
-        `Failed to analyze base branch: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+      if (!headResult) {
+        logger.warning('Failed to get complexity report for head');
+        await postResult(
+          config,
+          payload,
+          startedAt,
+          'failed',
+          committedAt,
+          filesAnalyzed,
+          0,
+          0,
+          0,
+          0,
+          [],
+          [],
+          reviewRunId,
+          logger,
+        );
+        return;
+      }
 
-    const deltas = baselineReport
-      ? calculateDeltas(baselineReport, currentReport, filesToAnalyze)
-      : null;
+      currentReport = headResult.report;
+      chunks = headResult.chunks;
+      avgComplexity = currentReport.summary.avgComplexity;
+      maxComplexity = currentReport.summary.maxComplexity;
+      logBuffer?.add(
+        'info',
+        `Head analysis complete: avg ${avgComplexity.toFixed(1)}, max ${maxComplexity}`,
+      );
+
+      // Clone and analyze base for delta tracking
+      try {
+        baseClone = await cloneBySha(
+          repository.full_name,
+          pr.base_sha,
+          auth.installation_token,
+          logger,
+        );
+        const baseResult = await runComplexityAnalysis(
+          filesToAnalyze,
+          reviewConfig.threshold,
+          baseClone.dir,
+          logger,
+        );
+        baselineReport = baseResult?.report ?? null;
+      } catch (error) {
+        logger.warning(
+          `Failed to analyze base branch: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      deltas = baselineReport
+        ? calculateDeltas(baselineReport, currentReport, filesToAnalyze)
+        : null;
+    } else {
+      // No complexity-analyzable files but summary plugin is enabled
+      logger.info('No complexity-analyzable files, running summary-only');
+      logBuffer?.add('info', 'No complexity-analyzable files, running summary-only');
+      currentReport = {
+        files: {},
+        summary: {
+          filesAnalyzed: 0,
+          totalViolations: 0,
+          bySeverity: { error: 0, warning: 0 },
+          avgComplexity: 0,
+          maxComplexity: 0,
+        },
+      };
+    }
 
     // Setup engine with enabled plugins
     const engine = new ReviewEngine();
@@ -254,10 +280,10 @@ export async function handlePRReview(
         })
       : undefined;
 
-    // Run engine
+    // Run engine — pass allChangedFiles so summary plugin can categorize all files
     findings = await engine.run({
       chunks,
-      changedFiles: filesToAnalyze,
+      changedFiles: allChangedFiles,
       complexityReport: currentReport,
       baselineReport,
       deltas,
@@ -389,8 +415,6 @@ export async function handlePRReview(
 // ---------------------------------------------------------------------------
 // Result Builders
 // ---------------------------------------------------------------------------
-
-import type { ComplexityReport } from '@liendev/review';
 
 function buildComplexitySnapshots(report: ComplexityReport): ComplexitySnapshotResult[] {
   const snapshots: ComplexitySnapshotResult[] = [];
