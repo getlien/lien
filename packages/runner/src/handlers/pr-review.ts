@@ -122,8 +122,28 @@ export async function handlePRReview(
       );
     }
   } else {
-    // review_run_id set but no check_run_id — platform should always provide one for PR jobs
-    logger.warning('review_run_id provided without check_run_id — check run will not be managed');
+    // review_run_id set but no check_run_id — fall back to creating our own
+    logger.warning(
+      'review_run_id provided without check_run_id — creating a managed check run locally',
+    );
+    try {
+      checkRunId = await createCheckRun(
+        octokit,
+        {
+          owner: prContext.owner,
+          repo: prContext.repo,
+          name: 'Lien Review',
+          headSha: prContext.headSha,
+          status: 'in_progress',
+          output: { title: 'Running...', summary: 'Analysis in progress' },
+        },
+        logger,
+      );
+    } catch (error) {
+      logger.warning(
+        `Failed to create fallback check run: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   let headClone: CloneResult | null = null;
@@ -533,8 +553,14 @@ async function postResult(
     logger,
   );
   if (!posted) {
-    logger.error(
-      `Platform callback failed for review_run_id=${reviewRunId} — result not persisted`,
-    );
+    if (reviewRunId != null) {
+      logger.error(
+        `Platform callback failed for review_run_id=${reviewRunId} — result not persisted`,
+      );
+    } else {
+      logger.error(
+        `Platform callback failed — result not persisted (repo_id=${payload.repository.id}, pr_number=${payload.pull_request.number}, head_sha=${payload.pull_request.head_sha})`,
+      );
+    }
   }
 }
