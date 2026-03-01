@@ -1,9 +1,14 @@
+import { execFileSync } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { initCommand } from './init.js';
 import type { EditorId } from './init.js';
+
+vi.mock('child_process', () => ({
+  execFileSync: vi.fn(),
+}));
 
 describe('initCommand', () => {
   let testDir: string;
@@ -326,5 +331,201 @@ describe('initCommand', () => {
       await fs.readFile(path.join(testDir, 'opencode.json'), 'utf-8'),
     );
     expect(opencodeConfig.mcp.lien.command).not.toContain('--root');
+  });
+
+  // --- --with-lsp ---
+
+  it('should create .lsp.json for claude-code with --with-lsp when tsconfig.json exists', async () => {
+    await fs.writeFile(path.join(testDir, 'tsconfig.json'), '{}');
+    vi.mocked(execFileSync).mockImplementation(() => Buffer.from(''));
+
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    const lspConfigPath = path.join(testDir, '.lsp.json');
+    const raw = await fs.readFile(lspConfigPath, 'utf-8');
+    const config = JSON.parse(raw);
+
+    expect(config.typescript).toBeDefined();
+    expect(config.typescript.command).toBe('typescript-language-server');
+    expect(config.typescript.args).toEqual(['--stdio']);
+    expect(config.typescript.extensionToLanguage['.ts']).toBe('typescript');
+  });
+
+  it('should detect multiple languages from project markers', async () => {
+    await fs.writeFile(path.join(testDir, 'package.json'), '{}');
+    await fs.writeFile(path.join(testDir, 'requirements.txt'), '');
+    await fs.writeFile(path.join(testDir, 'go.mod'), '');
+    vi.mocked(execFileSync).mockImplementation(() => Buffer.from(''));
+
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    const raw = await fs.readFile(path.join(testDir, '.lsp.json'), 'utf-8');
+    const config = JSON.parse(raw);
+
+    expect(config.typescript).toBeDefined();
+    expect(config.python).toBeDefined();
+    expect(config.go).toBeDefined();
+  });
+
+  it('should detect Go from go.mod marker', async () => {
+    await fs.writeFile(path.join(testDir, 'go.mod'), '');
+    vi.mocked(execFileSync).mockImplementation(() => Buffer.from(''));
+
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    const raw = await fs.readFile(path.join(testDir, '.lsp.json'), 'utf-8');
+    const config = JSON.parse(raw);
+
+    expect(config.go).toEqual({
+      command: 'gopls',
+      args: ['serve'],
+      extensionToLanguage: { '.go': 'go' },
+    });
+  });
+
+  it('should detect Rust from Cargo.toml marker', async () => {
+    await fs.writeFile(path.join(testDir, 'Cargo.toml'), '');
+    vi.mocked(execFileSync).mockImplementation(() => Buffer.from(''));
+
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    const raw = await fs.readFile(path.join(testDir, '.lsp.json'), 'utf-8');
+    const config = JSON.parse(raw);
+
+    expect(config.rust).toEqual({
+      command: 'rust-analyzer',
+      extensionToLanguage: { '.rs': 'rust' },
+    });
+    // rust-analyzer has empty args, so args should not be present
+    expect(config.rust.args).toBeUndefined();
+  });
+
+  it('should detect C# from .csproj marker extension', async () => {
+    await fs.writeFile(path.join(testDir, 'MyApp.csproj'), '');
+    vi.mocked(execFileSync).mockImplementation(() => Buffer.from(''));
+
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    const raw = await fs.readFile(path.join(testDir, '.lsp.json'), 'utf-8');
+    const config = JSON.parse(raw);
+
+    expect(config.csharp).toBeDefined();
+    expect(config.csharp.command).toBe('csharp-ls');
+  });
+
+  it('should detect Java from pom.xml marker', async () => {
+    await fs.writeFile(path.join(testDir, 'pom.xml'), '');
+    vi.mocked(execFileSync).mockImplementation(() => Buffer.from(''));
+
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    const raw = await fs.readFile(path.join(testDir, '.lsp.json'), 'utf-8');
+    const config = JSON.parse(raw);
+
+    expect(config.java).toBeDefined();
+    expect(config.java.command).toBe('jdtls');
+  });
+
+  it('should detect PHP from composer.json marker', async () => {
+    await fs.writeFile(path.join(testDir, 'composer.json'), '{}');
+    vi.mocked(execFileSync).mockImplementation(() => Buffer.from(''));
+
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    const raw = await fs.readFile(path.join(testDir, '.lsp.json'), 'utf-8');
+    const config = JSON.parse(raw);
+
+    expect(config.php).toBeDefined();
+    expect(config.php.command).toBe('phpactor');
+    expect(config.php.args).toEqual(['language-server']);
+  });
+
+  it('should skip .lsp.json when no languages detected', async () => {
+    vi.mocked(execFileSync).mockImplementation(() => Buffer.from(''));
+
+    const logSpy = vi.spyOn(console, 'log');
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('No supported languages detected'));
+
+    // .lsp.json should not exist
+    await expect(fs.access(path.join(testDir, '.lsp.json'))).rejects.toThrow();
+  });
+
+  it('should skip .lsp.json when it already exists', async () => {
+    await fs.writeFile(path.join(testDir, 'tsconfig.json'), '{}');
+    const existingLsp = { typescript: { command: 'custom-ts-server' } };
+    await fs.writeFile(path.join(testDir, '.lsp.json'), JSON.stringify(existingLsp));
+    vi.mocked(execFileSync).mockImplementation(() => Buffer.from(''));
+
+    const logSpy = vi.spyOn(console, 'log');
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Already configured'));
+
+    // File should not have been overwritten
+    const raw = await fs.readFile(path.join(testDir, '.lsp.json'), 'utf-8');
+    expect(JSON.parse(raw)).toEqual(existingLsp);
+  });
+
+  it('should warn about missing LSP binaries', async () => {
+    await fs.writeFile(path.join(testDir, 'go.mod'), '');
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('not found');
+    });
+
+    const logSpy = vi.spyOn(console, 'log');
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('gopls not found'));
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('go install golang.org/x/tools/gopls@latest'),
+    );
+  });
+
+  it('should not warn when LSP binary is available', async () => {
+    await fs.writeFile(path.join(testDir, 'go.mod'), '');
+    vi.mocked(execFileSync).mockImplementation(() => Buffer.from('/usr/local/bin/gopls'));
+
+    const logSpy = vi.spyOn(console, 'log');
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    const warningCalls = logSpy.mock.calls.filter(
+      call => typeof call[0] === 'string' && call[0].includes('not found'),
+    );
+    expect(warningCalls).toHaveLength(0);
+  });
+
+  it('should warn when --with-lsp is used with non-claude-code editor', async () => {
+    const logSpy = vi.spyOn(console, 'log');
+    await initCommand({ editor: 'cursor', withLsp: true });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('--with-lsp is currently only supported for Claude Code'),
+    );
+
+    // .lsp.json should not exist
+    await expect(fs.access(path.join(testDir, '.lsp.json'))).rejects.toThrow();
+  });
+
+  it('should not create .lsp.json without --with-lsp flag', async () => {
+    await fs.writeFile(path.join(testDir, 'tsconfig.json'), '{}');
+
+    await initCommand({ editor: 'claude-code' });
+
+    await expect(fs.access(path.join(testDir, '.lsp.json'))).rejects.toThrow();
+  });
+
+  it('should omit args when LSP server has empty args array', async () => {
+    await fs.writeFile(path.join(testDir, 'Cargo.toml'), '');
+    vi.mocked(execFileSync).mockImplementation(() => Buffer.from(''));
+
+    await initCommand({ editor: 'claude-code', withLsp: true });
+
+    const raw = await fs.readFile(path.join(testDir, '.lsp.json'), 'utf-8');
+    const config = JSON.parse(raw);
+
+    // rust-analyzer has empty args, so 'args' key should not be present
+    expect(Object.keys(config.rust)).toEqual(['command', 'extensionToLanguage']);
   });
 });

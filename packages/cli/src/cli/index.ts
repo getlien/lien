@@ -43,6 +43,7 @@ program
     ]),
   )
   .option('-p, --path <path>', 'Path to initialize (defaults to current directory)')
+  .option('--with-lsp', 'Generate .lsp.json with language server configs (Claude Code only)')
   .action(initCommand);
 
 program

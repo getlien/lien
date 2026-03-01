@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -68,9 +69,79 @@ const EDITORS: Record<EditorId, EditorDefinition> = {
   },
 };
 
+interface LspServerDefinition {
+  command: string;
+  args: string[];
+  extensionToLanguage: Record<string, string>;
+  markers: string[];
+  markerExtensions?: string[];
+  installHint: string;
+}
+
+const LSP_SERVERS: Record<string, LspServerDefinition> = {
+  typescript: {
+    command: 'typescript-language-server',
+    args: ['--stdio'],
+    extensionToLanguage: {
+      '.ts': 'typescript',
+      '.tsx': 'typescriptreact',
+      '.js': 'javascript',
+      '.jsx': 'javascriptreact',
+      '.mjs': 'javascript',
+      '.cjs': 'javascript',
+    },
+    markers: ['tsconfig.json', 'jsconfig.json', 'package.json'],
+    installHint: 'npm install -g typescript-language-server typescript',
+  },
+  python: {
+    command: 'pyright-langserver',
+    args: ['--stdio'],
+    extensionToLanguage: { '.py': 'python' },
+    markers: ['pyproject.toml', 'setup.py', 'requirements.txt', 'Pipfile'],
+    installHint: 'pip install pyright  OR  npm install -g pyright',
+  },
+  go: {
+    command: 'gopls',
+    args: ['serve'],
+    extensionToLanguage: { '.go': 'go' },
+    markers: ['go.mod'],
+    installHint: 'go install golang.org/x/tools/gopls@latest',
+  },
+  rust: {
+    command: 'rust-analyzer',
+    args: [],
+    extensionToLanguage: { '.rs': 'rust' },
+    markers: ['Cargo.toml'],
+    installHint: 'rustup component add rust-analyzer',
+  },
+  php: {
+    command: 'phpactor',
+    args: ['language-server'],
+    extensionToLanguage: { '.php': 'php' },
+    markers: ['composer.json'],
+    installHint: 'composer global require phpactor/phpactor',
+  },
+  java: {
+    command: 'jdtls',
+    args: [],
+    extensionToLanguage: { '.java': 'java' },
+    markers: ['pom.xml', 'build.gradle', 'build.gradle.kts'],
+    installHint: 'See https://github.com/eclipse-jdtls/eclipse.jdt.ls',
+  },
+  csharp: {
+    command: 'csharp-ls',
+    args: [],
+    extensionToLanguage: { '.cs': 'csharp' },
+    markers: [],
+    markerExtensions: ['.csproj', '.sln'],
+    installHint: 'dotnet tool install -g csharp-ls',
+  },
+};
+
 export interface InitOptions {
   editor?: EditorId;
   path?: string;
+  withLsp?: boolean;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -123,6 +194,83 @@ async function writeEditorConfig(editor: EditorDefinition, rootDir: string): Pro
   }
 }
 
+function isCommandAvailable(command: string): boolean {
+  try {
+    execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], {
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function detectProjectLanguages(rootDir: string): Promise<string[]> {
+  let rootFiles: string[];
+  try {
+    rootFiles = await fs.readdir(rootDir);
+  } catch {
+    return [];
+  }
+
+  const detected: string[] = [];
+  for (const [serverKey, def] of Object.entries(LSP_SERVERS)) {
+    const hasMarker = def.markers.some(marker => rootFiles.includes(marker));
+    const hasMarkerExtension =
+      def.markerExtensions?.some(ext => rootFiles.some(f => f.endsWith(ext))) ?? false;
+    if (hasMarker || hasMarkerExtension) {
+      detected.push(serverKey);
+    }
+  }
+  return detected;
+}
+
+function buildLspConfig(serverKeys: string[]): Record<string, unknown> {
+  const config: Record<string, unknown> = {};
+  for (const key of serverKeys) {
+    const def = LSP_SERVERS[key];
+    const entry: Record<string, unknown> = {
+      command: def.command,
+      extensionToLanguage: def.extensionToLanguage,
+    };
+    if (def.args.length > 0) {
+      entry.args = def.args;
+    }
+    config[key] = entry;
+  }
+  return config;
+}
+
+async function writeLspConfig(rootDir: string): Promise<void> {
+  const lspConfigPath = path.join(rootDir, '.lsp.json');
+  const label = displayPath(lspConfigPath, rootDir);
+
+  const existing = await readJsonFile(lspConfigPath);
+  if (existing && Object.keys(existing).length > 0) {
+    console.log(chalk.green(`\n✓ Already configured — ${label} exists`));
+    return;
+  }
+
+  const detected = await detectProjectLanguages(rootDir);
+  if (detected.length === 0) {
+    console.log(chalk.dim('\n  No supported languages detected — skipping .lsp.json'));
+    return;
+  }
+
+  const config = buildLspConfig(detected);
+  await fs.writeFile(lspConfigPath, JSON.stringify(config, null, 2) + '\n');
+  console.log(chalk.green(`\n✓ Created ${label} with ${detected.join(', ')} support`));
+
+  for (const key of detected) {
+    const server = LSP_SERVERS[key];
+    if (!isCommandAvailable(server.command)) {
+      console.log(
+        chalk.yellow(`  ⚠️  ${server.command} not found — install: ${server.installHint}`),
+      );
+    }
+  }
+}
+
 async function promptForEditor(): Promise<EditorId> {
   const { default: inquirer } = await import('inquirer');
   const { editor } = await inquirer.prompt<{ editor: EditorId }>([
@@ -171,6 +319,15 @@ export async function initCommand(options: InitOptions = {}) {
     const snippet = { [editor.configKey]: { lien: entry } };
     console.log(chalk.yellow(`\n${editor.restartMessage}`));
     console.log(JSON.stringify(snippet, null, 2));
+  }
+
+  // Handle --with-lsp
+  if (options.withLsp) {
+    if (editorId !== 'claude-code') {
+      console.log(chalk.yellow('\n  --with-lsp is currently only supported for Claude Code'));
+    } else {
+      await writeLspConfig(rootDir);
+    }
   }
 
   // Check if old config exists and warn
