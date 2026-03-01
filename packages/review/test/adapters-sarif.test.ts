@@ -112,7 +112,7 @@ describe('SARIFAdapter', () => {
     const findings = [
       makeFinding({ pluginId: 'complexity', category: 'cyclomatic' }),
       makeFinding({ pluginId: 'complexity', category: 'cognitive', filepath: 'b.ts' }),
-      makeFinding({ pluginId: 'logic', category: 'breaking_change', filepath: 'c.ts' }),
+      makeFinding({ pluginId: 'architectural', category: 'dry_violation', filepath: 'c.ts' }),
       // Duplicate rule — should not create another
       makeFinding({ pluginId: 'complexity', category: 'cyclomatic', filepath: 'd.ts' }),
     ];
@@ -123,7 +123,7 @@ describe('SARIFAdapter', () => {
     const ruleIds = sarif.runs[0].tool.driver.rules.map(r => r.id);
     expect(ruleIds).toContain('complexity/cyclomatic');
     expect(ruleIds).toContain('complexity/cognitive');
-    expect(ruleIds).toContain('logic/breaking_change');
+    expect(ruleIds).toContain('architectural/dry_violation');
   });
 
   it('sets artifact URI from filepath', async () => {

@@ -273,17 +273,8 @@ export async function postPRReview(
  */
 export const COMMENT_MARKER_PREFIX = '<!-- lien-review:';
 
-/**
- * Marker prefix for Lien Review logic review comments.
- * Format: <!-- lien-review-logic:filepath::line -->
- */
-export const LOGIC_MARKER_PREFIX = '<!-- lien-review-logic:';
-
 /** @deprecated Legacy prefix — kept for 6 months to recognize old PR comments */
 export const LEGACY_COMMENT_MARKER_PREFIX = '<!-- veille:';
-
-/** @deprecated Legacy prefix — kept for 6 months to recognize old PR comments */
-export const LEGACY_LOGIC_MARKER_PREFIX = '<!-- veille-logic:';
 
 /**
  * Parse a comment marker from a comment body, returning the dedup key or null.
@@ -297,26 +288,6 @@ export function parseCommentMarker(body: string): string | null {
     // Fall back to legacy prefix
     start = body.indexOf(LEGACY_COMMENT_MARKER_PREFIX);
     prefix = LEGACY_COMMENT_MARKER_PREFIX;
-  }
-  if (start === -1) return null;
-  const keyStart = start + prefix.length;
-  const end = body.indexOf(' -->', keyStart);
-  if (end === -1) return null;
-  return body.slice(keyStart, end);
-}
-
-/**
- * Parse a logic marker from a comment body, returning the dedup key or null.
- * Checks for the new `lien-review-logic:` prefix first, then falls back to legacy `veille-logic:`.
- */
-export function parseLogicMarker(body: string): string | null {
-  // Try new prefix first
-  let start = body.indexOf(LOGIC_MARKER_PREFIX);
-  let prefix = LOGIC_MARKER_PREFIX;
-  if (start === -1) {
-    // Fall back to legacy prefix
-    start = body.indexOf(LEGACY_LOGIC_MARKER_PREFIX);
-    prefix = LEGACY_LOGIC_MARKER_PREFIX;
   }
   if (start === -1) return null;
   const keyStart = start + prefix.length;
@@ -340,16 +311,14 @@ async function* listAllReviewComments(octokit: Octokit, prContext: PRContext) {
 
 /**
  * Fetch existing Lien Review inline comment keys from the PR.
- * Returns a Map of dedup keys → comment URLs for complexity comments
- * and a Set of logic keys (e.g. "filepath::line::category") for logic review comments.
+ * Returns a Map of dedup keys → comment URLs for complexity comments.
  */
 export async function getExistingCommentKeys(
   octokit: Octokit,
   prContext: PRContext,
   logger: Logger,
-): Promise<{ complexity: Map<string, string>; logic: Set<string> }> {
+): Promise<{ complexity: Map<string, string> }> {
   const complexity = new Map<string, string>();
-  const logic = new Set<string>();
 
   for await (const comment of listAllReviewComments(octokit, prContext)) {
     if (!comment.body) continue;
@@ -357,19 +326,11 @@ export async function getExistingCommentKeys(
     const complexityKey = parseCommentMarker(comment.body);
     if (complexityKey) {
       complexity.set(complexityKey, comment.html_url);
-      continue;
-    }
-
-    const logicKey = parseLogicMarker(comment.body);
-    if (logicKey) {
-      logic.add(logicKey);
     }
   }
 
-  logger.info(
-    `Found ${complexity.size} existing complexity comments and ${logic.size} logic comments`,
-  );
-  return { complexity, logic };
+  logger.info(`Found ${complexity.size} existing complexity comments`);
+  return { complexity };
 }
 
 /**

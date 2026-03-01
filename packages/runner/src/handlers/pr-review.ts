@@ -21,7 +21,6 @@ import {
   calculateDeltaSummary,
   ReviewEngine,
   ComplexityPlugin,
-  LogicPlugin,
   ArchitecturalPlugin,
   OpenRouterLLMClient,
 } from '@liendev/review';
@@ -31,7 +30,6 @@ import type {
   ReviewRunResult,
   ComplexitySnapshotResult,
   ReviewCommentResult,
-  LogicFindingResult,
 } from '../types.js';
 import type { RunnerConfig } from '../config.js';
 import { cloneBySha, resolveCommitTimestamp, type CloneResult } from '../clone.js';
@@ -63,8 +61,6 @@ export async function handlePRReview(
     enableDeltaTracking: true,
     baselineComplexityPath: '',
     blockOnNewErrors: payload.config.block_on_new_errors,
-    enableLogicReview: payload.config.review_types.logic,
-    logicReviewCategories: ['breaking_change', 'unchecked_return', 'missing_tests'],
     enableArchitecturalReview: payload.config.architectural_mode,
     archReviewCategories: [],
   };
@@ -174,7 +170,6 @@ export async function handlePRReview(
         0,
         [],
         [],
-        [],
         reviewRunId,
         logger,
       );
@@ -201,7 +196,6 @@ export async function handlePRReview(
         0,
         0,
         0,
-        [],
         [],
         [],
         reviewRunId,
@@ -247,7 +241,6 @@ export async function handlePRReview(
     // Setup engine with enabled plugins
     const engine = new ReviewEngine();
     if (payload.config.review_types.complexity) engine.register(new ComplexityPlugin());
-    if (payload.config.review_types.logic) engine.register(new LogicPlugin());
     if (payload.config.review_types.architectural) engine.register(new ArchitecturalPlugin());
 
     // Build LLM client
@@ -333,11 +326,10 @@ export async function handlePRReview(
     // Build result arrays
     const complexitySnapshots = buildComplexitySnapshots(currentReport);
     const reviewComments = buildReviewComments(findings);
-    const logicFindings = buildLogicFindings(findings);
 
     logBuffer?.add(
       'info',
-      `Review completed: ${filesAnalyzed} files analyzed, ${reviewComments.length} comments, ${logicFindings.length} logic findings`,
+      `Review completed: ${filesAnalyzed} files analyzed, ${reviewComments.length} comments`,
     );
 
     await postResult(
@@ -353,7 +345,6 @@ export async function handlePRReview(
       cost,
       complexitySnapshots,
       reviewComments,
-      logicFindings,
       reviewRunId,
       logger,
     );
@@ -375,7 +366,6 @@ export async function handlePRReview(
         maxComplexity,
         tokenUsage,
         cost,
-        [],
         [],
         [],
         reviewRunId,
@@ -433,20 +423,6 @@ function buildReviewComments(findings: ReviewFinding[]): ReviewCommentResult[] {
   }));
 }
 
-function buildLogicFindings(findings: ReviewFinding[]): LogicFindingResult[] {
-  return findings
-    .filter(f => f.pluginId === 'logic')
-    .map(f => ({
-      filepath: f.filepath,
-      symbol_name: f.symbolName ?? '',
-      line: f.line,
-      category: f.category,
-      severity: f.severity as 'error' | 'warning',
-      message: f.message,
-      evidence: f.evidence ?? '',
-    }));
-}
-
 function buildIdempotencyKey(
   repoId: number,
   prNumber: number,
@@ -471,7 +447,6 @@ async function postResult(
   cost: number,
   complexitySnapshots: ComplexitySnapshotResult[],
   reviewComments: ReviewCommentResult[],
-  logicFindings: LogicFindingResult[],
   reviewRunId: number | null,
   logger: Logger,
 ): Promise<void> {
@@ -504,7 +479,6 @@ async function postResult(
     summary_comment_id: null,
     complexity_snapshots: complexitySnapshots,
     review_comments: reviewComments,
-    logic_findings: logicFindings,
   };
 
   await postReviewRunResult(config.laravelApiUrl, payload.auth.service_token, result, logger);

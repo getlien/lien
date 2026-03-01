@@ -1,20 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { LogicPlugin } from '../src/plugins/logic.js';
 import { ArchitecturalPlugin } from '../src/plugins/architectural.js';
 import { createTestReport, silentLogger } from '../src/test-helpers.js';
 import type { ReviewFinding, PresentContext } from '../src/plugin-types.js';
-
-function makeLogicFinding(overrides?: Partial<ReviewFinding>): ReviewFinding {
-  return {
-    pluginId: 'logic',
-    filepath: 'src/foo.ts',
-    line: 10,
-    severity: 'warning',
-    category: 'breaking_change',
-    message: 'Breaking change detected',
-    ...overrides,
-  };
-}
 
 function makeArchFinding(overrides?: Partial<ReviewFinding>): ReviewFinding {
   return {
@@ -42,54 +29,6 @@ function makePresentContext(overrides?: Partial<PresentContext>): PresentContext
     ...overrides,
   } as PresentContext;
 }
-
-// ---------------------------------------------------------------------------
-// LogicPlugin.present()
-// ---------------------------------------------------------------------------
-
-describe('LogicPlugin.present()', () => {
-  it('returns early when postInlineComments is not available (CLI mode)', async () => {
-    const plugin = new LogicPlugin();
-    const ctx = makePresentContext(); // no postInlineComments
-
-    // Should not throw
-    await plugin.present([makeLogicFinding()], ctx);
-  });
-
-  it('returns early when there are no logic findings', async () => {
-    const plugin = new LogicPlugin();
-    const postInlineComments = vi.fn().mockResolvedValue({ posted: 0, skipped: 0 });
-    const ctx = makePresentContext({ postInlineComments });
-
-    await plugin.present([], ctx);
-
-    expect(postInlineComments).not.toHaveBeenCalled();
-  });
-
-  it('calls postInlineComments with the findings it receives', async () => {
-    const plugin = new LogicPlugin();
-    const postInlineComments = vi.fn().mockResolvedValue({ posted: 1, skipped: 0 });
-    const ctx = makePresentContext({ postInlineComments });
-
-    const logicFinding = makeLogicFinding();
-    await plugin.present([logicFinding], ctx);
-
-    expect(postInlineComments).toHaveBeenCalledTimes(1);
-    expect(postInlineComments).toHaveBeenCalledWith([logicFinding], expect.any(String));
-  });
-
-  it('logs posted/skipped count after posting', async () => {
-    const plugin = new LogicPlugin();
-    const infos: string[] = [];
-    const logger = { ...silentLogger, info: (msg: string) => infos.push(msg) };
-    const postInlineComments = vi.fn().mockResolvedValue({ posted: 2, skipped: 1 });
-    const ctx = makePresentContext({ postInlineComments, logger });
-
-    await plugin.present([makeLogicFinding(), makeLogicFinding()], ctx);
-
-    expect(infos.some(m => m === 'Logic: 2 posted, 1 skipped')).toBe(true);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // ArchitecturalPlugin.present()

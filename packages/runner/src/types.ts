@@ -26,7 +26,6 @@ export interface PRJobPayload {
     threshold: string;
     review_types: {
       complexity: boolean;
-      logic: boolean;
       architectural: boolean;
     };
     block_on_new_errors: boolean;
@@ -87,16 +86,6 @@ export interface ReviewCommentResult {
   suggestion: string | null;
 }
 
-export interface LogicFindingResult {
-  filepath: string;
-  symbol_name: string;
-  line: number;
-  category: string;
-  severity: 'error' | 'warning';
-  message: string;
-  evidence: string;
-}
-
 export interface ReviewRunResult {
   review_run_id?: number | null;
   idempotency_key: string;
@@ -116,5 +105,4 @@ export interface ReviewRunResult {
   summary_comment_id: number | null;
   complexity_snapshots: ComplexitySnapshotResult[];
   review_comments: ReviewCommentResult[];
-  logic_findings: LogicFindingResult[];
 }

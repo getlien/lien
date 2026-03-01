@@ -105,20 +105,12 @@ export interface ComplexityFindingMetadata {
   symbolType: string;
 }
 
-export interface LogicFindingMetadata {
-  pluginType: 'logic';
-  evidence: string;
-}
-
 export interface ArchitecturalFindingMetadata {
   pluginType: 'architectural';
   scope: string;
 }
 
-export type BuiltinFindingMetadata =
-  | ComplexityFindingMetadata
-  | LogicFindingMetadata
-  | ArchitecturalFindingMetadata;
+export type BuiltinFindingMetadata = ComplexityFindingMetadata | ArchitecturalFindingMetadata;
 
 /**
  * The universal output of a review plugin.

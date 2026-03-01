@@ -23,7 +23,6 @@ export type {
   AnalysisResult,
   ReviewSetup,
   ComplexityFindingMetadata,
-  LogicFindingMetadata,
   ArchitecturalFindingMetadata,
   BuiltinFindingMetadata,
 } from './plugin-types.js';
@@ -36,7 +35,6 @@ export { OpenRouterLLMClient, type OpenRouterLLMClientOptions } from './llm-clie
 
 // Built-in plugins
 export { ComplexityPlugin } from './plugins/complexity.js';
-export { LogicPlugin } from './plugins/logic.js';
 export { ArchitecturalPlugin } from './plugins/architectural.js';
 
 // Output adapters
@@ -68,7 +66,6 @@ export type {
   PRContext,
   ReviewConfig,
   LineComment,
-  LogicFinding,
   ComplexityReport,
   ComplexityViolation,
 } from './types.js';
@@ -97,13 +94,10 @@ export {
   getPRPatchData,
   getExistingCommentKeys,
   parseCommentMarker,
-  parseLogicMarker,
   createCheckRun,
   updateCheckRun,
   COMMENT_MARKER_PREFIX,
-  LOGIC_MARKER_PREFIX,
   LEGACY_COMMENT_MARKER_PREFIX,
-  LEGACY_LOGIC_MARKER_PREFIX,
 } from './github-api.js';
 
 // ─── OpenRouter API (legacy — prefer LLMClient) ────────────────────────────
@@ -116,15 +110,7 @@ export {
   parseCommentsResponse,
   mapCommentsToViolations,
   generateLineComments,
-  generateLogicComments,
 } from './openrouter.js';
-
-// ─── Logic review ───────────────────────────────────────────────────────────
-
-export { detectLogicFindings } from './logic-review.js';
-export { isFindingSuppressed, parseSuppressionComments } from './suppression.js';
-export { buildLogicReviewPrompt } from './logic-prompt.js';
-export { parseLogicReviewResponse, type LogicReviewEntry } from './logic-response.js';
 
 // ─── Prompt building ────────────────────────────────────────────────────────
 

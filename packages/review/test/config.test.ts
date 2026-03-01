@@ -29,7 +29,7 @@ describe('loadConfig', () => {
   it('returns defaults when no config file exists', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'logic', 'architectural']);
+    expect(config.plugins).toEqual(['complexity', 'architectural']);
     expect(config.llm.provider).toBe('openrouter');
     expect(config.llm.model).toBe('minimax/minimax-m2.5');
     expect(config.settings).toEqual({});
@@ -39,14 +39,14 @@ describe('loadConfig', () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue('null');
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'logic', 'architectural']);
+    expect(config.plugins).toEqual(['complexity', 'architectural']);
   });
 
   it('parses valid YAML config with string plugin list', () => {
     const yaml = `
 plugins:
   - complexity
-  - logic
+  - architectural
 llm:
   provider: openrouter
   model: test-model
@@ -55,7 +55,7 @@ llm:
     vi.mocked(fs.readFileSync).mockReturnValue(yaml);
 
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'logic']);
+    expect(config.plugins).toEqual(['complexity', 'architectural']);
     expect(config.llm.model).toBe('test-model');
   });
 
@@ -64,13 +64,13 @@ llm:
 plugins:
   - complexity:
       threshold: 20
-  - logic
+  - architectural
 `;
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(yaml);
 
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'logic']);
+    expect(config.plugins).toEqual(['complexity', 'architectural']);
     expect(config.settings.complexity).toEqual({ threshold: 20 });
   });
 
@@ -80,9 +80,6 @@ plugins:
   - complexity:
       threshold: 25
       blockOnNewErrors: true
-  - logic:
-      categories:
-        - breaking_change
   - architectural:
       mode: always
 `;
@@ -91,7 +88,6 @@ plugins:
 
     const config = loadConfig('/fake/root');
     expect(config.settings.complexity).toEqual({ threshold: 25, blockOnNewErrors: true });
-    expect(config.settings.logic).toEqual({ categories: ['breaking_change'] });
     expect(config.settings.architectural).toEqual({ mode: 'always' });
   });
 
@@ -199,17 +195,15 @@ plugins: "not-an-array"
     const yaml = `
 plugins:
   - complexity
-  - logic:
-      categories:
-        - unchecked_return
-  - architectural
+  - architectural:
+      mode: always
 `;
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(yaml);
 
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'logic', 'architectural']);
-    expect(config.settings.logic).toEqual({ categories: ['unchecked_return'] });
+    expect(config.plugins).toEqual(['complexity', 'architectural']);
+    expect(config.settings.architectural).toEqual({ mode: 'always' });
     expect(config.settings.complexity).toBeUndefined();
   });
 });
@@ -220,12 +214,6 @@ describe('loadPlugin', () => {
     expect(plugin.id).toBe('complexity');
     expect(typeof plugin.analyze).toBe('function');
     expect(typeof plugin.shouldActivate).toBe('function');
-  });
-
-  it('loads built-in "logic" plugin', async () => {
-    const plugin = await loadPlugin('logic');
-    expect(plugin.id).toBe('logic');
-    expect(typeof plugin.analyze).toBe('function');
   });
 
   it('loads built-in "architectural" plugin', async () => {
@@ -244,14 +232,14 @@ describe('loadPlugin', () => {
 describe('loadPlugins', () => {
   it('loads multiple built-in plugins', async () => {
     const config: ReviewYamlConfig = {
-      plugins: ['complexity', 'logic'],
+      plugins: ['complexity', 'architectural'],
       llm: { provider: 'openrouter', model: 'test' },
       settings: {},
     };
     const plugins = await loadPlugins(config);
     expect(plugins).toHaveLength(2);
     expect(plugins[0].id).toBe('complexity');
-    expect(plugins[1].id).toBe('logic');
+    expect(plugins[1].id).toBe('architectural');
   });
 
   it('rejects duplicate plugin IDs', async () => {
