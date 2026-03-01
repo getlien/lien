@@ -78,13 +78,29 @@ export async function handlePRReview(
   const octokit = createOctokit(auth.installation_token);
   logger.info(`Processing PR #${pr.number} on ${repository.full_name}`);
 
-  // Resolve check run: reuse platform-created one, create our own, or skip entirely
+  // Resolve check run: reuse platform-created one, create our own, or warn
   let checkRunId: number | undefined;
-  const skipCheckRun = reviewRunId != null && !payload.check_run_id;
 
-  if (reviewRunId != null && payload.check_run_id) {
-    // Platform created the check run — reuse it for annotations + conclusion
+  if (payload.check_run_id) {
+    // Platform created the check run — take ownership and transition to in_progress
     checkRunId = payload.check_run_id;
+    try {
+      await updateCheckRun(
+        octokit,
+        {
+          owner: prContext.owner,
+          repo: prContext.repo,
+          checkRunId,
+          status: 'in_progress',
+          output: { title: 'Running...', summary: 'Analysis in progress' },
+        },
+        logger,
+      );
+    } catch (error) {
+      logger.warning(
+        `Failed to update check run to in_progress: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   } else if (reviewRunId == null) {
     // No platform involvement — create our own check run
     try {
@@ -105,6 +121,9 @@ export async function handlePRReview(
         `Failed to create check run: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  } else {
+    // review_run_id set but no check_run_id — platform should always provide one for PR jobs
+    logger.warning('review_run_id provided without check_run_id — check run will not be managed');
   }
 
   let headClone: CloneResult | null = null;
@@ -320,7 +339,6 @@ export async function handlePRReview(
     try {
       await engine.present(findings, adapterContext, {
         checkRunId,
-        skipCheckRun,
       });
     } catch (error) {
       logger.error(
@@ -508,5 +526,15 @@ async function postResult(
     review_comments: reviewComments,
   };
 
-  await postReviewRunResult(config.laravelApiUrl, payload.auth.service_token, result, logger);
+  const posted = await postReviewRunResult(
+    config.laravelApiUrl,
+    payload.auth.service_token,
+    result,
+    logger,
+  );
+  if (!posted) {
+    logger.error(
+      `Platform callback failed for review_run_id=${reviewRunId} — result not persisted`,
+    );
+  }
 }
