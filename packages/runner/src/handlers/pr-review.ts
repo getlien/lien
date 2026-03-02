@@ -78,73 +78,7 @@ export async function handlePRReview(
   const octokit = createOctokit(auth.installation_token);
   logger.info(`Processing PR #${pr.number} on ${repository.full_name}`);
 
-  // Resolve check run: reuse platform-created one, create our own, or warn
-  let checkRunId: number | undefined;
-
-  if (payload.check_run_id) {
-    // Platform created the check run — take ownership and transition to in_progress
-    checkRunId = payload.check_run_id;
-    try {
-      await updateCheckRun(
-        octokit,
-        {
-          owner: prContext.owner,
-          repo: prContext.repo,
-          checkRunId,
-          status: 'in_progress',
-          output: { title: 'Running...', summary: 'Analysis in progress' },
-        },
-        logger,
-      );
-    } catch (error) {
-      logger.warning(
-        `Failed to update check run to in_progress: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  } else if (reviewRunId == null) {
-    // No platform involvement — create our own check run
-    try {
-      checkRunId = await createCheckRun(
-        octokit,
-        {
-          owner: prContext.owner,
-          repo: prContext.repo,
-          name: 'Lien Review',
-          headSha: prContext.headSha,
-          status: 'in_progress',
-          output: { title: 'Running...', summary: 'Analysis in progress' },
-        },
-        logger,
-      );
-    } catch (error) {
-      logger.warning(
-        `Failed to create check run: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  } else {
-    // review_run_id set but no check_run_id — fall back to creating our own
-    logger.warning(
-      'review_run_id provided without check_run_id — creating a managed check run locally',
-    );
-    try {
-      checkRunId = await createCheckRun(
-        octokit,
-        {
-          owner: prContext.owner,
-          repo: prContext.repo,
-          name: 'Lien Review',
-          headSha: prContext.headSha,
-          status: 'in_progress',
-          output: { title: 'Running...', summary: 'Analysis in progress' },
-        },
-        logger,
-      );
-    } catch (error) {
-      logger.warning(
-        `Failed to create fallback check run: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
+  const checkRunId = await resolveCheckRun(octokit, prContext, payload, reviewRunId, logger);
 
   // Transition platform review run to running
   if (reviewRunId != null) {
@@ -497,6 +431,64 @@ function buildReviewComments(findings: ReviewFinding[]): ReviewCommentResult[] {
     message: f.message,
     suggestion: f.suggestion ?? null,
   }));
+}
+
+async function resolveCheckRun(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  payload: PRJobPayload,
+  reviewRunId: number | null,
+  logger: Logger,
+): Promise<number | undefined> {
+  if (payload.check_run_id) {
+    // Platform created the check run — take ownership and transition to in_progress
+    try {
+      await updateCheckRun(
+        octokit,
+        {
+          owner: prContext.owner,
+          repo: prContext.repo,
+          checkRunId: payload.check_run_id,
+          status: 'in_progress',
+          output: { title: 'Running...', summary: 'Analysis in progress' },
+        },
+        logger,
+      );
+    } catch (error) {
+      logger.warning(
+        `Failed to update check run to in_progress: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return payload.check_run_id;
+  }
+
+  if (reviewRunId != null) {
+    // review_run_id set but no check_run_id — fall back to creating our own
+    logger.warning(
+      'review_run_id provided without check_run_id — creating a managed check run locally',
+    );
+  }
+
+  // Create our own check run (standalone mode or platform fallback)
+  try {
+    return await createCheckRun(
+      octokit,
+      {
+        owner: prContext.owner,
+        repo: prContext.repo,
+        name: 'Lien Review',
+        headSha: prContext.headSha,
+        status: 'in_progress',
+        output: { title: 'Running...', summary: 'Analysis in progress' },
+      },
+      logger,
+    );
+  } catch (error) {
+    logger.warning(
+      `Failed to create check run: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
+  }
 }
 
 function buildIdempotencyKey(
