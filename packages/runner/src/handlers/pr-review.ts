@@ -566,4 +566,15 @@ async function postResult(
       );
     }
   }
+
+  // Transition platform review run to terminal state (running → completed/failed)
+  if (reviewRunId != null) {
+    await postReviewRunStatus(
+      config.laravelApiUrl,
+      payload.auth.service_token,
+      reviewRunId,
+      status,
+      logger,
+    );
+  }
 }
