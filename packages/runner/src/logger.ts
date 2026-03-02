@@ -9,7 +9,7 @@ function log(level: string, message: string): void {
   const entry = JSON.stringify({
     level,
     message,
-    timestamp: new Date().toISOString(),
+    ts: new Date().toISOString(),
     service: 'lien-runner',
   });
   process.stderr.write(entry + '\n');
