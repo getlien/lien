@@ -222,8 +222,9 @@ const PLUGIN_ORDER = ['summary', 'complexity'];
 function reorderSections(sections: TaggedSection[]): string[] {
   const ordered: string[] = [];
   for (const id of PLUGIN_ORDER) {
-    const section = sections.find(s => s.pluginId === id);
-    if (section) ordered.push(section.markdown);
+    for (const section of sections) {
+      if (section.pluginId === id) ordered.push(section.markdown);
+    }
   }
   for (const section of sections) {
     if (!PLUGIN_ORDER.includes(section.pluginId)) {

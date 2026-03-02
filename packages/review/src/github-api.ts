@@ -389,16 +389,23 @@ function sectionMarkers(sectionId?: string): { start: string; end: string } {
   return { start: DESCRIPTION_START_MARKER, end: DESCRIPTION_END_MARKER };
 }
 
-/** Remove a marker-delimited section from text, cleaning up surrounding whitespace. */
+/** Remove all occurrences of a marker-delimited section from text. */
 function stripSection(text: string, startMarker: string, endMarker: string): string {
-  const startIdx = text.indexOf(startMarker);
-  const endIdx = text.indexOf(endMarker);
-  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) return text;
-  return text
-    .slice(0, startIdx)
-    .concat(text.slice(endIdx + endMarker.length))
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  let result = text;
+  let changed = false;
+
+  for (;;) {
+    const startIdx = result.indexOf(startMarker);
+    if (startIdx === -1) break;
+
+    const endIdx = result.indexOf(endMarker, startIdx + startMarker.length);
+    if (endIdx === -1) break;
+
+    result = result.slice(0, startIdx) + result.slice(endIdx + endMarker.length);
+    changed = true;
+  }
+
+  return changed ? result.replace(/\n{3,}/g, '\n\n') : text;
 }
 
 /**
