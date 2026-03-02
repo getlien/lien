@@ -37,7 +37,7 @@ import type {
 } from '../types.js';
 import type { RunnerConfig } from '../config.js';
 import { cloneBySha, resolveCommitTimestamp, type CloneResult } from '../clone.js';
-import { postReviewRunResult } from '../api-client.js';
+import { postReviewRunResult, postReviewRunStatus } from '../api-client.js';
 import { LogBuffer } from '../log-buffer.js';
 
 export async function handlePRReview(
@@ -144,6 +144,17 @@ export async function handlePRReview(
         `Failed to create fallback check run: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  // Transition platform review run to running
+  if (reviewRunId != null) {
+    await postReviewRunStatus(
+      config.laravelApiUrl,
+      auth.service_token,
+      reviewRunId,
+      'running',
+      logger,
+    );
   }
 
   let headClone: CloneResult | null = null;
