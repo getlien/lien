@@ -14,6 +14,53 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Transition a review run's status (e.g. pending → running).
+ * Best-effort — failure logs a warning but does not block the review.
+ */
+export async function postReviewRunStatus(
+  apiUrl: string,
+  serviceToken: string,
+  reviewRunId: number,
+  status: 'running' | 'completed' | 'failed',
+  logger: Logger,
+): Promise<boolean> {
+  const url = `${apiUrl.replace(/\/$/, '')}/api/v1/review-runs/${reviewRunId}/status`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Bearer ${serviceToken}`,
+      },
+      body: JSON.stringify({ status }),
+      signal: controller.signal,
+    });
+
+    if (response.ok) {
+      logger.info(`Posted review run status: ${status} (review_run_id=${reviewRunId})`);
+      return true;
+    }
+
+    const body = await response.text().catch(() => '');
+    logger.warning(
+      `POST review-runs/${reviewRunId}/status failed with ${response.status}: ${body.slice(0, 500)}`,
+    );
+    return false;
+  } catch (error) {
+    logger.warning(
+      `POST review-runs/${reviewRunId}/status error: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function postReviewRunResult(
   apiUrl: string,
   serviceToken: string,
