@@ -312,11 +312,7 @@ export function formatSummaryMarkdown(response: SummaryResponse): string {
   const riskLabel = capitalizeFirst(response.risk_level);
   const confidenceLabel = capitalizeFirst(response.confidence);
 
-  let md = `### Lien Summary
-
-> **${riskLabel} Risk** · ${confidenceLabel} Confidence
->
-> ${response.risk_explanation}`;
+  let md = `**${riskLabel} Risk** · ${confidenceLabel} Confidence — ${response.risk_explanation}`;
 
   if (response.overview) {
     md += `\n\n**Overview** — ${response.overview}`;
@@ -326,8 +322,6 @@ export function formatSummaryMarkdown(response: SummaryResponse): string {
     const keyChanges = response.key_changes.map(c => `- ${c}`).join('\n');
     md += `\n\n**Key Changes**\n${keyChanges}`;
   }
-
-  md += `\n\n*[Lien Review](https://lien.dev)*`;
 
   return md;
 }
@@ -400,10 +394,8 @@ export class SummaryPlugin implements ReviewPlugin {
 
     const markdown = formatSummaryMarkdown(response);
 
-    // Update PR description with dedicated section markers
-    if (context.updateDescription) {
-      await context.updateDescription(markdown, 'summary');
-    }
+    // Contribute to unified PR description
+    context.appendDescription(markdown, 'summary');
 
     // Append to check run summary
     context.appendSummary(markdown);

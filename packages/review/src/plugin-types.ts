@@ -201,10 +201,18 @@ export interface PresentContext {
   appendSummary(markdown: string): void;
 
   /**
+   * Contribute a content fragment to the unified PR description.
+   * The engine composes all fragments into a single "Lien Review" section at finalization.
+   * Order is determined by the engine (summary first, then complexity, then others).
+   */
+  appendDescription(markdown: string, pluginId: string): void;
+
+  /**
    * Update the PR description with a badge or stats block.
    * Only available in GitHub App context (pr + octokit present).
    * @param sectionId - Optional section identifier for per-plugin markers (e.g., 'summary').
    *   When omitted, uses the default `<!-- lien-stats -->` markers.
+   * @deprecated Use appendDescription() instead — the engine now composes a unified section.
    */
   updateDescription?(markdown: string, sectionId?: string): Promise<void>;
 

@@ -18,7 +18,7 @@ import {
   getMetricLabel,
   formatComplexityValue,
   formatThresholdValue,
-  buildDescriptionBadge,
+  buildComplexityStatus,
 } from '../prompt.js';
 
 export const complexityConfigSchema = z.object({
@@ -55,8 +55,9 @@ export class ComplexityPlugin implements ReviewPlugin {
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     context.appendSummary(buildComplexitySummary(findings, context));
 
-    await context.updateDescription?.(
-      buildDescriptionBadge(context.complexityReport, context.deltaSummary, context.deltas),
+    context.appendDescription(
+      buildComplexityStatus(context.complexityReport, context.deltaSummary, context.deltas),
+      'complexity',
     );
 
     if (findings.length === 0) return;

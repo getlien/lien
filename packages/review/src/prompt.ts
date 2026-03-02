@@ -483,10 +483,10 @@ function buildImpactSummary(report: ComplexityReport | null): string {
 }
 
 /**
- * Build the PR description stats badge
- * Human-friendly summary with metrics table
+ * Build complexity status content (no heading, no footer).
+ * Used as a content fragment for the unified PR description section.
  */
-export function buildDescriptionBadge(
+export function buildComplexityStatus(
   report: ComplexityReport | null,
   deltaSummary: DeltaSummary | null,
   deltas: ComplexityDelta[] | null,
@@ -495,10 +495,23 @@ export function buildDescriptionBadge(
   const metricTable = buildMetricTable(report, deltas);
   const impactSummary = buildImpactSummary(report);
 
+  return `${status.emoji} ${status.message}${impactSummary}${metricTable}`;
+}
+
+/**
+ * Build the PR description stats badge
+ * Human-friendly summary with metrics table
+ */
+export function buildDescriptionBadge(
+  report: ComplexityReport | null,
+  deltaSummary: DeltaSummary | null,
+  deltas: ComplexityDelta[] | null,
+): string {
+  const content = buildComplexityStatus(report, deltaSummary, deltas);
+
   return `### Lien Review
 
-${status.emoji} ${status.message}${impactSummary}
-${metricTable}
+${content}
 *[Lien Review](https://lien.dev)*`;
 }
 
