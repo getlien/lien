@@ -298,7 +298,7 @@ describe('SummaryPlugin', () => {
   });
 
   describe('formatSummaryMarkdown', () => {
-    it('formats markdown with risk badge and key changes', () => {
+    it('formats inline risk badge with key changes (content-only, no heading/footer)', () => {
       const md = formatSummaryMarkdown({
         risk_level: 'high',
         confidence: 'medium',
@@ -307,14 +307,15 @@ describe('SummaryPlugin', () => {
         key_changes: ['Updated CI config', 'New rollback logic'],
       });
 
-      expect(md).toContain('### Lien Summary');
       expect(md).toContain('**High Risk**');
       expect(md).toContain('Medium Confidence');
       expect(md).toContain('Touches critical infrastructure.');
       expect(md).toContain('**Overview** — Refactors deployment pipeline.');
       expect(md).toContain('- Updated CI config');
       expect(md).toContain('- New rollback logic');
-      expect(md).toContain('*[Lien Review](https://lien.dev)*');
+      // Content-only fragment — no heading or footer
+      expect(md).not.toContain('### ');
+      expect(md).not.toContain('*[Lien Review]');
     });
 
     it('omits overview section when overview is empty', () => {
@@ -326,7 +327,6 @@ describe('SummaryPlugin', () => {
         key_changes: ['Updated README'],
       });
 
-      expect(md).toContain('### Lien Summary');
       expect(md).toContain('**Low Risk**');
       expect(md).not.toContain('**Overview**');
       expect(md).toContain('- Updated README');
@@ -341,10 +341,8 @@ describe('SummaryPlugin', () => {
         key_changes: [],
       });
 
-      expect(md).toContain('### Lien Summary');
       expect(md).toContain('**Overview** — Adds retry logic to API client.');
       expect(md).not.toContain('**Key Changes**');
-      expect(md).toContain('*[Lien Review](https://lien.dev)*');
     });
 
     it('renders only risk assessment when both overview and key_changes are empty', () => {
@@ -356,12 +354,10 @@ describe('SummaryPlugin', () => {
         key_changes: [],
       });
 
-      expect(md).toContain('### Lien Summary');
       expect(md).toContain('**Low Risk**');
       expect(md).toContain('Config-only change, no runtime impact.');
       expect(md).not.toContain('**Overview**');
       expect(md).not.toContain('**Key Changes**');
-      expect(md).toContain('*[Lien Review](https://lien.dev)*');
     });
   });
 
@@ -375,7 +371,7 @@ describe('SummaryPlugin', () => {
         logger: silentLogger,
         addAnnotations: vi.fn(),
         appendSummary: vi.fn(),
-        updateDescription: vi.fn().mockResolvedValue(undefined),
+        appendDescription: vi.fn(),
         ...overrides,
       } as unknown as PresentContext;
     }
@@ -386,7 +382,7 @@ describe('SummaryPlugin', () => {
       expect(ctx.appendSummary).not.toHaveBeenCalled();
     });
 
-    it('updates PR description with summary section marker', async () => {
+    it('contributes summary fragment to unified description', async () => {
       const ctx = makePresentContext();
       const finding = {
         pluginId: 'summary',
@@ -407,12 +403,14 @@ describe('SummaryPlugin', () => {
 
       await plugin.present!([finding], ctx);
 
-      expect(ctx.updateDescription).toHaveBeenCalledTimes(1);
-      const [markdown, sectionId] = (ctx.updateDescription as ReturnType<typeof vi.fn>).mock
+      expect(ctx.appendDescription).toHaveBeenCalledTimes(1);
+      const [markdown, pluginId] = (ctx.appendDescription as ReturnType<typeof vi.fn>).mock
         .calls[0];
-      expect(sectionId).toBe('summary');
-      expect(markdown).toContain('### Lien Summary');
+      expect(pluginId).toBe('summary');
       expect(markdown).toContain('**Medium Risk**');
+      // Content-only fragment — no heading or footer
+      expect(markdown).not.toContain('### ');
+      expect(markdown).not.toContain('*[Lien Review]');
     });
 
     it('appends summary to check run output', async () => {
@@ -437,11 +435,11 @@ describe('SummaryPlugin', () => {
       await plugin.present!([finding], ctx);
       expect(ctx.appendSummary).toHaveBeenCalledTimes(1);
       const summary = (ctx.appendSummary as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(summary).toContain('### Lien Summary');
+      expect(summary).toContain('**Low Risk**');
     });
 
-    it('works when updateDescription is not available', async () => {
-      const ctx = makePresentContext({ updateDescription: undefined });
+    it('always calls appendDescription (non-optional)', async () => {
+      const ctx = makePresentContext();
       const finding = {
         pluginId: 'summary',
         filepath: '',
@@ -459,8 +457,8 @@ describe('SummaryPlugin', () => {
         },
       };
 
-      // Should not throw
       await plugin.present!([finding], ctx);
+      expect(ctx.appendDescription).toHaveBeenCalledTimes(1);
       expect(ctx.appendSummary).toHaveBeenCalledTimes(1);
     });
   });

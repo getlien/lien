@@ -389,6 +389,25 @@ function sectionMarkers(sectionId?: string): { start: string; end: string } {
   return { start: DESCRIPTION_START_MARKER, end: DESCRIPTION_END_MARKER };
 }
 
+/** Remove all occurrences of a marker-delimited section from text. */
+function stripSection(text: string, startMarker: string, endMarker: string): string {
+  let result = text;
+  let changed = false;
+
+  for (;;) {
+    const startIdx = result.indexOf(startMarker);
+    if (startIdx === -1) break;
+
+    const endIdx = result.indexOf(endMarker, startIdx + startMarker.length);
+    if (endIdx === -1) break;
+
+    result = result.slice(0, startIdx) + result.slice(endIdx + endMarker.length);
+    changed = true;
+  }
+
+  return changed ? result.replace(/\n{3,}/g, '\n\n') : text;
+}
+
 /**
  * Update the PR description with a stats badge or plugin section.
  * Appends or replaces the section at the bottom of the description.
@@ -412,7 +431,11 @@ export async function updatePRDescription(
       pull_number: prContext.pullNumber,
     });
 
-    const currentBody = pr.body || '';
+    let currentBody = pr.body || '';
+
+    // Clean up old per-plugin summary markers (migrated to unified section)
+    currentBody = stripSection(currentBody, '<!-- lien:summary -->', '<!-- /lien:summary -->');
+
     const { start: startMarker, end: endMarker } = sectionMarkers(sectionId);
     const wrappedBadge = `${startMarker}\n${badgeMarkdown}\n${endMarker}`;
 

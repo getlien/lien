@@ -120,6 +120,7 @@ export {
   buildNoViolationsMessage,
   getViolationKey,
   buildDescriptionBadge,
+  buildComplexityStatus,
   buildHeaderLine,
   getMetricLabel,
   formatComplexityValue,

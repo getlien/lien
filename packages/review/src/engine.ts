@@ -164,7 +164,8 @@ export class ReviewEngine {
     const pr = adapterContext.pr;
     const pendingAnnotations: CheckAnnotation[] = [];
     const debugLog: string[] = [];
-    const summarySections: string[] = [];
+    const summarySections: TaggedSection[] = [];
+    const descriptionParts = new Map<string, string>();
 
     const checkRunId = opts?.skipCheckRun
       ? undefined
@@ -175,6 +176,7 @@ export class ReviewEngine {
       pr,
       pendingAnnotations,
       summarySections,
+      descriptionParts,
       debugLog,
     );
     await dispatchPresent(
@@ -182,8 +184,12 @@ export class ReviewEngine {
       opts?.pluginFilter,
       findings,
       presentContext,
+      summarySections,
       adapterContext.logger,
     );
+
+    // Compose unified PR description from all plugin fragments
+    await finalizeDescription(descriptionParts, octokit, pr, adapterContext.logger);
 
     if (octokit && pr && checkRunId != null) {
       await finalizePresentation(
@@ -203,6 +209,59 @@ export class ReviewEngine {
 // ---------------------------------------------------------------------------
 // present() helpers
 // ---------------------------------------------------------------------------
+
+interface TaggedSection {
+  pluginId: string;
+  markdown: string;
+}
+
+/** Canonical ordering for plugin sections. Plugins listed here appear first, in order. */
+const PLUGIN_ORDER = ['summary', 'complexity'];
+
+/** Reorder tagged sections: known plugins first (in PLUGIN_ORDER), then any extras. */
+function reorderSections(sections: TaggedSection[]): string[] {
+  const ordered: string[] = [];
+  for (const id of PLUGIN_ORDER) {
+    for (const section of sections) {
+      if (section.pluginId === id) ordered.push(section.markdown);
+    }
+  }
+  for (const section of sections) {
+    if (!PLUGIN_ORDER.includes(section.pluginId)) {
+      ordered.push(section.markdown);
+    }
+  }
+  return ordered;
+}
+
+/**
+ * Compose all plugin description fragments into a single "Lien Review" section
+ * and update the PR description once.
+ */
+async function finalizeDescription(
+  descriptionParts: Map<string, string>,
+  octokit: Octokit | undefined,
+  pr: PRContext | undefined,
+  logger: Logger,
+): Promise<void> {
+  if (!octokit || !pr || descriptionParts.size === 0) return;
+
+  const ordered: string[] = [];
+  for (const id of PLUGIN_ORDER) {
+    const part = descriptionParts.get(id);
+    if (part) ordered.push(part);
+  }
+  for (const [id, part] of descriptionParts) {
+    if (!PLUGIN_ORDER.includes(id)) ordered.push(part);
+  }
+
+  const body = ordered.join('\n\n');
+  const markdown = `### Lien Review\n\n${body}\n\n*[Lien Review](https://lien.dev)*`;
+
+  await updatePRDescription(octokit, pr, markdown, logger).catch(err =>
+    logger.warning(`Failed to update PR description: ${err instanceof Error ? err.message : err}`),
+  );
+}
 
 async function ensureCheckRun(
   octokit: Octokit | undefined,
@@ -233,14 +292,20 @@ async function dispatchPresent(
   pluginFilter: string | undefined,
   findings: ReviewFinding[],
   presentContext: PresentContext,
+  summarySections: TaggedSection[],
   logger: Logger,
 ): Promise<void> {
   const active = pluginFilter ? plugins.filter(p => p.id === pluginFilter) : plugins;
   for (const plugin of active) {
     if (!plugin.present) continue;
     const pluginFindings = findings.filter(f => f.pluginId === plugin.id);
+    // Wrap appendSummary to tag entries with the plugin ID
+    const ctx: PresentContext = {
+      ...presentContext,
+      appendSummary: (markdown: string) => summarySections.push({ pluginId: plugin.id, markdown }),
+    };
     try {
-      await plugin.present(pluginFindings, presentContext);
+      await plugin.present(pluginFindings, ctx);
     } catch (error) {
       logger.warning(
         `Plugin "${plugin.id}" present() failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -254,15 +319,15 @@ async function finalizePresentation(
   pr: PRContext,
   checkRunId: number,
   findings: ReviewFinding[],
-  summarySections: string[],
+  summarySections: TaggedSection[],
   pendingAnnotations: CheckAnnotation[],
   debugLog: string[],
   logger: Logger,
 ): Promise<void> {
   const conclusion = determineConclusion(findings);
   const title = buildCheckTitle(findings);
-  const summary =
-    summarySections.length > 0 ? summarySections.join('\n\n') : buildCheckSummary(findings);
+  const ordered = reorderSections(summarySections);
+  const summary = ordered.length > 0 ? ordered.join('\n\n') : buildCheckSummary(findings);
   const text = debugLog.length > 0 ? debugLog.join('\n') : undefined;
   await finalizeCheckRun(
     octokit,
@@ -290,7 +355,8 @@ function buildPresentContext(
   octokit: Octokit | undefined,
   pr: PRContext | undefined,
   pendingAnnotations: CheckAnnotation[],
-  summarySections: string[],
+  summarySections: TaggedSection[],
+  descriptionParts: Map<string, string>,
   debugLog: string[],
 ): PresentContext {
   const logger = adapterContext.logger;
@@ -305,7 +371,9 @@ function buildPresentContext(
     llmUsage: adapterContext.llmUsage,
     model: adapterContext.model,
     addAnnotations: annotations => pendingAnnotations.push(...annotations),
-    appendSummary: (markdown: string) => summarySections.push(markdown),
+    appendSummary: (markdown: string) => summarySections.push({ pluginId: 'unknown', markdown }),
+    appendDescription: (markdown: string, pluginId: string) =>
+      descriptionParts.set(pluginId, markdown),
     updateDescription:
       octokit && pr
         ? (markdown: string, sectionId?: string) =>
