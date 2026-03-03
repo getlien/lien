@@ -1,3 +1,24 @@
+/* ─── Typography ─────────────────────────────────────────── */
+:root {
+  --vp-font-family-base: 'Satoshi', ui-sans-serif, system-ui, sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+/* ─── Brand color overrides (purple scale) ───────────────── */
+:root {
+  --vp-c-brand-1: #a855f7;
+  --vp-c-brand-2: #9333ea;
+  --vp-c-brand-3: #c084fc;
+  --vp-c-brand-soft: rgba(168, 85, 247, 0.14);
+}
+
+.dark {
+  --vp-c-brand-1: #a855f7;
+  --vp-c-brand-2: #c084fc;
+  --vp-c-brand-3: #9333ea;
+  --vp-c-brand-soft: rgba(168, 85, 247, 0.16);
+}
+
 /* Custom styles for Mermaid diagrams */
 
 /* Make Mermaid diagrams larger and more readable */
@@ -46,7 +67,7 @@
 .dark .mermaid rect,
 .dark .mermaid polygon {
   fill: #1e1e1e !important;
-  stroke: #4a9eff !important;
+  stroke: #a855f7 !important;
   stroke-width: 2px !important;
 }
 
@@ -58,7 +79,7 @@
 .dark .mermaid .node polygon,
 .dark .mermaid .node circle {
   fill: #2d2d2d !important;
-  stroke: #4a9eff !important;
+  stroke: #a855f7 !important;
 }
 
 .dark .mermaid .edgeLabel {
@@ -68,7 +89,7 @@
 
 .dark .mermaid line,
 .dark .mermaid path {
-  stroke: #4a9eff !important;
+  stroke: #a855f7 !important;
 }
 
 /* Add some spacing around diagrams */
