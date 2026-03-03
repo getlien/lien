@@ -225,7 +225,7 @@ onUnmounted(() => {
 
 .logo-name {
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--vp-c-text-2);
   opacity: 0;
   transform: translateY(-5px);
@@ -242,14 +242,14 @@ onUnmounted(() => {
 
 .floating-logo:hover .logo-icon,
 .floating-logo.is-hovered .logo-icon {
-  filter: grayscale(0) drop-shadow(0 0 20px rgba(99, 102, 241, 0.6));
+  filter: grayscale(0) drop-shadow(0 0 20px rgba(168, 85, 247, 0.6));
   width: 3.5rem;
   height: 3.5rem;
 }
 
 .dark .floating-logo:hover .logo-icon,
 .dark .floating-logo.is-hovered .logo-icon {
-  filter: grayscale(0) drop-shadow(0 0 25px rgba(74, 158, 255, 0.7));
+  filter: grayscale(0) drop-shadow(0 0 25px rgba(192, 132, 252, 0.7));
 }
 
 .floating-logo:hover .logo-name,
@@ -268,7 +268,7 @@ onUnmounted(() => {
   transform: translate(-50%, -50%);
   width: 80px;
   height: 80px;
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.2), transparent 70%);
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.2), transparent 70%);
   border-radius: 50%;
   animation: pulse 1.5s ease-out infinite;
   pointer-events: none;
@@ -276,7 +276,7 @@ onUnmounted(() => {
 
 .dark .floating-logo:hover::before,
 .dark .floating-logo.is-hovered::before {
-  background: radial-gradient(circle, rgba(74, 158, 255, 0.2), transparent 70%);
+  background: radial-gradient(circle, rgba(192, 132, 252, 0.2), transparent 70%);
 }
 
 @keyframes pulse {

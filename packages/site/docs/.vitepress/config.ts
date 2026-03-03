@@ -11,7 +11,9 @@ export default withMermaid(
     
     head: [
       ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
-      ['meta', { name: 'theme-color', content: '#646cff' }],
+      ['link', { rel: 'stylesheet', href: 'https://api.fontshare.com/v2/css?f[]=satoshi@400,500&display=swap' }],
+      ['link', { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap' }],
+      ['meta', { name: 'theme-color', content: '#9333ea' }],
       ['meta', { name: 'og:type', content: 'website' }],
       ['meta', { name: 'og:locale', content: 'en' }],
       ['meta', { name: 'og:site_name', content: 'Lien' }],
@@ -81,8 +83,8 @@ export default withMermaid(
         darkMode: true,
         primaryColor: '#2d2d2d',
         primaryTextColor: '#e0e0e0',
-        primaryBorderColor: '#4a9eff',
-        lineColor: '#4a9eff',
+        primaryBorderColor: '#a855f7',
+        lineColor: '#a855f7',
         secondaryColor: '#3d3d3d',
         tertiaryColor: '#1e1e1e',
         background: '#1a1a1a',
@@ -90,8 +92,8 @@ export default withMermaid(
         secondBkg: '#3d3d3d',
         mainContrastColor: '#e0e0e0',
         darkTextColor: '#e0e0e0',
-        border1: '#4a9eff',
-        border2: '#4a9eff',
+        border1: '#a855f7',
+        border2: '#a855f7',
         fontSize: '16px'
       },
       flowchart: {

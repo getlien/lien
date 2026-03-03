@@ -133,6 +133,12 @@ These live in project root and are tracked in git:
 
 ---
 
+## Style Guide
+
+**Read `STYLE_GUIDE.md` before making any UI or frontend changes.** It defines the design identity: typography (Satoshi/JetBrains Mono), color system (dark-first, zinc neutrals, purple accent), surface hierarchy, component patterns, motion, and accessibility requirements. All frontend work must conform to the style guide.
+
+---
+
 ## Core Principles
 
 ### KISS (Keep It Simple, Stupid)
