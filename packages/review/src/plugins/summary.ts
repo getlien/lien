@@ -159,18 +159,10 @@ function buildFileStats(file: string, report: ComplexityReport): string {
   const fileData = report.files[file];
   if (!fileData) return '';
 
+  const lines: string[] = [];
   const stats: string[] = [];
 
   if ((fileData.dependentCount ?? 0) > 0) stats.push(`dependents: ${fileData.dependentCount}`);
-
-  if (fileData.violations.length > 0) {
-    const errors = fileData.violations.filter(v => v.severity === 'error').length;
-    const warnings = fileData.violations.filter(v => v.severity === 'warning').length;
-    const parts: string[] = [];
-    if (errors > 0) parts.push(`${errors} error${errors > 1 ? 's' : ''}`);
-    if (warnings > 0) parts.push(`${warnings} warning${warnings > 1 ? 's' : ''}`);
-    stats.push(`violations: ${parts.join(', ')}`);
-  }
 
   if (fileData.testAssociations.length > 0) {
     stats.push(`covered by: ${fileData.testAssociations.join(', ')}`);
@@ -178,7 +170,17 @@ function buildFileStats(file: string, report: ComplexityReport): string {
     stats.push('no test coverage');
   }
 
-  return stats.length > 0 ? `*${stats.join(' · ')}*` : '';
+  if (stats.length > 0) lines.push(`*${stats.join(' · ')}*`);
+
+  if (fileData.violations.length > 0) {
+    const formatted = fileData.violations.map(v => {
+      const icon = v.severity === 'error' ? '🔴' : '🟡';
+      return `${v.symbolName} (${v.metricType} ${v.complexity}/${v.threshold} ${icon})`;
+    });
+    lines.push(`*violations: ${formatted.join(', ')}*`);
+  }
+
+  return lines.join('\n');
 }
 
 function buildFileSection(
