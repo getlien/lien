@@ -124,7 +124,6 @@ function detectExportChanges(context: ReviewContext): boolean {
 // ---------------------------------------------------------------------------
 
 const MAX_TOTAL_CHARS = 50_000;
-const MAX_DIFF_CHARS = 20_000;
 
 function groupChunksByFile(
   chunks: CodeChunk[],
@@ -352,7 +351,7 @@ function buildDiffSection(
     const patch = patches.get(file);
     if (!patch) continue;
 
-    const remaining = MAX_DIFF_CHARS - totalChars;
+    const remaining = MAX_TOTAL_CHARS - totalChars;
     if (remaining <= 0) break;
 
     const truncated =
