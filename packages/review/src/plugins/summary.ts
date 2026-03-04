@@ -46,6 +46,15 @@ export interface RiskSignals {
   improvedViolations: number;
   highRiskFileCount: number;
   hasExportChanges: boolean;
+  uncoveredSourceFileCount: number;
+}
+
+function countUncoveredSourceFiles(files: string[], report: ComplexityReport): number {
+  return files.filter(f => {
+    if (categorizeFile(f) !== 'source') return false;
+    const data = report.files[f];
+    return !data || data.testAssociations.length === 0;
+  }).length;
 }
 
 export function computeRiskSignals(context: ReviewContext): RiskSignals {
@@ -92,6 +101,8 @@ export function computeRiskSignals(context: ReviewContext): RiskSignals {
   // Export changes
   const hasExportChanges = detectExportChanges(context);
 
+  const uncoveredSourceFileCount = countUncoveredSourceFiles(allFiles, context.complexityReport);
+
   return {
     totalFiles: allFiles.length,
     categories,
@@ -100,6 +111,7 @@ export function computeRiskSignals(context: ReviewContext): RiskSignals {
     improvedViolations,
     highRiskFileCount,
     hasExportChanges,
+    uncoveredSourceFileCount,
   };
 }
 
@@ -120,23 +132,30 @@ function detectExportChanges(context: ReviewContext): boolean {
 
 const MAX_TOTAL_CHARS = 30_000;
 
+function groupChunksByFile(
+  chunks: CodeChunk[],
+  changedFilesSet: Set<string>,
+): Map<string, CodeChunk[]> {
+  const map = new Map<string, CodeChunk[]>();
+  for (const chunk of chunks) {
+    const file = chunk.metadata.file;
+    if (!changedFilesSet.has(file)) continue;
+    if (chunk.metadata.symbolType === 'method') continue;
+    if (chunk.metadata.type === 'block' && !chunk.metadata.symbolName) continue;
+    const existing = map.get(file) ?? [];
+    existing.push(chunk);
+    map.set(file, existing);
+  }
+  return map;
+}
+
 function buildCodeContext(
   chunks: CodeChunk[],
   report: ComplexityReport,
   changedFiles: string[],
 ): string {
   const changedFilesSet = new Set(changedFiles);
-  const chunksByFile = new Map<string, CodeChunk[]>();
-
-  for (const chunk of chunks) {
-    const file = chunk.metadata.file;
-    if (!changedFilesSet.has(file)) continue;
-    if (chunk.metadata.symbolType === 'method') continue;
-    if (chunk.metadata.type === 'block' && !chunk.metadata.symbolName) continue;
-    const existing = chunksByFile.get(file) ?? [];
-    existing.push(chunk);
-    chunksByFile.set(file, existing);
-  }
+  const chunksByFile = groupChunksByFile(chunks, changedFilesSet);
 
   // Sort files by dependentCount descending
   const sortedFiles = [...chunksByFile.keys()].sort((a, b) => {
@@ -188,6 +207,10 @@ function formatRiskSignals(signals: RiskSignals): string {
   if (signals.highRiskFileCount > 0)
     parts.push(`High-impact files (with dependents): ${signals.highRiskFileCount}`);
   if (signals.hasExportChanges) parts.push(`Export/interface changes detected`);
+  if (signals.uncoveredSourceFileCount > 0)
+    parts.push(
+      `Source files without test coverage: ${signals.uncoveredSourceFileCount}/${signals.categories.source}`,
+    );
 
   return parts.join('\n');
 }
@@ -234,7 +257,7 @@ Write a brief PR summary. Respond with ONLY valid JSON:
 \`\`\`
 
 Guidelines:
-- **risk_level**: "low" for docs/tests/config-only, "medium" for source changes with moderate scope, "high" for infra/db/many dependents/export changes, "critical" for breaking changes to widely-used interfaces
+- **risk_level**: "low" for docs/tests/config-only, "medium" for source changes with moderate scope, "high" for infra/db/many dependents/export changes/untested source files, "critical" for breaking changes to widely-used interfaces
 - **confidence**: "high" when the code context is clear and complete, "medium" when some files were truncated or the scope is ambiguous, "low" when the context is very limited
 ${overviewGuideline}
 ${keyChangesGuideline}
