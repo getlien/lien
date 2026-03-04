@@ -155,32 +155,54 @@ function groupChunksByFile(
   return map;
 }
 
-function appendPatchSections(
-  sections: string[],
-  notShownFiles: string[],
-  prPatches: Map<string, string> | undefined,
-  totalChars: number,
-): void {
-  const listedOnly: string[] = [];
+function buildFileStats(file: string, report: ComplexityReport): string {
+  const fileData = report.files[file];
+  if (!fileData) return '';
 
-  for (const file of notShownFiles) {
-    const patch = prPatches?.get(file);
-    if (patch) {
-      const section = `### ${file}\n\`\`\`diff\n${patch}\n\`\`\``;
-      if (totalChars + section.length <= MAX_TOTAL_CHARS) {
-        sections.push(section);
-        totalChars += section.length;
-        continue;
-      }
+  const stats: string[] = [];
+
+  if ((fileData.dependentCount ?? 0) > 0) stats.push(`dependents: ${fileData.dependentCount}`);
+
+  if (fileData.violations.length > 0) {
+    const errors = fileData.violations.filter(v => v.severity === 'error').length;
+    const warnings = fileData.violations.filter(v => v.severity === 'warning').length;
+    const parts: string[] = [];
+    if (errors > 0) parts.push(`${errors} error${errors > 1 ? 's' : ''}`);
+    if (warnings > 0) parts.push(`${warnings} warning${warnings > 1 ? 's' : ''}`);
+    stats.push(`violations: ${parts.join(', ')}`);
+  }
+
+  if (fileData.testAssociations.length > 0) {
+    stats.push(`covered by: ${fileData.testAssociations.join(', ')}`);
+  } else if (categorizeFile(file) === 'source') {
+    stats.push('no test coverage');
+  }
+
+  return stats.length > 0 ? `*${stats.join(' · ')}*` : '';
+}
+
+function buildFileSection(
+  file: string,
+  report: ComplexityReport,
+  fileChunks: CodeChunk[] | undefined,
+  patch: string | undefined,
+  remainingBudget: number,
+): { text: string; contentChars: number } {
+  const stats = buildFileStats(file, report);
+  const header = stats ? `### ${file}\n${stats}` : `### ${file}`;
+
+  if (fileChunks) {
+    const code = fileChunks.map(c => c.content).join('\n\n');
+    if (code.length <= remainingBudget) {
+      return { text: `${header}\n\`\`\`\n${code}\n\`\`\``, contentChars: code.length };
     }
-    listedOnly.push(file);
   }
 
-  if (listedOnly.length > 0) {
-    sections.push(
-      `### Files changed (content not available)\n${listedOnly.map(f => `- ${f}`).join('\n')}`,
-    );
+  if (patch && patch.length <= remainingBudget) {
+    return { text: `${header}\n\`\`\`diff\n${patch}\n\`\`\``, contentChars: patch.length };
   }
+
+  return { text: `${header}\n*(content not available)*`, contentChars: 0 };
 }
 
 function buildCodeContext(
@@ -190,11 +212,9 @@ function buildCodeContext(
   allChangedFiles: string[],
   prPatches?: Map<string, string>,
 ): string {
-  const changedFilesSet = new Set(changedFiles);
-  const chunksByFile = groupChunksByFile(chunks, changedFilesSet);
+  const chunksByFile = groupChunksByFile(chunks, new Set(changedFiles));
 
-  // Sort files by dependentCount descending
-  const sortedFiles = [...chunksByFile.keys()].sort((a, b) => {
+  const sortedFiles = [...allChangedFiles].sort((a, b) => {
     const depA = report.files[a]?.dependentCount ?? 0;
     const depB = report.files[b]?.dependentCount ?? 0;
     return depB - depA;
@@ -202,23 +222,18 @@ function buildCodeContext(
 
   const sections: string[] = [];
   let totalChars = 0;
-  const shownFiles = new Set<string>();
 
   for (const file of sortedFiles) {
-    const fileChunks = chunksByFile.get(file)!;
-    const fileCode = fileChunks.map(c => c.content).join('\n\n');
-    if (totalChars + fileCode.length > MAX_TOTAL_CHARS) continue;
-
-    const dependentCount = report.files[file]?.dependentCount ?? 0;
-    const header =
-      dependentCount > 0 ? `### ${file} (${dependentCount} dependents)` : `### ${file}`;
-    sections.push(`${header}\n\`\`\`\n${fileCode}\n\`\`\``);
-    totalChars += fileCode.length;
-    shownFiles.add(file);
+    const { text, contentChars } = buildFileSection(
+      file,
+      report,
+      chunksByFile.get(file),
+      prPatches?.get(file),
+      MAX_TOTAL_CHARS - totalChars,
+    );
+    sections.push(text);
+    totalChars += contentChars;
   }
-
-  const notShownFiles = allChangedFiles.filter(f => !shownFiles.has(f));
-  appendPatchSections(sections, notShownFiles, prPatches, totalChars);
 
   return sections.join('\n\n');
 }
@@ -245,13 +260,7 @@ function formatRiskSignals(signals: RiskSignals): string {
   if (signals.newViolations > 0) parts.push(`New complexity violations: ${signals.newViolations}`);
   if (signals.improvedViolations > 0)
     parts.push(`Improved/resolved: ${signals.improvedViolations}`);
-  if (signals.highRiskFileCount > 0)
-    parts.push(`High-impact files (with dependents): ${signals.highRiskFileCount}`);
   if (signals.hasExportChanges) parts.push(`Export/interface changes detected`);
-  if (signals.uncoveredSourceFileCount > 0)
-    parts.push(
-      `Source files without test coverage: ${signals.uncoveredSourceFileCount}/${signals.categories.source}`,
-    );
 
   return parts.join('\n');
 }

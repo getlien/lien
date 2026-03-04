@@ -309,7 +309,7 @@ describe('SummaryPlugin', () => {
       expect(prompt).toContain('Schema::table');
     });
 
-    it('lists allChangedFiles not in code context under "content not available"', async () => {
+    it('shows per-file "content not available" for files without chunks or patches', async () => {
       const llm = createMockLLMClient([makeSummaryLLMResponse()]);
       const context = createTestContext({
         changedFiles: ['src/app.ts'],
@@ -333,8 +333,8 @@ describe('SummaryPlugin', () => {
 
       await plugin.analyze(context);
       const prompt = llm.calls[0].prompt;
-      expect(prompt).toContain('Files changed (content not available)');
-      expect(prompt).toContain('database/migrations/add_pr_title.php');
+      expect(prompt).toContain('### database/migrations/add_pr_title.php');
+      expect(prompt).toContain('*(content not available)*');
     });
 
     it('does not add "content not available" section when all files are shown', async () => {
