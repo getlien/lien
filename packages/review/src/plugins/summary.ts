@@ -122,7 +122,7 @@ function detectExportChanges(context: ReviewContext): boolean {
 // Code Context Assembly (same pattern as ArchitecturalPlugin)
 // ---------------------------------------------------------------------------
 
-const MAX_TOTAL_CHARS = 30_000;
+const MAX_TOTAL_CHARS = 50_000;
 
 function groupChunksByFile(
   chunks: CodeChunk[],
