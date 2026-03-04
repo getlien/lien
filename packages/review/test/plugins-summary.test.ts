@@ -405,6 +405,113 @@ describe('SummaryPlugin', () => {
       expect(prompt).not.toContain('content not available');
     });
 
+    describe('buildCodeContext chunk scoping', () => {
+      // Each chunk is ~17.6k chars; 3 chunks total ~52.9k > 50k budget
+      const bigBody = '// padding\n'.repeat(1600);
+
+      it('includes all chunks when full file fits in budget', async () => {
+        const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+        const context = createTestContext({
+          changedFiles: ['src/app.ts'],
+          chunks: [
+            createTestChunk({
+              content: 'function small_a() { return 1; }',
+              metadata: { file: 'src/app.ts', symbolName: 'small_a', startLine: 1, endLine: 3 },
+            }),
+            createTestChunk({
+              content: 'function small_b() { return 2; }',
+              metadata: { file: 'src/app.ts', symbolName: 'small_b', startLine: 5, endLine: 7 },
+            }),
+          ],
+          llm,
+          pr: {
+            owner: 'test',
+            repo: 'repo',
+            pullNumber: 1,
+            title: 'test',
+            headSha: 'abc',
+            baseSha: 'def',
+            diffLines: new Map([['src/app.ts', new Set([2])]]),
+          },
+        });
+        await plugin.analyze(context);
+        const prompt = llm.calls[0].prompt;
+        expect(prompt).toContain('small_a');
+        expect(prompt).toContain('small_b');
+      });
+
+      it('scopes to changed chunks only when full file exceeds budget', async () => {
+        const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+        const context = createTestContext({
+          changedFiles: ['src/app.ts'],
+          chunks: [
+            createTestChunk({
+              content: `function chunk_a() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_a', startLine: 1, endLine: 100 },
+            }),
+            createTestChunk({
+              content: `function chunk_b() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_b', startLine: 101, endLine: 200 },
+            }),
+            createTestChunk({
+              content: `function chunk_c() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_c', startLine: 201, endLine: 300 },
+            }),
+          ],
+          llm,
+          pr: {
+            owner: 'test',
+            repo: 'repo',
+            pullNumber: 1,
+            title: 'test',
+            headSha: 'abc',
+            baseSha: 'def',
+            diffLines: new Map([['src/app.ts', new Set([150])]]),
+          },
+        });
+        await plugin.analyze(context);
+        const prompt = llm.calls[0].prompt;
+        expect(prompt).toContain('chunk_b');
+        expect(prompt).not.toContain('chunk_a');
+        expect(prompt).not.toContain('chunk_c');
+      });
+
+      it('falls through to patch when full file exceeds budget and diffLines is absent', async () => {
+        const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+        const context = createTestContext({
+          changedFiles: ['src/app.ts'],
+          chunks: [
+            createTestChunk({
+              content: `function chunk_a() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_a', startLine: 1, endLine: 100 },
+            }),
+            createTestChunk({
+              content: `function chunk_b() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_b', startLine: 101, endLine: 200 },
+            }),
+            createTestChunk({
+              content: `function chunk_c() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_c', startLine: 201, endLine: 300 },
+            }),
+          ],
+          llm,
+          pr: {
+            owner: 'test',
+            repo: 'repo',
+            pullNumber: 1,
+            title: 'test',
+            headSha: 'abc',
+            baseSha: 'def',
+            patches: new Map([['src/app.ts', '+function chunk_b() { /* changed */ }']]),
+          },
+        });
+        await plugin.analyze(context);
+        const prompt = llm.calls[0].prompt;
+        expect(prompt).toContain('```diff');
+        expect(prompt).toContain('+function chunk_b');
+      });
+    });
+
     it('returns empty on unparseable LLM response', async () => {
       const llm = createMockLLMClient(['not valid json at all']);
       const context = createTestContext({
