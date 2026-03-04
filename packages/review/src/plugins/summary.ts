@@ -124,6 +124,7 @@ function detectExportChanges(context: ReviewContext): boolean {
 // ---------------------------------------------------------------------------
 
 const MAX_TOTAL_CHARS = 50_000;
+const MAX_DIFF_CHARS = 20_000;
 
 function groupChunksByFile(
   chunks: CodeChunk[],
@@ -238,7 +239,6 @@ function buildFileSection(
   file: string,
   report: ComplexityReport,
   fileChunks: CodeChunk[] | undefined,
-  patch: string | undefined,
   remainingBudget: number,
   fileDeltaMap: FileDeltaMap | undefined,
   diffLines: Map<string, Set<number>> | undefined,
@@ -273,10 +273,6 @@ function buildFileSection(
     }
   }
 
-  if (patch && patch.length <= remainingBudget) {
-    return { text: `${header}\n\`\`\`diff\n${patch}\n\`\`\``, contentChars: patch.length };
-  }
-
   return { text: `${header}\n*(content not available)*`, contentChars: 0 };
 }
 
@@ -285,7 +281,6 @@ function buildCodeContext(
   report: ComplexityReport,
   changedFiles: string[],
   allChangedFiles: string[],
-  prPatches?: Map<string, string>,
   deltas?: ComplexityDelta[] | null,
   diffLines?: Map<string, Set<number>>,
 ): string {
@@ -306,7 +301,6 @@ function buildCodeContext(
       file,
       report,
       chunksByFile.get(file),
-      prPatches?.get(file),
       MAX_TOTAL_CHARS - totalChars,
       deltaMap.get(file),
       diffLines,
@@ -345,6 +339,31 @@ function formatRiskSignals(signals: RiskSignals): string {
   return parts.join('\n');
 }
 
+function buildDiffSection(
+  allChangedFiles: string[],
+  patches: Map<string, string> | undefined,
+): string {
+  if (!patches || patches.size === 0) return '';
+
+  const sections: string[] = [];
+  let totalChars = 0;
+
+  for (const file of allChangedFiles) {
+    const patch = patches.get(file);
+    if (!patch) continue;
+
+    const remaining = MAX_DIFF_CHARS - totalChars;
+    if (remaining <= 0) break;
+
+    const truncated =
+      patch.length > remaining ? patch.slice(0, remaining) + '\n... (truncated)' : patch;
+    sections.push(`### ${file}\n\`\`\`diff\n${truncated}\n\`\`\``);
+    totalChars += patch.length;
+  }
+
+  return sections.join('\n\n');
+}
+
 export function buildSummaryPrompt(
   signals: RiskSignals,
   codeContext: string,
@@ -354,21 +373,24 @@ export function buildSummaryPrompt(
   const prHeader = context.pr ? `## PR: ${context.pr.title}${body ? `\n\n${body}` : ''}\n\n` : '';
   const hasDescription = !!body && body.trim().length > 0;
 
+  const allChangedFiles = context.allChangedFiles ?? context.changedFiles;
+  const diffSection = buildDiffSection(allChangedFiles, context.pr?.patches);
+
   const overviewGuideline = hasDescription
     ? `- **overview**: Add context the description misses — non-obvious implications, affected areas, or architectural impact. Do NOT restate what the PR description already says. If the description is comprehensive, return an empty string \`""\``
     : `- **overview**: Focus on intent, not implementation details`;
 
   const keyChangesGuideline = hasDescription
-    ? `- **key_changes**: List only changes NOT already covered in the PR description. Return an empty array \`[]\` if the description already covers all key changes`
-    : `- **key_changes**: 2-5 bullets, each under 100 characters`;
+    ? `- **key_changes**: Derive strictly from the diff above — list only changes NOT already covered in the PR description. Return an empty array \`[]\` if the description already covers all key changes`
+    : `- **key_changes**: Derive strictly from the diff above — 2-5 bullets stating what was added, removed, or changed. Avoid inferring changes not visible in the diff`;
 
   return `You are a senior engineer writing a concise PR summary with risk assessment.
 
 ${prHeader}## Risk Signals
 
 ${formatRiskSignals(signals)}
-
-## Changed Code
+${diffSection ? `\n## What Changed\n\n${diffSection}\n` : ''}
+## Code Context
 
 ${codeContext}
 
@@ -388,7 +410,7 @@ Write a brief PR summary. Respond with ONLY valid JSON:
 
 Guidelines:
 - **risk_level**: "low" for docs/tests/config-only, "medium" for source changes with moderate scope, "high" for infra/db/many dependents/export changes/untested source files, "critical" for breaking changes to widely-used interfaces
-- **confidence**: "high" when the code context is clear and complete, "medium" when some files were truncated or the scope is ambiguous, "low" when the context is very limited
+- **confidence**: "high" when the diff and code context are clear and complete, "medium" when some files were truncated or the scope is ambiguous, "low" when the context is very limited
 ${overviewGuideline}
 ${keyChangesGuideline}
 - Be factual and specific — avoid vague language
@@ -507,7 +529,6 @@ export class SummaryPlugin implements ReviewPlugin {
       complexityReport,
       changedFiles,
       allChangedFiles,
-      context.pr?.patches,
       context.deltas,
       context.pr?.diffLines,
     );

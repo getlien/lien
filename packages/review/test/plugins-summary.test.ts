@@ -794,7 +794,7 @@ describe('SummaryPlugin', () => {
       });
 
       expect(prompt).toContain('Focus on intent, not implementation details');
-      expect(prompt).toContain('2-5 bullets, each under 100 characters');
+      expect(prompt).toContain('Derive strictly from the diff above');
       expect(prompt).not.toContain('NOT already covered in the PR description');
     });
 
@@ -823,6 +823,47 @@ describe('SummaryPlugin', () => {
       expect(prompt).toContain('### src/a.ts');
       expect(prompt).toContain('risk_level');
       expect(prompt).toContain('confidence');
+    });
+
+    it('includes a "What Changed" diff section when patches are available', () => {
+      const signals = computeRiskSignals(createTestContext({ changedFiles: ['src/a.ts'] }));
+
+      const prompt = buildSummaryPrompt(signals, '### src/a.ts\n```\ncode\n```', {
+        ...createTestContext(),
+        changedFiles: ['src/a.ts'],
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add retry logic',
+          headSha: 'abc',
+          baseSha: 'def',
+          patches: new Map([['src/a.ts', '+function retry() {}\n-function old() {}']]),
+        },
+      });
+
+      expect(prompt).toContain('## What Changed');
+      expect(prompt).toContain('+function retry()');
+      expect(prompt).toContain('## Code Context');
+    });
+
+    it('omits "What Changed" section when no patches are available', () => {
+      const signals = computeRiskSignals(createTestContext({ changedFiles: ['src/a.ts'] }));
+
+      const prompt = buildSummaryPrompt(signals, '### src/a.ts\n```\ncode\n```', {
+        ...createTestContext(),
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add retry logic',
+          headSha: 'abc',
+          baseSha: 'def',
+        },
+      });
+
+      expect(prompt).not.toContain('## What Changed');
+      expect(prompt).toContain('## Code Context');
     });
   });
 });
