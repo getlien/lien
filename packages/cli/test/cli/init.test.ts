@@ -43,7 +43,7 @@ describe('initCommand', () => {
       await initCommand({ editor: 'cursor', path: tmpDir });
 
       const agentPath = path.join(tmpDir, '.claude', 'agents', 'Explore.md');
-      await expect(fs.access(agentPath)).rejects.toThrow();
+      await expect(fs.access(agentPath)).rejects.toMatchObject({ code: 'ENOENT' });
     });
   });
 });

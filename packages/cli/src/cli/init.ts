@@ -151,8 +151,8 @@ async function installExploreAgent(rootDir: string): Promise<void> {
     await fs.access(agentPath);
     console.log(chalk.dim('  Explore agent already installed — skipping'));
     return;
-  } catch {
-    // File doesn't exist — install it
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
   await fs.mkdir(path.dirname(agentPath), { recursive: true });
   await fs.writeFile(agentPath, EXPLORE_AGENT_CONTENT);
