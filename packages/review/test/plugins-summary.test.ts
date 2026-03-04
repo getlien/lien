@@ -275,6 +275,95 @@ describe('SummaryPlugin', () => {
       expect(llm.calls[0].prompt).toContain('My Special PR Title');
     });
 
+    it('includes method-only files (e.g. migrations) via fallback chunks', async () => {
+      const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+      const context = createTestContext({
+        changedFiles: ['database/migrations/add_pr_title.php'],
+        chunks: [
+          // Only method chunks — no class/function-level chunks
+          createTestChunk({
+            content: 'public function up() { Schema::table(...); }',
+            metadata: {
+              file: 'database/migrations/add_pr_title.php',
+              symbolName: 'up',
+              symbolType: 'method',
+              type: 'function',
+              language: 'php',
+            },
+          }),
+        ],
+        llm,
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add pr_title column',
+          headSha: 'abc',
+          baseSha: 'def',
+        },
+      });
+
+      await plugin.analyze(context);
+      const prompt = llm.calls[0].prompt;
+      expect(prompt).toContain('database/migrations/add_pr_title.php');
+      expect(prompt).toContain('Schema::table');
+    });
+
+    it('lists allChangedFiles not in code context under "content not available"', async () => {
+      const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+      const context = createTestContext({
+        changedFiles: ['src/app.ts'],
+        allChangedFiles: ['src/app.ts', 'database/migrations/add_pr_title.php'],
+        chunks: [
+          createTestChunk({
+            content: 'function app() {}',
+            metadata: { file: 'src/app.ts', symbolName: 'app', language: 'typescript' },
+          }),
+        ],
+        llm,
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add pr_title column',
+          headSha: 'abc',
+          baseSha: 'def',
+        },
+      });
+
+      await plugin.analyze(context);
+      const prompt = llm.calls[0].prompt;
+      expect(prompt).toContain('Files changed (content not available)');
+      expect(prompt).toContain('database/migrations/add_pr_title.php');
+    });
+
+    it('does not add "content not available" section when all files are shown', async () => {
+      const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+      const context = createTestContext({
+        changedFiles: ['src/app.ts'],
+        allChangedFiles: ['src/app.ts'],
+        chunks: [
+          createTestChunk({
+            content: 'function app() {}',
+            metadata: { file: 'src/app.ts', symbolName: 'app', language: 'typescript' },
+          }),
+        ],
+        llm,
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'test',
+          headSha: 'abc',
+          baseSha: 'def',
+        },
+      });
+
+      await plugin.analyze(context);
+      const prompt = llm.calls[0].prompt;
+      expect(prompt).not.toContain('content not available');
+    });
+
     it('returns empty on unparseable LLM response', async () => {
       const llm = createMockLLMClient(['not valid json at all']);
       const context = createTestContext({
