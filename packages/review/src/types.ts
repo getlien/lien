@@ -16,6 +16,10 @@ export interface PRContext {
   body?: string;
   baseSha: string;
   headSha: string;
+  /** Raw unified diff patches keyed by filename. Populated by the runner when available. */
+  patches?: Map<string, string>;
+  /** Changed line numbers per filename, derived from the unified diff. Populated by the runner when available. */
+  diffLines?: Map<string, Set<number>>;
 }
 
 /**

@@ -126,7 +126,13 @@ describe('SummaryPlugin', () => {
 
     it('counts high-risk files with dependents', () => {
       const report = createTestReport([{ filepath: 'src/core.ts' }]);
-      report.files['src/core.ts'].dependentCount = 5;
+      report.files['src/core.ts'].dependents = [
+        'src/a.ts',
+        'src/b.ts',
+        'src/c.ts',
+        'src/d.ts',
+        'src/e.ts',
+      ];
 
       const context = createTestContext({
         changedFiles: ['src/core.ts', 'src/util.ts'],
@@ -273,6 +279,130 @@ describe('SummaryPlugin', () => {
 
       await plugin.analyze(context);
       expect(llm.calls[0].prompt).toContain('My Special PR Title');
+    });
+
+    it('includes method-only files (e.g. migrations) via fallback chunks', async () => {
+      const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+      const context = createTestContext({
+        changedFiles: ['database/migrations/add_pr_title.php'],
+        chunks: [
+          // Only method chunks — no class/function-level chunks
+          createTestChunk({
+            content: 'public function up() { Schema::table(...); }',
+            metadata: {
+              file: 'database/migrations/add_pr_title.php',
+              symbolName: 'up',
+              symbolType: 'method',
+              type: 'function',
+              language: 'php',
+            },
+          }),
+        ],
+        llm,
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add pr_title column',
+          headSha: 'abc',
+          baseSha: 'def',
+        },
+      });
+
+      await plugin.analyze(context);
+      const prompt = llm.calls[0].prompt;
+      expect(prompt).toContain('database/migrations/add_pr_title.php');
+      expect(prompt).toContain('Schema::table');
+    });
+
+    it('includes raw diff patch for unparseable files with no AST chunks', async () => {
+      const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+      const context = createTestContext({
+        changedFiles: ['src/app.ts'],
+        allChangedFiles: ['src/app.ts', 'database/migrations/add_reset_tokens.sql'],
+        chunks: [
+          createTestChunk({
+            content: 'function app() {}',
+            metadata: { file: 'src/app.ts', symbolName: 'app', language: 'typescript' },
+          }),
+        ],
+        llm,
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add reset tokens',
+          headSha: 'abc',
+          baseSha: 'def',
+          patches: new Map([
+            [
+              'database/migrations/add_reset_tokens.sql',
+              '+CREATE TABLE reset_tokens (\n+  id BIGINT PRIMARY KEY\n+);',
+            ],
+          ]),
+        },
+      });
+
+      await plugin.analyze(context);
+      const prompt = llm.calls[0].prompt;
+      expect(prompt).toContain('### database/migrations/add_reset_tokens.sql');
+      expect(prompt).toContain('```diff');
+      expect(prompt).toContain('+CREATE TABLE reset_tokens');
+    });
+
+    it('shows per-file "content not available" for files without chunks or patches', async () => {
+      const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+      const context = createTestContext({
+        changedFiles: ['src/app.ts'],
+        allChangedFiles: ['src/app.ts', 'database/migrations/add_pr_title.php'],
+        chunks: [
+          createTestChunk({
+            content: 'function app() {}',
+            metadata: { file: 'src/app.ts', symbolName: 'app', language: 'typescript' },
+          }),
+        ],
+        llm,
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add pr_title column',
+          headSha: 'abc',
+          baseSha: 'def',
+        },
+      });
+
+      await plugin.analyze(context);
+      const prompt = llm.calls[0].prompt;
+      expect(prompt).toContain('### database/migrations/add_pr_title.php');
+      expect(prompt).toContain('*(content not available)*');
+    });
+
+    it('does not add "content not available" section when all files are shown', async () => {
+      const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+      const context = createTestContext({
+        changedFiles: ['src/app.ts'],
+        allChangedFiles: ['src/app.ts'],
+        chunks: [
+          createTestChunk({
+            content: 'function app() {}',
+            metadata: { file: 'src/app.ts', symbolName: 'app', language: 'typescript' },
+          }),
+        ],
+        llm,
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'test',
+          headSha: 'abc',
+          baseSha: 'def',
+        },
+      });
+
+      await plugin.analyze(context);
+      const prompt = llm.calls[0].prompt;
+      expect(prompt).not.toContain('content not available');
     });
 
     it('returns empty on unparseable LLM response', async () => {

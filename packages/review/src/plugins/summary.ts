@@ -14,6 +14,7 @@ import type {
   SummaryFindingMetadata,
   PresentContext,
 } from '../plugin-types.js';
+import type { ComplexityDelta } from '../delta.js';
 import { extractJSONFromCodeBlock } from '../json-utils.js';
 import type { Logger } from '../logger.js';
 
@@ -57,6 +58,24 @@ function countUncoveredSourceFiles(files: string[], report: ComplexityReport): n
   }).length;
 }
 
+function countViolationDeltas(deltas: ReviewContext['deltas']): {
+  newViolations: number;
+  improvedViolations: number;
+} {
+  let newViolations = 0;
+  let improvedViolations = 0;
+  for (const delta of deltas ?? []) {
+    if (delta.severity === 'new' || delta.severity === 'error' || delta.severity === 'warning')
+      newViolations++;
+    if (delta.severity === 'improved' || delta.severity === 'deleted') improvedViolations++;
+  }
+  return { newViolations, improvedViolations };
+}
+
+function countHighRiskFiles(files: string[], report: ComplexityReport): number {
+  return files.filter(f => (report.files[f]?.dependents.length ?? 0) > 0).length;
+}
+
 export function computeRiskSignals(context: ReviewContext): RiskSignals {
   // Use allChangedFiles for categorization so we capture docs/config/infra files
   const allFiles = context.allChangedFiles ?? context.changedFiles;
@@ -69,49 +88,23 @@ export function computeRiskSignals(context: ReviewContext): RiskSignals {
     docs: 0,
     source: 0,
   };
+  for (const file of allFiles) categories[categorizeFile(file)]++;
 
-  for (const file of allFiles) {
-    categories[categorizeFile(file)]++;
-  }
+  const languages = [
+    ...new Set(context.chunks.map(c => c.metadata.language).filter(Boolean)),
+  ].sort() as string[];
 
-  // Languages from chunks
-  const langSet = new Set<string>();
-  for (const chunk of context.chunks) {
-    if (chunk.metadata.language) langSet.add(chunk.metadata.language);
-  }
-
-  // Complexity delta summary
-  let newViolations = 0;
-  let improvedViolations = 0;
-  if (context.deltas) {
-    for (const delta of context.deltas) {
-      if (delta.severity === 'new' || delta.severity === 'error' || delta.severity === 'warning')
-        newViolations++;
-      if (delta.severity === 'improved' || delta.severity === 'deleted') improvedViolations++;
-    }
-  }
-
-  // High-risk files (files with many dependents)
-  let highRiskFileCount = 0;
-  for (const file of allFiles) {
-    const fileData = context.complexityReport.files[file];
-    if (fileData && (fileData.dependentCount ?? 0) > 0) highRiskFileCount++;
-  }
-
-  // Export changes
-  const hasExportChanges = detectExportChanges(context);
-
-  const uncoveredSourceFileCount = countUncoveredSourceFiles(allFiles, context.complexityReport);
+  const { newViolations, improvedViolations } = countViolationDeltas(context.deltas);
 
   return {
     totalFiles: allFiles.length,
     categories,
-    languages: [...langSet].sort(),
+    languages,
     newViolations,
     improvedViolations,
-    highRiskFileCount,
-    hasExportChanges,
-    uncoveredSourceFileCount,
+    highRiskFileCount: countHighRiskFiles(allFiles, context.complexityReport),
+    hasExportChanges: detectExportChanges(context),
+    uncoveredSourceFileCount: countUncoveredSourceFiles(allFiles, context.complexityReport),
   };
 }
 
@@ -130,37 +123,159 @@ function detectExportChanges(context: ReviewContext): boolean {
 // Code Context Assembly (same pattern as ArchitecturalPlugin)
 // ---------------------------------------------------------------------------
 
-const MAX_TOTAL_CHARS = 30_000;
+const MAX_TOTAL_CHARS = 50_000;
 
 function groupChunksByFile(
   chunks: CodeChunk[],
   changedFilesSet: Set<string>,
 ): Map<string, CodeChunk[]> {
   const map = new Map<string, CodeChunk[]>();
+  // Separate method chunks as fallback for files with no class/function-level chunks
+  const methodFallback = new Map<string, CodeChunk[]>();
+
   for (const chunk of chunks) {
     const file = chunk.metadata.file;
     if (!changedFilesSet.has(file)) continue;
-    if (chunk.metadata.symbolType === 'method') continue;
+    if (chunk.metadata.symbolType === 'method') {
+      const existing = methodFallback.get(file) ?? [];
+      existing.push(chunk);
+      methodFallback.set(file, existing);
+      continue;
+    }
     if (chunk.metadata.type === 'block' && !chunk.metadata.symbolName) continue;
     const existing = map.get(file) ?? [];
     existing.push(chunk);
     map.set(file, existing);
   }
+
+  // Use method chunks for files that produced no primary chunks (e.g. migrations)
+  for (const [file, fallbackChunks] of methodFallback) {
+    if (!map.has(file)) map.set(file, fallbackChunks);
+  }
+
   return map;
+}
+
+type FileDeltaMap = Map<string, ComplexityDelta>;
+
+function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, FileDeltaMap> {
+  const map = new Map<string, FileDeltaMap>();
+  for (const delta of deltas ?? []) {
+    const fileMap = map.get(delta.filepath) ?? new Map<string, ComplexityDelta>();
+    fileMap.set(`${delta.symbolName}:${delta.metricType}`, delta);
+    map.set(delta.filepath, fileMap);
+  }
+  return map;
+}
+
+function computeChangedFunctions(
+  file: string,
+  fileChunks: CodeChunk[] | undefined,
+  diffLines: Map<string, Set<number>> | undefined,
+): Set<string> {
+  const changed = new Set<string>();
+  if (!fileChunks || !diffLines) return changed;
+
+  const fileDiffLines = diffLines.get(file);
+  if (!fileDiffLines || fileDiffLines.size === 0) return changed;
+
+  for (const chunk of fileChunks) {
+    const name = chunk.metadata.symbolName;
+    if (!name) continue;
+    for (const line of fileDiffLines) {
+      if (line >= chunk.metadata.startLine && line <= chunk.metadata.endLine) {
+        changed.add(name);
+        break;
+      }
+    }
+  }
+  return changed;
+}
+
+function buildFileStats(
+  file: string,
+  report: ComplexityReport,
+  fileDeltaMap: FileDeltaMap | undefined,
+  changedFunctions: Set<string>,
+): string {
+  const fileData = report.files[file];
+  const lines: string[] = [];
+
+  if (fileData) {
+    if (fileData.dependents.length > 0)
+      lines.push(`*depended on by: ${fileData.dependents.join(', ')}*`);
+
+    if (fileData.testAssociations.length > 0) {
+      lines.push(`*tests: ${fileData.testAssociations.join(', ')}*`);
+    } else if (categorizeFile(file) === 'source') {
+      lines.push('*tests: none*');
+    }
+  }
+
+  if (changedFunctions.size > 0) {
+    lines.push(`*changed: ${[...changedFunctions].join(', ')}*`);
+  }
+
+  if (fileData?.violations && fileData.violations.length > 0) {
+    const formatted = fileData.violations.map(v => {
+      const icon = v.severity === 'error' ? '🔴' : '🟡';
+      const delta = fileDeltaMap?.get(`${v.symbolName}:${v.metricType}`);
+      let deltaStr = '';
+      if (delta) {
+        if (delta.severity === 'new') deltaStr = ' new';
+        else if (delta.delta > 0) deltaStr = ` +${delta.delta}`;
+        else if (delta.delta < 0) deltaStr = ` ${delta.delta}`;
+      }
+      return `${v.symbolName} (${v.metricType} ${v.complexity}/${v.threshold} ${icon}${deltaStr})`;
+    });
+    lines.push(`*violations: ${formatted.join(', ')}*`);
+  }
+
+  return lines.join('\n');
+}
+
+function buildFileSection(
+  file: string,
+  report: ComplexityReport,
+  fileChunks: CodeChunk[] | undefined,
+  patch: string | undefined,
+  remainingBudget: number,
+  fileDeltaMap: FileDeltaMap | undefined,
+  diffLines: Map<string, Set<number>> | undefined,
+): { text: string; contentChars: number } {
+  const changedFunctions = computeChangedFunctions(file, fileChunks, diffLines);
+  const stats = buildFileStats(file, report, fileDeltaMap, changedFunctions);
+  const header = stats ? `### ${file}\n${stats}` : `### ${file}`;
+
+  if (fileChunks) {
+    const code = fileChunks.map(c => c.content).join('\n\n');
+    if (code.length <= remainingBudget) {
+      return { text: `${header}\n\`\`\`\n${code}\n\`\`\``, contentChars: code.length };
+    }
+  }
+
+  if (patch && patch.length <= remainingBudget) {
+    return { text: `${header}\n\`\`\`diff\n${patch}\n\`\`\``, contentChars: patch.length };
+  }
+
+  return { text: `${header}\n*(content not available)*`, contentChars: 0 };
 }
 
 function buildCodeContext(
   chunks: CodeChunk[],
   report: ComplexityReport,
   changedFiles: string[],
+  allChangedFiles: string[],
+  prPatches?: Map<string, string>,
+  deltas?: ComplexityDelta[] | null,
+  diffLines?: Map<string, Set<number>>,
 ): string {
-  const changedFilesSet = new Set(changedFiles);
-  const chunksByFile = groupChunksByFile(chunks, changedFilesSet);
+  const chunksByFile = groupChunksByFile(chunks, new Set(changedFiles));
+  const deltaMap = buildDeltaMap(deltas ?? null);
 
-  // Sort files by dependentCount descending
-  const sortedFiles = [...chunksByFile.keys()].sort((a, b) => {
-    const depA = report.files[a]?.dependentCount ?? 0;
-    const depB = report.files[b]?.dependentCount ?? 0;
+  const sortedFiles = [...allChangedFiles].sort((a, b) => {
+    const depA = report.files[a]?.dependents.length ?? 0;
+    const depB = report.files[b]?.dependents.length ?? 0;
     return depB - depA;
   });
 
@@ -168,15 +283,17 @@ function buildCodeContext(
   let totalChars = 0;
 
   for (const file of sortedFiles) {
-    const fileChunks = chunksByFile.get(file)!;
-    const fileCode = fileChunks.map(c => c.content).join('\n\n');
-    if (totalChars + fileCode.length > MAX_TOTAL_CHARS) continue;
-
-    const dependentCount = report.files[file]?.dependentCount ?? 0;
-    const header =
-      dependentCount > 0 ? `### ${file} (${dependentCount} dependents)` : `### ${file}`;
-    sections.push(`${header}\n\`\`\`\n${fileCode}\n\`\`\``);
-    totalChars += fileCode.length;
+    const { text, contentChars } = buildFileSection(
+      file,
+      report,
+      chunksByFile.get(file),
+      prPatches?.get(file),
+      MAX_TOTAL_CHARS - totalChars,
+      deltaMap.get(file),
+      diffLines,
+    );
+    sections.push(text);
+    totalChars += contentChars;
   }
 
   return sections.join('\n\n');
@@ -204,13 +321,7 @@ function formatRiskSignals(signals: RiskSignals): string {
   if (signals.newViolations > 0) parts.push(`New complexity violations: ${signals.newViolations}`);
   if (signals.improvedViolations > 0)
     parts.push(`Improved/resolved: ${signals.improvedViolations}`);
-  if (signals.highRiskFileCount > 0)
-    parts.push(`High-impact files (with dependents): ${signals.highRiskFileCount}`);
   if (signals.hasExportChanges) parts.push(`Export/interface changes detected`);
-  if (signals.uncoveredSourceFileCount > 0)
-    parts.push(
-      `Source files without test coverage: ${signals.uncoveredSourceFileCount}/${signals.categories.source}`,
-    );
 
   return parts.join('\n');
 }
@@ -367,11 +478,20 @@ export class SummaryPlugin implements ReviewPlugin {
     if (!context.llm) return [];
 
     const { chunks, complexityReport, changedFiles, logger } = context;
+    const allChangedFiles = context.allChangedFiles ?? changedFiles;
 
     logger.info('Computing risk signals for summary...');
     const signals = computeRiskSignals(context);
 
-    const codeContext = buildCodeContext(chunks, complexityReport, changedFiles);
+    const codeContext = buildCodeContext(
+      chunks,
+      complexityReport,
+      changedFiles,
+      allChangedFiles,
+      context.pr?.patches,
+      context.deltas,
+      context.pr?.diffLines,
+    );
     const prompt = buildSummaryPrompt(signals, codeContext, context);
     const response = await context.llm.complete(prompt);
 

@@ -20,6 +20,7 @@ import {
   filterAnalyzableFiles,
   enrichWithTestAssociations,
   getPRChangedFiles,
+  getPRPatchData,
   calculateDeltas,
   calculateDeltaSummary,
   ReviewEngine,
@@ -128,6 +129,7 @@ export async function handlePRReview(
     );
 
     const summaryEnabled = !!payload.config.review_types.summary;
+    if (summaryEnabled) await tryFetchPRPatches(octokit, prContext, logger);
 
     if (filesToAnalyze.length === 0 && !summaryEnabled) {
       logger.info('No analyzable files, skipping');
@@ -403,6 +405,22 @@ export async function handlePRReview(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+async function tryFetchPRPatches(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  logger: Logger,
+): Promise<void> {
+  try {
+    const patchData = await getPRPatchData(octokit, prContext);
+    prContext.patches = patchData.patches;
+    prContext.diffLines = patchData.diffLines;
+  } catch (error) {
+    logger.warning(
+      `Failed to fetch PR patch data: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
 
 async function tryEnrichTestAssociations(
   report: ComplexityReport,
