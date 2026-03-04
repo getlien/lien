@@ -412,6 +412,7 @@ async function tryFetchPRPatches(
 ): Promise<void> {
   const patchData = await getPRPatchData(octokit, prContext);
   prContext.patches = patchData.patches;
+  prContext.diffLines = patchData.diffLines;
 }
 
 async function tryEnrichTestAssociations(

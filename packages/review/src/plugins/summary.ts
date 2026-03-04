@@ -14,6 +14,7 @@ import type {
   SummaryFindingMetadata,
   PresentContext,
 } from '../plugin-types.js';
+import type { ComplexityDelta } from '../delta.js';
 import { extractJSONFromCodeBlock } from '../json-utils.js';
 import type { Logger } from '../logger.js';
 
@@ -155,27 +156,79 @@ function groupChunksByFile(
   return map;
 }
 
-function buildFileStats(file: string, report: ComplexityReport): string {
-  const fileData = report.files[file];
-  if (!fileData) return '';
+type FileDeltaMap = Map<string, ComplexityDelta>;
 
+function buildDeltaMap(deltas: ComplexityDelta[] | null): Map<string, FileDeltaMap> {
+  const map = new Map<string, FileDeltaMap>();
+  for (const delta of deltas ?? []) {
+    const fileMap = map.get(delta.filepath) ?? new Map<string, ComplexityDelta>();
+    fileMap.set(`${delta.symbolName}:${delta.metricType}`, delta);
+    map.set(delta.filepath, fileMap);
+  }
+  return map;
+}
+
+function computeChangedFunctions(
+  file: string,
+  fileChunks: CodeChunk[] | undefined,
+  diffLines: Map<string, Set<number>> | undefined,
+): Set<string> {
+  const changed = new Set<string>();
+  if (!fileChunks || !diffLines) return changed;
+
+  const fileDiffLines = diffLines.get(file);
+  if (!fileDiffLines || fileDiffLines.size === 0) return changed;
+
+  for (const chunk of fileChunks) {
+    const name = chunk.metadata.symbolName;
+    if (!name) continue;
+    for (const line of fileDiffLines) {
+      if (line >= chunk.metadata.startLine && line <= chunk.metadata.endLine) {
+        changed.add(name);
+        break;
+      }
+    }
+  }
+  return changed;
+}
+
+function buildFileStats(
+  file: string,
+  report: ComplexityReport,
+  fileDeltaMap: FileDeltaMap | undefined,
+  changedFunctions: Set<string>,
+): string {
+  const fileData = report.files[file];
   const lines: string[] = [];
   const stats: string[] = [];
 
-  if ((fileData.dependentCount ?? 0) > 0) stats.push(`dependents: ${fileData.dependentCount}`);
+  if (fileData) {
+    if ((fileData.dependentCount ?? 0) > 0) stats.push(`dependents: ${fileData.dependentCount}`);
 
-  if (fileData.testAssociations.length > 0) {
-    stats.push(`covered by: ${fileData.testAssociations.join(', ')}`);
-  } else if (categorizeFile(file) === 'source') {
-    stats.push('no test coverage');
+    if (fileData.testAssociations.length > 0) {
+      stats.push(`covered by: ${fileData.testAssociations.join(', ')}`);
+    } else if (categorizeFile(file) === 'source') {
+      stats.push('no test coverage');
+    }
   }
 
   if (stats.length > 0) lines.push(`*${stats.join(' · ')}*`);
 
-  if (fileData.violations.length > 0) {
+  if (changedFunctions.size > 0) {
+    lines.push(`*changed: ${[...changedFunctions].join(', ')}*`);
+  }
+
+  if (fileData?.violations && fileData.violations.length > 0) {
     const formatted = fileData.violations.map(v => {
       const icon = v.severity === 'error' ? '🔴' : '🟡';
-      return `${v.symbolName} (${v.metricType} ${v.complexity}/${v.threshold} ${icon})`;
+      const delta = fileDeltaMap?.get(`${v.symbolName}:${v.metricType}`);
+      let deltaStr = '';
+      if (delta) {
+        if (delta.severity === 'new') deltaStr = ' new';
+        else if (delta.delta > 0) deltaStr = ` +${delta.delta}`;
+        else if (delta.delta < 0) deltaStr = ` ${delta.delta}`;
+      }
+      return `${v.symbolName} (${v.metricType} ${v.complexity}/${v.threshold} ${icon}${deltaStr})`;
     });
     lines.push(`*violations: ${formatted.join(', ')}*`);
   }
@@ -189,8 +242,11 @@ function buildFileSection(
   fileChunks: CodeChunk[] | undefined,
   patch: string | undefined,
   remainingBudget: number,
+  fileDeltaMap: FileDeltaMap | undefined,
+  diffLines: Map<string, Set<number>> | undefined,
 ): { text: string; contentChars: number } {
-  const stats = buildFileStats(file, report);
+  const changedFunctions = computeChangedFunctions(file, fileChunks, diffLines);
+  const stats = buildFileStats(file, report, fileDeltaMap, changedFunctions);
   const header = stats ? `### ${file}\n${stats}` : `### ${file}`;
 
   if (fileChunks) {
@@ -213,8 +269,11 @@ function buildCodeContext(
   changedFiles: string[],
   allChangedFiles: string[],
   prPatches?: Map<string, string>,
+  deltas?: ComplexityDelta[] | null,
+  diffLines?: Map<string, Set<number>>,
 ): string {
   const chunksByFile = groupChunksByFile(chunks, new Set(changedFiles));
+  const deltaMap = buildDeltaMap(deltas ?? null);
 
   const sortedFiles = [...allChangedFiles].sort((a, b) => {
     const depA = report.files[a]?.dependentCount ?? 0;
@@ -232,6 +291,8 @@ function buildCodeContext(
       chunksByFile.get(file),
       prPatches?.get(file),
       MAX_TOTAL_CHARS - totalChars,
+      deltaMap.get(file),
+      diffLines,
     );
     sections.push(text);
     totalChars += contentChars;
@@ -430,6 +491,8 @@ export class SummaryPlugin implements ReviewPlugin {
       changedFiles,
       allChangedFiles,
       context.pr?.patches,
+      context.deltas,
+      context.pr?.diffLines,
     );
     const prompt = buildSummaryPrompt(signals, codeContext, context);
     const response = await context.llm.complete(prompt);
