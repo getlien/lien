@@ -5,10 +5,15 @@
  * from that module still used at runtime.
  */
 
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import {
   performChunkOnlyIndex,
   analyzeComplexityFromChunks,
   getSupportedExtensions,
+  findTestAssociationsFromChunks,
+  isTestFile,
   type ComplexityReport,
   type CodeChunk,
 } from '@liendev/parser';
@@ -51,6 +56,57 @@ export function filterAnalyzableFiles(files: string[]): string[] {
 
     return true;
   });
+}
+
+const TEST_SCAN_EXCLUDE = [/node_modules/, /vendor/, /dist/, /build/];
+
+async function scanTestFiles(rootDir: string): Promise<string[]> {
+  const entries = await readdir(rootDir, { recursive: true, withFileTypes: true });
+  return entries
+    .filter(e => e.isFile())
+    .map(e => join(e.parentPath, e.name))
+    .filter(p => isTestFile(p) && !TEST_SCAN_EXCLUDE.some(r => r.test(p)));
+}
+
+/**
+ * Enrich a ComplexityReport with test association data.
+ * Scans test files from the cloned repo and maps them to changed source files.
+ */
+export async function enrichWithTestAssociations(
+  report: ComplexityReport,
+  changedFiles: string[],
+  rootDir: string,
+  logger: Logger,
+): Promise<void> {
+  const testFiles = await scanTestFiles(rootDir);
+  if (testFiles.length === 0) {
+    logger.info('No test files found, skipping test association enrichment');
+    return;
+  }
+
+  logger.info(`Indexing ${testFiles.length} test files for coverage associations...`);
+  const result = await performChunkOnlyIndex(rootDir, { filesToIndex: testFiles });
+  if (!result.success || !result.chunks?.length) {
+    logger.warning('Test file indexing produced no chunks, skipping');
+    return;
+  }
+
+  const assocMap = findTestAssociationsFromChunks(changedFiles, result.chunks, rootDir);
+
+  for (const filepath of changedFiles) {
+    if (!report.files[filepath]) {
+      report.files[filepath] = {
+        violations: [],
+        dependents: [],
+        testAssociations: [],
+        riskLevel: 'low',
+      };
+    }
+    report.files[filepath].testAssociations = assocMap.get(filepath) ?? [];
+  }
+
+  const coveredCount = [...assocMap.values()].filter(v => v.length > 0).length;
+  logger.info(`Test associations: ${coveredCount}/${changedFiles.length} files covered`);
 }
 
 /**

@@ -77,7 +77,11 @@ export { type Logger, consoleLogger } from './logger.js';
 
 // ─── Analysis utilities ─────────────────────────────────────────────────────
 
-export { filterAnalyzableFiles, runComplexityAnalysis } from './analysis.js';
+export {
+  filterAnalyzableFiles,
+  runComplexityAnalysis,
+  enrichWithTestAssociations,
+} from './analysis.js';
 
 // ─── GitHub API ─────────────────────────────────────────────────────────────
 

@@ -18,6 +18,7 @@ import {
   updateCheckRun,
   runComplexityAnalysis,
   filterAnalyzableFiles,
+  enrichWithTestAssociations,
   getPRChangedFiles,
   calculateDeltas,
   calculateDeltaSummary,
@@ -208,6 +209,15 @@ export async function handlePRReview(
         'info',
         `Head analysis complete: avg ${avgComplexity.toFixed(1)}, max ${maxComplexity}`,
       );
+
+      // Enrich with test associations — non-critical, failures are swallowed
+      try {
+        await enrichWithTestAssociations(currentReport, filesToAnalyze, headClone.dir, logger);
+      } catch (error) {
+        logger.warning(
+          `Test association enrichment failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
 
       // Clone and analyze base for delta tracking
       try {

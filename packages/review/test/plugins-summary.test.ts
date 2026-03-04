@@ -149,6 +149,60 @@ describe('SummaryPlugin', () => {
       const signals = computeRiskSignals(context);
       expect(signals.languages).toEqual(['python', 'typescript']);
     });
+
+    it('reports 0 uncoveredSourceFileCount when all source files have test associations', () => {
+      const report = createTestReport([{ filepath: 'src/app.ts' }]);
+      report.files['src/app.ts'].testAssociations = ['test/app.test.ts'];
+
+      const context = createTestContext({
+        changedFiles: ['src/app.ts'],
+        complexityReport: report,
+      });
+
+      const signals = computeRiskSignals(context);
+      expect(signals.uncoveredSourceFileCount).toBe(0);
+    });
+
+    it('counts source files without test associations', () => {
+      const report = createTestReport([{ filepath: 'src/app.ts' }, { filepath: 'src/utils.ts' }]);
+      report.files['src/app.ts'].testAssociations = ['test/app.test.ts'];
+      report.files['src/utils.ts'].testAssociations = [];
+
+      const context = createTestContext({
+        changedFiles: ['src/app.ts', 'src/utils.ts'],
+        complexityReport: report,
+      });
+
+      const signals = computeRiskSignals(context);
+      expect(signals.uncoveredSourceFileCount).toBe(1);
+    });
+
+    it('excludes non-source files from uncovered count', () => {
+      const report = createTestReport([{ filepath: 'src/app.ts' }]);
+      report.files['src/app.ts'].testAssociations = [];
+
+      const context = createTestContext({
+        changedFiles: ['src/app.ts', 'README.md', 'config.json', 'test/app.test.ts'],
+        complexityReport: report,
+      });
+
+      const signals = computeRiskSignals(context);
+      // Only src/app.ts is a source file — docs, config, test are excluded
+      expect(signals.uncoveredSourceFileCount).toBe(1);
+    });
+
+    it('counts files absent from report.files as uncovered', () => {
+      // A clean changed file (no violations) won't be in report.files
+      const report = createTestReport([]);
+
+      const context = createTestContext({
+        changedFiles: ['src/clean.ts'],
+        complexityReport: report,
+      });
+
+      const signals = computeRiskSignals(context);
+      expect(signals.uncoveredSourceFileCount).toBe(1);
+    });
   });
 
   describe('analyze', () => {

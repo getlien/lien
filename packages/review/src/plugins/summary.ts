@@ -46,6 +46,7 @@ export interface RiskSignals {
   improvedViolations: number;
   highRiskFileCount: number;
   hasExportChanges: boolean;
+  uncoveredSourceFileCount: number;
 }
 
 export function computeRiskSignals(context: ReviewContext): RiskSignals {
@@ -92,6 +93,14 @@ export function computeRiskSignals(context: ReviewContext): RiskSignals {
   // Export changes
   const hasExportChanges = detectExportChanges(context);
 
+  // Uncovered source files (source-category files with no test associations)
+  let uncoveredSourceFileCount = 0;
+  for (const file of allFiles) {
+    if (categorizeFile(file) !== 'source') continue;
+    const fileData = context.complexityReport.files[file];
+    if (!fileData || fileData.testAssociations.length === 0) uncoveredSourceFileCount++;
+  }
+
   return {
     totalFiles: allFiles.length,
     categories,
@@ -100,6 +109,7 @@ export function computeRiskSignals(context: ReviewContext): RiskSignals {
     improvedViolations,
     highRiskFileCount,
     hasExportChanges,
+    uncoveredSourceFileCount,
   };
 }
 
@@ -188,6 +198,10 @@ function formatRiskSignals(signals: RiskSignals): string {
   if (signals.highRiskFileCount > 0)
     parts.push(`High-impact files (with dependents): ${signals.highRiskFileCount}`);
   if (signals.hasExportChanges) parts.push(`Export/interface changes detected`);
+  if (signals.uncoveredSourceFileCount > 0)
+    parts.push(
+      `Source files without test coverage: ${signals.uncoveredSourceFileCount}/${signals.categories.source}`,
+    );
 
   return parts.join('\n');
 }
@@ -234,7 +248,7 @@ Write a brief PR summary. Respond with ONLY valid JSON:
 \`\`\`
 
 Guidelines:
-- **risk_level**: "low" for docs/tests/config-only, "medium" for source changes with moderate scope, "high" for infra/db/many dependents/export changes, "critical" for breaking changes to widely-used interfaces
+- **risk_level**: "low" for docs/tests/config-only, "medium" for source changes with moderate scope, "high" for infra/db/many dependents/export changes/untested source files, "critical" for breaking changes to widely-used interfaces
 - **confidence**: "high" when the code context is clear and complete, "medium" when some files were truncated or the scope is ambiguous, "low" when the context is very limited
 ${overviewGuideline}
 ${keyChangesGuideline}
