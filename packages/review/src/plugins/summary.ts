@@ -207,9 +207,9 @@ function buildFileStats(
       stats.push(`depended on by: ${fileData.dependents.join(', ')}`);
 
     if (fileData.testAssociations.length > 0) {
-      stats.push(`covered by: ${fileData.testAssociations.join(', ')}`);
+      stats.push(`tests: ${fileData.testAssociations.join(', ')}`);
     } else if (categorizeFile(file) === 'source') {
-      stats.push('no test coverage');
+      stats.push('tests: none');
     }
   }
 
