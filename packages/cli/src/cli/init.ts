@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import chalk from 'chalk';
 import { showCompactBanner } from '../utils/banner.js';
+import { EXPLORE_AGENT_CONTENT } from './agents/explore-agent.js';
 
 export type EditorId =
   | 'cursor'
@@ -144,6 +145,20 @@ async function promptForEditor(): Promise<EditorId> {
   return editor;
 }
 
+async function installExploreAgent(rootDir: string): Promise<void> {
+  const agentPath = path.join(rootDir, '.claude', 'agents', 'Explore.md');
+  try {
+    await fs.access(agentPath);
+    console.log(chalk.dim('  Explore agent already installed — skipping'));
+    return;
+  } catch {
+    // File doesn't exist — install it
+  }
+  await fs.mkdir(path.dirname(agentPath), { recursive: true });
+  await fs.writeFile(agentPath, EXPLORE_AGENT_CONTENT);
+  console.log(chalk.green('✓ Installed .claude/agents/Explore.md'));
+}
+
 export async function initCommand(options: InitOptions = {}) {
   showCompactBanner();
 
@@ -164,6 +179,9 @@ export async function initCommand(options: InitOptions = {}) {
 
   if (editor.configPath) {
     await writeEditorConfig(editor, rootDir);
+    if (editorId === 'claude-code') {
+      await installExploreAgent(rootDir);
+    }
     console.log(chalk.dim(`  ${editor.restartMessage}\n`));
   } else {
     // Snippet-only editor (e.g. Antigravity)
