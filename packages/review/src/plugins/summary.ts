@@ -248,9 +248,28 @@ function buildFileSection(
   const header = stats ? `### ${file}\n${stats}` : `### ${file}`;
 
   if (fileChunks) {
-    const code = fileChunks.map(c => c.content).join('\n\n');
-    if (code.length <= remainingBudget) {
-      return { text: `${header}\n\`\`\`\n${code}\n\`\`\``, contentChars: code.length };
+    const allCode = fileChunks.map(c => c.content).join('\n\n');
+
+    // 1. Full file fits → include it (full context is valuable for risk assessment)
+    if (allCode.length <= remainingBudget) {
+      return { text: `${header}\n\`\`\`\n${allCode}\n\`\`\``, contentChars: allCode.length };
+    }
+
+    // 2. Doesn't fit → fallback to changed chunks only
+    const fileDiffLines = diffLines?.get(file);
+    if (fileDiffLines && fileDiffLines.size > 0) {
+      const changedChunks = fileChunks.filter(c =>
+        [...fileDiffLines].some(line => line >= c.metadata.startLine && line <= c.metadata.endLine),
+      );
+      if (changedChunks.length > 0) {
+        const changedCode = changedChunks.map(c => c.content).join('\n\n');
+        if (changedCode.length <= remainingBudget) {
+          return {
+            text: `${header}\n\`\`\`\n${changedCode}\n\`\`\``,
+            contentChars: changedCode.length,
+          };
+        }
+      }
     }
   }
 
