@@ -33,11 +33,12 @@ describe('computeSimplicitySignals', () => {
     expect(signals).toEqual([]);
   });
 
-  it('flags file with 3 trivial classes', () => {
+  it('flags file with 4 trivial classes', () => {
     const chunks = [
       makeChunk({ file: 'a.ts', symbolType: 'class', symbolName: 'A' }),
       makeChunk({ file: 'a.ts', symbolType: 'class', symbolName: 'B' }),
       makeChunk({ file: 'a.ts', symbolType: 'class', symbolName: 'C' }),
+      makeChunk({ file: 'a.ts', symbolType: 'class', symbolName: 'D' }),
       makeChunk({
         file: 'a.ts',
         symbolType: 'method',
@@ -66,7 +67,7 @@ describe('computeSimplicitySignals', () => {
     const signals = computeSimplicitySignals(chunks, ['a.ts']);
     expect(signals).toHaveLength(1);
     expect(signals[0].flagged).toBe(true);
-    expect(signals[0].classCount).toBe(3);
+    expect(signals[0].classCount).toBe(4);
     expect(signals[0].reason).toContain('possible over-abstraction');
   });
 
@@ -236,6 +237,7 @@ describe('serializeSimplicitySignals', () => {
         makeChunk({ file: 'src/kiss-violations.ts', symbolType: 'class', symbolName: 'A' }),
         makeChunk({ file: 'src/kiss-violations.ts', symbolType: 'class', symbolName: 'B' }),
         makeChunk({ file: 'src/kiss-violations.ts', symbolType: 'class', symbolName: 'C' }),
+        makeChunk({ file: 'src/kiss-violations.ts', symbolType: 'class', symbolName: 'D' }),
         makeChunk({ file: 'src/kiss-violations.ts', symbolType: 'function', symbolName: 'create' }),
         makeChunk({
           file: 'src/kiss-violations.ts',
@@ -260,10 +262,10 @@ describe('serializeSimplicitySignals', () => {
     const output = serializeSimplicitySignals(signals);
     expect(output).toContain('## File Structure Signals');
     expect(output).toContain('kiss-violations.ts');
-    expect(output).toContain('3 classes');
+    expect(output).toContain('4 classes');
     expect(output).toContain('1 functions');
     expect(output).toContain('2 methods');
-    expect(output).toContain('avg method complexity');
+    expect(output).toContain('avg complexity');
     expect(output).toContain('⚠️');
     expect(output).toContain('possible over-abstraction');
   });

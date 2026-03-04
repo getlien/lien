@@ -23,11 +23,11 @@ export interface FileSimplicitySignal {
 /** Minimum classes to emit a signal (even if not flagged) */
 const SIGNAL_CLASS_THRESHOLD = 2;
 /** Minimum classes to consider flagging as over-abstraction */
-const OVER_ABSTRACTION_CLASSES = 3;
+const OVER_ABSTRACTION_CLASSES = 4;
 /** Max avg method complexity to be considered "trivial" */
 const TRIVIAL_COMPLEXITY = 2;
 /** Max avg method lines to be considered "trivial" */
-const TRIVIAL_METHOD_LINES = 5;
+const TRIVIAL_METHOD_LINES = 8;
 
 /**
  * Group chunks by file path (same pattern as fingerprint.ts).
@@ -112,7 +112,7 @@ export function computeSimplicitySignals(
       avgMethodLines <= TRIVIAL_METHOD_LINES;
 
     const reason = flagged
-      ? `${classCount} classes with avg method complexity ${avgMethodComplexity.toFixed(1)} and avg ${Math.round(avgMethodLines)} lines — possible over-abstraction`
+      ? `${classCount} classes with avg complexity ${avgMethodComplexity.toFixed(1)} and avg ${Math.round(avgMethodLines)} lines/method — possible over-abstraction`
       : '';
 
     if (classCount >= SIGNAL_CLASS_THRESHOLD || flagged) {
