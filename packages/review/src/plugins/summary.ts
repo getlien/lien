@@ -73,7 +73,7 @@ function countViolationDeltas(deltas: ReviewContext['deltas']): {
 }
 
 function countHighRiskFiles(files: string[], report: ComplexityReport): number {
-  return files.filter(f => (report.files[f]?.dependentCount ?? 0) > 0).length;
+  return files.filter(f => (report.files[f]?.dependents.length ?? 0) > 0).length;
 }
 
 export function computeRiskSignals(context: ReviewContext): RiskSignals {
@@ -203,7 +203,8 @@ function buildFileStats(
   const stats: string[] = [];
 
   if (fileData) {
-    if ((fileData.dependentCount ?? 0) > 0) stats.push(`dependents: ${fileData.dependentCount}`);
+    if (fileData.dependents.length > 0)
+      stats.push(`depended on by: ${fileData.dependents.join(', ')}`);
 
     if (fileData.testAssociations.length > 0) {
       stats.push(`covered by: ${fileData.testAssociations.join(', ')}`);

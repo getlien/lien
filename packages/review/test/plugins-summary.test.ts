@@ -126,7 +126,13 @@ describe('SummaryPlugin', () => {
 
     it('counts high-risk files with dependents', () => {
       const report = createTestReport([{ filepath: 'src/core.ts' }]);
-      report.files['src/core.ts'].dependentCount = 5;
+      report.files['src/core.ts'].dependents = [
+        'src/a.ts',
+        'src/b.ts',
+        'src/c.ts',
+        'src/d.ts',
+        'src/e.ts',
+      ];
 
       const context = createTestContext({
         changedFiles: ['src/core.ts', 'src/util.ts'],
