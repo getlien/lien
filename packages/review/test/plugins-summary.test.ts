@@ -315,6 +315,41 @@ describe('SummaryPlugin', () => {
       expect(prompt).toContain('Schema::table');
     });
 
+    it('includes raw diff patch for unparseable files with no AST chunks', async () => {
+      const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+      const context = createTestContext({
+        changedFiles: ['src/app.ts'],
+        allChangedFiles: ['src/app.ts', 'database/migrations/add_reset_tokens.sql'],
+        chunks: [
+          createTestChunk({
+            content: 'function app() {}',
+            metadata: { file: 'src/app.ts', symbolName: 'app', language: 'typescript' },
+          }),
+        ],
+        llm,
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add reset tokens',
+          headSha: 'abc',
+          baseSha: 'def',
+          patches: new Map([
+            [
+              'database/migrations/add_reset_tokens.sql',
+              '+CREATE TABLE reset_tokens (\n+  id BIGINT PRIMARY KEY\n+);',
+            ],
+          ]),
+        },
+      });
+
+      await plugin.analyze(context);
+      const prompt = llm.calls[0].prompt;
+      expect(prompt).toContain('### database/migrations/add_reset_tokens.sql');
+      expect(prompt).toContain('```diff');
+      expect(prompt).toContain('+CREATE TABLE reset_tokens');
+    });
+
     it('shows per-file "content not available" for files without chunks or patches', async () => {
       const llm = createMockLLMClient([makeSummaryLLMResponse()]);
       const context = createTestContext({

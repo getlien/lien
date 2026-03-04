@@ -274,8 +274,8 @@ function buildCodeContext(
   const deltaMap = buildDeltaMap(deltas ?? null);
 
   const sortedFiles = [...allChangedFiles].sort((a, b) => {
-    const depA = report.files[a]?.dependentCount ?? 0;
-    const depB = report.files[b]?.dependentCount ?? 0;
+    const depA = report.files[a]?.dependents.length ?? 0;
+    const depB = report.files[b]?.dependents.length ?? 0;
     return depB - depA;
   });
 
