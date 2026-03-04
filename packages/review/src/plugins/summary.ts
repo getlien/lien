@@ -200,20 +200,17 @@ function buildFileStats(
 ): string {
   const fileData = report.files[file];
   const lines: string[] = [];
-  const stats: string[] = [];
 
   if (fileData) {
     if (fileData.dependents.length > 0)
-      stats.push(`depended on by: ${fileData.dependents.join(', ')}`);
+      lines.push(`*depended on by: ${fileData.dependents.join(', ')}*`);
 
     if (fileData.testAssociations.length > 0) {
-      stats.push(`tests: ${fileData.testAssociations.join(', ')}`);
+      lines.push(`*tests: ${fileData.testAssociations.join(', ')}*`);
     } else if (categorizeFile(file) === 'source') {
-      stats.push('tests: none');
+      lines.push('*tests: none*');
     }
   }
-
-  if (stats.length > 0) lines.push(`*${stats.join(' · ')}*`);
 
   if (changedFunctions.size > 0) {
     lines.push(`*changed: ${[...changedFunctions].join(', ')}*`);
