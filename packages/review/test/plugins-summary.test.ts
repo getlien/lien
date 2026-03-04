@@ -405,6 +405,113 @@ describe('SummaryPlugin', () => {
       expect(prompt).not.toContain('content not available');
     });
 
+    describe('buildCodeContext chunk scoping', () => {
+      // Each chunk is ~17.6k chars; 3 chunks total ~52.9k > 50k budget
+      const bigBody = '// padding\n'.repeat(1600);
+
+      it('includes all chunks when full file fits in budget', async () => {
+        const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+        const context = createTestContext({
+          changedFiles: ['src/app.ts'],
+          chunks: [
+            createTestChunk({
+              content: 'function small_a() { return 1; }',
+              metadata: { file: 'src/app.ts', symbolName: 'small_a', startLine: 1, endLine: 3 },
+            }),
+            createTestChunk({
+              content: 'function small_b() { return 2; }',
+              metadata: { file: 'src/app.ts', symbolName: 'small_b', startLine: 5, endLine: 7 },
+            }),
+          ],
+          llm,
+          pr: {
+            owner: 'test',
+            repo: 'repo',
+            pullNumber: 1,
+            title: 'test',
+            headSha: 'abc',
+            baseSha: 'def',
+            diffLines: new Map([['src/app.ts', new Set([2])]]),
+          },
+        });
+        await plugin.analyze(context);
+        const prompt = llm.calls[0].prompt;
+        expect(prompt).toContain('small_a');
+        expect(prompt).toContain('small_b');
+      });
+
+      it('scopes to changed chunks only when full file exceeds budget', async () => {
+        const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+        const context = createTestContext({
+          changedFiles: ['src/app.ts'],
+          chunks: [
+            createTestChunk({
+              content: `function chunk_a() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_a', startLine: 1, endLine: 100 },
+            }),
+            createTestChunk({
+              content: `function chunk_b() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_b', startLine: 101, endLine: 200 },
+            }),
+            createTestChunk({
+              content: `function chunk_c() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_c', startLine: 201, endLine: 300 },
+            }),
+          ],
+          llm,
+          pr: {
+            owner: 'test',
+            repo: 'repo',
+            pullNumber: 1,
+            title: 'test',
+            headSha: 'abc',
+            baseSha: 'def',
+            diffLines: new Map([['src/app.ts', new Set([150])]]),
+          },
+        });
+        await plugin.analyze(context);
+        const prompt = llm.calls[0].prompt;
+        expect(prompt).toContain('chunk_b');
+        expect(prompt).not.toContain('chunk_a');
+        expect(prompt).not.toContain('chunk_c');
+      });
+
+      it('falls through to patch when full file exceeds budget and diffLines is absent', async () => {
+        const llm = createMockLLMClient([makeSummaryLLMResponse()]);
+        const context = createTestContext({
+          changedFiles: ['src/app.ts'],
+          chunks: [
+            createTestChunk({
+              content: `function chunk_a() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_a', startLine: 1, endLine: 100 },
+            }),
+            createTestChunk({
+              content: `function chunk_b() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_b', startLine: 101, endLine: 200 },
+            }),
+            createTestChunk({
+              content: `function chunk_c() {\n${bigBody}}`,
+              metadata: { file: 'src/app.ts', symbolName: 'chunk_c', startLine: 201, endLine: 300 },
+            }),
+          ],
+          llm,
+          pr: {
+            owner: 'test',
+            repo: 'repo',
+            pullNumber: 1,
+            title: 'test',
+            headSha: 'abc',
+            baseSha: 'def',
+            patches: new Map([['src/app.ts', '+function chunk_b() { /* changed */ }']]),
+          },
+        });
+        await plugin.analyze(context);
+        const prompt = llm.calls[0].prompt;
+        expect(prompt).toContain('```diff');
+        expect(prompt).toContain('+function chunk_b');
+      });
+    });
+
     it('returns empty on unparseable LLM response', async () => {
       const llm = createMockLLMClient(['not valid json at all']);
       const context = createTestContext({
@@ -687,7 +794,7 @@ describe('SummaryPlugin', () => {
       });
 
       expect(prompt).toContain('Focus on intent, not implementation details');
-      expect(prompt).toContain('2-5 bullets, each under 100 characters');
+      expect(prompt).toContain('Derive strictly from the diff above');
       expect(prompt).not.toContain('NOT already covered in the PR description');
     });
 
@@ -716,6 +823,47 @@ describe('SummaryPlugin', () => {
       expect(prompt).toContain('### src/a.ts');
       expect(prompt).toContain('risk_level');
       expect(prompt).toContain('confidence');
+    });
+
+    it('includes a "What Changed" diff section when patches are available', () => {
+      const signals = computeRiskSignals(createTestContext({ changedFiles: ['src/a.ts'] }));
+
+      const prompt = buildSummaryPrompt(signals, '### src/a.ts\n```\ncode\n```', {
+        ...createTestContext(),
+        changedFiles: ['src/a.ts'],
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add retry logic',
+          headSha: 'abc',
+          baseSha: 'def',
+          patches: new Map([['src/a.ts', '+function retry() {}\n-function old() {}']]),
+        },
+      });
+
+      expect(prompt).toContain('## What Changed');
+      expect(prompt).toContain('+function retry()');
+      expect(prompt).toContain('## Code Context');
+    });
+
+    it('omits "What Changed" section when no patches are available', () => {
+      const signals = computeRiskSignals(createTestContext({ changedFiles: ['src/a.ts'] }));
+
+      const prompt = buildSummaryPrompt(signals, '### src/a.ts\n```\ncode\n```', {
+        ...createTestContext(),
+        pr: {
+          owner: 'test',
+          repo: 'repo',
+          pullNumber: 1,
+          title: 'Add retry logic',
+          headSha: 'abc',
+          baseSha: 'def',
+        },
+      });
+
+      expect(prompt).not.toContain('## What Changed');
+      expect(prompt).toContain('## Code Context');
     });
   });
 });
