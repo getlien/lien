@@ -137,15 +137,29 @@ function groupChunksByFile(
   changedFilesSet: Set<string>,
 ): Map<string, CodeChunk[]> {
   const map = new Map<string, CodeChunk[]>();
+  // Separate method chunks as fallback for files with no class/function-level chunks
+  const methodFallback = new Map<string, CodeChunk[]>();
+
   for (const chunk of chunks) {
     const file = chunk.metadata.file;
     if (!changedFilesSet.has(file)) continue;
-    if (chunk.metadata.symbolType === 'method') continue;
+    if (chunk.metadata.symbolType === 'method') {
+      const existing = methodFallback.get(file) ?? [];
+      existing.push(chunk);
+      methodFallback.set(file, existing);
+      continue;
+    }
     if (chunk.metadata.type === 'block' && !chunk.metadata.symbolName) continue;
     const existing = map.get(file) ?? [];
     existing.push(chunk);
     map.set(file, existing);
   }
+
+  // Use method chunks for files that produced no primary chunks (e.g. migrations)
+  for (const [file, fallbackChunks] of methodFallback) {
+    if (!map.has(file)) map.set(file, fallbackChunks);
+  }
+
   return map;
 }
 
@@ -153,6 +167,7 @@ function buildCodeContext(
   chunks: CodeChunk[],
   report: ComplexityReport,
   changedFiles: string[],
+  allChangedFiles: string[],
 ): string {
   const changedFilesSet = new Set(changedFiles);
   const chunksByFile = groupChunksByFile(chunks, changedFilesSet);
@@ -166,6 +181,7 @@ function buildCodeContext(
 
   const sections: string[] = [];
   let totalChars = 0;
+  const shownFiles = new Set<string>();
 
   for (const file of sortedFiles) {
     const fileChunks = chunksByFile.get(file)!;
@@ -177,6 +193,15 @@ function buildCodeContext(
       dependentCount > 0 ? `### ${file} (${dependentCount} dependents)` : `### ${file}`;
     sections.push(`${header}\n\`\`\`\n${fileCode}\n\`\`\``);
     totalChars += fileCode.length;
+    shownFiles.add(file);
+  }
+
+  // List any changed files not represented in the code sections above
+  const notShown = allChangedFiles.filter(f => !shownFiles.has(f));
+  if (notShown.length > 0) {
+    sections.push(
+      `### Files changed (content not available)\n${notShown.map(f => `- ${f}`).join('\n')}`,
+    );
   }
 
   return sections.join('\n\n');
@@ -367,11 +392,12 @@ export class SummaryPlugin implements ReviewPlugin {
     if (!context.llm) return [];
 
     const { chunks, complexityReport, changedFiles, logger } = context;
+    const allChangedFiles = context.allChangedFiles ?? changedFiles;
 
     logger.info('Computing risk signals for summary...');
     const signals = computeRiskSignals(context);
 
-    const codeContext = buildCodeContext(chunks, complexityReport, changedFiles);
+    const codeContext = buildCodeContext(chunks, complexityReport, changedFiles, allChangedFiles);
     const prompt = buildSummaryPrompt(signals, codeContext, context);
     const response = await context.llm.complete(prompt);
 
