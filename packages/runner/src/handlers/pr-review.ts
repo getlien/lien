@@ -211,13 +211,7 @@ export async function handlePRReview(
       );
 
       // Enrich with test associations — non-critical, failures are swallowed
-      try {
-        await enrichWithTestAssociations(currentReport, filesToAnalyze, headClone.dir, logger);
-      } catch (error) {
-        logger.warning(
-          `Test association enrichment failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+      await tryEnrichTestAssociations(currentReport, filesToAnalyze, headClone.dir, logger);
 
       // Clone and analyze base for delta tracking
       try {
@@ -403,6 +397,25 @@ export async function handlePRReview(
     if (logBuffer) await logBuffer.dispose().catch(() => {});
     if (headClone) await headClone.cleanup().catch(() => {});
     if (baseClone) await baseClone.cleanup().catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function tryEnrichTestAssociations(
+  report: ComplexityReport,
+  files: string[],
+  dir: string,
+  logger: Logger,
+): Promise<void> {
+  try {
+    await enrichWithTestAssociations(report, files, dir, logger);
+  } catch (error) {
+    logger.warning(
+      `Test association enrichment failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 

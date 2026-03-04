@@ -49,6 +49,14 @@ export interface RiskSignals {
   uncoveredSourceFileCount: number;
 }
 
+function countUncoveredSourceFiles(files: string[], report: ComplexityReport): number {
+  return files.filter(f => {
+    if (categorizeFile(f) !== 'source') return false;
+    const data = report.files[f];
+    return !data || data.testAssociations.length === 0;
+  }).length;
+}
+
 export function computeRiskSignals(context: ReviewContext): RiskSignals {
   // Use allChangedFiles for categorization so we capture docs/config/infra files
   const allFiles = context.allChangedFiles ?? context.changedFiles;
@@ -93,13 +101,7 @@ export function computeRiskSignals(context: ReviewContext): RiskSignals {
   // Export changes
   const hasExportChanges = detectExportChanges(context);
 
-  // Uncovered source files (source-category files with no test associations)
-  let uncoveredSourceFileCount = 0;
-  for (const file of allFiles) {
-    if (categorizeFile(file) !== 'source') continue;
-    const fileData = context.complexityReport.files[file];
-    if (!fileData || fileData.testAssociations.length === 0) uncoveredSourceFileCount++;
-  }
+  const uncoveredSourceFileCount = countUncoveredSourceFiles(allFiles, context.complexityReport);
 
   return {
     totalFiles: allFiles.length,
@@ -130,23 +132,30 @@ function detectExportChanges(context: ReviewContext): boolean {
 
 const MAX_TOTAL_CHARS = 30_000;
 
+function groupChunksByFile(
+  chunks: CodeChunk[],
+  changedFilesSet: Set<string>,
+): Map<string, CodeChunk[]> {
+  const map = new Map<string, CodeChunk[]>();
+  for (const chunk of chunks) {
+    const file = chunk.metadata.file;
+    if (!changedFilesSet.has(file)) continue;
+    if (chunk.metadata.symbolType === 'method') continue;
+    if (chunk.metadata.type === 'block' && !chunk.metadata.symbolName) continue;
+    const existing = map.get(file) ?? [];
+    existing.push(chunk);
+    map.set(file, existing);
+  }
+  return map;
+}
+
 function buildCodeContext(
   chunks: CodeChunk[],
   report: ComplexityReport,
   changedFiles: string[],
 ): string {
   const changedFilesSet = new Set(changedFiles);
-  const chunksByFile = new Map<string, CodeChunk[]>();
-
-  for (const chunk of chunks) {
-    const file = chunk.metadata.file;
-    if (!changedFilesSet.has(file)) continue;
-    if (chunk.metadata.symbolType === 'method') continue;
-    if (chunk.metadata.type === 'block' && !chunk.metadata.symbolName) continue;
-    const existing = chunksByFile.get(file) ?? [];
-    existing.push(chunk);
-    chunksByFile.set(file, existing);
-  }
+  const chunksByFile = groupChunksByFile(chunks, changedFilesSet);
 
   // Sort files by dependentCount descending
   const sortedFiles = [...chunksByFile.keys()].sort((a, b) => {
