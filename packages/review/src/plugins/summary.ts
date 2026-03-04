@@ -155,6 +155,34 @@ function groupChunksByFile(
   return map;
 }
 
+function appendPatchSections(
+  sections: string[],
+  notShownFiles: string[],
+  prPatches: Map<string, string> | undefined,
+  totalChars: number,
+): void {
+  const listedOnly: string[] = [];
+
+  for (const file of notShownFiles) {
+    const patch = prPatches?.get(file);
+    if (patch) {
+      const section = `### ${file}\n\`\`\`diff\n${patch}\n\`\`\``;
+      if (totalChars + section.length <= MAX_TOTAL_CHARS) {
+        sections.push(section);
+        totalChars += section.length;
+        continue;
+      }
+    }
+    listedOnly.push(file);
+  }
+
+  if (listedOnly.length > 0) {
+    sections.push(
+      `### Files changed (content not available)\n${listedOnly.map(f => `- ${f}`).join('\n')}`,
+    );
+  }
+}
+
 function buildCodeContext(
   chunks: CodeChunk[],
   report: ComplexityReport,
@@ -189,28 +217,8 @@ function buildCodeContext(
     shownFiles.add(file);
   }
 
-  // For files not covered by chunks: fill remaining budget with raw diff patches
   const notShownFiles = allChangedFiles.filter(f => !shownFiles.has(f));
-  const listedOnly: string[] = [];
-
-  for (const file of notShownFiles) {
-    const patch = prPatches?.get(file);
-    if (patch) {
-      const section = `### ${file}\n\`\`\`diff\n${patch}\n\`\`\``;
-      if (totalChars + section.length <= MAX_TOTAL_CHARS) {
-        sections.push(section);
-        totalChars += section.length;
-        continue;
-      }
-    }
-    listedOnly.push(file);
-  }
-
-  if (listedOnly.length > 0) {
-    sections.push(
-      `### Files changed (content not available)\n${listedOnly.map(f => `- ${f}`).join('\n')}`,
-    );
-  }
+  appendPatchSections(sections, notShownFiles, prPatches, totalChars);
 
   return sections.join('\n\n');
 }

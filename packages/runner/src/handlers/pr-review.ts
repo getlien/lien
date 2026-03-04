@@ -129,10 +129,7 @@ export async function handlePRReview(
     );
 
     const summaryEnabled = !!payload.config.review_types.summary;
-    if (summaryEnabled) {
-      const patchData = await getPRPatchData(octokit, prContext);
-      prContext.patches = patchData.patches;
-    }
+    if (summaryEnabled) await tryFetchPRPatches(octokit, prContext);
 
     if (filesToAnalyze.length === 0 && !summaryEnabled) {
       logger.info('No analyzable files, skipping');
@@ -408,6 +405,14 @@ export async function handlePRReview(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+async function tryFetchPRPatches(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+): Promise<void> {
+  const patchData = await getPRPatchData(octokit, prContext);
+  prContext.patches = patchData.patches;
+}
 
 async function tryEnrichTestAssociations(
   report: ComplexityReport,
