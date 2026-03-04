@@ -57,6 +57,24 @@ function countUncoveredSourceFiles(files: string[], report: ComplexityReport): n
   }).length;
 }
 
+function countViolationDeltas(deltas: ReviewContext['deltas']): {
+  newViolations: number;
+  improvedViolations: number;
+} {
+  let newViolations = 0;
+  let improvedViolations = 0;
+  for (const delta of deltas ?? []) {
+    if (delta.severity === 'new' || delta.severity === 'error' || delta.severity === 'warning')
+      newViolations++;
+    if (delta.severity === 'improved' || delta.severity === 'deleted') improvedViolations++;
+  }
+  return { newViolations, improvedViolations };
+}
+
+function countHighRiskFiles(files: string[], report: ComplexityReport): number {
+  return files.filter(f => (report.files[f]?.dependentCount ?? 0) > 0).length;
+}
+
 export function computeRiskSignals(context: ReviewContext): RiskSignals {
   // Use allChangedFiles for categorization so we capture docs/config/infra files
   const allFiles = context.allChangedFiles ?? context.changedFiles;
@@ -69,49 +87,23 @@ export function computeRiskSignals(context: ReviewContext): RiskSignals {
     docs: 0,
     source: 0,
   };
+  for (const file of allFiles) categories[categorizeFile(file)]++;
 
-  for (const file of allFiles) {
-    categories[categorizeFile(file)]++;
-  }
+  const languages = [
+    ...new Set(context.chunks.map(c => c.metadata.language).filter(Boolean)),
+  ].sort() as string[];
 
-  // Languages from chunks
-  const langSet = new Set<string>();
-  for (const chunk of context.chunks) {
-    if (chunk.metadata.language) langSet.add(chunk.metadata.language);
-  }
-
-  // Complexity delta summary
-  let newViolations = 0;
-  let improvedViolations = 0;
-  if (context.deltas) {
-    for (const delta of context.deltas) {
-      if (delta.severity === 'new' || delta.severity === 'error' || delta.severity === 'warning')
-        newViolations++;
-      if (delta.severity === 'improved' || delta.severity === 'deleted') improvedViolations++;
-    }
-  }
-
-  // High-risk files (files with many dependents)
-  let highRiskFileCount = 0;
-  for (const file of allFiles) {
-    const fileData = context.complexityReport.files[file];
-    if (fileData && (fileData.dependentCount ?? 0) > 0) highRiskFileCount++;
-  }
-
-  // Export changes
-  const hasExportChanges = detectExportChanges(context);
-
-  const uncoveredSourceFileCount = countUncoveredSourceFiles(allFiles, context.complexityReport);
+  const { newViolations, improvedViolations } = countViolationDeltas(context.deltas);
 
   return {
     totalFiles: allFiles.length,
     categories,
-    languages: [...langSet].sort(),
+    languages,
     newViolations,
     improvedViolations,
-    highRiskFileCount,
-    hasExportChanges,
-    uncoveredSourceFileCount,
+    highRiskFileCount: countHighRiskFiles(allFiles, context.complexityReport),
+    hasExportChanges: detectExportChanges(context),
+    uncoveredSourceFileCount: countUncoveredSourceFiles(allFiles, context.complexityReport),
   };
 }
 
@@ -163,6 +155,19 @@ function groupChunksByFile(
   return map;
 }
 
+function appendNotShownSection(
+  sections: string[],
+  allChangedFiles: string[],
+  shownFiles: Set<string>,
+): void {
+  const notShown = allChangedFiles.filter(f => !shownFiles.has(f));
+  if (notShown.length > 0) {
+    sections.push(
+      `### Files changed (content not available)\n${notShown.map(f => `- ${f}`).join('\n')}`,
+    );
+  }
+}
+
 function buildCodeContext(
   chunks: CodeChunk[],
   report: ComplexityReport,
@@ -196,13 +201,7 @@ function buildCodeContext(
     shownFiles.add(file);
   }
 
-  // List any changed files not represented in the code sections above
-  const notShown = allChangedFiles.filter(f => !shownFiles.has(f));
-  if (notShown.length > 0) {
-    sections.push(
-      `### Files changed (content not available)\n${notShown.map(f => `- ${f}`).join('\n')}`,
-    );
-  }
+  appendNotShownSection(sections, allChangedFiles, shownFiles);
 
   return sections.join('\n\n');
 }
