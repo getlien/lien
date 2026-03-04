@@ -155,24 +155,12 @@ function groupChunksByFile(
   return map;
 }
 
-function appendNotShownSection(
-  sections: string[],
-  allChangedFiles: string[],
-  shownFiles: Set<string>,
-): void {
-  const notShown = allChangedFiles.filter(f => !shownFiles.has(f));
-  if (notShown.length > 0) {
-    sections.push(
-      `### Files changed (content not available)\n${notShown.map(f => `- ${f}`).join('\n')}`,
-    );
-  }
-}
-
 function buildCodeContext(
   chunks: CodeChunk[],
   report: ComplexityReport,
   changedFiles: string[],
   allChangedFiles: string[],
+  prPatches?: Map<string, string>,
 ): string {
   const changedFilesSet = new Set(changedFiles);
   const chunksByFile = groupChunksByFile(chunks, changedFilesSet);
@@ -201,7 +189,28 @@ function buildCodeContext(
     shownFiles.add(file);
   }
 
-  appendNotShownSection(sections, allChangedFiles, shownFiles);
+  // For files not covered by chunks: fill remaining budget with raw diff patches
+  const notShownFiles = allChangedFiles.filter(f => !shownFiles.has(f));
+  const listedOnly: string[] = [];
+
+  for (const file of notShownFiles) {
+    const patch = prPatches?.get(file);
+    if (patch) {
+      const section = `### ${file}\n\`\`\`diff\n${patch}\n\`\`\``;
+      if (totalChars + section.length <= MAX_TOTAL_CHARS) {
+        sections.push(section);
+        totalChars += section.length;
+        continue;
+      }
+    }
+    listedOnly.push(file);
+  }
+
+  if (listedOnly.length > 0) {
+    sections.push(
+      `### Files changed (content not available)\n${listedOnly.map(f => `- ${f}`).join('\n')}`,
+    );
+  }
 
   return sections.join('\n\n');
 }
@@ -396,7 +405,13 @@ export class SummaryPlugin implements ReviewPlugin {
     logger.info('Computing risk signals for summary...');
     const signals = computeRiskSignals(context);
 
-    const codeContext = buildCodeContext(chunks, complexityReport, changedFiles, allChangedFiles);
+    const codeContext = buildCodeContext(
+      chunks,
+      complexityReport,
+      changedFiles,
+      allChangedFiles,
+      context.pr?.patches,
+    );
     const prompt = buildSummaryPrompt(signals, codeContext, context);
     const response = await context.llm.complete(prompt);
 

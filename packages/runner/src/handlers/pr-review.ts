@@ -20,6 +20,7 @@ import {
   filterAnalyzableFiles,
   enrichWithTestAssociations,
   getPRChangedFiles,
+  getPRPatchData,
   calculateDeltas,
   calculateDeltaSummary,
   ReviewEngine,
@@ -128,6 +129,10 @@ export async function handlePRReview(
     );
 
     const summaryEnabled = !!payload.config.review_types.summary;
+    if (summaryEnabled) {
+      const patchData = await getPRPatchData(octokit, prContext);
+      prContext.patches = patchData.patches;
+    }
 
     if (filesToAnalyze.length === 0 && !summaryEnabled) {
       logger.info('No analyzable files, skipping');

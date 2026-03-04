@@ -16,6 +16,8 @@ export interface PRContext {
   body?: string;
   baseSha: string;
   headSha: string;
+  /** Raw unified diff patches keyed by filename. Populated by the runner when available. */
+  patches?: Map<string, string>;
 }
 
 /**
