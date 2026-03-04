@@ -234,6 +234,31 @@ function buildFileStats(
   return lines.join('\n');
 }
 
+/**
+ * Select which chunks to include given the remaining character budget.
+ * Returns all chunks if they fit, falls back to changed chunks only, or null if nothing fits.
+ */
+function selectChunksForBudget(
+  file: string,
+  fileChunks: CodeChunk[],
+  remainingBudget: number,
+  diffLines: Map<string, Set<number>> | undefined,
+): CodeChunk[] | null {
+  const allCode = fileChunks.map(c => c.content).join('\n\n');
+  if (allCode.length <= remainingBudget) return fileChunks;
+
+  const fileDiffLines = diffLines?.get(file);
+  if (!fileDiffLines || fileDiffLines.size === 0) return null;
+
+  const changedChunks = fileChunks.filter(c =>
+    [...fileDiffLines].some(line => line >= c.metadata.startLine && line <= c.metadata.endLine),
+  );
+  if (changedChunks.length === 0) return null;
+
+  const changedCode = changedChunks.map(c => c.content).join('\n\n');
+  return changedCode.length <= remainingBudget ? changedChunks : null;
+}
+
 function buildFileSection(
   file: string,
   report: ComplexityReport,
@@ -247,28 +272,10 @@ function buildFileSection(
   const header = stats ? `### ${file}\n${stats}` : `### ${file}`;
 
   if (fileChunks) {
-    const allCode = fileChunks.map(c => c.content).join('\n\n');
-
-    // 1. Full file fits → include it (full context is valuable for risk assessment)
-    if (allCode.length <= remainingBudget) {
-      return { text: `${header}\n\`\`\`\n${allCode}\n\`\`\``, contentChars: allCode.length };
-    }
-
-    // 2. Doesn't fit → fallback to changed chunks only
-    const fileDiffLines = diffLines?.get(file);
-    if (fileDiffLines && fileDiffLines.size > 0) {
-      const changedChunks = fileChunks.filter(c =>
-        [...fileDiffLines].some(line => line >= c.metadata.startLine && line <= c.metadata.endLine),
-      );
-      if (changedChunks.length > 0) {
-        const changedCode = changedChunks.map(c => c.content).join('\n\n');
-        if (changedCode.length <= remainingBudget) {
-          return {
-            text: `${header}\n\`\`\`\n${changedCode}\n\`\`\``,
-            contentChars: changedCode.length,
-          };
-        }
-      }
+    const chunks = selectChunksForBudget(file, fileChunks, remainingBudget, diffLines);
+    if (chunks) {
+      const code = chunks.map(c => c.content).join('\n\n');
+      return { text: `${header}\n\`\`\`\n${code}\n\`\`\``, contentChars: code.length };
     }
   }
 
