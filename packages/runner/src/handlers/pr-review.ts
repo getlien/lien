@@ -530,7 +530,7 @@ async function tryPresentFindings(
 export async function computeRepoComplexity(
   cloneDir: string,
   threshold: string,
-  logger: Logger,
+  _logger?: Logger,
 ): Promise<{ report: ComplexityReport; avgComplexity: number; maxComplexity: number } | null> {
   const indexResult = await performChunkOnlyIndex(cloneDir);
   if (!indexResult.success || !indexResult.chunks || indexResult.chunks.length === 0) {
