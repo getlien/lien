@@ -30,6 +30,7 @@ import {
   OpenRouterLLMClient,
 } from '@liendev/review';
 import type { CodeChunk } from '@liendev/parser';
+import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
 
 import type {
   PRJobPayload,
@@ -132,7 +133,16 @@ export async function handlePRReview(
     if (summaryEnabled) await tryFetchPRPatches(octokit, prContext, logger);
 
     if (filesToAnalyze.length === 0 && !summaryEnabled) {
-      logger.info('No analyzable files, skipping');
+      logger.info('No analyzable files — running full-repo complexity scan');
+      const repoResult = await computeRepoComplexity(
+        headClone.dir,
+        payload.config.threshold,
+        logger,
+      );
+      const repoAvg = repoResult?.avgComplexity ?? 0;
+      const repoMax = repoResult?.maxComplexity ?? 0;
+      const repoSnapshots = repoResult ? buildComplexitySnapshots(repoResult.report) : [];
+
       if (checkRunId) {
         await updateCheckRun(
           octokit,
@@ -157,11 +167,11 @@ export async function handlePRReview(
         'completed',
         committedAt,
         filesAnalyzed,
+        repoAvg,
+        repoMax,
         0,
         0,
-        0,
-        0,
-        [],
+        repoSnapshots,
         [],
         reviewRunId,
         logger,
@@ -241,18 +251,29 @@ export async function handlePRReview(
         : null;
     } else {
       // No complexity-analyzable files but summary plugin is enabled
-      logger.info('No complexity-analyzable files, running summary-only');
-      logBuffer?.add('info', 'No complexity-analyzable files, running summary-only');
-      currentReport = {
-        files: {},
-        summary: {
-          filesAnalyzed: 0,
-          totalViolations: 0,
-          bySeverity: { error: 0, warning: 0 },
-          avgComplexity: 0,
-          maxComplexity: 0,
-        },
-      };
+      logger.info('No complexity-analyzable files — running full-repo scan + summary');
+      logBuffer?.add('info', 'No complexity-analyzable files, running full-repo scan + summary');
+      const repoResult = await computeRepoComplexity(
+        headClone.dir,
+        payload.config.threshold,
+        logger,
+      );
+      if (repoResult) {
+        currentReport = repoResult.report;
+        avgComplexity = repoResult.avgComplexity;
+        maxComplexity = repoResult.maxComplexity;
+      } else {
+        currentReport = {
+          files: {},
+          summary: {
+            filesAnalyzed: 0,
+            totalViolations: 0,
+            bySeverity: { error: 0, warning: 0 },
+            avgComplexity: 0,
+            maxComplexity: 0,
+          },
+        };
+      }
     }
 
     // Setup engine with enabled plugins
@@ -435,6 +456,34 @@ async function tryEnrichTestAssociations(
       `Test association enrichment failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+/**
+ * Full-repo complexity scan on an already-cloned directory.
+ * Used when a PR touches no analyzable files so we still report real scores.
+ */
+export async function computeRepoComplexity(
+  cloneDir: string,
+  threshold: string,
+  logger: Logger,
+): Promise<{ report: ComplexityReport; avgComplexity: number; maxComplexity: number } | null> {
+  const indexResult = await performChunkOnlyIndex(cloneDir);
+  if (!indexResult.success || !indexResult.chunks || indexResult.chunks.length === 0) {
+    return null;
+  }
+
+  const thresholdNum = parseInt(threshold, 10);
+  const report = analyzeComplexityFromChunks(
+    indexResult.chunks,
+    [...new Set(indexResult.chunks.map(c => c.metadata.file))],
+    !isNaN(thresholdNum) ? { testPaths: thresholdNum, mentalLoad: thresholdNum } : undefined,
+  );
+
+  return {
+    report,
+    avgComplexity: report.summary.avgComplexity,
+    maxComplexity: report.summary.maxComplexity,
+  };
 }
 
 // ---------------------------------------------------------------------------
