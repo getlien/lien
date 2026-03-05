@@ -13,6 +13,7 @@ import {
   type ReviewFinding,
   type ComplexityReport,
   type ComplexityDelta,
+  type AdapterContext,
   createOctokit,
   createCheckRun,
   updateCheckRun,
@@ -139,27 +140,7 @@ export async function handlePRReview(
         payload.config.threshold,
         logger,
       );
-      const repoAvg = repoResult?.avgComplexity ?? 0;
-      const repoMax = repoResult?.maxComplexity ?? 0;
-      const repoSnapshots = repoResult ? buildComplexitySnapshots(repoResult.report) : [];
-
-      if (checkRunId) {
-        await updateCheckRun(
-          octokit,
-          {
-            owner: prContext.owner,
-            repo: prContext.repo,
-            checkRunId,
-            status: 'completed',
-            conclusion: 'success',
-            output: {
-              title: 'No code files changed',
-              summary: 'No files eligible for complexity analysis.',
-            },
-          },
-          logger,
-        ).catch(err => logger.warning(`Failed to finalize check run: ${err}`));
-      }
+      await finalizeCheckRunNoFiles(checkRunId, octokit, prContext, logger);
       await postResult(
         config,
         payload,
@@ -167,11 +148,11 @@ export async function handlePRReview(
         'completed',
         committedAt,
         filesAnalyzed,
-        repoAvg,
-        repoMax,
+        repoResult?.avgComplexity ?? 0,
+        repoResult?.maxComplexity ?? 0,
         0,
         0,
-        repoSnapshots,
+        repoResult ? buildComplexitySnapshots(repoResult.report) : [],
         [],
         reviewRunId,
         logger,
@@ -179,102 +160,40 @@ export async function handlePRReview(
       return;
     }
 
-    // Run complexity analysis when there are analyzable files
-    let currentReport: ComplexityReport;
-    let chunks: CodeChunk[] = [];
-    let baselineReport: ComplexityReport | null = null;
-    let deltas: ComplexityDelta[] | null = null;
-
-    if (filesToAnalyze.length > 0) {
-      const headResult = await runComplexityAnalysis(
-        filesToAnalyze,
-        reviewConfig.threshold,
-        headClone.dir,
+    // Run complexity analysis (head+base when files analyzable, full-repo scan otherwise)
+    const analysis = await runAnalysisPhase(
+      filesToAnalyze,
+      reviewConfig.threshold,
+      headClone.dir,
+      repository.full_name,
+      pr.base_sha,
+      auth.installation_token,
+      logBuffer,
+      logger,
+    );
+    if (!analysis) {
+      await postResult(
+        config,
+        payload,
+        startedAt,
+        'failed',
+        committedAt,
+        filesAnalyzed,
+        0,
+        0,
+        0,
+        0,
+        [],
+        [],
+        reviewRunId,
         logger,
       );
-      if (!headResult) {
-        logger.warning('Failed to get complexity report for head');
-        await postResult(
-          config,
-          payload,
-          startedAt,
-          'failed',
-          committedAt,
-          filesAnalyzed,
-          0,
-          0,
-          0,
-          0,
-          [],
-          [],
-          reviewRunId,
-          logger,
-        );
-        return;
-      }
-
-      currentReport = headResult.report;
-      chunks = headResult.chunks;
-      avgComplexity = currentReport.summary.avgComplexity;
-      maxComplexity = currentReport.summary.maxComplexity;
-      logBuffer?.add(
-        'info',
-        `Head analysis complete: avg ${avgComplexity.toFixed(1)}, max ${maxComplexity}`,
-      );
-
-      // Enrich with test associations — non-critical, failures are swallowed
-      await tryEnrichTestAssociations(currentReport, filesToAnalyze, headClone.dir, logger);
-
-      // Clone and analyze base for delta tracking
-      try {
-        baseClone = await cloneBySha(
-          repository.full_name,
-          pr.base_sha,
-          auth.installation_token,
-          logger,
-        );
-        const baseResult = await runComplexityAnalysis(
-          filesToAnalyze,
-          reviewConfig.threshold,
-          baseClone.dir,
-          logger,
-        );
-        baselineReport = baseResult?.report ?? null;
-      } catch (error) {
-        logger.warning(
-          `Failed to analyze base branch: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-
-      deltas = baselineReport
-        ? calculateDeltas(baselineReport, currentReport, filesToAnalyze)
-        : null;
-    } else {
-      // No complexity-analyzable files but summary plugin is enabled
-      logger.info('No complexity-analyzable files — running full-repo scan + summary');
-      logBuffer?.add('info', 'No complexity-analyzable files, running full-repo scan + summary');
-      const repoResult = await computeRepoComplexity(
-        headClone.dir,
-        payload.config.threshold,
-        logger,
-      );
-      if (repoResult) {
-        currentReport = repoResult.report;
-        avgComplexity = repoResult.avgComplexity;
-        maxComplexity = repoResult.maxComplexity;
-      } else {
-        currentReport = {
-          files: {},
-          summary: {
-            filesAnalyzed: 0,
-            totalViolations: 0,
-            bySeverity: { error: 0, warning: 0 },
-            avgComplexity: 0,
-            maxComplexity: 0,
-          },
-        };
-      }
+      return;
     }
+    const { currentReport, chunks, baselineReport, deltas } = analysis;
+    avgComplexity = analysis.avgComplexity;
+    maxComplexity = analysis.maxComplexity;
+    baseClone = analysis.baseClone;
 
     // Setup engine with enabled plugins
     const engine = new ReviewEngine();
@@ -328,32 +247,15 @@ export async function handlePRReview(
       blockOnNewErrors: reviewConfig.blockOnNewErrors,
     };
 
-    try {
-      await engine.present(findings, adapterContext, {
-        checkRunId,
-      });
-    } catch (error) {
-      logger.error(
-        `engine.present() failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      if (checkRunId) {
-        await updateCheckRun(
-          octokit,
-          {
-            owner: prContext.owner,
-            repo: prContext.repo,
-            checkRunId,
-            status: 'completed',
-            conclusion: 'action_required',
-            output: {
-              title: 'Review failed',
-              summary: `An error occurred: ${error instanceof Error ? error.message : String(error)}`,
-            },
-          },
-          logger,
-        ).catch(err => logger.warning(`Failed to finalize check run after error: ${err}`));
-      }
-    }
+    await tryPresentFindings(
+      engine,
+      findings,
+      adapterContext,
+      checkRunId,
+      octokit,
+      prContext,
+      logger,
+    );
 
     // Collect usage stats
     if (llm) {
@@ -455,6 +357,169 @@ async function tryEnrichTestAssociations(
     logger.warning(
       `Test association enrichment failed: ${error instanceof Error ? error.message : String(error)}`,
     );
+  }
+}
+
+async function finalizeCheckRunNoFiles(
+  checkRunId: number | undefined,
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  logger: Logger,
+): Promise<void> {
+  if (!checkRunId) return;
+  await updateCheckRun(
+    octokit,
+    {
+      owner: prContext.owner,
+      repo: prContext.repo,
+      checkRunId,
+      status: 'completed',
+      conclusion: 'success',
+      output: {
+        title: 'No code files changed',
+        summary: 'No files eligible for complexity analysis.',
+      },
+    },
+    logger,
+  ).catch(err => logger.warning(`Failed to finalize check run: ${err}`));
+}
+
+interface AnalysisPhaseResult {
+  currentReport: ComplexityReport;
+  chunks: CodeChunk[];
+  avgComplexity: number;
+  maxComplexity: number;
+  baselineReport: ComplexityReport | null;
+  deltas: ComplexityDelta[] | null;
+  baseClone: CloneResult | null;
+}
+
+async function runAnalysisPhase(
+  filesToAnalyze: string[],
+  threshold: string,
+  headCloneDir: string,
+  repoFullName: string,
+  baseSha: string,
+  installationToken: string,
+  logBuffer: LogBuffer | null,
+  logger: Logger,
+): Promise<AnalysisPhaseResult | null> {
+  if (filesToAnalyze.length > 0) {
+    const headResult = await runComplexityAnalysis(filesToAnalyze, threshold, headCloneDir, logger);
+    if (!headResult) {
+      logger.warning('Failed to get complexity report for head');
+      return null;
+    }
+
+    const currentReport = headResult.report;
+    const avgComplexity = currentReport.summary.avgComplexity;
+    const maxComplexity = currentReport.summary.maxComplexity;
+    logBuffer?.add(
+      'info',
+      `Head analysis complete: avg ${avgComplexity.toFixed(1)}, max ${maxComplexity}`,
+    );
+
+    await tryEnrichTestAssociations(currentReport, filesToAnalyze, headCloneDir, logger);
+
+    let baseClone: CloneResult | null = null;
+    let baselineReport: ComplexityReport | null = null;
+    try {
+      baseClone = await cloneBySha(repoFullName, baseSha, installationToken, logger);
+      const baseResult = await runComplexityAnalysis(
+        filesToAnalyze,
+        threshold,
+        baseClone.dir,
+        logger,
+      );
+      baselineReport = baseResult?.report ?? null;
+    } catch (error) {
+      logger.warning(
+        `Failed to analyze base branch: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    const deltas = baselineReport
+      ? calculateDeltas(baselineReport, currentReport, filesToAnalyze)
+      : null;
+
+    return {
+      currentReport,
+      chunks: headResult.chunks,
+      avgComplexity,
+      maxComplexity,
+      baselineReport,
+      deltas,
+      baseClone,
+    };
+  }
+
+  // No complexity-analyzable files — run full-repo scan for summary-only path
+  logger.info('No complexity-analyzable files — running full-repo scan + summary');
+  logBuffer?.add('info', 'No complexity-analyzable files, running full-repo scan + summary');
+  const repoResult = await computeRepoComplexity(headCloneDir, threshold, logger);
+  if (repoResult) {
+    return {
+      currentReport: repoResult.report,
+      chunks: [],
+      avgComplexity: repoResult.avgComplexity,
+      maxComplexity: repoResult.maxComplexity,
+      baselineReport: null,
+      deltas: null,
+      baseClone: null,
+    };
+  }
+  return {
+    currentReport: {
+      files: {},
+      summary: {
+        filesAnalyzed: 0,
+        totalViolations: 0,
+        bySeverity: { error: 0, warning: 0 },
+        avgComplexity: 0,
+        maxComplexity: 0,
+      },
+    },
+    chunks: [],
+    avgComplexity: 0,
+    maxComplexity: 0,
+    baselineReport: null,
+    deltas: null,
+    baseClone: null,
+  };
+}
+
+async function tryPresentFindings(
+  engine: ReviewEngine,
+  findings: ReviewFinding[],
+  adapterContext: AdapterContext,
+  checkRunId: number | undefined,
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  logger: Logger,
+): Promise<void> {
+  try {
+    await engine.present(findings, adapterContext, { checkRunId });
+  } catch (error) {
+    logger.error(
+      `engine.present() failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    if (checkRunId) {
+      await updateCheckRun(
+        octokit,
+        {
+          owner: prContext.owner,
+          repo: prContext.repo,
+          checkRunId,
+          status: 'completed',
+          conclusion: 'action_required',
+          output: {
+            title: 'Review failed',
+            summary: `An error occurred: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        },
+        logger,
+      ).catch(err => logger.warning(`Failed to finalize check run after error: ${err}`));
+    }
   }
 }
 
