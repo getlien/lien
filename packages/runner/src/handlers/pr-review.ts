@@ -360,7 +360,7 @@ async function tryEnrichTestAssociations(
   }
 }
 
-async function finalizeCheckRunNoFiles(
+export async function finalizeCheckRunNoFiles(
   checkRunId: number | undefined,
   octokit: ReturnType<typeof createOctokit>,
   prContext: PRContext,
@@ -384,7 +384,7 @@ async function finalizeCheckRunNoFiles(
   ).catch(err => logger.warning(`Failed to finalize check run: ${err}`));
 }
 
-interface AnalysisPhaseResult {
+export interface AnalysisPhaseResult {
   currentReport: ComplexityReport;
   chunks: CodeChunk[];
   avgComplexity: number;
@@ -394,7 +394,7 @@ interface AnalysisPhaseResult {
   baseClone: CloneResult | null;
 }
 
-async function runAnalysisPhase(
+export async function runAnalysisPhase(
   filesToAnalyze: string[],
   threshold: string,
   headCloneDir: string,
@@ -488,7 +488,7 @@ async function runAnalysisPhase(
   };
 }
 
-async function tryPresentFindings(
+export async function tryPresentFindings(
   engine: ReviewEngine,
   findings: ReviewFinding[],
   adapterContext: AdapterContext,
