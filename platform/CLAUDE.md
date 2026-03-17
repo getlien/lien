@@ -1,14 +1,10 @@
 # Lien Platform
 
+> Platform-specific rules. Root `CLAUDE.md` applies for shared principles (KISS, YAGNI, DRY, commits, documentation organization).
+
 ## What is Lien Platform?
 
 The web platform for **Lien Review** — AI-powered code review as a service. Built with Laravel 12, Inertia.js + Vue 3, Tailwind CSS 4, PostgreSQL, and Valkey (Redis-compatible).
-
-**Key facts:**
-- Package: `liendev/lien-platform`
-- Domain: lien.dev
-- License: Proprietary
-- Companion repos: [`@liendev/lien`](https://github.com/getlien/lien) (core semantic search engine)
 
 **Stack:**
 - **Backend:** Laravel 12, PHP 8.4
@@ -28,30 +24,8 @@ The product requirements document lives at `.wip/prd.md` (symlinked from the lie
 
 ---
 
-## Core Principles
+## Data Transfer Objects
 
-### KISS (Keep It Simple, Stupid)
-- Simple > Clever
-- Code junior devs can understand
-
-### YAGNI (You Aren't Gonna Need It)
-- Don't build "just in case"
-- Wait for actual need
-- Delete unused code aggressively
-
-### DRY (Don't Repeat Yourself)
-- But don't abstract too early (wait for 3rd use)
-- Duplication > wrong abstraction
-
-### Single Responsibility
-- Each function does ONE thing
-- If you can't explain it in one sentence, split it
-
-### Fail Fast
-- Validate inputs early
-- Throw errors immediately
-
-### Data Transfer Objects
 - Prefer typed DTO classes over associative arrays when passing data between layers (controllers, services, jobs)
 - Use constructor property promotion with `readonly` properties
 - DTOs should have a static `fromRequest()` or `fromArray()` factory method
@@ -66,22 +40,6 @@ The product requirements document lives at `.wip/prd.md` (symlinked from the lie
 - **Database columns:** snake_case (`created_at`, `github_id`)
 - **Vue Components/Pages:** PascalCase files (`Dashboard.vue`, `ReviewDetail.vue`)
 - **Config keys:** kebab-case (`services.github`)
-
----
-
-## Commits
-
-Follow Conventional Commits:
-- `feat(scope): description` — New feature
-- `fix(scope): description` — Bug fix
-- `docs(scope): description` — Documentation
-- `refactor(scope): description` — Code refactor
-- `test(scope): description` — Tests
-- `chore(scope): description` — Maintenance
-
-**NEVER use `git commit --amend`.** Always create new commits.
-
-**No AI attribution in commits or PRs.** Do not add `Co-Authored-By` lines or AI tool branding.
 
 ---
 
@@ -121,32 +79,6 @@ php artisan migrate                  # Run migrations
 npm run dev                          # Vite dev server
 php artisan test                     # Run tests
 ```
-
----
-
-## Documentation Organization
-
-### Temporary Documentation
-
-**ALL temporary documents MUST go in `.wip/` folder (gitignored).**
-
-Examples: implementation plans, analysis reports, session notes, benchmarks.
-
-### Permanent Documentation
-
-Lives in project root or `docs/` and is tracked in git:
-- `README.md` — Project documentation
-- `CHANGELOG.md` — Release history
-- `docs/` — Architecture and design docs
-
----
-
-## When in Doubt
-
-1. Prefer readability over cleverness
-2. Make it work, then make it good, then (maybe) make it fast
-3. Delete code rather than comment it out
-4. Ask: "Will I understand this in 6 months?"
 
 ---
 
@@ -267,7 +199,6 @@ This project has domain-specific skills available. You MUST activate the relevan
 - Always use explicit return type declarations for methods and functions.
 - Use appropriate PHP type hints for method parameters.
 
-<!-- Explicit Return Types and Method Params -->
 ```php
 protected function isAccessible(User $user, ?string $path = null): bool
 {
