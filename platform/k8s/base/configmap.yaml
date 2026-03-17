@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: laravel-config
+  namespace: lien
+data:
+  APP_NAME: "Lien Platform"
+  APP_ENV: "local"
+  APP_DEBUG: "true"
+  APP_URL: "http://lien.k8s.orb.local"
+  APP_LOCALE: "en"
+  APP_FALLBACK_LOCALE: "en"
+  APP_FAKER_LOCALE: "en_US"
+  APP_MAINTENANCE_DRIVER: "file"
+  BCRYPT_ROUNDS: "12"
+  LOG_CHANNEL: "stack"
+  LOG_STACK: "stderr"
+  LOG_DEPRECATIONS_CHANNEL: "null"
+  LOG_LEVEL: "debug"
+  DB_CONNECTION: "pgsql"
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  DB_DATABASE: "lien_platform"
+  SESSION_DRIVER: "redis"
+  SESSION_LIFETIME: "120"
+  SESSION_ENCRYPT: "false"
+  SESSION_PATH: "/"
+  BROADCAST_CONNECTION: "log"
+  FILESYSTEM_DISK: "local"
+  QUEUE_CONNECTION: "redis"
+  CACHE_STORE: "redis"
+  REDIS_CLIENT: "predis"
+  REDIS_HOST: "valkey"
+  REDIS_PORT: "6379"
+  REDIS_SCHEME: "tcp"
+  NATS_HOST: "nats"
+  NATS_PORT: "4222"
+  MAIL_MAILER: "log"

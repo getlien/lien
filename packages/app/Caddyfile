@@ -1,4 +1,0 @@
-review.lien.dev {
-	tls /etc/ssl/certs/lien-review.pem /etc/ssl/certs/lien-review.key
-	reverse_proxy lien-review:3000
-}

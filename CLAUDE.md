@@ -9,7 +9,11 @@ Local-first semantic code search tool providing context to AI coding assistants 
 - Port: 7133 (L=7, I=1, E=3, N=3)
 - License: AGPL-3.0 | Domain: lien.dev
 
-**Structure:**
+**Monorepo Structure:**
+- `packages/` — TypeScript packages (parser, core, review, cli, runner, site)
+- `platform/` — Laravel 12 web app for Lien Review (see `platform/CLAUDE.md` for platform-specific rules)
+
+**Package Structure:**
 ```
 packages/cli/src/
 ├── cli/         # Commands (init, index, serve, status)

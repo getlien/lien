@@ -1,0 +1,27 @@
+# Terraform
+*.tfplan
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform.tfvars
+
+# Laravel
+.env.backup
+.env.production
+/.phpunit.cache
+.phpunit.result.cache
+.phpactor.json
+/auth.json
+/vendor
+/public/build
+/public/hot
+/public/storage
+/storage/*.key
+/storage/pail
+Homestead.json
+Homestead.yaml
+
+# Editor
+/.fleet
+/.nova
+/.zed
