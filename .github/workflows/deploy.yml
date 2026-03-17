@@ -178,12 +178,12 @@ jobs:
           GITHUB_REDIRECT_URI=https://app.lien.dev/auth/github/callback
           LIEN_SERVICE_TOKEN=$LIEN_SERVICE_TOKEN
           GH_APP_ID=$GH_APP_ID
-          GH_APP_PRIVATE_KEY=$GH_APP_PRIVATE_KEY
           GH_WEBHOOK_SECRET=$GH_WEBHOOK_SECRET
           EOF
           kubectl create secret generic laravel-secret \
             --namespace=lien \
             --from-env-file=/tmp/secret.env \
+            --from-literal="GH_APP_PRIVATE_KEY=$GH_APP_PRIVATE_KEY" \
             --dry-run=client -o yaml | kubectl apply -f -
           rm -f /tmp/secret.env
           cat > /tmp/runner-secret.env <<EOF
