@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: laravel-worker
+  namespace: lien
+spec:
+  template:
+    spec:
+      containers:
+        - name: worker
+          image: registry.digitalocean.com/getlien/lien-platform:${IMAGE_TAG}
+          imagePullPolicy: Always

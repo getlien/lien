@@ -1,0 +1,102 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nats-setup
+  namespace: lien
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: nats-setup
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-nats
+          image: natsio/nats-box:0.14.6
+          command:
+            - sh
+            - -c
+            - |
+              until nats server check connection -s nats://nats:4222 2>/dev/null; do
+                echo "Waiting for NATS..."
+                sleep 2
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: setup
+          image: natsio/nats-box:0.14.6
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+
+              SERVER="nats://nats:4222"
+
+              echo "==> Configuring 'reviews' stream..."
+              if nats stream info reviews --server "$SERVER" >/dev/null 2>&1; then
+                echo "    Stream exists, updating..."
+                nats stream edit reviews \
+                  --server "$SERVER" \
+                  --subjects "reviews.>" \
+                  --discard old \
+                  --max-age 24h \
+                  --max-bytes 256MB \
+                  --max-msg-size 1MB \
+                  --force
+              else
+                echo "    Creating stream..."
+                nats stream add reviews \
+                  --server "$SERVER" \
+                  --subjects "reviews.>" \
+                  --retention work \
+                  --storage file \
+                  --replicas 1 \
+                  --discard old \
+                  --max-age 24h \
+                  --max-bytes 256MB \
+                  --max-msg-size 1MB \
+                  --defaults
+              fi
+
+              echo "==> Configuring 'reviews-runner' consumer..."
+              if nats consumer info reviews reviews-runner --server "$SERVER" >/dev/null 2>&1; then
+                echo "    Consumer exists, updating..."
+                nats consumer edit reviews reviews-runner \
+                  --server "$SERVER" \
+                  --max-deliver 5 \
+                  --max-pending 1 \
+                  --wait 10m \
+                  --force
+              else
+                echo "    Creating consumer..."
+                nats consumer add reviews reviews-runner \
+                  --server "$SERVER" \
+                  --ack explicit \
+                  --deliver all \
+                  --max-deliver 5 \
+                  --max-pending 1 \
+                  --ack-wait 10m \
+                  --pull \
+                  --defaults
+              fi
+
+              echo "==> Verifying setup..."
+              nats stream info reviews --server "$SERVER"
+              nats consumer info reviews reviews-runner --server "$SERVER"
+              echo "==> NATS setup complete."
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: laravel-config
+  namespace: lien
+data:
+  APP_ENV: "production"
+  APP_DEBUG: "false"
+  APP_URL: "https://app.lien.dev"
+  LOG_LEVEL: "warning"
+  DB_HOST: "${PG_HOST}"
+  DB_PORT: "${PG_PORT}"
+  DB_DATABASE: "lien_platform"
+  DB_SSLMODE: "require"
+  REDIS_HOST: "${VALKEY_HOST}"
+  REDIS_PORT: "${VALKEY_PORT}"
+  REDIS_SCHEME: "tls"
+  SESSION_ENCRYPT: "true"
