@@ -1,0 +1,12 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: laravel-migrate
+  namespace: lien
+spec:
+  template:
+    spec:
+      containers:
+        - name: migrate
+          image: registry.digitalocean.com/getlien/lien-platform:${IMAGE_TAG}
+          imagePullPolicy: Always

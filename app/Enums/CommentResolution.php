@@ -1,0 +1,9 @@
+<?php
+
+namespace App\Enums;
+
+enum CommentResolution: string
+{
+    case Resolved = 'resolved';
+    case Dismissed = 'dismissed';
+}

@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runner
+  namespace: lien
+spec:
+  template:
+    spec:
+      containers:
+        - name: runner
+          image: registry.digitalocean.com/getlien/lien-runner:${IMAGE_TAG}
+          imagePullPolicy: Always

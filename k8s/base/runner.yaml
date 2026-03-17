@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runner
+  namespace: lien
+spec:
+  replicas: 3
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: runner
+  template:
+    metadata:
+      labels:
+        app: runner
+    spec:
+      initContainers:
+        - name: wait-for-nats
+          image: natsio/nats-box:0.14.6
+          command:
+            - sh
+            - -c
+            - |
+              MAX_ATTEMPTS=60
+              ATTEMPT=1
+              until nats server check connection -s nats://nats:4222 2>/dev/null; do
+                if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
+                  echo "ERROR: NATS not ready after $MAX_ATTEMPTS attempts."
+                  exit 1
+                fi
+                echo "Waiting for NATS... ($ATTEMPT/$MAX_ATTEMPTS)"
+                ATTEMPT=$((ATTEMPT + 1))
+                sleep 2
+              done
+              echo "NATS is ready."
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: runner
+          image: lien-runner:latest
+          imagePullPolicy: Never
+          env:
+            - name: NATS_URL
+              value: "nats://nats:4222"
+            - name: LARAVEL_API_URL
+              value: "http://laravel.lien.svc.cluster.local"
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: runner-secret
+                  key: OPENROUTER_API_KEY
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          volumeMounts:
+            - name: scratch
+              mountPath: /tmp
+      volumes:
+        - name: scratch
+          emptyDir:
+            sizeLimit: 2Gi

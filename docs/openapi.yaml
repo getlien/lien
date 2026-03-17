@@ -1,0 +1,568 @@
+openapi: 3.1.0
+info:
+  title: Lien Review Platform API
+  version: 1.0.0
+  description: >
+    Internal API for communication between the `@liendev/lien` review engine
+    and the Lien Review platform backend. All endpoints require a shared
+    service token (`LIEN_SERVICE_TOKEN`) sent as a Bearer token.
+  contact:
+    name: Lien Review
+    url: https://lien.dev
+
+servers:
+  - url: https://lien.dev/api/v1
+    description: Production
+  - url: http://localhost/api/v1
+    description: Local development
+
+tags:
+  - name: Repository Config
+    description: Per-repo review configuration (merged plan defaults + overrides)
+  - name: Review Runs
+    description: Review run lifecycle (creation and status updates)
+
+security:
+  - ServiceToken: []
+
+paths:
+  /repos/{repository}/config:
+    get:
+      operationId: getRepoConfig
+      summary: Get merged review configuration
+      description: >
+        Returns the merged review configuration for a repository. The response
+        combines plan-level defaults with per-repo overrides set via the
+        dashboard.
+      tags:
+        - Repository Config
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      responses:
+        '200':
+          description: Merged configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergedConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      operationId: updateRepoConfig
+      summary: Update per-repo review configuration
+      description: >
+        Updates per-repo review configuration overrides. Returns the new merged
+        configuration (plan defaults + updated overrides).
+      tags:
+        - Repository Config
+      parameters:
+        - $ref: '#/components/parameters/RepositoryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRepoConfigRequest'
+      responses:
+        '200':
+          description: Updated merged configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergedConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /review-runs:
+    post:
+      operationId: storeReviewRun
+      summary: Report a completed review run
+      description: >
+        Persists metrics, complexity snapshots, and review comments for a
+        review run. Uses upsert semantics keyed on
+        `(repository_id, idempotency_key)` — duplicate submissions update the
+        existing run rather than creating a new record.
+      tags:
+        - Review Runs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreReviewRunRequest'
+      responses:
+        '201':
+          description: Review run created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRunCreated'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /review-runs/{reviewRun}/status:
+    post:
+      operationId: updateReviewRunStatus
+      summary: Update review run status
+      description: >
+        Updates the status of an existing review run (e.g. from `pending` to
+        `running`, or from `running` to `completed`/`failed`).
+      tags:
+        - Review Runs
+      parameters:
+        - $ref: '#/components/parameters/ReviewRunId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateReviewRunStatusRequest'
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRunStatusUpdated'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+components:
+  securitySchemes:
+    ServiceToken:
+      type: http
+      scheme: bearer
+      description: >
+        Single shared service token (`LIEN_SERVICE_TOKEN`). Compared via
+        `hash_equals` on the backend. Used exclusively for machine-to-machine
+        communication between the review engine and the platform.
+
+  parameters:
+    RepositoryId:
+      name: repository
+      in: path
+      required: true
+      description: Repository ID (resolved via route-model binding)
+      schema:
+        type: integer
+
+    ReviewRunId:
+      name: reviewRun
+      in: path
+      required: true
+      description: Review run ID (resolved via route-model binding)
+      schema:
+        type: integer
+
+  schemas:
+    # ------------------------------------------------------------------
+    # Enums
+    # ------------------------------------------------------------------
+    ReviewRunStatus:
+      type: string
+      enum:
+        - pending
+        - running
+        - completed
+        - failed
+
+    Severity:
+      type: string
+      enum:
+        - error
+        - warning
+        - info
+        - none
+
+    ReviewCommentStatus:
+      type: string
+      enum:
+        - posted
+        - skipped
+        - suppressed
+        - deduped
+
+    PlanTier:
+      type: string
+      enum:
+        - free
+        - solo
+        - team
+        - business
+        - business_plus
+        - enterprise
+
+    ArchitecturalEnabled:
+      type: string
+      enum:
+        - always
+        - disabled
+        - auto
+
+    # ------------------------------------------------------------------
+    # Request bodies
+    # ------------------------------------------------------------------
+    StoreReviewRunRequest:
+      type: object
+      required:
+        - repository_id
+        - pr_number
+        - head_sha
+        - base_sha
+        - idempotency_key
+      properties:
+        repository_id:
+          type: integer
+        pr_number:
+          type: integer
+          minimum: 1
+        head_sha:
+          type: string
+          minLength: 40
+          maxLength: 40
+          pattern: '^[0-9a-f]{40}$'
+        base_sha:
+          type: string
+          minLength: 40
+          maxLength: 40
+          pattern: '^[0-9a-f]{40}$'
+        idempotency_key:
+          type: string
+          maxLength: 64
+        started_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        completed_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        status:
+          $ref: '#/components/schemas/ReviewRunStatus'
+        files_analyzed:
+          type: integer
+          minimum: 0
+        avg_complexity:
+          type:
+            - number
+            - 'null'
+          minimum: 0
+        max_complexity:
+          type:
+            - number
+            - 'null'
+          minimum: 0
+        token_usage:
+          type: integer
+          minimum: 0
+        cost:
+          type: number
+          minimum: 0
+        summary_comment_id:
+          type:
+            - integer
+            - 'null'
+        complexity_snapshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplexitySnapshot'
+        review_comments:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewComment'
+    UpdateReviewRunStatusRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          $ref: '#/components/schemas/ReviewRunStatus'
+
+    UpdateRepoConfigRequest:
+      type: object
+      required:
+        - review_config
+      properties:
+        review_config:
+          $ref: '#/components/schemas/ReviewConfigOverrides'
+
+    # ------------------------------------------------------------------
+    # Nested objects
+    # ------------------------------------------------------------------
+    ComplexitySnapshot:
+      type: object
+      required:
+        - filepath
+        - symbol_name
+        - symbol_type
+        - cyclomatic
+        - cognitive
+        - line_start
+        - line_end
+      properties:
+        filepath:
+          type: string
+        symbol_name:
+          type: string
+        symbol_type:
+          type: string
+        cyclomatic:
+          type: integer
+          minimum: 0
+        cognitive:
+          type: integer
+          minimum: 0
+        halstead_effort:
+          type:
+            - number
+            - 'null'
+        halstead_bugs:
+          type:
+            - number
+            - 'null'
+        line_start:
+          type: integer
+          minimum: 1
+        line_end:
+          type: integer
+          minimum: 1
+        delta_cyclomatic:
+          type:
+            - integer
+            - 'null'
+        delta_cognitive:
+          type:
+            - integer
+            - 'null'
+        severity:
+          $ref: '#/components/schemas/Severity'
+
+    ReviewComment:
+      type: object
+      required:
+        - review_type
+        - filepath
+        - line
+        - body
+        - status
+      properties:
+        review_type:
+          type: string
+        filepath:
+          type: string
+        line:
+          type: integer
+          minimum: 1
+        symbol_name:
+          type:
+            - string
+            - 'null'
+        body:
+          type: string
+        status:
+          $ref: '#/components/schemas/ReviewCommentStatus'
+        github_comment_id:
+          type:
+            - integer
+            - 'null'
+
+    ReviewConfigOverrides:
+      type: object
+      properties:
+        complexity:
+          $ref: '#/components/schemas/ComplexityConfig'
+        architectural:
+          $ref: '#/components/schemas/ArchitecturalConfig'
+
+    ComplexityConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        threshold:
+          type: integer
+          minimum: 1
+          maximum: 100
+
+    ArchitecturalConfig:
+      type: object
+      properties:
+        enabled:
+          $ref: '#/components/schemas/ArchitecturalEnabled'
+
+    # ------------------------------------------------------------------
+    # Response bodies
+    # ------------------------------------------------------------------
+    MergedConfig:
+      type: object
+      required:
+        - plan
+        - reviewTypes
+        - complexityReviewsRemaining
+        - managedLlmReviewsRemaining
+        - llmSource
+        - features
+      properties:
+        plan:
+          $ref: '#/components/schemas/PlanTier'
+        reviewTypes:
+          type: object
+          required:
+            - complexity
+            - architectural
+          properties:
+            complexity:
+              type: object
+              required:
+                - enabled
+                - threshold
+                - deltaTracking
+              properties:
+                enabled:
+                  type: boolean
+                threshold:
+                  type: integer
+                deltaTracking:
+                  type: boolean
+            architectural:
+              type: object
+              required:
+                - enabled
+              properties:
+                enabled:
+                  $ref: '#/components/schemas/ArchitecturalEnabled'
+        complexityReviewsRemaining:
+          type:
+            - integer
+            - 'null'
+          description: Always null — complexity reviews are unlimited on all tiers.
+        managedLlmReviewsRemaining:
+          type:
+            - integer
+            - 'null'
+          description: >
+            Remaining managed LLM reviews for the current billing period.
+            Null means unlimited.
+        llmSource:
+          type: string
+          description: LLM source for this org (e.g. "managed", "byok").
+        features:
+          $ref: '#/components/schemas/PlanFeatures'
+
+    PlanFeatures:
+      type: object
+      required:
+        - orgManagement
+        - customRules
+        - trendRetentionDays
+      properties:
+        orgManagement:
+          type: boolean
+        customRules:
+          type: boolean
+        trendRetentionDays:
+          type:
+            - integer
+            - 'null'
+          description: >
+            Number of days complexity trend data is retained. Null means
+            unlimited retention.
+
+    ReviewRunCreated:
+      type: object
+      required:
+        - review_run_id
+      properties:
+        review_run_id:
+          type: integer
+
+    ReviewRunStatusUpdated:
+      type: object
+      required:
+        - review_run_id
+        - status
+      properties:
+        review_run_id:
+          type: integer
+        status:
+          $ref: '#/components/schemas/ReviewRunStatus'
+
+    # ------------------------------------------------------------------
+    # Error responses
+    # ------------------------------------------------------------------
+    ErrorUnauthorized:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          examples:
+            - Unauthorized.
+
+    ErrorNotFound:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          examples:
+            - Not Found.
+
+    ErrorValidation:
+      type: object
+      required:
+        - message
+        - errors
+      properties:
+        message:
+          type: string
+          examples:
+            - The given data was invalid.
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          examples:
+            - head_sha:
+                - The head sha field is required.
+
+  responses:
+    Unauthorized:
+      description: Invalid or missing service token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorUnauthorized'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorNotFound'
+
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorValidation'

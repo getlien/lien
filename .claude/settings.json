@@ -1,0 +1,9 @@
+{
+    "mcpServers": {
+        "laravel-boost": {
+            "command": "php",
+            "args": ["artisan", "boost:mcp"],
+            "cwd": "/Users/alfhenderson/Code/lien-platform"
+        }
+    }
+}

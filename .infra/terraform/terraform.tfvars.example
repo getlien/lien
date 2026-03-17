@@ -1,0 +1,14 @@
+do_token          = "dop_v1_xxx"
+region            = "nyc3"
+domain            = "lien.dev"
+k8s_version       = "1.32"
+node_size         = "s-2vcpu-4gb"
+node_count        = 2
+pg_version        = "17"
+pg_size           = "db-s-1vcpu-1gb"
+valkey_version    = "8"
+valkey_size       = "db-s-1vcpu-1gb"
+
+# S3 backend credentials (DO Spaces) — set as env vars, not in tfvars:
+#   AWS_ACCESS_KEY_ID=<spaces_access_key>
+#   AWS_SECRET_ACCESS_KEY=<spaces_secret_key>
