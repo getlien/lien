@@ -16,11 +16,11 @@ doctl registry login
 
 PLATFORM="linux/amd64"
 
-LIEN_REPO="$(dirname "$PROJECT_ROOT")/lien"
+LIEN_REPO="$(dirname "$PROJECT_ROOT")"
 
-if [[ ! -d "$LIEN_REPO" ]]; then
-  echo "ERROR: lien repo not found at $LIEN_REPO" >&2
-  echo "       Clone getlien/lien as a sibling of this repo." >&2
+if [[ ! -d "$LIEN_REPO/packages/runner" ]]; then
+  echo "ERROR: packages/runner not found at $LIEN_REPO/packages/runner" >&2
+  echo "       Expected monorepo root at $LIEN_REPO" >&2
   exit 1
 fi
 
