@@ -48,6 +48,16 @@ coverage/
 .DS_Store
 Thumbs.db
 
+# Terraform
+*.tfplan
+*.tfstate
+*.tfstate.*
+.terraform/
+terraform.tfvars
+
+# PHP
+.phpunit.cache
+
 # Misc
 *.orig
 
