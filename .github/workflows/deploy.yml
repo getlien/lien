@@ -167,33 +167,25 @@ jobs:
           GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          cat > /tmp/secret.env <<EOF
-          APP_KEY=$APP_KEY
-          DB_USERNAME=$PG_USER
-          DB_PASSWORD=$PG_PASSWORD
-          REDIS_USERNAME=$VALKEY_USER
-          REDIS_PASSWORD=$VALKEY_PASSWORD
-          GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID
-          GITHUB_CLIENT_SECRET=$GITHUB_CLIENT_SECRET
-          GITHUB_REDIRECT_URI=https://app.lien.dev/auth/github/callback
-          LIEN_SERVICE_TOKEN=$LIEN_SERVICE_TOKEN
-          GH_APP_ID=$GH_APP_ID
-          GH_WEBHOOK_SECRET=$GH_WEBHOOK_SECRET
-          EOF
           kubectl create secret generic laravel-secret \
             --namespace=lien \
-            --from-env-file=/tmp/secret.env \
+            --from-literal="APP_KEY=$APP_KEY" \
+            --from-literal="DB_USERNAME=$PG_USER" \
+            --from-literal="DB_PASSWORD=$PG_PASSWORD" \
+            --from-literal="REDIS_USERNAME=$VALKEY_USER" \
+            --from-literal="REDIS_PASSWORD=$VALKEY_PASSWORD" \
+            --from-literal="GITHUB_CLIENT_ID=$GITHUB_CLIENT_ID" \
+            --from-literal="GITHUB_CLIENT_SECRET=$GITHUB_CLIENT_SECRET" \
+            --from-literal="GITHUB_REDIRECT_URI=https://app.lien.dev/auth/github/callback" \
+            --from-literal="LIEN_SERVICE_TOKEN=$LIEN_SERVICE_TOKEN" \
+            --from-literal="GH_APP_ID=$GH_APP_ID" \
             --from-literal="GH_APP_PRIVATE_KEY=$GH_APP_PRIVATE_KEY" \
+            --from-literal="GH_WEBHOOK_SECRET=$GH_WEBHOOK_SECRET" \
             --dry-run=client -o yaml | kubectl apply -f -
-          rm -f /tmp/secret.env
-          cat > /tmp/runner-secret.env <<EOF
-          OPENROUTER_API_KEY=$OPENROUTER_API_KEY
-          EOF
           kubectl create secret generic runner-secret \
             --namespace=lien \
-            --from-env-file=/tmp/runner-secret.env \
+            --from-literal="OPENROUTER_API_KEY=$OPENROUTER_API_KEY" \
             --dry-run=client -o yaml | kubectl apply -f -
-          rm -f /tmp/runner-secret.env
 
       - name: Deploy
         id: deploy
