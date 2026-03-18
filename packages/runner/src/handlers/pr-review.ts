@@ -198,12 +198,12 @@ export async function handlePRReview(
 
     // Setup engine with enabled plugins
     const engine = new ReviewEngine();
-    logger.info(`Review types: ${JSON.stringify(payload.config.review_types)}`);
+    logBuffer?.add('info', `Review types: ${JSON.stringify(payload.config.review_types)}`);
     if (payload.config.review_types.complexity) engine.register(new ComplexityPlugin());
     if (payload.config.review_types.architectural) engine.register(new ArchitecturalPlugin());
     if (payload.config.review_types.summary) engine.register(new SummaryPlugin());
     if (payload.config.review_types.bugs) engine.register(new BugFinderPlugin());
-    logger.info(`Registered plugins: ${engine.getPluginIds().join(', ')}`);
+    logBuffer?.add('info', `Registered plugins: ${engine.getPluginIds().join(', ')}`);
 
     // Build LLM client
     const llm = reviewConfig.openrouterApiKey
