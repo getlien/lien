@@ -539,7 +539,7 @@ export class SummaryPlugin implements ReviewPlugin {
       context.pr?.diffLines,
     );
     const prompt = buildSummaryPrompt(signals, codeContext, context);
-    const response = await context.llm.complete(prompt);
+    const response = await context.llm.complete(prompt, { temperature: 0 });
 
     const parsed = parseSummaryResponse(response.content, logger);
     if (!parsed) return [];

@@ -72,7 +72,7 @@ export class ArchitecturalPlugin implements ReviewPlugin {
     // Build prompt
     const limit = maxNotes(changedFiles.length);
     const prompt = buildArchitecturalPrompt(archContext, context, limit);
-    const response = await context.llm.complete(prompt);
+    const response = await context.llm.complete(prompt, { temperature: 0 });
 
     // Parse notes from response
     const notes = parseArchitecturalNotes(response.content, logger, limit);
