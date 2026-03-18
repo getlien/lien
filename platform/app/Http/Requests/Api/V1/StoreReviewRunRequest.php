@@ -114,7 +114,7 @@ class StoreReviewRunRequest extends FormRequest
             'review_comments' => ['sometimes', 'array'],
             'review_comments.*.review_type' => ['required', 'string'],
             'review_comments.*.filepath' => ['nullable', 'string', 'required_unless:review_comments.*.review_type,summary'],
-            'review_comments.*.line' => ['nullable', 'integer', 'min:1', 'required_unless:review_comments.*.review_type,summary'],
+            'review_comments.*.line' => ['nullable', 'integer', 'min:1'],
             'review_comments.*.symbol_name' => ['nullable', 'string'],
             'review_comments.*.body' => ['required', 'string'],
             'review_comments.*.status' => ['required', Rule::enum(ReviewCommentStatus::class)],

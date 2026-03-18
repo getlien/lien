@@ -144,7 +144,12 @@ beforeEach(() => {
     return { add: vi.fn(), dispose: vi.fn().mockResolvedValue(undefined) };
   });
   MockReviewEngine.mockImplementation(function () {
-    return { register: mockEngineRegister, run: mockEngineRun, present: mockEnginePresent };
+    return {
+      register: mockEngineRegister,
+      run: mockEngineRun,
+      present: mockEnginePresent,
+      getPluginIds: () => [],
+    };
   });
   mockEngineRun.mockResolvedValue([]);
   mockEnginePresent.mockResolvedValue(undefined);

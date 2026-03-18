@@ -603,7 +603,7 @@ function buildComplexitySnapshots(report: ComplexityReport): ComplexitySnapshotR
 function buildReviewComments(findings: ReviewFinding[]): ReviewCommentResult[] {
   return findings.map(f => ({
     filepath: f.filepath,
-    line: f.line,
+    line: f.line || null,
     end_line: f.endLine ?? null,
     symbol_name: f.symbolName ?? null,
     severity: f.severity,
