@@ -109,31 +109,14 @@ export class ReviewEngine {
     context: ReviewContext,
   ): Promise<ActivePlugin[]> {
     const active: ActivePlugin[] = [];
-    const logger = context.logger;
 
     for (const plugin of plugins) {
       const pluginConfig = resolvePluginConfig(plugin, context);
       const pluginContext: ReviewContext = { ...context, config: pluginConfig };
+      const skipReason = await getSkipReason(plugin, pluginContext);
 
-      if (plugin.requiresLLM && !context.llm) {
-        if (this.verbose) {
-          logger.debug(`[engine] Skipping "${plugin.id}" — requires LLM but none configured`);
-        }
-        continue;
-      }
-
-      try {
-        const isActive = await plugin.shouldActivate(pluginContext);
-        if (!isActive) {
-          if (this.verbose) {
-            logger.debug(`[engine] Skipping "${plugin.id}" — shouldActivate returned false`);
-          }
-          continue;
-        }
-      } catch (error) {
-        logger.warning(
-          `Plugin "${plugin.id}" shouldActivate() failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+      if (skipReason) {
+        if (this.verbose) context.logger.debug(`[engine] Skipping "${plugin.id}" — ${skipReason}`);
         continue;
       }
 
@@ -212,6 +195,27 @@ export class ReviewEngine {
 interface ActivePlugin {
   plugin: ReviewPlugin;
   pluginContext: ReviewContext;
+}
+
+/**
+ * Returns a skip reason string if the plugin should not run, or null if it should.
+ */
+async function getSkipReason(plugin: ReviewPlugin, context: ReviewContext): Promise<string | null> {
+  if (plugin.requiresLLM && !context.llm) {
+    return 'requires LLM but none configured';
+  }
+
+  try {
+    const isActive = await plugin.shouldActivate(context);
+    if (!isActive) return 'shouldActivate returned false';
+  } catch (error) {
+    context.logger.warning(
+      `Plugin "${plugin.id}" shouldActivate() failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return 'shouldActivate() threw an error';
+  }
+
+  return null;
 }
 
 /**
