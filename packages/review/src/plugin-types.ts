@@ -242,6 +242,13 @@ export interface PresentContext {
    * Only available when pr + octokit are present.
    */
   postReviewComment?(body: string, lineComments?: LineComment[]): Promise<void>;
+
+  /**
+   * Minimize (hide as "outdated") existing PR comments matching a marker string.
+   * Only available in GitHub App context (pr + octokit present).
+   * Returns the number of comments minimized.
+   */
+  minimizeOutdatedComments?(marker: string): Promise<number>;
 }
 
 // ---------------------------------------------------------------------------

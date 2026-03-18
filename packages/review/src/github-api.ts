@@ -551,3 +551,54 @@ export async function getPRPatchData(octokit: Octokit, prContext: PRContext): Pr
 
   return { diffLines, patches };
 }
+
+// ---------------------------------------------------------------------------
+// Comment Minimization
+// ---------------------------------------------------------------------------
+
+/**
+ * Find and minimize (hide as "outdated") PR issue comments matching a marker string.
+ * Uses the GraphQL `minimizeComment` mutation.
+ */
+export async function minimizeOutdatedComments(
+  octokit: Octokit,
+  prContext: PRContext,
+  marker: string,
+  logger: Logger,
+): Promise<number> {
+  let minimized = 0;
+
+  try {
+    const comments = await octokit.issues.listComments({
+      owner: prContext.owner,
+      repo: prContext.repo,
+      issue_number: prContext.pullNumber,
+    });
+
+    for (const comment of comments.data) {
+      if (!comment.body?.includes(marker)) continue;
+
+      try {
+        await octokit.graphql(
+          `mutation($id: ID!, $classifier: ReportedContentClassifiers!) {
+            minimizeComment(input: { subjectId: $id, classifier: $classifier }) {
+              minimizedComment { isMinimized }
+            }
+          }`,
+          { id: comment.node_id, classifier: 'OUTDATED' },
+        );
+        minimized++;
+      } catch (err) {
+        logger.warning(
+          `Failed to minimize comment ${comment.id}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    }
+  } catch (err) {
+    logger.warning(
+      `Failed to list comments for minimization: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+
+  return minimized;
+}
