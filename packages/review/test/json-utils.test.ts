@@ -38,6 +38,22 @@ describe('extractJSONFromCodeBlock', () => {
     const input = '```json\n  {"key": "value"}  \n```';
     expect(extractJSONFromCodeBlock(input)).toBe('{"key": "value"}');
   });
+
+  it('prefers json-tagged block over untagged block', () => {
+    const input = [
+      'Here is some context:',
+      '```',
+      'not the json',
+      '```',
+      '',
+      '```json',
+      '{"actual": "json"}',
+      '```',
+    ].join('\n');
+
+    const result = extractJSONFromCodeBlock(input);
+    expect(JSON.parse(result)).toEqual({ actual: 'json' });
+  });
 });
 
 describe('estimatePromptTokens', () => {

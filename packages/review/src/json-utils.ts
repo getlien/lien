@@ -5,10 +5,18 @@
 
 /**
  * Extract JSON content from an LLM response that may be wrapped in markdown code blocks.
- * Returns the trimmed content inside the first code block, or the original content if none found.
+ *
+ * Prefers a ```json-tagged block over an untagged one, since LLMs sometimes
+ * emit explanatory code blocks before the actual JSON payload.
+ * Falls back to the first untagged code block, then the raw content.
  */
 export function extractJSONFromCodeBlock(content: string): string {
-  const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  // Prefer explicitly tagged ```json blocks
+  const jsonTaggedMatch = content.match(/```json\s*([\s\S]*?)```/);
+  if (jsonTaggedMatch) return jsonTaggedMatch[1].trim();
+
+  // Fall back to any code block
+  const codeBlockMatch = content.match(/```\s*([\s\S]*?)```/);
   return (codeBlockMatch ? codeBlockMatch[1] : content).trim();
 }
 
