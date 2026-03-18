@@ -168,6 +168,7 @@ function collectFunctionsWithCallers(
 
 function selectTopCallers(callers: CallerEdge[]): CallerEdge[] {
   return callers
+    .slice()
     .sort(
       (a, b) =>
         (b.caller.chunk.metadata.complexity ?? 0) - (a.caller.chunk.metadata.complexity ?? 0),

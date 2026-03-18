@@ -6,7 +6,7 @@
  * of changed functions across the full repo.
  */
 
-import path from 'node:path';
+import path from 'node:path/posix';
 import type { CodeChunk } from '@liendev/parser';
 
 // ---------------------------------------------------------------------------

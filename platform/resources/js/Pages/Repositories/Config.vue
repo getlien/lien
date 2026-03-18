@@ -24,7 +24,10 @@ const form = useForm({
       enabled: props.repository.review_config?.summary?.enabled ?? true,
     },
     bugs: {
-      enabled: props.repository.review_config?.bugs?.enabled ?? false,
+      enabled:
+        props.repository.review_config?.bugs?.enabled ??
+        props.effectiveConfig?.reviewTypes?.bugs?.enabled ??
+        false,
     },
   },
 });
