@@ -8,16 +8,24 @@
  *
  * Prefers a ```json-tagged block over an untagged one, since LLMs sometimes
  * emit explanatory code blocks before the actual JSON payload.
- * Falls back to the first untagged code block, then the raw content.
+ *
+ * Returns null when no JSON-like content is found, allowing callers to
+ * distinguish between "no JSON present" and "empty string".
  */
-export function extractJSONFromCodeBlock(content: string): string {
+export function extractJSONFromCodeBlock(content: string): string | null {
   // Prefer explicitly tagged ```json blocks
   const jsonTaggedMatch = content.match(/```json\s*([\s\S]*?)```/);
   if (jsonTaggedMatch) return jsonTaggedMatch[1].trim();
 
   // Fall back to any code block
   const codeBlockMatch = content.match(/```\s*([\s\S]*?)```/);
-  return (codeBlockMatch ? codeBlockMatch[1] : content).trim();
+  if (codeBlockMatch) return codeBlockMatch[1].trim();
+
+  // No code block found — return null if content doesn't look like JSON
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+
+  return trimmed;
 }
 
 /**
