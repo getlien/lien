@@ -557,7 +557,8 @@ export async function getPRPatchData(octokit: Octokit, prContext: PRContext): Pr
 // ---------------------------------------------------------------------------
 
 /**
- * Find and minimize (hide as "outdated") PR issue comments matching a marker string.
+ * Find and minimize (hide as "outdated") PR review comments matching a marker string.
+ * Searches both PR reviews (created via postPRReview) and issue comments.
  * Uses the GraphQL `minimizeComment` mutation.
  */
 export async function minimizeOutdatedComments(
@@ -569,36 +570,41 @@ export async function minimizeOutdatedComments(
   let minimized = 0;
 
   try {
-    const comments = await octokit.issues.listComments({
+    // PR reviews (posted via pulls.createReview / postPRReview)
+    const reviews = await octokit.pulls.listReviews({
       owner: prContext.owner,
       repo: prContext.repo,
-      issue_number: prContext.pullNumber,
+      pull_number: prContext.pullNumber,
     });
 
-    for (const comment of comments.data) {
-      if (!comment.body?.includes(marker)) continue;
+    for (const review of reviews.data) {
+      if (!review.body?.includes(marker)) continue;
 
       try {
-        await octokit.graphql(
-          `mutation($id: ID!, $classifier: ReportedContentClassifiers!) {
-            minimizeComment(input: { subjectId: $id, classifier: $classifier }) {
-              minimizedComment { isMinimized }
-            }
-          }`,
-          { id: comment.node_id, classifier: 'OUTDATED' },
-        );
+        await minimizeViaGraphQL(octokit, review.node_id);
         minimized++;
       } catch (err) {
         logger.warning(
-          `Failed to minimize comment ${comment.id}: ${err instanceof Error ? err.message : err}`,
+          `Failed to minimize review ${review.id}: ${err instanceof Error ? err.message : err}`,
         );
       }
     }
   } catch (err) {
     logger.warning(
-      `Failed to list comments for minimization: ${err instanceof Error ? err.message : err}`,
+      `Failed to list reviews for minimization: ${err instanceof Error ? err.message : err}`,
     );
   }
 
   return minimized;
+}
+
+async function minimizeViaGraphQL(octokit: Octokit, nodeId: string): Promise<void> {
+  await octokit.graphql(
+    `mutation($id: ID!, $classifier: ReportedContentClassifiers!) {
+      minimizeComment(input: { subjectId: $id, classifier: $classifier }) {
+        minimizedComment { isMinimized }
+      }
+    }`,
+    { id: nodeId, classifier: 'OUTDATED' },
+  );
 }
