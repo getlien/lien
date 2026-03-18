@@ -106,25 +106,39 @@ export class BugFinderPlugin implements ReviewPlugin {
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     if (findings.length === 0) return;
 
-    // Post inline comments for findings with specific lines
+    // Try inline comments first (only works for lines within the diff)
+    let inlinePosted = 0;
     const inlineFindings = findings.filter(f => f.line > 0);
     if (inlineFindings.length > 0 && context.postInlineComments) {
-      const errorCount = findings.filter(f => f.severity === 'error').length;
-      const warningCount = findings.filter(f => f.severity === 'warning').length;
-      const parts: string[] = [];
-      if (errorCount > 0) parts.push(`${errorCount} error${errorCount === 1 ? '' : 's'}`);
-      if (warningCount > 0) parts.push(`${warningCount} warning${warningCount === 1 ? '' : 's'}`);
-      const summaryBody = `Bug Finder: ${parts.join(', ')}`;
-      await context.postInlineComments(inlineFindings, summaryBody);
+      const result = await context.postInlineComments(inlineFindings, 'Bug Finder');
+      inlinePosted = result.posted;
     }
 
-    // Append summary
+    // Post a top-level review comment for error-severity bugs that weren't posted inline
+    const errors = findings.filter(f => f.severity === 'error');
+    if (errors.length > 0 && context.postReviewComment && inlinePosted < errors.length) {
+      const body = formatBugReviewComment(errors);
+      await context.postReviewComment(body);
+    }
+
+    // Append to check run summary
     const lines = findings.map(
       f =>
         `- **${f.severity}** \`${f.filepath}:${f.line}\` ${f.symbolName ? `in \`${f.symbolName}\`` : ''}: ${f.message}`,
     );
     context.appendSummary(`### Bug Finder\n\n${lines.join('\n')}`);
   }
+}
+
+function formatBugReviewComment(errors: ReviewFinding[]): string {
+  const header = `## 🐛 Bug Finder — ${errors.length} potential bug${errors.length === 1 ? '' : 's'} detected\n\n`;
+  const items = errors.map(f => {
+    const location = `\`${f.filepath}:${f.line}\``;
+    const symbol = f.symbolName ? ` in \`${f.symbolName}\`` : '';
+    const suggestion = f.suggestion ? `\n  > 💡 ${f.suggestion}` : '';
+    return `- ${location}${symbol}: ${f.message}${suggestion}`;
+  });
+  return `${header}${items.join('\n')}\n\n*These issues were found by analyzing callers of changed functions.*`;
 }
 
 // ---------------------------------------------------------------------------
