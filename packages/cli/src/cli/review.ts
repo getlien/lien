@@ -285,6 +285,7 @@ async function indexAndAnalyze(
  */
 async function runReviewEngine(
   config: ReturnType<typeof loadConfig>,
+  rootDir: string,
   chunks: CodeChunk[],
   filesToReview: string[],
   complexityReport: ReturnType<typeof analyzeComplexityFromChunks>,
@@ -318,6 +319,7 @@ async function runReviewEngine(
       config: {},
       llm,
       logger,
+      repoRootDir: rootDir,
     },
     pluginFilter,
   );
@@ -349,6 +351,7 @@ export async function reviewCommand(options: ReviewOptions): Promise<void> {
     spinner?.start('Running review plugins...');
     const findings = await runReviewEngine(
       config,
+      rootDir,
       chunks,
       filesToReview,
       complexityReport,

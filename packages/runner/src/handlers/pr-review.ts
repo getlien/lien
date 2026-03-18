@@ -28,6 +28,7 @@ import {
   ComplexityPlugin,
   ArchitecturalPlugin,
   SummaryPlugin,
+  BugFinderPlugin,
   OpenRouterLLMClient,
 } from '@liendev/review';
 import type { CodeChunk } from '@liendev/parser';
@@ -200,6 +201,7 @@ export async function handlePRReview(
     if (payload.config.review_types.complexity) engine.register(new ComplexityPlugin());
     if (payload.config.review_types.architectural) engine.register(new ArchitecturalPlugin());
     if (payload.config.review_types.summary) engine.register(new SummaryPlugin());
+    if (payload.config.review_types.bugs) engine.register(new BugFinderPlugin());
 
     // Build LLM client
     const llm = reviewConfig.openrouterApiKey
@@ -229,6 +231,7 @@ export async function handlePRReview(
       llm,
       pr: prContext,
       logger,
+      repoRootDir: headClone.dir,
     });
     logger.info(`Engine produced ${findings.length} total findings`);
     logBuffer?.add('info', `Engine produced ${findings.length} findings`);

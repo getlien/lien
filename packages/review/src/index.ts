@@ -25,6 +25,7 @@ export type {
   ComplexityFindingMetadata,
   ArchitecturalFindingMetadata,
   SummaryFindingMetadata,
+  BugFindingMetadata,
   BuiltinFindingMetadata,
 } from './plugin-types.js';
 
@@ -38,6 +39,15 @@ export { OpenRouterLLMClient, type OpenRouterLLMClientOptions } from './llm-clie
 export { ComplexityPlugin } from './plugins/complexity.js';
 export { ArchitecturalPlugin } from './plugins/architectural.js';
 export { SummaryPlugin } from './plugins/summary.js';
+export { BugFinderPlugin } from './plugins/bugs.js';
+
+// Dependency graph
+export {
+  buildDependencyGraph,
+  type DependencyGraph,
+  type SymbolNode,
+  type CallerEdge,
+} from './dependency-graph.js';
 
 // Output adapters
 export { TerminalAdapter } from './adapters/terminal.js';

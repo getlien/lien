@@ -217,11 +217,14 @@ function formatFallbackContext(ctx: DependentContext): string {
  *
  * @param report - The complexity report with per-file dependency data
  * @param chunks - All CodeChunks from changed files (in-memory, no VectorDB)
+ * @param repoChunks - Optional full-repo chunks. When provided, call sites are
+ *   searched across the entire repo instead of just changed files.
  * @returns Map of "filepath::symbolName" -> formatted dependent context string
  */
 export function assembleDependentContext(
   report: ComplexityReport,
   chunks: CodeChunk[],
+  repoChunks?: CodeChunk[],
 ): Map<string, string> {
   const result = new Map<string, string>();
   const topFunctions = selectTopFunctions(report);
@@ -231,8 +234,9 @@ export function assembleDependentContext(
   for (const func of topFunctions) {
     const key = `${func.filepath}::${func.symbolName}`;
 
-    // Find dependent chunks with matching call sites
-    const snippets = findCallSitesForSymbol(func.symbolName, func.dependents, chunks);
+    // Find dependent chunks with matching call sites — prefer full-repo chunks when available
+    const searchChunks = repoChunks ?? chunks;
+    const snippets = findCallSitesForSymbol(func.symbolName, func.dependents, searchChunks);
 
     // If we have dependents listed but none in memory, skip —
     // the existing buildDependencyContext() in prompt.ts handles this.

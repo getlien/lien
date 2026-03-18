@@ -25,6 +25,8 @@ class UpdateRepoReviewConfigRequest extends FormRequest
             'review_config.architectural.enabled' => ['sometimes', 'in:always,disabled,auto'],
             'review_config.summary' => ['sometimes', 'array'],
             'review_config.summary.enabled' => ['sometimes', 'boolean'],
+            'review_config.bugs' => ['sometimes', 'array'],
+            'review_config.bugs.enabled' => ['sometimes', 'boolean'],
         ];
     }
 }
