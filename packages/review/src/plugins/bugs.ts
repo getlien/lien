@@ -94,7 +94,7 @@ export class BugFinderPlugin implements ReviewPlugin {
     const allFindings: ReviewFinding[] = [];
     for (const batch of batches) {
       const prompt = buildBugFinderPrompt(batch, context);
-      const response = await context.llm.complete(prompt);
+      const response = await context.llm.complete(prompt, { temperature: 0 });
       const bugs = parseBugResponse(response.content, logger);
       allFindings.push(...bugs.map(bug => bugToFinding(bug, batch)));
     }
