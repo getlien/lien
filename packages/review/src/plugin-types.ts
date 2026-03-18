@@ -89,6 +89,10 @@ export interface ReviewContext {
   llm?: LLMClient;
   pr?: PRContext;
   logger: Logger;
+  /** Full-repo AST chunks. Lazily populated by the engine when a plugin requires it. */
+  repoChunks?: CodeChunk[];
+  /** Root directory of the cloned repo. Required for lazy repo indexing. */
+  repoRootDir?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,10 +125,17 @@ export interface SummaryFindingMetadata {
   keyChanges: string[];
 }
 
+export interface BugFindingMetadata {
+  pluginType: 'bugs';
+  bugCategory: string;
+  changedFunction: string;
+}
+
 export type BuiltinFindingMetadata =
   | ComplexityFindingMetadata
   | ArchitecturalFindingMetadata
-  | SummaryFindingMetadata;
+  | SummaryFindingMetadata
+  | BugFindingMetadata;
 
 /**
  * The universal output of a review plugin.
@@ -250,6 +261,9 @@ export interface ReviewPlugin {
 
   /** Whether this plugin requires an LLM to produce any findings */
   requiresLLM?: boolean;
+
+  /** Whether this plugin needs full-repo chunks (triggers lazy indexing). */
+  requiresRepoChunks?: boolean;
 
   /**
    * When should this plugin run? Return false to skip.

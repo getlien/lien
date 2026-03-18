@@ -32,6 +32,7 @@ import {
   updatePRDescription,
 } from './github-api.js';
 import type { LineComment, PRContext } from './types.js';
+import { performChunkOnlyIndex } from '@liendev/parser';
 
 export interface EngineOptions {
   /** Enable verbose debug logging of activation decisions and timing */
@@ -66,15 +67,16 @@ export class ReviewEngine {
   /**
    * Run all registered plugins and collect findings.
    *
-   * Each plugin runs in isolation: if one fails, the engine logs the error
-   * and continues with remaining plugins.
+   * Three-phase execution:
+   * 1. Activate — resolve config, check shouldActivate() + LLM requirement
+   * 2. Lazy index — if any active plugin needs repoChunks, index the full repo once
+   * 3. Analyze — run all active plugins in parallel
    *
    * @param context - The review context shared by all plugins
    * @param pluginFilter - Optional: only run this specific plugin by ID
    * @returns All findings from all active plugins
    */
   async run(context: ReviewContext, pluginFilter?: string): Promise<ReviewFinding[]> {
-    const findings: ReviewFinding[] = [];
     const logger = context.logger;
 
     const pluginsToRun = pluginFilter
@@ -85,63 +87,43 @@ export class ReviewEngine {
       logger.warning(
         `Plugin "${pluginFilter}" not found. Available: ${this.getPluginIds().join(', ')}`,
       );
-      return findings;
+      return [];
     }
 
-    // Run all plugins in parallel for speed (they're independent)
-    const results = await Promise.allSettled(
-      pluginsToRun.map(async plugin => {
-        const start = Date.now();
+    // Phase 1: Activation — determine which plugins will run
+    const activePlugins = await this.resolveActivePlugins(pluginsToRun, context);
+    if (activePlugins.length === 0) return [];
 
-        // Resolve plugin config: merge defaults with user overrides
-        const pluginConfig = resolvePluginConfig(plugin, context);
-        const pluginContext: ReviewContext = { ...context, config: pluginConfig };
+    // Phase 2: Lazy repo indexing — only when an active plugin needs it
+    await ensureRepoChunks(activePlugins, context);
 
-        // Check if plugin requires LLM but none is available
-        if (plugin.requiresLLM && !context.llm) {
-          if (this.verbose) {
-            logger.debug(`[engine] Skipping "${plugin.id}" — requires LLM but none configured`);
-          }
-          return [];
-        }
+    // Phase 3: Analysis — run all active plugins in parallel
+    return runActivePlugins(activePlugins, this.verbose, logger);
+  }
 
-        // Activation check
-        const active = await plugin.shouldActivate(pluginContext);
-        if (!active) {
-          if (this.verbose) {
-            logger.debug(`[engine] Skipping "${plugin.id}" — shouldActivate returned false`);
-          }
-          return [];
-        }
+  /**
+   * Resolve config, check LLM requirement and shouldActivate() for each plugin.
+   */
+  private async resolveActivePlugins(
+    plugins: ReviewPlugin[],
+    context: ReviewContext,
+  ): Promise<ActivePlugin[]> {
+    const active: ActivePlugin[] = [];
 
-        if (this.verbose) {
-          logger.debug(`[engine] Running "${plugin.id}"...`);
-        }
+    for (const plugin of plugins) {
+      const pluginConfig = resolvePluginConfig(plugin, context);
+      const pluginContext: ReviewContext = { ...context, config: pluginConfig };
+      const skipReason = await getSkipReason(plugin, pluginContext);
 
-        // Run analysis
-        const pluginFindings = await plugin.analyze(pluginContext);
-
-        const elapsed = Date.now() - start;
-        logger.info(`Plugin "${plugin.id}": ${pluginFindings.length} findings (${elapsed}ms)`);
-
-        return pluginFindings;
-      }),
-    );
-
-    // Collect findings, log failures
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i];
-      if (result.status === 'fulfilled') {
-        findings.push(...result.value);
-      } else {
-        const plugin = pluginsToRun[i];
-        logger.warning(
-          `Plugin "${plugin.id}" failed (non-blocking): ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
-        );
+      if (skipReason) {
+        if (this.verbose) context.logger.debug(`[engine] Skipping "${plugin.id}" — ${skipReason}`);
+        continue;
       }
+
+      active.push({ plugin, pluginContext });
     }
 
-    return findings;
+    return active;
   }
 
   /**
@@ -204,6 +186,110 @@ export class ReviewEngine {
       );
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// run() helpers
+// ---------------------------------------------------------------------------
+
+interface ActivePlugin {
+  plugin: ReviewPlugin;
+  pluginContext: ReviewContext;
+}
+
+/**
+ * Returns a skip reason string if the plugin should not run, or null if it should.
+ */
+async function getSkipReason(plugin: ReviewPlugin, context: ReviewContext): Promise<string | null> {
+  if (plugin.requiresLLM && !context.llm) {
+    return 'requires LLM but none configured';
+  }
+
+  try {
+    const isActive = await plugin.shouldActivate(context);
+    if (!isActive) return 'shouldActivate returned false';
+  } catch (error) {
+    context.logger.warning(
+      `Plugin "${plugin.id}" shouldActivate() failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return 'shouldActivate() threw an error';
+  }
+
+  return null;
+}
+
+/**
+ * If any active plugin needs repoChunks, index the full repo once and share.
+ */
+async function ensureRepoChunks(
+  activePlugins: ActivePlugin[],
+  context: ReviewContext,
+): Promise<void> {
+  const needsRepoChunks = activePlugins.some(({ plugin }) => plugin.requiresRepoChunks);
+  if (!needsRepoChunks || context.repoChunks) return;
+
+  const logger = context.logger;
+
+  if (!context.repoRootDir) {
+    logger.warning(
+      '[engine] Plugin requires repoChunks but repoRootDir is not set — skipping repo indexing',
+    );
+    return;
+  }
+
+  const start = Date.now();
+  logger.info('[engine] Indexing full repo for dependency analysis...');
+  const indexResult = await performChunkOnlyIndex(context.repoRootDir);
+
+  if (indexResult.success && indexResult.chunks) {
+    context.repoChunks = indexResult.chunks;
+    logger.info(
+      `[engine] Full repo indexed: ${indexResult.chunks.length} chunks (${Date.now() - start}ms)`,
+    );
+  } else {
+    logger.warning(`[engine] Full repo indexing failed: ${indexResult.error ?? 'unknown error'}`);
+  }
+
+  // Update plugin contexts with repoChunks
+  for (const entry of activePlugins) {
+    entry.pluginContext = { ...entry.pluginContext, repoChunks: context.repoChunks };
+  }
+}
+
+/**
+ * Run all active plugins in parallel and collect findings.
+ */
+async function runActivePlugins(
+  activePlugins: ActivePlugin[],
+  verbose: boolean,
+  logger: Logger,
+): Promise<ReviewFinding[]> {
+  const results = await Promise.allSettled(
+    activePlugins.map(async ({ plugin, pluginContext }) => {
+      const start = Date.now();
+      if (verbose) logger.debug(`[engine] Running "${plugin.id}"...`);
+
+      const pluginFindings = await plugin.analyze(pluginContext);
+      logger.info(
+        `Plugin "${plugin.id}": ${pluginFindings.length} findings (${Date.now() - start}ms)`,
+      );
+      return pluginFindings;
+    }),
+  );
+
+  const findings: ReviewFinding[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.status === 'fulfilled') {
+      findings.push(...result.value);
+    } else {
+      const { plugin } = activePlugins[i];
+      logger.warning(
+        `Plugin "${plugin.id}" failed (non-blocking): ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+      );
+    }
+  }
+  return findings;
 }
 
 // ---------------------------------------------------------------------------

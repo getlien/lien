@@ -30,6 +30,9 @@ class RepoConfigService
                 'summary' => [
                     'enabled' => data_get($repoOverrides, 'summary.enabled', true),
                 ],
+                'bugs' => [
+                    'enabled' => data_get($repoOverrides, 'bugs.enabled', $planDefaults['bugs_default'] ?? false),
+                ],
             ],
             'complexityReviewsRemaining' => null,
             'managedLlmReviewsRemaining' => $planDefaults['managed_llm_reviews'],
@@ -41,7 +44,7 @@ class RepoConfigService
     /**
      * Get config shaped for the NATS runner payload.
      *
-     * @return array{threshold: string, review_types: array{complexity: bool, architectural: bool, summary: bool}, block_on_new_errors: bool, architectural_mode: string}
+     * @return array{threshold: string, review_types: array{complexity: bool, architectural: bool, summary: bool, bugs: bool}, block_on_new_errors: bool, architectural_mode: string}
      */
     public function getRunnerConfig(Repository $repository): array
     {
@@ -58,6 +61,7 @@ class RepoConfigService
                 'complexity' => (bool) data_get($overrides, 'complexity.enabled', true),
                 'architectural' => $architecturalMode !== 'off',
                 'summary' => (bool) data_get($overrides, 'summary.enabled', true),
+                'bugs' => (bool) data_get($overrides, 'bugs.enabled', $this->getPlanDefaults($org->plan_tier)['bugs_default'] ?? false),
             ],
             'block_on_new_errors' => false,
             'architectural_mode' => $architecturalMode,
@@ -74,6 +78,7 @@ class RepoConfigService
                 'managed_llm_reviews' => 5,
                 'llm_source' => 'managed',
                 'architectural_default' => 'disabled',
+                'bugs_default' => false,
                 'features' => [
                     'orgManagement' => false,
                     'customRules' => false,
@@ -84,6 +89,7 @@ class RepoConfigService
                 'managed_llm_reviews' => 25,
                 'llm_source' => 'managed',
                 'architectural_default' => 'auto',
+                'bugs_default' => false,
                 'features' => [
                     'orgManagement' => false,
                     'customRules' => false,
@@ -94,6 +100,7 @@ class RepoConfigService
                 'managed_llm_reviews' => 100,
                 'llm_source' => 'managed',
                 'architectural_default' => 'auto',
+                'bugs_default' => true,
                 'features' => [
                     'orgManagement' => true,
                     'customRules' => false,
@@ -104,6 +111,7 @@ class RepoConfigService
                 'managed_llm_reviews' => 200,
                 'llm_source' => 'managed',
                 'architectural_default' => 'auto',
+                'bugs_default' => true,
                 'features' => [
                     'orgManagement' => true,
                     'customRules' => true,
@@ -114,6 +122,7 @@ class RepoConfigService
                 'managed_llm_reviews' => 500,
                 'llm_source' => 'managed',
                 'architectural_default' => 'auto',
+                'bugs_default' => true,
                 'features' => [
                     'orgManagement' => true,
                     'customRules' => true,
@@ -124,6 +133,7 @@ class RepoConfigService
                 'managed_llm_reviews' => null,
                 'llm_source' => 'managed',
                 'architectural_default' => 'auto',
+                'bugs_default' => true,
                 'features' => [
                     'orgManagement' => true,
                     'customRules' => true,
