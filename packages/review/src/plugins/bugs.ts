@@ -69,55 +69,19 @@ export class BugFinderPlugin implements ReviewPlugin {
     if (!context.llm || !context.repoChunks) return [];
 
     const { chunks, logger } = context;
-
-    // 1. Identify changed functions
     const changedFunctions = collectChangedFunctions(chunks);
     if (changedFunctions.length === 0) return [];
 
-    // 2. Build dependency graph from full repo
     const graph = buildDependencyGraph(context.repoChunks);
-
-    // 3. Assemble and send batched prompts
     const batches = buildBatches(changedFunctions, graph, logger);
     if (batches.length === 0) return [];
 
     const allFindings: ReviewFinding[] = [];
-
     for (const batch of batches) {
       const prompt = buildBugFinderPrompt(batch, context);
       const response = await context.llm.complete(prompt);
       const bugs = parseBugResponse(response.content, logger);
-
-      for (const bug of bugs) {
-        const changedFn = batch.functions.find(
-          f =>
-            f.filepath === bug.filepath ||
-            batch.callerMap
-              .get(`${f.filepath}::${f.symbolName}`)
-              ?.some(e => e.caller.filepath === bug.filepath),
-        );
-
-        const metadata: BugFindingMetadata = {
-          pluginType: 'bugs',
-          bugCategory: bug.category,
-          changedFunction: changedFn
-            ? `${changedFn.filepath}::${changedFn.symbolName}`
-            : bug.filepath,
-        };
-
-        allFindings.push({
-          pluginId: 'bugs',
-          filepath: bug.filepath,
-          line: bug.line,
-          symbolName: bug.symbol,
-          severity: bug.severity === 'error' ? 'error' : 'warning',
-          category: bug.category,
-          message: bug.description,
-          suggestion: bug.suggestion,
-          evidence: bug.evidence,
-          metadata,
-        });
-      }
+      allFindings.push(...bugs.map(bug => bugToFinding(bug, batch)));
     }
 
     logger.info(`Bug finder: ${allFindings.length} potential bugs found`);
@@ -173,15 +137,7 @@ function buildBatches(
   graph: ReturnType<typeof buildDependencyGraph>,
   logger: Logger,
 ): PromptBatch[] {
-  // Filter to functions that actually have callers — no point analyzing isolated functions
-  const withCallers: { fn: ChangedFunction; callers: CallerEdge[] }[] = [];
-
-  for (const fn of changedFunctions) {
-    const callers = graph.getCallers(fn.filepath, fn.symbolName);
-    if (callers.length > 0) {
-      withCallers.push({ fn, callers });
-    }
-  }
+  const withCallers = collectFunctionsWithCallers(changedFunctions, graph);
 
   if (withCallers.length === 0) {
     logger.info('Bug finder: no changed functions have callers in the repo');
@@ -191,27 +147,53 @@ function buildBatches(
   // Sort by number of callers (highest impact first)
   withCallers.sort((a, b) => b.callers.length - a.callers.length);
 
-  // Batch by token budget
+  const batches = batchByTokenBudget(withCallers);
+  logger.info(
+    `Bug finder: ${withCallers.length} changed functions with callers, ${batches.length} batch(es)`,
+  );
+  return batches;
+}
+
+function collectFunctionsWithCallers(
+  changedFunctions: ChangedFunction[],
+  graph: ReturnType<typeof buildDependencyGraph>,
+): { fn: ChangedFunction; callers: CallerEdge[] }[] {
+  const result: { fn: ChangedFunction; callers: CallerEdge[] }[] = [];
+  for (const fn of changedFunctions) {
+    const callers = graph.getCallers(fn.filepath, fn.symbolName);
+    if (callers.length > 0) result.push({ fn, callers });
+  }
+  return result;
+}
+
+function selectTopCallers(callers: CallerEdge[]): CallerEdge[] {
+  return callers
+    .sort(
+      (a, b) =>
+        (b.caller.chunk.metadata.complexity ?? 0) - (a.caller.chunk.metadata.complexity ?? 0),
+    )
+    .slice(0, MAX_CALLERS_PER_FUNCTION);
+}
+
+function estimateChars(fn: ChangedFunction, topCallers: CallerEdge[]): number {
+  const callerChars = topCallers.reduce(
+    (sum, c) => sum + Math.min(c.caller.chunk.content.length, MAX_CALLER_SNIPPET_CHARS),
+    0,
+  );
+  return fn.chunk.content.length + callerChars;
+}
+
+function batchByTokenBudget(
+  withCallers: { fn: ChangedFunction; callers: CallerEdge[] }[],
+): PromptBatch[] {
   const batches: PromptBatch[] = [];
   let currentBatch: PromptBatch = { functions: [], callerMap: new Map() };
   let currentChars = 0;
 
   for (const { fn, callers } of withCallers) {
-    const topCallers = callers
-      .sort(
-        (a, b) =>
-          (b.caller.chunk.metadata.complexity ?? 0) - (a.caller.chunk.metadata.complexity ?? 0),
-      )
-      .slice(0, MAX_CALLERS_PER_FUNCTION);
+    const topCallers = selectTopCallers(callers);
+    const totalChars = estimateChars(fn, topCallers);
 
-    const fnChars = fn.chunk.content.length;
-    const callerChars = topCallers.reduce(
-      (sum, c) => sum + Math.min(c.caller.chunk.content.length, MAX_CALLER_SNIPPET_CHARS),
-      0,
-    );
-    const totalChars = fnChars + callerChars;
-
-    // Start new batch if this function doesn't fit
     if (
       currentBatch.functions.length > 0 &&
       (currentChars + totalChars > MAX_PROMPT_CHARS ||
@@ -227,14 +209,41 @@ function buildBatches(
     currentChars += totalChars;
   }
 
-  if (currentBatch.functions.length > 0) {
-    batches.push(currentBatch);
-  }
-
-  logger.info(
-    `Bug finder: ${withCallers.length} changed functions with callers, ${batches.length} batch(es)`,
-  );
+  if (currentBatch.functions.length > 0) batches.push(currentBatch);
   return batches;
+}
+
+// ---------------------------------------------------------------------------
+// Prompt
+// ---------------------------------------------------------------------------
+
+function bugToFinding(bug: BugReport, batch: PromptBatch): ReviewFinding {
+  const changedFn = batch.functions.find(
+    f =>
+      f.filepath === bug.filepath ||
+      batch.callerMap
+        .get(`${f.filepath}::${f.symbolName}`)
+        ?.some(e => e.caller.filepath === bug.filepath),
+  );
+
+  const metadata: BugFindingMetadata = {
+    pluginType: 'bugs',
+    bugCategory: bug.category,
+    changedFunction: changedFn ? `${changedFn.filepath}::${changedFn.symbolName}` : bug.filepath,
+  };
+
+  return {
+    pluginId: 'bugs',
+    filepath: bug.filepath,
+    line: bug.line,
+    symbolName: bug.symbol,
+    severity: bug.severity === 'error' ? 'error' : 'warning',
+    category: bug.category,
+    message: bug.description,
+    suggestion: bug.suggestion,
+    evidence: bug.evidence,
+    metadata,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -246,40 +255,39 @@ function truncateContent(content: string, maxChars: number): string {
   return content.slice(0, maxChars) + '\n// ... truncated';
 }
 
+function buildFunctionSection(fn: ChangedFunction, callers: CallerEdge[]): string {
+  const sig = fn.chunk.metadata.signature ?? fn.symbolName;
+  const params = fn.chunk.metadata.parameters?.join(', ') ?? '';
+  const returnType = fn.chunk.metadata.returnType ?? 'unknown';
+
+  let section = `### ${fn.filepath}::${fn.symbolName}\n`;
+  section += `Signature: \`${sig}\`\n`;
+  if (params) section += `Parameters: \`${params}\`\n`;
+  section += `Return type: \`${returnType}\`\n\n`;
+  section += `\`\`\`${fn.chunk.metadata.language ?? ''}\n${fn.chunk.content}\n\`\`\`\n`;
+
+  if (callers.length > 0) {
+    section += `\n#### Callers of ${fn.symbolName}\n\n`;
+    for (const caller of callers) {
+      const callerContent = truncateContent(caller.caller.chunk.content, MAX_CALLER_SNIPPET_CHARS);
+      section += `**${caller.caller.filepath}::${caller.caller.symbolName}** (line ${caller.callSiteLine})\n`;
+      section += `\`\`\`${caller.caller.chunk.metadata.language ?? ''}\n${callerContent}\n\`\`\`\n\n`;
+    }
+  }
+
+  return section;
+}
+
 function buildBugFinderPrompt(batch: PromptBatch, context: ReviewContext): string {
   const prHeader =
     context.pr?.title || context.pr?.body
       ? `## PR: ${context.pr.title ?? ''}${context.pr.body ? `\n\n${context.pr.body.slice(0, 1000)}` : ''}\n\n`
       : '';
 
-  const sections: string[] = [];
-
-  for (const fn of batch.functions) {
+  const sections = batch.functions.map(fn => {
     const callers = batch.callerMap.get(`${fn.filepath}::${fn.symbolName}`) ?? [];
-    const sig = fn.chunk.metadata.signature ?? fn.symbolName;
-    const params = fn.chunk.metadata.parameters?.join(', ') ?? '';
-    const returnType = fn.chunk.metadata.returnType ?? 'unknown';
-
-    let section = `### ${fn.filepath}::${fn.symbolName}\n`;
-    section += `Signature: \`${sig}\`\n`;
-    if (params) section += `Parameters: \`${params}\`\n`;
-    section += `Return type: \`${returnType}\`\n\n`;
-    section += `\`\`\`${fn.chunk.metadata.language ?? ''}\n${fn.chunk.content}\n\`\`\`\n`;
-
-    if (callers.length > 0) {
-      section += `\n#### Callers of ${fn.symbolName}\n\n`;
-      for (const caller of callers) {
-        const callerContent = truncateContent(
-          caller.caller.chunk.content,
-          MAX_CALLER_SNIPPET_CHARS,
-        );
-        section += `**${caller.caller.filepath}::${caller.caller.symbolName}** (line ${caller.callSiteLine})\n`;
-        section += `\`\`\`${caller.caller.chunk.metadata.language ?? ''}\n${callerContent}\n\`\`\`\n\n`;
-      }
-    }
-
-    sections.push(section);
-  }
+    return buildFunctionSection(fn, callers);
+  });
 
   return `You are a senior engineer reviewing code changes for bugs. You are given changed functions and the code that calls them. Your job is to find bugs introduced by the changes.
 

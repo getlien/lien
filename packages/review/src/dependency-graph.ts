@@ -92,10 +92,26 @@ export function resolveImportPath(
  * 3. Build caller edges: for each call site, link it to the exported symbol's definition
  */
 export function buildDependencyGraph(chunks: CodeChunk[]): DependencyGraph {
-  // Pass 1: Build file set and export index
+  const { fileSet, exportIndex } = buildExportIndex(chunks);
+  const chunkImportMaps = resolveChunkImports(chunks, fileSet);
+  const callerEdges = buildCallerEdges(chunks, chunkImportMaps, exportIndex);
+
+  return {
+    getCallers(filepath: string, symbolName: string): CallerEdge[] {
+      return callerEdges.get(`${filepath}::${symbolName}`) ?? [];
+    },
+  };
+}
+
+type ExportEntry = { filepath: string; chunk: CodeChunk };
+type ExportIndex = Map<string, ExportEntry[]>;
+type ResolvedImport = { definitionFilepath: string };
+type ChunkImportMap = Map<string, ResolvedImport>;
+
+/** Pass 1: Build file set and export index. */
+function buildExportIndex(chunks: CodeChunk[]): { fileSet: Set<string>; exportIndex: ExportIndex } {
   const fileSet = new Set<string>();
-  // symbolName -> [{ filepath, chunk }]
-  const exportIndex = new Map<string, { filepath: string; chunk: CodeChunk }[]>();
+  const exportIndex: ExportIndex = new Map();
 
   for (const chunk of chunks) {
     const file = chunk.metadata.file;
@@ -104,7 +120,6 @@ export function buildDependencyGraph(chunks: CodeChunk[]): DependencyGraph {
     if (!chunk.metadata.exports) continue;
     for (const exportedSymbol of chunk.metadata.exports) {
       const existing = exportIndex.get(exportedSymbol) ?? [];
-      // Deduplicate: multiple chunks in the same file may list the same export
       if (!existing.some(e => e.filepath === file)) {
         existing.push({ filepath: file, chunk });
       }
@@ -112,33 +127,41 @@ export function buildDependencyGraph(chunks: CodeChunk[]): DependencyGraph {
     }
   }
 
-  // Pass 2: Build per-chunk resolved import map
-  // For each chunk: Map<localSymbolName, { filepath of definition }>
-  type ResolvedImport = { definitionFilepath: string };
-  const chunkImportMaps = new Map<CodeChunk, Map<string, ResolvedImport>>();
+  return { fileSet, exportIndex };
+}
+
+/** Pass 2: Resolve imported symbols to their source filepaths. */
+function resolveChunkImports(
+  chunks: CodeChunk[],
+  fileSet: Set<string>,
+): Map<CodeChunk, ChunkImportMap> {
+  const result = new Map<CodeChunk, ChunkImportMap>();
 
   for (const chunk of chunks) {
     if (!chunk.metadata.importedSymbols) continue;
 
-    const importMap = new Map<string, ResolvedImport>();
-
+    const importMap: ChunkImportMap = new Map();
     for (const [importPath, symbols] of Object.entries(chunk.metadata.importedSymbols)) {
       const resolvedPath = resolveImportPath(importPath, chunk.metadata.file, fileSet);
       if (!resolvedPath) continue;
-
       for (const sym of symbols) {
         importMap.set(sym, { definitionFilepath: resolvedPath });
       }
     }
 
-    if (importMap.size > 0) {
-      chunkImportMaps.set(chunk, importMap);
-    }
+    if (importMap.size > 0) result.set(chunk, importMap);
   }
 
-  // Pass 3: Build caller edges
-  // Key: "filepath::symbolName" of the callee
-  const callerEdges = new Map<string, CallerEdge[]>();
+  return result;
+}
+
+/** Pass 3: Build caller edges from call sites + resolved imports. */
+function buildCallerEdges(
+  chunks: CodeChunk[],
+  chunkImportMaps: Map<CodeChunk, ChunkImportMap>,
+  exportIndex: ExportIndex,
+): Map<string, CallerEdge[]> {
+  const edges = new Map<string, CallerEdge[]>();
 
   for (const chunk of chunks) {
     if (!chunk.metadata.callSites || chunk.metadata.callSites.length === 0) continue;
@@ -152,28 +175,19 @@ export function buildDependencyGraph(chunks: CodeChunk[]): DependencyGraph {
       // Try to resolve via imports
       const resolved = importMap?.get(calledSymbol);
       if (resolved) {
-        const key = `${resolved.definitionFilepath}::${calledSymbol}`;
-        addEdge(callerEdges, key, chunk, callSite.line);
+        addEdge(edges, `${resolved.definitionFilepath}::${calledSymbol}`, chunk, callSite.line);
         continue;
       }
 
       // Try same-file: symbol is exported by the same file
       const exportLocations = exportIndex.get(calledSymbol);
-      if (exportLocations) {
-        const sameFile = exportLocations.find(e => e.filepath === callerFile);
-        if (sameFile) {
-          const key = `${callerFile}::${calledSymbol}`;
-          addEdge(callerEdges, key, chunk, callSite.line);
-        }
+      if (exportLocations?.some(e => e.filepath === callerFile)) {
+        addEdge(edges, `${callerFile}::${calledSymbol}`, chunk, callSite.line);
       }
     }
   }
 
-  return {
-    getCallers(filepath: string, symbolName: string): CallerEdge[] {
-      return callerEdges.get(`${filepath}::${symbolName}`) ?? [];
-    },
-  };
+  return edges;
 }
 
 function addEdge(
