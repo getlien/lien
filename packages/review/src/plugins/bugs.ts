@@ -66,10 +66,25 @@ export class BugFinderPlugin implements ReviewPlugin {
   }
 
   async analyze(context: ReviewContext): Promise<ReviewFinding[]> {
-    if (!context.llm || !context.repoChunks) return [];
-
     const { chunks, logger } = context;
+
+    if (!context.llm) {
+      logger.info('Bug finder: skipping — no LLM configured');
+      return [];
+    }
+    if (!context.repoChunks) {
+      logger.info('Bug finder: skipping — no repoChunks available');
+      return [];
+    }
+
+    logger.info(
+      `Bug finder: ${chunks.length} changed chunks, ${context.repoChunks.length} repo chunks`,
+    );
+
     const changedFunctions = collectChangedFunctions(chunks);
+    logger.info(
+      `Bug finder: ${changedFunctions.length} changed functions: ${changedFunctions.map(f => `${f.filepath}::${f.symbolName}`).join(', ')}`,
+    );
     if (changedFunctions.length === 0) return [];
 
     const graph = buildDependencyGraph(context.repoChunks);
