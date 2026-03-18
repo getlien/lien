@@ -78,7 +78,7 @@ export interface ComplexitySnapshotResult {
 
 export interface ReviewCommentResult {
   filepath: string;
-  line: number;
+  line: number | null;
   end_line: number | null;
   symbol_name: string | null;
   severity: 'error' | 'warning' | 'info';
