@@ -214,6 +214,27 @@ export async function handlePRReview(
         })
       : undefined;
 
+    // Build a tee logger so plugin output is visible in platform run logs
+    const engineLogger: Logger = logBuffer
+      ? {
+          info: (m: string) => {
+            logger.info(m);
+            logBuffer.add('info', m);
+          },
+          warning: (m: string) => {
+            logger.warning(m);
+            logBuffer.add('warning', m);
+          },
+          error: (m: string) => {
+            logger.error(m);
+            logBuffer.add('error', m);
+          },
+          debug: (m: string) => {
+            logger.debug(m);
+          },
+        }
+      : logger;
+
     // Run engine
     findings = await engine.run({
       chunks,
@@ -232,7 +253,7 @@ export async function handlePRReview(
       config: {},
       llm,
       pr: prContext,
-      logger,
+      logger: engineLogger,
       repoRootDir: headClone.dir,
     });
     logger.info(`Engine produced ${findings.length} total findings`);
