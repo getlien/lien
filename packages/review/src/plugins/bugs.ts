@@ -26,6 +26,7 @@ const MAX_PROMPT_CHARS = 60_000;
 const MAX_CALLERS_PER_FUNCTION = 5;
 const MAX_CHANGED_FUNCTIONS_PER_BATCH = 8;
 const MAX_CALLER_SNIPPET_CHARS = 2_000;
+const BUG_REVIEW_MARKER = '<!-- lien-plugin:bugs-review -->';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -117,6 +118,10 @@ export class BugFinderPlugin implements ReviewPlugin {
     // Post a top-level review comment for error-severity bugs that weren't posted inline
     const errors = findings.filter(f => f.severity === 'error');
     if (errors.length > 0 && context.postReviewComment && inlinePosted < errors.length) {
+      // Minimize previous bug finder comments so re-runs don't clutter the conversation
+      if (context.minimizeOutdatedComments) {
+        await context.minimizeOutdatedComments(BUG_REVIEW_MARKER);
+      }
       const body = formatBugReviewComment(errors);
       await context.postReviewComment(body);
     }
@@ -131,7 +136,7 @@ export class BugFinderPlugin implements ReviewPlugin {
 }
 
 function formatBugReviewComment(errors: ReviewFinding[]): string {
-  const header = `## 🐛 Bug Finder — ${errors.length} potential bug${errors.length === 1 ? '' : 's'} detected\n\n`;
+  const header = `${BUG_REVIEW_MARKER}\n## 🐛 Bug Finder — ${errors.length} potential bug${errors.length === 1 ? '' : 's'} detected\n\n`;
   const items = errors.map(f => {
     const location = `\`${f.filepath}:${f.line}\``;
     const symbol = f.symbolName ? ` in \`${f.symbolName}\`` : '';

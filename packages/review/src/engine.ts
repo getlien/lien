@@ -30,6 +30,7 @@ import {
   PLUGIN_MARKER_PREFIX,
   getExistingPluginCommentKeys,
   updatePRDescription,
+  minimizeOutdatedComments,
 } from './github-api.js';
 import type { LineComment, PRContext } from './types.js';
 import { performChunkOnlyIndex } from '@liendev/parser';
@@ -474,6 +475,8 @@ function buildPresentContext(
       octokit && pr
         ? (body, comments) => postPRReview(octokit, pr, comments ?? [], body, logger, 'COMMENT')
         : undefined,
+    minimizeOutdatedComments:
+      octokit && pr ? marker => minimizeOutdatedComments(octokit, pr, marker, logger) : undefined,
   };
 }
 
