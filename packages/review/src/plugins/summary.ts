@@ -415,7 +415,7 @@ Write a brief PR summary. Respond with ONLY valid JSON:
 \`\`\`
 
 Guidelines:
-- **risk_level**: "low" for docs/tests/config-only, "medium" for source changes with moderate scope, "high" for infra/db/many dependents/export changes/untested source files, "critical" for breaking changes to widely-used interfaces
+- **risk_level**: "low" for docs/tests/config-only OR purely mechanical changes (renames, moves, formatting) that don't alter behavior, "medium" for source changes with moderate scope, "high" for infra/db/many dependents/export changes/untested source files, "critical" for breaking changes to widely-used interfaces. A large diff is NOT automatically high-risk — judge by behavioral impact, not diff size
 - **confidence**: "high" when the diff and code context are clear and complete, "medium" when some files were truncated or the scope is ambiguous, "low" when the context is very limited
 ${overviewGuideline}
 ${keyChangesGuideline}
