@@ -17,3 +17,23 @@ export function buildChunkSnippetsMap(chunks: CodeChunk[]): Map<string, string> 
   }
   return snippets;
 }
+
+/** Format a chunk's size for display. */
+export function formatChunkSize(chunk: CodeChunk): string {
+  const bytes = chunk.content.length;
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)}KB`;
+  }
+  return `${bytes}B`;
+}
+
+/** Get a chunk summary with size and complexity. */
+export function getChunkStats(chunk: CodeChunk): string {
+  const size = formatChunkSize(chunk);
+  const complexity = chunk.metadata.complexity ?? 0;
+  const name = chunk.metadata.symbolName ?? 'unknown';
+  return `${name}: ${size}, complexity ${complexity}`;
+}
