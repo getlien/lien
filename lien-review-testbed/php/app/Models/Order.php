@@ -29,12 +29,17 @@ class Order
     }
 
     /**
-     * Simulate finding an order by its primary key.
-     * Returns an Order instance. In a real app this queries via Eloquent.
+     * Find an order by its primary key.
+     * Returns null if the order does not exist.
      */
-    public static function findById(int $id): self
+    public static function findById(int $id): ?self
     {
         // Simulated order store — production would hit the database
+        // Return null for IDs that don't exist
+        if ($id <= 0 || $id > 1000) {
+            return null;
+        }
+
         $items = [
             ['product_id' => 1, 'quantity' => 2, 'unit_price' => 79.99],
             ['product_id' => 3, 'quantity' => 1, 'unit_price' => 49.99],
