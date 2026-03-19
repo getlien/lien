@@ -26,6 +26,7 @@ export type {
   ArchitecturalFindingMetadata,
   SummaryFindingMetadata,
   BugFindingMetadata,
+  BugCallerInfo,
   BuiltinFindingMetadata,
 } from './plugin-types.js';
 

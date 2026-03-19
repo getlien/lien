@@ -125,10 +125,19 @@ export interface SummaryFindingMetadata {
   keyChanges: string[];
 }
 
+export interface BugCallerInfo {
+  filepath: string;
+  line: number;
+  symbol: string;
+  category: string;
+  description: string;
+  suggestion: string;
+}
+
 export interface BugFindingMetadata {
   pluginType: 'bugs';
-  bugCategory: string;
   changedFunction: string;
+  callers: BugCallerInfo[];
 }
 
 export type BuiltinFindingMetadata =
