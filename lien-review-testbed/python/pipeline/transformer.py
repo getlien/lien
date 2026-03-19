@@ -77,7 +77,7 @@ def normalize_keys(data: dict) -> dict:
 
 
 def sort_records(records: list[Record]) -> list[Record]:
-    """Sort records by timestamp in ascending order.
+    """Sort records by timestamp in descending order (most recent first).
 
     Uses lexicographic comparison on ISO-8601 timestamp strings, which
     produces chronological ordering for consistently formatted dates.
@@ -97,7 +97,7 @@ def sort_records(records: list[Record]) -> list[Record]:
         else:
             missing_timestamp.append(record)
 
-    sorted_with_ts = sorted(has_timestamp, key=lambda r: r.timestamp)
+    sorted_with_ts = sorted(has_timestamp, key=lambda r: r.timestamp, reverse=True)
 
     return sorted_with_ts + missing_timestamp
 
