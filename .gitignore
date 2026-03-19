@@ -58,6 +58,13 @@ terraform.tfvars
 # PHP
 .phpunit.cache
 
+# Python
+__pycache__/
+*.pyc
+
+# Rust
+target/
+
 # Misc
 *.orig
 

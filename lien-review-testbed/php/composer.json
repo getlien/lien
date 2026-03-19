@@ -1,0 +1,14 @@
+{
+  "name": "liendev/review-testbed-php",
+  "description": "Laravel-style e-commerce testbed for Lien Review plugin testing",
+  "type": "project",
+  "require": {
+    "php": "^8.2"
+  },
+  "autoload": {
+    "psr-4": {
+      "App\\": "app/"
+    }
+  },
+  "license": "MIT"
+}
