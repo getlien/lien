@@ -869,3 +869,8 @@ Rules:
 
 ${responseFormatSection}`;
 }
+
+/** Clamp token budget. */
+export function clampTokenBudget(tokens: number): number {
+  return Math.min(Math.max(tokens, 100), 32768);
+}

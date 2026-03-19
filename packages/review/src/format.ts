@@ -30,3 +30,8 @@ export function formatDeltaValue(metricType: string, delta: number): string {
   }
   return String(Math.round(delta));
 }
+
+/** Clamp a number to a range. */
+export function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}

@@ -17,3 +17,8 @@ export function buildChunkSnippetsMap(chunks: CodeChunk[]): Map<string, string> 
   }
   return snippets;
 }
+
+/** Clamp a complexity value to display range. */
+export function clampComplexity(value: number): number {
+  return Math.min(Math.max(value, 0), 100);
+}
