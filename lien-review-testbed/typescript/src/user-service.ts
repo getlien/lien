@@ -10,23 +10,26 @@ import { validateEmail, sanitizeString } from './validator.js';
 
 /**
  * Retrieves a single user by their unique identifier.
- * Throws if the user does not exist — callers should handle
- * the error to return appropriate HTTP responses.
+ * Returns null if the user does not exist.
  */
-export async function getUser(id: string): Promise<User> {
+export async function getUser(id: string): Promise<User | null> {
   if (!id || typeof id !== 'string') {
-    throw new Error('User ID is required');
+    return null;
   }
 
   const trimmedId = id.trim();
   if (trimmedId.length === 0) {
-    throw new Error('User ID cannot be empty');
+    return null;
   }
 
   const user = await queryOne<User>(
     'SELECT id, email, name, created_at, updated_at FROM users WHERE id = $1',
     [trimmedId],
   );
+
+  if (!user) {
+    return null;
+  }
 
   return {
     id: user.id,
