@@ -121,15 +121,14 @@ export class BugFinderPlugin implements ReviewPlugin {
       message: rebuildMessageWithLinks(f, blobBase),
     }));
 
-    // Try inline comments (should work — findings point at diff lines)
-    let inlinePosted = 0;
+    // Post inline comments on the diff (deduped automatically)
     if (context.postInlineComments) {
-      const result = await context.postInlineComments(linkedFindings, 'Bug Finder');
-      inlinePosted = result.posted;
+      await context.postInlineComments(linkedFindings, 'Bug Finder');
     }
 
-    // Fall back to top-level review comment for findings not posted inline
-    if (inlinePosted < findings.length && context.postReviewComment) {
+    // Always post a review comment as the primary notification
+    // (inline comments may be deduped from previous runs or filtered out of diff)
+    if (context.postReviewComment) {
       const body = formatBugReviewComment(linkedFindings);
       await context.postReviewComment(body);
     }
