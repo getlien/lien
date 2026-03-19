@@ -80,7 +80,7 @@ export class BugFinderPlugin implements ReviewPlugin {
       return [];
     }
 
-    const changedFunctions = collectChangedFunctions(chunks);
+    const changedFunctions = collectChangedFunctions(chunks, context.pr?.diffLines);
     if (changedFunctions.length === 0) return [];
 
     const graph = buildDependencyGraph(context.repoChunks);
@@ -273,10 +273,27 @@ function formatBugSummary(findings: ReviewFinding[], blobBase: string | null): s
 // Helpers
 // ---------------------------------------------------------------------------
 
-function collectChangedFunctions(chunks: CodeChunk[]): ChangedFunction[] {
+function collectChangedFunctions(
+  chunks: CodeChunk[],
+  diffLines?: Map<string, Set<number>>,
+): ChangedFunction[] {
   return chunks
     .filter(c => c.metadata.symbolType === 'function' || c.metadata.symbolType === 'method')
     .filter(c => c.metadata.symbolName)
+    .filter(c => {
+      // When diffLines are available, only include functions whose line range
+      // overlaps with actual diff changes. This prevents reporting pre-existing
+      // bugs in functions that happen to be in a changed file but weren't modified.
+      if (!diffLines) return true;
+      const lines = diffLines.get(c.metadata.file);
+      if (!lines) return true;
+      const start = c.metadata.startLine;
+      const end = c.metadata.endLine;
+      for (let line = start; line <= end; line++) {
+        if (lines.has(line)) return true;
+      }
+      return false;
+    })
     .map(c => ({
       filepath: c.metadata.file,
       symbolName: c.metadata.symbolName!,
