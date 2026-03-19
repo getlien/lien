@@ -97,6 +97,30 @@ class OrderRepository
     }
 
     /**
+     * Find all orders created within the given date range.
+     * Filters the in-memory store by createdAt timestamps.
+     *
+     * @return array<int, Order>
+     */
+    public function findByDateRange(\DateTimeImmutable $startDate, \DateTimeImmutable $endDate): array
+    {
+        if (count($this->orders) === 0) {
+            $this->seedDefaultOrders();
+        }
+
+        $filtered = array_filter(
+            $this->orders,
+            fn(Order $order) => $order->createdAt >= $startDate && $order->createdAt <= $endDate,
+        );
+
+        usort($filtered, function (Order $a, Order $b): int {
+            return $a->createdAt <=> $b->createdAt;
+        });
+
+        return array_values($filtered);
+    }
+
+    /**
      * Populate the store with sample orders for demonstration purposes.
      */
     private function seedDefaultOrders(): void

@@ -5,6 +5,40 @@ from __future__ import annotations
 from pipeline.models import Record
 
 
+def strip_html(text: str) -> str:
+    """Remove HTML tags from a string.
+
+    Strips all HTML tags including self-closing tags, attributes, and
+    nested elements. Preserves the text content between tags. Also
+    decodes common HTML entities like &amp;, &lt;, &gt;, and &quot;.
+
+    Returns the cleaned plain text string.
+    """
+    import re
+
+    if not text:
+        return text
+
+    # Remove script and style elements entirely
+    cleaned = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE)
+
+    # Remove HTML tags
+    cleaned = re.sub(r'<[^>]+>', '', cleaned)
+
+    # Decode HTML entities
+    cleaned = cleaned.replace('&amp;', '&')
+    cleaned = cleaned.replace('&lt;', '<')
+    cleaned = cleaned.replace('&gt;', '>')
+    cleaned = cleaned.replace('&quot;', '"')
+    cleaned = cleaned.replace('&#39;', "'")
+    cleaned = cleaned.replace('&nbsp;', ' ')
+
+    # Collapse whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    return cleaned
+
+
 def transform_record(record: Record) -> Record:
     """Apply the full transformation pipeline to a single record.
 
@@ -22,7 +56,7 @@ def transform_record(record: Record) -> Record:
         if value is None:
             continue
         if isinstance(value, str):
-            stripped = value.strip()
+            stripped = strip_html(value.strip())
             if stripped:
                 cleaned[key] = stripped
             else:

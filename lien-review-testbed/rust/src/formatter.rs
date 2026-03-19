@@ -6,23 +6,20 @@ use crate::error::AnalyzerError;
 pub fn format_result(result: &AnalysisResult, verbose: bool) -> String {
     let mut output = String::new();
 
-    output.push_str(&format!(
-        "=== Analysis: {} ===\n",
-        result.filename
-    ));
-    output.push_str(&format!("Score: {:.1}/100.0\n", result.score));
-    output.push_str(&format!("Issues: {}\n", result.issues.len()));
+    output.push_str(&format!("## Analysis: {}\n\n", result.filename));
+    output.push_str(&format!("**Score:** {:.1}/100.0\n\n", result.score));
+    output.push_str(&format!("**Issues:** {}\n\n", result.issues.len()));
 
     if verbose {
         output.push('\n');
-        output.push_str("Metrics:\n");
+        output.push_str("### Metrics\n\n| Metric | Value |\n|--------|-------|\n");
 
         let mut sorted_keys: Vec<&String> = result.metrics.keys().collect();
         sorted_keys.sort();
 
         for key in sorted_keys {
             if let Some(value) = result.metrics.get(key) {
-                output.push_str(&format!("  {}: {:.2}\n", key, value));
+                output.push_str(&format!("| {} | {:.2} |\n", key, value));
             }
         }
 
@@ -71,7 +68,7 @@ pub fn format_json(result: &AnalysisResult) -> Result<String, AnalyzerError> {
 pub fn format_summary(results: &[AnalysisResult]) -> String {
     let mut output = String::new();
 
-    output.push_str("=== Analysis Summary ===\n");
+    output.push_str("# Analysis Summary\n\n");
     output.push_str(&format!("Files analyzed: {}\n", results.len()));
 
     if results.is_empty() {

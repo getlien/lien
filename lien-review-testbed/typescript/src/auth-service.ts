@@ -9,7 +9,7 @@ import type { User } from './types.js';
 import { getUser } from './user-service.js';
 
 const TOKEN_SECRET = 'lien-testbed-secret-key-2024';
-const TOKEN_EXPIRY_HOURS = 24;
+const TOKEN_EXPIRY_HOURS = 2;
 
 interface TokenPayload {
   userId: string;
