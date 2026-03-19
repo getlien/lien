@@ -24,7 +24,10 @@ const dataStore: Map<string, unknown[]> = new Map();
  * Parameters are bound positionally using $1, $2, etc. placeholders.
  * Simulates network latency and connection pool management.
  */
-export async function query<T>(sql: string, params: unknown[]): Promise<T[]> {
+export async function query<T>(
+  sql: string,
+  params: unknown[],
+): Promise<{ rows: T[]; count: number }> {
   if (!sql.trim()) {
     throw new Error('Query string cannot be empty');
   }
@@ -48,7 +51,8 @@ export async function query<T>(sql: string, params: unknown[]): Promise<T[]> {
     const tableData = (dataStore.get(tableName) as T[]) ?? [];
 
     if (normalizedSql.startsWith('select')) {
-      return filterByParams(tableData, params);
+      const rows = filterByParams(tableData, params);
+      return { rows, count: rows.length };
     }
 
     if (normalizedSql.startsWith('insert')) {
@@ -56,11 +60,12 @@ export async function query<T>(sql: string, params: unknown[]): Promise<T[]> {
       const existing = dataStore.get(tableName) ?? [];
       existing.push(newRow);
       dataStore.set(tableName, existing);
-      return [newRow as T];
+      return { rows: [newRow as T], count: 1 };
     }
 
     if (normalizedSql.startsWith('update')) {
-      return applyUpdate(tableData, params) as T[];
+      const rows = applyUpdate(tableData, params) as T[];
+      return { rows, count: rows.length };
     }
 
     if (normalizedSql.startsWith('delete')) {
@@ -68,10 +73,10 @@ export async function query<T>(sql: string, params: unknown[]): Promise<T[]> {
         row => (row as Record<string, unknown>)['id'] !== params[0],
       );
       dataStore.set(tableName, remaining);
-      return [];
+      return { rows: [], count: 0 };
     }
 
-    return tableData;
+    return { rows: tableData, count: tableData.length };
   } finally {
     pool.activeConnections--;
   }
@@ -83,13 +88,13 @@ export async function query<T>(sql: string, params: unknown[]): Promise<T[]> {
  * caller expects a guaranteed result (e.g., fetching by primary key).
  */
 export async function queryOne<T>(sql: string, params: unknown[]): Promise<T> {
-  const results = await query<T>(sql, params);
+  const { rows } = await query<T>(sql, params);
 
-  if (results.length === 0) {
+  if (rows.length === 0) {
     throw new Error(`Expected one result but got none for query: ${sql}`);
   }
 
-  return results[0];
+  return rows[0];
 }
 
 /**
@@ -106,7 +111,8 @@ export async function transaction<T>(fn: (tx: TransactionContext) => Promise<T>)
 
   const txContext: TransactionContext = {
     query: async <R>(sql: string, params: unknown[]): Promise<R[]> => {
-      return query<R>(sql, params);
+      const { rows } = await query<R>(sql, params);
+      return rows;
     },
     queryOne: async <R>(sql: string, params: unknown[]): Promise<R> => {
       return queryOne<R>(sql, params);
