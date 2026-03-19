@@ -24,39 +24,36 @@ class PaymentService
      * Process a payment charge for the given order.
      * Validates the order state, communicates with the payment gateway,
      * and marks the order as paid on success.
-     * Throws RuntimeException on payment failure — callers should
-     * handle or propagate this exception.
+     * Returns false if the payment fails for any reason.
      */
     public function charge(Order $order): bool
     {
-        if ($order->status === 'paid') {
-            throw new RuntimeException(
-                "Order {$order->id} has already been paid"
+        try {
+            if ($order->status === 'paid') {
+                return false;
+            }
+
+            if ($order->total <= 0) {
+                return false;
+            }
+
+            // Simulate payment gateway communication
+            $gatewayResponse = $this->callPaymentGateway(
+                amount: $order->total,
+                currency: 'USD',
+                orderId: $order->id,
             );
+
+            if (!$gatewayResponse['success']) {
+                return false;
+            }
+
+            $order->markAsPaid();
+
+            return true;
+        } catch (\Exception $e) {
+            return false;
         }
-
-        if ($order->total <= 0) {
-            throw new RuntimeException(
-                "Order {$order->id} has invalid total: {$order->total}"
-            );
-        }
-
-        // Simulate payment gateway communication
-        $gatewayResponse = $this->callPaymentGateway(
-            amount: $order->total,
-            currency: 'USD',
-            orderId: $order->id,
-        );
-
-        if (!$gatewayResponse['success']) {
-            throw new RuntimeException(
-                "Payment failed for order {$order->id}: {$gatewayResponse['error']}"
-            );
-        }
-
-        $order->markAsPaid();
-
-        return true;
     }
 
     /**
