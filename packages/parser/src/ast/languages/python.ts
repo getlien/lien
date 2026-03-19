@@ -151,9 +151,12 @@ export class PythonExportExtractor implements LanguageExportExtractor {
         return;
       }
 
-      // Re-exports via `from .module import Symbol`
+      // Re-exports via `from .module import Symbol` (relative imports only)
       if (child.type === 'import_from_statement') {
-        this.extractReExportNames(child, addExport);
+        const hasRelativeImport = child.namedChildren.some(c => c.type === 'relative_import');
+        if (hasRelativeImport) {
+          this.extractReExportNames(child, addExport);
+        }
       }
     });
 

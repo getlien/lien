@@ -113,17 +113,32 @@ function buildExportIndex(chunks: CodeChunk[]): { fileSet: Set<string>; exportIn
   const fileSet = new Set<string>();
   const exportIndex: ExportIndex = new Map();
 
+  const addToIndex = (symbol: string, file: string, chunk: CodeChunk) => {
+    const existing = exportIndex.get(symbol) ?? [];
+    if (!existing.some(e => e.filepath === file)) {
+      existing.push({ filepath: file, chunk });
+    }
+    exportIndex.set(symbol, existing);
+  };
+
   for (const chunk of chunks) {
     const file = chunk.metadata.file;
     fileSet.add(file);
 
-    if (!chunk.metadata.exports) continue;
-    for (const exportedSymbol of chunk.metadata.exports) {
-      const existing = exportIndex.get(exportedSymbol) ?? [];
-      if (!existing.some(e => e.filepath === file)) {
-        existing.push({ filepath: file, chunk });
+    // Index explicit exports (classes, functions, interfaces)
+    if (chunk.metadata.exports) {
+      for (const exportedSymbol of chunk.metadata.exports) {
+        addToIndex(exportedSymbol, file, chunk);
       }
-      exportIndex.set(exportedSymbol, existing);
+    }
+
+    // Also index method/function symbolNames — needed for OOP languages (PHP, Rust, Python)
+    // where call sites reference method names (e.g., findById) but exports only list
+    // the class name (e.g., Order). This enables cross-file method call resolution.
+    const sym = chunk.metadata.symbolName;
+    const symType = chunk.metadata.symbolType;
+    if (sym && (symType === 'function' || symType === 'method')) {
+      addToIndex(sym, file, chunk);
     }
   }
 
@@ -173,6 +188,42 @@ function buildPackageImportedSymbols(chunks: CodeChunk[]): Map<CodeChunk, Set<st
   return result;
 }
 
+/**
+ * Build a map from exported class/module symbols to the files that export them.
+ * Used to resolve method calls through class imports (e.g., `Order::findById()`
+ * where `Order` is imported but `findById` is the call site symbol).
+ */
+function buildExportFileMap(exportIndex: ExportIndex): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
+  for (const [symbol, entries] of exportIndex) {
+    for (const entry of entries) {
+      const existing = result.get(symbol) ?? new Set<string>();
+      existing.add(entry.filepath);
+      result.set(symbol, existing);
+    }
+  }
+  return result;
+}
+
+/**
+ * Check if a chunk imports any symbol from a given file (via non-relative imports).
+ * Used for OOP method resolution: if a chunk imports class `Order` from `Order.php`,
+ * and `Order.php` also defines `findById`, the chunk can call `findById`.
+ */
+function chunkImportsFromFile(
+  chunk: CodeChunk,
+  targetFile: string,
+  pkgSymbols: Set<string> | undefined,
+  exportFileMap: Map<string, Set<string>>,
+): boolean {
+  if (!pkgSymbols) return false;
+  for (const sym of pkgSymbols) {
+    const files = exportFileMap.get(sym);
+    if (files?.has(targetFile)) return true;
+  }
+  return false;
+}
+
 /** Pass 3: Build caller edges from call sites + resolved imports. */
 function buildCallerEdges(
   chunks: CodeChunk[],
@@ -181,12 +232,14 @@ function buildCallerEdges(
 ): Map<string, CallerEdge[]> {
   const edges = new Map<string, CallerEdge[]>();
   const packageImports = buildPackageImportedSymbols(chunks);
+  const exportFileMap = buildExportFileMap(exportIndex);
 
   for (const chunk of chunks) {
     if (!chunk.metadata.callSites || chunk.metadata.callSites.length === 0) continue;
 
     const importMap = chunkImportMaps.get(chunk);
     const callerFile = chunk.metadata.file;
+    const pkgSymbols = packageImports.get(chunk);
 
     for (const callSite of chunk.metadata.callSites) {
       const calledSymbol = callSite.symbol;
@@ -205,16 +258,50 @@ function buildCallerEdges(
         continue;
       }
 
-      // 3. Symbol-name fallback for cross-package imports
-      //    Works across languages: @liendev/review (TS), use App\Services\... (PHP),
-      //    from package.module import ... (Python), use crate::... (Rust)
-      //    Handles re-exports from barrel/index files by linking to all exporting files.
-      if (!exportLocations) continue;
-      const pkgSymbols = packageImports.get(chunk);
-      if (!pkgSymbols?.has(calledSymbol)) continue;
-      for (const loc of exportLocations) {
-        if (loc.filepath === callerFile) continue;
-        addEdge(edges, `${loc.filepath}::${calledSymbol}`, chunk, callSite.line);
+      // 3a. Symbol-name fallback for cross-package imports (direct symbol match)
+      //     Works across languages: @liendev/review (TS), from package import ... (Python),
+      //     use crate::... (Rust). Handles re-exports from barrel/index files.
+      if (exportLocations && pkgSymbols?.has(calledSymbol)) {
+        for (const loc of exportLocations) {
+          if (loc.filepath === callerFile) continue;
+          addEdge(edges, `${loc.filepath}::${calledSymbol}`, chunk, callSite.line);
+        }
+        continue;
+      }
+
+      // 3b. OOP method fallback: the caller imports a class (e.g., `use App\Models\Order`)
+      //     and calls one of its methods (e.g., `findById`). The import is for the class,
+      //     not the method, so direct symbol matching fails. Instead, check if the caller
+      //     imports ANY symbol from a file that defines the called method.
+      if (exportLocations) {
+        let matched = false;
+        for (const loc of exportLocations) {
+          if (loc.filepath === callerFile) continue;
+          if (chunkImportsFromFile(chunk, loc.filepath, pkgSymbols, exportFileMap)) {
+            addEdge(edges, `${loc.filepath}::${calledSymbol}`, chunk, callSite.line);
+            matched = true;
+          }
+        }
+        if (matched) continue;
+
+        // 3c. Same-namespace/module fallback: in PHP/Python/Rust, classes in the same
+        //     namespace can reference each other without explicit imports. If the method
+        //     is defined in a file within the same directory, create the edge.
+        //     Skip for TS/JS which always require explicit imports.
+        const lang = chunk.metadata.language;
+        const supportsImplicitNamespace = lang && !['typescript', 'javascript'].includes(lang);
+        if (supportsImplicitNamespace) {
+          const otherFileLocations = exportLocations.filter(e => e.filepath !== callerFile);
+          if (otherFileLocations.length > 0) {
+            const callerDir = callerFile.substring(0, callerFile.lastIndexOf('/') + 1);
+            for (const loc of otherFileLocations) {
+              const locDir = loc.filepath.substring(0, loc.filepath.lastIndexOf('/') + 1);
+              if (locDir === callerDir) {
+                addEdge(edges, `${loc.filepath}::${calledSymbol}`, chunk, callSite.line);
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -201,13 +201,14 @@ class UserController:
       expect(exports).toEqual(['AuthService', 'UserController']);
     });
 
-    it('should extract re-exports from absolute imports', () => {
+    it('should NOT treat absolute imports as re-exports', () => {
       const code = 'from utils import helper';
       const tree = parser.parse(code);
       const extractor = getExtractor('python');
       const exports = extractor.extractExports(tree.rootNode);
 
-      expect(exports).toEqual(['helper']);
+      // Absolute imports are NOT re-exports — only relative imports (from .x import y) are
+      expect(exports).toEqual([]);
     });
 
     it('should extract re-exports from current package import', () => {
