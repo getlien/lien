@@ -25,8 +25,8 @@ class FindingsService
             ->where('type', ReviewRunType::Pr)
             ->where('status', ReviewRunStatus::Completed)
             ->where('completed_at', '>=', $since)
-            ->distinct('pr_number')
-            ->count('pr_number');
+            ->selectRaw('COUNT(DISTINCT repository_id || \'-\' || pr_number) as cnt')
+            ->value('cnt');
 
         $completedRunIds = ReviewRun::whereIn('repository_id', $repoIds)
             ->where('status', ReviewRunStatus::Completed)
@@ -52,6 +52,7 @@ class FindingsService
             ->selectRaw('review_type, COUNT(*) as count')
             ->groupBy('review_type')
             ->pluck('count', 'review_type')
+            ->map(fn ($count) => (int) $count)
             ->all();
 
         $resolutionRate = $findingsPosted > 0
@@ -128,16 +129,15 @@ class FindingsService
     ): array {
         $base = $this->baseFindingsQuery($repoIds, $repositoryId, $filters);
 
-        $posted = (clone $base)->count();
-        $resolved = (clone $base)->where('review_comments.resolution', 'resolved')->count();
-        $dismissed = (clone $base)->where('review_comments.resolution', 'dismissed')->count();
-        $open = (clone $base)->whereNull('review_comments.resolution')->count();
+        $row = (clone $base)
+            ->selectRaw("COUNT(*) as total, SUM(CASE WHEN review_comments.resolution = 'resolved' THEN 1 ELSE 0 END) as resolved, SUM(CASE WHEN review_comments.resolution = 'dismissed' THEN 1 ELSE 0 END) as dismissed, SUM(CASE WHEN review_comments.resolution IS NULL THEN 1 ELSE 0 END) as open")
+            ->first();
 
         return [
-            'posted' => $posted,
-            'resolved' => $resolved,
-            'dismissed' => $dismissed,
-            'open' => $open,
+            'posted' => (int) ($row->total ?? 0),
+            'resolved' => (int) ($row->resolved ?? 0),
+            'dismissed' => (int) ($row->dismissed ?? 0),
+            'open' => (int) ($row->open ?? 0),
         ];
     }
 
@@ -203,7 +203,10 @@ class FindingsService
 
         if (! empty($filters['range']) && $filters['range'] !== 'all') {
             $days = (int) $filters['range'];
-            $query->where('review_runs.completed_at', '>=', now()->subDays($days));
+
+            if (in_array($days, [7, 30, 90], true)) {
+                $query->where('review_runs.completed_at', '>=', now()->subDays($days));
+            }
         }
 
         return $query;

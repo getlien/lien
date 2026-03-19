@@ -23,6 +23,13 @@ function typeBadge(type) {
   return typeConfig[type] ?? { label: type, color: 'bg-zinc-800 text-zinc-400' };
 }
 
+const statusConfig = {
+  posted: { label: 'Posted', color: 'bg-green-900/30 text-green-400' },
+  suppressed: { label: 'Suppressed', color: 'bg-amber-900/30 text-amber-400' },
+  skipped: { label: 'Skipped', color: 'bg-zinc-800 text-zinc-400' },
+  deduped: { label: 'Deduped', color: 'bg-zinc-800 text-zinc-400' },
+};
+
 function statusLabel(finding) {
   if (finding.resolution) {
     return (
@@ -32,7 +39,9 @@ function statusLabel(finding) {
       }
     );
   }
-  return { label: 'Posted', color: 'bg-green-900/30 text-green-400' };
+  return (
+    statusConfig[finding.status] ?? { label: finding.status, color: 'bg-zinc-800 text-zinc-400' }
+  );
 }
 
 function truncateBody(body, maxLen = 80) {
@@ -153,21 +162,25 @@ const grouped = computed(() => {
           Showing {{ findings.from }}–{{ findings.to }} of {{ findings.total }}
         </p>
         <div class="flex gap-1">
-          <Link
-            v-for="link in findings.links"
-            :key="link.label"
-            :href="link.url"
-            :class="[
-              'rounded px-3 py-1 text-xs font-medium transition-colors',
-              link.active
-                ? 'bg-brand-950 text-brand-400'
-                : link.url
-                  ? 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                  : 'cursor-default text-zinc-600',
-            ]"
-            v-html="link.label"
-            preserve-state
-          />
+          <template v-for="link in findings.links" :key="link.label">
+            <Link
+              v-if="link.url"
+              :href="link.url"
+              :class="[
+                'rounded px-3 py-1 text-xs font-medium transition-colors',
+                link.active
+                  ? 'bg-brand-950 text-brand-400'
+                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200',
+              ]"
+              v-html="link.label"
+              preserve-state
+            />
+            <span
+              v-else
+              class="cursor-default rounded px-3 py-1 text-xs font-medium text-zinc-600"
+              v-html="link.label"
+            />
+          </template>
         </div>
       </div>
     </div>

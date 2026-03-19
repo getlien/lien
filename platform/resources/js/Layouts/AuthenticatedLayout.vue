@@ -104,11 +104,11 @@ function isSubNav(path) {
           href="/dashboard"
           :class="[
             'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-            currentUrl === '/dashboard'
+            currentUrl.startsWith('/dashboard')
               ? 'bg-zinc-800 text-brand-400'
               : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200',
           ]"
-          :aria-current="currentUrl === '/dashboard' ? 'page' : undefined"
+          :aria-current="currentUrl.startsWith('/dashboard') ? 'page' : undefined"
         >
           <svg
             class="h-5 w-5 shrink-0"
