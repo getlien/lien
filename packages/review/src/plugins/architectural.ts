@@ -75,13 +75,14 @@ export class ArchitecturalPlugin implements ReviewPlugin {
     const response = await context.llm.complete(prompt, { temperature: 0 });
 
     // Parse notes from response
-    const notes = parseArchitecturalNotes(response.content, logger, limit);
+    const { summary, notes } = parseArchitecturalNotes(response.content, logger, limit);
     logger.info(`Architectural plugin: ${notes.length} observations`);
 
-    return notes.map(note => {
+    return notes.map((note, i) => {
       const metadata: ArchitecturalFindingMetadata = {
         pluginType: 'architectural',
         scope: note.scope,
+        ...(i === 0 && summary ? { summary } : {}),
       };
 
       const { filepath, line } = resolveScope(note.scope, chunks);
@@ -166,12 +167,15 @@ function scopeLink(filepath: string, line: number, blobBase: string | null): str
 
 function formatArchDescription(findings: ReviewFinding[], blobBase: string | null): string {
   const count = findings.length;
+  const firstMeta = findings[0]?.metadata as ArchitecturalFindingMetadata | undefined;
+  const summary = firstMeta?.summary;
+  const summaryText = summary ? ` — ${summary}` : '';
   const rows = findings.map(f => {
     const scope = f.filepath ? scopeLink(f.filepath, f.line, blobBase) : 'General';
     return `| ${scope} | ${f.message} | ${f.suggestion ?? ''} |`;
   });
   const table = `| Scope | Observation | Suggestion |\n|---|---|---|\n${rows.join('\n')}`;
-  return `<details>\n<summary>🏗️ <b>Architectural</b> · ${count} observation${count === 1 ? '' : 's'}</summary>\n\n${table}\n\n</details>`;
+  return `<details>\n<summary>🏗️ <b>Architectural</b> · ${count} observation${count === 1 ? '' : 's'}${summaryText}</summary>\n\n${table}\n\n</details>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +342,7 @@ ONLY valid JSON:
 
 \`\`\`json
 {
+  "summary": "One sentence summarizing all architectural concerns (max 20 words)",
   "architectural_notes": [
     {
       "scope": "filepath or filepath::symbolName",
@@ -350,9 +355,10 @@ ONLY valid JSON:
 \`\`\`
 
 Rules:
+- **summary**: a single sentence covering all observations. Good: "Truncation logic duplicated across 3 files — consolidate into format.ts". Bad: "There are some issues"
 - Every observation must cite specific lines or files as evidence
 - Maximum ${limit} notes — only flag issues worth fixing
-- If no structural issues found, return an empty array`;
+- If no structural issues found, return \`{ "summary": "", "architectural_notes": [] }\``;
 }
 
 // ---------------------------------------------------------------------------
@@ -370,12 +376,12 @@ function isValidArchNote(note: unknown): note is ArchitecturalNote {
   );
 }
 
-function parseArchitecturalNotes(
-  content: string,
-  logger: Logger,
-  limit: number,
-): ArchitecturalNote[] {
-  // Try to parse as JSON with architectural_notes key
+interface ArchParseResult {
+  summary: string;
+  notes: ArchitecturalNote[];
+}
+
+function parseArchitecturalNotes(content: string, logger: Logger, limit: number): ArchParseResult {
   const jsonStr = extractJSONFromCodeBlock(content);
 
   try {
@@ -383,7 +389,7 @@ function parseArchitecturalNotes(
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.architectural_notes)) {
       const notes = parsed.architectural_notes.filter(isValidArchNote).slice(0, limit);
       logger.info(`Parsed ${notes.length} architectural notes`);
-      return notes;
+      return { summary: typeof parsed.summary === 'string' ? parsed.summary : '', notes };
     }
   } catch {
     // Fall through to retry
@@ -397,7 +403,7 @@ function parseArchitecturalNotes(
       if (parsed && Array.isArray(parsed.architectural_notes)) {
         const notes = parsed.architectural_notes.filter(isValidArchNote).slice(0, limit);
         logger.info(`Recovered ${notes.length} architectural notes with retry`);
-        return notes;
+        return { summary: typeof parsed.summary === 'string' ? parsed.summary : '', notes };
       }
     } catch {
       // Total failure
@@ -405,5 +411,5 @@ function parseArchitecturalNotes(
   }
 
   logger.warning('Failed to parse architectural review response');
-  return [];
+  return { summary: '', notes: [] };
 }

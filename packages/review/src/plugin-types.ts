@@ -117,6 +117,8 @@ export interface ComplexityFindingMetadata {
 export interface ArchitecturalFindingMetadata {
   pluginType: 'architectural';
   scope: string;
+  /** LLM-generated one-line summary of all architectural concerns. Present on the first finding only. */
+  summary?: string;
 }
 
 export interface SummaryFindingMetadata {
