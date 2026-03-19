@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ReviewRunStatus;
+use App\Http\Controllers\Concerns\WithActiveRepositories;
 use App\Models\Repository;
+use App\Services\FindingsService;
 use App\Services\RepositoryStatsService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -11,19 +13,19 @@ use Inertia\Response;
 
 class RepositoryDashboardController extends Controller
 {
-    private const ALLOWED_RANGES = [7, 30, 90];
+    use WithActiveRepositories;
 
-    public function __construct(private RepositoryStatsService $stats) {}
+    public function __construct(
+        private RepositoryStatsService $stats,
+        private FindingsService $findingsService,
+    ) {}
 
     public function show(Request $request, Repository $repository): Response
     {
         $this->authorize('view', $repository);
         $repository->load('organization');
 
-        $days = (int) $request->query('range', 30);
-        if (! in_array($days, self::ALLOWED_RANGES, true)) {
-            $days = 30;
-        }
+        $days = $this->resolveRange($request);
 
         $lastRun = $repository->reviewRuns()
             ->where('status', ReviewRunStatus::Completed)
@@ -62,6 +64,11 @@ class RepositoryDashboardController extends Controller
 
             'reviewActivity' => Inertia::defer(fn () => $this->stats->getReviewActivity($repository, $days), 'stats'),
             'costTracking' => Inertia::defer(fn () => $this->stats->getCostTracking($repository, $days), 'stats'),
+
+            'recentFindings' => Inertia::defer(fn () => $this->findingsService->getRecentFindings(
+                collect([$repository->id]),
+                5,
+            ), 'findings'),
         ]);
     }
 }

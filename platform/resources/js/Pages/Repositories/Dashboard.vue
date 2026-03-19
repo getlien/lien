@@ -6,6 +6,7 @@ import Breadcrumbs from '@/Components/Breadcrumbs.vue';
 import ComplexityTrendChart from '@/Components/Charts/ComplexityTrendChart.vue';
 import TopFunctionsTable from '@/Components/Tables/TopFunctionsTable.vue';
 import RecentRunsTable from '@/Components/Tables/RecentRunsTable.vue';
+import RecentFindingsFeed from '@/Components/Dashboard/RecentFindingsFeed.vue';
 import FunctionSourceOverlay from '@/Components/Overlays/FunctionSourceOverlay.vue';
 import StatCard from '@/Components/StatCard.vue';
 import SkeletonChart from '@/Components/Skeletons/SkeletonChart.vue';
@@ -24,6 +25,7 @@ const props = defineProps({
   topFunctions: Array,
   clusterMapData: Array,
   recentRuns: Array,
+  recentFindings: Array,
   range: Number,
   reviewActivity: Object,
   costTracking: Object,
@@ -199,6 +201,28 @@ function baselinePercent() {
             <StatCard label="Total Tokens" :value="formatTokens(costTracking?.total_tokens ?? 0)" />
             <StatCard label="Total Cost" :value="formatCost(costTracking?.total_cost ?? 0)" />
             <StatCard label="Review Runs" :value="costTracking?.total_runs ?? 0" />
+          </div>
+        </div>
+      </Deferred>
+
+      <Deferred :data="['recentFindings']">
+        <template #fallback>
+          <div class="mt-8">
+            <SkeletonTable />
+          </div>
+        </template>
+        <div class="mt-8 deferred-enter">
+          <div class="flex items-center justify-between">
+            <h2 class="text-lg font-medium text-zinc-100">Recent Findings</h2>
+            <Link
+              :href="`/repos/${repository.id}/findings`"
+              class="text-sm font-medium text-brand-400 hover:text-brand-300"
+            >
+              View all findings &rarr;
+            </Link>
+          </div>
+          <div class="mt-3">
+            <RecentFindingsFeed v-if="recentFindings" :findings="recentFindings" />
           </div>
         </div>
       </Deferred>

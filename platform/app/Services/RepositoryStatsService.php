@@ -6,6 +6,8 @@ use App\Enums\ReviewCommentStatus;
 use App\Enums\ReviewRunStatus;
 use App\Enums\ReviewRunType;
 use App\Models\Repository;
+use App\Models\ReviewRun;
+use Illuminate\Support\Collection;
 
 class RepositoryStatsService
 {
@@ -175,6 +177,30 @@ class RepositoryStatsService
                 'duration_seconds' => $run->started_at && $run->completed_at
                     ? $run->started_at->diffInSeconds($run->completed_at)
                     : null,
+            ])
+            ->all();
+    }
+
+    /**
+     * @param  Collection<int, int>  $repoIds
+     * @return list<array{id: int, repository_id: int, repository_name: string, type: string, status: string, pr_number: int|null, pr_title: string|null, created_at: string}>
+     */
+    public function getCompactRecentRuns(Collection $repoIds, int $limit = 5): array
+    {
+        return ReviewRun::with('repository:id,full_name')
+            ->whereIn('repository_id', $repoIds)
+            ->latest('created_at')
+            ->limit($limit)
+            ->get()
+            ->map(fn (ReviewRun $run) => [
+                'id' => $run->id,
+                'repository_id' => $run->repository_id,
+                'repository_name' => $run->repository->full_name,
+                'type' => $run->type->value,
+                'status' => $run->status->value,
+                'pr_number' => $run->pr_number,
+                'pr_title' => $run->pr_title,
+                'created_at' => $run->created_at->toISOString(),
             ])
             ->all();
     }
