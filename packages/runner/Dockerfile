@@ -63,7 +63,7 @@ COPY --from=builder /app/packages/runner/package.json packages/runner/
 COPY --from=builder /app/packages/runner/dist/ packages/runner/dist/
 
 ENV GIT_TERMINAL_PROMPT=0
-ENV OPENROUTER_MODEL=minimax/minimax-m2.5
+ENV OPENROUTER_MODEL=minimax/minimax-m2.7
 
 USER lien
 
