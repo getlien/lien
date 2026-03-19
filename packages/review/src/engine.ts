@@ -98,8 +98,23 @@ export class ReviewEngine {
     // Phase 2: Lazy repo indexing — only when an active plugin needs it
     await ensureRepoChunks(activePlugins, context);
 
-    // Phase 3: Analysis — run all active plugins in parallel
-    return runActivePlugins(activePlugins, this.verbose, logger);
+    // Phase 3: Analysis — run all active plugins in parallel, except summary runs last
+    const deferredId = 'summary';
+    const parallel = activePlugins.filter(({ plugin }) => plugin.id !== deferredId);
+    const deferred = activePlugins.filter(({ plugin }) => plugin.id === deferredId);
+
+    const findings = await runActivePlugins(parallel, this.verbose, logger);
+
+    // Run deferred plugins (summary) with access to prior findings
+    if (deferred.length > 0) {
+      for (const entry of deferred) {
+        entry.pluginContext = { ...entry.pluginContext, priorFindings: findings };
+      }
+      const deferredFindings = await runActivePlugins(deferred, this.verbose, logger);
+      findings.push(...deferredFindings);
+    }
+
+    return findings;
   }
 
   /**
