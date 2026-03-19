@@ -467,6 +467,14 @@ export class RustSymbolExtractor implements LanguageSymbolExtractor {
         }
       }
 
+      // scoped_identifier: module::function(), Type::method()
+      if (funcNode.type === 'scoped_identifier') {
+        const nameNode = funcNode.childForFieldName('name');
+        if (nameNode) {
+          return { symbol: nameNode.text, line, key: `${nameNode.text}:${line}` };
+        }
+      }
+
       return null;
     }
 
