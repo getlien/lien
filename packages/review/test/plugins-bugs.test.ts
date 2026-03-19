@@ -1,16 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BugFinderPlugin } from '../src/plugins/bugs.js';
 import { createTestContext, createTestChunk, createMockLLMClient } from '../src/test-helpers.js';
+import type { PresentContext, BugFindingMetadata } from '../src/plugin-types.js';
 
 function makeBugLLMResponse(
   bugs: Array<{
-    filepath: string;
-    line: number;
-    symbol?: string;
+    callerFilepath: string;
+    callerLine: number;
+    callerSymbol: string;
     severity?: string;
     category?: string;
     description: string;
-    evidence?: string;
     suggestion?: string;
   }>,
 ): string {
@@ -18,8 +18,6 @@ function makeBugLLMResponse(
     bugs: bugs.map(b => ({
       severity: 'warning',
       category: 'logic_error',
-      symbol: 'unknown',
-      evidence: '',
       suggestion: '',
       ...b,
     })),
@@ -191,22 +189,21 @@ describe('BugFinderPlugin', () => {
 
     const findings = await plugin.analyze(context);
     expect(findings).toEqual([]);
-    expect(llm.calls).toHaveLength(0); // No LLM call made
+    expect(llm.calls).toHaveLength(0);
   });
 
-  it('sends prompt to LLM and parses bug findings', async () => {
+  it('anchors findings on the changed function, not the caller', async () => {
     const { validateChunk, authChunk } = makeTestScenario();
 
     const llmResponse = makeBugLLMResponse([
       {
-        filepath: 'src/services/auth.ts',
-        line: 3,
-        symbol: 'register',
+        callerFilepath: 'src/services/auth.ts',
+        callerLine: 3,
+        callerSymbol: 'register',
         severity: 'warning',
         category: 'null_check',
-        description: 'validateEmail may return null but register assumes boolean',
-        evidence: 'Line 3: if (validateEmail(email))',
-        suggestion: 'Add explicit null check',
+        description: 'Passes null to validateEmail check',
+        suggestion: 'Add null guard',
       },
     ]);
 
@@ -221,12 +218,73 @@ describe('BugFinderPlugin', () => {
 
     expect(llm.calls).toHaveLength(1);
     expect(findings).toHaveLength(1);
+    // Finding is anchored on the CHANGED function
+    expect(findings[0].filepath).toBe('src/utils/validate.ts');
+    expect(findings[0].line).toBe(1); // validateChunk.metadata.startLine
+    expect(findings[0].symbolName).toBe('validateEmail');
     expect(findings[0].pluginId).toBe('bugs');
-    expect(findings[0].filepath).toBe('src/services/auth.ts');
-    expect(findings[0].line).toBe(3);
-    expect(findings[0].severity).toBe('warning');
-    expect(findings[0].category).toBe('null_check');
-    expect(findings[0].symbolName).toBe('register');
+  });
+
+  it('groups multiple callers into one finding per changed function', async () => {
+    const { validateChunk, authChunk } = makeTestScenario();
+
+    // Add a second caller
+    const profileChunk = createTestChunk({
+      content:
+        'import { validateEmail } from "../utils/validate";\nfunction updateProfile() { validateEmail(email); }',
+      metadata: {
+        file: 'src/services/profile.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'updateProfile',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['updateProfile'],
+        importedSymbols: { '../utils/validate': ['validateEmail'] },
+        callSites: [{ symbol: 'validateEmail', line: 2 }],
+      },
+    });
+
+    const llmResponse = makeBugLLMResponse([
+      {
+        callerFilepath: 'src/services/auth.ts',
+        callerLine: 3,
+        callerSymbol: 'register',
+        severity: 'error',
+        category: 'null_check',
+        description: 'Null not handled',
+      },
+      {
+        callerFilepath: 'src/services/profile.ts',
+        callerLine: 2,
+        callerSymbol: 'updateProfile',
+        severity: 'warning',
+        category: 'null_check',
+        description: 'Null not handled',
+      },
+    ]);
+
+    const llm = createMockLLMClient([llmResponse]);
+    const context = createTestContext({
+      chunks: [validateChunk],
+      repoChunks: [validateChunk, authChunk, profileChunk],
+      llm,
+    });
+
+    const findings = await plugin.analyze(context);
+
+    // Grouped into one finding for validateEmail
+    expect(findings).toHaveLength(1);
+    expect(findings[0].filepath).toBe('src/utils/validate.ts');
+    expect(findings[0].symbolName).toBe('validateEmail');
+    // Worst severity wins
+    expect(findings[0].severity).toBe('error');
+    // Metadata has both callers
+    const meta = findings[0].metadata as BugFindingMetadata;
+    expect(meta.callers).toHaveLength(2);
+    expect(meta.callers[0].symbol).toBe('register');
+    expect(meta.callers[1].symbol).toBe('updateProfile');
   });
 
   it('prompt includes changed function code and caller code', async () => {
@@ -243,12 +301,12 @@ describe('BugFinderPlugin', () => {
 
     expect(llm.calls).toHaveLength(1);
     const prompt = llm.calls[0].prompt;
-    // Changed function code is in the prompt
     expect(prompt).toContain('validateEmail');
     expect(prompt).toContain('src/utils/validate.ts');
-    // Caller code is in the prompt
     expect(prompt).toContain('register');
     expect(prompt).toContain('src/services/auth.ts');
+    // New prompt format asks for callerFilepath
+    expect(prompt).toContain('callerFilepath');
   });
 
   it('handles malformed LLM response gracefully', async () => {
@@ -279,17 +337,18 @@ describe('BugFinderPlugin', () => {
     expect(findings).toEqual([]);
   });
 
-  it('sets correct metadata on findings', async () => {
+  it('metadata includes callers array with details', async () => {
     const { validateChunk, authChunk } = makeTestScenario();
 
     const llmResponse = makeBugLLMResponse([
       {
-        filepath: 'src/services/auth.ts',
-        line: 3,
-        symbol: 'register',
+        callerFilepath: 'src/services/auth.ts',
+        callerLine: 3,
+        callerSymbol: 'register',
         severity: 'error',
         category: 'type_mismatch',
         description: 'Type mismatch at call site',
+        suggestion: 'Add type guard',
       },
     ]);
 
@@ -303,38 +362,18 @@ describe('BugFinderPlugin', () => {
     const findings = await plugin.analyze(context);
 
     expect(findings).toHaveLength(1);
-    const meta = findings[0].metadata as {
-      pluginType: string;
-      bugCategory: string;
-      changedFunction: string;
-    };
+    const meta = findings[0].metadata as BugFindingMetadata;
     expect(meta.pluginType).toBe('bugs');
-    expect(meta.bugCategory).toBe('type_mismatch');
     expect(meta.changedFunction).toBe('src/utils/validate.ts::validateEmail');
-  });
-
-  it('normalizes invalid severity to warning', async () => {
-    const { validateChunk, authChunk } = makeTestScenario();
-
-    const llmResponse = makeBugLLMResponse([
-      {
-        filepath: 'src/services/auth.ts',
-        line: 3,
-        severity: 'critical' as 'error', // Invalid severity
-        description: 'Some bug',
-      },
-    ]);
-
-    const llm = createMockLLMClient([llmResponse]);
-    const context = createTestContext({
-      chunks: [validateChunk],
-      repoChunks: [validateChunk, authChunk],
-      llm,
+    expect(meta.callers).toHaveLength(1);
+    expect(meta.callers[0]).toEqual({
+      filepath: 'src/services/auth.ts',
+      line: 3,
+      symbol: 'register',
+      category: 'type_mismatch',
+      description: 'Type mismatch at call site',
+      suggestion: 'Add type guard',
     });
-
-    const findings = await plugin.analyze(context);
-    expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('warning'); // Normalized to warning
   });
 
   // ---------------------------------------------------------------------------
@@ -367,11 +406,26 @@ describe('BugFinderPlugin', () => {
       [
         {
           pluginId: 'bugs',
-          filepath: 'src/auth.ts',
-          line: 10,
-          severity: 'warning',
-          category: 'null_check',
-          message: 'Missing null check',
+          filepath: 'src/utils/validate.ts',
+          line: 1,
+          symbolName: 'validateEmail',
+          severity: 'warning' as const,
+          category: 'bug',
+          message: '1 caller affected',
+          metadata: {
+            pluginType: 'bugs' as const,
+            changedFunction: 'src/utils/validate.ts::validateEmail',
+            callers: [
+              {
+                filepath: 'src/auth.ts',
+                line: 10,
+                symbol: 'register',
+                category: 'null_check',
+                description: 'Missing null check',
+                suggestion: 'Add guard',
+              },
+            ],
+          },
         },
       ],
       presentContext,
@@ -379,7 +433,7 @@ describe('BugFinderPlugin', () => {
 
     expect(summaries).toHaveLength(1);
     expect(summaries[0]).toContain('Bug Finder');
-    expect(summaries[0]).toContain('Missing null check');
+    expect(summaries[0]).toContain('validateEmail');
   });
 
   it('does nothing when no findings', async () => {

@@ -2,8 +2,8 @@
  * Bug Finder plugin.
  *
  * Analyzes changed functions in the context of their callers (from the full repo)
- * to find bugs introduced by the changes. Uses the dependency graph to locate
- * callers and an LLM for bug detection.
+ * to find bugs introduced by the changes. Findings are anchored on the changed
+ * function (in the diff), with affected callers listed in the message.
  */
 
 import type { CodeChunk } from '@liendev/parser';
@@ -12,6 +12,7 @@ import type {
   ReviewContext,
   ReviewFinding,
   BugFindingMetadata,
+  BugCallerInfo,
   PresentContext,
 } from '../plugin-types.js';
 import { buildDependencyGraph, type CallerEdge } from '../dependency-graph.js';
@@ -38,14 +39,14 @@ interface ChangedFunction {
   chunk: CodeChunk;
 }
 
+/** What the LLM returns — caller-focused. */
 interface BugReport {
-  filepath: string;
-  line: number;
-  symbol: string;
+  callerFilepath: string;
+  callerLine: number;
+  callerSymbol: string;
   severity: 'error' | 'warning';
   category: string;
   description: string;
-  evidence: string;
   suggestion: string;
 }
 
@@ -97,54 +98,126 @@ export class BugFinderPlugin implements ReviewPlugin {
       const prompt = buildBugFinderPrompt(batch, context);
       const response = await context.llm.complete(prompt, { temperature: 0 });
       const bugs = parseBugResponse(response.content, logger);
-      allFindings.push(...bugs.map(bug => bugToFinding(bug, batch)));
+      allFindings.push(...bugsToGroupedFindings(bugs, batch));
     }
 
-    logger.info(`Bug finder: ${allFindings.length} potential bugs found`);
+    logger.info(`Bug finder: ${allFindings.length} findings (grouped by changed function)`);
     return allFindings;
   }
 
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     if (findings.length === 0) return;
 
-    // Try inline comments first (only works for lines within the diff)
+    // Minimize previous bug finder review comments
+    if (context.minimizeOutdatedComments) {
+      await context.minimizeOutdatedComments(BUG_REVIEW_MARKER);
+    }
+
+    // Try inline comments (should work now — findings point at diff lines)
     let inlinePosted = 0;
-    const inlineFindings = findings.filter(f => f.line > 0);
-    if (inlineFindings.length > 0 && context.postInlineComments) {
-      const result = await context.postInlineComments(inlineFindings, 'Bug Finder');
+    if (context.postInlineComments) {
+      const result = await context.postInlineComments(findings, 'Bug Finder');
       inlinePosted = result.posted;
     }
 
-    // Post a top-level review comment for error-severity bugs that weren't posted inline
-    const errors = findings.filter(f => f.severity === 'error');
-    if (errors.length > 0 && context.postReviewComment && inlinePosted < errors.length) {
-      // Minimize previous bug finder comments so re-runs don't clutter the conversation
-      if (context.minimizeOutdatedComments) {
-        await context.minimizeOutdatedComments(BUG_REVIEW_MARKER);
-      }
-      const body = formatBugReviewComment(errors);
+    // Fall back to top-level review comment for findings not posted inline
+    if (inlinePosted < findings.length && context.postReviewComment) {
+      const body = formatBugReviewComment(findings);
       await context.postReviewComment(body);
     }
 
     // Append to check run summary
-    const lines = findings.map(
-      f =>
-        `- **${f.severity}** \`${f.filepath}:${f.line}\` ${f.symbolName ? `in \`${f.symbolName}\`` : ''}: ${f.message}`,
-    );
-    context.appendSummary(`### Bug Finder\n\n${lines.join('\n')}`);
+    context.appendSummary(formatBugSummary(findings));
   }
 }
 
-function formatBugReviewComment(errors: ReviewFinding[]): string {
-  const count = errors.length;
-  const header = `${BUG_REVIEW_MARKER}\n**Bug Finder** · ${count} issue${count === 1 ? '' : 's'} in callers of changed functions\n`;
-  const items = errors.map(f => {
-    const symbol = f.symbolName ? `\`${f.symbolName}\`` : f.filepath;
-    const suggestion = f.suggestion ? ` · ${f.suggestion}` : '';
-    return `| \`${f.filepath}:${f.line}\` | ${symbol} | ${f.message}${suggestion} |`;
+// ---------------------------------------------------------------------------
+// Finding construction — group bugs per changed function
+// ---------------------------------------------------------------------------
+
+function associateBugToFunction(bug: BugReport, batch: PromptBatch): ChangedFunction | null {
+  for (const fn of batch.functions) {
+    const callers = batch.callerMap.get(`${fn.filepath}::${fn.symbolName}`) ?? [];
+    if (callers.some(c => c.caller.filepath === bug.callerFilepath)) return fn;
+  }
+  return null;
+}
+
+function bugsToGroupedFindings(bugs: BugReport[], batch: PromptBatch): ReviewFinding[] {
+  // Group bugs by changed function
+  const grouped = new Map<ChangedFunction, BugReport[]>();
+  for (const bug of bugs) {
+    const fn = associateBugToFunction(bug, batch);
+    if (!fn) continue;
+    const existing = grouped.get(fn) ?? [];
+    existing.push(bug);
+    grouped.set(fn, existing);
+  }
+
+  // One finding per changed function
+  const findings: ReviewFinding[] = [];
+  for (const [fn, fnBugs] of grouped) {
+    const callers: BugCallerInfo[] = fnBugs.map(b => ({
+      filepath: b.callerFilepath,
+      line: b.callerLine,
+      symbol: b.callerSymbol,
+      category: b.category,
+      description: b.description,
+      suggestion: b.suggestion,
+    }));
+
+    const worstSeverity = fnBugs.some(b => b.severity === 'error') ? 'error' : 'warning';
+
+    const metadata: BugFindingMetadata = {
+      pluginType: 'bugs',
+      changedFunction: `${fn.filepath}::${fn.symbolName}`,
+      callers,
+    };
+
+    findings.push({
+      pluginId: 'bugs',
+      filepath: fn.filepath,
+      line: fn.chunk.metadata.startLine,
+      symbolName: fn.symbolName,
+      severity: worstSeverity,
+      category: 'bug',
+      message: formatCallerTable(callers),
+      metadata,
+    });
+  }
+
+  return findings;
+}
+
+// ---------------------------------------------------------------------------
+// Formatting
+// ---------------------------------------------------------------------------
+
+function formatCallerTable(callers: BugCallerInfo[]): string {
+  const count = callers.length;
+  const header = `${count} caller${count === 1 ? '' : 's'} affected by this change\n\n`;
+  const rows = callers.map(
+    c => `| \`${c.filepath}:${c.line}\` | \`${c.symbol}\` | ${c.description} | ${c.suggestion} |`,
+  );
+  return `${header}| Caller | Function | Issue | Fix |\n|---|---|---|---|\n${rows.join('\n')}`;
+}
+
+function formatBugReviewComment(findings: ReviewFinding[]): string {
+  const sections = findings.map(f => {
+    const sym = f.symbolName ? `\`${f.symbolName}\`` : f.filepath;
+    return `**${sym}** (\`${f.filepath}:${f.line}\`)\n\n${f.message}`;
   });
-  const table = `| Location | Caller | Issue |\n|---|---|---|\n${items.join('\n')}`;
-  return `${header}\n${table}`;
+  return `${BUG_REVIEW_MARKER}\n**Bug Finder**\n\n${sections.join('\n\n---\n\n')}`;
+}
+
+function formatBugSummary(findings: ReviewFinding[]): string {
+  const sections = findings.map(f => {
+    const meta = f.metadata as BugFindingMetadata;
+    const callerCount = meta.callers.length;
+    const rows = meta.callers.map(c => `| \`${c.filepath}:${c.line}\` | ${c.description} |`);
+    return `**\`${f.symbolName}\`** (\`${f.filepath}:${f.line}\`) — ${callerCount} caller${callerCount === 1 ? '' : 's'} affected\n\n| Caller | Issue |\n|---|---|\n${rows.join('\n')}`;
+  });
+  return `### Bug Finder\n\n${sections.join('\n\n')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,39 +326,6 @@ function batchByTokenBudget(
 // Prompt
 // ---------------------------------------------------------------------------
 
-function bugToFinding(bug: BugReport, batch: PromptBatch): ReviewFinding {
-  const changedFn = batch.functions.find(
-    f =>
-      f.filepath === bug.filepath ||
-      batch.callerMap
-        .get(`${f.filepath}::${f.symbolName}`)
-        ?.some(e => e.caller.filepath === bug.filepath),
-  );
-
-  const metadata: BugFindingMetadata = {
-    pluginType: 'bugs',
-    bugCategory: bug.category,
-    changedFunction: changedFn ? `${changedFn.filepath}::${changedFn.symbolName}` : bug.filepath,
-  };
-
-  return {
-    pluginId: 'bugs',
-    filepath: bug.filepath,
-    line: bug.line,
-    symbolName: bug.symbol,
-    severity: bug.severity === 'error' ? 'error' : 'warning',
-    category: bug.category,
-    message: bug.description,
-    suggestion: bug.suggestion,
-    evidence: bug.evidence,
-    metadata,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Prompt
-// ---------------------------------------------------------------------------
-
 function truncateContent(content: string, maxChars: number): string {
   if (content.length <= maxChars) return content;
   return content.slice(0, maxChars) + '\n// ... truncated';
@@ -337,18 +377,18 @@ type_mismatch | null_check | parameter_change | broken_assumption | logic_error 
 
 ## Response Format
 
-ONLY valid JSON:
+ONLY valid JSON. Report the CALLER that breaks, not the changed function.
 
 \`\`\`json
 {
   "bugs": [
     {
-      "filepath": "path/to/file.ts",
-      "line": 42,
-      "symbol": "callerFunction",
+      "callerFilepath": "path/to/caller.ts",
+      "callerLine": 42,
+      "callerSymbol": "functionThatBreaks",
       "severity": "error or warning",
       "category": "one of the categories above",
-      "description": "Short, direct statement of the bug (max 15 words)",
+      "description": "Short statement of the bug (max 15 words)",
       "suggestion": "Short fix (max 15 words)"
     }
   ]
@@ -357,9 +397,9 @@ ONLY valid JSON:
 
 Rules:
 - ONLY report bugs you are confident about
-- Description must be a short statement, not an explanation. Bad: "The function uses X which does Y, but Z expects W". Good: "Passes null to JSON.parse — will throw TypeError"
-- Suggestion must be a concrete action. Bad: "Add null check". Good: "Guard with \`if (!jsonStr) return [];\`"
-- Focus on CALLERS, not the changed function itself
+- callerFilepath/callerLine/callerSymbol must reference a CALLER shown above, not the changed function
+- Description: short statement. Good: "Passes null to JSON.parse — TypeError". Bad: "The function uses X which..."
+- Suggestion: concrete action. Good: "Guard with \`if (!x) return []\`". Bad: "Add null check"
 - If no bugs, return \`{ "bugs": [] }\``;
 }
 
@@ -371,8 +411,9 @@ function isValidBug(bug: unknown): bug is BugReport {
   if (!bug || typeof bug !== 'object') return false;
   const b = bug as Record<string, unknown>;
   return (
-    typeof b.filepath === 'string' &&
-    typeof b.line === 'number' &&
+    typeof b.callerFilepath === 'string' &&
+    typeof b.callerLine === 'number' &&
+    typeof b.callerSymbol === 'string' &&
     typeof b.severity === 'string' &&
     typeof b.category === 'string' &&
     typeof b.description === 'string'
@@ -416,8 +457,7 @@ function normalizeBug(bug: BugReport): BugReport {
   return {
     ...bug,
     severity: bug.severity === 'error' ? 'error' : 'warning',
-    symbol: bug.symbol ?? 'unknown',
-    evidence: bug.evidence ?? '',
+    callerSymbol: bug.callerSymbol ?? 'unknown',
     suggestion: bug.suggestion ?? '',
   };
 }
