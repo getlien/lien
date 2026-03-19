@@ -236,19 +236,21 @@ ${archContext.code}
 
 ## Instructions
 
-Review the changed code for architectural concerns:
+Review the changed code for **structural and design** concerns only:
 
 - **DRY violations**: duplicated logic across functions/files
 - **Single Responsibility**: functions doing too many unrelated things
 - **Coupling issues**: tight coupling between modules
 - **Missing abstractions**: repeated patterns that should be shared
 - **KISS violations**: over-engineered solutions
-- **Cross-file coherence**: pattern conflicts, naming convention violations
 
 Do NOT flag:
-- Minor style variations
-- Metric values (those are covered by complexity review)
+- **Breaking changes, return type changes, or caller compatibility** (handled by bug finder)
+- **Null safety, type mismatches, or missing error handling** (handled by bug finder)
+- Minor style variations or naming nitpicks
+- Metric values (handled by complexity review)
 - Intentional deviations (test utilities, generated code)
+- Things that are correct but could theoretically be "cleaner"
 
 ## Response Format
 
