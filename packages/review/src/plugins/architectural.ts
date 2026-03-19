@@ -22,6 +22,8 @@ export const architecturalConfigSchema = z.object({
   mode: z.enum(['auto', 'always', 'off']).default('auto'),
 });
 
+const ARCH_REVIEW_MARKER = '<!-- lien-plugin:arch-review -->';
+
 /** Compute max architectural notes based on change size. */
 function maxNotes(changedFileCount: number): number {
   return Math.min(3 + Math.floor(changedFileCount / 10), 5);
@@ -101,11 +103,29 @@ export class ArchitecturalPlugin implements ReviewPlugin {
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     if (findings.length === 0) return;
 
+    // Post as a PR review comment so it's visible in the conversation
+    if (context.postReviewComment) {
+      if (context.minimizeOutdatedComments) {
+        await context.minimizeOutdatedComments(ARCH_REVIEW_MARKER);
+      }
+      await context.postReviewComment(formatArchReviewComment(findings));
+    }
+
+    // Also append to check run summary
     const lines = findings
-      .map(f => `> **${f.message}**\n> ${f.evidence ?? ''}\n> *Suggestion: ${f.suggestion ?? ''}*`)
+      .map(f => `> **${f.message}**\n> ${f.evidence ?? ''}\n> *${f.suggestion ?? ''}*`)
       .join('\n\n');
     context.appendSummary(`### Architectural observations\n\n${lines}`);
   }
+}
+
+function formatArchReviewComment(findings: ReviewFinding[]): string {
+  const rows = findings.map(f => {
+    const scope = f.filepath ? `\`${f.filepath}\`` : 'General';
+    return `| ${scope} | ${f.message} | ${f.suggestion ?? ''} |`;
+  });
+  const table = `| Scope | Observation | Suggestion |\n|---|---|---|\n${rows.join('\n')}`;
+  return `${ARCH_REVIEW_MARKER}\n**Architectural Review** · ${findings.length} observation${findings.length === 1 ? '' : 's'}\n\n${table}`;
 }
 
 // ---------------------------------------------------------------------------
