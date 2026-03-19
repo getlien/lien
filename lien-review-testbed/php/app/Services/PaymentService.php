@@ -5,10 +5,20 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Order;
+use App\Repositories\OrderRepository;
 use RuntimeException;
 
 class PaymentService
 {
+    private readonly OrderRepository $orderRepository;
+    private readonly ?OrderService $orderService;
+
+    public function __construct(OrderRepository $orderRepository, ?OrderService $orderService = null)
+    {
+        $this->orderRepository = $orderRepository;
+        $this->orderService = $orderService;
+    }
+
     /** @var array<string, bool> Supported payment methods and their enabled status */
     private const PAYMENT_METHODS = [
         'credit_card' => true,
@@ -111,6 +121,49 @@ class PaymentService
      *
      * @return array{success: bool, transaction_id: string|null, error: string|null}
      */
+    /**
+     * Look up the order details for a refund request.
+     * Calls OrderService to retrieve order details, creating a circular dependency.
+     */
+    public function getOrderForRefund(int $orderId): Order
+    {
+        $order = $this->orderRepository->findOrder($orderId);
+
+        if ($order->status !== 'paid') {
+            throw new RuntimeException(
+                "Cannot process refund for order {$orderId} with status '{$order->status}' — must be paid"
+            );
+        }
+
+        // Call back into OrderService to verify order state — creates circular dependency
+        if ($this->orderService !== null) {
+            $this->orderService->cancelOrder($orderId);
+        }
+
+        return $order;
+    }
+
+    /**
+     * Process a batch refund by looking up multiple orders through OrderService.
+     * This deepens the circular dependency between PaymentService and OrderService.
+     */
+    public function processBatchRefund(array $orderIds): array
+    {
+        $results = [];
+
+        foreach ($orderIds as $orderId) {
+            try {
+                $order = $this->getOrderForRefund($orderId);
+                $this->refund($order);
+                $results[$orderId] = 'refunded';
+            } catch (RuntimeException $e) {
+                $results[$orderId] = $e->getMessage();
+            }
+        }
+
+        return $results;
+    }
+
     private function callPaymentGateway(float $amount, string $currency, int $orderId): array
     {
         // Simulate occasional gateway failures for testing
