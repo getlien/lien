@@ -129,15 +129,29 @@ export class ArchitecturalPlugin implements ReviewPlugin {
  * If the scope includes a symbol, looks it up in chunks to get the start line.
  */
 function resolveScope(scope: string, chunks: CodeChunk[]): { filepath: string; line: number } {
-  if (scope.includes('::')) {
-    const [filepath, symbolName] = scope.split('::');
+  const [rawFilepath, symbolName] = scope.includes('::') ? scope.split('::') : [scope, undefined];
+
+  // Try exact match first, then partial match (LLM sometimes shortens paths)
+  const filepath = resolveFilepath(rawFilepath, chunks);
+
+  if (symbolName) {
     const chunk = chunks.find(
       c => c.metadata.file === filepath && c.metadata.symbolName === symbolName,
     );
     if (chunk) return { filepath, line: chunk.metadata.startLine };
-    return { filepath, line: 0 };
   }
-  return { filepath: scope, line: 0 };
+
+  return { filepath, line: 0 };
+}
+
+/** Match a filepath against chunks — handles LLM returning shortened paths like "format.ts". */
+function resolveFilepath(filepath: string, chunks: CodeChunk[]): string {
+  // Exact match
+  if (chunks.some(c => c.metadata.file === filepath)) return filepath;
+
+  // Partial match: find a chunk whose path ends with the given filepath
+  const match = chunks.find(c => c.metadata.file.endsWith(`/${filepath}`));
+  return match ? match.metadata.file : filepath;
 }
 
 function scopeLink(filepath: string, line: number, blobBase: string | null): string {
@@ -157,7 +171,7 @@ function formatArchDescription(findings: ReviewFinding[], blobBase: string | nul
     return `| ${scope} | ${f.message} | ${f.suggestion ?? ''} |`;
   });
   const table = `| Scope | Observation | Suggestion |\n|---|---|---|\n${rows.join('\n')}`;
-  return `**Architectural** · ${count} observation${count === 1 ? '' : 's'}\n\n${table}`;
+  return `<details>\n<summary>🏗️ <b>Architectural</b> · ${count} observation${count === 1 ? '' : 's'}</summary>\n\n${table}\n\n</details>`;
 }
 
 // ---------------------------------------------------------------------------
