@@ -136,14 +136,15 @@ export class BugFinderPlugin implements ReviewPlugin {
 }
 
 function formatBugReviewComment(errors: ReviewFinding[]): string {
-  const header = `${BUG_REVIEW_MARKER}\n## 🐛 Bug Finder — ${errors.length} potential bug${errors.length === 1 ? '' : 's'} detected\n\n`;
+  const count = errors.length;
+  const header = `${BUG_REVIEW_MARKER}\n**Bug Finder** · ${count} issue${count === 1 ? '' : 's'} in callers of changed functions\n`;
   const items = errors.map(f => {
-    const location = `\`${f.filepath}:${f.line}\``;
-    const symbol = f.symbolName ? ` in \`${f.symbolName}\`` : '';
-    const suggestion = f.suggestion ? `\n  > 💡 ${f.suggestion}` : '';
-    return `- ${location}${symbol}: ${f.message}${suggestion}`;
+    const symbol = f.symbolName ? `\`${f.symbolName}\`` : f.filepath;
+    const suggestion = f.suggestion ? ` · ${f.suggestion}` : '';
+    return `| \`${f.filepath}:${f.line}\` | ${symbol} | ${f.message}${suggestion} |`;
   });
-  return `${header}${items.join('\n')}\n\n*These issues were found by analyzing callers of changed functions.*`;
+  const table = `| Location | Caller | Issue |\n|---|---|---|\n${items.join('\n')}`;
+  return `${header}\n${table}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -324,24 +325,19 @@ function buildBugFinderPrompt(batch: PromptBatch, context: ReviewContext): strin
     return buildFunctionSection(fn, callers);
   });
 
-  return `You are a senior engineer reviewing code changes for bugs. You are given changed functions and the code that calls them. Your job is to find bugs introduced by the changes.
+  return `Find bugs in callers of changed functions. Be terse — write like a linter, not a human.
 
 ${prHeader}## Changed Functions
 
 ${sections.join('\n')}
 
-## Bug Categories to Check
+## Categories
 
-- **type_mismatch**: Return type changed but callers expect the old type
-- **null_check**: Function now returns null/undefined but callers don't handle it
-- **parameter_change**: Parameters added/removed/reordered but callers use old calling convention
-- **broken_assumption**: Callers assume behavior that the new code no longer guarantees
-- **logic_error**: Off-by-one, wrong comparison operator, missing edge case
-- **unchecked_error**: New throw/reject paths that callers don't catch
+type_mismatch | null_check | parameter_change | broken_assumption | logic_error | unchecked_error
 
 ## Response Format
 
-Respond with ONLY valid JSON:
+ONLY valid JSON:
 
 \`\`\`json
 {
@@ -352,19 +348,19 @@ Respond with ONLY valid JSON:
       "symbol": "callerFunction",
       "severity": "error or warning",
       "category": "one of the categories above",
-      "description": "Concrete description of the bug",
-      "evidence": "Specific code that proves the bug exists",
-      "suggestion": "How to fix it"
+      "description": "Short, direct statement of the bug (max 15 words)",
+      "suggestion": "Short fix (max 15 words)"
     }
   ]
 }
 \`\`\`
 
 Rules:
-- ONLY report bugs you are confident about — no speculation
-- Each bug must reference a specific line and file
-- Bugs in the CALLERS are more valuable than bugs in the changed function itself
-- If no bugs found, return \`{ "bugs": [] }\``;
+- ONLY report bugs you are confident about
+- Description must be a short statement, not an explanation. Bad: "The function uses X which does Y, but Z expects W". Good: "Passes null to JSON.parse — will throw TypeError"
+- Suggestion must be a concrete action. Bad: "Add null check". Good: "Guard with \`if (!jsonStr) return [];\`"
+- Focus on CALLERS, not the changed function itself
+- If no bugs, return \`{ "bugs": [] }\``;
 }
 
 // ---------------------------------------------------------------------------
