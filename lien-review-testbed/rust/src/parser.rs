@@ -1,7 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
-
-use crate::config::Config;
 use crate::error::AnalyzerError;
 
 /// Represents a parsed input file with its content and metadata.
@@ -10,52 +7,6 @@ pub struct ParsedInput {
     pub filename: String,
     pub lines: Vec<String>,
     pub metadata: HashMap<String, String>,
-}
-
-/// Reads the file at the given path and parses it into a structured
-/// representation. Respects the max_depth configuration to limit the
-/// number of lines processed.
-pub fn parse_input(path: &str, config: &Config) -> Result<ParsedInput, AnalyzerError> {
-    let content = fs::read_to_string(path).map_err(|e| {
-        AnalyzerError::ParseError(format!("Failed to read input file '{}': {}", path, e))
-    })?;
-
-    let all_lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-
-    let max_lines = config.max_depth * 100;
-    let lines: Vec<String> = if all_lines.len() > max_lines {
-        all_lines.into_iter().take(max_lines).collect()
-    } else {
-        all_lines
-    };
-
-    let filename = path
-        .rsplit('/')
-        .next()
-        .unwrap_or(path)
-        .to_string();
-
-    let mut input = ParsedInput {
-        filename,
-        lines,
-        metadata: HashMap::new(),
-    };
-
-    let extracted = parse_metadata(&input);
-    input.metadata = extracted;
-
-    validate_input(&input)?;
-
-    if config.verbose {
-        let line_count = input.lines.len();
-        let meta_count = input.metadata.len();
-        eprintln!(
-            "[parser] Parsed '{}': {} lines, {} metadata entries",
-            path, line_count, meta_count
-        );
-    }
-
-    Ok(input)
 }
 
 /// Parses a single line into a key-value pair. Lines containing ':'
