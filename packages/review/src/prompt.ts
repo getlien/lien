@@ -869,3 +869,9 @@ Rules:
 
 ${responseFormatSection}`;
 }
+
+/** Truncate a prompt section to fit token budget. */
+export function truncatePromptSection(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen - 3) + '...';
+}

@@ -30,3 +30,14 @@ export function formatDeltaValue(metricType: string, delta: number): string {
   }
   return String(Math.round(delta));
 }
+
+/** Truncate a string with ellipsis. */
+export function truncate(str: string, maxLen: number): string {
+  if (str.length <= maxLen) return str;
+  return str.slice(0, maxLen - 3) + '...';
+}
+
+/** Pluralize a word. */
+export function pluralize(count: number, singular: string, plural?: string): string {
+  return count === 1 ? singular : (plural ?? `${singular}s`);
+}
