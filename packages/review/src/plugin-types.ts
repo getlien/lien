@@ -93,6 +93,8 @@ export interface ReviewContext {
   repoChunks?: CodeChunk[];
   /** Root directory of the cloned repo. Required for lazy repo indexing. */
   repoRootDir?: string;
+  /** Findings from plugins that ran before this one. Set by the engine for deferred plugins (e.g., summary). */
+  priorFindings?: ReviewFinding[];
 }
 
 // ---------------------------------------------------------------------------

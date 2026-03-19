@@ -438,6 +438,30 @@ interface SummaryResponse {
 const VALID_RISK_LEVELS = new Set(['low', 'medium', 'high', 'critical']);
 const VALID_CONFIDENCE_LEVELS = new Set(['low', 'medium', 'high']);
 
+const RISK_ORDER: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+const RISK_LABELS = ['low', 'medium', 'high', 'critical'] as const;
+
+/**
+ * Escalate risk level based on findings from other plugins.
+ * Bug finder errors → at least "high". Complexity errors → at least "medium".
+ */
+function escalateRisk(
+  baseRisk: 'low' | 'medium' | 'high' | 'critical',
+  priorFindings: ReviewFinding[],
+): 'low' | 'medium' | 'high' | 'critical' {
+  let level = RISK_ORDER[baseRisk] ?? 0;
+
+  const bugErrors = priorFindings.filter(f => f.pluginId === 'bugs' && f.severity === 'error');
+  if (bugErrors.length > 0) level = Math.max(level, RISK_ORDER['high']);
+
+  const complexityErrors = priorFindings.filter(
+    f => f.pluginId === 'complexity' && f.severity === 'error',
+  );
+  if (complexityErrors.length > 0) level = Math.max(level, RISK_ORDER['medium']);
+
+  return RISK_LABELS[level];
+}
+
 function isValidSummaryResponse(parsed: unknown): parsed is SummaryResponse {
   if (!parsed || typeof parsed !== 'object') return false;
   const p = parsed as Record<string, unknown>;
@@ -544,9 +568,16 @@ export class SummaryPlugin implements ReviewPlugin {
     const parsed = parseSummaryResponse(response.content, logger);
     if (!parsed) return [];
 
+    // Escalate risk based on findings from other plugins (bug errors → high risk)
+    const riskLevel = escalateRisk(parsed.risk_level, context.priorFindings ?? []);
+    const riskExplanation =
+      riskLevel !== parsed.risk_level
+        ? `${parsed.risk_explanation} Risk escalated due to bug finder errors.`
+        : parsed.risk_explanation;
+
     const metadata: SummaryFindingMetadata = {
       pluginType: 'summary',
-      riskLevel: parsed.risk_level,
+      riskLevel,
       confidence: parsed.confidence,
       overview: parsed.overview,
       keyChanges: parsed.key_changes,
@@ -560,7 +591,7 @@ export class SummaryPlugin implements ReviewPlugin {
         severity: 'info',
         category: 'summary',
         message: parsed.overview,
-        evidence: parsed.risk_explanation,
+        evidence: riskExplanation,
         metadata,
       },
     ];
