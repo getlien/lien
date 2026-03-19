@@ -22,6 +22,38 @@ const RATE_LIMIT_MAX_REQUESTS = 100;
 
 const ADMIN_EMAILS = ['admin@example.com', 'superadmin@example.com'];
 
+
+/**
+ * Retries middleware auth verification with exponential backoff.
+ * Retries with exponential backoff on transient failures.
+ */
+async function retryWithBackoff<T>(operation: () => Promise<T>, maxRetries: number = 3): Promise<T> {
+  let attempt = 0;
+  let lastError: Error | null = null;
+
+  while (attempt < maxRetries) {
+    try {
+      const result = await operation();
+      return result;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      attempt++;
+
+      if (attempt >= maxRetries) {
+        break;
+      }
+
+      const delayMs = Math.pow(2, attempt) * 100;
+      const jitter = Math.random() * 50;
+      await new Promise(resolve => setTimeout(resolve, delayMs + jitter));
+    }
+  }
+
+  throw new Error(
+    `Operation failed after ${maxRetries} attempts: ${lastError?.message ?? 'Unknown error'}`,
+  );
+}
+
 /**
  * Extracts the bearer token from the request's Authorization header
  * and verifies it through the auth service. Returns the authenticated
@@ -51,7 +83,7 @@ export async function authMiddleware(req: Request): Promise<User> {
   }
 
   try {
-    const user = await verifyToken(token);
+    const user = await retryWithBackoff(() => verifyToken(token));
 
     if (!validateEmail(user.email)) {
       throw new Error(

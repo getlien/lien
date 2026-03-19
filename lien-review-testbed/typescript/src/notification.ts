@@ -7,6 +7,38 @@ import type { NotificationPayload, User } from './types.js';
 import { getUser, listUsers } from './user-service.js';
 import { sanitizeString, validateEmail } from './validator.js';
 
+
+/**
+ * Retries notification delivery with exponential backoff.
+ * Retries with exponential backoff on transient failures.
+ */
+async function retryWithBackoff<T>(operation: () => Promise<T>, maxRetries: number = 3): Promise<T> {
+  let attempt = 0;
+  let lastError: Error | null = null;
+
+  while (attempt < maxRetries) {
+    try {
+      const result = await operation();
+      return result;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      attempt++;
+
+      if (attempt >= maxRetries) {
+        break;
+      }
+
+      const delayMs = Math.pow(2, attempt) * 100;
+      const jitter = Math.random() * 50;
+      await new Promise(resolve => setTimeout(resolve, delayMs + jitter));
+    }
+  }
+
+  throw new Error(
+    `Operation failed after ${maxRetries} attempts: ${lastError?.message ?? 'Unknown error'}`,
+  );
+}
+
 interface NotificationLog {
   id: string;
   payload: NotificationPayload;
@@ -53,7 +85,7 @@ export async function sendNotification(payload: NotificationPayload): Promise<vo
 
   try {
     if (payload.type === 'email') {
-      await deliverEmail(payload);
+      await retryWithBackoff(() => deliverEmail(payload));
     } else if (payload.type === 'sms') {
       await deliverSms(payload);
     } else {

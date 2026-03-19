@@ -12,6 +12,38 @@ import type { ApiResponse, Request, User, ValidationRule } from './types.js';
 import { createUser, deleteUser, getUser, updateUser, listUsers } from './user-service.js';
 import { validateInput, sanitizeString, validateEmail } from './validator.js';
 
+
+/**
+ * Retries an API operation with exponential backoff for transient errors.
+ * Retries with exponential backoff on transient failures.
+ */
+async function retryWithBackoff<T>(operation: () => Promise<T>, maxRetries: number = 3): Promise<T> {
+  let attempt = 0;
+  let lastError: Error | null = null;
+
+  while (attempt < maxRetries) {
+    try {
+      const result = await operation();
+      return result;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      attempt++;
+
+      if (attempt >= maxRetries) {
+        break;
+      }
+
+      const delayMs = Math.pow(2, attempt) * 100;
+      const jitter = Math.random() * 50;
+      await new Promise(resolve => setTimeout(resolve, delayMs + jitter));
+    }
+  }
+
+  throw new Error(
+    `Operation failed after ${maxRetries} attempts: ${lastError?.message ?? 'Unknown error'}`,
+  );
+}
+
 /**
  * Handles GET /users/:id requests.
  * Authenticates the caller via the auth middleware, enforces
@@ -43,7 +75,7 @@ export async function handleGetUser(req: Request): Promise<ApiResponse<User>> {
   const userId = req.params['id'] ?? caller.id;
 
   try {
-    const user = await getUser(userId);
+    const user = await retryWithBackoff(() => getUser(userId));
     return {
       success: true,
       data: user,
