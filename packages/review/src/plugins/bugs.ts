@@ -41,6 +41,7 @@ interface ChangedFunction {
 
 /** What the LLM returns — caller-focused. */
 interface BugReport {
+  changedFunction: string;
   callerFilepath: string;
   callerLine: number;
   callerSymbol: string;
@@ -136,10 +137,29 @@ export class BugFinderPlugin implements ReviewPlugin {
 // ---------------------------------------------------------------------------
 
 function associateBugToFunction(bug: BugReport, batch: PromptBatch): ChangedFunction | null {
+  // Primary: match by changedFunction name from LLM response
+  if (bug.changedFunction) {
+    const match = batch.functions.find(fn => fn.symbolName === bug.changedFunction);
+    if (match) return match;
+  }
+
+  // Fallback: match by caller filepath + symbol (more precise than filepath alone)
+  for (const fn of batch.functions) {
+    const callers = batch.callerMap.get(`${fn.filepath}::${fn.symbolName}`) ?? [];
+    if (
+      callers.some(
+        c => c.caller.filepath === bug.callerFilepath && c.caller.symbolName === bug.callerSymbol,
+      )
+    )
+      return fn;
+  }
+
+  // Last resort: match by caller filepath only
   for (const fn of batch.functions) {
     const callers = batch.callerMap.get(`${fn.filepath}::${fn.symbolName}`) ?? [];
     if (callers.some(c => c.caller.filepath === bug.callerFilepath)) return fn;
   }
+
   return null;
 }
 
@@ -412,6 +432,7 @@ ONLY valid JSON. Report the CALLER that breaks, not the changed function.
 {
   "bugs": [
     {
+      "changedFunction": "nameOfChangedFunction",
       "callerFilepath": "path/to/caller.ts",
       "callerLine": 42,
       "callerSymbol": "functionThatBreaks",
@@ -426,6 +447,7 @@ ONLY valid JSON. Report the CALLER that breaks, not the changed function.
 
 Rules:
 - ONLY report bugs you are confident about
+- changedFunction must be the name of the changed function (from the "## Changed Functions" sections above) that caused the bug
 - callerFilepath/callerLine/callerSymbol must reference a CALLER shown above, not the changed function
 - Description: short statement. Good: "Passes null to JSON.parse — TypeError". Bad: "The function uses X which..."
 - Suggestion: concrete action. Good: "Guard with \`if (!x) return []\`". Bad: "Add null check"
@@ -485,6 +507,7 @@ function parseBugResponse(content: string, logger: Logger): BugReport[] {
 function normalizeBug(bug: BugReport): BugReport {
   return {
     ...bug,
+    changedFunction: bug.changedFunction ?? '',
     severity: bug.severity === 'error' ? 'error' : 'warning',
     callerSymbol: bug.callerSymbol ?? 'unknown',
     suggestion: bug.suggestion ?? '',
