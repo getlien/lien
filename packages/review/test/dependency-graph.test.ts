@@ -276,3 +276,214 @@ describe('buildDependencyGraph', () => {
     expect(callers[0].caller.symbolName).toBe('main');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cross-package symbol-name fallback
+// ---------------------------------------------------------------------------
+
+describe('buildDependencyGraph — cross-package fallback', () => {
+  it('resolves TypeScript package import (@liendev/review)', () => {
+    const definition = createTestChunk({
+      metadata: {
+        file: 'packages/review/src/analysis.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'filterAnalyzableFiles',
+        language: 'typescript',
+        exports: ['filterAnalyzableFiles'],
+      },
+    });
+
+    const caller = createTestChunk({
+      metadata: {
+        file: 'packages/runner/src/handlers/pr-review.ts',
+        startLine: 50,
+        endLine: 80,
+        type: 'function',
+        symbolName: 'handlePRReview',
+        language: 'typescript',
+        importedSymbols: { '@liendev/review': ['filterAnalyzableFiles'] },
+        callSites: [{ symbol: 'filterAnalyzableFiles', line: 65 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([definition, caller]);
+    const callers = graph.getCallers('packages/review/src/analysis.ts', 'filterAnalyzableFiles');
+
+    expect(callers).toHaveLength(1);
+    expect(callers[0].caller.symbolName).toBe('handlePRReview');
+    expect(callers[0].caller.filepath).toBe('packages/runner/src/handlers/pr-review.ts');
+  });
+
+  it('resolves PHP namespace import (use App\\Services\\...)', () => {
+    const definition = createTestChunk({
+      metadata: {
+        file: 'app/Services/RepoConfigService.php',
+        startLine: 10,
+        endLine: 30,
+        type: 'function',
+        symbolName: 'getRunnerConfig',
+        language: 'php',
+        exports: ['getRunnerConfig'],
+      },
+    });
+
+    const caller = createTestChunk({
+      metadata: {
+        file: 'app/Jobs/ProcessPullRequestWebhook.php',
+        startLine: 40,
+        endLine: 60,
+        type: 'function',
+        symbolName: 'handle',
+        language: 'php',
+        importedSymbols: { 'App\\Services\\RepoConfigService': ['getRunnerConfig'] },
+        callSites: [{ symbol: 'getRunnerConfig', line: 50 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([definition, caller]);
+    const callers = graph.getCallers('app/Services/RepoConfigService.php', 'getRunnerConfig');
+
+    expect(callers).toHaveLength(1);
+    expect(callers[0].caller.symbolName).toBe('handle');
+  });
+
+  it('resolves Python absolute import (from package.module import ...)', () => {
+    const definition = createTestChunk({
+      metadata: {
+        file: 'src/utils/validator.py',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'validate_email',
+        language: 'python',
+        exports: ['validate_email'],
+      },
+    });
+
+    const caller = createTestChunk({
+      metadata: {
+        file: 'src/services/auth.py',
+        startLine: 5,
+        endLine: 20,
+        type: 'function',
+        symbolName: 'register_user',
+        language: 'python',
+        importedSymbols: { 'utils.validator': ['validate_email'] },
+        callSites: [{ symbol: 'validate_email', line: 10 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([definition, caller]);
+    const callers = graph.getCallers('src/utils/validator.py', 'validate_email');
+
+    expect(callers).toHaveLength(1);
+    expect(callers[0].caller.symbolName).toBe('register_user');
+  });
+
+  it('resolves Rust crate import (use crate::module::symbol)', () => {
+    const definition = createTestChunk({
+      metadata: {
+        file: 'src/utils/validate.rs',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'validate_input',
+        language: 'rust',
+        exports: ['validate_input'],
+      },
+    });
+
+    const caller = createTestChunk({
+      metadata: {
+        file: 'src/handlers/api.rs',
+        startLine: 10,
+        endLine: 30,
+        type: 'function',
+        symbolName: 'handle_request',
+        language: 'rust',
+        importedSymbols: { 'crate::utils::validate': ['validate_input'] },
+        callSites: [{ symbol: 'validate_input', line: 20 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([definition, caller]);
+    const callers = graph.getCallers('src/utils/validate.rs', 'validate_input');
+
+    expect(callers).toHaveLength(1);
+    expect(callers[0].caller.symbolName).toBe('handle_request');
+  });
+
+  it('does NOT link when symbol is exported by multiple files (ambiguous)', () => {
+    const def1 = createTestChunk({
+      metadata: {
+        file: 'src/utils/format.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'format',
+        language: 'typescript',
+        exports: ['format'],
+      },
+    });
+
+    const def2 = createTestChunk({
+      metadata: {
+        file: 'src/helpers/format.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'format',
+        language: 'typescript',
+        exports: ['format'],
+      },
+    });
+
+    const caller = createTestChunk({
+      metadata: {
+        file: 'src/app.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'main',
+        language: 'typescript',
+        importedSymbols: { 'some-package': ['format'] },
+        callSites: [{ symbol: 'format', line: 5 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([def1, def2, caller]);
+    expect(graph.getCallers('src/utils/format.ts', 'format')).toHaveLength(0);
+    expect(graph.getCallers('src/helpers/format.ts', 'format')).toHaveLength(0);
+  });
+
+  it('does NOT link when symbol is not imported from any package', () => {
+    const definition = createTestChunk({
+      metadata: {
+        file: 'src/utils.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'helper',
+        language: 'typescript',
+        exports: ['helper'],
+      },
+    });
+
+    const caller = createTestChunk({
+      metadata: {
+        file: 'src/other.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'doStuff',
+        language: 'typescript',
+        callSites: [{ symbol: 'helper', line: 5 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([definition, caller]);
+    expect(graph.getCallers('src/utils.ts', 'helper')).toHaveLength(0);
+  });
+});

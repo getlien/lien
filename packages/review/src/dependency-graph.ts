@@ -155,6 +155,24 @@ function resolveChunkImports(
   return result;
 }
 
+/**
+ * Build a set of symbols each chunk imports from non-relative (package) paths.
+ * Used for the symbol-name fallback in cross-package resolution.
+ */
+function buildPackageImportedSymbols(chunks: CodeChunk[]): Map<CodeChunk, Set<string>> {
+  const result = new Map<CodeChunk, Set<string>>();
+  for (const chunk of chunks) {
+    if (!chunk.metadata.importedSymbols) continue;
+    const symbols = new Set<string>();
+    for (const [importPath, syms] of Object.entries(chunk.metadata.importedSymbols)) {
+      if (importPath.startsWith('.')) continue;
+      for (const sym of syms) symbols.add(sym);
+    }
+    if (symbols.size > 0) result.set(chunk, symbols);
+  }
+  return result;
+}
+
 /** Pass 3: Build caller edges from call sites + resolved imports. */
 function buildCallerEdges(
   chunks: CodeChunk[],
@@ -162,6 +180,7 @@ function buildCallerEdges(
   exportIndex: ExportIndex,
 ): Map<string, CallerEdge[]> {
   const edges = new Map<string, CallerEdge[]>();
+  const packageImports = buildPackageImportedSymbols(chunks);
 
   for (const chunk of chunks) {
     if (!chunk.metadata.callSites || chunk.metadata.callSites.length === 0) continue;
@@ -172,17 +191,29 @@ function buildCallerEdges(
     for (const callSite of chunk.metadata.callSites) {
       const calledSymbol = callSite.symbol;
 
-      // Try to resolve via imports
+      // 1. Try to resolve via relative imports
       const resolved = importMap?.get(calledSymbol);
       if (resolved) {
         addEdge(edges, `${resolved.definitionFilepath}::${calledSymbol}`, chunk, callSite.line);
         continue;
       }
 
-      // Try same-file: symbol is exported by the same file
+      // 2. Try same-file: symbol is exported by the same file
       const exportLocations = exportIndex.get(calledSymbol);
       if (exportLocations?.some(e => e.filepath === callerFile)) {
         addEdge(edges, `${callerFile}::${calledSymbol}`, chunk, callSite.line);
+        continue;
+      }
+
+      // 3. Symbol-name fallback for cross-package imports
+      //    Works across languages: @liendev/review (TS), use App\Services\... (PHP),
+      //    from package.module import ... (Python), use crate::... (Rust)
+      //    Links only when the symbol is uniquely exported by one file.
+      if (!exportLocations) continue;
+      const pkgSymbols = packageImports.get(chunk);
+      if (!pkgSymbols?.has(calledSymbol)) continue;
+      if (exportLocations.length === 1) {
+        addEdge(edges, `${exportLocations[0].filepath}::${calledSymbol}`, chunk, callSite.line);
       }
     }
   }
