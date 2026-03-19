@@ -261,28 +261,19 @@ fn process_files(
 /// Used when the --quick flag is passed to get a fast overview
 /// without full report generation.
 fn quick_analyze(path: &str, config: &Config) -> Result<AnalysisResult, AnalyzerError> {
-    let input = parser::parse_input(path, config)?;
+    // Use analyzer's combined parse_and_analyze instead of separate parse + analyze
+    let result = analyzer::parse_and_analyze(path, config)?;
 
-    let metrics = analyzer::compute_metrics(&input);
-    let issues = analyzer::detect_issues(&input, config);
-    let score = analyzer::calculate_score(&metrics, &issues);
-
-    let metadata = parser::parse_metadata(&input);
-    for (key, value) in &metadata {
-        let (parsed_key, _) = parser::parse_line(&format!("{}: {}", key, value));
-        if config.verbose {
-            eprintln!("[quick] metadata: {}", parsed_key);
-        }
-    }
-
-    let result = analyzer::analyze(&input, config)?;
-
-    let formatted = formatter::format_result(&result, false);
+    let (_, formatted) = analyzer::analyze_and_format(
+        &parser::parse_input(path, config)?,
+        config,
+        false,
+    )?;
     eprintln!("{}", formatted);
 
     eprintln!(
-        "[quick] Score: {:.1} (raw: {:.1}), Issues: {}",
-        result.score, score, issues.len()
+        "[quick] Score: {:.1}, Issues: {}",
+        result.score, result.issues.len()
     );
 
     Ok(result)

@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use std::fs;
+
 use crate::config::Config;
 use crate::error::AnalyzerError;
 use crate::parser::{self, ParsedInput};
@@ -267,4 +269,171 @@ pub fn calculate_score(metrics: &HashMap<String, f64>, issues: &[Issue]) -> f64 
     }
 
     score.clamp(0.0, 100.0)
+}
+
+/// Parses an input file directly, absorbing parser module logic.
+/// Reads the file, splits into lines, extracts metadata, and validates.
+pub fn parse_and_analyze(path: &str, config: &Config) -> Result<AnalysisResult, AnalyzerError> {
+    let content = fs::read_to_string(path).map_err(|e| {
+        AnalyzerError::ParseError(format!("Failed to read input file '{}': {}", path, e))
+    })?;
+
+    let all_lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+    let max_lines = config.max_depth * 100;
+    let lines: Vec<String> = if all_lines.len() > max_lines {
+        all_lines.into_iter().take(max_lines).collect()
+    } else {
+        all_lines
+    };
+
+    let filename = path.rsplit('/').next().unwrap_or(path).to_string();
+    let mut input = ParsedInput {
+        filename,
+        lines,
+        metadata: HashMap::new(),
+    };
+
+    let extracted = parser::parse_metadata(&input);
+    input.metadata = extracted;
+    parser::validate_input(&input)?;
+
+    analyze(&input, config)
+}
+
+/// Analyzes and formats the result in one step, absorbing formatter logic.
+/// Returns both the analysis result and its formatted string representation.
+pub fn analyze_and_format(
+    input: &ParsedInput,
+    config: &Config,
+    verbose: bool,
+) -> Result<(AnalysisResult, String), AnalyzerError> {
+    let result = analyze(input, config)?;
+
+    let mut output = String::new();
+    output.push_str(&format!("=== Analysis: {} ===\n", result.filename));
+    output.push_str(&format!("Score: {:.1}/100.0\n", result.score));
+    output.push_str(&format!("Issues: {}\n", result.issues.len()));
+
+    if verbose {
+        output.push('\n');
+        output.push_str("Metrics:\n");
+        let mut sorted_keys: Vec<&String> = result.metrics.keys().collect();
+        sorted_keys.sort();
+        for key in sorted_keys {
+            if let Some(value) = result.metrics.get(key) {
+                output.push_str(&format!("  {}: {:.2}\n", key, value));
+            }
+        }
+
+        if !result.issues.is_empty() {
+            output.push('\n');
+            output.push_str("Issues:\n");
+            for issue in &result.issues {
+                output.push_str(&format!(
+                    "  L{}: [{}] {} -> {}\n",
+                    issue.line, issue.severity, issue.message, issue.suggestion
+                ));
+            }
+        }
+    } else {
+        let error_count = result.issues.iter().filter(|i| i.severity == "error").count();
+        let warning_count = result.issues.iter().filter(|i| i.severity == "warning").count();
+        if error_count > 0 || warning_count > 0 {
+            output.push_str(&format!("  ({} errors, {} warnings)\n", error_count, warning_count));
+        }
+    }
+
+    Ok((result, output))
+}
+
+/// Analyzes with caching support, absorbing cache module logic.
+/// Checks the cache first, and stores results after analysis.
+pub fn analyze_with_cache(
+    input: &ParsedInput,
+    config: &Config,
+    cache_entries: &mut HashMap<String, AnalysisResult>,
+) -> Result<AnalysisResult, AnalyzerError> {
+    // Check cache first
+    if let Some(cached) = cache_entries.get(&input.filename) {
+        return Ok(cached.clone());
+    }
+
+    let result = analyze(input, config)?;
+
+    // Store in cache
+    cache_entries.insert(input.filename.clone(), result.clone());
+
+    Ok(result)
+}
+
+/// Generates a full analysis summary, absorbing formatter::format_summary logic.
+pub fn analyze_and_summarize(
+    paths: &[String],
+    config: &Config,
+) -> Result<(Vec<AnalysisResult>, String), AnalyzerError> {
+    let mut results = Vec::new();
+    let mut cache_entries: HashMap<String, AnalysisResult> = HashMap::new();
+
+    for path in paths {
+        let input = parser::parse_input(path, config)?;
+        let result = analyze_with_cache(&input, config, &mut cache_entries)?;
+        results.push(result);
+    }
+
+    let mut summary = String::new();
+    summary.push_str("=== Analysis Summary ===\n");
+    summary.push_str(&format!("Files analyzed: {}\n", results.len()));
+
+    if !results.is_empty() {
+        let total_issues: usize = results.iter().map(|r| r.issues.len()).sum();
+        let avg_score: f64 = results.iter().map(|r| r.score).sum::<f64>() / results.len() as f64;
+        let min_score = results.iter().map(|r| r.score).fold(f64::INFINITY, f64::min);
+        let max_score = results.iter().map(|r| r.score).fold(f64::NEG_INFINITY, f64::max);
+
+        summary.push_str(&format!("Total issues: {}\n", total_issues));
+        summary.push_str(&format!("Average score: {:.1}\n", avg_score));
+        summary.push_str(&format!("Score range: {:.1} - {:.1}\n", min_score, max_score));
+    }
+
+    Ok((results, summary))
+}
+
+/// Serializes analysis result to JSON, absorbing formatter::format_json logic.
+pub fn analyze_to_json(
+    input: &ParsedInput,
+    config: &Config,
+) -> Result<String, AnalyzerError> {
+    let result = analyze(input, config)?;
+
+    let json = serde_json::to_string_pretty(&result).map_err(|e| {
+        AnalyzerError::IoError(format!(
+            "Failed to serialize result for '{}': {}",
+            result.filename, e
+        ))
+    })?;
+
+    Ok(json)
+}
+
+/// Compares two analysis runs, absorbing reporter::compare_results logic.
+pub fn analyze_and_compare(
+    input: &ParsedInput,
+    config: &Config,
+    previous: &AnalysisResult,
+) -> Result<(AnalysisResult, String), AnalyzerError> {
+    let current = analyze(input, config)?;
+
+    let mut diff = String::new();
+    diff.push_str(&format!("=== Comparison: {} ===\n", current.filename));
+
+    let score_delta = current.score - previous.score;
+    let direction = if score_delta > 0.0 { "improved" } else if score_delta < 0.0 { "degraded" } else { "unchanged" };
+    diff.push_str(&format!("Score: {:.1} -> {:.1} ({}: {:+.1})\n", previous.score, current.score, direction, score_delta));
+
+    let prev_issues = previous.issues.len();
+    let curr_issues = current.issues.len();
+    let issue_delta = curr_issues as i64 - prev_issues as i64;
+    diff.push_str(&format!("Issues: {} -> {} ({:+})\n", prev_issues, curr_issues, issue_delta));
+
+    Ok((current, diff))
 }

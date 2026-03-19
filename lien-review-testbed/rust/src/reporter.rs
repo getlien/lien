@@ -295,3 +295,12 @@ pub fn report_from_cache(config_path: &str) -> Result<String, AnalyzerError> {
 
     Ok(report)
 }
+
+/// Generates a quick summary using the analyzer's combined function.
+pub fn quick_summary(
+    paths: &[String],
+    config: &Config,
+) -> Result<String, AnalyzerError> {
+    let (_, summary) = analyzer::analyze_and_summarize(paths, config)?;
+    Ok(summary)
+}
