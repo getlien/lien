@@ -169,7 +169,7 @@ function formatArchDescription(findings: ReviewFinding[], blobBase: string | nul
   const count = findings.length;
   const firstMeta = findings[0]?.metadata as ArchitecturalFindingMetadata | undefined;
   const summary = firstMeta?.summary;
-  const summaryText = summary ? ` — ${summary}` : '';
+  const summaryText = summary && count > 1 ? ` — ${summary}` : '';
   const rows = findings.map(f => {
     const scope = f.filepath ? scopeLink(f.filepath, f.line, blobBase) : 'General';
     return `| ${scope} | ${f.message} | ${f.suggestion ?? ''} |`;
