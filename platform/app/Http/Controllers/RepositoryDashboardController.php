@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\ReviewRunStatus;
+use App\Http\Controllers\Concerns\WithActiveRepositories;
 use App\Models\Repository;
 use App\Services\FindingsService;
 use App\Services\RepositoryStatsService;
@@ -12,7 +13,7 @@ use Inertia\Response;
 
 class RepositoryDashboardController extends Controller
 {
-    private const ALLOWED_RANGES = [7, 30, 90];
+    use WithActiveRepositories;
 
     public function __construct(
         private RepositoryStatsService $stats,
@@ -24,10 +25,7 @@ class RepositoryDashboardController extends Controller
         $this->authorize('view', $repository);
         $repository->load('organization');
 
-        $days = (int) $request->query('range', 30);
-        if (! in_array($days, self::ALLOWED_RANGES, true)) {
-            $days = 30;
-        }
+        $days = $this->resolveRange($request);
 
         $lastRun = $repository->reviewRuns()
             ->where('status', ReviewRunStatus::Completed)

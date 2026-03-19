@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\WithActiveRepositories;
 use App\Services\FindingsService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -9,17 +10,13 @@ use Inertia\Response;
 
 class FindingsController extends Controller
 {
+    use WithActiveRepositories;
+
     public function __construct(private FindingsService $findingsService) {}
 
     public function index(Request $request): Response
     {
-        $activeRepos = $request->user()
-            ->organizations()
-            ->with(['repositories' => fn ($q) => $q->active()->orderBy('full_name')])
-            ->get()
-            ->flatMap(fn ($org) => $org->repositories);
-
-        $repoIds = $activeRepos->pluck('id');
+        ['repoIds' => $repoIds, 'repoList' => $repoList] = $this->getActiveRepositories($request);
 
         $filters = [
             'type' => $request->query('type'),
@@ -30,10 +27,7 @@ class FindingsController extends Controller
         ];
 
         return Inertia::render('Findings', [
-            'repositories' => $activeRepos->map(fn ($repo) => [
-                'id' => $repo->id,
-                'full_name' => $repo->full_name,
-            ])->values()->all(),
+            'repositories' => $repoList,
             'filters' => $filters,
             'summary' => Inertia::defer(
                 fn () => $this->findingsService->getSummary($repoIds, filters: $filters),

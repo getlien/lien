@@ -94,30 +94,6 @@ class FindingsService
     }
 
     /**
-     * @param  Collection<int, int>  $repoIds
-     * @return list<array<string, mixed>>
-     */
-    public function getCompactRecentRuns(Collection $repoIds, int $limit = 5): array
-    {
-        return ReviewRun::with('repository:id,full_name')
-            ->whereIn('repository_id', $repoIds)
-            ->latest('created_at')
-            ->limit($limit)
-            ->get()
-            ->map(fn (ReviewRun $run) => [
-                'id' => $run->id,
-                'repository_id' => $run->repository_id,
-                'repository_name' => $run->repository->full_name,
-                'type' => $run->type->value,
-                'status' => $run->status->value,
-                'pr_number' => $run->pr_number,
-                'pr_title' => $run->pr_title,
-                'created_at' => $run->created_at->toISOString(),
-            ])
-            ->all();
-    }
-
-    /**
      * @param  Collection<int, int>|null  $repoIds
      * @param  array{type?: string, status?: string, resolution?: string, repo?: string, range?: string}  $filters
      * @return array{posted: int, resolved: int, dismissed: int, open: int}
