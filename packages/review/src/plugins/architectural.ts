@@ -236,7 +236,23 @@ ${archContext.code}
 
 ## Instructions
 
-Review the changed code for **structural and design** concerns only:
+Review the changed code for **structural and design** concerns only.
+
+## Good observations (examples)
+
+\`\`\`json
+{"scope": "src/handlers/auth.ts::handleLogin", "observation": "Login and registration handlers duplicate the same token generation + cookie setting logic", "evidence": "Lines 45-52 in handleLogin and lines 78-85 in handleRegister are identical", "suggestion": "Extract to a shared createSession() helper"}
+\`\`\`
+
+\`\`\`json
+{"scope": "src/services/payment.ts", "observation": "PaymentService directly constructs HTTP requests to Stripe instead of using the existing ApiClient", "evidence": "Lines 30-45 use raw fetch() while ApiClient is available and used everywhere else", "suggestion": "Use ApiClient.post() for consistency and centralized error handling"}
+\`\`\`
+
+\`\`\`json
+{"scope": "src/utils/format.ts::formatDate", "observation": "Three files each implement their own date formatting with slightly different logic", "evidence": "format.ts:12, dashboard.ts:45, report.ts:78 all format dates differently", "suggestion": "Consolidate into formatDate() and import it"}
+\`\`\`
+
+## What to look for
 
 - **DRY violations**: duplicated logic across functions/files
 - **Single Responsibility**: functions doing too many unrelated things
@@ -244,35 +260,33 @@ Review the changed code for **structural and design** concerns only:
 - **Missing abstractions**: repeated patterns that should be shared
 - **KISS violations**: over-engineered solutions
 
-Do NOT flag:
-- **Breaking changes, return type changes, or caller compatibility** (handled by bug finder)
-- **Null safety, type mismatches, or missing error handling** (handled by bug finder)
-- Minor style variations or naming nitpicks
-- Metric values (handled by complexity review)
-- Intentional deviations (test utilities, generated code)
-- Things that are correct but could theoretically be "cleaner"
+## Out of scope (handled by other plugins)
+
+- Breaking changes, caller compatibility, null safety, type mismatches
+- Complexity metrics and thresholds
+- Style, naming, formatting
 
 ## Response Format
 
-Respond with ONLY valid JSON:
+ONLY valid JSON:
 
 \`\`\`json
 {
   "architectural_notes": [
     {
       "scope": "filepath or filepath::symbolName",
-      "observation": "1 sentence describing the issue",
-      "evidence": "specific file/line/metric backing it",
-      "suggestion": "what to do about it"
+      "observation": "1 sentence — what the structural issue is",
+      "evidence": "specific lines/files proving it exists",
+      "suggestion": "concrete action to fix it"
     }
   ]
 }
 \`\`\`
 
 Rules:
-- ONLY include notes backed by specific evidence
-- Maximum ${limit} notes per review — quality over quantity
-- If no architectural issues found, return an empty array`;
+- Every observation must cite specific lines or files as evidence
+- Maximum ${limit} notes — only flag issues worth fixing
+- If no structural issues found, return an empty array`;
 }
 
 // ---------------------------------------------------------------------------
