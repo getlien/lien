@@ -100,6 +100,8 @@ class FindingsService
         $base = $this->baseFindingsQuery($repoIds, $repositoryId, $filters);
 
         $row = (clone $base)
+            ->reorder()
+            ->select([])
             ->selectRaw("COUNT(*) as total, SUM(CASE WHEN review_comments.resolution = 'resolved' THEN 1 ELSE 0 END) as resolved, SUM(CASE WHEN review_comments.resolution = 'dismissed' THEN 1 ELSE 0 END) as dismissed, SUM(CASE WHEN review_comments.resolution IS NULL THEN 1 ELSE 0 END) as open")
             ->first();
 
