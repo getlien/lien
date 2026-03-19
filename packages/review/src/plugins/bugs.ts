@@ -79,14 +79,7 @@ export class BugFinderPlugin implements ReviewPlugin {
       return [];
     }
 
-    logger.info(
-      `Bug finder: ${chunks.length} changed chunks, ${context.repoChunks.length} repo chunks`,
-    );
-
     const changedFunctions = collectChangedFunctions(chunks);
-    logger.info(
-      `Bug finder: ${changedFunctions.length} changed functions: ${changedFunctions.map(f => `${f.filepath}::${f.symbolName}`).join(', ')}`,
-    );
     if (changedFunctions.length === 0) return [];
 
     const graph = buildDependencyGraph(context.repoChunks);
