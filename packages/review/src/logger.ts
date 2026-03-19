@@ -4,10 +4,10 @@
  * in both the GitHub Action and the GitHub App.
  */
 export interface Logger {
-  info(message: string): void;
-  warning(message: string): void;
-  error(message: string): void;
-  debug(message: string): void;
+  info(message: string, context?: Record<string, unknown>): void;
+  warning(message: string, context?: Record<string, unknown>): void;
+  error(message: string, context?: Record<string, unknown>): void;
+  debug(message: string, context?: Record<string, unknown>): void;
 }
 
 /**

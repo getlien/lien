@@ -24,7 +24,12 @@ import type { Logger } from './logger.js';
  * Filter files to only include those that can be analyzed
  * (excludes non-code files, vendor, node_modules, etc.)
  */
-export function filterAnalyzableFiles(files: string[]): string[] {
+export interface FilterResult {
+  files: string[];
+  excluded: string[];
+}
+
+export function filterAnalyzableFiles(files: string[]): FilterResult {
   const codeExtensions = new Set(getSupportedExtensions().map(ext => `.${ext}`));
 
   const excludePatterns = [
@@ -40,22 +45,19 @@ export function filterAnalyzableFiles(files: string[]): string[] {
     /pnpm-lock\.yaml/,
   ];
 
-  return files.filter(file => {
-    // Check extension
+  const included: string[] = [];
+  const excluded: string[] = [];
+
+  for (const file of files) {
     const ext = file.slice(file.lastIndexOf('.'));
-    if (!codeExtensions.has(ext)) {
-      return false;
+    if (!codeExtensions.has(ext) || excludePatterns.some(p => p.test(file))) {
+      excluded.push(file);
+    } else {
+      included.push(file);
     }
+  }
 
-    // Check exclude patterns
-    for (const pattern of excludePatterns) {
-      if (pattern.test(file)) {
-        return false;
-      }
-    }
-
-    return true;
-  });
+  return { files: included, excluded };
 }
 
 const TEST_SCAN_EXCLUDE = [/node_modules/, /vendor/, /dist/, /build/];
