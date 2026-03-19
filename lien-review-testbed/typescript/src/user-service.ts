@@ -13,7 +13,7 @@ import { validateEmail, sanitizeString } from './validator.js';
  * Throws if the user does not exist — callers should handle
  * the error to return appropriate HTTP responses.
  */
-export async function getUser(id: string): Promise<User> {
+export async function fetchUser(id: string): Promise<User> {
   if (!id || typeof id !== 'string') {
     throw new Error('User ID is required');
   }
@@ -91,7 +91,7 @@ export async function createUser(email: string, name: string): Promise<User> {
  * the rest are left unchanged. Always bumps `updatedAt`.
  */
 export async function updateUser(id: string, updates: Partial<User>): Promise<User> {
-  const existingUser = await getUser(id);
+  const existingUser = await fetchUser(id);
 
   const fieldsToUpdate: Record<string, unknown> = {};
 
@@ -162,7 +162,7 @@ export async function listUsers(page: number, limit: number): Promise<User[]> {
  * Uses a transaction to ensure the update is atomic.
  */
 export async function deleteUser(id: string): Promise<void> {
-  await getUser(id);
+  await fetchUser(id);
 
   await transaction(async tx => {
     await tx.query('UPDATE users SET deleted_at = $1, updated_at = $2 WHERE id = $3', [

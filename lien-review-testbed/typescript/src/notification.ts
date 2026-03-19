@@ -4,7 +4,7 @@
  */
 
 import type { NotificationPayload, User } from './types.js';
-import { getUser, listUsers } from './user-service.js';
+import { fetchUser, listUsers } from './user-service.js';
 import { sanitizeString, validateEmail } from './validator.js';
 
 interface NotificationLog {
@@ -76,7 +76,7 @@ export async function sendNotification(payload: NotificationPayload): Promise<vo
  * template variables, then delegates to sendNotification.
  */
 export async function notifyUser(userId: string, subject: string, body: string): Promise<void> {
-  const user = await getUser(userId);
+  const user = await fetchUser(userId);
 
   if (!validateEmail(user.email)) {
     throw new Error(`Cannot send notification: user ${userId} has an invalid email address`);
@@ -111,7 +111,7 @@ export async function notifyBatch(userIds: string[], subject: string, body: stri
 
   for (const userId of uniqueIds) {
     try {
-      const user = await getUser(userId);
+      const user = await fetchUser(userId);
       const personalizedBody = formatEmailBody(user, body);
 
       await sendNotification({

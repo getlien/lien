@@ -23,7 +23,7 @@ export { query, queryOne, transaction, healthCheck } from './database.js';
 export { validateEmail, validateInput, sanitizeString } from './validator.js';
 
 // User service
-export { getUser, createUser, updateUser, listUsers, deleteUser } from './user-service.js';
+export { fetchUser, createUser, updateUser, listUsers, deleteUser } from './user-service.js';
 
 // Auth service
 export {

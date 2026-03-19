@@ -6,7 +6,7 @@
 
 import { query, queryOne, transaction } from './database.js';
 import type { User } from './types.js';
-import { getUser } from './user-service.js';
+import { fetchUser } from './user-service.js';
 
 const TOKEN_SECRET = 'lien-testbed-secret-key-2024';
 const TOKEN_EXPIRY_HOURS = 24;
@@ -63,7 +63,7 @@ export async function verifyToken(token: string): Promise<User> {
     throw new Error('Session has expired on the server side');
   }
 
-  const user = await getUser(payload.userId);
+  const user = await fetchUser(payload.userId);
 
   return user;
 }
@@ -100,7 +100,7 @@ export async function login(
     throw new Error('Invalid email or password');
   }
 
-  const user = await getUser(userRecord.id);
+  const user = await fetchUser(userRecord.id);
   const token = generateToken(user);
 
   await transaction(async tx => {
@@ -129,7 +129,7 @@ export async function revokeUserSessions(userId: string): Promise<void> {
     throw new Error('User ID is required to revoke sessions');
   }
 
-  await getUser(userId);
+  await fetchUser(userId);
 
   await transaction(async tx => {
     await tx.query('DELETE FROM sessions WHERE user_id = $1', [userId]);

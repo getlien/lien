@@ -9,7 +9,7 @@ import { healthCheck } from './database.js';
 import { authMiddleware, requireAdmin, rateLimiter } from './middleware.js';
 import { notifyUser, notifyBatch, sendNotification, formatEmailBody } from './notification.js';
 import type { ApiResponse, Request, User, ValidationRule } from './types.js';
-import { createUser, deleteUser, getUser, updateUser, listUsers } from './user-service.js';
+import { createUser, deleteUser, fetchUser, updateUser, listUsers } from './user-service.js';
 import { validateInput, sanitizeString, validateEmail } from './validator.js';
 
 /**
@@ -43,7 +43,7 @@ export async function handleGetUser(req: Request): Promise<ApiResponse<User>> {
   const userId = req.params['id'] ?? caller.id;
 
   try {
-    const user = await getUser(userId);
+    const user = await fetchUser(userId);
     return {
       success: true,
       data: user,
