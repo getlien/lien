@@ -318,7 +318,7 @@ interface TaggedSection {
 }
 
 /** Canonical ordering for plugin sections. Plugins listed here appear first, in order. */
-const PLUGIN_ORDER = ['summary', 'complexity'];
+const PLUGIN_ORDER = ['summary', 'complexity', 'architectural'];
 
 /** Reorder tagged sections: known plugins first (in PLUGIN_ORDER), then any extras. */
 function reorderSections(sections: TaggedSection[]): string[] {

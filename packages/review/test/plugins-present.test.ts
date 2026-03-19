@@ -26,6 +26,7 @@ function makePresentContext(overrides?: Partial<PresentContext>): PresentContext
     logger: silentLogger,
     addAnnotations: vi.fn(),
     appendSummary: vi.fn(),
+    appendDescription: vi.fn(),
     ...overrides,
   } as PresentContext;
 }

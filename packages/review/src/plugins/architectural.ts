@@ -22,8 +22,6 @@ export const architecturalConfigSchema = z.object({
   mode: z.enum(['auto', 'always', 'off']).default('auto'),
 });
 
-const ARCH_REVIEW_MARKER = '<!-- lien-plugin:arch-review -->';
-
 /** Compute max architectural notes based on change size. */
 function maxNotes(changedFileCount: number): number {
   return Math.min(3 + Math.floor(changedFileCount / 10), 5);
@@ -109,21 +107,14 @@ export class ArchitecturalPlugin implements ReviewPlugin {
       ? `https://github.com/${context.pr.owner}/${context.pr.repo}/blob/${context.pr.headSha}`
       : null;
 
-    // Minimize previous architectural review comments
-    if (context.minimizeOutdatedComments) {
-      await context.minimizeOutdatedComments(ARCH_REVIEW_MARKER);
-    }
-
     // Try inline comments for findings with specific lines (symbol-scoped)
     const inlineFindings = findings.filter(f => f.line > 0);
     if (inlineFindings.length > 0 && context.postInlineComments) {
       await context.postInlineComments(inlineFindings, 'Architectural Review');
     }
 
-    // Post review comment for all findings (with links)
-    if (context.postReviewComment) {
-      await context.postReviewComment(formatArchReviewComment(findings, blobBase));
-    }
+    // Contribute to unified PR description (alongside summary + complexity)
+    context.appendDescription(formatArchDescription(findings, blobBase), 'architectural');
 
     // Append to check run summary
     const lines = findings
@@ -159,13 +150,14 @@ function scopeLink(filepath: string, line: number, blobBase: string | null): str
   return `\`${filepath}\``;
 }
 
-function formatArchReviewComment(findings: ReviewFinding[], blobBase: string | null): string {
+function formatArchDescription(findings: ReviewFinding[], blobBase: string | null): string {
+  const count = findings.length;
   const rows = findings.map(f => {
     const scope = f.filepath ? scopeLink(f.filepath, f.line, blobBase) : 'General';
     return `| ${scope} | ${f.message} | ${f.suggestion ?? ''} |`;
   });
   const table = `| Scope | Observation | Suggestion |\n|---|---|---|\n${rows.join('\n')}`;
-  return `${ARCH_REVIEW_MARKER}\n**Architectural Review** · ${findings.length} observation${findings.length === 1 ? '' : 's'}\n\n${table}`;
+  return `**Architectural** · ${count} observation${count === 1 ? '' : 's'}\n\n${table}`;
 }
 
 // ---------------------------------------------------------------------------
