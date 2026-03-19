@@ -36,16 +36,15 @@ impl Config {
         Ok(config)
     }
 
-    /// Returns the configuration value for the given key as a String.
-    /// Returns an empty string for unknown keys.
-    pub fn get(&self, key: &str) -> String {
+    /// Returns the configuration value for the given key, or None for unknown keys.
+    pub fn get(&self, key: &str) -> Option<String> {
         match key {
-            "input_path" => self.input_path.clone(),
-            "output_path" => self.output_path.clone(),
-            "verbose" => self.verbose.to_string(),
-            "max_depth" => self.max_depth.to_string(),
-            "cache_enabled" => self.cache_enabled.to_string(),
-            _ => String::new(),
+            "input_path" => Some(self.input_path.clone()),
+            "output_path" => Some(self.output_path.clone()),
+            "verbose" => Some(self.verbose.to_string()),
+            "max_depth" => Some(self.max_depth.to_string()),
+            "cache_enabled" => Some(self.cache_enabled.to_string()),
+            _ => None,
         }
     }
 
