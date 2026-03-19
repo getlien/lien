@@ -13,6 +13,30 @@ import { createUser, deleteUser, getUser, updateUser, listUsers } from './user-s
 import { validateInput, sanitizeString, validateEmail } from './validator.js';
 
 /**
+ * Formats a Date into a human-readable timestamp string with timezone.
+ * Used for logging and audit trails in API responses.
+ */
+function formatTimestamp(date: Date): string {
+  const pad = (n: number, width: number = 2): string => {
+    return n.toString().padStart(width, '0');
+  };
+
+  const year = date.getUTCFullYear();
+  const month = pad(date.getUTCMonth() + 1);
+  const day = pad(date.getUTCDate());
+  const hours = pad(date.getUTCHours());
+  const minutes = pad(date.getUTCMinutes());
+  const seconds = pad(date.getUTCSeconds());
+  const millis = pad(date.getUTCMilliseconds(), 3);
+
+  const tzOffset = -date.getTimezoneOffset();
+  const tzSign = tzOffset >= 0 ? '+' : '-';
+  const tzHours = pad(Math.floor(Math.abs(tzOffset) / 60));
+  const tzMins = pad(Math.abs(tzOffset) % 60);
+
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${millis}${tzSign}${tzHours}:${tzMins}`;
+}
+/**
  * Handles GET /users/:id requests.
  * Authenticates the caller via the auth middleware, enforces
  * rate limiting, extracts the user ID from route params, and
@@ -527,6 +551,7 @@ export async function handleBatchNotify(req: Request): Promise<ApiResponse<void>
  * Does not require authentication.
  */
 export async function handleHealthCheck(): Promise<ApiResponse<{ status: string }>> {
+  const _checkedAt = formatTimestamp(new Date());
   const dbHealthy = await healthCheck();
 
   if (!dbHealthy) {

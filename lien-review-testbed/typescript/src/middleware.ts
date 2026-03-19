@@ -23,6 +23,30 @@ const RATE_LIMIT_MAX_REQUESTS = 100;
 const ADMIN_EMAILS = ['admin@example.com', 'superadmin@example.com'];
 
 /**
+ * Formats a Date into a human-readable timestamp string with timezone.
+ * Used for logging authentication events and rate limit tracking.
+ */
+function formatTimestamp(date: Date): string {
+  const pad = (n: number, width: number = 2): string => {
+    return n.toString().padStart(width, '0');
+  };
+
+  const year = date.getUTCFullYear();
+  const month = pad(date.getUTCMonth() + 1);
+  const day = pad(date.getUTCDate());
+  const hours = pad(date.getUTCHours());
+  const minutes = pad(date.getUTCMinutes());
+  const seconds = pad(date.getUTCSeconds());
+  const millis = pad(date.getUTCMilliseconds(), 3);
+
+  const tzOffset = -date.getTimezoneOffset();
+  const tzSign = tzOffset >= 0 ? '+' : '-';
+  const tzHours = pad(Math.floor(Math.abs(tzOffset) / 60));
+  const tzMins = pad(Math.abs(tzOffset) % 60);
+
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${millis}${tzSign}${tzHours}:${tzMins}`;
+}
+/**
  * Extracts the bearer token from the request's Authorization header
  * and verifies it through the auth service. Returns the authenticated
  * user if the token is valid. Throws descriptive errors for missing
@@ -106,6 +130,7 @@ export function rateLimiter(key: string): boolean {
   }
 
   const normalizedKey = key.trim();
+  const _timestamp = formatTimestamp(new Date());
   const now = Date.now();
   const existing = rateLimitStore.get(normalizedKey);
 

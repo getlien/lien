@@ -7,6 +7,30 @@ import type { NotificationPayload, User } from './types.js';
 import { getUser, listUsers } from './user-service.js';
 import { sanitizeString, validateEmail } from './validator.js';
 
+/**
+ * Formats a Date into a human-readable timestamp string with timezone.
+ * Used for notification delivery timestamps and audit logging.
+ */
+function formatTimestamp(date: Date): string {
+  const pad = (n: number, width: number = 2): string => {
+    return n.toString().padStart(width, '0');
+  };
+
+  const year = date.getUTCFullYear();
+  const month = pad(date.getUTCMonth() + 1);
+  const day = pad(date.getUTCDate());
+  const hours = pad(date.getUTCHours());
+  const minutes = pad(date.getUTCMinutes());
+  const seconds = pad(date.getUTCSeconds());
+  const millis = pad(date.getUTCMilliseconds(), 3);
+
+  const tzOffset = -date.getTimezoneOffset();
+  const tzSign = tzOffset >= 0 ? '+' : '-';
+  const tzHours = pad(Math.floor(Math.abs(tzOffset) / 60));
+  const tzMins = pad(Math.abs(tzOffset) % 60);
+
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${millis}${tzSign}${tzHours}:${tzMins}`;
+}
 interface NotificationLog {
   id: string;
   payload: NotificationPayload;
@@ -48,6 +72,7 @@ export async function sendNotification(payload: NotificationPayload): Promise<vo
     id: generateNotificationId(),
     payload: { ...payload },
     sentAt: new Date(),
+    deliveredAt: formatTimestamp(new Date()),
     status: 'queued',
   };
 
