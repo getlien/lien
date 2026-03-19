@@ -44,10 +44,20 @@ export function validateEmail(email: string): boolean {
   return EMAIL_REGEX.test(trimmed);
 }
 
+export class ValidationError extends Error {
+  public readonly errors: string[];
+
+  constructor(errors: string[]) {
+    super(`Validation failed: ${errors.join(', ')}`);
+    this.name = 'ValidationError';
+    this.errors = errors;
+  }
+}
+
 /**
  * Validates a data object against a set of validation rules.
  * Returns a ValidationResult with `valid: true` if all rules pass,
- * or `valid: false` with an array of human-readable error messages.
+ * or throws a ValidationError if any rules fail.
  *
  * Supports required checks, type checks, and string length constraints.
  */
@@ -92,9 +102,13 @@ export function validateInput(
     }
   }
 
+  if (errors.length > 0) {
+    throw new ValidationError(errors);
+  }
+
   return {
-    valid: errors.length === 0,
-    errors,
+    valid: true,
+    errors: [],
   };
 }
 
