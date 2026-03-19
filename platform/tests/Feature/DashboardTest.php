@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ReviewCommentStatus;
 use App\Enums\ReviewRunStatus;
 use App\Enums\ReviewRunType;
 use App\Models\Organization;
 use App\Models\Repository;
+use App\Models\ReviewComment;
 use App\Models\ReviewRun;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -44,13 +46,9 @@ class DashboardTest extends TestCase
         $response->assertOk();
         $response->assertInertia(fn ($page) => $page
             ->component('Dashboard')
-            ->where('view', 'by_pr')
             ->has('repositories', 1)
             ->where('repositories.0.full_name', 'acme/app')
-            ->has('filters')
-            ->where('filters.type', null)
-            ->where('filters.status', null)
-            ->where('filters.repo', null)
+            ->where('range', 30)
         );
     }
 
@@ -123,7 +121,7 @@ class DashboardTest extends TestCase
         );
     }
 
-    public function test_dashboard_defaults_to_by_pr_view(): void
+    public function test_dashboard_defaults_to_30_day_range(): void
     {
         $user = User::factory()->create();
         $org = Organization::factory()->create();
@@ -133,96 +131,35 @@ class DashboardTest extends TestCase
 
         $response->assertOk();
         $response->assertInertia(fn ($page) => $page
-            ->where('view', 'by_pr')
+            ->where('range', 30)
         );
     }
 
-    public function test_dashboard_accepts_all_view(): void
+    public function test_dashboard_accepts_valid_range(): void
     {
         $user = User::factory()->create();
         $org = Organization::factory()->create();
         $user->organizations()->attach($org->id, ['role' => 'admin']);
 
-        $response = $this->actingAs($user)->get('/dashboard?view=all');
+        $response = $this->actingAs($user)->get('/dashboard?range=7');
 
         $response->assertOk();
         $response->assertInertia(fn ($page) => $page
-            ->where('view', 'all')
+            ->where('range', 7)
         );
     }
 
-    public function test_dashboard_ignores_invalid_view(): void
+    public function test_dashboard_ignores_invalid_range(): void
     {
         $user = User::factory()->create();
         $org = Organization::factory()->create();
         $user->organizations()->attach($org->id, ['role' => 'admin']);
 
-        $response = $this->actingAs($user)->get('/dashboard?view=invalid');
+        $response = $this->actingAs($user)->get('/dashboard?range=15');
 
         $response->assertOk();
         $response->assertInertia(fn ($page) => $page
-            ->where('view', 'by_pr')
-        );
-    }
-
-    public function test_dashboard_filters_by_status(): void
-    {
-        $user = User::factory()->create();
-        $org = Organization::factory()->create();
-        $user->organizations()->attach($org->id, ['role' => 'admin']);
-
-        $response = $this->actingAs($user)->get('/dashboard?status=completed');
-
-        $response->assertOk();
-        $response->assertInertia(fn ($page) => $page
-            ->where('filters.status', 'completed')
-        );
-    }
-
-    public function test_dashboard_filters_by_type_in_all_view(): void
-    {
-        $user = User::factory()->create();
-        $org = Organization::factory()->create();
-        $user->organizations()->attach($org->id, ['role' => 'admin']);
-
-        $response = $this->actingAs($user)->get('/dashboard?view=all&type=baseline');
-
-        $response->assertOk();
-        $response->assertInertia(fn ($page) => $page
-            ->where('view', 'all')
-            ->where('filters.type', 'baseline')
-        );
-    }
-
-    public function test_dashboard_filters_by_repository(): void
-    {
-        $user = User::factory()->create();
-        $org = Organization::factory()->create();
-        $user->organizations()->attach($org->id, ['role' => 'admin']);
-
-        $repo = Repository::factory()->create([
-            'organization_id' => $org->id,
-        ]);
-
-        $response = $this->actingAs($user)->get('/dashboard?repo='.$repo->id);
-
-        $response->assertOk();
-        $response->assertInertia(fn ($page) => $page
-            ->where('filters.repo', $repo->id)
-        );
-    }
-
-    public function test_dashboard_ignores_invalid_repo_filter(): void
-    {
-        $user = User::factory()->create();
-        $org = Organization::factory()->create();
-        $user->organizations()->attach($org->id, ['role' => 'admin']);
-
-        $response = $this->actingAs($user)->get('/dashboard?repo=99999');
-
-        $response->assertOk();
-        $response->assertInertia(fn ($page) => $page
-            ->where('filters.repo', null)
+            ->where('range', 30)
         );
     }
 
@@ -252,7 +189,7 @@ class DashboardTest extends TestCase
         );
     }
 
-    public function test_grouped_view_returns_baseline_and_pr_groups(): void
+    public function test_impact_stats_are_deferred(): void
     {
         $user = User::factory()->create();
         $org = Organization::factory()->create();
@@ -262,13 +199,7 @@ class DashboardTest extends TestCase
             'organization_id' => $org->id,
         ]);
 
-        ReviewRun::factory()->baseline()->create([
-            'repository_id' => $repo->id,
-            'status' => ReviewRunStatus::Completed,
-            'completed_at' => now(),
-        ]);
-
-        ReviewRun::factory()->create([
+        $run = ReviewRun::factory()->create([
             'repository_id' => $repo->id,
             'type' => ReviewRunType::Pr,
             'pr_number' => 42,
@@ -276,28 +207,68 @@ class DashboardTest extends TestCase
             'completed_at' => now(),
         ]);
 
+        ReviewComment::factory()->create([
+            'review_run_id' => $run->id,
+            'review_type' => 'bugs',
+            'status' => ReviewCommentStatus::Posted,
+        ]);
+
         $response = $this->actingAs($user)->get('/dashboard');
 
         $response->assertOk();
         $response->assertInertia(fn ($page) => $page
-            ->where('view', 'by_pr')
-            ->missing('groupedRuns')
-            ->loadDeferredProps('runs', fn ($reload) => $reload
-                ->has('groupedRuns', fn ($prop) => $prop
-                    ->has('data', 2)
-                    ->has('data.0.repository_id')
-                    ->has('data.0.type')
-                    ->has('data.0.latest_status')
-                    ->has('data.0.runs_count')
-                    ->has('data.0.latest_run_id')
-                    ->has('data.0.trend_data')
-                    ->etc()
+            ->missing('impactStats')
+            ->loadDeferredProps('stats', fn ($reload) => $reload
+                ->has('impactStats', fn ($prop) => $prop
+                    ->has('prsReviewed')
+                    ->has('findingsPosted')
+                    ->has('byType')
+                    ->has('resolutionRate')
+                    ->has('totalCost')
                 )
             )
         );
     }
 
-    public function test_all_runs_view_returns_paginated_runs(): void
+    public function test_recent_findings_are_deferred(): void
+    {
+        $user = User::factory()->create();
+        $org = Organization::factory()->create();
+        $user->organizations()->attach($org->id, ['role' => 'admin']);
+
+        $repo = Repository::factory()->create([
+            'organization_id' => $org->id,
+        ]);
+
+        $run = ReviewRun::factory()->create([
+            'repository_id' => $repo->id,
+            'type' => ReviewRunType::Pr,
+            'pr_number' => 10,
+            'status' => ReviewRunStatus::Completed,
+            'completed_at' => now(),
+        ]);
+
+        ReviewComment::factory()->create([
+            'review_run_id' => $run->id,
+            'review_type' => 'bugs',
+            'status' => ReviewCommentStatus::Posted,
+            'body' => 'Null pointer found',
+        ]);
+
+        $response = $this->actingAs($user)->get('/dashboard');
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->missing('recentFindings')
+            ->loadDeferredProps('findings', fn ($reload) => $reload
+                ->has('recentFindings', 1)
+                ->where('recentFindings.0.review_type', 'bugs')
+                ->where('recentFindings.0.body', 'Null pointer found')
+            )
+        );
+    }
+
+    public function test_recent_runs_are_deferred(): void
     {
         $user = User::factory()->create();
         $org = Organization::factory()->create();
@@ -313,99 +284,17 @@ class DashboardTest extends TestCase
             'completed_at' => now(),
         ]);
 
-        $response = $this->actingAs($user)->get('/dashboard?view=all');
+        $response = $this->actingAs($user)->get('/dashboard');
 
         $response->assertOk();
         $response->assertInertia(fn ($page) => $page
-            ->where('view', 'all')
-            ->missing('allRuns')
+            ->missing('recentRuns')
             ->loadDeferredProps('runs', fn ($reload) => $reload
-                ->has('allRuns', fn ($prop) => $prop
-                    ->has('data', 3)
-                    ->has('data.0.id')
-                    ->has('data.0.repository_name')
-                    ->has('data.0.type')
-                    ->has('data.0.status')
-                    ->has('data.0.created_at')
-                    ->etc()
-                )
-            )
-        );
-    }
-
-    public function test_all_runs_view_filters_by_type(): void
-    {
-        $user = User::factory()->create();
-        $org = Organization::factory()->create();
-        $user->organizations()->attach($org->id, ['role' => 'admin']);
-
-        $repo = Repository::factory()->create([
-            'organization_id' => $org->id,
-        ]);
-
-        ReviewRun::factory()->baseline()->create([
-            'repository_id' => $repo->id,
-            'status' => ReviewRunStatus::Completed,
-            'completed_at' => now(),
-        ]);
-
-        ReviewRun::factory()->create([
-            'repository_id' => $repo->id,
-            'type' => ReviewRunType::Pr,
-            'pr_number' => 10,
-            'status' => ReviewRunStatus::Completed,
-            'completed_at' => now(),
-        ]);
-
-        $response = $this->actingAs($user)->get('/dashboard?view=all&type=baseline');
-
-        $response->assertOk();
-        $response->assertInertia(fn ($page) => $page
-            ->loadDeferredProps('runs', fn ($reload) => $reload
-                ->has('allRuns', fn ($prop) => $prop
-                    ->has('data', 1)
-                    ->where('data.0.type', 'baseline')
-                    ->etc()
-                )
-            )
-        );
-    }
-
-    public function test_grouped_view_filters_by_status(): void
-    {
-        $user = User::factory()->create();
-        $org = Organization::factory()->create();
-        $user->organizations()->attach($org->id, ['role' => 'admin']);
-
-        $repo = Repository::factory()->create([
-            'organization_id' => $org->id,
-        ]);
-
-        ReviewRun::factory()->create([
-            'repository_id' => $repo->id,
-            'type' => ReviewRunType::Pr,
-            'pr_number' => 1,
-            'status' => ReviewRunStatus::Completed,
-            'completed_at' => now(),
-        ]);
-
-        ReviewRun::factory()->create([
-            'repository_id' => $repo->id,
-            'type' => ReviewRunType::Pr,
-            'pr_number' => 2,
-            'status' => ReviewRunStatus::Failed,
-        ]);
-
-        $response = $this->actingAs($user)->get('/dashboard?status=completed');
-
-        $response->assertOk();
-        $response->assertInertia(fn ($page) => $page
-            ->loadDeferredProps('runs', fn ($reload) => $reload
-                ->has('groupedRuns', fn ($prop) => $prop
-                    ->has('data', 1)
-                    ->where('data.0.latest_status', 'completed')
-                    ->etc()
-                )
+                ->has('recentRuns', 3)
+                ->has('recentRuns.0.id')
+                ->has('recentRuns.0.repository_name')
+                ->has('recentRuns.0.status')
+                ->has('recentRuns.0.created_at')
             )
         );
     }

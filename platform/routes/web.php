@@ -2,10 +2,12 @@
 
 use App\Http\Controllers\Auth\GitHubAuthController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\FindingsController;
 use App\Http\Controllers\FunctionSourceController;
 use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\RepositoryConfigController;
 use App\Http\Controllers\RepositoryDashboardController;
+use App\Http\Controllers\RepositoryFindingsController;
 use App\Http\Controllers\ReviewRunController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -23,6 +25,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/auth/logout', [GitHubAuthController::class, 'logout'])->name('logout');
 
     Route::get('/dashboard', [DashboardController::class, 'show'])->name('dashboard');
+    Route::get('/findings', [FindingsController::class, 'index'])->name('findings');
 
     Route::get('/onboarding/organizations', [OnboardingController::class, 'showOrganizations'])->name('onboarding.organizations');
     Route::post('/onboarding/organizations', [OnboardingController::class, 'selectOrganization'])->name('onboarding.organizations.select');
@@ -34,6 +37,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('/repos/{repository}/config', [RepositoryConfigController::class, 'destroy'])->name('repositories.config.destroy');
 
     Route::get('/repos/{repository}/dashboard', [RepositoryDashboardController::class, 'show'])->name('repositories.dashboard');
+    Route::get('/repos/{repository}/findings', [RepositoryFindingsController::class, 'index'])->name('repositories.findings');
 
     Route::get('/repos/{repository}/functions/{complexitySnapshot}/source', [FunctionSourceController::class, 'show'])->name('repositories.functions.source');
 

@@ -1,143 +1,124 @@
 <script setup>
-import { Deferred, Link, router, usePoll, Head } from '@inertiajs/vue3';
-import { computed, watch } from 'vue';
+import { Deferred, Link, Head, router } from '@inertiajs/vue3';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import SkeletonTable from '@/Components/Skeletons/SkeletonTable.vue';
+import ImpactStats from '@/Components/Dashboard/ImpactStats.vue';
+import RecentFindingsFeed from '@/Components/Dashboard/RecentFindingsFeed.vue';
 import SkeletonStatGrid from '@/Components/Skeletons/SkeletonStatGrid.vue';
-import ViewToggle from '@/Components/Dashboard/ViewToggle.vue';
-import DashboardStats from '@/Components/Dashboard/DashboardStats.vue';
-import AllRunsTable from '@/Components/Dashboard/AllRunsTable.vue';
-import GroupedRunsTable from '@/Components/Dashboard/GroupedRunsTable.vue';
+import SkeletonTable from '@/Components/Skeletons/SkeletonTable.vue';
+import { statusBadge, timeAgo } from '@/utils/runs';
 
 const props = defineProps({
-  view: String,
-  filters: Object,
   repositories: Array,
-  allRuns: Object,
-  groupedRuns: Object,
-  dashboardStats: Object,
+  range: Number,
+  impactStats: Object,
+  recentFindings: Array,
+  recentRuns: Array,
 });
 
-const hasActiveRuns = computed(() => {
-  if (props.view === 'by_pr' && props.groupedRuns?.data) {
-    return props.groupedRuns.data.some(
-      g => g.latest_status === 'pending' || g.latest_status === 'running',
-    );
-  }
-  if (props.view === 'all' && props.allRuns?.data) {
-    return props.allRuns.data.some(r => r.status === 'pending' || r.status === 'running');
-  }
-  return false;
-});
-
-const { start, stop } = usePoll(10000, { only: ['runs'] }, { autoStart: false });
-
-watch(
-  hasActiveRuns,
-  active => {
-    if (active) {
-      start();
-    } else {
-      stop();
-    }
-  },
-  { immediate: true },
-);
-
-function switchView(newView) {
-  router.get('/dashboard', { view: newView }, { preserveState: true });
-}
-
-function applyFilters(key, value) {
-  const params = { view: props.view, ...props.filters };
-  if (value) {
-    params[key] = value;
-  } else {
-    delete params[key];
-  }
-  router.get('/dashboard', params, { preserveState: true });
+function setRange(n) {
+  router.get('/dashboard', { range: n }, { preserveState: true });
 }
 </script>
 
 <template>
-  <Head title="Review Runs — Lien Review" />
+  <Head title="Dashboard — Lien Review" />
 
   <AuthenticatedLayout>
     <div v-if="repositories?.length">
-      <h1 class="text-2xl font-medium text-zinc-100">Review Runs</h1>
-
-      <!-- Dashboard Stats -->
-      <Deferred v-if="dashboardStats" :data="['dashboardStats']">
-        <template #fallback>
-          <SkeletonStatGrid class="mt-6" />
-        </template>
-        <DashboardStats :stats="dashboardStats" class="mt-6 deferred-enter" />
-      </Deferred>
-
-      <div class="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <ViewToggle :view="view" @change="switchView" />
-
-        <div class="flex gap-3" role="group" aria-label="Filter runs">
-          <div v-if="view === 'all'">
-            <label for="filter-type" class="sr-only">Filter by type</label>
-            <select
-              id="filter-type"
-              :value="filters.type || ''"
-              class="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20"
-              @change="applyFilters('type', $event.target.value)"
-            >
-              <option value="">All Types</option>
-              <option value="baseline">Baseline</option>
-              <option value="pr">PR</option>
-            </select>
-          </div>
-          <div>
-            <label for="filter-status" class="sr-only">Filter by status</label>
-            <select
-              id="filter-status"
-              :value="filters.status || ''"
-              class="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20"
-              @change="applyFilters('status', $event.target.value)"
-            >
-              <option value="">All Statuses</option>
-              <option value="pending">Pending</option>
-              <option value="running">Running</option>
-              <option value="completed">Completed</option>
-              <option value="failed">Failed</option>
-            </select>
-          </div>
-          <div v-if="repositories?.length > 1">
-            <label for="filter-repo" class="sr-only">Filter by repository</label>
-            <select
-              id="filter-repo"
-              :value="filters.repo || ''"
-              class="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20"
-              @change="applyFilters('repo', $event.target.value)"
-            >
-              <option value="">All Repositories</option>
-              <option v-for="repo in repositories" :key="repo.id" :value="repo.id">
-                {{ repo.full_name }}
-              </option>
-            </select>
-          </div>
+      <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-medium text-zinc-100">Overview</h1>
+        <div class="flex items-center gap-1">
+          <button
+            v-for="n in [7, 30, 90]"
+            :key="n"
+            type="button"
+            :aria-pressed="range === n"
+            class="rounded-full px-3 py-1 text-sm font-medium transition-colors"
+            :class="range === n ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'"
+            @click="setRange(n)"
+          >
+            {{ n }}d
+          </button>
         </div>
       </div>
 
-      <div class="mt-6">
-        <Deferred v-if="view === 'by_pr'" :data="['groupedRuns']">
-          <template #fallback>
-            <SkeletonTable />
-          </template>
-          <GroupedRunsTable :groups="groupedRuns" :filters="filters" />
-        </Deferred>
+      <Deferred :data="['impactStats']">
+        <template #fallback>
+          <SkeletonStatGrid class="mt-6" />
+        </template>
+        <ImpactStats v-if="impactStats" :stats="impactStats" class="mt-6 deferred-enter" />
+      </Deferred>
 
-        <Deferred v-else :data="['allRuns']">
-          <template #fallback>
-            <SkeletonTable />
-          </template>
-          <AllRunsTable :runs="allRuns" :filters="filters" />
-        </Deferred>
-      </div>
+      <Deferred :data="['recentFindings']">
+        <template #fallback>
+          <SkeletonTable class="mt-8" />
+        </template>
+        <div class="mt-8 deferred-enter">
+          <div class="flex items-center justify-between">
+            <h2 class="text-lg font-medium text-zinc-100">Recent Findings</h2>
+            <Link href="/findings" class="text-sm font-medium text-brand-400 hover:text-brand-300">
+              View all findings &rarr;
+            </Link>
+          </div>
+          <div class="mt-3">
+            <RecentFindingsFeed v-if="recentFindings" :findings="recentFindings" />
+          </div>
+        </div>
+      </Deferred>
+
+      <Deferred :data="['recentRuns']">
+        <template #fallback>
+          <SkeletonTable class="mt-8" />
+        </template>
+        <div class="mt-8 deferred-enter">
+          <div class="flex items-center justify-between">
+            <h2 class="text-lg font-medium text-zinc-100">Recent Runs</h2>
+          </div>
+          <div
+            v-if="recentRuns?.length"
+            class="mt-3 overflow-hidden rounded-lg border border-zinc-800"
+          >
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-zinc-800 bg-zinc-900">
+                  <th class="px-4 py-2 text-left text-xs font-medium text-zinc-400">PR</th>
+                  <th class="px-4 py-2 text-left text-xs font-medium text-zinc-400">Repository</th>
+                  <th class="px-4 py-2 text-left text-xs font-medium text-zinc-400">Status</th>
+                  <th class="px-4 py-2 text-right text-xs font-medium text-zinc-400">When</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-zinc-800/50">
+                <tr
+                  v-for="run in recentRuns"
+                  :key="run.id"
+                  class="transition-colors hover:bg-zinc-800/50"
+                >
+                  <td class="px-4 py-2.5 text-sm text-zinc-200">
+                    <template v-if="run.pr_number">PR #{{ run.pr_number }}</template>
+                    <template v-else>
+                      <span class="text-zinc-400">{{ run.type }}</span>
+                    </template>
+                  </td>
+                  <td class="px-4 py-2.5 text-sm text-zinc-400">{{ run.repository_name }}</td>
+                  <td class="px-4 py-2.5">
+                    <span
+                      :class="['rounded px-2 py-0.5 text-xs font-medium', statusBadge(run.status)]"
+                    >
+                      {{ run.status }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-2.5 text-right text-xs text-zinc-500">
+                    {{ timeAgo(run.created_at) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="mt-3 rounded-lg border border-zinc-800 bg-zinc-900 p-8 text-center">
+            <p class="text-sm text-zinc-400">No runs yet.</p>
+          </div>
+        </div>
+      </Deferred>
     </div>
 
     <div v-else class="mt-8 rounded-lg border border-zinc-800 bg-zinc-900 p-12 text-center">
@@ -152,16 +133,16 @@ function applyFilters(key, value) {
         <path
           stroke-linecap="round"
           stroke-linejoin="round"
-          d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
+          d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z"
         />
       </svg>
-      <h3 class="mt-4 text-sm font-medium text-zinc-200">No repositories yet</h3>
-      <p class="mt-1 text-sm text-zinc-400">
-        Connect your GitHub organization to start reviewing code with AI.
+      <h2 class="mt-4 text-lg font-medium text-zinc-100">Get started with Lien Review</h2>
+      <p class="mt-2 text-sm text-zinc-400">
+        Connect your repositories to start getting AI-powered code reviews.
       </p>
       <Link
         href="/onboarding/organizations"
-        class="mt-6 inline-block rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-600"
+        class="mt-6 inline-flex items-center rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-600"
       >
         Get Started
       </Link>
