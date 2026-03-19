@@ -86,10 +86,12 @@ export class ArchitecturalPlugin implements ReviewPlugin {
         scope: note.scope,
       };
 
+      const { filepath, line } = resolveScope(note.scope, chunks);
+
       return {
         pluginId: 'architectural',
-        filepath: note.scope.includes('::') ? note.scope.split('::')[0] : note.scope,
-        line: 0,
+        filepath,
+        line,
         severity: 'info' as const,
         category: 'architectural',
         message: note.observation,
@@ -103,15 +105,27 @@ export class ArchitecturalPlugin implements ReviewPlugin {
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     if (findings.length === 0) return;
 
-    // Post as a PR review comment so it's visible in the conversation
-    if (context.postReviewComment) {
-      if (context.minimizeOutdatedComments) {
-        await context.minimizeOutdatedComments(ARCH_REVIEW_MARKER);
-      }
-      await context.postReviewComment(formatArchReviewComment(findings));
+    const blobBase = context.pr
+      ? `https://github.com/${context.pr.owner}/${context.pr.repo}/blob/${context.pr.headSha}`
+      : null;
+
+    // Minimize previous architectural review comments
+    if (context.minimizeOutdatedComments) {
+      await context.minimizeOutdatedComments(ARCH_REVIEW_MARKER);
     }
 
-    // Also append to check run summary
+    // Try inline comments for findings with specific lines (symbol-scoped)
+    const inlineFindings = findings.filter(f => f.line > 0);
+    if (inlineFindings.length > 0 && context.postInlineComments) {
+      await context.postInlineComments(inlineFindings, 'Architectural Review');
+    }
+
+    // Post review comment for all findings (with links)
+    if (context.postReviewComment) {
+      await context.postReviewComment(formatArchReviewComment(findings, blobBase));
+    }
+
+    // Append to check run summary
     const lines = findings
       .map(f => `> **${f.message}**\n> ${f.evidence ?? ''}\n> *${f.suggestion ?? ''}*`)
       .join('\n\n');
@@ -119,9 +133,35 @@ export class ArchitecturalPlugin implements ReviewPlugin {
   }
 }
 
-function formatArchReviewComment(findings: ReviewFinding[]): string {
+/**
+ * Resolve a scope string ("filepath" or "filepath::symbolName") to a filepath + line.
+ * If the scope includes a symbol, looks it up in chunks to get the start line.
+ */
+function resolveScope(scope: string, chunks: CodeChunk[]): { filepath: string; line: number } {
+  if (scope.includes('::')) {
+    const [filepath, symbolName] = scope.split('::');
+    const chunk = chunks.find(
+      c => c.metadata.file === filepath && c.metadata.symbolName === symbolName,
+    );
+    if (chunk) return { filepath, line: chunk.metadata.startLine };
+    return { filepath, line: 0 };
+  }
+  return { filepath: scope, line: 0 };
+}
+
+function scopeLink(filepath: string, line: number, blobBase: string | null): string {
+  if (blobBase && line > 0) {
+    return `[${filepath}:${line}](${blobBase}/${filepath}#L${line})`;
+  }
+  if (blobBase) {
+    return `[${filepath}](${blobBase}/${filepath})`;
+  }
+  return `\`${filepath}\``;
+}
+
+function formatArchReviewComment(findings: ReviewFinding[], blobBase: string | null): string {
   const rows = findings.map(f => {
-    const scope = f.filepath ? `\`${f.filepath}\`` : 'General';
+    const scope = f.filepath ? scopeLink(f.filepath, f.line, blobBase) : 'General';
     return `| ${scope} | ${f.message} | ${f.suggestion ?? ''} |`;
   });
   const table = `| Scope | Observation | Suggestion |\n|---|---|---|\n${rows.join('\n')}`;
