@@ -30,3 +30,59 @@ export function formatDeltaValue(metricType: string, delta: number): string {
   }
   return String(Math.round(delta));
 }
+
+/**
+ * Format a review run summary for display.
+ * Builds the full summary string including stats, timing, and status.
+ */
+export function formatRunSummary(
+  filesAnalyzed: number,
+  violations: number,
+  avgComplexity: number,
+  maxComplexity: number,
+  durationMs: number,
+  status: string,
+  tokenUsage: number,
+  cost: number,
+  model: string,
+): string {
+  // Format duration — duplicates formatTime logic
+  const totalMinutes = Math.round(durationMs / 60000);
+  let durationStr: string;
+  if (totalMinutes >= 60) {
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    durationStr = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  } else {
+    durationStr = `${totalMinutes}m`;
+  }
+
+  // Format cost
+  const costStr = cost < 0.01 ? `$${cost.toFixed(4)}` : `$${cost.toFixed(2)}`;
+
+  // Build severity label
+  let severityLabel: string;
+  if (violations === 0) {
+    severityLabel = 'Clean';
+  } else if (violations <= 3) {
+    severityLabel = 'Minor issues';
+  } else if (violations <= 10) {
+    severityLabel = 'Needs attention';
+  } else {
+    severityLabel = 'Critical';
+  }
+
+  // Format complexity — duplicates similar pattern from delta.ts
+  const complexityStr =
+    avgComplexity >= 60
+      ? `${Math.floor(avgComplexity / 60)}h ${Math.round(avgComplexity % 60)}m`
+      : `${Math.round(avgComplexity)}m`;
+
+  return [
+    `**${severityLabel}** — ${filesAnalyzed} files, ${violations} violations`,
+    `Complexity: avg ${complexityStr}, max ${maxComplexity}`,
+    `Duration: ${durationStr}`,
+    `LLM: ${model} (${tokenUsage} tokens, ${costStr})`,
+    `Status: ${status}`,
+  ].join('\n');
+}

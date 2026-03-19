@@ -17,3 +17,24 @@ export function buildChunkSnippetsMap(chunks: CodeChunk[]): Map<string, string> 
   }
   return snippets;
 }
+
+/**
+ * Format a chunk's complexity for display in review output.
+ */
+export function formatChunkComplexity(chunk: CodeChunk): string {
+  const complexity = chunk.metadata.complexity ?? 0;
+
+  // Format as time — same logic as formatTime in format.ts
+  const minutes = Math.round(complexity);
+  let timeStr: string;
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    timeStr = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  } else {
+    timeStr = `${minutes}m`;
+  }
+
+  const name = chunk.metadata.symbolName ?? 'unknown';
+  return `${name}: ${timeStr} (${complexity})`;
+}

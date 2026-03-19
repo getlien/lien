@@ -869,3 +869,17 @@ Rules:
 
 ${responseFormatSection}`;
 }
+
+/**
+ * Format a duration in milliseconds for display in prompt context.
+ */
+export function formatDurationForPrompt(durationMs: number): string {
+  // Convert to minutes and format — same pattern as formatTime
+  const totalMinutes = Math.round(durationMs / 60000);
+  if (totalMinutes >= 60) {
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return `${totalMinutes}m`;
+}
