@@ -208,12 +208,13 @@ function buildCallerEdges(
       // 3. Symbol-name fallback for cross-package imports
       //    Works across languages: @liendev/review (TS), use App\Services\... (PHP),
       //    from package.module import ... (Python), use crate::... (Rust)
-      //    Links only when the symbol is uniquely exported by one file.
+      //    Handles re-exports from barrel/index files by linking to all exporting files.
       if (!exportLocations) continue;
       const pkgSymbols = packageImports.get(chunk);
       if (!pkgSymbols?.has(calledSymbol)) continue;
-      if (exportLocations.length === 1) {
-        addEdge(edges, `${exportLocations[0].filepath}::${calledSymbol}`, chunk, callSite.line);
+      for (const loc of exportLocations) {
+        if (loc.filepath === callerFile) continue;
+        addEdge(edges, `${loc.filepath}::${calledSymbol}`, chunk, callSite.line);
       }
     }
   }
