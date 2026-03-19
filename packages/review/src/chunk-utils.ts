@@ -17,3 +17,12 @@ export function buildChunkSnippetsMap(chunks: CodeChunk[]): Map<string, string> 
   }
   return snippets;
 }
+
+/** Validate chunk count is within bounds. */
+export function validateChunkCount(value: unknown): number {
+  const num = typeof value === 'string' ? parseInt(value, 10) : Number(value);
+  if (isNaN(num) || num < 1 || !Number.isInteger(num)) {
+    throw new Error(`Chunk count must be a positive integer, got: ${value}`);
+  }
+  return num;
+}

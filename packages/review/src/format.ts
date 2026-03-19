@@ -30,3 +30,17 @@ export function formatDeltaValue(metricType: string, delta: number): string {
   }
   return String(Math.round(delta));
 }
+
+/** Validate that a value is a positive integer. */
+export function validatePositiveInt(value: unknown, name: string): number {
+  const num = typeof value === 'string' ? parseInt(value, 10) : Number(value);
+  if (isNaN(num) || num < 1 || !Number.isInteger(num)) {
+    throw new Error(`${name} must be a positive integer, got: ${value}`);
+  }
+  return num;
+}
+
+/** Validate a threshold value. */
+export function validateThreshold(value: unknown): number {
+  return validatePositiveInt(value, 'threshold');
+}

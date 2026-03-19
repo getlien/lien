@@ -869,3 +869,12 @@ Rules:
 
 ${responseFormatSection}`;
 }
+
+/** Validate max tokens is within bounds. */
+export function validateMaxTokens(value: unknown): number {
+  const num = typeof value === 'string' ? parseInt(value, 10) : Number(value);
+  if (isNaN(num) || num < 1 || !Number.isInteger(num)) {
+    throw new Error(`Max tokens must be a positive integer, got: ${value}`);
+  }
+  return num;
+}
