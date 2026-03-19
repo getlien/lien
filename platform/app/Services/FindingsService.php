@@ -21,12 +21,11 @@ class FindingsService
     {
         $since = now()->subDays($days);
 
-        $prsReviewed = (int) ReviewRun::whereIn('repository_id', $repoIds)
-            ->where('type', ReviewRunType::Pr)
+        $runStats = ReviewRun::whereIn('repository_id', $repoIds)
             ->where('status', ReviewRunStatus::Completed)
             ->where('completed_at', '>=', $since)
-            ->selectRaw('COUNT(DISTINCT repository_id || \'-\' || pr_number) as cnt')
-            ->value('cnt');
+            ->selectRaw("COUNT(DISTINCT CASE WHEN type = ? THEN repository_id || '-' || pr_number END) as prs_reviewed, COALESCE(SUM(cost), 0) as total_cost", [ReviewRunType::Pr->value])
+            ->first();
 
         $completedRunIds = ReviewRun::whereIn('repository_id', $repoIds)
             ->where('status', ReviewRunStatus::Completed)
@@ -35,11 +34,11 @@ class FindingsService
 
         if ($completedRunIds->isEmpty()) {
             return [
-                'prsReviewed' => $prsReviewed,
+                'prsReviewed' => (int) $runStats->prs_reviewed,
                 'findingsPosted' => 0,
                 'byType' => [],
                 'resolutionRate' => 0,
-                'totalCost' => 0.0,
+                'totalCost' => (float) $runStats->total_cost,
             ];
         }
 
@@ -59,17 +58,12 @@ class FindingsService
             ? (int) round((clone $findingsQuery)->whereNotNull('resolution')->count() / $findingsPosted * 100)
             : 0;
 
-        $totalCost = (float) ReviewRun::whereIn('repository_id', $repoIds)
-            ->where('status', ReviewRunStatus::Completed)
-            ->where('completed_at', '>=', $since)
-            ->sum('cost');
-
         return [
-            'prsReviewed' => $prsReviewed,
+            'prsReviewed' => (int) $runStats->prs_reviewed,
             'findingsPosted' => $findingsPosted,
             'byType' => $byType,
             'resolutionRate' => $resolutionRate,
-            'totalCost' => $totalCost,
+            'totalCost' => (float) $runStats->total_cost,
         ];
     }
 
