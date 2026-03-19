@@ -108,26 +108,34 @@ export class BugFinderPlugin implements ReviewPlugin {
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     if (findings.length === 0) return;
 
+    const blobBase = buildBlobBase(context.pr);
+
     // Minimize previous bug finder review comments
     if (context.minimizeOutdatedComments) {
       await context.minimizeOutdatedComments(BUG_REVIEW_MARKER);
     }
 
-    // Try inline comments (should work now — findings point at diff lines)
+    // Rebuild finding messages with GitHub links for inline comments
+    const linkedFindings = findings.map(f => ({
+      ...f,
+      message: rebuildMessageWithLinks(f, blobBase),
+    }));
+
+    // Try inline comments (should work — findings point at diff lines)
     let inlinePosted = 0;
     if (context.postInlineComments) {
-      const result = await context.postInlineComments(findings, 'Bug Finder');
+      const result = await context.postInlineComments(linkedFindings, 'Bug Finder');
       inlinePosted = result.posted;
     }
 
     // Fall back to top-level review comment for findings not posted inline
     if (inlinePosted < findings.length && context.postReviewComment) {
-      const body = formatBugReviewComment(findings);
+      const body = formatBugReviewComment(linkedFindings);
       await context.postReviewComment(body);
     }
 
-    // Append to check run summary
-    context.appendSummary(formatBugSummary(findings));
+    // Append to check run summary (also linked)
+    context.appendSummary(formatBugSummary(linkedFindings, blobBase));
   }
 }
 
@@ -193,11 +201,40 @@ function bugsToGroupedFindings(bugs: BugReport[], batch: PromptBatch): ReviewFin
 // Formatting
 // ---------------------------------------------------------------------------
 
+function buildBlobBase(pr?: { owner: string; repo: string; headSha: string }): string | null {
+  if (!pr) return null;
+  return `https://github.com/${pr.owner}/${pr.repo}/blob/${pr.headSha}`;
+}
+
+function callerLink(c: BugCallerInfo, blobBase: string | null): string {
+  if (blobBase) {
+    return `[${c.filepath}:${c.line}](${blobBase}/${c.filepath}#L${c.line})`;
+  }
+  return `\`${c.filepath}:${c.line}\``;
+}
+
+/** Plain table (no links) — stored in finding.message during analyze(). */
 function formatCallerTable(callers: BugCallerInfo[]): string {
   const count = callers.length;
   const header = `${count} caller${count === 1 ? '' : 's'} affected by this change\n\n`;
   const rows = callers.map(
     c => `| \`${c.filepath}:${c.line}\` | \`${c.symbol}\` | ${c.description} | ${c.suggestion} |`,
+  );
+  return `${header}| Caller | Function | Issue | Fix |\n|---|---|---|---|\n${rows.join('\n')}`;
+}
+
+/** Rebuild the message with GitHub links for present(). */
+function rebuildMessageWithLinks(f: ReviewFinding, blobBase: string | null): string {
+  const meta = f.metadata as BugFindingMetadata | undefined;
+  if (!meta?.callers || !blobBase) return f.message;
+  return formatLinkedCallerTable(meta.callers, blobBase);
+}
+
+function formatLinkedCallerTable(callers: BugCallerInfo[], blobBase: string | null): string {
+  const count = callers.length;
+  const header = `${count} caller${count === 1 ? '' : 's'} affected by this change\n\n`;
+  const rows = callers.map(
+    c => `| ${callerLink(c, blobBase)} | \`${c.symbol}\` | ${c.description} | ${c.suggestion} |`,
   );
   return `${header}| Caller | Function | Issue | Fix |\n|---|---|---|---|\n${rows.join('\n')}`;
 }
@@ -210,11 +247,11 @@ function formatBugReviewComment(findings: ReviewFinding[]): string {
   return `${BUG_REVIEW_MARKER}\n**Bug Finder**\n\n${sections.join('\n\n---\n\n')}`;
 }
 
-function formatBugSummary(findings: ReviewFinding[]): string {
+function formatBugSummary(findings: ReviewFinding[], blobBase: string | null): string {
   const sections = findings.map(f => {
     const meta = f.metadata as BugFindingMetadata;
     const callerCount = meta.callers.length;
-    const rows = meta.callers.map(c => `| \`${c.filepath}:${c.line}\` | ${c.description} |`);
+    const rows = meta.callers.map(c => `| ${callerLink(c, blobBase)} | ${c.description} |`);
     return `**\`${f.symbolName}\`** (\`${f.filepath}:${f.line}\`) — ${callerCount} caller${callerCount === 1 ? '' : 's'} affected\n\n| Caller | Issue |\n|---|---|\n${rows.join('\n')}`;
   });
   return `### Bug Finder\n\n${sections.join('\n\n')}`;
