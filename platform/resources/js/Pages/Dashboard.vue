@@ -67,7 +67,7 @@ function applyFilters(key, value) {
       <h1 class="text-2xl font-medium text-zinc-100">Review Runs</h1>
 
       <!-- Dashboard Stats -->
-      <Deferred v-if="dashboardStats" :data="['dashboardStats']">
+      <Deferred :data="['dashboardStats']">
         <template #fallback>
           <SkeletonStatGrid class="mt-6" />
         </template>

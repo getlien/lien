@@ -12,7 +12,6 @@ import StatCard from '@/Components/StatCard.vue';
 import CopyableCode from '@/Components/CopyableCode.vue';
 import FunctionSourceOverlay from '@/Components/Overlays/FunctionSourceOverlay.vue';
 import SkeletonTable from '@/Components/Skeletons/SkeletonTable.vue';
-import SkeletonStatGrid from '@/Components/Skeletons/SkeletonStatGrid.vue';
 import SkeletonDeltaBanner from '@/Components/Skeletons/SkeletonDeltaBanner.vue';
 
 const props = defineProps({

@@ -11,8 +11,10 @@ const props = defineProps({
 const planLabel = computed(() => {
   const labels = {
     free: 'Free',
-    pro: 'Pro',
+    solo: 'Solo',
     team: 'Team',
+    business: 'Business',
+    business_plus: 'Business+',
     enterprise: 'Enterprise',
   };
   return labels[props.config.plan] ?? props.config.plan;
@@ -21,8 +23,10 @@ const planLabel = computed(() => {
 const planColor = computed(() => {
   const colors = {
     free: 'bg-zinc-800 text-zinc-300',
-    pro: 'bg-brand-900/40 text-brand-400',
+    solo: 'bg-brand-900/40 text-brand-400',
     team: 'bg-cyan-900/40 text-cyan-400',
+    business: 'bg-blue-900/40 text-blue-400',
+    business_plus: 'bg-amber-900/40 text-amber-400',
     enterprise: 'bg-amber-900/40 text-amber-400',
   };
   return colors[props.config.plan] ?? 'bg-zinc-800 text-zinc-300';
@@ -68,7 +72,10 @@ const features = computed(() => {
     { name: 'Org Management', enabled: f.orgManagement ?? false },
     { name: 'Custom Rules', enabled: f.customRules ?? false },
     {
-      name: `${f.trendRetentionDays ?? 30}d Trend Retention`,
+      name:
+        f.trendRetentionDays === null
+          ? 'Unlimited Trend Retention'
+          : `${f.trendRetentionDays ?? 30}d Trend Retention`,
       enabled: true,
     },
   ];
@@ -88,10 +95,7 @@ const features = computed(() => {
     <!-- Review Quotas -->
     <div class="mt-5 flex flex-wrap gap-4">
       <div
-        v-if="
-          config.complexityReviewsRemaining !== null &&
-          config.complexityReviewsRemaining !== undefined
-        "
+        v-if="'complexityReviewsRemaining' in config"
         class="rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3"
       >
         <p class="text-xs text-zinc-400">Complexity Reviews</p>

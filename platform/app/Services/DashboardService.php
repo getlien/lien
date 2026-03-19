@@ -8,6 +8,7 @@ use App\Models\ReviewComment;
 use App\Models\ReviewRun;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class DashboardService
 {
@@ -19,33 +20,44 @@ class DashboardService
     {
         $sevenDaysAgo = now()->subDays(7);
 
-        $runs = ReviewRun::whereIn('repository_id', $repoIds)
+        $totalRuns = ReviewRun::whereIn('repository_id', $repoIds)
             ->where('created_at', '>=', $sevenDaysAgo)
-            ->get();
+            ->count();
 
-        $completedRuns = $runs->filter(fn (ReviewRun $r) => $r->status === ReviewRunStatus::Completed);
+        $aggregates = ReviewRun::query()
+            ->whereIn('repository_id', $repoIds)
+            ->where('created_at', '>=', $sevenDaysAgo)
+            ->where('status', ReviewRunStatus::Completed)
+            ->selectRaw('avg(avg_complexity) as avg_complexity, sum(cost) as total_cost')
+            ->first();
 
-        $runIds = $completedRuns->pluck('id');
+        $completedRunIds = ReviewRun::whereIn('repository_id', $repoIds)
+            ->where('created_at', '>=', $sevenDaysAgo)
+            ->where('status', ReviewRunStatus::Completed)
+            ->pluck('id');
 
-        $comments = $runIds->isEmpty()
-            ? collect()
-            : ReviewComment::whereIn('review_run_id', $runIds)
+        $byType = [];
+        $findingsPosted = 0;
+
+        if ($completedRunIds->isNotEmpty()) {
+            $typeCounts = ReviewComment::whereIn('review_run_id', $completedRunIds)
                 ->where('status', 'posted')
-                ->get();
+                ->select('review_type', DB::raw('count(*) as count'))
+                ->groupBy('review_type')
+                ->pluck('count', 'review_type')
+                ->all();
 
-        $byType = $comments->groupBy('review_type')
-            ->map(fn (Collection $group) => $group->count())
-            ->all();
-
-        $avgComplexity = $completedRuns->avg('avg_complexity');
-
-        $totalCost = $completedRuns->sum('cost');
+            $byType = $typeCounts;
+            $findingsPosted = array_sum($typeCounts);
+        }
 
         return [
-            'totalRuns' => $runs->count(),
-            'findingsPosted' => $comments->count(),
-            'avgComplexity' => $avgComplexity !== null ? round((float) $avgComplexity, 1) : null,
-            'totalCost' => (float) $totalCost,
+            'totalRuns' => $totalRuns,
+            'findingsPosted' => $findingsPosted,
+            'avgComplexity' => $aggregates->avg_complexity !== null
+                ? round((float) $aggregates->avg_complexity, 1)
+                : null,
+            'totalCost' => (float) ($aggregates->total_cost ?? 0),
             'byType' => $byType,
         ];
     }
