@@ -415,7 +415,7 @@ describe('buildDependencyGraph — cross-package fallback', () => {
     expect(callers[0].caller.symbolName).toBe('handle_request');
   });
 
-  it('does NOT link when symbol is exported by multiple files (ambiguous)', () => {
+  it('links to all exporting files when symbol is re-exported (barrel files)', () => {
     const def1 = createTestChunk({
       metadata: {
         file: 'src/utils/format.ts',
@@ -454,8 +454,8 @@ describe('buildDependencyGraph — cross-package fallback', () => {
     });
 
     const graph = buildDependencyGraph([def1, def2, caller]);
-    expect(graph.getCallers('src/utils/format.ts', 'format')).toHaveLength(0);
-    expect(graph.getCallers('src/helpers/format.ts', 'format')).toHaveLength(0);
+    expect(graph.getCallers('src/utils/format.ts', 'format')).toHaveLength(1);
+    expect(graph.getCallers('src/helpers/format.ts', 'format')).toHaveLength(1);
   });
 
   it('does NOT link when symbol is not imported from any package', () => {
