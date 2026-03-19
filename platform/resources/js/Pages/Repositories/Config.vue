@@ -1,6 +1,8 @@
 <script setup>
 import { useForm, Link, Head, router } from '@inertiajs/vue3';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
+import EffectiveConfigCard from '@/Components/Config/EffectiveConfigCard.vue';
+import Breadcrumbs from '@/Components/Breadcrumbs.vue';
 import { useToast } from '@/composables/useToast';
 
 const props = defineProps({
@@ -67,6 +69,14 @@ function configSource(field) {
 
   <AuthenticatedLayout>
     <div class="mx-auto max-w-3xl">
+      <Breadcrumbs
+        :items="[
+          { label: 'Dashboard', href: '/dashboard' },
+          { label: repository.full_name, href: `/repos/${repository.id}/dashboard` },
+          { label: 'Config' },
+        ]"
+        class="mb-4"
+      />
       <h1 class="text-2xl font-medium text-zinc-100">Review Configuration</h1>
 
       <div
@@ -220,16 +230,7 @@ function configSource(field) {
           </div>
         </div>
 
-        <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-5">
-          <h2 class="text-lg font-medium text-zinc-100">Effective Configuration</h2>
-          <p class="mt-1 text-sm text-zinc-400">
-            This is the merged configuration that will be used by the review engine.
-          </p>
-          <pre
-            class="mt-4 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-4 font-mono text-[13px] text-zinc-300"
-            >{{ JSON.stringify(effectiveConfig, null, 2) }}</pre
-          >
-        </div>
+        <EffectiveConfigCard :config="effectiveConfig" />
 
         <div class="flex items-center justify-between gap-3">
           <button

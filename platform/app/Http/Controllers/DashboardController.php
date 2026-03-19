@@ -40,6 +40,10 @@ class DashboardController extends Controller
                 'id' => $repo->id,
                 'full_name' => $repo->full_name,
             ])->values()->all(),
+            'dashboardStats' => Inertia::defer(
+                fn () => $this->dashboardService->getDashboardStats($repoIds),
+                'stats',
+            ),
             ...$this->getDeferredData($view, $repoIds, $filters, $page),
         ];
 
