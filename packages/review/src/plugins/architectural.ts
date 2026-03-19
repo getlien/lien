@@ -55,7 +55,7 @@ export class ArchitecturalPlugin implements ReviewPlugin {
 
     // "auto" mode: activate on broad or risky changes
     return (
-      context.changedFiles.length >= 3 ||
+      context.changedFiles.length >= 2 ||
       hasHighRiskFiles(context.complexityReport) ||
       hasExportChanges(context)
     );

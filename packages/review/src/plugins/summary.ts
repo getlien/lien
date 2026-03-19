@@ -420,7 +420,8 @@ Guidelines:
 ${overviewGuideline}
 ${keyChangesGuideline}
 - Be factual and specific — avoid vague language
-- NEVER repeat information already present in the PR title or description — only add new insight`;
+- NEVER repeat information already present in the PR title or description — only add new insight
+- Assess risk based on the CODE IMPACT (what the diff actually does), not the PR description framing. A PR described as "test" or "experiment" is still high-risk if it modifies auth, payment, or widely-used interfaces`;
 }
 
 // ---------------------------------------------------------------------------
