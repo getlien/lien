@@ -86,33 +86,26 @@ def load_from_api(url: str, params: dict | None = None) -> list[Record]:
     return valid_records
 
 
-async def load_data(source: str) -> list[Record]:
-    """Unified async loader that delegates to file or API loading.
+def load_data(source: str) -> list[Record]:
+    """Unified loader that delegates to file or API loading.
 
     Inspects the source string to determine the loading strategy:
     sources starting with 'http://' or 'https://' are treated as API
     endpoints; everything else is treated as a local file path.
 
-    The actual I/O is offloaded to a thread executor so that file reads
-    and simulated API calls do not block the event loop. Returns an
-    empty list if the source string is blank or if loading fails.
+    Returns an empty list if the source string is blank or if loading
+    fails.
     """
     if not source or not source.strip():
         return []
-
-    loop = asyncio.get_event_loop()
 
     is_url = source.startswith("http://") or source.startswith("https://")
 
     try:
         if is_url:
-            records = await loop.run_in_executor(
-                None, load_from_api, source, None
-            )
+            records = load_from_api(source, None)
         else:
-            records = await loop.run_in_executor(
-                None, load_from_file, source
-            )
+            records = load_from_file(source)
     except (FileNotFoundError, ValueError):
         return []
 
