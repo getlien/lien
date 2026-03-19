@@ -5,14 +5,17 @@ from __future__ import annotations
 from pipeline.models import Record
 
 
-def transform_record(record: Record) -> Record:
+def transform_record(record: Record, strict: bool) -> Record:
     """Apply the full transformation pipeline to a single record.
 
     Normalizes all dictionary keys to lowercase, strips leading/trailing
     whitespace from string values, removes keys whose values are None,
     and marks the record status as 'transformed'.
 
-    Returns a new Record instance — the original is not mutated.
+    When strict is True, raises ValueError if any value in the record
+    data is an empty string after stripping or if required keys are missing.
+
+    Returns a new Record instance â the original is not mutated.
     """
     transformed = record.copy()
     data = normalize_keys(transformed.data)
@@ -20,9 +23,13 @@ def transform_record(record: Record) -> Record:
     cleaned: dict = {}
     for key, value in data.items():
         if value is None:
+            if strict:
+                raise ValueError(f"Null value for key '{key}' not allowed in strict mode")
             continue
         if isinstance(value, str):
             stripped = value.strip()
+            if strict and not stripped:
+                raise ValueError(f"Empty string for key '{key}' not allowed in strict mode")
             if stripped:
                 cleaned[key] = stripped
             else:
