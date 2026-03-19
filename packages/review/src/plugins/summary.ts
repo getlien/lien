@@ -462,6 +462,20 @@ function escalateRisk(
   return RISK_LABELS[level];
 }
 
+function formatEscalationReason(priorFindings: ReviewFinding[]): string {
+  const bugFindings = priorFindings.filter(f => f.pluginId === 'bugs' && f.severity === 'error');
+  if (bugFindings.length === 0) return '';
+
+  const parts = bugFindings.map(f => {
+    const meta = f.metadata as { callers?: Array<{ symbol: string }> } | undefined;
+    const callerCount = meta?.callers?.length ?? 0;
+    const sym = f.symbolName ? `\`${f.symbolName}\`` : 'a changed function';
+    return `${sym} (${callerCount} caller${callerCount === 1 ? '' : 's'} affected)`;
+  });
+
+  return `Bug finder found errors in ${parts.join(', ')}.`;
+}
+
 function isValidSummaryResponse(parsed: unknown): parsed is SummaryResponse {
   if (!parsed || typeof parsed !== 'object') return false;
   const p = parsed as Record<string, unknown>;
@@ -569,10 +583,11 @@ export class SummaryPlugin implements ReviewPlugin {
     if (!parsed) return [];
 
     // Escalate risk based on findings from other plugins (bug errors → high risk)
-    const riskLevel = escalateRisk(parsed.risk_level, context.priorFindings ?? []);
+    const priorFindings = context.priorFindings ?? [];
+    const riskLevel = escalateRisk(parsed.risk_level, priorFindings);
     const riskExplanation =
       riskLevel !== parsed.risk_level
-        ? `${parsed.risk_explanation} Risk escalated due to bug finder errors.`
+        ? `${parsed.risk_explanation} ${formatEscalationReason(priorFindings)}`
         : parsed.risk_explanation;
 
     const metadata: SummaryFindingMetadata = {
