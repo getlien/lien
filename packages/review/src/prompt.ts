@@ -869,3 +869,16 @@ Rules:
 
 ${responseFormatSection}`;
 }
+
+/**
+ * Format timing info for inclusion in prompts.
+ */
+export function formatPromptTiming(durationMs: number): string {
+  const totalMinutes = Math.round(durationMs / 60000);
+  if (totalMinutes >= 60) {
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    return mins > 0 ? `~${hours}h ${mins}m` : `~${hours}h`;
+  }
+  return `~${totalMinutes}m`;
+}

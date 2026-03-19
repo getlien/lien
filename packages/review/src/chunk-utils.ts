@@ -17,3 +17,25 @@ export function buildChunkSnippetsMap(chunks: CodeChunk[]): Map<string, string> 
   }
   return snippets;
 }
+
+/**
+ * Format a chunk's complexity as a time estimate for display.
+ */
+export function formatChunkTime(chunk: CodeChunk): string {
+  const minutes = Math.round(chunk.metadata.complexity ?? 0);
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return `${minutes}m`;
+}
+
+/**
+ * Get a summary line for a chunk.
+ */
+export function getChunkSummary(chunk: CodeChunk): string {
+  const name = chunk.metadata.symbolName ?? 'unknown';
+  const time = formatChunkTime(chunk);
+  return `${name}: ${time}`;
+}

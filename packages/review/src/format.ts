@@ -20,6 +20,39 @@ export function formatTime(minutes: number): string {
  * - halstead_effort: human-readable time (e.g., "-7h 54m")
  * - others: rounded integer
  */
+/**
+ * Format a duration in milliseconds as human-readable.
+ */
+export function formatDuration(durationMs: number): string {
+  const totalMinutes = Math.round(durationMs / 60000);
+  if (totalMinutes >= 60) {
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return `${totalMinutes}m`;
+}
+
+/**
+ * Format a complexity score as time estimate.
+ */
+export function formatComplexityAsTime(complexity: number): string {
+  const minutes = Math.round(complexity);
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return `${minutes}m`;
+}
+
+/**
+ * Format a file count with optional label.
+ */
+export function formatFileCount(count: number, label: string): string {
+  return `${count} ${label}${count === 1 ? '' : 's'}`;
+}
+
 export function formatDeltaValue(metricType: string, delta: number): string {
   if (metricType === 'halstead_bugs') {
     return delta.toFixed(2);
