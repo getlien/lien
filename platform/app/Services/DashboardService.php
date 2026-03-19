@@ -4,12 +4,52 @@ namespace App\Services;
 
 use App\Enums\ReviewRunStatus;
 use App\Enums\ReviewRunType;
+use App\Models\ReviewComment;
 use App\Models\ReviewRun;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 
 class DashboardService
 {
+    /**
+     * @param  Collection<int, int>  $repoIds
+     * @return array{totalRuns: int, findingsPosted: int, avgComplexity: ?float, totalCost: float, byType: array<string, int>}
+     */
+    public function getDashboardStats(Collection $repoIds): array
+    {
+        $sevenDaysAgo = now()->subDays(7);
+
+        $runs = ReviewRun::whereIn('repository_id', $repoIds)
+            ->where('created_at', '>=', $sevenDaysAgo)
+            ->get();
+
+        $completedRuns = $runs->filter(fn (ReviewRun $r) => $r->status === ReviewRunStatus::Completed);
+
+        $runIds = $completedRuns->pluck('id');
+
+        $comments = $runIds->isEmpty()
+            ? collect()
+            : ReviewComment::whereIn('review_run_id', $runIds)
+                ->where('status', 'posted')
+                ->get();
+
+        $byType = $comments->groupBy('review_type')
+            ->map(fn (Collection $group) => $group->count())
+            ->all();
+
+        $avgComplexity = $completedRuns->avg('avg_complexity');
+
+        $totalCost = $completedRuns->sum('cost');
+
+        return [
+            'totalRuns' => $runs->count(),
+            'findingsPosted' => $comments->count(),
+            'avgComplexity' => $avgComplexity !== null ? round((float) $avgComplexity, 1) : null,
+            'totalCost' => (float) $totalCost,
+            'byType' => $byType,
+        ];
+    }
+
     /**
      * @param  Collection<int, int>  $repoIds
      */
