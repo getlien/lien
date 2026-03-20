@@ -378,6 +378,89 @@ describe('BugFinderPlugin', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Changed type/interface analysis
+  // ---------------------------------------------------------------------------
+
+  it('detects interface contract violations in importers', async () => {
+    const typeChunk = createTestChunk({
+      content: 'export interface User { id: string; name: string; role: string; }',
+      metadata: {
+        file: 'src/types.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'class',
+        symbolName: 'User',
+        symbolType: 'interface',
+        language: 'typescript',
+        exports: ['User'],
+      },
+    });
+
+    const importerChunk = createTestChunk({
+      content:
+        'import { User } from "./types";\nexport function createUser(name: string): User {\n  return { id: "1", name };\n}',
+      metadata: {
+        file: 'src/user-service.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'createUser',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['createUser'],
+        importedSymbols: { './types': ['User'] },
+      },
+    });
+
+    const llmResponse = makeBugLLMResponse([
+      {
+        changedFunction: 'User',
+        callerFilepath: 'src/user-service.ts',
+        callerLine: 3,
+        callerSymbol: 'createUser',
+        severity: 'error',
+        category: 'type_mismatch',
+        description: 'Missing required field "role" in User literal',
+        suggestion: 'Add role property to returned object',
+      },
+    ]);
+
+    const llm = createMockLLMClient([llmResponse]);
+    const context = createTestContext({
+      chunks: [typeChunk],
+      repoChunks: [typeChunk, importerChunk],
+      llm,
+    });
+
+    const findings = await plugin.analyze(context);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].symbolName).toBe('User');
+    expect(findings[0].filepath).toBe('src/types.ts');
+    const meta = findings[0].metadata as BugFindingMetadata;
+    expect(meta.callers[0].description).toContain('role');
+  });
+
+  it('activates when only type chunks are present', () => {
+    const context = createTestContext({
+      chunks: [
+        createTestChunk({
+          metadata: {
+            file: 'src/types.ts',
+            startLine: 1,
+            endLine: 5,
+            type: 'class',
+            symbolType: 'interface',
+            symbolName: 'User',
+            language: 'typescript',
+          },
+        }),
+      ],
+    });
+    expect(plugin.shouldActivate(context)).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
   // present
   // ---------------------------------------------------------------------------
 

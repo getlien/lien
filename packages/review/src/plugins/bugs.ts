@@ -66,9 +66,12 @@ export class BugFinderPlugin implements ReviewPlugin {
     const hasFunctions = context.chunks.some(
       c => c.metadata.symbolType === 'function' || c.metadata.symbolType === 'method',
     );
+    const hasTypes = context.chunks.some(
+      c => c.metadata.symbolType === 'class' || c.metadata.symbolType === 'interface',
+    );
     const hasDeletedFunctions =
       context.pr?.patches && detectDeletedFunctions(context.pr.patches, context.chunks).length > 0;
-    return hasFunctions || !!hasDeletedFunctions;
+    return hasFunctions || hasTypes || !!hasDeletedFunctions;
   }
 
   async analyze(context: ReviewContext): Promise<ReviewFinding[]> {
@@ -106,6 +109,10 @@ export class BugFinderPlugin implements ReviewPlugin {
           allFindings.push(...bugsToGroupedFindings(bugs, batch));
         }
       }
+
+      // 3. Analyze changed types/interfaces — find importers that may not satisfy new contracts
+      const typeFindings = await analyzeChangedTypes(chunks, context);
+      allFindings.push(...typeFindings);
     }
 
     logger.info(`Bug finder: ${allFindings.length} findings (grouped by changed function)`);
@@ -542,6 +549,176 @@ function normalizeBug(bug: BugReport): BugReport {
     callerSymbol: bug.callerSymbol ?? 'unknown',
     suggestion: bug.suggestion ?? '',
   };
+}
+
+// ---------------------------------------------------------------------------
+// Changed type/interface analysis
+// ---------------------------------------------------------------------------
+
+const TYPE_SYMBOL_TYPES = new Set(['class', 'interface']);
+const MAX_TYPE_IMPORTERS = 5;
+const MAX_IMPORTER_SNIPPET_CHARS = 2_000;
+
+/**
+ * Collect changed type/interface/class definitions from chunks.
+ */
+function collectChangedTypes(
+  chunks: CodeChunk[],
+  diffLines?: Map<string, Set<number>>,
+): ChangedFunction[] {
+  return chunks
+    .filter(c => c.metadata.symbolType && TYPE_SYMBOL_TYPES.has(c.metadata.symbolType))
+    .filter(c => c.metadata.symbolName)
+    .filter(c => {
+      if (!diffLines) return true;
+      const lines = diffLines.get(c.metadata.file);
+      if (!lines) return true;
+      for (let line = c.metadata.startLine; line <= c.metadata.endLine; line++) {
+        if (lines.has(line)) return true;
+      }
+      return false;
+    })
+    .map(c => ({
+      filepath: c.metadata.file,
+      symbolName: c.metadata.symbolName!,
+      chunk: c,
+    }));
+}
+
+/**
+ * Find repo chunks that import a given symbol name.
+ */
+function findImporters(
+  symbolName: string,
+  sourceFile: string,
+  repoChunks: CodeChunk[],
+): CodeChunk[] {
+  const seen = new Set<string>();
+  return repoChunks.filter(c => {
+    if (!c.metadata.importedSymbols || !c.metadata.symbolName) return false;
+    if (c.metadata.file === sourceFile) return false;
+    const key = `${c.metadata.file}::${c.metadata.symbolName}`;
+    if (seen.has(key)) return false;
+    for (const symbols of Object.values(c.metadata.importedSymbols)) {
+      if (symbols.includes(symbolName)) {
+        seen.add(key);
+        return true;
+      }
+    }
+    return false;
+  });
+}
+
+/**
+ * Analyze changed types/interfaces by finding importers and checking if they
+ * satisfy the new contract.
+ */
+async function analyzeChangedTypes(
+  chunks: CodeChunk[],
+  context: ReviewContext,
+): Promise<ReviewFinding[]> {
+  const changedTypes = collectChangedTypes(chunks, context.pr?.diffLines);
+  if (changedTypes.length === 0 || !context.llm || !context.repoChunks) return [];
+
+  context.logger.info(`Bug finder: ${changedTypes.length} changed type(s) to analyze`);
+  const findings: ReviewFinding[] = [];
+
+  for (const type of changedTypes) {
+    const importers = findImporters(type.symbolName, type.filepath, context.repoChunks);
+    if (importers.length === 0) continue;
+
+    const topImporters = importers.slice(0, MAX_TYPE_IMPORTERS);
+    const importerSections = topImporters
+      .map(c => {
+        const content = truncateContent(c.content, MAX_IMPORTER_SNIPPET_CHARS);
+        return `**${c.metadata.file}::${c.metadata.symbolName}** (line ${c.metadata.startLine})\n\`\`\`${c.metadata.language ?? ''}\n${content}\n\`\`\``;
+      })
+      .join('\n\n');
+
+    const prompt = `Find bugs in code that uses a changed type/interface. Be terse — write like a linter, not a human.
+
+## Changed Type
+
+### ${type.filepath}::${type.symbolName}
+
+\`\`\`${type.chunk.metadata.language ?? ''}
+${type.chunk.content}
+\`\`\`
+
+## Files that import ${type.symbolName}
+
+${importerSections}
+
+## Instructions
+
+Check if the importing code satisfies the current type contract. Look for:
+- Object literals or constructors missing required fields
+- Spread operations that don't include new required properties
+- Type assertions that bypass the new contract
+- Factory functions that return incomplete objects
+
+## Response Format
+
+ONLY valid JSON. Report the FILE that breaks, not the type definition.
+
+\`\`\`json
+{
+  "bugs": [
+    {
+      "changedFunction": "${type.symbolName}",
+      "callerFilepath": "path/to/importer.ts",
+      "callerLine": 42,
+      "callerSymbol": "functionThatBreaks",
+      "severity": "error or warning",
+      "category": "type_mismatch",
+      "description": "Short statement (max 15 words)",
+      "suggestion": "Short fix (max 15 words)"
+    }
+  ]
+}
+\`\`\`
+
+Rules:
+- ONLY report bugs you are confident about
+- If no bugs, return \`{ "bugs": [] }\``;
+
+    const response = await context.llm.complete(prompt, { temperature: 0 });
+    const bugs = parseBugResponse(response.content, context.logger);
+
+    for (const bug of bugs) {
+      const callerInfos: BugCallerInfo[] = [
+        {
+          filepath: bug.callerFilepath,
+          line: bug.callerLine,
+          symbol: bug.callerSymbol,
+          category: bug.category,
+          description: bug.description,
+          suggestion: bug.suggestion,
+        },
+      ];
+
+      findings.push({
+        pluginId: 'bugs',
+        filepath: type.filepath,
+        line: type.chunk.metadata.startLine,
+        symbolName: type.symbolName,
+        severity: bug.severity,
+        category: 'bug',
+        message: formatCallerTable(callerInfos),
+        metadata: {
+          pluginType: 'bugs',
+          changedFunction: `${type.filepath}::${type.symbolName}`,
+          callers: callerInfos,
+        },
+      });
+    }
+  }
+
+  if (findings.length > 0) {
+    context.logger.info(`Bug finder: ${findings.length} type contract violation(s) found`);
+  }
+
+  return findings;
 }
 
 // ---------------------------------------------------------------------------
