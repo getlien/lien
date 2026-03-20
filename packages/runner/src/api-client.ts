@@ -112,7 +112,7 @@ export async function postReviewRunResult(
     }
 
     if (attempt < MAX_RETRIES - 1) {
-      await sleep(BACKOFF_MS[attempt]);
+      await sleep(BACKOFF_MS[attempt] ?? BACKOFF_MS[BACKOFF_MS.length - 1]);
     }
   }
 
