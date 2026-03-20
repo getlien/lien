@@ -1114,7 +1114,7 @@ Rules:
 // Changed config key analysis
 // ---------------------------------------------------------------------------
 
-const CONFIG_FILE_PATTERNS = /\.(env|json|ya?ml|toml|ini)$/;
+const CONFIG_FILE_PATTERNS = /\.(env(\..*)?|json|ya?ml|toml|ini)$/;
 
 interface ChangedConfigKey {
   filepath: string;
