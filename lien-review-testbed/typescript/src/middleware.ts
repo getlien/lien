@@ -151,12 +151,8 @@ export function getPermissionsForRole(role: UserRole): string[] {
       return ['read', 'write'];
     case UserRole.Viewer:
       return ['read'];
-    case UserRole.Guest:
-      return ['read'];
-    default: {
-      const _exhaustive: never = role;
-      throw new Error(`Unknown role: ${_exhaustive}`);
-    }
+    default:
+      return [];
   }
 }
 
