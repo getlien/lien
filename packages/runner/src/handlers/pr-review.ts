@@ -83,6 +83,42 @@ export async function handlePRReview(
   const octokit = createOctokit(auth.installation_token);
   logger.info(`Processing PR #${pr.number} on ${repository.full_name}`);
 
+  // Skip stale jobs — if a newer push exists for this PR, don't process the old one
+  const isStale = await checkIfStale(octokit, prContext, pr.head_sha, logger);
+  if (isStale) {
+    // Mark the check run as cancelled so GitHub shows it was superseded
+    if (payload.check_run_id) {
+      await updateCheckRun(
+        octokit,
+        {
+          owner: prContext.owner,
+          repo: prContext.repo,
+          checkRunId: payload.check_run_id,
+          status: 'completed',
+          conclusion: 'cancelled',
+          output: {
+            title: 'Superseded',
+            summary: 'Skipped — a newer commit was pushed to this PR.',
+          },
+        },
+        logger,
+      ).catch(() => {}); // best-effort
+    }
+    if (reviewRunId != null) {
+      await postReviewRunStatus(
+        config.laravelApiUrl,
+        auth.service_token,
+        reviewRunId,
+        'completed',
+        logger,
+      );
+    }
+    logger.info(
+      `Skipping stale job for PR #${pr.number} (sha ${pr.head_sha.slice(0, 7)} is no longer HEAD)`,
+    );
+    return;
+  }
+
   const checkRunId = await resolveCheckRun(octokit, prContext, payload, reviewRunId, logger);
 
   // Transition platform review run to running
@@ -667,6 +703,39 @@ async function resolveCheckRun(
       `Failed to create check run: ${error instanceof Error ? error.message : String(error)}`,
     );
     return undefined;
+  }
+}
+
+/**
+ * Check if a job is stale by comparing its head SHA against the PR's current HEAD.
+ * If the PR has a newer commit, this job is outdated and should be skipped.
+ */
+async function checkIfStale(
+  octokit: ReturnType<typeof createOctokit>,
+  prContext: PRContext,
+  jobHeadSha: string,
+  logger: Logger,
+): Promise<boolean> {
+  try {
+    const { data: pr } = await octokit.rest.pulls.get({
+      owner: prContext.owner,
+      repo: prContext.repo,
+      pull_number: prContext.pullNumber,
+    });
+    const currentHeadSha = pr.head.sha;
+    if (currentHeadSha !== jobHeadSha) {
+      logger.info(
+        `Job SHA ${jobHeadSha.slice(0, 7)} differs from PR HEAD ${currentHeadSha.slice(0, 7)} — stale`,
+      );
+      return true;
+    }
+    return false;
+  } catch (error) {
+    // If we can't check, proceed with the job (don't block on API errors)
+    logger.warning(
+      `Failed to check PR staleness: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
   }
 }
 
