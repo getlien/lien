@@ -213,5 +213,13 @@ async function postBaselineResult(
     review_comments: [],
   };
 
-  await postReviewRunResult(config.laravelApiUrl, payload.auth.service_token, result, logger);
+  const posted = await postReviewRunResult(
+    config.laravelApiUrl,
+    payload.auth.service_token,
+    result,
+    logger,
+  );
+  if (!posted) {
+    logger.warning('Failed to post baseline result — result not persisted');
+  }
 }
