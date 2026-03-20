@@ -604,8 +604,6 @@ const ANNOTATIONS_BATCH_SIZE = 50;
 function determineConclusion(findings: ReviewFinding[]): 'success' | 'failure' | 'neutral' {
   if (findings.length === 0) return 'success';
   if (findings.some(f => f.severity === 'error')) return 'failure';
-  // Bug findings with error or warning severity should block CI
-  if (findings.some(f => f.pluginId === 'bugs' && f.severity !== 'info')) return 'failure';
   return 'neutral';
 }
 
