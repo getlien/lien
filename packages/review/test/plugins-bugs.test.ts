@@ -507,6 +507,76 @@ describe('BugFinderPlugin', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Reverse-direction: changed callers
+  // ---------------------------------------------------------------------------
+
+  it('analyzes changed callers for incorrect usage of existing APIs', async () => {
+    // An unchanged callee function
+    const calleeChunk = createTestChunk({
+      content: 'export function getUser(id: string): User | null { return db.query(id); }',
+      metadata: {
+        file: 'src/services/user.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'getUser',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['getUser'],
+        signature: 'getUser(id: string): User | null',
+        returnType: 'User | null',
+      },
+    });
+
+    // A changed caller that uses the callee
+    const callerChunk = createTestChunk({
+      content:
+        'import { getUser } from "./services/user";\nexport function handleRequest(id: string) {\n  const user = getUser(id);\n  return user.name;\n}',
+      metadata: {
+        file: 'src/api/handler.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'handleRequest',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['handleRequest'],
+        importedSymbols: { './services/user': ['getUser'] },
+        callSites: [{ symbol: 'getUser', line: 3 }],
+      },
+    });
+
+    const llmResponse = makeBugLLMResponse([
+      {
+        changedFunction: 'handleRequest',
+        callerFilepath: 'src/api/handler.ts',
+        callerLine: 4,
+        callerSymbol: 'handleRequest',
+        severity: 'error',
+        category: 'null_check',
+        description: 'Accesses user.name without null check',
+        suggestion: 'Add if (!user) return null',
+      },
+    ]);
+
+    // Only one LLM call: reverse analysis (forward has no callers, skips LLM)
+    const llm = createMockLLMClient([llmResponse]);
+    const context = createTestContext({
+      chunks: [callerChunk], // Only the caller is changed
+      repoChunks: [calleeChunk, callerChunk],
+      llm,
+    });
+
+    const findings = await plugin.analyze(context);
+
+    // Should find the null check issue from reverse analysis
+    const nullBugs = findings.filter(f =>
+      (f.metadata as BugFindingMetadata).callers.some(c => c.description.includes('null')),
+    );
+    expect(nullBugs.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ---------------------------------------------------------------------------
   // present
   // ---------------------------------------------------------------------------
 
