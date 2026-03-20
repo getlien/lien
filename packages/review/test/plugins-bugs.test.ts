@@ -5,6 +5,7 @@ import type { PresentContext, BugFindingMetadata } from '../src/plugin-types.js'
 
 function makeBugLLMResponse(
   bugs: Array<{
+    changedFunction?: string;
     callerFilepath: string;
     callerLine: number;
     callerSymbol: string;
@@ -508,6 +509,180 @@ describe('BugFinderPlugin', () => {
 
     const findings = await plugin.analyze(context);
     expect(findings).toHaveLength(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // changedFunction attribution disambiguation
+  // ---------------------------------------------------------------------------
+
+  it('disambiguates changedFunction when multiple functions share callers from the same file', async () => {
+    const validateChunk = createTestChunk({
+      content:
+        'export function validateEmail(email: string): boolean { return email.includes("@"); }',
+      metadata: {
+        file: 'src/utils/validate.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'validateEmail',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['validateEmail'],
+        signature: 'validateEmail(email: string): boolean',
+        parameters: ['email: string'],
+        returnType: 'boolean',
+      },
+    });
+
+    const sanitizeChunk = createTestChunk({
+      content: 'export function sanitizeString(input: string): string { return input.trim(); }',
+      metadata: {
+        file: 'src/utils/validate.ts',
+        startLine: 10,
+        endLine: 15,
+        type: 'function',
+        symbolName: 'sanitizeString',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['sanitizeString'],
+        signature: 'sanitizeString(input: string): string',
+        parameters: ['input: string'],
+        returnType: 'string',
+      },
+    });
+
+    const authChunk = createTestChunk({
+      content:
+        'import { validateEmail } from "../utils/validate";\nexport function register(email: string) {\n  if (validateEmail(email)) {\n    // register\n  }\n}',
+      metadata: {
+        file: 'src/services/auth.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'register',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['register'],
+        importedSymbols: { '../utils/validate': ['validateEmail'] },
+        callSites: [{ symbol: 'validateEmail', line: 3 }],
+      },
+    });
+
+    const llmResponse = makeBugLLMResponse([
+      {
+        changedFunction: 'validateEmail',
+        callerFilepath: 'src/services/auth.ts',
+        callerLine: 3,
+        callerSymbol: 'register',
+        severity: 'warning',
+        category: 'null_check',
+        description: 'Passes null to validateEmail',
+        suggestion: 'Add null guard',
+      },
+    ]);
+
+    const llm = createMockLLMClient([llmResponse]);
+    const context = createTestContext({
+      chunks: [validateChunk, sanitizeChunk],
+      repoChunks: [validateChunk, sanitizeChunk, authChunk],
+      llm,
+    });
+
+    const findings = await plugin.analyze(context);
+
+    expect(findings).toHaveLength(1);
+    // Finding is attributed to validateEmail, NOT sanitizeString
+    expect(findings[0].filepath).toBe('src/utils/validate.ts');
+    expect(findings[0].symbolName).toBe('validateEmail');
+    expect(findings[0].line).toBe(1); // validateChunk.metadata.startLine
+    const meta = findings[0].metadata as BugFindingMetadata;
+    expect(meta.changedFunction).toBe('src/utils/validate.ts::validateEmail');
+  });
+
+  // ---------------------------------------------------------------------------
+  // diffLines filtering
+  // ---------------------------------------------------------------------------
+
+  it('excludes functions not overlapping with diff lines', async () => {
+    const validateChunk = createTestChunk({
+      content:
+        'export function validateEmail(email: string): boolean { return email.includes("@"); }',
+      metadata: {
+        file: 'src/utils/validate.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'validateEmail',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['validateEmail'],
+      },
+    });
+
+    const sanitizeChunk = createTestChunk({
+      content: 'export function sanitizeString(input: string): string { return input.trim(); }',
+      metadata: {
+        file: 'src/utils/validate.ts',
+        startLine: 50,
+        endLine: 60,
+        type: 'function',
+        symbolName: 'sanitizeString',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['sanitizeString'],
+      },
+    });
+
+    const callerChunk = createTestChunk({
+      content:
+        'import { validateEmail, sanitizeString } from "../utils/validate";\nfunction process() { validateEmail("x"); sanitizeString("y"); }',
+      metadata: {
+        file: 'src/services/processor.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'process',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['process'],
+        importedSymbols: { '../utils/validate': ['validateEmail', 'sanitizeString'] },
+        callSites: [
+          { symbol: 'validateEmail', line: 2 },
+          { symbol: 'sanitizeString', line: 2 },
+        ],
+      },
+    });
+
+    // diffLines only includes lines 1-5 (validateEmail range), NOT lines 50-60 (sanitizeString)
+    const diffLines = new Map<string, Set<number>>([
+      ['src/utils/validate.ts', new Set([1, 2, 3, 4, 5])],
+    ]);
+
+    const llm = createMockLLMClient([makeBugLLMResponse([])]);
+    const context = createTestContext({
+      chunks: [validateChunk, sanitizeChunk],
+      repoChunks: [validateChunk, sanitizeChunk, callerChunk],
+      llm,
+      pr: {
+        owner: 'test',
+        repo: 'test',
+        pullNumber: 1,
+        title: 'test',
+        baseSha: 'base123',
+        headSha: 'head123',
+        diffLines,
+      },
+    });
+
+    await plugin.analyze(context);
+
+    // LLM should have been called (validateEmail has callers)
+    expect(llm.calls).toHaveLength(1);
+    const prompt = llm.calls[0].prompt;
+    // Prompt should contain validateEmail as a changed function section
+    expect(prompt).toContain('### src/utils/validate.ts::validateEmail');
+    // sanitizeString should NOT appear as a changed function section (does not overlap with diff lines)
+    expect(prompt).not.toContain('### src/utils/validate.ts::sanitizeString');
   });
 
   it('does nothing when no findings', async () => {

@@ -328,6 +328,29 @@ pub static COUNTER: i32 = 0;`;
       }
     });
 
+    it('should extract call site from scoped call (module::function)', () => {
+      const code = 'fn main() { parser::parse_input(&path, &config); }';
+      const tree = parser.parse(code);
+
+      function findNode(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
+        if (node.type === type) return node;
+        for (const child of node.namedChildren) {
+          const result = findNode(child, type);
+          if (result) return result;
+        }
+        return null;
+      }
+
+      const callNode = findNode(tree.rootNode, 'call_expression');
+      expect(callNode).not.toBeNull();
+      if (callNode) {
+        const callSite = symbolExtractor.extractCallSite(callNode);
+        expect(callSite).not.toBeNull();
+        // Should extract 'parse_input', not 'parser'
+        expect(callSite!.symbol).toBe('parse_input');
+      }
+    });
+
     it('should extract call site from macro invocation', () => {
       const code = 'fn main() { println!("hello"); }';
       const tree = parser.parse(code);

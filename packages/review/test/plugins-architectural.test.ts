@@ -70,6 +70,14 @@ describe('ArchitecturalPlugin', () => {
     expect(plugin.shouldActivate(context)).toBe(true);
   });
 
+  it('returns true in auto mode with exactly 2 changed files', () => {
+    const context = createTestContext({
+      config: { mode: 'auto' },
+      changedFiles: ['a.ts', 'b.ts'],
+    });
+    expect(plugin.shouldActivate(context)).toBe(true);
+  });
+
   it('returns false in auto mode with < 3 files, no risk, no export changes', () => {
     const context = createTestContext({
       config: { mode: 'auto' },
