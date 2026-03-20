@@ -6,6 +6,7 @@
 import { verifyToken, generateToken, hashPassword } from './auth-service.js';
 import { healthCheck } from './database.js';
 import { sendNotification, formatEmailBody } from './notification.js';
+import { UserRole } from './types.js';
 import type { Request, User } from './types.js';
 import { createUser, deleteUser } from './user-service.js';
 import { validateEmail, validateInput } from './validator.js';
@@ -135,6 +136,37 @@ export function rateLimiter(key: string): boolean {
   rateLimitStore.set(normalizedKey, existing);
 
   return true;
+}
+
+/**
+ * Returns the permission level for a given user role.
+ * Used by route handlers to determine access to resources.
+ * Each role maps to a specific set of allowed actions.
+ */
+export function getPermissionsForRole(role: UserRole): string[] {
+  switch (role) {
+    case UserRole.Admin:
+      return ['read', 'write', 'delete', 'manage_users', 'view_analytics'];
+    case UserRole.Editor:
+      return ['read', 'write'];
+    case UserRole.Viewer:
+      return ['read'];
+    case UserRole.Guest:
+      return ['read'];
+    default: {
+      const _exhaustive: never = role;
+      throw new Error(`Unknown role: ${_exhaustive}`);
+    }
+  }
+}
+
+/**
+ * Checks if a user has a specific permission based on their role.
+ * Returns true if the user's role grants the requested permission.
+ */
+export function hasPermission(user: User, permission: string): boolean {
+  const permissions = getPermissionsForRole(user.role);
+  return permissions.includes(permission);
 }
 
 /**

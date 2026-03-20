@@ -2,10 +2,18 @@
  * Shared type definitions for the API service.
  */
 
+export enum UserRole {
+  Admin = 'admin',
+  Editor = 'editor',
+  Viewer = 'viewer',
+  Guest = 'guest',
+}
+
 export interface User {
   id: string;
   email: string;
   name: string;
+  role: UserRole;
   createdAt: Date;
   updatedAt: Date;
 }
