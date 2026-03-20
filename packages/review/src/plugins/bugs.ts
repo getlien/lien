@@ -1167,7 +1167,7 @@ function detectChangedConfigKeys(patches: Map<string, string>): ChangedConfigKey
  * Parse a config line into key-value pair based on file type.
  */
 function parseConfigLine(line: string, filepath: string): { key: string; value: string } | null {
-  if (filepath.endsWith('.env') || filepath.endsWith('.ini')) {
+  if (/\.env(\..*)?$/.test(filepath) || filepath.endsWith('.ini')) {
     // KEY=value or KEY="value"
     const match = line.match(/^([A-Z_][A-Z0-9_]*)\s*=\s*(.*)/);
     if (match) return { key: match[1], value: match[2].replace(/^["']|["']$/g, '') };
