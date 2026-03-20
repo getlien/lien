@@ -75,7 +75,9 @@ export class BugFinderPlugin implements ReviewPlugin {
     );
     const hasDeletedFunctions =
       context.pr?.patches && detectDeletedFunctions(context.pr.patches, context.chunks).length > 0;
-    return hasFunctions || hasTypes || !!hasDeletedFunctions;
+    const hasConfigChanges =
+      context.pr?.patches && [...context.pr.patches.keys()].some(f => CONFIG_FILE_PATTERNS.test(f));
+    return hasFunctions || hasTypes || !!hasDeletedFunctions || !!hasConfigChanges;
   }
 
   async analyze(context: ReviewContext): Promise<ReviewFinding[]> {
