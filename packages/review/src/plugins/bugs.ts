@@ -586,7 +586,10 @@ function collectChangedTypes(
 }
 
 /**
- * Find repo chunks that import a given symbol name.
+ * Find repo chunks that import a given symbol name from the source file.
+ * Checks that the import path plausibly resolves to the source file
+ * (contains the source filename without extension, or is a relative path
+ * from the same directory tree).
  */
 function findImporters(
   symbolName: string,
@@ -594,13 +597,23 @@ function findImporters(
   repoChunks: CodeChunk[],
 ): CodeChunk[] {
   const seen = new Set<string>();
+  // Extract the basename without extension for path matching
+  const sourceBasename = sourceFile
+    .split('/')
+    .pop()!
+    .replace(/\.[^.]+$/, '');
+
   return repoChunks.filter(c => {
     if (!c.metadata.importedSymbols || !c.metadata.symbolName) return false;
     if (c.metadata.file === sourceFile) return false;
     const key = `${c.metadata.file}::${c.metadata.symbolName}`;
     if (seen.has(key)) return false;
-    for (const symbols of Object.values(c.metadata.importedSymbols)) {
-      if (symbols.includes(symbolName)) {
+    for (const [importPath, symbols] of Object.entries(c.metadata.importedSymbols)) {
+      if (!symbols.includes(symbolName)) continue;
+      // Check import path plausibly resolves to source file:
+      // - relative path containing the source filename (e.g., './types' for 'types.ts')
+      // - or same directory structure
+      if (importPath.includes(sourceBasename) || importPath.startsWith('.')) {
         seen.add(key);
         return true;
       }
