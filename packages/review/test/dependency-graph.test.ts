@@ -458,6 +458,112 @@ describe('buildDependencyGraph — cross-package fallback', () => {
     expect(graph.getCallers('src/helpers/format.ts', 'format')).toHaveLength(1);
   });
 
+  it('resolves OOP method call through class import (step 3b)', () => {
+    const methodChunk = createTestChunk({
+      metadata: {
+        file: 'app/Models/Order.php',
+        startLine: 10,
+        endLine: 20,
+        type: 'function',
+        symbolName: 'findById',
+        symbolType: 'method',
+        language: 'php',
+        exports: ['Order'],
+      },
+    });
+
+    const callerChunk = createTestChunk({
+      content: 'function findOrder($id) { return Order::findById($id); }',
+      metadata: {
+        file: 'app/Repositories/OrderRepository.php',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'findOrder',
+        language: 'php',
+        importedSymbols: { 'App\\Models\\Order': ['Order'] },
+        callSites: [{ symbol: 'findById', line: 5 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([methodChunk, callerChunk]);
+    const callers = graph.getCallers('app/Models/Order.php', 'findById');
+
+    expect(callers).toHaveLength(1);
+    expect(callers[0].caller.filepath).toBe('app/Repositories/OrderRepository.php');
+    expect(callers[0].caller.symbolName).toBe('findOrder');
+    expect(callers[0].callSiteLine).toBe(5);
+  });
+
+  it('resolves same-namespace method call for PHP (step 3c)', () => {
+    const methodChunk = createTestChunk({
+      metadata: {
+        file: 'app/Services/PaymentService.php',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'charge',
+        symbolType: 'method',
+        language: 'php',
+        exports: ['PaymentService'],
+      },
+    });
+
+    const callerChunk = createTestChunk({
+      content: 'function processOrder() { $this->paymentService->charge(); }',
+      metadata: {
+        file: 'app/Services/OrderService.php',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'processOrder',
+        language: 'php',
+        callSites: [{ symbol: 'charge', line: 10 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([methodChunk, callerChunk]);
+    const callers = graph.getCallers('app/Services/PaymentService.php', 'charge');
+
+    expect(callers).toHaveLength(1);
+    expect(callers[0].caller.filepath).toBe('app/Services/OrderService.php');
+    expect(callers[0].caller.symbolName).toBe('processOrder');
+  });
+
+  it('does NOT apply same-namespace fallback for TypeScript (step 3c)', () => {
+    const methodChunk = createTestChunk({
+      metadata: {
+        file: 'src/services/payment.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'charge',
+        symbolType: 'method',
+        language: 'typescript',
+        exports: ['PaymentService'],
+      },
+    });
+
+    const callerChunk = createTestChunk({
+      content: 'function processOrder() { charge(); }',
+      metadata: {
+        file: 'src/services/order.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'processOrder',
+        language: 'typescript',
+        callSites: [{ symbol: 'charge', line: 10 }],
+      },
+    });
+
+    const graph = buildDependencyGraph([methodChunk, callerChunk]);
+    const callers = graph.getCallers('src/services/payment.ts', 'charge');
+
+    // TypeScript requires explicit imports — no same-namespace fallback
+    expect(callers).toHaveLength(0);
+  });
+
   it('does NOT link when symbol is not imported from any package', () => {
     const definition = createTestChunk({
       metadata: {
