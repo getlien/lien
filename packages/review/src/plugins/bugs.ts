@@ -15,7 +15,11 @@ import type {
   BugCallerInfo,
   PresentContext,
 } from '../plugin-types.js';
-import { buildDependencyGraph, type CallerEdge } from '../dependency-graph.js';
+import {
+  buildDependencyGraph,
+  type CallerEdge,
+  type DependencyGraph,
+} from '../dependency-graph.js';
 import { extractJSONFromCodeBlock } from '../json-utils.js';
 import type { Logger } from '../logger.js';
 
@@ -113,6 +117,10 @@ export class BugFinderPlugin implements ReviewPlugin {
       // 3. Analyze changed types/interfaces — find importers that may not satisfy new contracts
       const typeFindings = await analyzeChangedTypes(chunks, context);
       allFindings.push(...typeFindings);
+
+      // 4. Analyze changed callers — check if new/modified code uses existing functions correctly
+      const callerFindings = await analyzeChangedCallers(chunks, context, graph);
+      allFindings.push(...callerFindings);
     }
 
     logger.info(`Bug finder: ${allFindings.length} findings (grouped by changed function)`);
@@ -729,6 +737,157 @@ Rules:
 
   if (findings.length > 0) {
     context.logger.info(`Bug finder: ${findings.length} type contract violation(s) found`);
+  }
+
+  return findings;
+}
+
+// ---------------------------------------------------------------------------
+// Reverse-direction analysis: check if changed callers use callees correctly
+// ---------------------------------------------------------------------------
+
+const MAX_CALLEES_PER_CALLER = 3;
+
+/**
+ * Analyze changed functions as callers — check if they use existing
+ * (unchanged) functions correctly. This catches bugs where new/modified
+ * code calls existing APIs incorrectly (wrong args, missing error handling, etc.).
+ *
+ * Only analyzes calls to functions NOT already covered by the forward analysis
+ * (i.e., callees that are NOT themselves changed functions).
+ */
+async function analyzeChangedCallers(
+  chunks: CodeChunk[],
+  context: ReviewContext,
+  graph: DependencyGraph,
+): Promise<ReviewFinding[]> {
+  if (!context.llm || !context.repoChunks) return [];
+
+  const changedFunctions = collectChangedFunctions(chunks, context.pr?.diffLines);
+  if (changedFunctions.length === 0) return [];
+
+  // Build set of changed function keys to avoid duplicate analysis
+  const changedFunctionKeys = new Set(
+    changedFunctions.map(fn => `${fn.filepath}::${fn.symbolName}`),
+  );
+
+  // For each changed function, find callees that are NOT changed themselves
+  const callerCalleesPairs: { caller: ChangedFunction; callees: CodeChunk[] }[] = [];
+
+  for (const caller of changedFunctions) {
+    const callSites = caller.chunk.metadata.callSites;
+    if (!callSites || callSites.length === 0) continue;
+
+    const calleeChunks: CodeChunk[] = [];
+    const seenCallees = new Set<string>();
+
+    for (const cs of callSites) {
+      // Skip if this callee is already analyzed as a changed function
+      // (forward analysis already covers it)
+      const calleeKey = context.repoChunks.find(
+        c =>
+          c.metadata.symbolName === cs.symbol &&
+          c.metadata.file !== caller.filepath &&
+          (c.metadata.symbolType === 'function' || c.metadata.symbolType === 'method'),
+      );
+      if (!calleeKey) continue;
+
+      const key = `${calleeKey.metadata.file}::${cs.symbol}`;
+      if (changedFunctionKeys.has(key) || seenCallees.has(key)) continue;
+      seenCallees.add(key);
+      calleeChunks.push(calleeKey);
+    }
+
+    if (calleeChunks.length > 0) {
+      callerCalleesPairs.push({ caller, callees: calleeChunks.slice(0, MAX_CALLEES_PER_CALLER) });
+    }
+  }
+
+  if (callerCalleesPairs.length === 0) return [];
+  context.logger.info(
+    `Bug finder: analyzing ${callerCalleesPairs.length} changed caller(s) for correct API usage`,
+  );
+
+  const findings: ReviewFinding[] = [];
+
+  for (const { caller, callees } of callerCalleesPairs) {
+    const calleeSections = callees
+      .map(c => {
+        const sig = c.metadata.signature ?? c.metadata.symbolName ?? 'unknown';
+        const content = truncateContent(c.content, MAX_CALLER_SNIPPET_CHARS);
+        return `### ${c.metadata.file}::${c.metadata.symbolName}\nSignature: \`${sig}\`\nReturn type: \`${c.metadata.returnType ?? 'unknown'}\`\n\n\`\`\`${c.metadata.language ?? ''}\n${content}\n\`\`\``;
+      })
+      .join('\n\n');
+
+    const prompt = `Check if this changed function uses existing APIs correctly. Be terse — write like a linter, not a human.
+
+## Changed Caller
+
+### ${caller.filepath}::${caller.symbolName}
+\`\`\`${caller.chunk.metadata.language ?? ''}
+${caller.chunk.content}
+\`\`\`
+
+## APIs Called by ${caller.symbolName}
+
+${calleeSections}
+
+## Response Format
+
+ONLY valid JSON. Report bugs in the CHANGED CALLER, not the APIs it calls.
+
+\`\`\`json
+{
+  "bugs": [
+    {
+      "changedFunction": "${caller.symbolName}",
+      "callerFilepath": "${caller.filepath}",
+      "callerLine": 42,
+      "callerSymbol": "${caller.symbolName}",
+      "severity": "error or warning",
+      "category": "type_mismatch | null_check | parameter_change | broken_assumption | logic_error | unchecked_error",
+      "description": "Short statement (max 15 words)",
+      "suggestion": "Short fix (max 15 words)"
+    }
+  ]
+}
+\`\`\`
+
+Rules:
+- ONLY report bugs you are confident about in the changed caller
+- Check: wrong parameter count/types, missing null/error checks, incorrect assumptions about return values
+- If no bugs, return \`{ "bugs": [] }\``;
+
+    const response = await context.llm.complete(prompt, { temperature: 0 });
+    const bugs = parseBugResponse(response.content, context.logger);
+
+    for (const bug of bugs) {
+      const callerInfos: BugCallerInfo[] = [
+        {
+          filepath: bug.callerFilepath,
+          line: bug.callerLine,
+          symbol: bug.callerSymbol,
+          category: bug.category,
+          description: bug.description,
+          suggestion: bug.suggestion,
+        },
+      ];
+
+      findings.push({
+        pluginId: 'bugs',
+        filepath: caller.filepath,
+        line: caller.chunk.metadata.startLine,
+        symbolName: caller.symbolName,
+        severity: bug.severity,
+        category: 'bug',
+        message: formatCallerTable(callerInfos),
+        metadata: {
+          pluginType: 'bugs',
+          changedFunction: `${caller.filepath}::${caller.symbolName}`,
+          callers: callerInfos,
+        },
+      });
+    }
   }
 
   return findings;
