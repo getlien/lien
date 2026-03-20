@@ -612,6 +612,146 @@ describe('BugFinderPlugin', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Changed enum analysis
+  // ---------------------------------------------------------------------------
+
+  it('detects enum variant removal breaking switch statements', async () => {
+    const consumerChunk = createTestChunk({
+      content:
+        'import { Status } from "./status";\nexport function handle(s: Status) {\n  switch (s) {\n    case Status.Active: return "on";\n    case Status.Inactive: return "off";\n    case Status.Deleted: return "gone";\n  }\n}',
+      metadata: {
+        file: 'src/handler.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'handle',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['handle'],
+        importedSymbols: { './status': ['Status'] },
+      },
+    });
+
+    const patches = new Map([
+      [
+        'src/status.ts',
+        [
+          '@@ -1,5 +1,4 @@',
+          ' export enum Status {',
+          '   Active = "active",',
+          '   Inactive = "inactive",',
+          '-  Deleted = "deleted",',
+          ' }',
+        ].join('\n'),
+      ],
+    ]);
+
+    const llmResponse = makeBugLLMResponse([
+      {
+        changedFunction: 'Status',
+        callerFilepath: 'src/handler.ts',
+        callerLine: 6,
+        callerSymbol: 'handle',
+        severity: 'error',
+        category: 'broken_assumption',
+        description: 'References removed variant Status.Deleted',
+        suggestion: 'Remove the Deleted case from switch',
+      },
+    ]);
+
+    const llm = createMockLLMClient([llmResponse]);
+    const context = createTestContext({
+      chunks: [],
+      repoChunks: [consumerChunk],
+      llm,
+      pr: {
+        owner: 'test',
+        repo: 'test',
+        prNumber: 1,
+        title: 'test',
+        headSha: 'abc123',
+        patches,
+        diffLines: new Map(),
+      },
+    });
+
+    const findings = await plugin.analyze(context);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].symbolName).toBe('Status');
+    const meta = findings[0].metadata as BugFindingMetadata;
+    expect(meta.callers[0].description).toContain('Deleted');
+  });
+
+  it('detects added enum variant missing from switch', async () => {
+    const consumerChunk = createTestChunk({
+      content:
+        'import { Status } from "./status";\nexport function handle(s: Status): string {\n  switch (s) {\n    case Status.Active: return "on";\n    case Status.Inactive: return "off";\n  }\n}',
+      metadata: {
+        file: 'src/handler.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'handle',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['handle'],
+        importedSymbols: { './status': ['Status'] },
+      },
+    });
+
+    const patches = new Map([
+      [
+        'src/status.ts',
+        [
+          '@@ -1,4 +1,5 @@',
+          ' export enum Status {',
+          '   Active = "active",',
+          '   Inactive = "inactive",',
+          '+  Suspended = "suspended",',
+          ' }',
+        ].join('\n'),
+      ],
+    ]);
+
+    const llmResponse = makeBugLLMResponse([
+      {
+        changedFunction: 'Status',
+        callerFilepath: 'src/handler.ts',
+        callerLine: 3,
+        callerSymbol: 'handle',
+        severity: 'warning',
+        category: 'broken_assumption',
+        description: 'Non-exhaustive switch missing Status.Suspended',
+        suggestion: 'Add case Status.Suspended',
+      },
+    ]);
+
+    const llm = createMockLLMClient([llmResponse]);
+    const context = createTestContext({
+      chunks: [],
+      repoChunks: [consumerChunk],
+      llm,
+      pr: {
+        owner: 'test',
+        repo: 'test',
+        prNumber: 1,
+        title: 'test',
+        headSha: 'abc123',
+        patches,
+        diffLines: new Map(),
+      },
+    });
+
+    const findings = await plugin.analyze(context);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].symbolName).toBe('Status');
+    const meta = findings[0].metadata as BugFindingMetadata;
+    expect(meta.callers[0].description).toContain('Suspended');
+  });
+
+  // ---------------------------------------------------------------------------
   // Reverse-direction: changed callers
   // ---------------------------------------------------------------------------
 
