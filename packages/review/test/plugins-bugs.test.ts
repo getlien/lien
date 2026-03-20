@@ -460,6 +460,52 @@ describe('BugFinderPlugin', () => {
     expect(plugin.shouldActivate(context)).toBe(true);
   });
 
+  it('ignores importers whose import path does not match the source file', async () => {
+    const typeChunk = createTestChunk({
+      content: 'export interface User { id: string; name: string; role: string; }',
+      metadata: {
+        file: 'src/types.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'class',
+        symbolName: 'User',
+        symbolType: 'interface',
+        language: 'typescript',
+        exports: ['User'],
+      },
+    });
+
+    // This chunk imports User from a DIFFERENT path (not ./types)
+    const unrelatedChunk = createTestChunk({
+      content:
+        'import { User } from "@company/auth";\nexport function getAdmin(): User {\n  return { id: "1", name: "admin" };\n}',
+      metadata: {
+        file: 'src/admin.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'getAdmin',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['getAdmin'],
+        importedSymbols: { '@company/auth': ['User'] },
+      },
+    });
+
+    const llm = createMockLLMClient([]);
+    const context = createTestContext({
+      chunks: [typeChunk],
+      repoChunks: [typeChunk, unrelatedChunk],
+      llm,
+    });
+
+    const findings = await plugin.analyze(context);
+
+    // Should find no violations because the importer imports User from
+    // @company/auth, not from ./types (the source file)
+    expect(findings).toHaveLength(0);
+  });
+
   // ---------------------------------------------------------------------------
   // present
   // ---------------------------------------------------------------------------
