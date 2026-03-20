@@ -1340,7 +1340,7 @@ const MAX_CALLEES_PER_CALLER = 3;
 async function analyzeChangedCallers(
   chunks: CodeChunk[],
   context: ReviewContext,
-  graph: DependencyGraph,
+  _graph: DependencyGraph,
 ): Promise<ReviewFinding[]> {
   if (!context.llm || !context.repoChunks) return [];
 
