@@ -118,7 +118,13 @@ export class BugFinderPlugin implements ReviewPlugin {
       const typeFindings = await analyzeChangedTypes(chunks, context);
       allFindings.push(...typeFindings);
 
-      // 4. Analyze changed callers — check if new/modified code uses existing functions correctly
+      // 4. Analyze changed constants/variables — check if value changes break assumptions
+      if (context.pr?.patches && context.repoChunks) {
+        const constFindings = await analyzeChangedConstants(context);
+        allFindings.push(...constFindings);
+      }
+
+      // 5. Analyze changed callers — check if new/modified code uses existing functions correctly
       const callerFindings = await analyzeChangedCallers(chunks, context, graph);
       allFindings.push(...callerFindings);
     }
@@ -737,6 +743,169 @@ Rules:
 
   if (findings.length > 0) {
     context.logger.info(`Bug finder: ${findings.length} type contract violation(s) found`);
+  }
+
+  return findings;
+}
+
+// ---------------------------------------------------------------------------
+// Changed constant/variable analysis
+// ---------------------------------------------------------------------------
+
+/** Patterns that match constant/variable definitions across languages. */
+const CONST_DEF_PATTERNS = [
+  // TypeScript/JavaScript: export const NAME =, const NAME =, let NAME =
+  /(?:export\s+)?(?:const|let|var)\s+([A-Z][A-Z0-9_]+)\s*[:=]/,
+  // Python: NAME = value (top-level UPPER_CASE assignments)
+  /^([A-Z][A-Z0-9_]+)\s*[:=]/,
+  // Rust: pub const NAME:, pub static NAME:, const NAME:
+  /(?:pub\s+)?(?:const|static)\s+([A-Z][A-Z0-9_]+)\s*:/,
+  // PHP: const NAME =
+  /const\s+([A-Z][A-Z0-9_]+)\s*=/,
+];
+
+interface ChangedConstant {
+  filepath: string;
+  name: string;
+  oldValue: string;
+  newValue: string;
+}
+
+/**
+ * Detect constants whose values changed in the diff.
+ * Only catches constants that appear in both removed and added lines
+ * with different values (i.e., value modifications, not additions/deletions).
+ */
+function detectChangedConstants(patches: Map<string, string>): ChangedConstant[] {
+  const results: ChangedConstant[] = [];
+
+  for (const [filepath, patch] of patches) {
+    const removed = new Map<string, string>();
+    const added = new Map<string, string>();
+
+    for (const line of patch.split('\n')) {
+      if (!line.startsWith('-') && !line.startsWith('+')) continue;
+      if (line.startsWith('---') || line.startsWith('+++')) continue;
+
+      const content = line.slice(1).trim();
+      for (const pattern of CONST_DEF_PATTERNS) {
+        const match = content.match(pattern);
+        if (match?.[1]) {
+          if (line.startsWith('-')) removed.set(match[1], content);
+          else added.set(match[1], content);
+        }
+      }
+    }
+
+    // Constants that changed value (present in both removed and added with different content)
+    for (const [name, oldLine] of removed) {
+      const newLine = added.get(name);
+      if (newLine && newLine !== oldLine) {
+        results.push({ filepath, name, oldValue: oldLine, newValue: newLine });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Analyze changed constants by finding importers and checking if the
+ * value change breaks assumptions in consuming code.
+ */
+async function analyzeChangedConstants(context: ReviewContext): Promise<ReviewFinding[]> {
+  if (!context.llm || !context.repoChunks || !context.pr?.patches) return [];
+
+  const changedConstants = detectChangedConstants(context.pr.patches);
+  if (changedConstants.length === 0) return [];
+
+  context.logger.info(`Bug finder: ${changedConstants.length} changed constant(s) to analyze`);
+  const findings: ReviewFinding[] = [];
+
+  for (const { filepath, name, oldValue, newValue } of changedConstants) {
+    const importers = findImporters(name, filepath, context.repoChunks);
+    if (importers.length === 0) continue;
+
+    const topImporters = importers.slice(0, MAX_TYPE_IMPORTERS);
+    const importerSections = topImporters
+      .map(c => {
+        const content = truncateContent(c.content, MAX_IMPORTER_SNIPPET_CHARS);
+        return `**${c.metadata.file}::${c.metadata.symbolName}** (line ${c.metadata.startLine})\n\`\`\`${c.metadata.language ?? ''}\n${content}\n\`\`\``;
+      })
+      .join('\n\n');
+
+    const prompt = `Check if this constant value change breaks assumptions in consuming code. Be terse — write like a linter, not a human.
+
+## Changed Constant
+
+File: ${filepath}
+Before: \`${oldValue}\`
+After:  \`${newValue}\`
+
+## Code that uses ${name}
+
+${importerSections}
+
+## Response Format
+
+ONLY valid JSON. Report the FILE that breaks, not the constant definition.
+
+\`\`\`json
+{
+  "bugs": [
+    {
+      "changedFunction": "${name}",
+      "callerFilepath": "path/to/consumer.ts",
+      "callerLine": 42,
+      "callerSymbol": "functionThatBreaks",
+      "severity": "error or warning",
+      "category": "broken_assumption",
+      "description": "Short statement (max 15 words)",
+      "suggestion": "Short fix (max 15 words)"
+    }
+  ]
+}
+\`\`\`
+
+Rules:
+- ONLY report bugs you are confident about
+- Look for: hardcoded assumptions about the value, boundary conditions, off-by-one errors from value changes
+- If no bugs, return \`{ "bugs": [] }\``;
+
+    const response = await context.llm.complete(prompt, { temperature: 0 });
+    const bugs = parseBugResponse(response.content, context.logger);
+
+    for (const bug of bugs) {
+      const callerInfos: BugCallerInfo[] = [
+        {
+          filepath: bug.callerFilepath,
+          line: bug.callerLine,
+          symbol: bug.callerSymbol,
+          category: bug.category,
+          description: bug.description,
+          suggestion: bug.suggestion,
+        },
+      ];
+
+      findings.push({
+        pluginId: 'bugs',
+        filepath,
+        line: 1,
+        symbolName: name,
+        severity: bug.severity,
+        category: 'bug',
+        message: formatCallerTable(callerInfos),
+        metadata: {
+          pluginType: 'bugs',
+          changedFunction: `${filepath}::${name}`,
+          callers: callerInfos,
+        },
+      });
+    }
+  }
+
+  if (findings.length > 0) {
+    context.logger.info(`Bug finder: ${findings.length} constant value violation(s) found`);
   }
 
   return findings;
