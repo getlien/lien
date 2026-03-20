@@ -63,36 +63,43 @@ export class BugFinderPlugin implements ReviewPlugin {
   requiresRepoChunks = true;
 
   shouldActivate(context: ReviewContext): boolean {
-    return context.chunks.some(
+    const hasFunctions = context.chunks.some(
       c => c.metadata.symbolType === 'function' || c.metadata.symbolType === 'method',
     );
+    const hasDeletedFunctions =
+      context.pr?.patches && detectDeletedFunctions(context.pr.patches, context.chunks).length > 0;
+    return hasFunctions || !!hasDeletedFunctions;
   }
 
   async analyze(context: ReviewContext): Promise<ReviewFinding[]> {
     const { chunks, logger } = context;
 
-    if (!context.llm) {
-      logger.info('Bug finder: skipping — no LLM configured');
-      return [];
-    }
     if (!context.repoChunks) {
       logger.info('Bug finder: skipping — no repoChunks available');
       return [];
     }
 
-    const changedFunctions = collectChangedFunctions(chunks, context.pr?.diffLines);
-    if (changedFunctions.length === 0) return [];
-
     const graph = buildDependencyGraph(context.repoChunks);
-    const batches = buildBatches(changedFunctions, graph, logger);
-    if (batches.length === 0) return [];
-
     const allFindings: ReviewFinding[] = [];
-    for (const batch of batches) {
-      const prompt = buildBugFinderPrompt(batch, context);
-      const response = await context.llm.complete(prompt, { temperature: 0 });
-      const bugs = parseBugResponse(response.content, logger);
-      allFindings.push(...bugsToGroupedFindings(bugs, batch));
+
+    // 1. Detect deleted functions and find remaining callers (deterministic, no LLM)
+    if (context.pr?.patches) {
+      const deletedFindings = findDeletedFunctionCallers(context.pr.patches, chunks, graph, logger);
+      allFindings.push(...deletedFindings);
+    }
+
+    // 2. Analyze changed functions via LLM
+    if (context.llm) {
+      const changedFunctions = collectChangedFunctions(chunks, context.pr?.diffLines);
+      if (changedFunctions.length > 0) {
+        const batches = buildBatches(changedFunctions, graph, logger);
+        for (const batch of batches) {
+          const prompt = buildBugFinderPrompt(batch, context);
+          const response = await context.llm.complete(prompt, { temperature: 0 });
+          const bugs = parseBugResponse(response.content, logger);
+          allFindings.push(...bugsToGroupedFindings(bugs, batch));
+        }
+      }
     }
 
     logger.info(`Bug finder: ${allFindings.length} findings (grouped by changed function)`);
@@ -529,4 +536,118 @@ function normalizeBug(bug: BugReport): BugReport {
     callerSymbol: bug.callerSymbol ?? 'unknown',
     suggestion: bug.suggestion ?? '',
   };
+}
+
+// ---------------------------------------------------------------------------
+// Deleted function detection (deterministic — no LLM needed)
+// ---------------------------------------------------------------------------
+
+/** Patterns that match function definitions across languages. */
+const FUNCTION_DEF_PATTERNS = [
+  // TypeScript/JavaScript: export function name(, export async function name(, function name(
+  /(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(/,
+  // Python: def name(, async def name(
+  /(?:async\s+)?def\s+(\w+)\s*\(/,
+  // Rust: pub fn name(, fn name(
+  /(?:pub\s+)?fn\s+(\w+)\s*[(<]/,
+  // PHP: public function name(, function name(
+  /(?:public|protected|private|static|\s)+function\s+(\w+)\s*\(/,
+];
+
+/**
+ * Parse diff patches to find function names that were deleted (removed but not re-added).
+ */
+function detectDeletedFunctions(
+  patches: Map<string, string>,
+  headChunks: CodeChunk[],
+): { filepath: string; symbolName: string }[] {
+  const deleted: { filepath: string; symbolName: string }[] = [];
+
+  // Build set of function names that exist in HEAD
+  const headFunctions = new Set<string>();
+  for (const chunk of headChunks) {
+    if (chunk.metadata.symbolName) {
+      headFunctions.add(`${chunk.metadata.file}::${chunk.metadata.symbolName}`);
+    }
+  }
+
+  for (const [filepath, patch] of patches) {
+    const removedFunctions = new Set<string>();
+    const addedFunctions = new Set<string>();
+
+    for (const line of patch.split('\n')) {
+      if (!line.startsWith('-') && !line.startsWith('+')) continue;
+      if (line.startsWith('---') || line.startsWith('+++')) continue;
+
+      const content = line.slice(1); // Remove the +/- prefix
+      for (const pattern of FUNCTION_DEF_PATTERNS) {
+        const match = content.match(pattern);
+        if (match?.[1]) {
+          if (line.startsWith('-')) removedFunctions.add(match[1]);
+          else addedFunctions.add(match[1]);
+        }
+      }
+    }
+
+    // Functions removed but not re-added (and not in HEAD chunks) = truly deleted
+    for (const name of removedFunctions) {
+      if (!addedFunctions.has(name) && !headFunctions.has(`${filepath}::${name}`)) {
+        deleted.push({ filepath, symbolName: name });
+      }
+    }
+  }
+
+  return deleted;
+}
+
+/**
+ * Find callers of deleted functions. Returns findings without LLM analysis —
+ * a deleted function with remaining callers is always a bug.
+ */
+function findDeletedFunctionCallers(
+  patches: Map<string, string>,
+  headChunks: CodeChunk[],
+  graph: ReturnType<typeof buildDependencyGraph>,
+  logger: Logger,
+): ReviewFinding[] {
+  const deletedFunctions = detectDeletedFunctions(patches, headChunks);
+  if (deletedFunctions.length === 0) return [];
+
+  logger.info(`Bug finder: ${deletedFunctions.length} deleted function(s) detected`);
+
+  const findings: ReviewFinding[] = [];
+  for (const { filepath, symbolName } of deletedFunctions) {
+    const callers = graph.getCallers(filepath, symbolName);
+    if (callers.length === 0) continue;
+
+    const callerInfos: BugCallerInfo[] = callers.slice(0, MAX_CALLERS_PER_FUNCTION).map(c => ({
+      filepath: c.caller.filepath,
+      line: c.callSiteLine,
+      symbol: c.caller.symbolName,
+      category: 'broken_assumption',
+      description: `Calls deleted function \`${symbolName}\``,
+      suggestion: `Remove or replace call to \`${symbolName}\``,
+    }));
+
+    const metadata: BugFindingMetadata = {
+      pluginType: 'bugs',
+      changedFunction: `${filepath}::${symbolName} (deleted)`,
+      callers: callerInfos,
+    };
+
+    findings.push({
+      pluginId: 'bugs',
+      filepath,
+      line: 1, // Function is deleted, so no specific line
+      symbolName: `${symbolName} (deleted)`,
+      severity: 'error',
+      category: 'bug',
+      message: formatCallerTable(callerInfos),
+      metadata,
+    });
+
+    logger.info(`Bug finder: deleted \`${symbolName}\` has ${callers.length} remaining callers`);
+  }
+
+  return findings;
 }
