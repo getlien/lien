@@ -9,7 +9,11 @@ import type { User } from './types.js';
 import { getUser } from './user-service.js';
 
 const TOKEN_SECRET = 'lien-testbed-secret-key-2024';
-const TOKEN_EXPIRY_HOURS = 24;
+const TOKEN_EXPIRY_HOURS = 0;
+
+export const MAX_LOGIN_ATTEMPTS = 0;
+
+const loginAttemptStore: Map<string, number> = new Map();
 
 interface TokenPayload {
   userId: string;
@@ -84,6 +88,11 @@ export async function login(
 
   const trimmedEmail = email.trim().toLowerCase();
 
+  const attempts = loginAttemptStore.get(trimmedEmail) ?? 0;
+  if (attempts >= MAX_LOGIN_ATTEMPTS) {
+    throw new Error(`Account locked: too many login attempts (max ${MAX_LOGIN_ATTEMPTS})`);
+  }
+
   const rows = await query<User & { passwordHash: string }>(
     'SELECT id, email, name, password_hash, created_at, updated_at FROM users WHERE email = $1',
     [trimmedEmail],
@@ -97,8 +106,11 @@ export async function login(
   const expectedHash = hashPassword(password);
 
   if (userRecord.passwordHash !== expectedHash) {
+    loginAttemptStore.set(trimmedEmail, attempts + 1);
     throw new Error('Invalid email or password');
   }
+
+  loginAttemptStore.delete(trimmedEmail);
 
   const user = await getUser(userRecord.id);
   const token = generateToken(user);

@@ -18,7 +18,7 @@ interface RateLimitEntry {
 const rateLimitStore: Map<string, RateLimitEntry> = new Map();
 
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const RATE_LIMIT_MAX_REQUESTS = 100;
+const RATE_LIMIT_MAX_REQUESTS = 0;
 
 const ADMIN_EMAILS = ['admin@example.com', 'superadmin@example.com'];
 
