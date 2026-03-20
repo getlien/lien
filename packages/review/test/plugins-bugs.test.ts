@@ -436,6 +436,80 @@ describe('BugFinderPlugin', () => {
     expect(summaries[0]).toContain('validateEmail');
   });
 
+  // ---------------------------------------------------------------------------
+  // Deleted function detection
+  // ---------------------------------------------------------------------------
+
+  it('detects deleted functions with remaining callers', async () => {
+    // authChunk calls validateEmail — simulate deleting validateEmail
+    const { authChunk } = makeTestScenario();
+
+    const patches = new Map([
+      [
+        'src/utils/validate.ts',
+        [
+          '@@ -1,5 +0,0 @@',
+          '-export function validateEmail(email: string): boolean {',
+          '-  return email.includes("@");',
+          '-}',
+        ].join('\n'),
+      ],
+    ]);
+
+    const context = createTestContext({
+      chunks: [], // validateEmail is deleted — no HEAD chunks for it
+      repoChunks: [authChunk], // authChunk still calls validateEmail
+      pr: {
+        owner: 'test',
+        repo: 'test',
+        prNumber: 1,
+        title: 'test',
+        headSha: 'abc123',
+        patches,
+        diffLines: new Map(),
+      },
+    });
+
+    const findings = await plugin.analyze(context);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].symbolName).toBe('validateEmail (deleted)');
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].filepath).toBe('src/utils/validate.ts');
+    const meta = findings[0].metadata as BugFindingMetadata;
+    expect(meta.callers).toHaveLength(1);
+    expect(meta.callers[0].symbol).toBe('register');
+    expect(meta.callers[0].description).toContain('deleted function');
+  });
+
+  it('does not flag deleted functions with no callers', async () => {
+    const patches = new Map([
+      [
+        'src/unused.ts',
+        ['@@ -1,3 +0,0 @@', '-export function unusedHelper(): void {', '-  // nothing', '-}'].join(
+          '\n',
+        ),
+      ],
+    ]);
+
+    const context = createTestContext({
+      chunks: [],
+      repoChunks: [], // no callers anywhere
+      pr: {
+        owner: 'test',
+        repo: 'test',
+        prNumber: 1,
+        title: 'test',
+        headSha: 'abc123',
+        patches,
+        diffLines: new Map(),
+      },
+    });
+
+    const findings = await plugin.analyze(context);
+    expect(findings).toHaveLength(0);
+  });
+
   it('does nothing when no findings', async () => {
     const summaries: string[] = [];
     const presentContext = {

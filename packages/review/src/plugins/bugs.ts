@@ -84,7 +84,13 @@ export class BugFinderPlugin implements ReviewPlugin {
 
     // 1. Detect deleted functions and find remaining callers (deterministic, no LLM)
     if (context.pr?.patches) {
-      const deletedFindings = findDeletedFunctionCallers(context.pr.patches, chunks, graph, logger);
+      const deletedFindings = findDeletedFunctionCallers(
+        context.pr.patches,
+        chunks,
+        graph,
+        logger,
+        context.repoChunks,
+      );
       allFindings.push(...deletedFindings);
     }
 
@@ -609,6 +615,7 @@ function findDeletedFunctionCallers(
   headChunks: CodeChunk[],
   graph: ReturnType<typeof buildDependencyGraph>,
   logger: Logger,
+  repoChunks?: CodeChunk[],
 ): ReviewFinding[] {
   const deletedFunctions = detectDeletedFunctions(patches, headChunks);
   if (deletedFunctions.length === 0) return [];
@@ -617,7 +624,29 @@ function findDeletedFunctionCallers(
 
   const findings: ReviewFinding[] = [];
   for (const { filepath, symbolName } of deletedFunctions) {
-    const callers = graph.getCallers(filepath, symbolName);
+    // Try dependency graph first (works when function file still has other exports)
+    let callers = graph.getCallers(filepath, symbolName);
+
+    // Fallback: scan repo chunks for call sites referencing the deleted symbol.
+    // Needed because the dep graph can't resolve callers for functions that
+    // no longer exist in HEAD (no export index entry).
+    if (callers.length === 0 && repoChunks) {
+      callers = repoChunks
+        .filter(
+          c =>
+            c.metadata.file !== filepath &&
+            c.metadata.callSites?.some(cs => cs.symbol === symbolName),
+        )
+        .map(c => ({
+          caller: {
+            filepath: c.metadata.file,
+            symbolName: c.metadata.symbolName ?? 'unknown',
+            chunk: c,
+          },
+          callSiteLine: c.metadata.callSites!.find(cs => cs.symbol === symbolName)!.line,
+        }));
+    }
+
     if (callers.length === 0) continue;
 
     const callerInfos: BugCallerInfo[] = callers.slice(0, MAX_CALLERS_PER_FUNCTION).map(c => ({
