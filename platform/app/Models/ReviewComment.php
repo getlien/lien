@@ -20,9 +20,11 @@ class ReviewComment extends Model
         'line',
         'symbol_name',
         'body',
+        'category',
         'status',
         'github_comment_id',
         'resolution',
+        'fingerprint',
     ];
 
     /**

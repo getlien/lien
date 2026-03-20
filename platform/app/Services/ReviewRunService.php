@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Enums\CommentResolution;
 use App\Enums\ReviewRunStatus;
 use App\Enums\ReviewRunType;
+use App\Models\ReviewComment;
 use App\Models\ReviewRun;
 use Illuminate\Support\Facades\DB;
 
@@ -14,12 +16,58 @@ class ReviewRunService
      */
     public function createOrUpdate(array $data): ReviewRun
     {
-        return DB::transaction(function () use ($data) {
+        $reviewRun = DB::transaction(function () use ($data) {
             $reviewRun = $this->upsertReviewRun($data);
             $this->syncRelatedEntities($reviewRun, $data);
 
             return $reviewRun;
         });
+
+        if (
+            $reviewRun->type === ReviewRunType::Pr
+            && array_key_exists('review_comments', $data)
+        ) {
+            $this->autoResolvePriorFindings($reviewRun);
+        }
+
+        return $reviewRun;
+    }
+
+    /**
+     * Auto-resolve findings from prior runs on the same PR that are no longer present.
+     *
+     * @return int Number of comments auto-resolved
+     */
+    public function autoResolvePriorFindings(ReviewRun $reviewRun): int
+    {
+        if ($reviewRun->type !== ReviewRunType::Pr || $reviewRun->pr_number === null) {
+            return 0;
+        }
+
+        $currentFingerprints = $reviewRun->reviewComments()
+            ->whereNotNull('fingerprint')
+            ->pluck('fingerprint')
+            ->all();
+
+        $priorRunIds = ReviewRun::where('repository_id', $reviewRun->repository_id)
+            ->where('pr_number', $reviewRun->pr_number)
+            ->where('id', '!=', $reviewRun->id)
+            ->where('type', ReviewRunType::Pr)
+            ->pluck('id');
+
+        if ($priorRunIds->isEmpty()) {
+            return 0;
+        }
+
+        $query = ReviewComment::whereIn('review_run_id', $priorRunIds)
+            ->whereNull('resolution')
+            ->whereNotNull('fingerprint');
+
+        if (! empty($currentFingerprints)) {
+            $query->whereNotIn('fingerprint', $currentFingerprints);
+        }
+
+        return $query->update(['resolution' => CommentResolution::AutoResolved]);
     }
 
     /**
@@ -70,6 +118,15 @@ class ReviewRunService
     private function syncRelatedEntities(ReviewRun $reviewRun, array $data): void
     {
         $this->syncCollection($reviewRun, 'complexitySnapshots', $data, 'complexity_snapshots', 'repository_id');
+
+        if (array_key_exists('review_comments', $data)) {
+            $data['review_comments'] = array_map(function (array $comment) {
+                $comment['fingerprint'] = $this->computeFingerprint($comment);
+
+                return $comment;
+            }, $data['review_comments'] ?? []);
+        }
+
         $this->syncCollection($reviewRun, 'reviewComments', $data, 'review_comments');
     }
 
@@ -95,6 +152,19 @@ class ReviewRunService
             : $data[$dataKey];
 
         $reviewRun->{$relation}()->createMany($items);
+    }
+
+    /**
+     * @param  array<string, mixed>  $comment
+     */
+    private function computeFingerprint(array $comment): string
+    {
+        return hash('sha256', implode(':', [
+            $comment['review_type'] ?? '',
+            $comment['filepath'] ?? '',
+            $comment['symbol_name'] ?? '',
+            $comment['category'] ?? '',
+        ]));
     }
 
     public function updateStatus(ReviewRun $reviewRun, ReviewRunStatus $status): ReviewRun

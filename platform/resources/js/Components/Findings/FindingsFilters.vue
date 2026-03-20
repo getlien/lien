@@ -45,6 +45,7 @@ function update(key, value) {
       <option value="">All Resolutions</option>
       <option value="open">Open</option>
       <option value="resolved">Resolved</option>
+      <option value="auto_resolved">Auto-resolved</option>
       <option value="dismissed">Dismissed</option>
     </select>
 
