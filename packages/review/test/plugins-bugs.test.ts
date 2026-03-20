@@ -507,6 +507,111 @@ describe('BugFinderPlugin', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Changed constant analysis
+  // ---------------------------------------------------------------------------
+
+  it('detects changed constants that break consumer assumptions', async () => {
+    const consumerChunk = createTestChunk({
+      content:
+        'import { MAX_RETRIES } from "./config";\nexport function fetchWithRetry(url: string) {\n  for (let i = 0; i < MAX_RETRIES; i++) {\n    // retry\n  }\n}',
+      metadata: {
+        file: 'src/service.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'fetchWithRetry',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['fetchWithRetry'],
+        importedSymbols: { './config': ['MAX_RETRIES'] },
+      },
+    });
+
+    const patches = new Map([
+      [
+        'src/config.ts',
+        [
+          '@@ -1,3 +1,3 @@',
+          '-export const MAX_RETRIES = 3;',
+          '+export const MAX_RETRIES = 0;',
+          ' export const API_TIMEOUT = 5000;',
+        ].join('\n'),
+      ],
+    ]);
+
+    const llmResponse = makeBugLLMResponse([
+      {
+        changedFunction: 'MAX_RETRIES',
+        callerFilepath: 'src/service.ts',
+        callerLine: 3,
+        callerSymbol: 'fetchWithRetry',
+        severity: 'error',
+        category: 'broken_assumption',
+        description: 'Retry loop never executes with MAX_RETRIES = 0',
+        suggestion: 'Use MAX_RETRIES >= 1 or add fallback',
+      },
+    ]);
+
+    const llm = createMockLLMClient([llmResponse]);
+    const context = createTestContext({
+      chunks: [],
+      repoChunks: [consumerChunk],
+      llm,
+      pr: {
+        owner: 'test',
+        repo: 'test',
+        prNumber: 1,
+        title: 'test',
+        headSha: 'abc123',
+        patches,
+        diffLines: new Map(),
+      },
+    });
+
+    const findings = await plugin.analyze(context);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].symbolName).toBe('MAX_RETRIES');
+    expect(findings[0].severity).toBe('error');
+    const meta = findings[0].metadata as BugFindingMetadata;
+    expect(meta.callers[0].description).toContain('MAX_RETRIES');
+  });
+
+  it('ignores constants that were only added or removed (not changed)', async () => {
+    const patches = new Map([
+      [
+        'src/config.ts',
+        [
+          '@@ -1,2 +1,3 @@',
+          ' export const MAX_RETRIES = 3;',
+          '+export const NEW_CONST = 42;',
+          ' export const API_TIMEOUT = 5000;',
+        ].join('\n'),
+      ],
+    ]);
+
+    const llm = createMockLLMClient([]);
+    const context = createTestContext({
+      chunks: [],
+      repoChunks: [],
+      llm,
+      pr: {
+        owner: 'test',
+        repo: 'test',
+        prNumber: 1,
+        title: 'test',
+        headSha: 'abc123',
+        patches,
+        diffLines: new Map(),
+      },
+    });
+
+    const findings = await plugin.analyze(context);
+    expect(findings).toHaveLength(0);
+    expect(llm.calls).toHaveLength(0); // LLM should not even be called
+  });
+
+  // ---------------------------------------------------------------------------
   // Reverse-direction: changed callers
   // ---------------------------------------------------------------------------
 
