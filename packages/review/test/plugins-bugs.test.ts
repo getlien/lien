@@ -612,6 +612,101 @@ describe('BugFinderPlugin', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Changed config key analysis
+  // ---------------------------------------------------------------------------
+
+  it('detects config value changes that break consuming code', async () => {
+    const consumerChunk = createTestChunk({
+      content:
+        'export function connect() {\n  const timeout = parseInt(process.env.API_TIMEOUT!);\n  if (timeout > 10000) throw new Error("too high");\n  return fetch(url, { signal: AbortSignal.timeout(timeout) });\n}',
+      metadata: {
+        file: 'src/api.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'connect',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['connect'],
+      },
+    });
+
+    const patches = new Map([
+      [
+        '.env',
+        [
+          '@@ -1,3 +1,3 @@',
+          '-API_TIMEOUT=5000',
+          '+API_TIMEOUT=30000',
+          ' DATABASE_URL=postgres://localhost/db',
+        ].join('\n'),
+      ],
+    ]);
+
+    const llmResponse = makeBugLLMResponse([
+      {
+        changedFunction: 'API_TIMEOUT',
+        callerFilepath: 'src/api.ts',
+        callerLine: 3,
+        callerSymbol: 'connect',
+        severity: 'error',
+        category: 'broken_assumption',
+        description: 'API_TIMEOUT=30000 exceeds the 10000 guard, throws',
+        suggestion: 'Raise the guard threshold or lower the timeout',
+      },
+    ]);
+
+    const llm = createMockLLMClient([llmResponse]);
+    const context = createTestContext({
+      chunks: [],
+      repoChunks: [consumerChunk],
+      llm,
+      pr: {
+        owner: 'test',
+        repo: 'test',
+        prNumber: 1,
+        title: 'test',
+        headSha: 'abc123',
+        patches,
+        diffLines: new Map(),
+      },
+    });
+
+    const findings = await plugin.analyze(context);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].symbolName).toBe('API_TIMEOUT');
+    const meta = findings[0].metadata as BugFindingMetadata;
+    expect(meta.callers[0].symbol).toBe('connect');
+  });
+
+  it('ignores non-config files in diff', async () => {
+    const patches = new Map([
+      ['src/main.ts', ['@@ -1,2 +1,2 @@', '-const x = 1;', '+const x = 2;'].join('\n')],
+    ]);
+
+    const llm = createMockLLMClient([]);
+    const context = createTestContext({
+      chunks: [],
+      repoChunks: [],
+      llm,
+      pr: {
+        owner: 'test',
+        repo: 'test',
+        prNumber: 1,
+        title: 'test',
+        headSha: 'abc123',
+        patches,
+        diffLines: new Map(),
+      },
+    });
+
+    const findings = await plugin.analyze(context);
+    expect(findings).toHaveLength(0);
+    expect(llm.calls).toHaveLength(0);
+  });
+
+  // ---------------------------------------------------------------------------
   // Changed enum analysis
   // ---------------------------------------------------------------------------
 
