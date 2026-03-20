@@ -4,6 +4,7 @@
  * performs authentication via middleware, and delegates to service layers.
  */
 
+import { API_TIMEOUT, MAX_RETRIES } from './api-config.js';
 import { login, hashPassword, generateToken, revokeUserSessions } from './auth-service.js';
 import { healthCheck } from './database.js';
 import { authMiddleware, requireAdmin, rateLimiter } from './middleware.js';
@@ -526,20 +527,26 @@ export async function handleBatchNotify(req: Request): Promise<ApiResponse<void>
  * Checks database connectivity and returns service status.
  * Does not require authentication.
  */
-export async function handleHealthCheck(): Promise<ApiResponse<{ status: string }>> {
-  const dbHealthy = await healthCheck();
+export async function handleHealthCheck(): Promise<
+  ApiResponse<{ status: string; timeoutMs: number; maxRetries: number }>
+> {
+  let dbHealthy = false;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    dbHealthy = await healthCheck();
+    if (dbHealthy) break;
+  }
 
   if (!dbHealthy) {
     return {
       success: false,
-      data: { status: 'degraded' },
-      error: 'Database connectivity check failed',
+      data: { status: 'degraded', timeoutMs: API_TIMEOUT, maxRetries: MAX_RETRIES },
+      error: `Database connectivity check failed after ${MAX_RETRIES} attempts (timeout: ${API_TIMEOUT}ms)`,
     };
   }
 
   return {
     success: true,
-    data: { status: 'healthy' },
+    data: { status: 'healthy', timeoutMs: API_TIMEOUT, maxRetries: MAX_RETRIES },
   };
 }
 

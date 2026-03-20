@@ -11,9 +11,20 @@ interface ConnectionPool {
   lastHealthCheck: Date | null;
 }
 
+const DB_POOL_SIZE = parseInt(process.env['DB_POOL_SIZE'] ?? '20', 10);
+const DB_QUERY_TIMEOUT = parseInt(process.env['DB_QUERY_TIMEOUT'] ?? '5000', 10);
+
+if (DB_POOL_SIZE > 100) {
+  throw new Error(`DB_POOL_SIZE must be <= 100, got ${DB_POOL_SIZE}`);
+}
+
+if (DB_QUERY_TIMEOUT > 10000) {
+  throw new Error(`DB_QUERY_TIMEOUT must be <= 10000ms, got ${DB_QUERY_TIMEOUT}`);
+}
+
 const pool: ConnectionPool = {
   activeConnections: 0,
-  maxConnections: 20,
+  maxConnections: DB_POOL_SIZE,
   lastHealthCheck: null,
 };
 
