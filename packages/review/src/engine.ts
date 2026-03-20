@@ -603,10 +603,19 @@ const ANNOTATIONS_BATCH_SIZE = 50;
  */
 function determineConclusion(findings: ReviewFinding[]): 'success' | 'failure' | 'neutral' {
   if (findings.length === 0) return 'success';
-  if (findings.some(f => f.severity === 'error')) return 'failure';
-  // Bug findings with error or warning severity should block CI
-  if (findings.some(f => f.pluginId === 'bugs' && f.severity !== 'info')) return 'failure';
-  return 'neutral';
+  const hasNewErrors = findings.some(f => {
+    if (f.severity !== 'error') return false;
+    // For complexity findings, only block if the PR introduced or worsened the violation
+    // (positive delta). Pre-existing violations in touched files should not block merges.
+    if (f.pluginId === 'complexity') {
+      const meta = f.metadata as { delta?: number | null };
+      return meta.delta != null && meta.delta > 0;
+    }
+    return true;
+  });
+  if (hasNewErrors) return 'failure';
+  if (findings.some(f => f.severity === 'error' || f.severity === 'warning')) return 'neutral';
+  return 'success';
 }
 
 /** Count errors/warnings and group by plugin in a single pass. */
