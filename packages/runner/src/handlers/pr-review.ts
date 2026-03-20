@@ -645,6 +645,7 @@ function buildReviewComments(findings: ReviewFinding[]): ReviewCommentResult[] {
     plugin_id: f.pluginId,
     message: f.message,
     suggestion: f.suggestion ?? null,
+    status: 'posted',
   }));
 }
 
