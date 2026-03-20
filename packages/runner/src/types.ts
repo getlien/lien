@@ -86,6 +86,7 @@ export interface ReviewCommentResult {
   plugin_id: string;
   message: string;
   suggestion: string | null;
+  status: 'posted' | 'skipped' | 'suppressed';
 }
 
 export interface ReviewRunResult {

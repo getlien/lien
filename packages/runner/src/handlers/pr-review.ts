@@ -645,6 +645,7 @@ function buildReviewComments(findings: ReviewFinding[]): ReviewCommentResult[] {
     plugin_id: f.pluginId,
     message: f.message,
     suggestion: f.suggestion ?? null,
+    status: 'posted',
   }));
 }
 
@@ -806,13 +807,14 @@ async function postResult(
   if (!posted) {
     if (reviewRunId != null) {
       logger.error(
-        `Platform callback failed for review_run_id=${reviewRunId} — result not persisted`,
+        `Platform callback failed for review_run_id=${reviewRunId} — result not persisted, skipping status transition`,
       );
     } else {
       logger.error(
         `Platform callback failed — result not persisted (repo_id=${payload.repository.id}, pr_number=${payload.pull_request.number}, head_sha=${payload.pull_request.head_sha})`,
       );
     }
+    return;
   }
 
   // Transition platform review run to terminal state (running → completed/failed)

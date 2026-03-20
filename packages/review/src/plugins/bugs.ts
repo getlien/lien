@@ -699,11 +699,13 @@ ${importerSections}
 
 ## Instructions
 
-Check if the importing code satisfies the current type contract. Look for:
-- Object literals or constructors missing required fields
-- Spread operations that don't include new required properties
-- Type assertions that bypass the new contract
-- Factory functions that return incomplete objects
+Check if the importing code correctly uses **${type.symbolName}** specifically. Look for:
+- Object literals or constructors missing required fields of ${type.symbolName}
+- Spread operations that don't include new required properties of ${type.symbolName}
+- Type assertions that bypass the ${type.symbolName} contract
+- Factory functions that return incomplete ${type.symbolName} objects
+
+IMPORTANT: ONLY check usage of ${type.symbolName}. The file may import other types — ignore them entirely.
 
 ## Response Format
 
@@ -727,13 +729,21 @@ ONLY valid JSON. Report the FILE that breaks, not the type definition.
 \`\`\`
 
 Rules:
+- ONLY report bugs related to ${type.symbolName} — not other types from the same file
 - ONLY report bugs you are confident about
 - If no bugs, return \`{ "bugs": [] }\``;
 
     const response = await context.llm.complete(prompt, { temperature: 0 });
     const bugs = parseBugResponse(response.content, context.logger);
 
-    for (const bug of bugs) {
+    // Filter out bugs that reference a different type than the one being analyzed.
+    // The LLM sometimes confuses types when the importer code uses multiple types
+    // from the same file (e.g., ReviewCommentResult vs ReviewRunResult).
+    const relevantBugs = bugs.filter(
+      b => !b.changedFunction || b.changedFunction === type.symbolName,
+    );
+
+    for (const bug of relevantBugs) {
       const callerInfos: BugCallerInfo[] = [
         {
           filepath: bug.callerFilepath,
