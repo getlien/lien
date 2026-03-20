@@ -103,44 +103,51 @@ export class BugFinderPlugin implements ReviewPlugin {
       allFindings.push(...deletedFindings);
     }
 
-    // 2. Analyze changed functions via LLM
+    // 2-7. Run all LLM-based analyses in parallel — they share read-only context/graph
     if (context.llm) {
+      const analyses: Promise<ReviewFinding[]>[] = [];
+
+      // 2. Changed functions → callers
       const changedFunctions = collectChangedFunctions(chunks, context.pr?.diffLines);
       if (changedFunctions.length > 0) {
         const batches = buildBatches(changedFunctions, graph, logger);
-        for (const batch of batches) {
-          const prompt = buildBugFinderPrompt(batch, context);
-          const response = await context.llm.complete(prompt, { temperature: 0 });
-          const bugs = parseBugResponse(response.content, logger);
-          allFindings.push(...bugsToGroupedFindings(bugs, batch));
-        }
+        analyses.push(
+          Promise.all(
+            batches.map(async batch => {
+              const prompt = buildBugFinderPrompt(batch, context);
+              const response = await context.llm!.complete(prompt, { temperature: 0 });
+              const bugs = parseBugResponse(response.content, logger);
+              return bugsToGroupedFindings(bugs, batch);
+            }),
+          ).then(results => results.flat()),
+        );
       }
 
-      // 3. Analyze changed types/interfaces — find importers that may not satisfy new contracts
-      const typeFindings = await analyzeChangedTypes(chunks, context);
-      allFindings.push(...typeFindings);
+      // 3. Changed types/interfaces
+      analyses.push(analyzeChangedTypes(chunks, context));
 
-      // 4. Analyze changed constants/variables — check if value changes break assumptions
+      // 4. Changed constants
       if (context.pr?.patches && context.repoChunks) {
-        const constFindings = await analyzeChangedConstants(context);
-        allFindings.push(...constFindings);
+        analyses.push(analyzeChangedConstants(context));
       }
 
-      // 5. Analyze changed enums — check if variant additions/removals/renames break consumers
+      // 5. Changed enums
       if (context.pr?.patches && context.repoChunks) {
-        const enumFindings = await analyzeChangedEnums(context);
-        allFindings.push(...enumFindings);
+        analyses.push(analyzeChangedEnums(context));
       }
 
-      // 6. Analyze changed config keys — check if config value changes break consuming code
+      // 6. Changed config keys
       if (context.pr?.patches && context.repoChunks) {
-        const configFindings = await analyzeChangedConfigKeys(context);
-        allFindings.push(...configFindings);
+        analyses.push(analyzeChangedConfigKeys(context));
       }
 
-      // 7. Analyze changed callers — check if new/modified code uses existing functions correctly
-      const callerFindings = await analyzeChangedCallers(chunks, context, graph);
-      allFindings.push(...callerFindings);
+      // 7. Changed callers → callees
+      analyses.push(analyzeChangedCallers(chunks, context, graph));
+
+      const results = await Promise.all(analyses);
+      for (const findings of results) {
+        allFindings.push(...findings);
+      }
     }
 
     logger.info(`Bug finder: ${allFindings.length} findings (grouped by changed function)`);
