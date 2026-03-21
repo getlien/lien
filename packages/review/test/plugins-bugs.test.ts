@@ -917,6 +917,140 @@ describe('BugFinderPlugin', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // False positive suppression
+  // ---------------------------------------------------------------------------
+
+  it('suppresses null-check findings when all callers are in test files', async () => {
+    // A changed function with a caller in a test file
+    const changedChunk = createTestChunk({
+      content: 'export function getUser(id: string) { return db.find(id); }',
+      metadata: {
+        file: 'src/user.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'getUser',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['getUser'],
+        signature: 'getUser(id: string)',
+        returnType: 'User | null',
+      },
+    });
+
+    const testCallerChunk = createTestChunk({
+      content:
+        'import { getUser } from "../user";\nit("finds user", () => {\n  const user = getUser("1");\n  expect(user.name).toBe("Alice");\n});',
+      metadata: {
+        file: 'src/__tests__/user.test.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'finds user',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: [],
+        importedSymbols: { '../user': ['getUser'] },
+        callSites: [{ symbol: 'getUser', line: 3 }],
+      },
+    });
+
+    const llmResponse = makeBugLLMResponse([
+      {
+        changedFunction: 'getUser',
+        callerFilepath: 'src/__tests__/user.test.ts',
+        callerLine: 4,
+        callerSymbol: 'finds user',
+        severity: 'warning',
+        category: 'null_check',
+        description: 'getUser may return null, accessing .name without check',
+        suggestion: 'Add null check before accessing .name',
+      },
+    ]);
+
+    const llm = createMockLLMClient([llmResponse]);
+    const context = createTestContext({
+      chunks: [changedChunk],
+      repoChunks: [changedChunk, testCallerChunk],
+      llm,
+    });
+
+    const findings = await plugin.analyze(context);
+
+    // The null-check finding in the test file should be suppressed
+    expect(
+      findings.filter(f => {
+        const meta = f.metadata as BugFindingMetadata;
+        return meta.callers.some(c => c.category === 'null_check');
+      }),
+    ).toHaveLength(0);
+  });
+
+  it('keeps null-check findings when callers are in source files', async () => {
+    const changedChunk = createTestChunk({
+      content: 'export function getUser(id: string) { return db.find(id); }',
+      metadata: {
+        file: 'src/user.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'getUser',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['getUser'],
+        signature: 'getUser(id: string)',
+        returnType: 'User | null',
+      },
+    });
+
+    const sourceCallerChunk = createTestChunk({
+      content:
+        'import { getUser } from "./user";\nexport function handler(id: string) {\n  const user = getUser(id);\n  return user.name;\n}',
+      metadata: {
+        file: 'src/handler.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'handler',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['handler'],
+        importedSymbols: { './user': ['getUser'] },
+        callSites: [{ symbol: 'getUser', line: 3 }],
+      },
+    });
+
+    const llmResponse = makeBugLLMResponse([
+      {
+        changedFunction: 'getUser',
+        callerFilepath: 'src/handler.ts',
+        callerLine: 4,
+        callerSymbol: 'handler',
+        severity: 'warning',
+        category: 'null_check',
+        description: 'getUser may return null, accessing .name without check',
+        suggestion: 'Add null check',
+      },
+    ]);
+
+    const llm = createMockLLMClient([llmResponse]);
+    const context = createTestContext({
+      chunks: [changedChunk],
+      repoChunks: [changedChunk, sourceCallerChunk],
+      llm,
+    });
+
+    const findings = await plugin.analyze(context);
+
+    // Null-check finding in source file should NOT be suppressed
+    const nullFindings = findings.filter(f => {
+      const meta = f.metadata as BugFindingMetadata;
+      return meta.callers.some(c => c.category === 'null_check');
+    });
+    expect(nullFindings.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ---------------------------------------------------------------------------
   // present
   // ---------------------------------------------------------------------------
 
