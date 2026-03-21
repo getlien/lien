@@ -594,6 +594,41 @@ function normalizeBug(bug: BugReport): BugReport {
 
 const TEST_PATH_PATTERN = /(?:test[s]?|spec|__tests__)[/\\]|\.(?:test|spec)\./i;
 
+/** Language family groups — extensions that can call each other. */
+const LANGUAGE_FAMILIES: Record<string, string> = {
+  ts: 'js',
+  tsx: 'js',
+  js: 'js',
+  jsx: 'js',
+  mjs: 'js',
+  mts: 'js',
+  cjs: 'js',
+  py: 'py',
+  php: 'php',
+  rs: 'rs',
+  go: 'go',
+  java: 'jvm',
+  kt: 'jvm',
+  scala: 'jvm',
+  rb: 'rb',
+  cs: 'cs',
+  c: 'c',
+  cpp: 'c',
+  cc: 'c',
+  cxx: 'c',
+  h: 'c',
+  hpp: 'c',
+  swift: 'swift',
+};
+
+/** Check if a file belongs to the same language family as the given extension. */
+function isSameLanguageFamily(filepath: string, sourceExt: string): boolean {
+  const fileExt = filepath.split('.').pop() ?? '';
+  const sourceFamily = LANGUAGE_FAMILIES[sourceExt] ?? sourceExt;
+  const fileFamily = LANGUAGE_FAMILIES[fileExt] ?? fileExt;
+  return sourceFamily === fileFamily;
+}
+
 /**
  * Post-LLM filter: suppress common false positive patterns.
  * Applied after all analysis paths before returning findings.
@@ -1631,11 +1666,15 @@ function findDeletedFunctionCallers(
     // Fallback: scan repo chunks for call sites referencing the deleted symbol.
     // Needed because the dep graph can't resolve callers for functions that
     // no longer exist in HEAD (no export index entry).
+    // Only match callers in the same language — a deleted PHP function
+    // cannot affect TypeScript callers that share the same name.
     if (callers.length === 0 && repoChunks) {
+      const deletedFileExt = filepath.split('.').pop() ?? '';
       callers = repoChunks
         .filter(
           c =>
             c.metadata.file !== filepath &&
+            isSameLanguageFamily(c.metadata.file, deletedFileExt) &&
             c.metadata.callSites?.some(cs => cs.symbol === symbolName),
         )
         .map(c => ({
