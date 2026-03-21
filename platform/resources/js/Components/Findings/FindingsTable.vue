@@ -7,6 +7,8 @@ const props = defineProps({
   findings: { type: Object, required: true },
 });
 
+const emit = defineEmits(['select']);
+
 const typeConfig = {
   bugs: { label: 'bug', color: 'bg-red-900/30 text-red-400' },
   architectural: { label: 'arch', color: 'bg-cyan-900/30 text-cyan-400' },
@@ -104,7 +106,11 @@ const grouped = computed(() => {
           <div
             v-for="finding in group.findings"
             :key="finding.id"
-            class="flex items-center gap-3 bg-zinc-950 px-4 py-3 transition-colors hover:bg-zinc-800/50"
+            class="flex cursor-pointer items-center gap-3 bg-zinc-950 px-4 py-3 transition-colors hover:bg-zinc-800/50"
+            role="button"
+            tabindex="0"
+            @click="emit('select', finding)"
+            @keydown.enter.space.prevent="emit('select', finding)"
           >
             <span
               v-if="finding.line"

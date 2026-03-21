@@ -1,12 +1,16 @@
 <script setup>
+import { ref } from 'vue';
 import { Deferred, Head, router } from '@inertiajs/vue3';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import Breadcrumbs from '@/Components/Breadcrumbs.vue';
 import FindingsSummaryBar from '@/Components/Findings/FindingsSummaryBar.vue';
 import FindingsFilters from '@/Components/Findings/FindingsFilters.vue';
 import FindingsTable from '@/Components/Findings/FindingsTable.vue';
+import FindingDetailSidebar from '@/Components/Findings/FindingDetailSidebar.vue';
 import SkeletonStatGrid from '@/Components/Skeletons/SkeletonStatGrid.vue';
 import SkeletonTable from '@/Components/Skeletons/SkeletonTable.vue';
+
+const selectedFinding = ref(null);
 
 const props = defineProps({
   repository: Object,
@@ -61,8 +65,14 @@ function applyFilter(key, value) {
         <template #fallback>
           <SkeletonTable class="mt-6" />
         </template>
-        <FindingsTable v-if="findings" :findings="findings" class="mt-6 deferred-enter" />
+        <FindingsTable
+          v-if="findings"
+          :findings="findings"
+          class="mt-6 deferred-enter"
+          @select="selectedFinding = $event"
+        />
       </Deferred>
     </div>
+    <FindingDetailSidebar :finding="selectedFinding" @close="selectedFinding = null" />
   </AuthenticatedLayout>
 </template>
