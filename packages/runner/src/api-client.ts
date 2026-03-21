@@ -87,7 +87,8 @@ export async function postReviewRunResult(
       });
 
       if (response.ok) {
-        logger.info(`Posted review run result (status ${response.status})`);
+        const body = await response.text().catch(() => '');
+        logger.info(`Posted review run result (status ${response.status}, ${body.length} bytes)`);
         return true;
       }
 
