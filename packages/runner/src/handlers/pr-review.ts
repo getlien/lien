@@ -193,6 +193,7 @@ export async function handlePRReview(
         [],
         reviewRunId,
         logger,
+        logBuffer,
       );
       return;
     }
@@ -224,6 +225,7 @@ export async function handlePRReview(
         [],
         reviewRunId,
         logger,
+        logBuffer,
       );
       return;
     }
@@ -372,6 +374,7 @@ export async function handlePRReview(
         [],
         reviewRunId,
         logger,
+        logBuffer,
       );
     } catch (postError) {
       logger.error(
