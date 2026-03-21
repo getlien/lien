@@ -524,8 +524,10 @@ Rules:
 - callerFilepath/callerLine/callerSymbol must reference a CALLER shown above, not the changed function
 - Description: short statement. Good: "Passes null to JSON.parse — TypeError". Bad: "The function uses X which..."
 - Suggestion: concrete action. Good: "Guard with \`if (!x) return []\`". Bad: "Add null check"
-- Do NOT flag pre-existing patterns that were not introduced by the change
-- Do NOT confuse different types/interfaces in the same file — read signatures carefully
+- ONLY flag bugs INTRODUCED by the change — do NOT flag pre-existing patterns in unchanged code
+- Read function signatures from the code shown — do NOT guess or hallucinate type signatures
+- Optional parameters (marked with ?) do NOT need to be passed — omitting them is valid
+- Do NOT confuse different types/interfaces in the same file — check the ACTUAL type name
 - Do NOT flag null checks in test files where data was just created above
 - If no bugs, return \`{ "bugs": [] }\``;
 }
@@ -1455,6 +1457,12 @@ async function analyzeChangedCallers(
           })
           .join('\n\n');
 
+        // Include the diff patch so the LLM can focus on changed lines only
+        const callerPatch = context.pr?.patches?.get(caller.filepath);
+        const diffSection = callerPatch
+          ? `\n## Diff for ${caller.filepath}\n\n\`\`\`diff\n${truncateContent(callerPatch, 3000)}\n\`\`\`\n`
+          : '';
+
         const prompt = `Check if this changed function uses existing APIs correctly. Be terse — write like a linter, not a human.
 
 ## Changed Caller
@@ -1463,7 +1471,7 @@ async function analyzeChangedCallers(
 \`\`\`${caller.chunk.metadata.language ?? ''}
 ${caller.chunk.content}
 \`\`\`
-
+${diffSection}
 ## APIs Called by ${caller.symbolName}
 
 ${calleeSections}
@@ -1490,11 +1498,11 @@ ONLY valid JSON. Report bugs in the CHANGED CALLER, not the APIs it calls.
 \`\`\`
 
 Rules:
-- ONLY report bugs you are confident about in the changed caller
-- Check: wrong parameter count/types, missing null/error checks, incorrect assumptions about return values
-- Do NOT flag pre-existing patterns that were not introduced by the change
-- Do NOT flag null checks on values that are guaranteed by context (e.g., test factories, just-created data)
-- Read function signatures carefully — use the ACTUAL parameter types, not guesses
+- ONLY report bugs on CHANGED lines (visible in the diff above) — do NOT flag unchanged/pre-existing code
+- Read function signatures from the code shown — do NOT guess or hallucinate type signatures
+- Optional parameters (marked with ?) do NOT need to be passed — omitting them is valid
+- Do NOT flag null checks on values guaranteed by context (e.g., test factories, just-created data)
+- Do NOT confuse different types/interfaces in the same file — check the ACTUAL type name
 - If no bugs, return \`{ "bugs": [] }\``;
 
         const response = await context.llm!.complete(prompt, { temperature: 0 });
