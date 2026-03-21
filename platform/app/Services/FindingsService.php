@@ -186,6 +186,7 @@ class FindingsService
 
     /**
      * Classify a finding's risk level based on multiple heuristics.
+     * Uses a weighted scoring system across type, location, symbol, and resolution.
      *
      * @param  array<string, mixed>  $finding
      */
