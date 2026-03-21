@@ -147,6 +147,12 @@ button[role='switch']:focus-visible {
   user-select: none;
 }
 
+/* Finding line highlight */
+.finding-highlight-line {
+  background-color: color-mix(in srgb, var(--color-brand-500) 15%, transparent);
+  display: block;
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,
