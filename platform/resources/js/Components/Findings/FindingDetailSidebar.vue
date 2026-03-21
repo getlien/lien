@@ -1,5 +1,6 @@
 <script setup>
-import { watch, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
+import axios from 'axios';
 import { timeAgo, formatFullDate } from '@/utils/runs';
 
 const props = defineProps({
@@ -7,6 +8,12 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['close']);
+
+const sourceLoading = ref(false);
+const sourceError = ref(null);
+const sourceData = ref(null);
+const highlightedHtml = ref('');
+let abortController = null;
 
 const typeConfig = {
   bugs: { label: 'bug', color: 'bg-red-900/30 text-red-400' },
@@ -50,6 +57,124 @@ function close() {
   emit('close');
 }
 
+// Source code fetching
+watch(
+  () => props.finding,
+  (val, old) => {
+    if (val && val !== old) {
+      if (val.filepath && val.line && val.repository_id) {
+        fetchSource(val);
+      } else {
+        sourceData.value = null;
+        highlightedHtml.value = '';
+      }
+    }
+    if (!val) {
+      sourceData.value = null;
+      highlightedHtml.value = '';
+      sourceError.value = null;
+    }
+  },
+);
+
+async function fetchSource(finding) {
+  if (abortController) abortController.abort();
+  abortController = new AbortController();
+  const signal = abortController.signal;
+
+  sourceLoading.value = true;
+  sourceError.value = null;
+  sourceData.value = null;
+  highlightedHtml.value = '';
+
+  try {
+    const response = await axios.get(
+      `/repos/${finding.repository_id}/findings/${finding.id}/source`,
+      { signal },
+    );
+    sourceData.value = response.data;
+    await highlightCode(
+      response.data.source,
+      response.data.language,
+      response.data.line_start,
+      response.data.highlight_line,
+    );
+  } catch (err) {
+    if (axios.isCancel(err)) return;
+    sourceError.value = err.response?.data?.error || 'Failed to load source code.';
+  } finally {
+    if (!signal.aborted) sourceLoading.value = false;
+  }
+}
+
+let highlighterPromise = null;
+
+function getHighlighter() {
+  if (!highlighterPromise) {
+    highlighterPromise = (async () => {
+      const [{ createHighlighterCore }, { createOnigurumaEngine }] = await Promise.all([
+        import('shiki/core'),
+        import('shiki/engine/oniguruma'),
+      ]);
+
+      return createHighlighterCore({
+        themes: [import('shiki/themes/github-dark.mjs')],
+        langs: [
+          import('shiki/langs/typescript.mjs'),
+          import('shiki/langs/javascript.mjs'),
+          import('shiki/langs/php.mjs'),
+          import('shiki/langs/python.mjs'),
+          import('shiki/langs/ruby.mjs'),
+          import('shiki/langs/go.mjs'),
+          import('shiki/langs/rust.mjs'),
+          import('shiki/langs/java.mjs'),
+          import('shiki/langs/kotlin.mjs'),
+          import('shiki/langs/swift.mjs'),
+          import('shiki/langs/csharp.mjs'),
+          import('shiki/langs/vue.mjs'),
+        ],
+        engine: createOnigurumaEngine(import('shiki/wasm')),
+      });
+    })().catch(() => {
+      highlighterPromise = null;
+      return null;
+    });
+  }
+
+  return highlighterPromise;
+}
+
+async function highlightCode(code, language, lineStart, highlightLine) {
+  try {
+    const highlighter = await getHighlighter();
+    if (!highlighter) {
+      highlightedHtml.value = '';
+      return;
+    }
+
+    const lang = highlighter.getLoadedLanguages().includes(language) ? language : 'plaintext';
+    let html = highlighter.codeToHtml(code, {
+      lang,
+      theme: 'github-dark',
+      decorations:
+        highlightLine >= lineStart
+          ? [
+              {
+                start: { line: highlightLine - lineStart, character: 0 },
+                end: { line: highlightLine - lineStart + 1, character: 0 },
+                properties: { class: 'finding-highlight-line' },
+              },
+            ]
+          : [],
+    });
+    html = html.replace('<pre ', `<pre style="counter-reset:line-number ${lineStart - 1}" `);
+    highlightedHtml.value = html;
+  } catch {
+    highlightedHtml.value = '';
+  }
+}
+
+// Scroll lock
 let previousOverflow = '';
 
 watch(
@@ -72,6 +197,7 @@ function onKeydown(e) {
 
 onMounted(() => document.addEventListener('keydown', onKeydown));
 onUnmounted(() => {
+  if (abortController) abortController.abort();
   document.removeEventListener('keydown', onKeydown);
   document.body.style.overflow = previousOverflow;
 });
@@ -103,7 +229,7 @@ onUnmounted(() => {
     >
       <aside
         v-if="finding"
-        class="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-zinc-700 bg-zinc-800 shadow-xl"
+        class="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-zinc-700 bg-zinc-800 shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-label="Finding details"
@@ -166,10 +292,54 @@ onUnmounted(() => {
           </span>
         </div>
 
-        <!-- Body -->
-        <div class="flex-1 overflow-y-auto px-5 py-5">
-          <div class="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">
-            {{ finding.body }}
+        <!-- Scrollable content -->
+        <div class="flex-1 overflow-y-auto">
+          <!-- Body -->
+          <div class="border-b border-zinc-700 px-5 py-5">
+            <div class="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">
+              {{ finding.body }}
+            </div>
+          </div>
+
+          <!-- Source code -->
+          <div v-if="finding.filepath && finding.line">
+            <div class="flex items-center gap-2 px-5 py-3">
+              <svg
+                class="h-4 w-4 text-zinc-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"
+                />
+              </svg>
+              <span class="text-xs font-medium text-zinc-400">Source</span>
+            </div>
+
+            <!-- Loading -->
+            <div v-if="sourceLoading" class="space-y-2 px-5 pb-5">
+              <div
+                v-for="i in 8"
+                :key="i"
+                class="skeleton-shimmer h-4 rounded"
+                :style="{ width: `${30 + Math.random() * 60}%` }"
+              />
+            </div>
+
+            <!-- Error -->
+            <div v-else-if="sourceError" class="px-5 pb-5 text-sm text-zinc-500">
+              {{ sourceError }}
+            </div>
+
+            <!-- Highlighted source -->
+            <div v-else-if="sourceData" class="overflow-x-auto">
+              <div v-if="highlightedHtml" class="source-code text-sm" v-html="highlightedHtml" />
+              <pre v-else class="p-4 text-sm leading-6"><code>{{ sourceData.source }}</code></pre>
+            </div>
           </div>
         </div>
       </aside>

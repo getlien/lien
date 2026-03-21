@@ -3,6 +3,7 @@
 use App\Http\Controllers\Auth\GitHubAuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FindingsController;
+use App\Http\Controllers\FindingSourceController;
 use App\Http\Controllers\FunctionSourceController;
 use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\RepositoryConfigController;
@@ -40,6 +41,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/repos/{repository}/findings', [RepositoryFindingsController::class, 'index'])->name('repositories.findings');
 
     Route::get('/repos/{repository}/functions/{complexitySnapshot}/source', [FunctionSourceController::class, 'show'])->name('repositories.functions.source');
+    Route::get('/repos/{repository}/findings/{reviewComment}/source', [FindingSourceController::class, 'show'])->name('repositories.findings.source');
 
     Route::get('/repos/{repository}/runs', [ReviewRunController::class, 'index'])->name('repositories.runs.index');
     Route::get('/repos/{repository}/runs/{reviewRun}', [ReviewRunController::class, 'show'])->name('repositories.runs.show');
