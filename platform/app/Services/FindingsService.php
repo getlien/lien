@@ -164,6 +164,8 @@ class FindingsService
         if (! empty($filters['resolution'])) {
             if ($filters['resolution'] === 'open') {
                 $query->whereNull('review_comments.resolution');
+            } elseif ($filters['resolution'] === 'resolved') {
+                $query->whereIn('review_comments.resolution', ['resolved', 'auto_resolved']);
             } else {
                 $query->where('review_comments.resolution', $filters['resolution']);
             }
