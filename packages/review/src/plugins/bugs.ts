@@ -150,8 +150,9 @@ export class BugFinderPlugin implements ReviewPlugin {
       }
     }
 
-    logger.info(`Bug finder: ${allFindings.length} findings (grouped by changed function)`);
-    return allFindings;
+    const filtered = suppressFalsePositives(allFindings, logger);
+    logger.info(`Bug finder: ${filtered.length} findings (grouped by changed function)`);
+    return filtered;
   }
 
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
@@ -523,6 +524,9 @@ Rules:
 - callerFilepath/callerLine/callerSymbol must reference a CALLER shown above, not the changed function
 - Description: short statement. Good: "Passes null to JSON.parse — TypeError". Bad: "The function uses X which..."
 - Suggestion: concrete action. Good: "Guard with \`if (!x) return []\`". Bad: "Add null check"
+- Do NOT flag pre-existing patterns that were not introduced by the change
+- Do NOT confuse different types/interfaces in the same file — read signatures carefully
+- Do NOT flag null checks in test files where data was just created above
 - If no bugs, return \`{ "bugs": [] }\``;
 }
 
@@ -584,6 +588,37 @@ function normalizeBug(bug: BugReport): BugReport {
     callerSymbol: bug.callerSymbol ?? 'unknown',
     suggestion: bug.suggestion ?? '',
   };
+}
+
+const TEST_PATH_PATTERN = /(?:test[s]?|spec|__tests__)[/\\]|\.(?:test|spec)\./i;
+
+/**
+ * Post-LLM filter: suppress common false positive patterns.
+ * Applied after all analysis paths before returning findings.
+ */
+function suppressFalsePositives(findings: ReviewFinding[], logger: Logger): ReviewFinding[] {
+  const before = findings.length;
+  const filtered = findings.filter(f => {
+    const meta = f.metadata as BugFindingMetadata;
+
+    // Suppress null-check findings in test files — test assertions handle failures,
+    // and factory-created data is always present within the test scope.
+    if (meta.callers?.length > 0) {
+      const allCallersInTests = meta.callers.every(c => TEST_PATH_PATTERN.test(c.filepath));
+      if (allCallersInTests && meta.callers.every(c => c.category === 'null_check')) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  if (filtered.length < before) {
+    logger.info(
+      `Bug finder: suppressed ${before - filtered.length} false positive(s) in test files`,
+    );
+  }
+  return filtered;
 }
 
 // ---------------------------------------------------------------------------
@@ -1447,12 +1482,20 @@ ONLY valid JSON. Report bugs in the CHANGED CALLER, not the APIs it calls.
 Rules:
 - ONLY report bugs you are confident about in the changed caller
 - Check: wrong parameter count/types, missing null/error checks, incorrect assumptions about return values
+- Do NOT flag pre-existing patterns that were not introduced by the change
+- Do NOT flag null checks on values that are guaranteed by context (e.g., test factories, just-created data)
+- Read function signatures carefully — use the ACTUAL parameter types, not guesses
 - If no bugs, return \`{ "bugs": [] }\``;
 
     const response = await context.llm.complete(prompt, { temperature: 0 });
     const bugs = parseBugResponse(response.content, context.logger);
 
-    for (const bug of bugs) {
+    // Filter out bugs that reference a different function than the changed caller
+    const relevantBugs = bugs.filter(
+      b => !b.changedFunction || b.changedFunction === caller.symbolName,
+    );
+
+    for (const bug of relevantBugs) {
       const callerInfos: BugCallerInfo[] = [
         {
           filepath: bug.callerFilepath,
