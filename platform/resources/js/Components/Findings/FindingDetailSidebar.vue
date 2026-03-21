@@ -244,7 +244,7 @@ onUnmounted(() => {
     >
       <aside
         v-if="finding"
-        class="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-zinc-700 bg-zinc-800 shadow-xl"
+        class="fixed inset-y-0 right-0 z-50 flex w-full max-w-3xl flex-col border-l border-zinc-700 bg-zinc-800 shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-label="Finding details"
