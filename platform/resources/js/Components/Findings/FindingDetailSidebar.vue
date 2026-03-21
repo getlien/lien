@@ -98,6 +98,7 @@ async function fetchSource(finding) {
       response.data.language,
       response.data.line_start,
       response.data.highlight_line,
+      response.data.diff_lines ?? [],
     );
   } catch (err) {
     if (axios.isCancel(err)) return;
@@ -144,7 +145,7 @@ function getHighlighter() {
   return highlighterPromise;
 }
 
-async function highlightCode(code, language, lineStart, highlightLine) {
+async function highlightCode(code, language, lineStart, highlightLine, diffLines = []) {
   try {
     const highlighter = await getHighlighter();
     if (!highlighter) {
@@ -153,19 +154,33 @@ async function highlightCode(code, language, lineStart, highlightLine) {
     }
 
     const lang = highlighter.getLoadedLanguages().includes(language) ? language : 'plaintext';
+    const lineCount = code.split('\n').length;
+    const decorations = [];
+
+    // Diff line decorations (green background for added lines)
+    for (const l of diffLines) {
+      if (l >= lineStart && l - lineStart < lineCount) {
+        decorations.push({
+          start: { line: l - lineStart, character: 0 },
+          end: { line: l - lineStart + 1, character: 0 },
+          properties: { class: 'diff-add-line' },
+        });
+      }
+    }
+
+    // Finding line decoration (brand purple highlight — renders on top of diff)
+    if (highlightLine >= lineStart && highlightLine - lineStart < lineCount) {
+      decorations.push({
+        start: { line: highlightLine - lineStart, character: 0 },
+        end: { line: highlightLine - lineStart + 1, character: 0 },
+        properties: { class: 'finding-highlight-line' },
+      });
+    }
+
     let html = highlighter.codeToHtml(code, {
       lang,
       theme: 'github-dark',
-      decorations:
-        highlightLine >= lineStart
-          ? [
-              {
-                start: { line: highlightLine - lineStart, character: 0 },
-                end: { line: highlightLine - lineStart + 1, character: 0 },
-                properties: { class: 'finding-highlight-line' },
-              },
-            ]
-          : [],
+      decorations,
     });
     html = html.replace('<pre ', `<pre style="counter-reset:line-number ${lineStart - 1}" `);
     highlightedHtml.value = html;

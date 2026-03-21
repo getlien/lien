@@ -41,6 +41,75 @@ class GitHubFileService
     }
 
     /**
+     * Fetch the added line numbers for a file in a PR.
+     *
+     * @return list<int>
+     */
+    public function fetchAddedLines(Repository $repository, int $prNumber, string $filepath): array
+    {
+        $organization = $repository->organization;
+
+        if (! $organization->github_installation_id) {
+            return [];
+        }
+
+        try {
+            $token = $this->github->getInstallationToken($organization->github_installation_id);
+
+            $response = Http::withToken($token)
+                ->acceptJson()
+                ->timeout(10)
+                ->get("https://api.github.com/repos/{$repository->full_name}/pulls/{$prNumber}/files");
+
+            if (! $response->successful()) {
+                return [];
+            }
+
+            $files = $response->json();
+
+            foreach ($files as $file) {
+                if (($file['filename'] ?? '') === $filepath && isset($file['patch'])) {
+                    return $this->parseAddedLines($file['patch']);
+                }
+            }
+        } catch (\Throwable) {
+            // Gracefully degrade — diff is optional
+        }
+
+        return [];
+    }
+
+    /**
+     * Parse a unified diff patch to extract added line numbers.
+     *
+     * @return list<int>
+     */
+    private function parseAddedLines(string $patch): array
+    {
+        $lines = [];
+        $currentLine = 0;
+
+        foreach (explode("\n", $patch) as $line) {
+            if (preg_match('/^@@ -\d+(?:,\d+)? \+(\d+)/', $line, $m)) {
+                $currentLine = (int) $m[1];
+
+                continue;
+            }
+
+            if (str_starts_with($line, '+')) {
+                $lines[] = $currentLine;
+                $currentLine++;
+            } elseif (str_starts_with($line, '-')) {
+                // Deleted line — don't increment file line counter
+            } else {
+                $currentLine++;
+            }
+        }
+
+        return $lines;
+    }
+
+    /**
      * @return list<string>
      */
     private function fetchFileLines(Repository $repository, string $filepath, string $sha): array

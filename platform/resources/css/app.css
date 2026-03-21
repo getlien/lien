@@ -147,6 +147,13 @@ button[role='switch']:focus-visible {
   user-select: none;
 }
 
+/* Diff added line highlight */
+.diff-add-line {
+  background-color: color-mix(in srgb, #22c55e 10%, transparent);
+  display: block;
+  border-left: 2px solid #22c55e;
+}
+
 /* Finding line highlight */
 .finding-highlight-line {
   background-color: color-mix(in srgb, var(--color-brand-500) 15%, transparent);
