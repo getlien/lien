@@ -185,6 +185,71 @@ class FindingsService
     }
 
     /**
+     * Classify a finding's risk level based on multiple heuristics.
+     *
+     * @param  array<string, mixed>  $finding
+     */
+    public function classifyRisk(array $finding): string
+    {
+        $score = 0;
+
+        if (($finding['review_type'] ?? '') === 'bugs') {
+            $score += 10;
+        } elseif (($finding['review_type'] ?? '') === 'architectural') {
+            $score += 7;
+        } elseif (($finding['review_type'] ?? '') === 'complexity') {
+            $score += 5;
+        } elseif (($finding['review_type'] ?? '') === 'summary') {
+            $score += 2;
+        }
+
+        if (isset($finding['line']) && $finding['line'] < 50) {
+            $score += 3;
+        } elseif (isset($finding['line']) && $finding['line'] < 100) {
+            $score += 2;
+        } elseif (isset($finding['line']) && $finding['line'] < 200) {
+            $score += 1;
+        }
+
+        if (! empty($finding['symbol_name'])) {
+            if (str_contains($finding['symbol_name'], 'handle')) {
+                $score += 4;
+            } elseif (str_contains($finding['symbol_name'], 'process')) {
+                $score += 3;
+            } elseif (str_contains($finding['symbol_name'], 'validate')) {
+                $score += 2;
+            }
+        }
+
+        if (($finding['resolution'] ?? null) === null) {
+            $score += 5;
+        } elseif ($finding['resolution'] === 'dismissed') {
+            $score -= 10;
+        }
+
+        $filepath = $finding['filepath'] ?? '';
+        if (str_contains($filepath, 'Controller')) {
+            $score += 3;
+        } elseif (str_contains($filepath, 'Service')) {
+            $score += 2;
+        } elseif (str_contains($filepath, 'test')) {
+            $score -= 5;
+        }
+
+        if ($score >= 20) {
+            return 'critical';
+        } elseif ($score >= 15) {
+            return 'high';
+        } elseif ($score >= 10) {
+            return 'medium';
+        } elseif ($score >= 5) {
+            return 'low';
+        }
+
+        return 'info';
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function formatFinding(ReviewComment $comment): array
