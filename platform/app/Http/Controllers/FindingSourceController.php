@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\DetectsLanguage;
 use App\Models\Repository;
 use App\Models\ReviewComment;
 use App\Services\GitHubAppService;
@@ -10,6 +11,8 @@ use Illuminate\Support\Facades\Http;
 
 class FindingSourceController extends Controller
 {
+    use DetectsLanguage;
+
     private const CONTEXT_LINES = 10;
 
     public function __construct(private GitHubAppService $github) {}
@@ -82,26 +85,5 @@ class FindingSourceController extends Controller
             'filepath' => $reviewComment->filepath,
             'language' => $this->detectLanguage((string) $reviewComment->filepath),
         ]);
-    }
-
-    private function detectLanguage(string $filepath): string
-    {
-        $extension = pathinfo($filepath, PATHINFO_EXTENSION);
-
-        return match ($extension) {
-            'ts', 'tsx' => 'typescript',
-            'js', 'jsx', 'mjs' => 'javascript',
-            'php' => 'php',
-            'py' => 'python',
-            'rb' => 'ruby',
-            'go' => 'go',
-            'rs' => 'rust',
-            'java' => 'java',
-            'kt' => 'kotlin',
-            'swift' => 'swift',
-            'cs' => 'csharp',
-            'vue' => 'vue',
-            default => 'plaintext',
-        };
     }
 }

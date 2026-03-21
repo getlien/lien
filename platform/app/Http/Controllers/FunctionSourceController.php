@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\DetectsLanguage;
 use App\Models\ComplexitySnapshot;
 use App\Models\Repository;
 use App\Services\GitHubAppService;
@@ -10,6 +11,8 @@ use Illuminate\Support\Facades\Http;
 
 class FunctionSourceController extends Controller
 {
+    use DetectsLanguage;
+
     public function __construct(private GitHubAppService $github) {}
 
     public function show(Repository $repository, ComplexitySnapshot $complexitySnapshot): JsonResponse
@@ -75,26 +78,5 @@ class FunctionSourceController extends Controller
             'filepath' => $complexitySnapshot->filepath,
             'language' => $this->detectLanguage($complexitySnapshot->filepath),
         ]);
-    }
-
-    private function detectLanguage(string $filepath): string
-    {
-        $extension = pathinfo($filepath, PATHINFO_EXTENSION);
-
-        return match ($extension) {
-            'ts', 'tsx' => 'typescript',
-            'js', 'jsx', 'mjs' => 'javascript',
-            'php' => 'php',
-            'py' => 'python',
-            'rb' => 'ruby',
-            'go' => 'go',
-            'rs' => 'rust',
-            'java' => 'java',
-            'kt' => 'kotlin',
-            'swift' => 'swift',
-            'cs' => 'csharp',
-            'vue' => 'vue',
-            default => 'plaintext',
-        };
     }
 }
