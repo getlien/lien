@@ -80,7 +80,7 @@ class FindingSourceController extends Controller
             'line_end' => $lineEnd,
             'highlight_line' => $reviewComment->line,
             'filepath' => $reviewComment->filepath,
-            'language' => $this->detectLanguage($reviewComment->filepath),
+            'language' => $this->detectLanguage((string) $reviewComment->filepath),
         ]);
     }
 
