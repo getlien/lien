@@ -184,66 +184,37 @@ class FindingsService
         return $query;
     }
 
+    private const RISK_TYPE_SCORES = [
+        'bugs' => 10,
+        'architectural' => 7,
+        'complexity' => 5,
+        'summary' => 2,
+    ];
+
+    private const RISK_THRESHOLDS = [
+        20 => 'critical',
+        15 => 'high',
+        10 => 'medium',
+        5 => 'low',
+    ];
+
     /**
-     * Classify a finding's risk level based on multiple heuristics.
+     * Classify a finding's risk level based on type and resolution state.
      *
      * @param  array<string, mixed>  $finding
      */
     public function classifyRisk(array $finding): string
     {
-        $score = 0;
-
-        if (($finding['review_type'] ?? '') === 'bugs') {
-            $score += 10;
-        } elseif (($finding['review_type'] ?? '') === 'architectural') {
-            $score += 7;
-        } elseif (($finding['review_type'] ?? '') === 'complexity') {
-            $score += 5;
-        } elseif (($finding['review_type'] ?? '') === 'summary') {
-            $score += 2;
-        }
-
-        if (isset($finding['line']) && $finding['line'] < 50) {
-            $score += 3;
-        } elseif (isset($finding['line']) && $finding['line'] < 100) {
-            $score += 2;
-        } elseif (isset($finding['line']) && $finding['line'] < 200) {
-            $score += 1;
-        }
-
-        if (! empty($finding['symbol_name'])) {
-            if (str_contains($finding['symbol_name'], 'handle')) {
-                $score += 4;
-            } elseif (str_contains($finding['symbol_name'], 'process')) {
-                $score += 3;
-            } elseif (str_contains($finding['symbol_name'], 'validate')) {
-                $score += 2;
-            }
-        }
+        $score = self::RISK_TYPE_SCORES[$finding['review_type'] ?? ''] ?? 0;
 
         if (($finding['resolution'] ?? null) === null) {
             $score += 5;
-        } elseif ($finding['resolution'] === 'dismissed') {
-            $score -= 10;
         }
 
-        $filepath = $finding['filepath'] ?? '';
-        if (str_contains($filepath, 'Controller')) {
-            $score += 3;
-        } elseif (str_contains($filepath, 'Service')) {
-            $score += 2;
-        } elseif (str_contains($filepath, 'test')) {
-            $score -= 5;
-        }
-
-        if ($score >= 20) {
-            return 'critical';
-        } elseif ($score >= 15) {
-            return 'high';
-        } elseif ($score >= 10) {
-            return 'medium';
-        } elseif ($score >= 5) {
-            return 'low';
+        foreach (self::RISK_THRESHOLDS as $threshold => $level) {
+            if ($score >= $threshold) {
+                return $level;
+            }
         }
 
         return 'info';
