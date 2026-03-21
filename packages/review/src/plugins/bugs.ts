@@ -886,21 +886,22 @@ async function analyzeChangedConstants(context: ReviewContext): Promise<ReviewFi
   if (changedConstants.length === 0) return [];
 
   context.logger.info(`Bug finder: ${changedConstants.length} changed constant(s) to analyze`);
-  const findings: ReviewFinding[] = [];
 
-  for (const { filepath, name, oldValue, newValue } of changedConstants) {
-    const importers = findImporters(name, filepath, context.repoChunks);
-    if (importers.length === 0) continue;
+  const findings = (
+    await Promise.all(
+      changedConstants
+        .map(c => ({ ...c, importers: findImporters(c.name, c.filepath, context.repoChunks!) }))
+        .filter(c => c.importers.length > 0)
+        .map(async ({ filepath, name, oldValue, newValue, importers }) => {
+          const topImporters = importers.slice(0, MAX_TYPE_IMPORTERS);
+          const importerSections = topImporters
+            .map(c => {
+              const content = truncateContent(c.content, MAX_IMPORTER_SNIPPET_CHARS);
+              return `**${c.metadata.file}::${c.metadata.symbolName}** (line ${c.metadata.startLine})\n\`\`\`${c.metadata.language ?? ''}\n${content}\n\`\`\``;
+            })
+            .join('\n\n');
 
-    const topImporters = importers.slice(0, MAX_TYPE_IMPORTERS);
-    const importerSections = topImporters
-      .map(c => {
-        const content = truncateContent(c.content, MAX_IMPORTER_SNIPPET_CHARS);
-        return `**${c.metadata.file}::${c.metadata.symbolName}** (line ${c.metadata.startLine})\n\`\`\`${c.metadata.language ?? ''}\n${content}\n\`\`\``;
-      })
-      .join('\n\n');
-
-    const prompt = `Check if this constant value change breaks assumptions in consuming code. Be terse — write like a linter, not a human.
+          const prompt = `Check if this constant value change breaks assumptions in consuming code. Be terse — write like a linter, not a human.
 
 ## Changed Constant
 
@@ -938,37 +939,39 @@ Rules:
 - Look for: hardcoded assumptions about the value, boundary conditions, off-by-one errors from value changes
 - If no bugs, return \`{ "bugs": [] }\``;
 
-    const response = await context.llm.complete(prompt, { temperature: 0 });
-    const bugs = parseBugResponse(response.content, context.logger);
+          const response = await context.llm!.complete(prompt, { temperature: 0 });
+          const bugs = parseBugResponse(response.content, context.logger);
 
-    for (const bug of bugs) {
-      const callerInfos: BugCallerInfo[] = [
-        {
-          filepath: bug.callerFilepath,
-          line: bug.callerLine,
-          symbol: bug.callerSymbol,
-          category: bug.category,
-          description: bug.description,
-          suggestion: bug.suggestion,
-        },
-      ];
+          return bugs.map(bug => {
+            const callerInfos: BugCallerInfo[] = [
+              {
+                filepath: bug.callerFilepath,
+                line: bug.callerLine,
+                symbol: bug.callerSymbol,
+                category: bug.category,
+                description: bug.description,
+                suggestion: bug.suggestion,
+              },
+            ];
 
-      findings.push({
-        pluginId: 'bugs',
-        filepath,
-        line: 1,
-        symbolName: name,
-        severity: bug.severity,
-        category: 'bug',
-        message: formatCallerTable(callerInfos),
-        metadata: {
-          pluginType: 'bugs',
-          changedFunction: `${filepath}::${name}`,
-          callers: callerInfos,
-        },
-      });
-    }
-  }
+            return {
+              pluginId: 'bugs',
+              filepath,
+              line: 1,
+              symbolName: name,
+              severity: bug.severity,
+              category: 'bug',
+              message: formatCallerTable(callerInfos),
+              metadata: {
+                pluginType: 'bugs',
+                changedFunction: `${filepath}::${name}`,
+                callers: callerInfos,
+              },
+            } satisfies ReviewFinding;
+          });
+        }),
+    )
+  ).flat();
 
   if (findings.length > 0) {
     context.logger.info(`Bug finder: ${findings.length} constant value violation(s) found`);
@@ -1073,25 +1076,27 @@ async function analyzeChangedEnums(context: ReviewContext): Promise<ReviewFindin
   if (changedEnums.length === 0) return [];
 
   context.logger.info(`Bug finder: ${changedEnums.length} changed enum(s) to analyze`);
-  const findings: ReviewFinding[] = [];
 
-  for (const { filepath, name, removedVariants, addedVariants } of changedEnums) {
-    const importers = findImporters(name, filepath, context.repoChunks);
-    if (importers.length === 0) continue;
+  const findings = (
+    await Promise.all(
+      changedEnums
+        .map(e => ({ ...e, importers: findImporters(e.name, e.filepath, context.repoChunks!) }))
+        .filter(e => e.importers.length > 0)
+        .map(async ({ filepath, name, removedVariants, addedVariants, importers }) => {
+          const topImporters = importers.slice(0, MAX_TYPE_IMPORTERS);
+          const importerSections = topImporters
+            .map(c => {
+              const content = truncateContent(c.content, MAX_IMPORTER_SNIPPET_CHARS);
+              return `**${c.metadata.file}::${c.metadata.symbolName}** (line ${c.metadata.startLine})\n\`\`\`${c.metadata.language ?? ''}\n${content}\n\`\`\``;
+            })
+            .join('\n\n');
 
-    const topImporters = importers.slice(0, MAX_TYPE_IMPORTERS);
-    const importerSections = topImporters
-      .map(c => {
-        const content = truncateContent(c.content, MAX_IMPORTER_SNIPPET_CHARS);
-        return `**${c.metadata.file}::${c.metadata.symbolName}** (line ${c.metadata.startLine})\n\`\`\`${c.metadata.language ?? ''}\n${content}\n\`\`\``;
-      })
-      .join('\n\n');
+          const changes: string[] = [];
+          if (removedVariants.length > 0)
+            changes.push(`Removed variants: ${removedVariants.join(', ')}`);
+          if (addedVariants.length > 0) changes.push(`Added variants: ${addedVariants.join(', ')}`);
 
-    const changes: string[] = [];
-    if (removedVariants.length > 0) changes.push(`Removed variants: ${removedVariants.join(', ')}`);
-    if (addedVariants.length > 0) changes.push(`Added variants: ${addedVariants.join(', ')}`);
-
-    const prompt = `Check if this enum change breaks consuming code. Be terse — write like a linter, not a human.
+          const prompt = `Check if this enum change breaks consuming code. Be terse — write like a linter, not a human.
 
 ## Changed Enum: ${name}
 
@@ -1129,37 +1134,39 @@ Rules:
 - For added variants: check for non-exhaustive switch/match statements that miss the new variant
 - If no bugs, return \`{ "bugs": [] }\``;
 
-    const response = await context.llm.complete(prompt, { temperature: 0 });
-    const bugs = parseBugResponse(response.content, context.logger);
+          const response = await context.llm!.complete(prompt, { temperature: 0 });
+          const bugs = parseBugResponse(response.content, context.logger);
 
-    for (const bug of bugs) {
-      const callerInfos: BugCallerInfo[] = [
-        {
-          filepath: bug.callerFilepath,
-          line: bug.callerLine,
-          symbol: bug.callerSymbol,
-          category: bug.category,
-          description: bug.description,
-          suggestion: bug.suggestion,
-        },
-      ];
+          return bugs.map(bug => {
+            const callerInfos: BugCallerInfo[] = [
+              {
+                filepath: bug.callerFilepath,
+                line: bug.callerLine,
+                symbol: bug.callerSymbol,
+                category: bug.category,
+                description: bug.description,
+                suggestion: bug.suggestion,
+              },
+            ];
 
-      findings.push({
-        pluginId: 'bugs',
-        filepath,
-        line: 1,
-        symbolName: name,
-        severity: bug.severity,
-        category: 'bug',
-        message: formatCallerTable(callerInfos),
-        metadata: {
-          pluginType: 'bugs',
-          changedFunction: `${filepath}::${name}`,
-          callers: callerInfos,
-        },
-      });
-    }
-  }
+            return {
+              pluginId: 'bugs',
+              filepath,
+              line: 1,
+              symbolName: name,
+              severity: bug.severity,
+              category: 'bug',
+              message: formatCallerTable(callerInfos),
+              metadata: {
+                pluginType: 'bugs',
+                changedFunction: `${filepath}::${name}`,
+                callers: callerInfos,
+              },
+            } satisfies ReviewFinding;
+          });
+        }),
+    )
+  ).flat();
 
   return findings;
 }
@@ -1276,21 +1283,22 @@ async function analyzeChangedConfigKeys(context: ReviewContext): Promise<ReviewF
   if (changedKeys.length === 0) return [];
 
   context.logger.info(`Bug finder: ${changedKeys.length} changed config key(s) to analyze`);
-  const findings: ReviewFinding[] = [];
 
-  for (const { filepath, key, oldValue, newValue } of changedKeys) {
-    const refs = findConfigReferences(key, context.repoChunks);
-    if (refs.length === 0) continue;
+  const findings = (
+    await Promise.all(
+      changedKeys
+        .map(k => ({ ...k, refs: findConfigReferences(k.key, context.repoChunks!) }))
+        .filter(k => k.refs.length > 0)
+        .map(async ({ filepath, key, oldValue, newValue, refs }) => {
+          const topRefs = refs.slice(0, MAX_TYPE_IMPORTERS);
+          const refSections = topRefs
+            .map(c => {
+              const content = truncateContent(c.content, MAX_IMPORTER_SNIPPET_CHARS);
+              return `**${c.metadata.file}::${c.metadata.symbolName}** (line ${c.metadata.startLine})\n\`\`\`${c.metadata.language ?? ''}\n${content}\n\`\`\``;
+            })
+            .join('\n\n');
 
-    const topRefs = refs.slice(0, MAX_TYPE_IMPORTERS);
-    const refSections = topRefs
-      .map(c => {
-        const content = truncateContent(c.content, MAX_IMPORTER_SNIPPET_CHARS);
-        return `**${c.metadata.file}::${c.metadata.symbolName}** (line ${c.metadata.startLine})\n\`\`\`${c.metadata.language ?? ''}\n${content}\n\`\`\``;
-      })
-      .join('\n\n');
-
-    const prompt = `Check if this config value change breaks consuming code. Be terse — write like a linter, not a human.
+          const prompt = `Check if this config value change breaks consuming code. Be terse — write like a linter, not a human.
 
 ## Changed Config
 
@@ -1329,37 +1337,39 @@ Rules:
 - Look for: hardcoded assumptions about the old value, type mismatches from new value, boundary violations
 - If no bugs, return \`{ "bugs": [] }\``;
 
-    const response = await context.llm.complete(prompt, { temperature: 0 });
-    const bugs = parseBugResponse(response.content, context.logger);
+          const response = await context.llm!.complete(prompt, { temperature: 0 });
+          const bugs = parseBugResponse(response.content, context.logger);
 
-    for (const bug of bugs) {
-      const callerInfos: BugCallerInfo[] = [
-        {
-          filepath: bug.callerFilepath,
-          line: bug.callerLine,
-          symbol: bug.callerSymbol,
-          category: bug.category,
-          description: bug.description,
-          suggestion: bug.suggestion,
-        },
-      ];
+          return bugs.map(bug => {
+            const callerInfos: BugCallerInfo[] = [
+              {
+                filepath: bug.callerFilepath,
+                line: bug.callerLine,
+                symbol: bug.callerSymbol,
+                category: bug.category,
+                description: bug.description,
+                suggestion: bug.suggestion,
+              },
+            ];
 
-      findings.push({
-        pluginId: 'bugs',
-        filepath,
-        line: 1,
-        symbolName: key,
-        severity: bug.severity,
-        category: 'bug',
-        message: formatCallerTable(callerInfos),
-        metadata: {
-          pluginType: 'bugs',
-          changedFunction: `${filepath}::${key}`,
-          callers: callerInfos,
-        },
-      });
-    }
-  }
+            return {
+              pluginId: 'bugs',
+              filepath,
+              line: 1,
+              symbolName: key,
+              severity: bug.severity,
+              category: 'bug',
+              message: formatCallerTable(callerInfos),
+              metadata: {
+                pluginType: 'bugs',
+                changedFunction: `${filepath}::${key}`,
+                callers: callerInfos,
+              },
+            } satisfies ReviewFinding;
+          });
+        }),
+    )
+  ).flat();
 
   if (findings.length > 0) {
     context.logger.info(`Bug finder: ${findings.length} config key violation(s) found`);
@@ -1434,18 +1444,18 @@ async function analyzeChangedCallers(
     `Bug finder: analyzing ${callerCalleesPairs.length} changed caller(s) for correct API usage`,
   );
 
-  const findings: ReviewFinding[] = [];
+  const findings = (
+    await Promise.all(
+      callerCalleesPairs.map(async ({ caller, callees }) => {
+        const calleeSections = callees
+          .map(c => {
+            const sig = c.metadata.signature ?? c.metadata.symbolName ?? 'unknown';
+            const content = truncateContent(c.content, MAX_CALLER_SNIPPET_CHARS);
+            return `### ${c.metadata.file}::${c.metadata.symbolName}\nSignature: \`${sig}\`\nReturn type: \`${c.metadata.returnType ?? 'unknown'}\`\n\n\`\`\`${c.metadata.language ?? ''}\n${content}\n\`\`\``;
+          })
+          .join('\n\n');
 
-  for (const { caller, callees } of callerCalleesPairs) {
-    const calleeSections = callees
-      .map(c => {
-        const sig = c.metadata.signature ?? c.metadata.symbolName ?? 'unknown';
-        const content = truncateContent(c.content, MAX_CALLER_SNIPPET_CHARS);
-        return `### ${c.metadata.file}::${c.metadata.symbolName}\nSignature: \`${sig}\`\nReturn type: \`${c.metadata.returnType ?? 'unknown'}\`\n\n\`\`\`${c.metadata.language ?? ''}\n${content}\n\`\`\``;
-      })
-      .join('\n\n');
-
-    const prompt = `Check if this changed function uses existing APIs correctly. Be terse — write like a linter, not a human.
+        const prompt = `Check if this changed function uses existing APIs correctly. Be terse — write like a linter, not a human.
 
 ## Changed Caller
 
@@ -1487,42 +1497,42 @@ Rules:
 - Read function signatures carefully — use the ACTUAL parameter types, not guesses
 - If no bugs, return \`{ "bugs": [] }\``;
 
-    const response = await context.llm.complete(prompt, { temperature: 0 });
-    const bugs = parseBugResponse(response.content, context.logger);
+        const response = await context.llm!.complete(prompt, { temperature: 0 });
+        const bugs = parseBugResponse(response.content, context.logger);
 
-    // Filter out bugs that reference a different function than the changed caller
-    const relevantBugs = bugs.filter(
-      b => !b.changedFunction || b.changedFunction === caller.symbolName,
-    );
+        // Filter out bugs that reference a different function than the changed caller
+        return bugs
+          .filter(b => !b.changedFunction || b.changedFunction === caller.symbolName)
+          .map(bug => {
+            const callerInfos: BugCallerInfo[] = [
+              {
+                filepath: bug.callerFilepath,
+                line: bug.callerLine,
+                symbol: bug.callerSymbol,
+                category: bug.category,
+                description: bug.description,
+                suggestion: bug.suggestion,
+              },
+            ];
 
-    for (const bug of relevantBugs) {
-      const callerInfos: BugCallerInfo[] = [
-        {
-          filepath: bug.callerFilepath,
-          line: bug.callerLine,
-          symbol: bug.callerSymbol,
-          category: bug.category,
-          description: bug.description,
-          suggestion: bug.suggestion,
-        },
-      ];
-
-      findings.push({
-        pluginId: 'bugs',
-        filepath: caller.filepath,
-        line: caller.chunk.metadata.startLine,
-        symbolName: caller.symbolName,
-        severity: bug.severity,
-        category: 'bug',
-        message: formatCallerTable(callerInfos),
-        metadata: {
-          pluginType: 'bugs',
-          changedFunction: `${caller.filepath}::${caller.symbolName}`,
-          callers: callerInfos,
-        },
-      });
-    }
-  }
+            return {
+              pluginId: 'bugs',
+              filepath: caller.filepath,
+              line: caller.chunk.metadata.startLine,
+              symbolName: caller.symbolName,
+              severity: bug.severity,
+              category: 'bug',
+              message: formatCallerTable(callerInfos),
+              metadata: {
+                pluginType: 'bugs',
+                changedFunction: `${caller.filepath}::${caller.symbolName}`,
+                callers: callerInfos,
+              },
+            } satisfies ReviewFinding;
+          });
+      }),
+    )
+  ).flat();
 
   return findings;
 }
