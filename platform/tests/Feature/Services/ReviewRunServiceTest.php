@@ -48,6 +48,7 @@ class ReviewRunServiceTest extends TestCase
                     'filepath' => 'src/auth.ts',
                     'line' => 15,
                     'body' => 'High complexity.',
+                    'category' => 'cyclomatic',
                     'status' => 'posted',
                 ],
             ],
