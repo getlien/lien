@@ -113,7 +113,13 @@ class StoreReviewRunRequest extends FormRequest
 
             'review_comments' => ['sometimes', 'array'],
             'review_comments.*.review_type' => ['required', 'string'],
-            'review_comments.*.filepath' => ['nullable', 'string', 'required_unless:review_comments.*.review_type,summary'],
+            'review_comments.*.filepath' => ['nullable', 'string', function (string $attribute, mixed $value, \Closure $fail) {
+                $index = explode('.', $attribute)[1];
+                $reviewType = $this->input("review_comments.{$index}.review_type");
+                if ($reviewType !== 'summary' && ($value === null || $value === '')) {
+                    $fail('The filepath field is required unless review type is summary.');
+                }
+            }],
             'review_comments.*.line' => ['nullable', 'integer', 'min:1'],
             'review_comments.*.symbol_name' => ['nullable', 'string'],
             'review_comments.*.body' => ['required', 'string'],

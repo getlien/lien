@@ -348,6 +348,7 @@ export async function handlePRReview(
       reviewComments,
       reviewRunId,
       logger,
+      logBuffer,
     );
   } catch (error) {
     logger.error(`PR review failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -766,6 +767,7 @@ async function postResult(
   reviewComments: ReviewCommentResult[],
   reviewRunId: number | null,
   logger: Logger,
+  logBuffer?: LogBuffer | null,
 ): Promise<void> {
   const configHash = createHash('sha256')
     .update(JSON.stringify(payload.config))
@@ -805,15 +807,9 @@ async function postResult(
     logger,
   );
   if (!posted) {
-    if (reviewRunId != null) {
-      logger.error(
-        `Platform callback failed for review_run_id=${reviewRunId} — result not persisted`,
-      );
-    } else {
-      logger.error(
-        `Platform callback failed — result not persisted (repo_id=${payload.repository.id}, pr_number=${payload.pull_request.number}, head_sha=${payload.pull_request.head_sha})`,
-      );
-    }
+    const errorMsg = `Platform callback failed — ${reviewComments.length} review comments not persisted`;
+    logger.error(errorMsg);
+    logBuffer?.add('error', errorMsg);
   }
 
   // Transition platform review run to terminal state (running → completed/failed)

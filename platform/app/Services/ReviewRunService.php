@@ -8,6 +8,7 @@ use App\Enums\ReviewRunType;
 use App\Models\ReviewComment;
 use App\Models\ReviewRun;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ReviewRunService
 {
@@ -120,6 +121,9 @@ class ReviewRunService
         $this->syncCollection($reviewRun, 'complexitySnapshots', $data, 'complexity_snapshots', 'repository_id');
 
         if (array_key_exists('review_comments', $data)) {
+            $count = count($data['review_comments']);
+            Log::info('Syncing review comments', ['review_run_id' => $reviewRun->id, 'count' => $count]);
+
             $data['review_comments'] = array_map(function (array $comment) {
                 $comment['fingerprint'] = $this->computeFingerprint($comment);
 
