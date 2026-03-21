@@ -7,6 +7,7 @@ import ComplexityTrendChart from '@/Components/Charts/ComplexityTrendChart.vue';
 import TopFunctionsTable from '@/Components/Tables/TopFunctionsTable.vue';
 import RecentRunsTable from '@/Components/Tables/RecentRunsTable.vue';
 import RecentFindingsFeed from '@/Components/Dashboard/RecentFindingsFeed.vue';
+import FindingDetailSidebar from '@/Components/Findings/FindingDetailSidebar.vue';
 import FunctionSourceOverlay from '@/Components/Overlays/FunctionSourceOverlay.vue';
 import StatCard from '@/Components/StatCard.vue';
 import SkeletonChart from '@/Components/Skeletons/SkeletonChart.vue';
@@ -14,6 +15,7 @@ import SkeletonTable from '@/Components/Skeletons/SkeletonTable.vue';
 import SkeletonStatGrid from '@/Components/Skeletons/SkeletonStatGrid.vue';
 
 const selectedFunction = ref(null);
+const selectedFinding = ref(null);
 
 const props = defineProps({
   repository: Object,
@@ -222,7 +224,11 @@ function baselinePercent() {
             </Link>
           </div>
           <div class="mt-3">
-            <RecentFindingsFeed v-if="recentFindings" :findings="recentFindings" />
+            <RecentFindingsFeed
+              v-if="recentFindings"
+              :findings="recentFindings"
+              @select="selectedFinding = $event"
+            />
           </div>
         </div>
       </Deferred>
@@ -253,5 +259,6 @@ function baselinePercent() {
       :function-data="selectedFunction"
       @close="selectedFunction = null"
     />
+    <FindingDetailSidebar :finding="selectedFinding" @close="selectedFinding = null" />
   </AuthenticatedLayout>
 </template>

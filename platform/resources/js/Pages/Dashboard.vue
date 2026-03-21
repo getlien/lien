@@ -1,11 +1,15 @@
 <script setup>
+import { ref } from 'vue';
 import { Deferred, Link, Head, router } from '@inertiajs/vue3';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import ImpactStats from '@/Components/Dashboard/ImpactStats.vue';
 import RecentFindingsFeed from '@/Components/Dashboard/RecentFindingsFeed.vue';
+import FindingDetailSidebar from '@/Components/Findings/FindingDetailSidebar.vue';
 import SkeletonStatGrid from '@/Components/Skeletons/SkeletonStatGrid.vue';
 import SkeletonTable from '@/Components/Skeletons/SkeletonTable.vue';
 import { statusBadge, timeAgo } from '@/utils/runs';
+
+const selectedFinding = ref(null);
 
 const props = defineProps({
   repositories: Array,
@@ -61,7 +65,11 @@ function setRange(n) {
             </Link>
           </div>
           <div class="mt-3">
-            <RecentFindingsFeed v-if="recentFindings" :findings="recentFindings" />
+            <RecentFindingsFeed
+              v-if="recentFindings"
+              :findings="recentFindings"
+              @select="selectedFinding = $event"
+            />
           </div>
         </div>
       </Deferred>
@@ -147,5 +155,6 @@ function setRange(n) {
         Get Started
       </Link>
     </div>
+    <FindingDetailSidebar :finding="selectedFinding" @close="selectedFinding = null" />
   </AuthenticatedLayout>
 </template>
