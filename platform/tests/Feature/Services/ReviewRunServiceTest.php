@@ -2,9 +2,11 @@
 
 namespace Tests\Feature\Services;
 
+use App\Enums\CommentResolution;
 use App\Enums\ReviewRunStatus;
 use App\Enums\ReviewRunType;
 use App\Models\Repository;
+use App\Models\ReviewComment;
 use App\Models\ReviewRun;
 use App\Services\ReviewRunService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -46,6 +48,7 @@ class ReviewRunServiceTest extends TestCase
                     'filepath' => 'src/auth.ts',
                     'line' => 15,
                     'body' => 'High complexity.',
+                    'category' => 'cyclomatic',
                     'status' => 'posted',
                 ],
             ],
@@ -353,6 +356,162 @@ class ReviewRunServiceTest extends TestCase
         $reviewRun->refresh();
         $this->assertEquals(ReviewRunStatus::Running, $reviewRun->status);
         $this->assertNotNull($reviewRun->started_at);
+    }
+
+    public function test_auto_resolve_prior_findings_on_new_push(): void
+    {
+        // Run 1: findings A, B, C
+        $run1 = $this->service->createOrUpdate($this->basePayload([
+            'head_sha' => str_repeat('1', 40),
+            'review_comments' => [
+                ['review_type' => 'bugs', 'filepath' => 'src/a.ts', 'symbol_name' => 'funcA', 'category' => 'null_check', 'line' => 10, 'body' => 'Finding A', 'status' => 'posted'],
+                ['review_type' => 'bugs', 'filepath' => 'src/b.ts', 'symbol_name' => 'funcB', 'category' => 'null_check', 'line' => 20, 'body' => 'Finding B', 'status' => 'posted'],
+                ['review_type' => 'complexity', 'filepath' => 'src/c.ts', 'symbol_name' => 'funcC', 'category' => 'cyclomatic', 'line' => 30, 'body' => 'Finding C', 'status' => 'posted'],
+            ],
+        ]));
+
+        $this->assertEquals(3, $run1->reviewComments()->count());
+        $this->assertTrue($run1->reviewComments()->whereNotNull('fingerprint')->count() === 3);
+
+        // Run 2: only finding A remains (B and C were fixed)
+        $run2 = $this->service->createOrUpdate($this->basePayload([
+            'head_sha' => str_repeat('2', 40),
+            'review_comments' => [
+                ['review_type' => 'bugs', 'filepath' => 'src/a.ts', 'symbol_name' => 'funcA', 'category' => 'null_check', 'line' => 12, 'body' => 'Finding A still', 'status' => 'posted'],
+            ],
+        ]));
+
+        // B and C from run 1 should be auto-resolved
+        $run1Comments = $run1->reviewComments()->get();
+        $findingA = $run1Comments->firstWhere('body', 'Finding A');
+        $findingB = $run1Comments->firstWhere('body', 'Finding B');
+        $findingC = $run1Comments->firstWhere('body', 'Finding C');
+
+        $this->assertNull($findingA->resolution);
+        $this->assertEquals(CommentResolution::AutoResolved, $findingB->resolution);
+        $this->assertEquals(CommentResolution::AutoResolved, $findingC->resolution);
+    }
+
+    public function test_auto_resolve_preserves_manual_resolutions(): void
+    {
+        $run1 = $this->service->createOrUpdate($this->basePayload([
+            'head_sha' => str_repeat('1', 40),
+            'review_comments' => [
+                ['review_type' => 'bugs', 'filepath' => 'src/a.ts', 'symbol_name' => 'funcA', 'category' => 'null_check', 'line' => 10, 'body' => 'Finding A', 'status' => 'posted'],
+                ['review_type' => 'bugs', 'filepath' => 'src/b.ts', 'symbol_name' => 'funcB', 'category' => 'null_check', 'line' => 20, 'body' => 'Finding B', 'status' => 'posted'],
+            ],
+        ]));
+
+        // Manually resolve finding B
+        $findingB = $run1->reviewComments()->where('body', 'Finding B')->first();
+        $findingB->update(['resolution' => CommentResolution::Resolved]);
+
+        // Run 2: neither A nor B present
+        $this->service->createOrUpdate($this->basePayload([
+            'head_sha' => str_repeat('2', 40),
+            'review_comments' => [],
+        ]));
+
+        $findingA = $run1->reviewComments()->where('body', 'Finding A')->first();
+        $findingB->refresh();
+
+        $this->assertEquals(CommentResolution::AutoResolved, $findingA->resolution);
+        $this->assertEquals(CommentResolution::Resolved, $findingB->resolution);
+    }
+
+    public function test_auto_resolve_does_not_run_for_baselines(): void
+    {
+        $run1 = $this->service->createOrUpdate($this->basePayload([
+            'head_sha' => str_repeat('1', 40),
+            'pr_number' => null,
+            'review_comments' => [
+                ['review_type' => 'complexity', 'filepath' => 'src/a.ts', 'symbol_name' => 'funcA', 'category' => 'cyclomatic', 'line' => 10, 'body' => 'High complexity', 'status' => 'posted'],
+            ],
+        ]));
+
+        $this->assertNull($run1->reviewComments()->first()->resolution);
+
+        // Another baseline run with no comments
+        $this->service->createOrUpdate($this->basePayload([
+            'head_sha' => str_repeat('2', 40),
+            'pr_number' => null,
+            'review_comments' => [],
+        ]));
+
+        // Should NOT be auto-resolved since both are baselines
+        $this->assertNull($run1->reviewComments()->first()->fresh()->resolution);
+    }
+
+    public function test_auto_resolve_ignores_comments_without_fingerprints(): void
+    {
+        // Create a run with legacy comments (no fingerprint)
+        $run1 = ReviewRun::factory()->create([
+            'repository_id' => $this->repository->id,
+            'type' => ReviewRunType::Pr,
+            'pr_number' => 42,
+            'head_sha' => str_repeat('1', 40),
+            'status' => ReviewRunStatus::Completed,
+        ]);
+
+        ReviewComment::factory()->create([
+            'review_run_id' => $run1->id,
+            'fingerprint' => null,
+        ]);
+
+        // New run with no comments
+        $this->service->createOrUpdate($this->basePayload([
+            'head_sha' => str_repeat('2', 40),
+            'review_comments' => [],
+        ]));
+
+        // Legacy comment should NOT be auto-resolved
+        $this->assertNull($run1->reviewComments()->first()->fresh()->resolution);
+    }
+
+    public function test_auto_resolve_skips_when_no_review_comments_key(): void
+    {
+        $run1 = $this->service->createOrUpdate($this->basePayload([
+            'head_sha' => str_repeat('1', 40),
+            'review_comments' => [
+                ['review_type' => 'bugs', 'filepath' => 'src/a.ts', 'symbol_name' => 'funcA', 'category' => 'null_check', 'line' => 10, 'body' => 'Finding A', 'status' => 'posted'],
+            ],
+        ]));
+
+        // Status-only update (no review_comments key)
+        $this->service->createOrUpdate($this->basePayload([
+            'head_sha' => str_repeat('2', 40),
+            'status' => 'completed',
+            'files_analyzed' => 5,
+        ]));
+
+        $this->assertNull($run1->reviewComments()->first()->fresh()->resolution);
+    }
+
+    public function test_auto_resolve_first_run_is_noop(): void
+    {
+        $run = $this->service->createOrUpdate($this->basePayload([
+            'review_comments' => [
+                ['review_type' => 'bugs', 'filepath' => 'src/a.ts', 'symbol_name' => 'funcA', 'category' => 'null_check', 'line' => 10, 'body' => 'Finding A', 'status' => 'posted'],
+            ],
+        ]));
+
+        $resolved = $this->service->autoResolvePriorFindings($run);
+
+        $this->assertEquals(0, $resolved);
+    }
+
+    public function test_fingerprint_is_computed_on_create(): void
+    {
+        $run = $this->service->createOrUpdate($this->basePayload([
+            'review_comments' => [
+                ['review_type' => 'bugs', 'filepath' => 'src/a.ts', 'symbol_name' => 'funcA', 'category' => 'null_check', 'line' => 10, 'body' => 'Test', 'status' => 'posted'],
+            ],
+        ]));
+
+        $comment = $run->reviewComments()->first();
+        $expected = hash('sha256', 'bugs:src/a.ts:funcA:null_check');
+
+        $this->assertEquals($expected, $comment->fingerprint);
     }
 
     /**

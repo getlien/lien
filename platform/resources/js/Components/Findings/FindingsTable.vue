@@ -16,6 +16,7 @@ const typeConfig = {
 
 const resolutionConfig = {
   resolved: { label: 'Resolved', color: 'bg-green-900/30 text-green-400' },
+  auto_resolved: { label: 'Auto-resolved', color: 'bg-green-900/30 text-green-400' },
   dismissed: { label: 'Dismissed', color: 'bg-zinc-800 text-zinc-400' },
 };
 

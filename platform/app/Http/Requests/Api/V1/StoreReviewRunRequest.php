@@ -117,6 +117,7 @@ class StoreReviewRunRequest extends FormRequest
             'review_comments.*.line' => ['nullable', 'integer', 'min:1'],
             'review_comments.*.symbol_name' => ['nullable', 'string'],
             'review_comments.*.body' => ['required', 'string'],
+            'review_comments.*.category' => ['nullable', 'string', 'max:255'],
             'review_comments.*.status' => ['required', Rule::enum(ReviewCommentStatus::class)],
             'review_comments.*.github_comment_id' => ['nullable', 'integer'],
         ];

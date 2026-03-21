@@ -27,9 +27,16 @@ class ReviewCommentFactory extends Factory
             'line' => fake()->numberBetween(1, 500),
             'symbol_name' => fake()->optional(0.7)->passthrough(fake()->word().ucfirst(fake()->word())),
             'body' => fake()->paragraph(),
+            'category' => fake()->randomElement(['cyclomatic', 'cognitive', 'breaking_change', 'architectural']),
             'status' => ReviewCommentStatus::Posted,
             'github_comment_id' => fake()->optional(0.8)->randomNumber(9),
             'resolution' => null,
+            'fingerprint' => fn (array $attrs) => hash('sha256', implode(':', [
+                $attrs['review_type'],
+                $attrs['filepath'] ?? '',
+                $attrs['symbol_name'] ?? '',
+                $attrs['category'],
+            ])),
         ];
     }
 
@@ -60,6 +67,13 @@ class ReviewCommentFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'resolution' => CommentResolution::Dismissed,
+        ]);
+    }
+
+    public function autoResolved(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'resolution' => CommentResolution::AutoResolved,
         ]);
     }
 
