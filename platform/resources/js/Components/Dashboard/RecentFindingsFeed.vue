@@ -5,6 +5,8 @@ defineProps({
   findings: { type: Array, required: true },
 });
 
+const emit = defineEmits(['select']);
+
 const typeConfig = {
   bugs: { label: 'bug', color: 'bg-red-900/30 text-red-400' },
   architectural: { label: 'arch', color: 'bg-cyan-900/30 text-cyan-400' },
@@ -51,7 +53,11 @@ function truncateBody(body, maxLen = 60) {
       <div
         v-for="finding in findings"
         :key="finding.id"
-        class="flex items-center gap-3 bg-zinc-950 px-4 py-3 transition-colors hover:bg-zinc-800/50"
+        class="flex cursor-pointer items-center gap-3 bg-zinc-950 px-4 py-3 transition-colors hover:bg-zinc-800/50"
+        role="button"
+        tabindex="0"
+        @click="emit('select', finding)"
+        @keydown.enter.space.prevent="emit('select', finding)"
       >
         <span v-if="finding.repository_name" class="hidden shrink-0 text-xs text-zinc-500 sm:block">
           {{ finding.repository_name }}
