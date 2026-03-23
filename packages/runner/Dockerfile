@@ -66,8 +66,9 @@ ENV GIT_TERMINAL_PROMPT=0
 
 # Pre-warm HuggingFace embedding model (Xenova/all-MiniLM-L6-v2, ~90MB)
 # so the first review doesn't incur a download delay.
-# @huggingface/transformers lives in packages/core/node_modules/, so run from there.
+# Must run as lien user (owns ~/.cache) with HF_HOME pointing to writable dir.
 USER lien
+ENV HF_HOME=/home/lien/.cache/huggingface
 RUN cd packages/core && node --input-type=module -e "import { pipeline } from '@huggingface/transformers'; const p = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2'); await p.dispose();"
 
 CMD ["node", "packages/runner/dist/index.js"]
