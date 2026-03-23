@@ -166,6 +166,7 @@ jobs:
           GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
           GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           kubectl create secret generic laravel-secret \
             --namespace=lien \
@@ -185,6 +186,7 @@ jobs:
           kubectl create secret generic runner-secret \
             --namespace=lien \
             --from-literal="OPENROUTER_API_KEY=$OPENROUTER_API_KEY" \
+            --from-literal="ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy
