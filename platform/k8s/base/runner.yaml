@@ -62,6 +62,11 @@ spec:
                 secretKeyRef:
                   name: runner-secret
                   key: ANTHROPIC_API_KEY
+            - name: MINIMAX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: runner-secret
+                  key: MINIMAX_API_KEY
           resources:
             requests:
               cpu: 500m

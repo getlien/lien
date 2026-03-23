@@ -22,22 +22,35 @@ import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
 import { buildFullIndex } from './indexing.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
 
-const AGENT_REVIEW_MARKER = '<!-- lien-plugin:agent-review:';
-
 const configSchema = z.object({
   anthropicApiKey: z.string().min(1),
   model: z.string().default('claude-sonnet-4-6'),
+  baseUrl: z.string().optional(),
+  inputCostPerMTok: z.number().optional(),
+  outputCostPerMTok: z.number().optional(),
   maxTurns: z.number().int().min(1).max(30).default(15),
   maxTokenBudget: z.number().int().default(100_000),
 });
 
+export interface AgentReviewPluginOptions {
+  /** Plugin ID (must be unique per engine). Default: 'agent-review'. */
+  id?: string;
+  /** Human-readable name. Default: 'Agent Review'. */
+  name?: string;
+}
+
 export class AgentReviewPlugin implements ReviewPlugin {
-  id = 'agent-review';
-  name = 'Agent Review';
-  description = 'AI-powered agentic code review using Anthropic tool_use';
+  id: string;
+  name: string;
+  description = 'AI-powered agentic code review using Anthropic-compatible tool_use';
   requiresLLM = false;
   requiresRepoChunks = true;
   configSchema = configSchema;
+
+  constructor(options?: AgentReviewPluginOptions) {
+    this.id = options?.id ?? 'agent-review';
+    this.name = options?.name ?? 'Agent Review';
+  }
 
   shouldActivate(context: ReviewContext): boolean {
     const apiKey = context.config.anthropicApiKey as string | undefined;
@@ -58,6 +71,9 @@ export class AgentReviewPlugin implements ReviewPlugin {
       const agentClient = new AnthropicAgentClient({
         apiKey: config.anthropicApiKey,
         model: config.model,
+        baseUrl: config.baseUrl,
+        inputCostPerMTok: config.inputCostPerMTok,
+        outputCostPerMTok: config.outputCostPerMTok,
         maxTurns: config.maxTurns,
         maxTokenBudget: config.maxTokenBudget,
         logger,
@@ -79,12 +95,13 @@ export class AgentReviewPlugin implements ReviewPlugin {
       );
 
       logger.info(
-        `[agent] Review complete: ${result.findings.length} findings in ${result.turns} turns ($${result.usage.cost.toFixed(4)})`,
+        `[${this.id}] Review complete: ${result.findings.length} findings in ${result.turns} turns ($${result.usage.cost.toFixed(4)})`,
       );
 
       context.reportUsage?.(result.usage);
 
-      return result.findings.map(f => mapToReviewFinding(f));
+      const pluginId = this.id;
+      return result.findings.map(f => mapToReviewFinding(f, pluginId));
     } finally {
       // Clean up embedding worker
       await embeddings.dispose().catch(() => {});
@@ -92,8 +109,10 @@ export class AgentReviewPlugin implements ReviewPlugin {
   }
 
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
+    const marker = `<!-- lien-plugin:${this.id}:`;
+
     if (findings.length === 0) {
-      context.appendSummary('### Agent Review\n\nNo issues found.');
+      context.appendSummary(`### ${this.name}\n\nNo issues found.`);
       return;
     }
 
@@ -106,16 +125,16 @@ export class AgentReviewPlugin implements ReviewPlugin {
 
     // 1. Minimize outdated comments from previous runs
     if (context.minimizeOutdatedComments) {
-      await context.minimizeOutdatedComments(AGENT_REVIEW_MARKER);
+      await context.minimizeOutdatedComments(marker);
     }
 
     // 2. Post inline comments for bug findings on the diff
     if (bugFindings.length > 0 && context.postInlineComments) {
-      const body = formatBugSummary(bugFindings);
+      const body = formatBugSummary(bugFindings, this.name);
       await context.postInlineComments(bugFindings, body);
     }
 
-    // 4. Contribute to PR description
+    // 3. Contribute to PR description
     const descParts: string[] = [];
     if (summaryFinding) {
       descParts.push(formatSummaryDescription(summaryFinding));
@@ -124,7 +143,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
       descParts.push(formatArchDescription(archFindings));
     }
     if (descParts.length > 0) {
-      context.appendDescription(descParts.join('\n\n'), 'agent-review');
+      context.appendDescription(descParts.join('\n\n'), this.id);
     }
 
     // 5. Append to check run summary
@@ -136,9 +155,9 @@ export class AgentReviewPlugin implements ReviewPlugin {
 // Finding mapping
 // ---------------------------------------------------------------------------
 
-function mapToReviewFinding(f: AgentFinding): ReviewFinding {
+function mapToReviewFinding(f: AgentFinding, pluginId: string): ReviewFinding {
   return {
-    pluginId: 'agent-review',
+    pluginId,
     filepath: f.filepath,
     line: f.line,
     endLine: f.endLine,
@@ -155,24 +174,13 @@ function mapToReviewFinding(f: AgentFinding): ReviewFinding {
 // Presentation helpers
 // ---------------------------------------------------------------------------
 
-function formatBugSummary(findings: ReviewFinding[]): string {
+function formatBugSummary(findings: ReviewFinding[], name: string): string {
   const errors = findings.filter(f => f.severity === 'error').length;
   const warnings = findings.filter(f => f.severity === 'warning').length;
   const parts: string[] = [];
   if (errors > 0) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
   if (warnings > 0) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
-  return `Agent Review: ${parts.join(', ')}`;
-}
-
-function formatReviewComment(findings: ReviewFinding[]): string {
-  const lines = findings.map(f => {
-    const icon = f.severity === 'error' ? '🔴' : '🟡';
-    const symbol = f.symbolName ? ` in \`${f.symbolName}\`` : '';
-    const suggestion = f.suggestion ? `\n  💡 *${f.suggestion}*` : '';
-    return `${icon} **${f.filepath}:${f.line}**${symbol}\n  ${f.message}${suggestion}`;
-  });
-
-  return `### Agent Review\n\n${lines.join('\n\n')}`;
+  return `${name}: ${parts.join(', ')}`;
 }
 
 function formatSummaryDescription(finding: ReviewFinding): string {

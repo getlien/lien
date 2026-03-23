@@ -235,7 +235,14 @@ export async function handlePRReview(
     // Setup engine with enabled plugins
     const engine = new ReviewEngine();
     if (payload.config.review_types.complexity) engine.register(new ComplexityPlugin());
-    if (config.anthropicApiKey) engine.register(new AgentReviewPlugin());
+    if (config.anthropicApiKey) {
+      engine.register(new AgentReviewPlugin({ id: 'agent-review', name: 'Agent Review (Sonnet)' }));
+    }
+    if (config.minimaxApiKey) {
+      engine.register(
+        new AgentReviewPlugin({ id: 'agent-review-minimax', name: 'Agent Review (MiniMax)' }),
+      );
+    }
 
     // Build LLM client (only needed if non-agent plugins are active in future)
     const llm = reviewConfig.openrouterApiKey
@@ -286,6 +293,15 @@ export async function handlePRReview(
         'agent-review': {
           anthropicApiKey: config.anthropicApiKey,
           model: 'claude-sonnet-4-6',
+          maxTurns: 15,
+          maxTokenBudget: 100_000,
+        },
+        'agent-review-minimax': {
+          anthropicApiKey: config.minimaxApiKey,
+          model: 'MiniMax-M2.7',
+          baseUrl: 'https://api.minimax.io/anthropic',
+          inputCostPerMTok: 0.3,
+          outputCostPerMTok: 1.2,
           maxTurns: 15,
           maxTokenBudget: 100_000,
         },
