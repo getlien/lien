@@ -6,7 +6,6 @@
  */
 
 import type { CodeChunk } from '@liendev/parser';
-import type { VectorDBInterface, EmbeddingService } from '@liendev/core';
 import type { DependencyGraph } from '../../dependency-graph.js';
 import type { Logger } from '../../logger.js';
 
@@ -39,8 +38,6 @@ export interface AgentFinding {
 
 /** Context passed to agent tool implementations for codebase investigation. */
 export interface AgentToolContext {
-  vectorDB: VectorDBInterface;
-  embeddings: EmbeddingService;
   repoChunks: CodeChunk[];
   repoRootDir: string;
   graph: DependencyGraph;
