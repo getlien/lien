@@ -10,20 +10,23 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from '../../logger.js';
 import type { AgentFinding, AgentResult } from './types.js';
 
-/** Sonnet pricing: $3/MTok input, $15/MTok output. */
-const INPUT_COST_PER_TOKEN = 3 / 1_000_000;
-const OUTPUT_COST_PER_TOKEN = 15 / 1_000_000;
+/** Default Sonnet pricing: $3/MTok input, $15/MTok output. */
+const DEFAULT_INPUT_COST_PER_MTOK = 3;
+const DEFAULT_OUTPUT_COST_PER_MTOK = 15;
 
 interface AgentClientOptions {
   apiKey: string;
   model: string;
+  baseUrl?: string;
+  inputCostPerMTok?: number;
+  outputCostPerMTok?: number;
   maxTurns: number;
   maxTokenBudget: number;
   logger: Logger;
 }
 
 /**
- * Anthropic agent client that runs a tool_use loop until the model
+ * Anthropic-compatible agent client that runs a tool_use loop until the model
  * finishes its investigation or budget/turn limits are hit.
  */
 export class AnthropicAgentClient {
@@ -32,13 +35,21 @@ export class AnthropicAgentClient {
   private maxTurns: number;
   private maxTokenBudget: number;
   private logger: Logger;
+  private inputCostPerToken: number;
+  private outputCostPerToken: number;
 
   constructor(options: AgentClientOptions) {
-    this.client = new Anthropic({ apiKey: options.apiKey });
+    this.client = new Anthropic({
+      apiKey: options.apiKey,
+      ...(options.baseUrl ? { baseURL: options.baseUrl } : {}),
+    });
     this.model = options.model;
     this.maxTurns = options.maxTurns;
     this.maxTokenBudget = options.maxTokenBudget;
     this.logger = options.logger;
+    this.inputCostPerToken = (options.inputCostPerMTok ?? DEFAULT_INPUT_COST_PER_MTOK) / 1_000_000;
+    this.outputCostPerToken =
+      (options.outputCostPerMTok ?? DEFAULT_OUTPUT_COST_PER_MTOK) / 1_000_000;
   }
 
   /**
@@ -109,13 +120,18 @@ export class AnthropicAgentClient {
         break;
       }
 
-      // Budget exceeded
+      // Hard budget exceeded — stop immediately
       if (totalTokens >= this.maxTokenBudget) {
         this.logger.warning(
           `[agent] Token budget exceeded (${totalTokens}/${this.maxTokenBudget}), stopping`,
         );
         break;
       }
+
+      // Approaching budget or last turn — tell the agent to wrap up
+      const nearBudget = totalTokens >= this.maxTokenBudget * 0.7;
+      const lastTurn = turn >= this.maxTurns - 1;
+      const shouldWrapUp = nearBudget || lastTurn;
 
       // Process tool_use blocks
       if (response.stop_reason === 'tool_use' && toolUseBlocks.length > 0) {
@@ -139,6 +155,14 @@ export class AnthropicAgentClient {
           }),
         );
 
+        // Nudge the agent to wrap up when budget is running low
+        if (shouldWrapUp) {
+          toolResults.push({
+            type: 'text',
+            text: 'You are running low on budget. Stop investigating and output your findings JSON now. Do not make any more tool calls. If you found no issues, output an empty findings array.',
+          } as unknown as Anthropic.Messages.ToolResultBlockParam);
+        }
+
         messages.push({ role: 'user', content: toolResults });
       } else {
         // Unexpected stop reason (max_tokens, stop_sequence, etc.) — stop looping
@@ -155,7 +179,7 @@ export class AnthropicAgentClient {
     const findings = lastResponse ? extractFindings(lastResponse.content) : [];
 
     const cost =
-      totalInputTokens * INPUT_COST_PER_TOKEN + totalOutputTokens * OUTPUT_COST_PER_TOKEN;
+      totalInputTokens * this.inputCostPerToken + totalOutputTokens * this.outputCostPerToken;
 
     return {
       findings,

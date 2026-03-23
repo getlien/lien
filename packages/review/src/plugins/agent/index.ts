@@ -19,25 +19,35 @@ import { buildDependencyGraph } from '../../dependency-graph.js';
 import type { AgentConfig, AgentFinding } from './types.js';
 import { AnthropicAgentClient } from './anthropic-client.js';
 import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
-import { buildFullIndex } from './indexing.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
-
-const AGENT_REVIEW_MARKER = '<!-- lien-plugin:agent-review:';
 
 const configSchema = z.object({
   anthropicApiKey: z.string().min(1),
   model: z.string().default('claude-sonnet-4-6'),
+  baseUrl: z.string().optional(),
+  inputCostPerMTok: z.number().optional(),
+  outputCostPerMTok: z.number().optional(),
   maxTurns: z.number().int().min(1).max(30).default(15),
   maxTokenBudget: z.number().int().default(100_000),
 });
 
+export interface AgentReviewPluginOptions {
+  id?: string;
+  name?: string;
+}
+
 export class AgentReviewPlugin implements ReviewPlugin {
-  id = 'agent-review';
-  name = 'Agent Review';
-  description = 'AI-powered agentic code review using Anthropic tool_use';
+  id: string;
+  name: string;
+  description = 'AI-powered agentic code review using Anthropic-compatible tool_use';
   requiresLLM = false;
   requiresRepoChunks = true;
   configSchema = configSchema;
+
+  constructor(options?: AgentReviewPluginOptions) {
+    this.id = options?.id ?? 'agent-review';
+    this.name = options?.name ?? 'Agent Review';
+  }
 
   shouldActivate(context: ReviewContext): boolean {
     const apiKey = context.config.anthropicApiKey as string | undefined;
@@ -48,52 +58,48 @@ export class AgentReviewPlugin implements ReviewPlugin {
     const config = context.config as unknown as AgentConfig;
     const logger = context.logger;
 
-    // Build full index with embeddings for semantic_search
-    const { vectorDB, embeddings } = await buildFullIndex(context.repoRootDir!, logger);
+    // Build dependency graph from in-memory chunks (no embeddings needed)
+    const graph = buildDependencyGraph(context.repoChunks!);
 
-    try {
-      // Build dependency graph from in-memory chunks
-      const graph = buildDependencyGraph(context.repoChunks!);
+    const agentClient = new AnthropicAgentClient({
+      apiKey: config.anthropicApiKey,
+      model: config.model,
+      baseUrl: config.baseUrl,
+      inputCostPerMTok: config.inputCostPerMTok,
+      outputCostPerMTok: config.outputCostPerMTok,
+      maxTurns: config.maxTurns,
+      maxTokenBudget: config.maxTokenBudget,
+      logger,
+    });
 
-      const agentClient = new AnthropicAgentClient({
-        apiKey: config.anthropicApiKey,
-        model: config.model,
-        maxTurns: config.maxTurns,
-        maxTokenBudget: config.maxTokenBudget,
-        logger,
-      });
+    const result = await agentClient.run(
+      buildSystemPrompt(),
+      buildInitialMessage(context),
+      AGENT_TOOLS,
+      (name, input) =>
+        dispatchTool(name, input, {
+          repoChunks: context.repoChunks!,
+          repoRootDir: context.repoRootDir!,
+          graph,
+          logger,
+        }),
+    );
 
-      const result = await agentClient.run(
-        buildSystemPrompt(),
-        buildInitialMessage(context),
-        AGENT_TOOLS,
-        (name, input) =>
-          dispatchTool(name, input, {
-            vectorDB,
-            embeddings,
-            repoChunks: context.repoChunks!,
-            repoRootDir: context.repoRootDir!,
-            graph,
-            logger,
-          }),
-      );
+    logger.info(
+      `[${this.id}] Review complete: ${result.findings.length} findings in ${result.turns} turns ($${result.usage.cost.toFixed(4)})`,
+    );
 
-      logger.info(
-        `[agent] Review complete: ${result.findings.length} findings in ${result.turns} turns ($${result.usage.cost.toFixed(4)})`,
-      );
+    context.reportUsage?.(result.usage);
 
-      context.reportUsage?.(result.usage);
-
-      return result.findings.map(f => mapToReviewFinding(f));
-    } finally {
-      // Clean up embedding worker
-      await embeddings.dispose().catch(() => {});
-    }
+    const pluginId = this.id;
+    return result.findings.map(f => mapToReviewFinding(f, pluginId));
   }
 
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
+    const marker = `<!-- lien-plugin:${this.id}:`;
+
     if (findings.length === 0) {
-      context.appendSummary('### Agent Review\n\nNo issues found.');
+      context.appendSummary(`### ${this.name}\n\nNo issues found.`);
       return;
     }
 
@@ -106,21 +112,16 @@ export class AgentReviewPlugin implements ReviewPlugin {
 
     // 1. Minimize outdated comments from previous runs
     if (context.minimizeOutdatedComments) {
-      await context.minimizeOutdatedComments(AGENT_REVIEW_MARKER);
+      await context.minimizeOutdatedComments(marker);
     }
 
     // 2. Post inline comments for bug findings on the diff
     if (bugFindings.length > 0 && context.postInlineComments) {
-      const body = formatBugSummary(bugFindings);
+      const body = `${this.name}: ${formatBugCount(bugFindings)}`;
       await context.postInlineComments(bugFindings, body);
     }
 
-    // 3. Post review comment as primary notification
-    if (bugFindings.length > 0 && context.postReviewComment) {
-      await context.postReviewComment(formatReviewComment(bugFindings));
-    }
-
-    // 4. Contribute to PR description
+    // 3. Contribute to PR description
     const descParts: string[] = [];
     if (summaryFinding) {
       descParts.push(formatSummaryDescription(summaryFinding));
@@ -129,11 +130,11 @@ export class AgentReviewPlugin implements ReviewPlugin {
       descParts.push(formatArchDescription(archFindings));
     }
     if (descParts.length > 0) {
-      context.appendDescription(descParts.join('\n\n'), 'agent-review');
+      context.appendDescription(descParts.join('\n\n'), this.id);
     }
 
-    // 5. Append to check run summary
-    context.appendSummary(formatCheckSummary(findings));
+    // 4. Append to check run summary
+    context.appendSummary(formatCheckSummary(findings, this.name));
   }
 }
 
@@ -141,9 +142,9 @@ export class AgentReviewPlugin implements ReviewPlugin {
 // Finding mapping
 // ---------------------------------------------------------------------------
 
-function mapToReviewFinding(f: AgentFinding): ReviewFinding {
+function mapToReviewFinding(f: AgentFinding, pluginId: string): ReviewFinding {
   return {
-    pluginId: 'agent-review',
+    pluginId,
     filepath: f.filepath,
     line: f.line,
     endLine: f.endLine,
@@ -160,24 +161,13 @@ function mapToReviewFinding(f: AgentFinding): ReviewFinding {
 // Presentation helpers
 // ---------------------------------------------------------------------------
 
-function formatBugSummary(findings: ReviewFinding[]): string {
+function formatBugCount(findings: ReviewFinding[]): string {
   const errors = findings.filter(f => f.severity === 'error').length;
   const warnings = findings.filter(f => f.severity === 'warning').length;
   const parts: string[] = [];
   if (errors > 0) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
   if (warnings > 0) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
-  return `Agent Review: ${parts.join(', ')}`;
-}
-
-function formatReviewComment(findings: ReviewFinding[]): string {
-  const lines = findings.map(f => {
-    const icon = f.severity === 'error' ? '🔴' : '🟡';
-    const symbol = f.symbolName ? ` in \`${f.symbolName}\`` : '';
-    const suggestion = f.suggestion ? `\n  💡 *${f.suggestion}*` : '';
-    return `${icon} **${f.filepath}:${f.line}**${symbol}\n  ${f.message}${suggestion}`;
-  });
-
-  return `### Agent Review\n\n${lines.join('\n\n')}`;
+  return parts.join(', ');
 }
 
 function formatSummaryDescription(finding: ReviewFinding): string {
@@ -205,14 +195,14 @@ function formatArchDescription(findings: ReviewFinding[]): string {
   return `<details>\n<summary>🏗️ <b>Architectural</b> · ${count} observation${count === 1 ? '' : 's'}</summary>\n\n${table}\n\n</details>`;
 }
 
-function formatCheckSummary(findings: ReviewFinding[]): string {
+function formatCheckSummary(findings: ReviewFinding[], name: string): string {
   const bugs = findings.filter(
     f => f.category !== 'architectural' && f.category !== 'summary' && f.line > 0,
   );
   const arch = findings.filter(f => f.category === 'architectural');
   const summary = findings.find(f => f.category === 'summary');
 
-  const sections: string[] = ['### Agent Review'];
+  const sections: string[] = [`### ${name}`];
 
   if (summary) {
     const meta = summary.metadata as { riskLevel?: string; overview?: string } | undefined;

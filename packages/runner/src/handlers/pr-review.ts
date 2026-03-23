@@ -235,7 +235,14 @@ export async function handlePRReview(
     // Setup engine with enabled plugins
     const engine = new ReviewEngine();
     if (payload.config.review_types.complexity) engine.register(new ComplexityPlugin());
-    if (config.anthropicApiKey) engine.register(new AgentReviewPlugin());
+    if (config.anthropicApiKey) {
+      engine.register(new AgentReviewPlugin({ id: 'agent-review', name: 'Agent Review (Sonnet)' }));
+    }
+    if (config.minimaxApiKey) {
+      engine.register(
+        new AgentReviewPlugin({ id: 'agent-review-minimax', name: 'Agent Review (MiniMax)' }),
+      );
+    }
 
     // Build LLM client (only needed if non-agent plugins are active in future)
     const llm = reviewConfig.openrouterApiKey
@@ -286,8 +293,15 @@ export async function handlePRReview(
         'agent-review': {
           anthropicApiKey: config.anthropicApiKey,
           model: 'claude-sonnet-4-6',
-          maxTurns: 15,
-          maxTokenBudget: 100_000,
+          ...scaleAgentBudget(filesToAnalyze.length),
+        },
+        'agent-review-minimax': {
+          anthropicApiKey: config.minimaxApiKey,
+          model: 'MiniMax-M2.7',
+          baseUrl: 'https://api.minimax.io/anthropic',
+          inputCostPerMTok: 0.3,
+          outputCostPerMTok: 1.2,
+          ...scaleAgentBudget(filesToAnalyze.length),
         },
       },
       config: {},
@@ -400,6 +414,16 @@ export async function handlePRReview(
 
 // ---------------------------------------------------------------------------
 // Helpers
+
+/**
+ * Scale agent turn count and token budget by PR size.
+ * Small PRs get tighter limits to avoid over-investigation.
+ */
+function scaleAgentBudget(fileCount: number): { maxTurns: number; maxTokenBudget: number } {
+  if (fileCount <= 3) return { maxTurns: 5, maxTokenBudget: 30_000 };
+  if (fileCount <= 10) return { maxTurns: 8, maxTokenBudget: 60_000 };
+  return { maxTurns: 15, maxTokenBudget: 100_000 };
+}
 // ---------------------------------------------------------------------------
 
 async function tryFetchPRPatches(

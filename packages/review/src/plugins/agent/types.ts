@@ -6,7 +6,6 @@
  */
 
 import type { CodeChunk } from '@liendev/parser';
-import type { VectorDBInterface, EmbeddingService } from '@liendev/core';
 import type { DependencyGraph } from '../../dependency-graph.js';
 import type { Logger } from '../../logger.js';
 
@@ -14,6 +13,12 @@ import type { Logger } from '../../logger.js';
 export interface AgentConfig {
   anthropicApiKey: string;
   model: string;
+  /** Base URL for the API (default: Anthropic). Set for Anthropic-compatible providers like MiniMax. */
+  baseUrl?: string;
+  /** Cost per million input tokens. Default: Sonnet pricing ($3/MTok). */
+  inputCostPerMTok?: number;
+  /** Cost per million output tokens. Default: Sonnet pricing ($15/MTok). */
+  outputCostPerMTok?: number;
   maxTurns: number;
   maxTokenBudget: number;
 }
@@ -33,8 +38,6 @@ export interface AgentFinding {
 
 /** Context passed to agent tool implementations for codebase investigation. */
 export interface AgentToolContext {
-  vectorDB: VectorDBInterface;
-  embeddings: EmbeddingService;
   repoChunks: CodeChunk[];
   repoRootDir: string;
   graph: DependencyGraph;
