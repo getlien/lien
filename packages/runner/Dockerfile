@@ -65,8 +65,9 @@ COPY --from=builder /app/packages/runner/dist/ packages/runner/dist/
 ENV GIT_TERMINAL_PROMPT=0
 
 # Pre-warm HuggingFace embedding model (Xenova/all-MiniLM-L6-v2, ~90MB)
-# so the first review doesn't incur a download delay
+# so the first review doesn't incur a download delay.
+# @huggingface/transformers lives in packages/core/node_modules/, so run from there.
 USER lien
-RUN node --input-type=module -e "import { pipeline } from '@huggingface/transformers'; const p = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2'); await p.dispose();"
+RUN cd packages/core && node --input-type=module -e "import { pipeline } from '@huggingface/transformers'; const p = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2'); await p.dispose();"
 
 CMD ["node", "packages/runner/dist/index.js"]
