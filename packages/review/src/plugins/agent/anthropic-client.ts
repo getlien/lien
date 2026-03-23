@@ -8,7 +8,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from '../../logger.js';
-import type { AgentFinding, AgentResult } from './types.js';
+import type { AgentFinding, AgentSummary, AgentResult } from './types.js';
 
 /** Default Sonnet pricing: $3/MTok input, $15/MTok output. */
 const DEFAULT_INPUT_COST_PER_MTOK = 3;
@@ -175,14 +175,15 @@ export class AnthropicAgentClient {
       this.logger.warning(`[agent] Max turns reached (${this.maxTurns}), stopping`);
     }
 
-    // Parse findings from the final response
-    const findings = lastResponse ? extractFindings(lastResponse.content) : [];
+    // Parse findings and summary from the final response
+    const parsed = lastResponse ? extractResponse(lastResponse.content) : { findings: [] };
 
     const cost =
       totalInputTokens * this.inputCostPerToken + totalOutputTokens * this.outputCostPerToken;
 
     return {
-      findings,
+      findings: parsed.findings,
+      summary: parsed.summary,
       usage: {
         promptTokens: totalInputTokens,
         completionTokens: totalOutputTokens,
@@ -200,32 +201,44 @@ export class AnthropicAgentClient {
  * Looks for a ```json ... ``` block in text content and parses it as
  * the agent's structured output containing findings and summary.
  */
-function extractFindings(content: Anthropic.Messages.ContentBlock[]): AgentFinding[] {
-  // Find the last text block (the model's final answer)
+function extractResponse(content: Anthropic.Messages.ContentBlock[]): {
+  findings: AgentFinding[];
+  summary?: AgentSummary;
+} {
   const textBlocks = content.filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text');
 
   if (textBlocks.length === 0) {
-    return [];
+    return { findings: [] };
   }
 
   const text = textBlocks[textBlocks.length - 1].text;
 
-  // Extract JSON from ```json ... ``` code fence
   const jsonMatch = text.match(/```json\s*\n([\s\S]*?)\n\s*```/);
   if (!jsonMatch) {
-    return [];
+    return { findings: [] };
   }
 
   try {
     const parsed = JSON.parse(jsonMatch[1]);
 
-    // Support both { findings: [...] } and direct array
     const findings: unknown[] = Array.isArray(parsed) ? parsed : (parsed.findings ?? []);
+    const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
 
-    return findings.filter(isValidFinding);
+    return { findings: findings.filter(isValidFinding), summary };
   } catch {
-    return [];
+    return { findings: [] };
   }
+}
+
+/** Type guard to validate a summary object. */
+function isValidSummary(value: unknown): value is AgentSummary {
+  if (typeof value !== 'object' || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.riskLevel === 'string' &&
+    typeof obj.overview === 'string' &&
+    Array.isArray(obj.keyChanges)
+  );
 }
 
 /** Type guard to validate an agent finding has required fields. */

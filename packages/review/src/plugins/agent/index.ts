@@ -92,7 +92,26 @@ export class AgentReviewPlugin implements ReviewPlugin {
     context.reportUsage?.(result.usage);
 
     const pluginId = this.id;
-    return result.findings.map(f => mapToReviewFinding(f, pluginId));
+    const findings = result.findings.map(f => mapToReviewFinding(f, pluginId));
+
+    // Add summary as a special finding so present() can render it
+    if (result.summary) {
+      findings.push({
+        pluginId,
+        filepath: '',
+        line: 0,
+        severity: 'info' as const,
+        category: 'summary',
+        message: result.summary.overview,
+        metadata: {
+          riskLevel: result.summary.riskLevel,
+          overview: result.summary.overview,
+          keyChanges: result.summary.keyChanges,
+        },
+      });
+    }
+
+    return findings;
   }
 
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
