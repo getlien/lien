@@ -50,7 +50,6 @@ WORKDIR /app
 COPY --from=pruner /app/node_modules/ node_modules/
 COPY --from=pruner /app/packages/parser/node_modules/ packages/parser/node_modules/
 COPY --from=pruner /app/packages/core/node_modules/ packages/core/node_modules/
-COPY --from=pruner /app/packages/review/node_modules/ packages/review/node_modules/
 
 # Copy built dist and package manifests
 COPY --from=builder /app/package.json ./
