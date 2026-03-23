@@ -8,9 +8,8 @@ vi.mock('@liendev/review', () => ({
   getPRChangedFiles: vi.fn(),
   getPRPatchData: vi.fn(),
   ReviewEngine: vi.fn(),
-  SummaryPlugin: vi.fn(),
+  AgentReviewPlugin: vi.fn(),
   ComplexityPlugin: vi.fn(),
-  ArchitecturalPlugin: vi.fn(),
   OpenRouterLLMClient: vi.fn(),
   runComplexityAnalysis: vi.fn(),
   enrichWithTestAssociations: vi.fn(),
@@ -44,7 +43,7 @@ import {
   getPRChangedFiles,
   getPRPatchData,
   ReviewEngine,
-  SummaryPlugin,
+  AgentReviewPlugin,
 } from '@liendev/review';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
 import { cloneBySha, resolveCommitTimestamp } from '../src/clone.js';
@@ -60,7 +59,7 @@ const mockFilterAnalyzableFiles = vi.mocked(filterAnalyzableFiles);
 const mockGetPRChangedFiles = vi.mocked(getPRChangedFiles);
 const mockGetPRPatchData = vi.mocked(getPRPatchData);
 const MockReviewEngine = vi.mocked(ReviewEngine);
-const MockSummaryPlugin = vi.mocked(SummaryPlugin);
+const MockAgentReviewPlugin = vi.mocked(AgentReviewPlugin);
 const mockPerformChunkOnlyIndex = vi.mocked(performChunkOnlyIndex);
 const mockAnalyzeComplexityFromChunks = vi.mocked(analyzeComplexityFromChunks);
 const mockCloneBySha = vi.mocked(cloneBySha);
@@ -108,6 +107,7 @@ function makeConfig(): RunnerConfig {
     natsStream: 'reviews',
     natsConsumer: 'reviews-runner',
     laravelApiUrl: 'https://api.test',
+    anthropicApiKey: 'test-anthropic-key',
     openrouterApiKey: '',
     openrouterModel: 'test-model',
     pullTimeoutMs: 30_000,
@@ -269,7 +269,7 @@ describe('handlePRReview — no-analyzable-files paths', () => {
   });
 
   describe('Path B: summary enabled', () => {
-    it('posts real complexity from repo scan and registers SummaryPlugin', async () => {
+    it('posts real complexity from repo scan and registers AgentReviewPlugin', async () => {
       setupNoAnalyzableFiles();
       setupRepoScanSuccess(7.3, 18);
       mockGetPRPatchData.mockResolvedValue({ patches: {}, diffLines: 0 } as never);
@@ -285,10 +285,9 @@ describe('handlePRReview — no-analyzable-files paths', () => {
         status: 'completed',
       });
 
-      // Engine instantiated, SummaryPlugin registered
+      // Engine instantiated, AgentReviewPlugin registered
       expect(MockReviewEngine).toHaveBeenCalledOnce();
-      expect(MockSummaryPlugin).toHaveBeenCalledOnce();
-      expect(mockEngineRegister).toHaveBeenCalledOnce();
+      expect(MockAgentReviewPlugin).toHaveBeenCalledOnce();
     });
 
     it('posts zero complexity when repo scan returns no chunks', async () => {

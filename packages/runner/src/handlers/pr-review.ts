@@ -26,9 +26,7 @@ import {
   calculateDeltaSummary,
   ReviewEngine,
   ComplexityPlugin,
-  ArchitecturalPlugin,
-  SummaryPlugin,
-  BugFinderPlugin,
+  AgentReviewPlugin,
   OpenRouterLLMClient,
 } from '@liendev/review';
 import type { CodeChunk } from '@liendev/parser';
@@ -237,11 +235,9 @@ export async function handlePRReview(
     // Setup engine with enabled plugins
     const engine = new ReviewEngine();
     if (payload.config.review_types.complexity) engine.register(new ComplexityPlugin());
-    if (payload.config.review_types.architectural) engine.register(new ArchitecturalPlugin());
-    if (payload.config.review_types.summary) engine.register(new SummaryPlugin());
-    if (payload.config.review_types.bugs) engine.register(new BugFinderPlugin());
+    if (config.anthropicApiKey) engine.register(new AgentReviewPlugin());
 
-    // Build LLM client
+    // Build LLM client (only needed if non-agent plugins are active in future)
     const llm = reviewConfig.openrouterApiKey
       ? new OpenRouterLLMClient({
           apiKey: reviewConfig.openrouterApiKey,
@@ -271,6 +267,9 @@ export async function handlePRReview(
         }
       : logger;
 
+    // Track agent usage separately (reported via callback since it bypasses LLMClient)
+    let agentUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 };
+
     // Run engine
     findings = await engine.run({
       chunks,
@@ -284,13 +283,21 @@ export async function handlePRReview(
           threshold: parseInt(reviewConfig.threshold, 10),
           blockOnNewErrors: reviewConfig.blockOnNewErrors,
         },
-        architectural: { mode: reviewConfig.enableArchitecturalReview },
+        'agent-review': {
+          anthropicApiKey: config.anthropicApiKey,
+          model: 'claude-sonnet-4-6',
+          maxTurns: 15,
+          maxTokenBudget: 100_000,
+        },
       },
       config: {},
       llm,
       pr: prContext,
       logger: engineLogger,
       repoRootDir: headClone.dir,
+      reportUsage: usage => {
+        agentUsage = usage;
+      },
     });
     logger.info(`Engine produced ${findings.length} total findings`);
     logBuffer?.add('info', `Engine produced ${findings.length} findings`);
@@ -319,12 +326,14 @@ export async function handlePRReview(
       logger,
     );
 
-    // Collect usage stats
+    // Collect usage stats (LLM client + agent)
     if (llm) {
       const usage = llm.getUsage();
       tokenUsage = usage.totalTokens;
       cost = usage.cost;
     }
+    tokenUsage += agentUsage.totalTokens;
+    cost += agentUsage.cost;
 
     // Build result arrays
     const complexitySnapshots = buildComplexitySnapshots(currentReport);

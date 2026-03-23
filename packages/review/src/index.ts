@@ -41,6 +41,7 @@ export { ComplexityPlugin } from './plugins/complexity.js';
 export { ArchitecturalPlugin } from './plugins/architectural.js';
 export { SummaryPlugin } from './plugins/summary.js';
 export { BugFinderPlugin } from './plugins/bugs.js';
+export { AgentReviewPlugin } from './plugins/agent/index.js';
 
 // Dependency graph
 export {
