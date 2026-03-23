@@ -1,9 +1,14 @@
 import { parentPort } from 'worker_threads';
+import os from 'os';
+import path from 'path';
 import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
 import { DEFAULT_EMBEDDING_MODEL } from '../constants.js';
 
 env.allowRemoteModels = true;
 env.allowLocalModels = true;
+// Use ~/.cache/huggingface instead of the default (node_modules/.cache)
+// so it works in containers where node_modules is read-only.
+env.cacheDir = path.join(os.homedir(), '.cache', 'huggingface');
 
 let extractor: FeatureExtractionPipeline | null = null;
 let processing: Promise<void> = Promise.resolve();
