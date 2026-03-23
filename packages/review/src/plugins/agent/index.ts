@@ -115,11 +115,6 @@ export class AgentReviewPlugin implements ReviewPlugin {
       await context.postInlineComments(bugFindings, body);
     }
 
-    // 3. Post review comment as primary notification
-    if (bugFindings.length > 0 && context.postReviewComment) {
-      await context.postReviewComment(formatReviewComment(bugFindings));
-    }
-
     // 4. Contribute to PR description
     const descParts: string[] = [];
     if (summaryFinding) {
