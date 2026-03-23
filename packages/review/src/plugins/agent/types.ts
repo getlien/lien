@@ -15,9 +15,9 @@ export interface AgentConfig {
   model: string;
   /** Base URL for the API (default: Anthropic). Set for Anthropic-compatible providers like MiniMax. */
   baseUrl?: string;
-  /** Cost per input token in dollars. Default: Sonnet pricing ($3/MTok). */
+  /** Cost per million input tokens. Default: Sonnet pricing ($3/MTok). */
   inputCostPerMTok?: number;
-  /** Cost per output token in dollars. Default: Sonnet pricing ($15/MTok). */
+  /** Cost per million output tokens. Default: Sonnet pricing ($15/MTok). */
   outputCostPerMTok?: number;
   maxTurns: number;
   maxTokenBudget: number;

@@ -293,8 +293,7 @@ export async function handlePRReview(
         'agent-review': {
           anthropicApiKey: config.anthropicApiKey,
           model: 'claude-sonnet-4-6',
-          maxTurns: 15,
-          maxTokenBudget: 100_000,
+          ...scaleAgentBudget(filesToAnalyze.length),
         },
         'agent-review-minimax': {
           anthropicApiKey: config.minimaxApiKey,
@@ -302,8 +301,7 @@ export async function handlePRReview(
           baseUrl: 'https://api.minimax.io/anthropic',
           inputCostPerMTok: 0.3,
           outputCostPerMTok: 1.2,
-          maxTurns: 15,
-          maxTokenBudget: 100_000,
+          ...scaleAgentBudget(filesToAnalyze.length),
         },
       },
       config: {},
@@ -416,6 +414,16 @@ export async function handlePRReview(
 
 // ---------------------------------------------------------------------------
 // Helpers
+
+/**
+ * Scale agent turn count and token budget by PR size.
+ * Small PRs get tighter limits to avoid over-investigation.
+ */
+function scaleAgentBudget(fileCount: number): { maxTurns: number; maxTokenBudget: number } {
+  if (fileCount <= 3) return { maxTurns: 5, maxTokenBudget: 30_000 };
+  if (fileCount <= 10) return { maxTurns: 8, maxTokenBudget: 60_000 };
+  return { maxTurns: 15, maxTokenBudget: 100_000 };
+}
 // ---------------------------------------------------------------------------
 
 async function tryFetchPRPatches(

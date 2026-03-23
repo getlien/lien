@@ -1,8 +1,9 @@
 /**
- * Agent tool implementations backed by in-memory CodeChunk[] arrays.
+ * Agent tool implementations.
  *
- * No VectorDB or embeddings required — all tools work from the repoChunks
- * that the engine already produces via performChunkOnlyIndex().
+ * Each function takes parsed input and an AgentToolContext, queries the
+ * codebase using VectorDB, EmbeddingService, or the filesystem, and
+ * returns a JSON string for the agent.
  */
 
 import fs from 'fs/promises';
@@ -16,17 +17,62 @@ import type { AgentToolContext } from './types.js';
 // Constants
 // ---------------------------------------------------------------------------
 
+const MAX_SEARCH_LIMIT = 20;
+const DEFAULT_SEARCH_LIMIT = 5;
 const MAX_FILES_CONTEXT = 20;
 const MAX_FUNCTIONS_LIMIT = 100;
 const DEFAULT_FUNCTIONS_LIMIT = 30;
 const DEFAULT_COMPLEXITY_TOP = 10;
 const MAX_READ_LINES = 500;
+const CONTENT_TRUNCATE_LENGTH = 1500;
+
+// ---------------------------------------------------------------------------
+// semantic_search
+// ---------------------------------------------------------------------------
+
+export async function semanticSearch(
+  input: Record<string, unknown>,
+  ctx: AgentToolContext,
+): Promise<string> {
+  try {
+    const query = input.query as string;
+    if (!query) return JSON.stringify({ error: 'query is required' });
+
+    const limit = Math.min(
+      Math.max((input.limit as number) || DEFAULT_SEARCH_LIMIT, 1),
+      MAX_SEARCH_LIMIT,
+    );
+
+    const embedding = await ctx.embeddings.embed(query);
+    const results = await ctx.vectorDB.search(embedding, limit, query);
+
+    const shaped = results.map(r => ({
+      file: r.metadata.file,
+      symbolName: r.metadata.symbolName ?? null,
+      symbolType: r.metadata.symbolType ?? null,
+      content:
+        r.content.length > CONTENT_TRUNCATE_LENGTH
+          ? r.content.slice(0, CONTENT_TRUNCATE_LENGTH) + '...'
+          : r.content,
+      score: Math.round(r.score * 1000) / 1000,
+      startLine: r.metadata.startLine,
+      endLine: r.metadata.endLine,
+    }));
+
+    return JSON.stringify({ results: shaped, count: shaped.length });
+  } catch (err) {
+    return JSON.stringify({ error: `semantic_search failed: ${(err as Error).message}` });
+  }
+}
 
 // ---------------------------------------------------------------------------
 // get_files_context
 // ---------------------------------------------------------------------------
 
-export function getFilesContext(input: Record<string, unknown>, ctx: AgentToolContext): string {
+export async function getFilesContext(
+  input: Record<string, unknown>,
+  ctx: AgentToolContext,
+): Promise<string> {
   try {
     const raw = input.filepaths;
     const filepaths = Array.isArray(raw) ? (raw as string[]) : [raw as string];
@@ -39,20 +85,20 @@ export function getFilesContext(input: Record<string, unknown>, ctx: AgentToolCo
     const fileResults: Record<string, unknown[]> = {};
 
     for (const filepath of filepaths) {
-      const chunks = ctx.repoChunks.filter(c => c.metadata.file === filepath);
-      fileResults[filepath] = chunks.map(c => ({
-        symbolName: c.metadata.symbolName ?? null,
-        symbolType: c.metadata.symbolType ?? null,
-        signature: c.metadata.signature ?? null,
-        startLine: c.metadata.startLine,
-        endLine: c.metadata.endLine,
-        imports: c.metadata.imports ?? [],
-        exports: c.metadata.exports ?? [],
-        callSites: c.metadata.callSites ?? [],
-        parameters: c.metadata.parameters ?? [],
-        returnType: c.metadata.returnType ?? null,
-        complexity: c.metadata.complexity ?? null,
-        cognitiveComplexity: c.metadata.cognitiveComplexity ?? null,
+      const chunks = await ctx.vectorDB.scanWithFilter({ file: filepath });
+      fileResults[filepath] = chunks.map(r => ({
+        symbolName: r.metadata.symbolName ?? null,
+        symbolType: r.metadata.symbolType ?? null,
+        signature: r.metadata.signature ?? null,
+        startLine: r.metadata.startLine,
+        endLine: r.metadata.endLine,
+        imports: r.metadata.imports ?? [],
+        exports: r.metadata.exports ?? [],
+        callSites: r.metadata.callSites ?? [],
+        parameters: r.metadata.parameters ?? [],
+        returnType: r.metadata.returnType ?? null,
+        complexity: r.metadata.complexity ?? null,
+        cognitiveComplexity: r.metadata.cognitiveComplexity ?? null,
       }));
     }
 
@@ -66,7 +112,10 @@ export function getFilesContext(input: Record<string, unknown>, ctx: AgentToolCo
 // get_dependents
 // ---------------------------------------------------------------------------
 
-export function getDependents(input: Record<string, unknown>, ctx: AgentToolContext): string {
+export async function getDependents(
+  input: Record<string, unknown>,
+  ctx: AgentToolContext,
+): Promise<string> {
   try {
     const filepath = input.filepath as string;
     if (!filepath) return JSON.stringify({ error: 'filepath is required' });
@@ -74,6 +123,7 @@ export function getDependents(input: Record<string, unknown>, ctx: AgentToolCont
     const symbol = input.symbol as string | undefined;
 
     if (symbol) {
+      // Find callers for a specific symbol
       const callers = ctx.graph.getCallers(filepath, symbol);
       const riskLevel = getRiskLevel(callers.length);
 
@@ -144,7 +194,10 @@ function getRiskLevel(count: number): 'low' | 'medium' | 'high' | 'critical' {
 // list_functions
 // ---------------------------------------------------------------------------
 
-export function listFunctions(input: Record<string, unknown>, ctx: AgentToolContext): string {
+export async function listFunctions(
+  input: Record<string, unknown>,
+  ctx: AgentToolContext,
+): Promise<string> {
   try {
     const pattern = input.pattern as string | undefined;
     const symbolType = input.symbolType as
@@ -159,26 +212,15 @@ export function listFunctions(input: Record<string, unknown>, ctx: AgentToolCont
       MAX_FUNCTIONS_LIMIT,
     );
 
-    let results = ctx.repoChunks.filter(c => !!c.metadata.symbolName);
+    const results = await ctx.vectorDB.querySymbols({ pattern, symbolType, language, limit });
 
-    if (symbolType) {
-      results = results.filter(c => c.metadata.symbolType === symbolType);
-    }
-    if (language) {
-      results = results.filter(c => c.metadata.language === language);
-    }
-    if (pattern) {
-      const regex = new RegExp(pattern, 'i');
-      results = results.filter(c => regex.test(c.metadata.symbolName!));
-    }
-
-    const shaped = results.slice(0, limit).map(c => ({
-      symbolName: c.metadata.symbolName,
-      symbolType: c.metadata.symbolType ?? null,
-      filepath: c.metadata.file,
-      startLine: c.metadata.startLine,
-      signature: c.metadata.signature ?? null,
-      language: c.metadata.language,
+    const shaped = results.map(r => ({
+      symbolName: r.metadata.symbolName ?? null,
+      symbolType: r.metadata.symbolType ?? null,
+      filepath: r.metadata.file,
+      startLine: r.metadata.startLine,
+      signature: r.metadata.signature ?? null,
+      language: r.metadata.language,
     }));
 
     return JSON.stringify({ results: shaped, count: shaped.length });
@@ -191,16 +233,21 @@ export function listFunctions(input: Record<string, unknown>, ctx: AgentToolCont
 // get_complexity
 // ---------------------------------------------------------------------------
 
-export function getComplexity(input: Record<string, unknown>, ctx: AgentToolContext): string {
+export async function getComplexity(
+  input: Record<string, unknown>,
+  ctx: AgentToolContext,
+): Promise<string> {
   try {
     const files = input.files as string[] | undefined;
     const top = Math.max((input.top as number) || DEFAULT_COMPLEXITY_TOP, 1);
 
     const report = analyzeComplexityFromChunks(ctx.repoChunks, files);
 
+    // Collect all violations across files, sorted by severity then complexity
     const allViolations = Object.values(report.files)
       .flatMap(f => f.violations)
       .sort((a, b) => {
+        // Errors first, then by complexity descending
         if (a.severity !== b.severity) return a.severity === 'error' ? -1 : 1;
         return b.complexity - a.complexity;
       })
@@ -241,6 +288,7 @@ export async function readFile(
     const filepath = input.filepath as string;
     if (!filepath) return JSON.stringify({ error: 'filepath is required' });
 
+    // Path traversal prevention
     if (filepath.includes('..')) {
       return JSON.stringify({ error: 'Path traversal not allowed' });
     }
@@ -264,7 +312,10 @@ export async function readFile(
       lines.length,
     );
 
+    // Cap at MAX_READ_LINES
     const effectiveEnd = Math.min(endLine, startLine + MAX_READ_LINES - 1);
+
+    // Lines are 1-based in the API, 0-based in the array
     const slice = lines.slice(startLine - 1, effectiveEnd);
     const numbered = slice.map((line, i) => `${startLine + i}: ${line}`).join('\n');
 

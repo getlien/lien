@@ -32,9 +32,7 @@ const configSchema = z.object({
 });
 
 export interface AgentReviewPluginOptions {
-  /** Plugin ID (must be unique per engine). Default: 'agent-review'. */
   id?: string;
-  /** Human-readable name. Default: 'Agent Review'. */
   name?: string;
 }
 
@@ -119,7 +117,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
 
     // 2. Post inline comments for bug findings on the diff
     if (bugFindings.length > 0 && context.postInlineComments) {
-      const body = formatBugSummary(bugFindings, this.name);
+      const body = `${this.name}: ${formatBugCount(bugFindings)}`;
       await context.postInlineComments(bugFindings, body);
     }
 
@@ -135,8 +133,8 @@ export class AgentReviewPlugin implements ReviewPlugin {
       context.appendDescription(descParts.join('\n\n'), this.id);
     }
 
-    // 5. Append to check run summary
-    context.appendSummary(formatCheckSummary(findings));
+    // 4. Append to check run summary
+    context.appendSummary(formatCheckSummary(findings, this.name));
   }
 }
 
@@ -163,13 +161,13 @@ function mapToReviewFinding(f: AgentFinding, pluginId: string): ReviewFinding {
 // Presentation helpers
 // ---------------------------------------------------------------------------
 
-function formatBugSummary(findings: ReviewFinding[], name: string): string {
+function formatBugCount(findings: ReviewFinding[]): string {
   const errors = findings.filter(f => f.severity === 'error').length;
   const warnings = findings.filter(f => f.severity === 'warning').length;
   const parts: string[] = [];
   if (errors > 0) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
   if (warnings > 0) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
-  return `${name}: ${parts.join(', ')}`;
+  return parts.join(', ');
 }
 
 function formatSummaryDescription(finding: ReviewFinding): string {
@@ -197,14 +195,14 @@ function formatArchDescription(findings: ReviewFinding[]): string {
   return `<details>\n<summary>🏗️ <b>Architectural</b> · ${count} observation${count === 1 ? '' : 's'}</summary>\n\n${table}\n\n</details>`;
 }
 
-function formatCheckSummary(findings: ReviewFinding[]): string {
+function formatCheckSummary(findings: ReviewFinding[], name: string): string {
   const bugs = findings.filter(
     f => f.category !== 'architectural' && f.category !== 'summary' && f.line > 0,
   );
   const arch = findings.filter(f => f.category === 'architectural');
   const summary = findings.find(f => f.category === 'summary');
 
-  const sections: string[] = ['### Agent Review'];
+  const sections: string[] = [`### ${name}`];
 
   if (summary) {
     const meta = summary.metadata as { riskLevel?: string; overview?: string } | undefined;

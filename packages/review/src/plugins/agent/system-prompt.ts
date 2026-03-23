@@ -21,6 +21,7 @@ export function buildSystemPrompt(): string {
 
 You have these tools to investigate the codebase:
 
+- **semantic_search**: Search the codebase by meaning. Use this to find conceptually related code, similar patterns, or understand how something works.
 - **get_dependents**: Find all callers/importers of a file or symbol. Critical for checking if changes break callers.
 - **get_files_context**: Get all code chunks, imports, exports, and call sites for specific files. Use this to understand a file's role.
 - **list_functions**: Search for symbols by name pattern. Find all handlers, services, or related functions.
@@ -32,7 +33,7 @@ You have these tools to investigate the codebase:
 1. **Understand the diff**: Read the patches carefully. Identify what changed and why.
 2. **Check callers**: For every changed function signature or behavior, use get_dependents to find all callers. Check if they handle the new behavior correctly.
 3. **Trace type changes**: If types, interfaces, or return types changed, find all consumers.
-4. **Examine related code**: Use list_functions or read_file to find similar patterns that might need the same change.
+4. **Examine related code**: Use semantic_search to find similar patterns that might need the same change.
 5. **Verify error handling**: Check if new error paths are handled by callers.
 
 ## Focus Areas

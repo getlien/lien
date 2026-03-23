@@ -17,11 +17,8 @@ const DEFAULT_OUTPUT_COST_PER_MTOK = 15;
 interface AgentClientOptions {
   apiKey: string;
   model: string;
-  /** Base URL for Anthropic-compatible APIs (e.g., MiniMax). Omit for Anthropic. */
   baseUrl?: string;
-  /** Cost per million input tokens. Default: $3 (Sonnet). */
   inputCostPerMTok?: number;
-  /** Cost per million output tokens. Default: $15 (Sonnet). */
   outputCostPerMTok?: number;
   maxTurns: number;
   maxTokenBudget: number;
@@ -31,9 +28,6 @@ interface AgentClientOptions {
 /**
  * Anthropic-compatible agent client that runs a tool_use loop until the model
  * finishes its investigation or budget/turn limits are hit.
- *
- * Works with any Anthropic-compatible API (Anthropic, MiniMax, etc.)
- * by setting the baseUrl option.
  */
 export class AnthropicAgentClient {
   private client: Anthropic;
@@ -126,13 +120,18 @@ export class AnthropicAgentClient {
         break;
       }
 
-      // Budget exceeded
+      // Hard budget exceeded — stop immediately
       if (totalTokens >= this.maxTokenBudget) {
         this.logger.warning(
           `[agent] Token budget exceeded (${totalTokens}/${this.maxTokenBudget}), stopping`,
         );
         break;
       }
+
+      // Approaching budget or last turn — tell the agent to wrap up
+      const nearBudget = totalTokens >= this.maxTokenBudget * 0.7;
+      const lastTurn = turn >= this.maxTurns - 1;
+      const shouldWrapUp = nearBudget || lastTurn;
 
       // Process tool_use blocks
       if (response.stop_reason === 'tool_use' && toolUseBlocks.length > 0) {
@@ -155,6 +154,14 @@ export class AnthropicAgentClient {
             };
           }),
         );
+
+        // Nudge the agent to wrap up when budget is running low
+        if (shouldWrapUp) {
+          toolResults.push({
+            type: 'text',
+            text: 'You are running low on budget. Stop investigating and output your findings JSON now. Do not make any more tool calls. If you found no issues, output an empty findings array.',
+          } as unknown as Anthropic.Messages.ToolResultBlockParam);
+        }
 
         messages.push({ role: 'user', content: toolResults });
       } else {
