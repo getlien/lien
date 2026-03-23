@@ -31,14 +31,26 @@ const FUNCTION_DEF_PATTERNS = [
 export function detectDeletedFunctions(
   patches: Map<string, string>,
   headChunks: CodeChunk[],
+  repoChunks?: CodeChunk[],
 ): { filepath: string; symbolName: string }[] {
   const deleted: { filepath: string; symbolName: string }[] = [];
 
-  // Build set of function names that exist in HEAD
+  // Build set of function names that exist in HEAD (filepath::name keyed)
   const headFunctions = new Set<string>();
   for (const chunk of headChunks) {
     if (chunk.metadata.symbolName) {
       headFunctions.add(`${chunk.metadata.file}::${chunk.metadata.symbolName}`);
+    }
+  }
+
+  // Build name-only set from repoChunks (or headChunks) for move detection.
+  // A function that was moved to another file still exists in the repo —
+  // it should not be flagged as deleted.
+  const repoSymbolNames = new Set<string>();
+  for (const chunk of repoChunks ?? headChunks) {
+    const { symbolName, symbolType } = chunk.metadata;
+    if (symbolName && (symbolType === 'function' || symbolType === 'method')) {
+      repoSymbolNames.add(symbolName);
     }
   }
 
@@ -50,7 +62,7 @@ export function detectDeletedFunctions(
       if (!line.startsWith('-') && !line.startsWith('+')) continue;
       if (line.startsWith('---') || line.startsWith('+++')) continue;
 
-      const content = line.slice(1); // Remove the +/- prefix
+      const content = line.slice(1);
       for (const pattern of FUNCTION_DEF_PATTERNS) {
         const match = content.match(pattern);
         if (match?.[1]) {
@@ -60,9 +72,14 @@ export function detectDeletedFunctions(
       }
     }
 
-    // Functions removed but not re-added (and not in HEAD chunks) = truly deleted
+    // Truly deleted = removed from this file AND not re-added AND not in HEAD
+    // AND not moved to another file (checked via repoSymbolNames)
     for (const name of removedFunctions) {
-      if (!addedFunctions.has(name) && !headFunctions.has(`${filepath}::${name}`)) {
+      if (
+        !addedFunctions.has(name) &&
+        !headFunctions.has(`${filepath}::${name}`) &&
+        !repoSymbolNames.has(name)
+      ) {
         deleted.push({ filepath, symbolName: name });
       }
     }
@@ -82,7 +99,7 @@ export function findDeletedFunctionCallers(
   logger: Logger,
   repoChunks?: CodeChunk[],
 ): ReviewFinding[] {
-  const deletedFunctions = detectDeletedFunctions(patches, headChunks);
+  const deletedFunctions = detectDeletedFunctions(patches, headChunks, repoChunks);
   if (deletedFunctions.length === 0) return [];
 
   logger.info(`Bug finder: ${deletedFunctions.length} deleted function(s) detected`);
