@@ -274,6 +274,7 @@ async function ensureRepoChunks(
 
 /**
  * Run all active plugins in parallel and collect findings.
+ * Respects per-plugin timeoutMs if set on the plugin definition.
  */
 async function runActivePlugins(
   activePlugins: ActivePlugin[],
@@ -285,7 +286,20 @@ async function runActivePlugins(
       const start = Date.now();
       if (verbose) logger.debug(`[engine] Running "${plugin.id}"...`);
 
-      const pluginFindings = await plugin.analyze(pluginContext);
+      const analyzePromise = Promise.resolve(plugin.analyze(pluginContext));
+
+      // Apply per-plugin timeout if configured
+      let pluginFindings: ReviewFinding[];
+      if (plugin.timeoutMs) {
+        pluginFindings = await withTimeout(
+          analyzePromise,
+          plugin.timeoutMs,
+          `Plugin "${plugin.id}" timed out after ${plugin.timeoutMs}ms`,
+        );
+      } else {
+        pluginFindings = await analyzePromise;
+      }
+
       logger.info(
         `Plugin "${plugin.id}": ${pluginFindings.length} findings (${Date.now() - start}ms)`,
       );
@@ -306,6 +320,17 @@ async function runActivePlugins(
     }
   }
   return findings;
+}
+
+/**
+ * Race a promise against a timeout. Rejects with the given message if the timeout fires first.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 // ---------------------------------------------------------------------------

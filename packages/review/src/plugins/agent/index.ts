@@ -43,6 +43,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
   requiresLLM = false;
   requiresRepoChunks = true;
   configSchema = configSchema;
+  timeoutMs = 300_000; // 5 minutes — agent should finish well before this
 
   constructor(options?: AgentReviewPluginOptions) {
     this.id = options?.id ?? 'agent-review';

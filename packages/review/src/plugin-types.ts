@@ -318,6 +318,9 @@ export interface ReviewPlugin {
 
   /** Default config values for this plugin */
   defaultConfig?: Record<string, unknown>;
+
+  /** Maximum time in ms this plugin is allowed to run before being cancelled. Default: no limit. */
+  timeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------
