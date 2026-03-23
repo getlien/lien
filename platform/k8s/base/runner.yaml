@@ -49,20 +49,25 @@ spec:
           imagePullPolicy: Never
           env:
             - name: NATS_URL
-              value: "nats://nats:4222"
+              value: 'nats://nats:4222'
             - name: LARAVEL_API_URL
-              value: "http://laravel.lien.svc.cluster.local"
+              value: 'http://laravel.lien.svc.cluster.local'
             - name: OPENROUTER_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: runner-secret
                   key: OPENROUTER_API_KEY
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: runner-secret
+                  key: ANTHROPIC_API_KEY
           resources:
             requests:
               cpu: 500m
               memory: 256Mi
             limits:
-              cpu: "2"
+              cpu: '2'
               memory: 1Gi
           volumeMounts:
             - name: scratch
