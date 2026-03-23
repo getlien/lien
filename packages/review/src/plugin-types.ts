@@ -95,6 +95,13 @@ export interface ReviewContext {
   repoRootDir?: string;
   /** Findings from plugins that ran before this one. Set by the engine for deferred plugins (e.g., summary). */
   priorFindings?: ReviewFinding[];
+  /** Callback for plugins to report LLM usage (cost tracking). Set by the runner for agent plugins that bypass the LLMClient. */
+  reportUsage?: (usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    cost: number;
+  }) => void;
 }
 
 // ---------------------------------------------------------------------------

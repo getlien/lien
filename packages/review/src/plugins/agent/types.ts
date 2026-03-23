@@ -1,0 +1,54 @@
+/**
+ * Shared types for the agent review plugin.
+ *
+ * Defines the configuration, finding shape, tool context, and result types
+ * used across the agent's anthropic client, tools, and system prompt modules.
+ */
+
+import type { CodeChunk } from '@liendev/parser';
+import type { VectorDBInterface, EmbeddingService } from '@liendev/core';
+import type { DependencyGraph } from '../../dependency-graph.js';
+import type { Logger } from '../../logger.js';
+
+/** Configuration for the agent review plugin. */
+export interface AgentConfig {
+  anthropicApiKey: string;
+  model: string;
+  maxTurns: number;
+  maxTokenBudget: number;
+}
+
+/** A single finding produced by the agent during review. */
+export interface AgentFinding {
+  filepath: string;
+  line: number;
+  endLine?: number;
+  symbolName?: string;
+  severity: 'error' | 'warning';
+  category: string;
+  message: string;
+  suggestion?: string;
+  evidence?: string;
+}
+
+/** Context passed to agent tool implementations for codebase investigation. */
+export interface AgentToolContext {
+  vectorDB: VectorDBInterface;
+  embeddings: EmbeddingService;
+  repoChunks: CodeChunk[];
+  repoRootDir: string;
+  graph: DependencyGraph;
+  logger: Logger;
+}
+
+/** Result of an agent review run, including findings, usage, and turn count. */
+export interface AgentResult {
+  findings: AgentFinding[];
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    cost: number;
+  };
+  turns: number;
+}
