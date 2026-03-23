@@ -3,26 +3,44 @@
  *
  * Builds a LanceDB index with vector embeddings so the agent can use
  * semantic_search and other VectorDB-backed tools during investigation.
+ *
+ * Uses a shared promise so multiple agent plugin instances (e.g., Sonnet + MiniMax)
+ * running in parallel only build the index once.
  */
 
 import { indexCodebase, createVectorDB, WorkerEmbeddings } from '@liendev/core';
 import type { VectorDBInterface, EmbeddingService } from '@liendev/core';
 import type { Logger } from '../../logger.js';
 
+interface IndexResult {
+  vectorDB: VectorDBInterface;
+  embeddings: EmbeddingService;
+}
+
+/** Shared promise keyed by rootDir so concurrent callers reuse the same build. */
+let pendingBuild: { rootDir: string; promise: Promise<IndexResult> } | null = null;
+
 /**
  * Build a full LanceDB index with embeddings for the given repo directory.
  *
- * Creates a WorkerEmbeddings instance, runs full indexing via `indexCodebase`,
- * then initializes a VectorDB connection for tool queries.
- *
- * @param rootDir - Root directory of the cloned repo
- * @param logger - Logger for progress output
- * @returns Initialized VectorDB and EmbeddingService instances
+ * Safe to call concurrently — the first caller builds the index,
+ * subsequent callers for the same rootDir await the same promise.
  */
-export async function buildFullIndex(
-  rootDir: string,
-  logger: Logger,
-): Promise<{ vectorDB: VectorDBInterface; embeddings: EmbeddingService }> {
+export function buildFullIndex(rootDir: string, logger: Logger): Promise<IndexResult> {
+  if (pendingBuild && pendingBuild.rootDir === rootDir) {
+    logger.info('[agent] Reusing in-progress index build...');
+    return pendingBuild.promise;
+  }
+
+  const promise = doBuildFullIndex(rootDir, logger).finally(() => {
+    pendingBuild = null;
+  });
+
+  pendingBuild = { rootDir, promise };
+  return promise;
+}
+
+async function doBuildFullIndex(rootDir: string, logger: Logger): Promise<IndexResult> {
   logger.info('[agent] Building full index with embeddings...');
   const start = Date.now();
 
