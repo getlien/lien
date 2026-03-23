@@ -1,7 +1,8 @@
 /**
  * Anthropic tool definitions and dispatch for the agent review plugin.
  *
- * Defines 5 chunk-based tools (no embeddings required):
+ * Defines 6 tools the agent can use to investigate the codebase:
+ * - semantic_search: vector-based conceptual code search
  * - get_files_context: retrieve all chunks for specific files
  * - get_dependents: find callers/importers of a symbol
  * - list_functions: search symbols by pattern
@@ -11,6 +12,7 @@
 
 import type { AgentToolContext } from './types.js';
 import {
+  semanticSearch,
   getFilesContext,
   getDependents,
   listFunctions,
@@ -23,6 +25,27 @@ import {
 // ---------------------------------------------------------------------------
 
 export const AGENT_TOOLS = [
+  {
+    name: 'semantic_search',
+    description:
+      'Search the codebase by meaning using vector embeddings. ' +
+      'Finds conceptually related code even without exact keyword matches. ' +
+      'Use this to discover related functions, patterns, or implementations.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Natural language search query describing the code you want to find.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max results to return (default 5, max 20).',
+        },
+      },
+      required: ['query'],
+    },
+  },
   {
     name: 'get_files_context',
     description:
@@ -145,6 +168,11 @@ export const AGENT_TOOLS = [
 
 /**
  * Dispatch a tool call to the appropriate implementation.
+ *
+ * @param name - Tool name from the agent's tool_use block
+ * @param input - Parsed input arguments
+ * @param ctx - Agent tool context (VectorDB, embeddings, graph, etc.)
+ * @returns JSON string result for the agent
  */
 export async function dispatchTool(
   name: string,
@@ -152,6 +180,8 @@ export async function dispatchTool(
   ctx: AgentToolContext,
 ): Promise<string> {
   switch (name) {
+    case 'semantic_search':
+      return semanticSearch(input, ctx);
     case 'get_files_context':
       return getFilesContext(input, ctx);
     case 'get_dependents':
