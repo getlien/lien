@@ -14,7 +14,21 @@ export function extractJSONFromCodeBlock(content: string): string {
 
 /**
  * Estimate prompt token count using ~4 chars/token heuristic.
+ * Optionally include a system prompt in the estimate.
  */
-export function estimatePromptTokens(prompt: string): number {
-  return Math.ceil(prompt.length / 4);
+export function estimatePromptTokens(prompt: string, systemPrompt?: string): number {
+  const total = prompt.length + (systemPrompt?.length || 0);
+  return Math.ceil(total / 4);
+}
+
+/**
+ * Safely parse JSON with a fallback value.
+ * Returns the fallback if parsing fails instead of throwing.
+ */
+export function safeParseJSON<T>(content: string, fallback: T): T {
+  try {
+    return JSON.parse(content);
+  } catch {
+    return fallback;
+  }
 }
