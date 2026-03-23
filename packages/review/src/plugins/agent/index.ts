@@ -19,7 +19,6 @@ import { buildDependencyGraph } from '../../dependency-graph.js';
 import type { AgentConfig, AgentFinding } from './types.js';
 import { AnthropicAgentClient } from './anthropic-client.js';
 import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
-import { buildFullIndex } from './indexing.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
 
 const configSchema = z.object({
@@ -61,51 +60,41 @@ export class AgentReviewPlugin implements ReviewPlugin {
     const config = context.config as unknown as AgentConfig;
     const logger = context.logger;
 
-    // Build full index with embeddings for semantic_search
-    const { vectorDB, embeddings } = await buildFullIndex(context.repoRootDir!, logger);
+    // Build dependency graph from in-memory chunks (no embeddings needed)
+    const graph = buildDependencyGraph(context.repoChunks!);
 
-    try {
-      // Build dependency graph from in-memory chunks
-      const graph = buildDependencyGraph(context.repoChunks!);
+    const agentClient = new AnthropicAgentClient({
+      apiKey: config.anthropicApiKey,
+      model: config.model,
+      baseUrl: config.baseUrl,
+      inputCostPerMTok: config.inputCostPerMTok,
+      outputCostPerMTok: config.outputCostPerMTok,
+      maxTurns: config.maxTurns,
+      maxTokenBudget: config.maxTokenBudget,
+      logger,
+    });
 
-      const agentClient = new AnthropicAgentClient({
-        apiKey: config.anthropicApiKey,
-        model: config.model,
-        baseUrl: config.baseUrl,
-        inputCostPerMTok: config.inputCostPerMTok,
-        outputCostPerMTok: config.outputCostPerMTok,
-        maxTurns: config.maxTurns,
-        maxTokenBudget: config.maxTokenBudget,
-        logger,
-      });
+    const result = await agentClient.run(
+      buildSystemPrompt(),
+      buildInitialMessage(context),
+      AGENT_TOOLS,
+      (name, input) =>
+        dispatchTool(name, input, {
+          repoChunks: context.repoChunks!,
+          repoRootDir: context.repoRootDir!,
+          graph,
+          logger,
+        }),
+    );
 
-      const result = await agentClient.run(
-        buildSystemPrompt(),
-        buildInitialMessage(context),
-        AGENT_TOOLS,
-        (name, input) =>
-          dispatchTool(name, input, {
-            vectorDB,
-            embeddings,
-            repoChunks: context.repoChunks!,
-            repoRootDir: context.repoRootDir!,
-            graph,
-            logger,
-          }),
-      );
+    logger.info(
+      `[${this.id}] Review complete: ${result.findings.length} findings in ${result.turns} turns ($${result.usage.cost.toFixed(4)})`,
+    );
 
-      logger.info(
-        `[${this.id}] Review complete: ${result.findings.length} findings in ${result.turns} turns ($${result.usage.cost.toFixed(4)})`,
-      );
+    context.reportUsage?.(result.usage);
 
-      context.reportUsage?.(result.usage);
-
-      const pluginId = this.id;
-      return result.findings.map(f => mapToReviewFinding(f, pluginId));
-    } finally {
-      // Clean up embedding worker
-      await embeddings.dispose().catch(() => {});
-    }
+    const pluginId = this.id;
+    return result.findings.map(f => mapToReviewFinding(f, pluginId));
   }
 
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
