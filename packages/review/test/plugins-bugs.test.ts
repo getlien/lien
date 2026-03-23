@@ -1259,6 +1259,100 @@ describe('BugFinderPlugin', () => {
     expect(findings).toHaveLength(0);
   });
 
+  it('does not flag moved functions (deleted from file A but exists in file B)', async () => {
+    // The function exists in a different file in repoChunks — it was moved, not deleted
+    const movedChunk = createTestChunk({
+      content: 'export function validateEmail(email: string): boolean { return true; }',
+      metadata: {
+        file: 'src/utils/validation.ts', // NEW location
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'validateEmail',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['validateEmail'],
+      },
+    });
+
+    const patches = new Map([
+      [
+        'src/utils/validate.ts', // OLD location
+        [
+          '@@ -1,5 +0,0 @@',
+          '-export function validateEmail(email: string): boolean {',
+          '-  return email.includes("@");',
+          '-}',
+        ].join('\n'),
+      ],
+    ]);
+
+    const context = createTestContext({
+      chunks: [],
+      repoChunks: [movedChunk], // Function exists here — it was moved
+      pr: {
+        owner: 'test',
+        repo: 'test',
+        prNumber: 1,
+        title: 'test',
+        headSha: 'abc123',
+        patches,
+        diffLines: new Map(),
+      },
+    });
+
+    const findings = await plugin.analyze(context);
+    // Should NOT flag validateEmail as deleted since it exists in repoChunks
+    const deletedFindings = findings.filter(f => f.symbolName?.includes('deleted'));
+    expect(deletedFindings).toHaveLength(0);
+  });
+
+  it('still flags truly deleted functions that do not exist anywhere', async () => {
+    const callerChunk = createTestChunk({
+      content: 'import { oldHelper } from "./utils";\nexport function main() { oldHelper(); }',
+      metadata: {
+        file: 'src/main.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'main',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['main'],
+        importedSymbols: { './utils': ['oldHelper'] },
+        callSites: [{ symbol: 'oldHelper', line: 2 }],
+      },
+    });
+
+    const patches = new Map([
+      [
+        'src/utils.ts',
+        ['@@ -1,3 +0,0 @@', '-export function oldHelper(): void {', '-  // removed', '-}'].join(
+          '\n',
+        ),
+      ],
+    ]);
+
+    const context = createTestContext({
+      chunks: [],
+      repoChunks: [callerChunk], // oldHelper does NOT exist anywhere
+      pr: {
+        owner: 'test',
+        repo: 'test',
+        prNumber: 1,
+        title: 'test',
+        headSha: 'abc123',
+        patches,
+        diffLines: new Map(),
+      },
+    });
+
+    const findings = await plugin.analyze(context);
+    const deletedFindings = findings.filter(f => f.symbolName?.includes('deleted'));
+    expect(deletedFindings).toHaveLength(1);
+    expect(deletedFindings[0].symbolName).toBe('oldHelper (deleted)');
+  });
+
   // ---------------------------------------------------------------------------
   // changedFunction attribution disambiguation
   // ---------------------------------------------------------------------------
