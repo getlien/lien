@@ -188,10 +188,17 @@ export function calculateDeltas(
 }
 
 /**
- * Calculate summary statistics for deltas
+ * Calculate summary statistics for deltas.
+ *
+ * @param deltas - Complexity deltas to summarize
+ * @param metricFilter - When set, only count deltas matching this metric type (e.g., 'cyclomatic')
  */
-export function calculateDeltaSummary(deltas: ComplexityDelta[]): DeltaSummary {
-  const collection = collect(deltas);
+export function calculateDeltaSummary(
+  deltas: ComplexityDelta[],
+  metricFilter?: string,
+): DeltaSummary {
+  const filtered = metricFilter ? deltas.filter(d => d.metricType === metricFilter) : deltas;
+  const collection = collect(filtered);
 
   // Categorize each delta
   const categorized = collection.map(d => {
@@ -248,7 +255,8 @@ export function formatSeverityEmoji(severity: ComplexityDelta['severity']): stri
  */
 export function logDeltaSummary(summary: DeltaSummary, logger: Logger): void {
   const sign = summary.totalDelta >= 0 ? '+' : '';
-  logger.info(`Complexity delta: ${sign}${summary.totalDelta}`);
+  logger.info(`Complexity delta: ${sign}${Math.round(summary.totalDelta)}`);
   logger.info(`  Degraded: ${summary.degraded}, Improved: ${summary.improved}`);
-  logger.info(`  New: ${summary.newFunctions}, Deleted: ${summary.deletedFunctions}`);
+  if (summary.newFunctions > 0) logger.info(`  New: ${summary.newFunctions}`);
+  if (summary.deletedFunctions > 0) logger.info(`  Deleted: ${summary.deletedFunctions}`);
 }

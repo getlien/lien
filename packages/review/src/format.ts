@@ -30,3 +30,21 @@ export function formatDeltaValue(metricType: string, delta: number): string {
   }
   return String(Math.round(delta));
 }
+
+/**
+ * Format a delta summary as a compact one-liner for check run titles.
+ * Example: "↑3 ↓1 +2 new" or "No changes"
+ */
+export function formatDeltaSummaryCompact(summary: {
+  degraded: number;
+  improved: number;
+  newFunctions: number;
+  deletedFunctions: number;
+}): string {
+  const parts: string[] = [];
+  if (summary.degraded > 0) parts.push(`↑${summary.degraded}`);
+  if (summary.improved) parts.push(`↓${summary.improved}`);
+  if (summary.newFunctions > 0) parts.push(`+${summary.newFunctions} new`);
+  if (summary.deletedFunctions) parts.push(`-${summary.deletedFunctions} removed`);
+  return parts.length > 0 ? parts.join(' ') : 'No changes';
+}
