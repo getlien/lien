@@ -1053,6 +1053,81 @@ describe('BugFinderPlugin', () => {
   // ---------------------------------------------------------------------------
   // present
   // ---------------------------------------------------------------------------
+  // Type context resolution
+  // ---------------------------------------------------------------------------
+
+  it('includes imported type definitions in the LLM prompt', async () => {
+    // A function that imports Logger
+    const changedChunk = createTestChunk({
+      content: 'export function process(logger: Logger) { logger.error("fail"); }',
+      metadata: {
+        file: 'src/processor.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'process',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['process'],
+        importedSymbols: { './logger': ['Logger'] },
+        signature: 'process(logger: Logger)',
+      },
+    });
+
+    // The caller
+    const callerChunk = createTestChunk({
+      content:
+        'import { process } from "./processor";\nexport function run() { process(console); }',
+      metadata: {
+        file: 'src/runner.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'run',
+        symbolType: 'function',
+        language: 'typescript',
+        exports: ['run'],
+        importedSymbols: { './processor': ['process'] },
+        callSites: [{ symbol: 'process', line: 2 }],
+      },
+    });
+
+    // The Logger interface definition in the repo
+    const loggerChunk = createTestChunk({
+      content:
+        'export interface Logger {\n  info(msg: string): void;\n  error(msg: string): void;\n}',
+      metadata: {
+        file: 'src/logger.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'class',
+        symbolName: 'Logger',
+        symbolType: 'interface',
+        language: 'typescript',
+        exports: ['Logger'],
+      },
+    });
+
+    const llm = createMockLLMClient([makeBugLLMResponse([])]);
+    const context = createTestContext({
+      chunks: [changedChunk],
+      repoChunks: [changedChunk, callerChunk, loggerChunk],
+      llm,
+    });
+
+    await plugin.analyze(context);
+
+    // The LLM prompt should contain the Logger interface definition
+    expect(llm.calls.length).toBeGreaterThanOrEqual(1);
+    const prompt = llm.calls[0].prompt;
+    expect(prompt).toContain('Logger');
+    expect(prompt).toContain('error(msg: string)');
+    expect(prompt).toContain('Type Definitions');
+  });
+
+  // ---------------------------------------------------------------------------
+  // present
+  // ---------------------------------------------------------------------------
 
   it('appends summary with findings', async () => {
     const summaries: string[] = [];
