@@ -10,21 +10,30 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from '../../logger.js';
 import type { AgentFinding, AgentResult } from './types.js';
 
-/** Sonnet pricing: $3/MTok input, $15/MTok output. */
-const INPUT_COST_PER_TOKEN = 3 / 1_000_000;
-const OUTPUT_COST_PER_TOKEN = 15 / 1_000_000;
+/** Default Sonnet pricing: $3/MTok input, $15/MTok output. */
+const DEFAULT_INPUT_COST_PER_MTOK = 3;
+const DEFAULT_OUTPUT_COST_PER_MTOK = 15;
 
 interface AgentClientOptions {
   apiKey: string;
   model: string;
+  /** Base URL for Anthropic-compatible APIs (e.g., MiniMax). Omit for Anthropic. */
+  baseUrl?: string;
+  /** Cost per million input tokens. Default: $3 (Sonnet). */
+  inputCostPerMTok?: number;
+  /** Cost per million output tokens. Default: $15 (Sonnet). */
+  outputCostPerMTok?: number;
   maxTurns: number;
   maxTokenBudget: number;
   logger: Logger;
 }
 
 /**
- * Anthropic agent client that runs a tool_use loop until the model
+ * Anthropic-compatible agent client that runs a tool_use loop until the model
  * finishes its investigation or budget/turn limits are hit.
+ *
+ * Works with any Anthropic-compatible API (Anthropic, MiniMax, etc.)
+ * by setting the baseUrl option.
  */
 export class AnthropicAgentClient {
   private client: Anthropic;
@@ -32,13 +41,21 @@ export class AnthropicAgentClient {
   private maxTurns: number;
   private maxTokenBudget: number;
   private logger: Logger;
+  private inputCostPerToken: number;
+  private outputCostPerToken: number;
 
   constructor(options: AgentClientOptions) {
-    this.client = new Anthropic({ apiKey: options.apiKey });
+    this.client = new Anthropic({
+      apiKey: options.apiKey,
+      ...(options.baseUrl ? { baseURL: options.baseUrl } : {}),
+    });
     this.model = options.model;
     this.maxTurns = options.maxTurns;
     this.maxTokenBudget = options.maxTokenBudget;
     this.logger = options.logger;
+    this.inputCostPerToken = (options.inputCostPerMTok ?? DEFAULT_INPUT_COST_PER_MTOK) / 1_000_000;
+    this.outputCostPerToken =
+      (options.outputCostPerMTok ?? DEFAULT_OUTPUT_COST_PER_MTOK) / 1_000_000;
   }
 
   /**
@@ -155,7 +172,7 @@ export class AnthropicAgentClient {
     const findings = lastResponse ? extractFindings(lastResponse.content) : [];
 
     const cost =
-      totalInputTokens * INPUT_COST_PER_TOKEN + totalOutputTokens * OUTPUT_COST_PER_TOKEN;
+      totalInputTokens * this.inputCostPerToken + totalOutputTokens * this.outputCostPerToken;
 
     return {
       findings,
