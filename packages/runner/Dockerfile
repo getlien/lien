@@ -50,6 +50,7 @@ WORKDIR /app
 COPY --from=pruner /app/node_modules/ node_modules/
 COPY --from=pruner /app/packages/parser/node_modules/ packages/parser/node_modules/
 COPY --from=pruner /app/packages/core/node_modules/ packages/core/node_modules/
+COPY --from=pruner /app/packages/review/node_modules/ packages/review/node_modules/
 
 # Copy built dist and package manifests
 COPY --from=builder /app/package.json ./
@@ -63,8 +64,10 @@ COPY --from=builder /app/packages/runner/package.json packages/runner/
 COPY --from=builder /app/packages/runner/dist/ packages/runner/dist/
 
 ENV GIT_TERMINAL_PROMPT=0
-ENV OPENROUTER_MODEL=minimax/minimax-m2.7
 
+# Pre-warm HuggingFace embedding model (Xenova/all-MiniLM-L6-v2, ~90MB)
+# so the first review doesn't incur a download delay
 USER lien
+RUN node --input-type=module -e "import { pipeline } from '@huggingface/transformers'; const p = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2'); await p.dispose();"
 
 CMD ["node", "packages/runner/dist/index.js"]
