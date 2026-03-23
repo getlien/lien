@@ -44,9 +44,17 @@ export interface AgentToolContext {
   logger: Logger;
 }
 
+/** Summary produced by the agent alongside findings. */
+export interface AgentSummary {
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  overview: string;
+  keyChanges: string[];
+}
+
 /** Result of an agent review run, including findings, usage, and turn count. */
 export interface AgentResult {
   findings: AgentFinding[];
+  summary?: AgentSummary;
   usage: {
     promptTokens: number;
     completionTokens: number;
