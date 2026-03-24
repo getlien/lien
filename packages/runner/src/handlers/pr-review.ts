@@ -420,9 +420,9 @@ export async function handlePRReview(
  * Small PRs get tighter limits to avoid over-investigation.
  */
 function scaleAgentBudget(fileCount: number): { maxTurns: number; maxTokenBudget: number } {
-  if (fileCount <= 3) return { maxTurns: 5, maxTokenBudget: 30_000 };
-  if (fileCount <= 10) return { maxTurns: 8, maxTokenBudget: 60_000 };
-  return { maxTurns: 15, maxTokenBudget: 100_000 };
+  if (fileCount <= 3) return { maxTurns: 8, maxTokenBudget: 50_000 };
+  if (fileCount <= 10) return { maxTurns: 10, maxTokenBudget: 80_000 };
+  return { maxTurns: 15, maxTokenBudget: 120_000 };
 }
 // ---------------------------------------------------------------------------
 
