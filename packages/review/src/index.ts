@@ -5,7 +5,7 @@
  * to analyze code and post reviews.
  */
 
-// ─── Plugin Architecture (new) ──────────────────────────────────────────────
+// ─── Plugin Architecture ────────────────────────────────────────────────────
 
 // Core types
 export type {
@@ -23,24 +23,14 @@ export type {
   AnalysisResult,
   ReviewSetup,
   ComplexityFindingMetadata,
-  ArchitecturalFindingMetadata,
-  SummaryFindingMetadata,
-  BugFindingMetadata,
-  BugCallerInfo,
   BuiltinFindingMetadata,
 } from './plugin-types.js';
 
 // Engine
 export { ReviewEngine, createDefaultEngine, type EngineOptions } from './engine.js';
 
-// LLM Client
-export { OpenRouterLLMClient, type OpenRouterLLMClientOptions } from './llm-client.js';
-
 // Built-in plugins
 export { ComplexityPlugin } from './plugins/complexity.js';
-export { ArchitecturalPlugin } from './plugins/architectural.js';
-export { SummaryPlugin } from './plugins/summary.js';
-export { BugFinderPlugin } from './plugins/bugs.js';
 export { AgentReviewPlugin } from './plugins/agent/index.js';
 
 // Dependency graph
@@ -118,18 +108,6 @@ export {
   LEGACY_COMMENT_MARKER_PREFIX,
 } from './github-api.js';
 
-// ─── OpenRouter API (legacy — prefer LLMClient) ────────────────────────────
-
-export {
-  type OpenRouterResponse,
-  type TokenUsage,
-  resetTokenUsage,
-  getTokenUsage,
-  parseCommentsResponse,
-  mapCommentsToViolations,
-  generateLineComments,
-} from './openrouter.js';
-
 // ─── Prompt building ────────────────────────────────────────────────────────
 
 export {
@@ -142,22 +120,8 @@ export {
   formatComplexityValue,
   formatThresholdValue,
   type TokenUsageInfo,
-  type ArchitecturalContext,
-  buildLineCommentPrompt,
   buildLineSummaryComment,
-  buildBatchedCommentsPrompt,
 } from './prompt.js';
-
-// ─── Architectural review (legacy — prefer ArchitecturalPlugin) ─────────────
-
-export {
-  type ArchitecturalNote,
-  type EnrichedCommentsResult,
-  shouldActivateArchReview,
-  computeArchitecturalContext,
-  generateEnrichedComments,
-  parseEnrichedResponse,
-} from './architectural-review.js';
 
 // ─── Fingerprint ────────────────────────────────────────────────────────────
 
