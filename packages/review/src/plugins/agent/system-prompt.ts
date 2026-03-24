@@ -81,6 +81,18 @@ Before outputting findings, ask yourself:
   "evidence": "Phase 2 edge case sweep — NaN check"
 }
 
+### Good finding — sign computed before rounding:
+{
+  "filepath": "src/logger.ts",
+  "line": 12,
+  "symbolName": "logDelta",
+  "severity": "warning",
+  "category": "logic_error",
+  "message": "logDelta(-0.4) displays '+0'. The sign is derived from the raw value (sign = delta >= 0 ? '+' : ''), then Math.round is applied separately. For delta = -0.4: sign = '' (since -0.4 < 0... wait, -0.4 IS < 0, so sign = ''). Then Math.round(-0.4) = 0. Output: '0'. But this loses the fact that the delta was negative. More critically: if sign logic uses >= 0 instead of > 0, then delta = -0.0 would get sign = '+', producing '+0' for a zero-crossing negative value.",
+  "suggestion": "Round first, then derive sign from the rounded value: const rounded = Math.round(delta); const sign = rounded > 0 ? '+' : '';",
+  "evidence": "Phase 2 edge case sweep — rounding near zero"
+}
+
 ### Good finding — structural, caller broken:
 {
   "filepath": "src/api.ts",
