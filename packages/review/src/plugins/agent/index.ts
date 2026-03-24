@@ -117,15 +117,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
   async present(findings: ReviewFinding[], context: PresentContext): Promise<void> {
     const marker = `<!-- lien-plugin:${this.id}:`;
 
-    if (findings.length === 0) {
-      context.appendSummary(`### ${this.name}\n\nNo issues found.`);
-      // Still render a clean PR description callout
-      const noIssuesDesc = buildDescription([], undefined, []);
-      if (noIssuesDesc) {
-        context.appendDescription(noIssuesDesc, this.id);
-      }
-      return;
-    }
+    const commitSha = context.pr?.headSha;
 
     // Separate bug findings (line > 0) from summary/architectural findings
     const bugFindings = findings.filter(
@@ -134,24 +126,21 @@ export class AgentReviewPlugin implements ReviewPlugin {
     const archFindings = findings.filter(f => f.category === 'architectural');
     const summaryFinding = findings.find(f => f.category === 'summary');
 
-    // 1. Minimize outdated comments from previous runs
-    if (context.minimizeOutdatedComments) {
-      await context.minimizeOutdatedComments(marker);
-    }
-
-    // 2. Post inline comments for bug findings on the diff
+    // 1. Post inline comments for bug findings on the diff
+    //    Minimize outdated comments only when we have new ones to replace them
     if (bugFindings.length > 0 && context.postInlineComments) {
-      const body = `${this.name}: ${formatBugCount(bugFindings)}`;
-      await context.postInlineComments(bugFindings, body);
+      if (context.minimizeOutdatedComments) {
+        await context.minimizeOutdatedComments(marker);
+      }
+      const reviewBody = buildFixPrompt(bugFindings, marker);
+      await context.postInlineComments(bugFindings, reviewBody);
     }
 
-    // 3. Contribute to PR description — GitHub callout box style
-    const description = buildDescription(bugFindings, summaryFinding, archFindings);
-    if (description) {
-      context.appendDescription(description, this.id);
-    }
+    // 2. Contribute to PR description — GitHub callout box style
+    const description = buildDescription(bugFindings, summaryFinding, archFindings, commitSha);
+    context.appendDescription(description, this.id);
 
-    // 5. Append to check run summary
+    // 4. Append to check run summary
     context.appendSummary(formatCheckSummary(findings, this.name));
   }
 }
@@ -178,30 +167,6 @@ function mapToReviewFinding(f: AgentFinding, pluginId: string): ReviewFinding {
 // ---------------------------------------------------------------------------
 // Presentation helpers
 // ---------------------------------------------------------------------------
-
-function formatBugCount(findings: ReviewFinding[]): string {
-  const errors = findings.filter(f => f.severity === 'error').length;
-  const warnings = findings.filter(f => f.severity === 'warning').length;
-  const parts: string[] = [];
-  if (errors > 0) parts.push(`${errors} error${errors === 1 ? '' : 's'}`);
-  if (warnings > 0) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
-  return parts.join(', ');
-}
-
-function formatSummaryDescription(finding: ReviewFinding): string {
-  const meta = finding.metadata as
-    | { riskLevel?: string; overview?: string; keyChanges?: string[] }
-    | undefined;
-  const risk = meta?.riskLevel ?? 'unknown';
-  const overview = meta?.overview ?? finding.message;
-  const keyChanges = meta?.keyChanges ?? [];
-
-  let md = `**${capitalize(risk)} Risk** — ${overview}`;
-  if (keyChanges.length > 0) {
-    md += `\n\n**Key Changes**\n${keyChanges.map(c => `- ${c}`).join('\n')}`;
-  }
-  return md;
-}
 
 function formatArchDescription(findings: ReviewFinding[]): string {
   const count = findings.length;
@@ -257,7 +222,8 @@ function buildDescription(
   bugFindings: ReviewFinding[],
   summaryFinding: ReviewFinding | undefined,
   archFindings: ReviewFinding[],
-): string | null {
+  commitSha?: string,
+): string {
   const meta = summaryFinding?.metadata as
     | { riskLevel?: string; overview?: string; keyChanges?: string[] }
     | undefined;
@@ -292,18 +258,24 @@ function buildDescription(
     parts.push(formatArchDescription(archFindings));
   }
 
-  if (bugFindings.length > 0) {
-    parts.push(buildFixPrompt(bugFindings));
-  }
+  // Footer with commit SHA
+  const shortSha = commitSha ? commitSha.slice(0, 7) : '';
+  const footer = shortSha
+    ? `<sup>Reviewed by [Lien Review](https://lien.dev) for commit ${shortSha}. Updates automatically on new commits.</sup>`
+    : `<sup>Reviewed by [Lien Review](https://lien.dev). Updates automatically on new commits.</sup>`;
+  parts.push(footer);
 
   return parts.join('\n\n');
 }
 
 /**
- * Build a collapsed "fix all" prompt that users can paste into their AI coding assistant.
- * Each finding becomes a concise fix instruction with file path and line number.
+ * Build the review-level comment body with a collapsed "fix all" prompt.
+ * Includes the dedup marker so minimizeOutdatedComments can clean up on reruns.
  */
-function buildFixPrompt(findings: ReviewFinding[]): string {
+function buildFixPrompt(findings: ReviewFinding[], marker: string): string {
+  const count = findings.length;
+  const headline = `**${count} issue${count === 1 ? '' : 's'} found**`;
+
   const instructions = findings.map(f => {
     const loc = `\`${f.filepath}:${f.line}\``;
     const symbol = f.symbolName ? ` in \`${f.symbolName}\`` : '';
@@ -313,7 +285,7 @@ function buildFixPrompt(findings: ReviewFinding[]): string {
 
   const prompt = `Verify each finding against the current code and only fix it if the issue is real.\n\n${instructions.join('\n')}`;
 
-  return `<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n\`\`\`\n${prompt}\n\`\`\`\n\n</details>`;
+  return `${marker}review -->\n${headline}\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n\`\`\`\n${prompt}\n\`\`\`\n\n</details>`;
 }
 
 function capitalize(s: string): string {

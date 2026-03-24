@@ -176,7 +176,45 @@ export class AnthropicAgentClient {
     }
 
     // Parse findings and summary from the final response
-    const parsed = lastResponse ? extractResponse(lastResponse.content) : { findings: [] };
+    let parsed = lastResponse ? extractResponse(lastResponse.content) : { findings: [] };
+
+    // If the agent didn't produce a JSON block (e.g., budget hit mid-investigation),
+    // make one final cheap call asking just for the summary
+    if (!parsed.summary && lastResponse) {
+      this.logger.info('[agent] No JSON output — requesting summary...');
+      messages.push({ role: 'assistant', content: lastResponse.content });
+      messages.push({
+        role: 'user',
+        content:
+          'You ran out of budget before outputting findings. Based on what you investigated so far, output ONLY the JSON block now with your findings and summary. No more tool calls.',
+      });
+
+      try {
+        const summaryResponse = await this.client.messages.create({
+          model: this.model,
+          max_tokens: 4096,
+          system: [
+            {
+              type: 'text',
+              text: 'Output only a ```json code fence with findings and summary. No other text.',
+            },
+          ],
+          messages,
+        });
+
+        totalInputTokens += summaryResponse.usage.input_tokens;
+        totalOutputTokens += summaryResponse.usage.output_tokens;
+
+        const retryParsed = extractResponse(summaryResponse.content);
+        if (retryParsed.summary || retryParsed.findings.length > 0) {
+          parsed = retryParsed;
+        }
+      } catch (err) {
+        this.logger.warning(
+          `[agent] Summary retry failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     const cost =
       totalInputTokens * this.inputCostPerToken + totalOutputTokens * this.outputCostPerToken;
