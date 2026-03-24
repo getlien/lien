@@ -140,7 +140,13 @@ export class AgentReviewPlugin implements ReviewPlugin {
       await context.postInlineComments(bugFindings, body);
     }
 
-    // 3. Contribute to PR description
+    // 3. Post review comment with AI fix prompt (collapsed)
+    if (bugFindings.length > 0 && context.postReviewComment) {
+      const fixPrompt = buildFixPrompt(bugFindings);
+      await context.postReviewComment(fixPrompt);
+    }
+
+    // 4. Contribute to PR description
     const descParts: string[] = [];
     if (summaryFinding) {
       descParts.push(formatSummaryDescription(summaryFinding));
@@ -152,7 +158,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
       context.appendDescription(descParts.join('\n\n'), this.id);
     }
 
-    // 4. Append to check run summary
+    // 5. Append to check run summary
     context.appendSummary(formatCheckSummary(findings, this.name));
   }
 }
@@ -248,6 +254,23 @@ function formatCheckSummary(findings: ReviewFinding[], name: string): string {
   }
 
   return sections.join('\n\n');
+}
+
+/**
+ * Build a collapsed "fix all" prompt that users can paste into their AI coding assistant.
+ * Each finding becomes a concise fix instruction with file path and line number.
+ */
+function buildFixPrompt(findings: ReviewFinding[]): string {
+  const instructions = findings.map(f => {
+    const loc = `\`${f.filepath}:${f.line}\``;
+    const symbol = f.symbolName ? ` in \`${f.symbolName}\`` : '';
+    const fix = f.suggestion ? ` Fix: ${f.suggestion}` : '';
+    return `- ${loc}${symbol}: ${f.message}${fix}`;
+  });
+
+  const prompt = `Verify each finding against the current code and only fix it if the issue is real.\n\n${instructions.join('\n\n')}`;
+
+  return `<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n\`\`\`\n${prompt}\n\`\`\`\n\n</details>`;
 }
 
 function capitalize(s: string): string {
