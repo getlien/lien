@@ -119,6 +119,11 @@ export class AgentReviewPlugin implements ReviewPlugin {
 
     if (findings.length === 0) {
       context.appendSummary(`### ${this.name}\n\nNo issues found.`);
+      // Still render a clean PR description callout
+      const noIssuesDesc = buildDescription([], undefined, []);
+      if (noIssuesDesc) {
+        context.appendDescription(noIssuesDesc, this.id);
+      }
       return;
     }
 
