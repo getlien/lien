@@ -140,33 +140,10 @@ export class AgentReviewPlugin implements ReviewPlugin {
       await context.postInlineComments(bugFindings, body);
     }
 
-    // 3. Contribute to PR description — prominent summary + collapsed fix prompt
-    const descParts: string[] = [];
-
-    // Finding count headline
-    if (bugFindings.length > 0) {
-      const count = bugFindings.length;
-      const icon = bugFindings.some(f => f.severity === 'error') ? '🔴' : '🟡';
-      descParts.push(`${icon} **${count} issue${count === 1 ? '' : 's'} found**`);
-    }
-
-    // Risk summary
-    if (summaryFinding) {
-      descParts.push(formatSummaryDescription(summaryFinding));
-    }
-
-    // Architectural observations
-    if (archFindings.length > 0) {
-      descParts.push(formatArchDescription(archFindings));
-    }
-
-    // Collapsed AI fix prompt
-    if (bugFindings.length > 0) {
-      descParts.push(buildFixPrompt(bugFindings));
-    }
-
-    if (descParts.length > 0) {
-      context.appendDescription(descParts.join('\n\n'), this.id);
+    // 3. Contribute to PR description — GitHub callout box style
+    const description = buildDescription(bugFindings, summaryFinding, archFindings);
+    if (description) {
+      context.appendDescription(description, this.id);
     }
 
     // 5. Append to check run summary
@@ -268,6 +245,56 @@ function formatCheckSummary(findings: ReviewFinding[], name: string): string {
 }
 
 /**
+ * Build the PR description section using GitHub's callout blockquote syntax.
+ * Uses > [!NOTE] for clean PRs, > [!WARNING] when issues are found.
+ */
+function buildDescription(
+  bugFindings: ReviewFinding[],
+  summaryFinding: ReviewFinding | undefined,
+  archFindings: ReviewFinding[],
+): string | null {
+  const meta = summaryFinding?.metadata as
+    | { riskLevel?: string; overview?: string; keyChanges?: string[] }
+    | undefined;
+  const risk = meta?.riskLevel ?? 'low';
+  const overview = meta?.overview ?? summaryFinding?.message ?? '';
+
+  const calloutType = bugFindings.length > 0 ? 'WARNING' : 'NOTE';
+  const headline =
+    bugFindings.length > 0
+      ? `**${bugFindings.length} issue${bugFindings.length === 1 ? '' : 's'} found** · ${capitalize(risk)} Risk`
+      : `**${capitalize(risk)} Risk**`;
+
+  const lines: string[] = [];
+  lines.push(`> [!${calloutType}]`);
+  lines.push(`> ${headline}`);
+
+  if (overview) {
+    lines.push(`>`);
+    lines.push(`> ${overview}`);
+  }
+
+  if (meta?.keyChanges && meta.keyChanges.length > 0) {
+    lines.push(`>`);
+    for (const change of meta.keyChanges) {
+      lines.push(`> - ${change}`);
+    }
+  }
+
+  const parts: string[] = [lines.join('\n')];
+
+  if (archFindings.length > 0) {
+    parts.push(formatArchDescription(archFindings));
+  }
+
+  if (bugFindings.length > 0) {
+    parts.push(buildFixPrompt(bugFindings));
+  }
+
+  return parts.join('\n\n');
+}
+
+/**
  * Build a collapsed "fix all" prompt that users can paste into their AI coding assistant.
  * Each finding becomes a concise fix instruction with file path and line number.
  */
@@ -279,7 +306,7 @@ function buildFixPrompt(findings: ReviewFinding[]): string {
     return `- ${loc}${symbol}: ${f.message}${fix}`;
   });
 
-  const prompt = `Verify each finding against the current code and only fix it if the issue is real.\n\n${instructions.join('\n\n')}`;
+  const prompt = `Verify each finding against the current code and only fix it if the issue is real.\n\n${instructions.join('\n')}`;
 
   return `<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n\`\`\`\n${prompt}\n\`\`\`\n\n</details>`;
 }
