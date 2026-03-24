@@ -358,7 +358,7 @@ async function finalizeDescription(
   }
 
   const body = ordered.join('\n\n');
-  const markdown = `### Lien Review\n\n${body}\n\n*[Lien Review](https://lien.dev)*`;
+  const markdown = `### Lien Review\n\n${body}`;
 
   await updatePRDescription(octokit, pr, markdown, logger).catch(err =>
     logger.warning(`Failed to update PR description: ${err instanceof Error ? err.message : err}`),
