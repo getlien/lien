@@ -15,6 +15,7 @@ export function extractJSONFromCodeBlock(content: string): string {
 /**
  * Estimate prompt token count using ~4 chars/token heuristic.
  */
-export function estimatePromptTokens(prompt: string): number {
-  return Math.ceil(prompt.length / 4);
+export function estimatePromptTokens(prompt: string, systemPrompt?: string): number {
+  const total = prompt.length + (systemPrompt?.length || 0);
+  return Math.ceil(total / 4);
 }
