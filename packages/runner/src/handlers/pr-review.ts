@@ -416,14 +416,18 @@ function scaleAgentBudget(
   const contentChars = chunks.reduce((sum, c) => sum + c.content.length, 0);
   const estimatedContentTokens = Math.ceil(contentChars / 4);
 
-  // Base budget: system prompt (~2K) + initial message overhead (~1K) + content tokens
-  // Plus room for tool calls (~3K per call) and final JSON output (~2K)
+  // Budget breakdown:
+  // - System prompt: ~3K tokens (XML tags, examples, three-phase instructions)
+  // - Initial message: ~1K overhead + content tokens (diff, signatures, etc.)
+  // - Tool results: ~8K per call (get_files_context returns full chunks)
+  // - Final JSON output: ~2K
+  // - Conversation growth: each turn re-sends everything
   const maxTurns = fileCount <= 3 ? 8 : fileCount <= 10 ? 10 : 15;
-  const toolBudget = maxTurns * 3_000;
-  const baseBudget = 3_000 + estimatedContentTokens + toolBudget + 2_000;
+  const toolBudget = maxTurns * 8_000;
+  const baseBudget = 4_000 + estimatedContentTokens + toolBudget + 2_000;
 
-  // Clamp to sensible range
-  const maxTokenBudget = Math.min(Math.max(baseBudget, 30_000), 200_000);
+  // Clamp: minimum 60K (small PRs still need room), maximum 200K
+  const maxTokenBudget = Math.min(Math.max(baseBudget, 60_000), 200_000);
 
   return { maxTurns, maxTokenBudget };
 }

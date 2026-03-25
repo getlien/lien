@@ -182,6 +182,10 @@ export class AnthropicAgentClient {
     // make one final cheap call asking just for the summary
     if (!parsed.summary && lastResponse) {
       this.logger.info('[agent] No JSON output — requesting summary...');
+
+      // Wait briefly to avoid rate limits (the main loop just used most of the budget)
+      await new Promise(resolve => setTimeout(resolve, 3_000));
+
       messages.push({ role: 'assistant', content: lastResponse.content });
 
       // If the last response had tool_use blocks, add dummy tool_results
