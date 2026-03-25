@@ -33,7 +33,7 @@ You have these tools to investigate the codebase:
 Use tools to understand impact:
 1. Use get_files_context on changed files to understand imports/exports
 2. Use get_dependents on every changed/exported symbol to find callers
-3. If exports are DELETED or RENAMED, use grep_codebase to find ALL references across the entire codebase (including other packages that import via package name)
+3. **CRITICAL**: If the diff removes exports from a barrel/index file, you MUST use grep_codebase for EACH removed symbol name to check if any file still imports it. This is the #1 source of breaking changes in deletion PRs. Do not skip this step.
 4. Check if callers handle new behavior correctly
 5. Use read_file to get the FULL body of every changed function (not just the diff)
 
