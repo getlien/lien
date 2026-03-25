@@ -15,6 +15,7 @@ import {
   getDependents,
   listFunctions,
   getComplexity,
+  grepCodebase,
   readFile,
 } from './agent-tools.js';
 
@@ -113,6 +114,24 @@ export const AGENT_TOOLS = [
     },
   },
   {
+    name: 'grep_codebase',
+    description:
+      'Search the entire codebase for a text pattern (regex). Use this to find all files that ' +
+      'reference a specific symbol, import, or string. Critical for checking if deleted exports ' +
+      'are still imported elsewhere.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        pattern: {
+          type: 'string',
+          description:
+            'Regex pattern to search for. Example: "OpenRouterLLMClient", "from.*@liendev/review".',
+        },
+      },
+      required: ['pattern'],
+    },
+  },
+  {
     name: 'read_file',
     description:
       'Read file contents from the cloned repo with line numbers. ' +
@@ -153,6 +172,8 @@ export async function dispatchTool(
       return getFilesContext(input, ctx);
     case 'get_dependents':
       return getDependents(input, ctx);
+    case 'grep_codebase':
+      return grepCodebase(input, ctx);
     case 'list_functions':
       return listFunctions(input, ctx);
     case 'get_complexity':

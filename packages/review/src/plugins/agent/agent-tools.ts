@@ -230,6 +230,45 @@ export function getComplexity(input: Record<string, unknown>, ctx: AgentToolCont
 }
 
 // ---------------------------------------------------------------------------
+// grep_codebase
+// ---------------------------------------------------------------------------
+
+const MAX_GREP_RESULTS = 30;
+
+export function grepCodebase(input: Record<string, unknown>, ctx: AgentToolContext): string {
+  try {
+    const pattern = input.pattern as string;
+    if (!pattern) return JSON.stringify({ error: 'pattern is required' });
+
+    const regex = new RegExp(pattern, 'i');
+    const matches: Array<{ filepath: string; line: number; match: string }> = [];
+
+    for (const chunk of ctx.repoChunks) {
+      const lines = chunk.content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (regex.test(lines[i])) {
+          matches.push({
+            filepath: chunk.metadata.file,
+            line: chunk.metadata.startLine + i,
+            match: lines[i].trim().slice(0, 200),
+          });
+          if (matches.length >= MAX_GREP_RESULTS) break;
+        }
+      }
+      if (matches.length >= MAX_GREP_RESULTS) break;
+    }
+
+    return JSON.stringify({
+      results: matches,
+      count: matches.length,
+      truncated: matches.length >= MAX_GREP_RESULTS,
+    });
+  } catch (err) {
+    return JSON.stringify({ error: `grep_codebase failed: ${(err as Error).message}` });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // read_file
 // ---------------------------------------------------------------------------
 

@@ -21,6 +21,7 @@ You have these tools to investigate the codebase:
 - get_dependents: Find all callers/importers of a file or symbol
 - get_files_context: Get all code chunks, imports, exports, and call sites for files
 - list_functions: Search for symbols by name pattern
+- grep_codebase: Search the ENTIRE codebase for a text pattern. Critical for finding imports of deleted exports across packages.
 - get_complexity: Get complexity metrics for files
 - read_file: Read file contents from the repo
 </tools>
@@ -32,8 +33,9 @@ You have these tools to investigate the codebase:
 Use tools to understand impact:
 1. Use get_files_context on changed files to understand imports/exports
 2. Use get_dependents on every changed/exported symbol to find callers
-3. Check if callers handle new behavior correctly
-4. Use read_file to get the FULL body of every changed function (not just the diff)
+3. If exports are DELETED or RENAMED, use grep_codebase to find ALL references across the entire codebase (including other packages that import via package name)
+4. Check if callers handle new behavior correctly
+5. Use read_file to get the FULL body of every changed function (not just the diff)
 
 ### Phase 2: Edge Case Sweep
 For EACH changed or new function, read its full body and mentally execute it with these inputs:
