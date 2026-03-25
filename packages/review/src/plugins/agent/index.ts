@@ -163,7 +163,16 @@ export class AgentReviewPlugin implements ReviewPlugin {
         await context.minimizeOutdatedComments(marker);
       }
       const reviewBody = buildFixPrompt(bugFindings, marker);
-      await context.postInlineComments(bugFindings, reviewBody);
+      const result = await context.postInlineComments(bugFindings, reviewBody);
+
+      // If some findings were outside the diff, post them as a review comment
+      if (result && result.skipped > 0 && context.postReviewComment) {
+        const outsideDiff = bugFindings.filter(f => !context.pr?.patches?.has(f.filepath));
+        if (outsideDiff.length > 0) {
+          const outsideBody = `${marker}outside-diff -->\n**⚠️ Issues found outside the diff:**\n\n${outsideDiff.map(f => `- 🔴 **${f.filepath}:${f.line}**${f.symbolName ? ` in \`${f.symbolName}\`` : ''}\n  ${f.message}${f.suggestion ? `\n  💡 *${f.suggestion}*` : ''}`).join('\n\n')}`;
+          await context.postReviewComment(outsideBody);
+        }
+      }
     }
 
     // 2. Contribute to PR description — GitHub callout box style
