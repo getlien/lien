@@ -183,11 +183,22 @@ export class AnthropicAgentClient {
     if (!parsed.summary && lastResponse) {
       this.logger.info('[agent] No JSON output — requesting summary...');
       messages.push({ role: 'assistant', content: lastResponse.content });
-      messages.push({
-        role: 'user',
-        content:
-          'You ran out of budget before outputting findings. Based on what you investigated so far, output ONLY the JSON block now with your findings and summary. No more tool calls.',
+
+      // If the last response had tool_use blocks, add dummy tool_results
+      // so the Anthropic API accepts the conversation
+      const pendingToolUse = lastResponse.content.filter(
+        (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use',
+      );
+      const retryContent: Anthropic.Messages.ContentBlockParam[] = pendingToolUse.map(b => ({
+        type: 'tool_result' as const,
+        tool_use_id: b.id,
+        content: '[Budget exceeded — tool not executed]',
+      }));
+      retryContent.push({
+        type: 'text' as const,
+        text: 'You ran out of budget before outputting findings. Based on what you investigated so far, output ONLY the JSON block now with your findings and summary. No more tool calls.',
       });
+      messages.push({ role: 'user', content: retryContent });
 
       try {
         const summaryResponse = await this.client.messages.create({
