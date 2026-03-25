@@ -235,7 +235,7 @@ export async function handlePRReview(
     // Setup engine with enabled plugins
     const engine = new ReviewEngine();
     if (payload.config.review_types.complexity) engine.register(new ComplexityPlugin());
-    if (config.anthropicApiKey) engine.register(new AgentReviewPlugin());
+    if (config.openrouterApiKey || config.anthropicApiKey) engine.register(new AgentReviewPlugin());
 
     // Build LLM client (only needed if non-agent plugins are active in future)
     const llm = reviewConfig.openrouterApiKey
@@ -284,8 +284,12 @@ export async function handlePRReview(
           blockOnNewErrors: reviewConfig.blockOnNewErrors,
         },
         'agent-review': {
-          anthropicApiKey: config.anthropicApiKey,
-          model: 'claude-sonnet-4-6',
+          apiKey: config.openrouterApiKey || config.anthropicApiKey,
+          provider: config.openrouterApiKey ? 'openai' : 'anthropic',
+          model: config.openrouterApiKey ? 'google/gemini-2.5-flash' : 'claude-sonnet-4-6',
+          baseUrl: config.openrouterApiKey ? 'https://openrouter.ai/api/v1' : undefined,
+          inputCostPerMTok: config.openrouterApiKey ? 0.3 : 3,
+          outputCostPerMTok: config.openrouterApiKey ? 2.5 : 15,
           ...scaleAgentBudget(filesToAnalyze.length, chunks),
         },
       },
