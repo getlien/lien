@@ -223,9 +223,52 @@ Title: ${context.pr.title}${context.pr.body ? `\nDescription: ${context.pr.body}
     sections.push(`<changed_functions>\n${lines.join('\n')}\n</changed_functions>`);
   }
 
+  // Detect deleted exports from diff — critical for finding breaking changes
+  if (context.pr?.patches) {
+    const deletedExports = extractDeletedExports(context.pr.patches);
+    if (deletedExports.length > 0) {
+      sections.push(
+        `<deleted_exports>\nThese exports were REMOVED in this PR. Use grep_codebase to check if any file still imports them:\n${deletedExports.map(e => `- ${e}`).join('\n')}\n</deleted_exports>`,
+      );
+    }
+  }
+
   sections.push(
     'Investigate this PR. Run Phase 1 (structural analysis with tools), Phase 2 (edge case sweep), Phase 3 (self-review), then output findings as JSON.',
   );
 
   return sections.join('\n\n');
+}
+
+/**
+ * Extract symbol names of deleted exports from diff patches.
+ * Looks for lines like `-export { Foo } from ...` or `-export { Foo, Bar }`.
+ */
+function extractDeletedExports(patches: Map<string, string>): string[] {
+  const symbols: string[] = [];
+
+  for (const [, patch] of patches) {
+    const lines = patch.split('\n');
+    for (const line of lines) {
+      // Match removed export lines: -export { X, Y } from ...
+      if (!line.startsWith('-')) continue;
+      const exportMatch = line.match(/^-\s*export\s*\{([^}]+)\}/);
+      if (exportMatch) {
+        const names = exportMatch[1].split(',').map(s =>
+          s
+            .trim()
+            .split(/\s+as\s+/)[0]
+            .trim(),
+        );
+        symbols.push(...names.filter(n => n && !n.startsWith('type ')));
+      }
+      // Match removed re-export: -export { default as X } from ...
+      const reexportMatch = line.match(/^-\s*export\s*\{\s*(\w+)\s*\}/);
+      if (reexportMatch && !exportMatch) {
+        symbols.push(reexportMatch[1]);
+      }
+    }
+  }
+
+  return [...new Set(symbols)];
 }
