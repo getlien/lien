@@ -29,6 +29,9 @@ export type {
 // Engine
 export { ReviewEngine, createDefaultEngine, type EngineOptions } from './engine.js';
 
+// LLM Client (used by CLI's `lien review` command)
+export { OpenRouterLLMClient, type OpenRouterLLMClientOptions } from './llm-client.js';
+
 // Built-in plugins
 export { ComplexityPlugin } from './plugins/complexity.js';
 export { AgentReviewPlugin } from './plugins/agent/index.js';
