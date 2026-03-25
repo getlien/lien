@@ -11,13 +11,16 @@ import type { Logger } from '../../logger.js';
 
 /** Configuration for the agent review plugin. */
 export interface AgentConfig {
-  anthropicApiKey: string;
+  /** API key (OpenRouter or Anthropic) */
+  apiKey?: string;
+  /** @deprecated Use apiKey instead */
+  anthropicApiKey?: string;
   model: string;
-  /** Base URL for the API (default: Anthropic). Set for Anthropic-compatible providers like MiniMax. */
+  /** 'openai' for OpenRouter/Gemini/DeepSeek, 'anthropic' for Claude */
+  provider?: 'openai' | 'anthropic';
+  /** Base URL for the API */
   baseUrl?: string;
-  /** Cost per million input tokens. Default: Sonnet pricing ($3/MTok). */
   inputCostPerMTok?: number;
-  /** Cost per million output tokens. Default: Sonnet pricing ($15/MTok). */
   outputCostPerMTok?: number;
   maxTurns: number;
   maxTokenBudget: number;

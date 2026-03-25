@@ -16,19 +16,24 @@ import type {
 } from '../../plugin-types.js';
 import { buildDependencyGraph } from '../../dependency-graph.js';
 
-import type { AgentConfig, AgentFinding } from './types.js';
+import type { AgentConfig, AgentFinding, AgentResult } from './types.js';
 import { AnthropicAgentClient } from './anthropic-client.js';
+import { OpenAIAgentClient, toOpenAITools } from './openai-client.js';
 import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
 
 const configSchema = z.object({
-  anthropicApiKey: z.string().min(1),
-  model: z.string().default('claude-sonnet-4-6'),
-  baseUrl: z.string().optional(),
+  apiKey: z.string().min(1),
+  model: z.string().default('google/gemini-2.5-flash'),
+  /** 'openai' for OpenRouter/Gemini/DeepSeek, 'anthropic' for Claude */
+  provider: z.enum(['openai', 'anthropic']).default('openai'),
+  baseUrl: z.string().default('https://openrouter.ai/api/v1'),
   inputCostPerMTok: z.number().optional(),
   outputCostPerMTok: z.number().optional(),
   maxTurns: z.number().int().min(1).max(30).default(15),
   maxTokenBudget: z.number().int().default(100_000),
+  // Legacy — maps to apiKey
+  anthropicApiKey: z.string().optional(),
 });
 
 export interface AgentReviewPluginOptions {
@@ -50,40 +55,65 @@ export class AgentReviewPlugin implements ReviewPlugin {
   }
 
   shouldActivate(context: ReviewContext): boolean {
-    const apiKey = context.config.anthropicApiKey as string | undefined;
-    return !!apiKey && context.chunks.length > 0;
+    const apiKey =
+      (context.config.apiKey as string) ?? (context.config.anthropicApiKey as string) ?? '';
+    return apiKey.length > 0 && context.chunks.length > 0;
   }
 
   async analyze(context: ReviewContext): Promise<ReviewFinding[]> {
     const config = context.config as unknown as AgentConfig;
     const logger = context.logger;
+    const apiKey = config.apiKey ?? config.anthropicApiKey ?? '';
+    const provider = config.provider ?? (config.anthropicApiKey ? 'anthropic' : 'openai');
 
     // Build dependency graph from in-memory chunks (no embeddings needed)
     const graph = buildDependencyGraph(context.repoChunks!);
 
-    const agentClient = new AnthropicAgentClient({
-      apiKey: config.anthropicApiKey,
-      model: config.model,
-      baseUrl: config.baseUrl,
-      inputCostPerMTok: config.inputCostPerMTok,
-      outputCostPerMTok: config.outputCostPerMTok,
-      maxTurns: config.maxTurns,
-      maxTokenBudget: config.maxTokenBudget,
-      logger,
-    });
+    const toolExecutor = (name: string, input: Record<string, unknown>) =>
+      dispatchTool(name, input, {
+        repoChunks: context.repoChunks!,
+        repoRootDir: context.repoRootDir!,
+        graph,
+        logger,
+      });
 
-    const result = await agentClient.run(
-      buildSystemPrompt(),
-      buildInitialMessage(context),
-      AGENT_TOOLS,
-      (name, input) =>
-        dispatchTool(name, input, {
-          repoChunks: context.repoChunks!,
-          repoRootDir: context.repoRootDir!,
-          graph,
-          logger,
-        }),
-    );
+    let result: AgentResult;
+
+    if (provider === 'anthropic') {
+      const client = new AnthropicAgentClient({
+        apiKey,
+        model: config.model,
+        baseUrl: config.baseUrl,
+        inputCostPerMTok: config.inputCostPerMTok,
+        outputCostPerMTok: config.outputCostPerMTok,
+        maxTurns: config.maxTurns,
+        maxTokenBudget: config.maxTokenBudget,
+        logger,
+      });
+      result = await client.run(
+        buildSystemPrompt(),
+        buildInitialMessage(context),
+        AGENT_TOOLS,
+        toolExecutor,
+      );
+    } else {
+      const client = new OpenAIAgentClient({
+        apiKey,
+        model: config.model,
+        baseUrl: config.baseUrl ?? 'https://openrouter.ai/api/v1',
+        inputCostPerMTok: config.inputCostPerMTok,
+        outputCostPerMTok: config.outputCostPerMTok,
+        maxTurns: config.maxTurns,
+        maxTokenBudget: config.maxTokenBudget,
+        logger,
+      });
+      result = await client.run(
+        buildSystemPrompt(),
+        buildInitialMessage(context),
+        toOpenAITools(AGENT_TOOLS),
+        toolExecutor,
+      );
+    }
 
     logger.info(
       `[${this.id}] Review complete: ${result.findings.length} findings in ${result.turns} turns ($${result.usage.cost.toFixed(4)})`,
