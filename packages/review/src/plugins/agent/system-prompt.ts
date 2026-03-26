@@ -148,7 +148,7 @@ After all three phases, output a JSON block in a \`\`\`json code fence:
   ],
   "summary": {
     "riskLevel": "low | medium | high | critical",
-    "overview": "One paragraph — what this PR does and its risk profile",
+    "overview": "One paragraph — what this PR does and its risk profile. Focus on impact, not how you investigated. Do not mention tool names.",
     "keyChanges": ["bullet 1", "bullet 2"]
   }
 }
