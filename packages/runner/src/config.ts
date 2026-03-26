@@ -8,6 +8,7 @@ export interface RunnerConfig {
   natsConsumer: string;
   laravelApiUrl: string;
   anthropicApiKey: string;
+  openrouterApiKey: string;
   pullTimeoutMs: number;
   jobTimeoutMs: number;
 }
@@ -33,6 +34,7 @@ export function loadConfig(): RunnerConfig {
     natsConsumer: process.env.NATS_CONSUMER ?? 'reviews-runner',
     laravelApiUrl,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
+    openrouterApiKey: process.env.OPENROUTER_API_KEY ?? '',
     pullTimeoutMs: parsePositiveInt(process.env.PULL_TIMEOUT_MS, 30_000, 'PULL_TIMEOUT_MS'),
     jobTimeoutMs: parsePositiveInt(process.env.JOB_TIMEOUT_MS, 600_000, 'JOB_TIMEOUT_MS'),
   };
