@@ -354,6 +354,10 @@ export async function getExistingPluginCommentKeys(
   try {
     for await (const comment of listAllReviewComments(octokit, prContext)) {
       if (!comment.body) continue;
+      // Only dedup against comments on the current HEAD commit.
+      // Old commit comments get minimized as "outdated" by GitHub,
+      // so we should re-post findings on the new commit.
+      if (comment.commit_id !== prContext.headSha) continue;
       const start = comment.body.indexOf(prefix);
       if (start === -1) continue;
       const keyStart = start + prefix.length;
