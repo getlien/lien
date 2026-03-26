@@ -36,7 +36,7 @@ export function formatDeltaValue(metricType: string, delta: number): string {
  */
 export function formatPercentChange(before: number, after: number): string {
   if (before === 0) return after === 0 ? '0%' : '∞';
-  const pct = Math.round(((after - before) / before) * 100);
+  const pct = Math.round(((after - before) / Math.abs(before)) * 100);
   if (pct > 0) return `+${pct}% ↑`;
   if (pct < 0) return `${pct}% ↓`;
   return '0%';
