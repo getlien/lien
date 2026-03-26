@@ -228,8 +228,9 @@ export class OpenAIAgentClient {
     const body: Record<string, unknown> = {
       model: this.model,
       messages,
-      max_tokens: 8192,
+      max_tokens: 16384,
       temperature: 0,
+      reasoning: { effort: 'high' },
     };
     if (tools.length > 0) {
       body.tools = tools;
