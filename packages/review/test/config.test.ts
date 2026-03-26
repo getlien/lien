@@ -29,7 +29,7 @@ describe('loadConfig', () => {
   it('returns defaults when no config file exists', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'architectural', 'summary']);
+    expect(config.plugins).toEqual(['complexity', 'agent-review']);
     expect(config.llm.provider).toBe('openrouter');
     expect(config.llm.model).toBe('minimax/minimax-m2.5');
     expect(config.settings).toEqual({});
@@ -39,14 +39,14 @@ describe('loadConfig', () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue('null');
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'architectural', 'summary']);
+    expect(config.plugins).toEqual(['complexity', 'agent-review']);
   });
 
   it('parses valid YAML config with string plugin list', () => {
     const yaml = `
 plugins:
   - complexity
-  - architectural
+  - agent-review
 llm:
   provider: openrouter
   model: test-model
@@ -55,7 +55,7 @@ llm:
     vi.mocked(fs.readFileSync).mockReturnValue(yaml);
 
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'architectural']);
+    expect(config.plugins).toEqual(['complexity', 'agent-review']);
     expect(config.llm.model).toBe('test-model');
   });
 
@@ -64,13 +64,13 @@ llm:
 plugins:
   - complexity:
       threshold: 20
-  - architectural
+  - agent-review
 `;
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(yaml);
 
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'architectural']);
+    expect(config.plugins).toEqual(['complexity', 'agent-review']);
     expect(config.settings.complexity).toEqual({ threshold: 20 });
   });
 
@@ -80,7 +80,7 @@ plugins:
   - complexity:
       threshold: 25
       blockOnNewErrors: true
-  - architectural:
+  - agent-review:
       mode: always
 `;
     vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -88,7 +88,7 @@ plugins:
 
     const config = loadConfig('/fake/root');
     expect(config.settings.complexity).toEqual({ threshold: 25, blockOnNewErrors: true });
-    expect(config.settings.architectural).toEqual({ mode: 'always' });
+    expect(config.settings['agent-review']).toEqual({ mode: 'always' });
   });
 
   it('interpolates ${VAR} from environment variables', () => {
@@ -195,15 +195,15 @@ plugins: "not-an-array"
     const yaml = `
 plugins:
   - complexity
-  - architectural:
+  - agent-review:
       mode: always
 `;
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockReturnValue(yaml);
 
     const config = loadConfig('/fake/root');
-    expect(config.plugins).toEqual(['complexity', 'architectural']);
-    expect(config.settings.architectural).toEqual({ mode: 'always' });
+    expect(config.plugins).toEqual(['complexity', 'agent-review']);
+    expect(config.settings['agent-review']).toEqual({ mode: 'always' });
     expect(config.settings.complexity).toBeUndefined();
   });
 });
@@ -216,9 +216,9 @@ describe('loadPlugin', () => {
     expect(typeof plugin.shouldActivate).toBe('function');
   });
 
-  it('loads built-in "architectural" plugin', async () => {
-    const plugin = await loadPlugin('architectural');
-    expect(plugin.id).toBe('architectural');
+  it('loads built-in "agent-review" plugin', async () => {
+    const plugin = await loadPlugin('agent-review');
+    expect(plugin.id).toBe('agent-review');
     expect(typeof plugin.analyze).toBe('function');
   });
 
@@ -232,14 +232,14 @@ describe('loadPlugin', () => {
 describe('loadPlugins', () => {
   it('loads multiple built-in plugins', async () => {
     const config: ReviewYamlConfig = {
-      plugins: ['complexity', 'architectural'],
+      plugins: ['complexity', 'agent-review'],
       llm: { provider: 'openrouter', model: 'test' },
       settings: {},
     };
     const plugins = await loadPlugins(config);
     expect(plugins).toHaveLength(2);
     expect(plugins[0].id).toBe('complexity');
-    expect(plugins[1].id).toBe('architectural');
+    expect(plugins[1].id).toBe('agent-review');
   });
 
   it('rejects duplicate plugin IDs', async () => {

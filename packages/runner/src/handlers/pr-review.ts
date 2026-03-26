@@ -8,7 +8,6 @@ import { createHash } from 'node:crypto';
 
 import {
   type PRContext,
-  type ReviewConfig,
   type Logger,
   type ReviewFinding,
   type ComplexityReport,
@@ -27,7 +26,6 @@ import {
   ReviewEngine,
   ComplexityPlugin,
   AgentReviewPlugin,
-  OpenRouterLLMClient,
 } from '@liendev/review';
 import type { CodeChunk } from '@liendev/parser';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
@@ -61,15 +59,9 @@ export async function handlePRReview(
     headSha: pr.head_sha,
   };
 
-  const reviewConfig: ReviewConfig = {
-    openrouterApiKey: config.openrouterApiKey,
-    model: config.openrouterModel,
+  const reviewConfig = {
     threshold: payload.config.threshold,
-    enableDeltaTracking: true,
-    baselineComplexityPath: '',
     blockOnNewErrors: payload.config.block_on_new_errors,
-    enableArchitecturalReview: payload.config.architectural_mode,
-    archReviewCategories: [],
   };
 
   const reviewRunId = payload.review_run_id ?? null;
@@ -237,15 +229,6 @@ export async function handlePRReview(
     if (payload.config.review_types.complexity) engine.register(new ComplexityPlugin());
     if (config.openrouterApiKey || config.anthropicApiKey) engine.register(new AgentReviewPlugin());
 
-    // Build LLM client (only needed if non-agent plugins are active in future)
-    const llm = reviewConfig.openrouterApiKey
-      ? new OpenRouterLLMClient({
-          apiKey: reviewConfig.openrouterApiKey,
-          model: reviewConfig.model,
-          logger,
-        })
-      : undefined;
-
     // Build a tee logger so plugin output is visible in platform run logs
     const engineLogger: Logger = logBuffer
       ? {
@@ -294,7 +277,6 @@ export async function handlePRReview(
         },
       },
       config: {},
-      llm,
       pr: prContext,
       logger: engineLogger,
       repoRootDir: headClone.dir,
@@ -314,8 +296,8 @@ export async function handlePRReview(
       pr: prContext,
       octokit,
       logger,
-      llmUsage: llm?.getUsage(),
-      model: reviewConfig.model,
+      llmUsage: agentUsage.totalTokens > 0 ? agentUsage : undefined,
+      model: 'claude-sonnet-4-6',
       blockOnNewErrors: reviewConfig.blockOnNewErrors,
     };
 
@@ -329,14 +311,9 @@ export async function handlePRReview(
       logger,
     );
 
-    // Collect usage stats (LLM client + agent)
-    if (llm) {
-      const usage = llm.getUsage();
-      tokenUsage = usage.totalTokens;
-      cost = usage.cost;
-    }
-    tokenUsage += agentUsage.totalTokens;
-    cost += agentUsage.cost;
+    // Collect usage stats from agent
+    tokenUsage = agentUsage.totalTokens;
+    cost = agentUsage.cost;
 
     // Build result arrays
     const complexitySnapshots = buildComplexitySnapshots(currentReport);

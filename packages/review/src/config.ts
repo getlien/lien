@@ -37,7 +37,7 @@ const pluginEntrySchema = z.union([
 ]);
 
 const reviewConfigSchema = z.object({
-  plugins: z.array(pluginEntrySchema).default(['complexity', 'architectural', 'summary']),
+  plugins: z.array(pluginEntrySchema).default(['complexity', 'agent-review']),
   llm: llmConfigSchema,
 });
 
@@ -198,19 +198,15 @@ const BUILTIN_PLUGINS: Record<string, () => Promise<ReviewPlugin>> = {
     const { ComplexityPlugin } = await import('./plugins/complexity.js');
     return new ComplexityPlugin();
   },
-  architectural: async () => {
-    const { ArchitecturalPlugin } = await import('./plugins/architectural.js');
-    return new ArchitecturalPlugin();
-  },
-  summary: async () => {
-    const { SummaryPlugin } = await import('./plugins/summary.js');
-    return new SummaryPlugin();
+  'agent-review': async () => {
+    const { AgentReviewPlugin } = await import('./plugins/agent/index.js');
+    return new AgentReviewPlugin();
   },
 };
 
 /**
  * Load a plugin by name.
- * - Built-in plugins: 'complexity', 'architectural'
+ * - Built-in plugins: 'complexity', 'agent-review'
  * - npm packages: full package name (e.g., '@myorg/lien-plugin-security')
  */
 export async function loadPlugin(name: string): Promise<ReviewPlugin> {

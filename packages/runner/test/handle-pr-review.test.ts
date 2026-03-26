@@ -10,7 +10,6 @@ vi.mock('@liendev/review', () => ({
   ReviewEngine: vi.fn(),
   AgentReviewPlugin: vi.fn(),
   ComplexityPlugin: vi.fn(),
-  OpenRouterLLMClient: vi.fn(),
   runComplexityAnalysis: vi.fn(),
   enrichWithTestAssociations: vi.fn(),
   calculateDeltas: vi.fn(),
@@ -108,8 +107,6 @@ function makeConfig(): RunnerConfig {
     natsConsumer: 'reviews-runner',
     laravelApiUrl: 'https://api.test',
     anthropicApiKey: 'test-anthropic-key',
-    openrouterApiKey: '',
-    openrouterModel: 'test-model',
     pullTimeoutMs: 30_000,
     jobTimeoutMs: 600_000,
   };
