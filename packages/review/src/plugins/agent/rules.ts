@@ -292,7 +292,7 @@ Focus on fields/variants introduced or modified in this PR. If a new field is ad
   "suggestion": "Add a filePatterns check: if (t.filePatterns?.some(pat => ctx.changedFiles.some(f => matchGlob(f, pat)))) return true;",
   "evidence": "Incomplete handling check — interface field declared but not consumed by processing function"
 }`,
-  triggers: { always: true },
+  triggers: { languages: ['typescript', 'java', 'csharp', 'go', 'rust', 'php'] },
   severity: 'error',
   category: 'logic_error',
   enabled: true,

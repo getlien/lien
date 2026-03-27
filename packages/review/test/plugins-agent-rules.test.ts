@@ -119,7 +119,22 @@ describe('selectRules', () => {
     const activeIds = result.active.map(r => r.id);
     expect(activeIds).toContain('structural-analysis');
     expect(activeIds).toContain('edge-case-sweep');
-    expect(activeIds).toContain('incomplete-handling');
+  });
+
+  it('includes incomplete-handling for typed languages', () => {
+    const ts = makeTriggerContext({ languages: new Set(['typescript']) });
+    expect(selectRules(BUILTIN_RULES, ts).active.map(r => r.id)).toContain('incomplete-handling');
+
+    const go = makeTriggerContext({ languages: new Set(['go']) });
+    expect(selectRules(BUILTIN_RULES, go).active.map(r => r.id)).toContain('incomplete-handling');
+  });
+
+  it('skips incomplete-handling for untyped languages', () => {
+    const py = makeTriggerContext({ languages: new Set(['python']) });
+    expect(selectRules(BUILTIN_RULES, py).skipped).toContain('incomplete-handling');
+
+    const js = makeTriggerContext({ languages: new Set(['javascript']) });
+    expect(selectRules(BUILTIN_RULES, js).skipped).toContain('incomplete-handling');
   });
 
   it('skips concurrency-race when diff has no concurrency keywords', () => {
