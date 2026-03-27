@@ -119,6 +119,7 @@ describe('selectRules', () => {
     const activeIds = result.active.map(r => r.id);
     expect(activeIds).toContain('structural-analysis');
     expect(activeIds).toContain('edge-case-sweep');
+    expect(activeIds).toContain('incomplete-handling');
   });
 
   it('skips concurrency-race when diff has no concurrency keywords', () => {
@@ -336,11 +337,17 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('lockForUpdate');
     expect(prompt).toContain('Lock ordering');
 
+    // Incomplete handling rule
+    expect(prompt).toContain('Incomplete Handling');
+    expect(prompt).toContain('Unread fields');
+    expect(prompt).toContain('Missing cases');
+
     // Examples
     expect(prompt).toContain('percentChange');
     expect(prompt).toContain('formatRatio');
     expect(prompt).toContain('refundCredit');
     expect(prompt).toContain('fetchUser');
+    expect(prompt).toContain('ruleMatchesTriggers'); // incomplete-handling example
 
     // Bad examples (always included)
     expect(prompt).toContain('DO NOT report');
@@ -393,5 +400,6 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('"ruleId": "structural-analysis"');
     expect(prompt).toContain('"ruleId": "edge-case-sweep"');
     expect(prompt).toContain('"ruleId": "concurrency-race"');
+    expect(prompt).toContain('"ruleId": "incomplete-handling"');
   });
 });

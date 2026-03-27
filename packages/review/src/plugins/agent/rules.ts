@@ -267,5 +267,42 @@ For code with DB transactions, locks, or shared state:
   source: 'builtin',
 };
 
+const INCOMPLETE_HANDLING: ReviewRule = {
+  id: 'incomplete-handling',
+  name: 'Incomplete Interface/Type Handling',
+  description:
+    'Check for interface fields, enum variants, or union members declared but silently ignored by consuming code',
+  prompt: `### Incomplete Handling Check
+When a function consumes a typed object (interface, type, config, options), check that ALL declared fields are actually handled:
+- **Unread fields**: An interface declares field X, but the function that processes it never reads X. Callers who set X will get silent no-ops.
+- **Missing cases**: A switch/if-else chain over a union or enum doesn't cover all variants. New variants fall through silently.
+- **Partial iteration**: A function iterates over some properties of a config/options object but skips others that affect behavior.
+- **Declared but unimplemented**: A type defines a contract (e.g., trigger conditions, handler map, feature flags), but the implementation only handles a subset. This is especially dangerous when the type is part of a public API or config schema — users will set the field expecting it to work.
+
+Focus on fields/variants introduced or modified in this PR. If a new field is added to a type, grep for all consumers and verify they handle it.`,
+  example: `### Good finding — interface field declared but never consumed:
+{
+  "filepath": "src/rules.ts",
+  "line": 54,
+  "symbolName": "ruleMatchesTriggers",
+  "severity": "error",
+  "category": "logic_error",
+  "ruleId": "incomplete-handling",
+  "message": "RuleTriggers.filePatterns is declared in the interface (types.ts:53) but ruleMatchesTriggers never reads it. Rules with only filePatterns triggers will silently fail to activate, since the function checks 'always', 'languages', and 'keywords' but skips 'filePatterns'.",
+  "suggestion": "Add a filePatterns check: if (t.filePatterns?.some(pat => ctx.changedFiles.some(f => matchGlob(f, pat)))) return true;",
+  "evidence": "Incomplete handling check — interface field declared but not consumed by processing function"
+}`,
+  triggers: { always: true },
+  severity: 'error',
+  category: 'logic_error',
+  enabled: true,
+  source: 'builtin',
+};
+
 /** All built-in review rules. */
-export const BUILTIN_RULES: ReviewRule[] = [STRUCTURAL_ANALYSIS, EDGE_CASE_SWEEP, CONCURRENCY_RACE];
+export const BUILTIN_RULES: ReviewRule[] = [
+  STRUCTURAL_ANALYSIS,
+  EDGE_CASE_SWEEP,
+  CONCURRENCY_RACE,
+  INCOMPLETE_HANDLING,
+];
