@@ -285,6 +285,14 @@ describe('globToRegex', () => {
     expect(re.test('foo.js')).toBe(false);
   });
 
+  it('does not produce false positives with **/ separator', () => {
+    const re = globToRegex('src/**/foo.ts');
+    expect(re.test('src/foo.ts')).toBe(true); // zero dirs
+    expect(re.test('src/bar/foo.ts')).toBe(true); // one dir
+    expect(re.test('src/a/b/foo.ts')).toBe(true); // nested dirs
+    expect(re.test('src/barfoo.ts')).toBe(false); // no separator — must not match
+  });
+
   it('matches ? as single character', () => {
     const re = globToRegex('?.ts');
     expect(re.test('a.ts')).toBe(true);

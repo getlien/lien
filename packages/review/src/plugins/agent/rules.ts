@@ -39,7 +39,7 @@ export function buildTriggerContext(context: ReviewContext): TriggerContext {
 
   return {
     languages,
-    changedFiles: context.changedFiles,
+    changedFiles: context.allChangedFiles ?? context.changedFiles,
     diffText,
   };
 }
@@ -55,10 +55,12 @@ export function buildTriggerContext(context: ReviewContext): TriggerContext {
 export function globToRegex(pattern: string): RegExp {
   // Protect glob chars with placeholders, escape the rest, then expand
   const re = pattern
-    .replace(/\*\*\/?/g, '\0GLOBSTAR\0') // ** (with optional /) → placeholder
+    .replace(/\*\*\//g, '\0GLOBSTAR_SEP\0') // **/ → zero or more dirs (with separator)
+    .replace(/\*\*/g, '\0GLOBSTAR\0') // ** alone → any path
     .replace(/\*/g, '\0STAR\0') // * → placeholder
     .replace(/\?/g, '\0QUESTION\0') // ? → placeholder
     .replace(/[.+^${}()|[\]\\]/g, '\\$&') // escape regex specials
+    .replace(/\0GLOBSTAR_SEP\0/g, '(?:.*/)?') // **/ = zero or more dirs ending with /
     .replace(/\0GLOBSTAR\0/g, '.*') // ** = any path
     .replace(/\0STAR\0/g, '[^/]*') // * = non-separator wildcard
     .replace(/\0QUESTION\0/g, '[^/]'); // ? = single non-separator char
