@@ -80,12 +80,46 @@ class GitHubCheckService
         }
     }
 
+    /**
+     * Complete a GitHub Check Run with a custom conclusion and output.
+     */
+    public function completeCheckRun(
+        ReviewRun $reviewRun,
+        int $checkRunId,
+        string $installationToken,
+        string $conclusion,
+        string $title,
+        string $summary,
+    ): void {
+        $repository = $reviewRun->repository;
+
+        $response = Http::withToken($installationToken)
+            ->acceptJson()
+            ->patch("https://api.github.com/repos/{$repository->full_name}/check-runs/{$checkRunId}", [
+                'status' => 'completed',
+                'conclusion' => $conclusion,
+                'completed_at' => now()->toIso8601String(),
+                'output' => [
+                    'title' => $title,
+                    'summary' => $summary,
+                ],
+            ]);
+
+        if (! $response->successful()) {
+            Log::warning('Failed to complete GitHub check run', [
+                'review_run_id' => $reviewRun->id,
+                'check_run_id' => $checkRunId,
+                'response' => $response->body(),
+            ]);
+        }
+    }
+
     private function mapStatus(ReviewRunStatus $status): string
     {
         return match ($status) {
             ReviewRunStatus::Pending => 'queued',
             ReviewRunStatus::Running => 'in_progress',
-            ReviewRunStatus::Completed, ReviewRunStatus::Failed => 'completed',
+            ReviewRunStatus::Completed, ReviewRunStatus::Failed, ReviewRunStatus::Skipped => 'completed',
         };
     }
 }

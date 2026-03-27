@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\BillingMode;
 use App\Enums\PlanTier;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -21,6 +22,12 @@ class Organization extends Model
         'slug',
         'avatar_url',
         'plan_tier',
+        'credit_balance',
+        'billing_mode',
+        'stripe_customer_id',
+        'stripe_subscription_id',
+        'byok_api_key',
+        'byok_provider',
         'settings',
     ];
 
@@ -31,6 +38,9 @@ class Organization extends Model
     {
         return [
             'plan_tier' => PlanTier::class,
+            'billing_mode' => BillingMode::class,
+            'credit_balance' => 'integer',
+            'byok_api_key' => 'encrypted',
             'settings' => 'array',
         ];
     }
@@ -51,5 +61,28 @@ class Organization extends Model
     public function repositories(): HasMany
     {
         return $this->hasMany(Repository::class);
+    }
+
+    /**
+     * @return HasMany<CreditTransaction, $this>
+     */
+    public function creditTransactions(): HasMany
+    {
+        return $this->hasMany(CreditTransaction::class);
+    }
+
+    public function hasCredits(): bool
+    {
+        return $this->credit_balance > 0;
+    }
+
+    public function isByok(): bool
+    {
+        return $this->billing_mode === BillingMode::Byok;
+    }
+
+    public function canRunReview(): bool
+    {
+        return $this->isByok() || $this->hasCredits();
     }
 }
