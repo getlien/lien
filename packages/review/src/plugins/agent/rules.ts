@@ -53,31 +53,15 @@ export function buildTriggerContext(context: ReviewContext): TriggerContext {
  * Supports `*` (any non-separator), `**` (any path), and `?` (single char).
  */
 export function globToRegex(pattern: string): RegExp {
-  let re = '';
-  let i = 0;
-  while (i < pattern.length) {
-    const ch = pattern[i];
-    if (ch === '*' && pattern[i + 1] === '*') {
-      // ** matches any path segment(s)
-      re += '.*';
-      i += 2;
-      // skip trailing slash after **
-      if (pattern[i] === '/') i++;
-    } else if (ch === '*') {
-      // * matches anything except /
-      re += '[^/]*';
-      i++;
-    } else if (ch === '?') {
-      re += '[^/]';
-      i++;
-    } else if ('.+^${}()|[]\\'.includes(ch)) {
-      re += '\\' + ch;
-      i++;
-    } else {
-      re += ch;
-      i++;
-    }
-  }
+  // Protect glob chars with placeholders, escape the rest, then expand
+  const re = pattern
+    .replace(/\*\*\/?/g, '\0GLOBSTAR\0') // ** (with optional /) → placeholder
+    .replace(/\*/g, '\0STAR\0') // * → placeholder
+    .replace(/\?/g, '\0QUESTION\0') // ? → placeholder
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&') // escape regex specials
+    .replace(/\0GLOBSTAR\0/g, '.*') // ** = any path
+    .replace(/\0STAR\0/g, '[^/]*') // * = non-separator wildcard
+    .replace(/\0QUESTION\0/g, '[^/]'); // ? = single non-separator char
   return new RegExp(`^${re}$`);
 }
 

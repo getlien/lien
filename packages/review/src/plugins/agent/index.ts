@@ -15,6 +15,7 @@ import type {
   PresentContext,
 } from '../../plugin-types.js';
 import { buildDependencyGraph } from '../../dependency-graph.js';
+import type { Logger } from '../../logger.js';
 
 import type { AgentConfig, AgentFinding, AgentResult } from './types.js';
 import { AnthropicAgentClient } from './anthropic-client.js';
@@ -87,38 +88,15 @@ export class AgentReviewPlugin implements ReviewPlugin {
 
     const systemPrompt = buildSystemPrompt(rules);
     const initialMessage = buildInitialMessage(context);
-    let result: AgentResult;
-
-    if (provider === 'anthropic') {
-      const client = new AnthropicAgentClient({
-        apiKey,
-        model: config.model,
-        baseUrl: config.baseUrl,
-        inputCostPerMTok: config.inputCostPerMTok,
-        outputCostPerMTok: config.outputCostPerMTok,
-        maxTurns: config.maxTurns,
-        maxTokenBudget: config.maxTokenBudget,
-        logger,
-      });
-      result = await client.run(systemPrompt, initialMessage, AGENT_TOOLS, toolExecutor);
-    } else {
-      const client = new OpenAIAgentClient({
-        apiKey,
-        model: config.model,
-        baseUrl: config.baseUrl ?? 'https://openrouter.ai/api/v1',
-        inputCostPerMTok: config.inputCostPerMTok,
-        outputCostPerMTok: config.outputCostPerMTok,
-        maxTurns: config.maxTurns,
-        maxTokenBudget: config.maxTokenBudget,
-        logger,
-      });
-      result = await client.run(
-        systemPrompt,
-        initialMessage,
-        toOpenAITools(AGENT_TOOLS),
-        toolExecutor,
-      );
-    }
+    const result = await runAgentClient(
+      provider,
+      config,
+      apiKey,
+      logger,
+      systemPrompt,
+      initialMessage,
+      toolExecutor,
+    );
 
     logger.info(
       `[${this.id}] Review complete: ${result.findings.length} findings in ${result.turns} turns ($${result.usage.cost.toFixed(4)})`,
@@ -187,6 +165,48 @@ export class AgentReviewPlugin implements ReviewPlugin {
     // 4. Append to check run summary
     context.appendSummary(formatCheckSummary(findings, this.name));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Agent client execution
+// ---------------------------------------------------------------------------
+
+type ToolExecutor = (name: string, input: Record<string, unknown>) => Promise<string>;
+
+function runAgentClient(
+  provider: string,
+  config: AgentConfig,
+  apiKey: string,
+  logger: Logger,
+  systemPrompt: string,
+  initialMessage: string,
+  toolExecutor: ToolExecutor,
+): Promise<AgentResult> {
+  if (provider === 'anthropic') {
+    const client = new AnthropicAgentClient({
+      apiKey,
+      model: config.model,
+      baseUrl: config.baseUrl,
+      inputCostPerMTok: config.inputCostPerMTok,
+      outputCostPerMTok: config.outputCostPerMTok,
+      maxTurns: config.maxTurns,
+      maxTokenBudget: config.maxTokenBudget,
+      logger,
+    });
+    return client.run(systemPrompt, initialMessage, AGENT_TOOLS, toolExecutor);
+  }
+
+  const client = new OpenAIAgentClient({
+    apiKey,
+    model: config.model,
+    baseUrl: config.baseUrl ?? 'https://openrouter.ai/api/v1',
+    inputCostPerMTok: config.inputCostPerMTok,
+    outputCostPerMTok: config.outputCostPerMTok,
+    maxTurns: config.maxTurns,
+    maxTokenBudget: config.maxTokenBudget,
+    logger,
+  });
+  return client.run(systemPrompt, initialMessage, toOpenAITools(AGENT_TOOLS), toolExecutor);
 }
 
 // ---------------------------------------------------------------------------
