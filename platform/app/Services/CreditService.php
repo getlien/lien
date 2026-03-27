@@ -63,6 +63,8 @@ class CreditService
     public function refundCredit(Organization $org, ReviewRun $reviewRun): ?CreditTransaction
     {
         return DB::transaction(function () use ($org, $reviewRun) {
+            $org = Organization::lockForUpdate()->find($org->id);
+
             $alreadyRefunded = CreditTransaction::query()
                 ->where('organization_id', $org->id)
                 ->where('review_run_id', $reviewRun->id)
@@ -73,7 +75,6 @@ class CreditService
                 return null;
             }
 
-            $org = Organization::lockForUpdate()->find($org->id);
             $org->increment('credit_balance');
 
             return CreditTransaction::create([
@@ -90,6 +91,8 @@ class CreditService
     public function purchaseCredits(Organization $org, CreditPackage $package, string $stripePaymentIntentId): ?CreditTransaction
     {
         return DB::transaction(function () use ($org, $package, $stripePaymentIntentId) {
+            $org = Organization::lockForUpdate()->find($org->id);
+
             $alreadyProcessed = CreditTransaction::query()
                 ->where('stripe_payment_intent_id', $stripePaymentIntentId)
                 ->exists();
@@ -98,7 +101,6 @@ class CreditService
                 return null;
             }
 
-            $org = Organization::lockForUpdate()->find($org->id);
             $org->increment('credit_balance', $package->credits());
 
             return CreditTransaction::create([
