@@ -10,6 +10,7 @@ use App\Models\ReviewRun;
 use App\Services\GitHubAppService;
 use App\Services\GitHubCheckService;
 use App\Services\NatsService;
+use App\Services\RepoConfigService;
 use App\Services\RunnerTokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -26,12 +27,13 @@ class ProcessPullRequestWebhookTest extends TestCase
         config(['services.lien.service_token' => 'test-signing-key-that-is-at-least-32-bytes-long']);
         Http::fake([
             'api.github.com/repos/*/check-runs' => Http::response(['id' => 99999], 201),
+            'api.github.com/repos/*/check-runs/*' => Http::response([], 200),
         ]);
     }
 
     public function test_happy_path_publishes_to_nats(): void
     {
-        $org = Organization::factory()->create(['login' => 'test-org']);
+        $org = Organization::factory()->withCredits(10)->create(['login' => 'test-org']);
         $repo = Repository::factory()->create([
             'organization_id' => $org->id,
             'full_name' => 'test-org/test-repo',
@@ -67,20 +69,17 @@ class ProcessPullRequestWebhookTest extends TestCase
                 });
         });
 
-        $job = new ProcessPullRequestWebhook($this->webhookPayload());
-        $job->handle(
-            app(GitHubAppService::class),
-            app(GitHubCheckService::class),
-            app(\App\Services\RepoConfigService::class),
-            app(NatsService::class),
-            app(RunnerTokenService::class),
-        );
+        $this->dispatchJob($this->webhookPayload());
 
         $this->assertDatabaseHas('review_runs', [
             'repository_id' => $repo->id,
             'pr_number' => 42,
             'status' => 'pending',
         ]);
+
+        // Credits are NOT deducted at dispatch — only on completion
+        $org->refresh();
+        $this->assertEquals(10, $org->credit_balance);
     }
 
     public function test_ignores_unknown_repo(): void
@@ -89,19 +88,12 @@ class ProcessPullRequestWebhookTest extends TestCase
             $mock->shouldNotReceive('publish');
         });
 
-        $job = new ProcessPullRequestWebhook($this->webhookPayload());
-        $job->handle(
-            app(GitHubAppService::class),
-            app(GitHubCheckService::class),
-            app(\App\Services\RepoConfigService::class),
-            app(NatsService::class),
-            app(RunnerTokenService::class),
-        );
+        $this->dispatchJob($this->webhookPayload());
     }
 
     public function test_ignores_inactive_repo(): void
     {
-        $org = Organization::factory()->create(['login' => 'test-org']);
+        $org = Organization::factory()->withCredits(5)->create(['login' => 'test-org']);
         Repository::factory()->create([
             'organization_id' => $org->id,
             'full_name' => 'test-org/test-repo',
@@ -112,19 +104,12 @@ class ProcessPullRequestWebhookTest extends TestCase
             $mock->shouldNotReceive('publish');
         });
 
-        $job = new ProcessPullRequestWebhook($this->webhookPayload());
-        $job->handle(
-            app(GitHubAppService::class),
-            app(GitHubCheckService::class),
-            app(\App\Services\RepoConfigService::class),
-            app(NatsService::class),
-            app(RunnerTokenService::class),
-        );
+        $this->dispatchJob($this->webhookPayload());
     }
 
     public function test_stores_installation_id_on_organization(): void
     {
-        $org = Organization::factory()->create([
+        $org = Organization::factory()->withCredits(5)->create([
             'login' => 'test-org',
             'github_installation_id' => null,
         ]);
@@ -142,14 +127,7 @@ class ProcessPullRequestWebhookTest extends TestCase
             $mock->shouldReceive('publish')->once();
         });
 
-        $job = new ProcessPullRequestWebhook($this->webhookPayload());
-        $job->handle(
-            app(GitHubAppService::class),
-            app(GitHubCheckService::class),
-            app(\App\Services\RepoConfigService::class),
-            app(NatsService::class),
-            app(RunnerTokenService::class),
-        );
+        $this->dispatchJob($this->webhookPayload());
 
         $this->assertDatabaseHas('organizations', [
             'id' => $org->id,
@@ -159,7 +137,7 @@ class ProcessPullRequestWebhookTest extends TestCase
 
     public function test_overwrites_existing_installation_id(): void
     {
-        $org = Organization::factory()->create([
+        $org = Organization::factory()->withCredits(5)->create([
             'login' => 'test-org',
             'github_installation_id' => 11111,
         ]);
@@ -177,14 +155,7 @@ class ProcessPullRequestWebhookTest extends TestCase
             $mock->shouldReceive('publish')->once();
         });
 
-        $job = new ProcessPullRequestWebhook($this->webhookPayload());
-        $job->handle(
-            app(GitHubAppService::class),
-            app(GitHubCheckService::class),
-            app(\App\Services\RepoConfigService::class),
-            app(NatsService::class),
-            app(RunnerTokenService::class),
-        );
+        $this->dispatchJob($this->webhookPayload());
 
         $this->assertDatabaseHas('organizations', [
             'id' => $org->id,
@@ -194,7 +165,7 @@ class ProcessPullRequestWebhookTest extends TestCase
 
     public function test_skips_duplicate_dispatch_for_existing_review_run(): void
     {
-        $org = Organization::factory()->create(['login' => 'test-org']);
+        $org = Organization::factory()->withCredits(5)->create(['login' => 'test-org']);
         $repo = Repository::factory()->create([
             'organization_id' => $org->id,
             'full_name' => 'test-org/test-repo',
@@ -215,14 +186,7 @@ class ProcessPullRequestWebhookTest extends TestCase
             $mock->shouldNotReceive('publish');
         });
 
-        $job = new ProcessPullRequestWebhook($this->webhookPayload());
-        $job->handle(
-            app(GitHubAppService::class),
-            app(GitHubCheckService::class),
-            app(\App\Services\RepoConfigService::class),
-            app(NatsService::class),
-            app(RunnerTokenService::class),
-        );
+        $this->dispatchJob($this->webhookPayload());
 
         $existingRun->refresh();
         $this->assertEquals(ReviewRunStatus::Running, $existingRun->status);
@@ -230,7 +194,7 @@ class ProcessPullRequestWebhookTest extends TestCase
 
     public function test_skips_processing_when_installation_id_missing(): void
     {
-        $org = Organization::factory()->create(['login' => 'test-org']);
+        $org = Organization::factory()->withCredits(5)->create(['login' => 'test-org']);
         Repository::factory()->create([
             'organization_id' => $org->id,
             'full_name' => 'test-org/test-repo',
@@ -244,11 +208,67 @@ class ProcessPullRequestWebhookTest extends TestCase
         $payload = $this->webhookPayload();
         unset($payload['installation']);
 
+        $this->dispatchJob($payload);
+    }
+
+    public function test_skips_review_on_zero_credits(): void
+    {
+        $org = Organization::factory()->withCredits(0)->create(['login' => 'test-org']);
+        $repo = Repository::factory()->create([
+            'organization_id' => $org->id,
+            'full_name' => 'test-org/test-repo',
+            'is_active' => true,
+        ]);
+
+        $this->mock(GitHubAppService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('getInstallationToken')->andReturn('ghs_test_token');
+        });
+
+        $this->mock(NatsService::class, function (MockInterface $mock) {
+            $mock->shouldNotReceive('publish');
+        });
+
+        $this->dispatchJob($this->webhookPayload());
+
+        $this->assertDatabaseHas('review_runs', [
+            'repository_id' => $repo->id,
+            'pr_number' => 42,
+            'status' => 'skipped',
+        ]);
+    }
+
+    public function test_byok_org_dispatches_with_zero_credits(): void
+    {
+        $org = Organization::factory()->withCredits(0)->byok()->create(['login' => 'test-org']);
+        Repository::factory()->create([
+            'organization_id' => $org->id,
+            'full_name' => 'test-org/test-repo',
+            'is_active' => true,
+        ]);
+
+        $this->mock(GitHubAppService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('getInstallationToken')->andReturn('ghs_test_token');
+        });
+
+        $this->mock(NatsService::class, function (MockInterface $mock) {
+            $mock->shouldReceive('publish')->once();
+        });
+
+        $this->dispatchJob($this->webhookPayload());
+
+        $this->assertDatabaseHas('review_runs', [
+            'pr_number' => 42,
+            'status' => 'pending',
+        ]);
+    }
+
+    private function dispatchJob(array $payload): void
+    {
         $job = new ProcessPullRequestWebhook($payload);
         $job->handle(
             app(GitHubAppService::class),
             app(GitHubCheckService::class),
-            app(\App\Services\RepoConfigService::class),
+            app(RepoConfigService::class),
             app(NatsService::class),
             app(RunnerTokenService::class),
         );

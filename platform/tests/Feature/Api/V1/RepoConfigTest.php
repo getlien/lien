@@ -21,7 +21,7 @@ class RepoConfigTest extends TestCase
 
     public function test_get_repo_config(): void
     {
-        $org = Organization::factory()->team()->create();
+        $org = Organization::factory()->team()->withCredits(100)->create();
         $repo = Repository::factory()->create(['organization_id' => $org->id]);
 
         $response = $this->getJson(
@@ -32,6 +32,8 @@ class RepoConfigTest extends TestCase
         $response->assertOk();
         $response->assertJsonStructure([
             'plan',
+            'billingMode',
+            'creditBalance',
             'reviewTypes' => [
                 'complexity' => ['enabled', 'threshold', 'deltaTracking'],
                 'architectural' => ['enabled'],
@@ -41,7 +43,12 @@ class RepoConfigTest extends TestCase
             'llmSource',
             'features' => ['orgManagement', 'customRules', 'trendRetentionDays'],
         ]);
-        $response->assertJson(['plan' => 'team', 'managedLlmReviewsRemaining' => 100]);
+        $response->assertJson([
+            'plan' => 'team',
+            'billingMode' => 'credits',
+            'creditBalance' => 100,
+            'managedLlmReviewsRemaining' => 100,
+        ]);
     }
 
     public function test_get_repo_config_with_overrides(): void
