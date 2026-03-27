@@ -34,9 +34,7 @@ export function buildTriggerContext(context: ReviewContext): TriggerContext {
 
   let diffText = '';
   if (context.pr?.patches) {
-    for (const [, patch] of context.pr.patches) {
-      diffText += patch + '\n';
-    }
+    diffText = [...context.pr.patches.values()].join('\n');
   }
 
   return {
@@ -57,7 +55,15 @@ function ruleMatchesTriggers(rule: ReviewRule, ctx: TriggerContext): boolean {
   const t = rule.triggers;
   if (t.always) return true;
   if (t.languages?.some(lang => ctx.languages.has(lang))) return true;
-  if (t.keywords?.some(kw => new RegExp(kw, 'i').test(ctx.diffText))) return true;
+  if (t.keywords) {
+    for (const kw of t.keywords) {
+      try {
+        if (new RegExp(kw, 'i').test(ctx.diffText)) return true;
+      } catch {
+        // Invalid regex pattern — skip (relevant for custom rules)
+      }
+    }
+  }
 
   return false;
 }

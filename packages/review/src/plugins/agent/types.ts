@@ -49,8 +49,6 @@ export interface AgentFinding {
 export interface RuleTriggers {
   /** Activate when any changed file is in one of these languages. */
   languages?: string[];
-  /** Activate when any changed file matches one of these globs. */
-  filePatterns?: string[];
   /** Activate when the diff content contains any of these keywords (case-insensitive regex). */
   keywords?: string[];
   /** Always activate regardless of context. */
