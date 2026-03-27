@@ -48,6 +48,39 @@ export function buildTriggerContext(context: ReviewContext): TriggerContext {
 // Rule Selection
 // ---------------------------------------------------------------------------
 
+/**
+ * Convert a simple glob pattern to a RegExp.
+ * Supports `*` (any non-separator), `**` (any path), and `?` (single char).
+ */
+export function globToRegex(pattern: string): RegExp {
+  let re = '';
+  let i = 0;
+  while (i < pattern.length) {
+    const ch = pattern[i];
+    if (ch === '*' && pattern[i + 1] === '*') {
+      // ** matches any path segment(s)
+      re += '.*';
+      i += 2;
+      // skip trailing slash after **
+      if (pattern[i] === '/') i++;
+    } else if (ch === '*') {
+      // * matches anything except /
+      re += '[^/]*';
+      i++;
+    } else if (ch === '?') {
+      re += '[^/]';
+      i++;
+    } else if ('.+^${}()|[]\\'.includes(ch)) {
+      re += '\\' + ch;
+      i++;
+    } else {
+      re += ch;
+      i++;
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
 /** Check if a rule's triggers match the given context. */
 function ruleMatchesTriggers(rule: ReviewRule, ctx: TriggerContext): boolean {
   if (!rule.enabled) return false;
@@ -55,6 +88,13 @@ function ruleMatchesTriggers(rule: ReviewRule, ctx: TriggerContext): boolean {
   const t = rule.triggers;
   if (t.always) return true;
   if (t.languages?.some(lang => ctx.languages.has(lang))) return true;
+  if (
+    t.filePatterns?.some(pat => {
+      const re = globToRegex(pat);
+      return ctx.changedFiles.some(f => re.test(f));
+    })
+  )
+    return true;
   if (t.keywords) {
     for (const kw of t.keywords) {
       try {

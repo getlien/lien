@@ -4,6 +4,7 @@ import type { ReviewRule, ResolvedRules } from '../src/plugins/agent/types.js';
 import {
   BUILTIN_RULES,
   buildTriggerContext,
+  globToRegex,
   selectRules,
   type TriggerContext,
 } from '../src/plugins/agent/rules.js';
@@ -181,6 +182,116 @@ describe('selectRules', () => {
 
     const match = makeTriggerContext({ languages: new Set(['rust', 'typescript']) });
     expect(selectRules([rule], match).active.map(r => r.id)).toContain('test-lang');
+  });
+
+  it('matches filePatterns triggers', () => {
+    const rule: ReviewRule = {
+      id: 'test-patterns',
+      name: 'Test',
+      description: 'test',
+      prompt: 'test',
+      triggers: { filePatterns: ['src/services/**'] },
+      severity: 'warning',
+      category: 'test',
+      enabled: true,
+      source: 'builtin',
+    };
+
+    const noMatch = makeTriggerContext({ changedFiles: ['src/utils/helpers.ts'] });
+    expect(selectRules([rule], noMatch).skipped).toContain('test-patterns');
+
+    const match = makeTriggerContext({ changedFiles: ['src/services/auth.ts'] });
+    expect(selectRules([rule], match).active.map(r => r.id)).toContain('test-patterns');
+  });
+
+  it('matches filePatterns with extension globs', () => {
+    const rule: ReviewRule = {
+      id: 'test-ext',
+      name: 'Test',
+      description: 'test',
+      prompt: 'test',
+      triggers: { filePatterns: ['*.php'] },
+      severity: 'warning',
+      category: 'test',
+      enabled: true,
+      source: 'builtin',
+    };
+
+    const noMatch = makeTriggerContext({ changedFiles: ['src/app.ts'] });
+    expect(selectRules([rule], noMatch).skipped).toContain('test-ext');
+
+    const match = makeTriggerContext({ changedFiles: ['app/Models/User.php'] });
+    expect(selectRules([rule], match).skipped).toContain('test-ext'); // *.php only matches root-level
+
+    const rootMatch = makeTriggerContext({ changedFiles: ['config.php'] });
+    expect(selectRules([rule], rootMatch).active.map(r => r.id)).toContain('test-ext');
+  });
+
+  it('matches filePatterns with ** prefix for any depth', () => {
+    const rule: ReviewRule = {
+      id: 'test-deep',
+      name: 'Test',
+      description: 'test',
+      prompt: 'test',
+      triggers: { filePatterns: ['**/*.php'] },
+      severity: 'warning',
+      category: 'test',
+      enabled: true,
+      source: 'builtin',
+    };
+
+    const match = makeTriggerContext({ changedFiles: ['app/Models/User.php'] });
+    expect(selectRules([rule], match).active.map(r => r.id)).toContain('test-deep');
+
+    const noMatch = makeTriggerContext({ changedFiles: ['app/Models/User.ts'] });
+    expect(selectRules([rule], noMatch).skipped).toContain('test-deep');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// globToRegex
+// ---------------------------------------------------------------------------
+
+describe('globToRegex', () => {
+  it('matches * as non-separator wildcard', () => {
+    const re = globToRegex('*.ts');
+    expect(re.test('index.ts')).toBe(true);
+    expect(re.test('foo.ts')).toBe(true);
+    expect(re.test('src/foo.ts')).toBe(false); // * does not cross /
+    expect(re.test('foo.js')).toBe(false);
+  });
+
+  it('matches ** as path-crossing wildcard', () => {
+    const re = globToRegex('**/*.ts');
+    expect(re.test('src/foo.ts')).toBe(true);
+    expect(re.test('a/b/c/foo.ts')).toBe(true);
+    expect(re.test('foo.ts')).toBe(true);
+    expect(re.test('foo.js')).toBe(false);
+  });
+
+  it('matches ? as single character', () => {
+    const re = globToRegex('?.ts');
+    expect(re.test('a.ts')).toBe(true);
+    expect(re.test('ab.ts')).toBe(false);
+  });
+
+  it('handles directory prefix globs', () => {
+    const re = globToRegex('src/services/**');
+    expect(re.test('src/services/auth.ts')).toBe(true);
+    expect(re.test('src/services/deep/nested.ts')).toBe(true);
+    expect(re.test('src/utils/helpers.ts')).toBe(false);
+  });
+
+  it('escapes regex special characters in pattern', () => {
+    const re = globToRegex('file.test.ts');
+    expect(re.test('file.test.ts')).toBe(true);
+    expect(re.test('filextest.ts')).toBe(false); // dot should be literal
+  });
+
+  it('matches exact file path', () => {
+    const re = globToRegex('src/index.ts');
+    expect(re.test('src/index.ts')).toBe(true);
+    expect(re.test('lib/src/index.ts')).toBe(false);
   });
 });
 
