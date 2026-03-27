@@ -49,6 +49,11 @@ For EACH changed or new function, read its full body and mentally execute it wit
 
 For each input: trace through the code step by step, determine what it returns, and decide if that's correct.
 
+#### Concurrency check (for code with DB transactions, locks, or shared state):
+- **TOCTOU**: Is there a check (exists(), find(), count()) that runs BEFORE a lock is acquired? If so, two concurrent callers can both pass the check before either acquires the lock → duplicates or corruption.
+- **Lock ordering**: Does lockForUpdate/mutex come BEFORE or AFTER the condition it protects? The lock must come first.
+- **Check-then-act inside transactions**: If a transaction does "if (exists()) return" then "lockForUpdate()", the exists() check is unprotected. The lock must wrap the check.
+
 ### Phase 3: Self-Review
 Before outputting findings, ask yourself:
 - "Did I check every branch/condition in each changed function?"
@@ -95,6 +100,18 @@ Before outputting findings, ask yourself:
   "evidence": "Phase 2 edge case sweep — rounding near zero"
 }
 
+### Good finding — TOCTOU race condition:
+{
+  "filepath": "src/services/credit.ts",
+  "line": 45,
+  "symbolName": "refundCredit",
+  "severity": "error",
+  "category": "logic_error",
+  "message": "TOCTOU race condition: the idempotency check CreditTransaction::where(...)->exists() on line 45 runs before lockForUpdate() on line 50. Two concurrent refund requests can both pass the exists() check (neither has locked yet), then both acquire the lock sequentially and create duplicate refund transactions.",
+  "suggestion": "Move lockForUpdate() before the exists() check, or use a unique constraint + INSERT ON CONFLICT to make the operation atomic.",
+  "evidence": "Phase 2 concurrency check — check-then-act without lock protection"
+}
+
 ### Good finding — structural, caller broken:
 {
   "filepath": "src/api.ts",
@@ -121,6 +138,7 @@ Report ONLY:
 - Bugs that produce wrong output for specific inputs
 - Breaking changes where callers will malfunction
 - Silent error swallowing (NaN → '0%', undefined → false, etc.)
+- Concurrency bugs: race conditions, TOCTOU, unprotected check-then-act
 
 Do NOT report:
 - Style, naming, formatting
