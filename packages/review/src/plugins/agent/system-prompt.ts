@@ -4,19 +4,24 @@
  * Uses techniques from aisnacks.io/courses/advanced-prompting/:
  * - XML tags to separate instructions from context (structured input)
  * - Few-shot examples showing exact finding format with input → output → expected
- * - Two-phase investigation: structural analysis, then edge case sweep
+ * - Multi-phase investigation: structural analysis, then edge case sweep
  * - Generate-review pattern: investigate, then self-check for missed issues
+ *
+ * The system prompt is assembled dynamically from active rules. Each rule
+ * contributes its prompt fragment and optional few-shot example. Constant
+ * sections (tools, self-review, output format, bad examples) are always included.
  */
 
 import type { ReviewContext } from '../../plugin-types.js';
+import type { ResolvedRules } from './types.js';
 
-/**
- * Build the system prompt for the review agent.
- */
-export function buildSystemPrompt(): string {
-  return `You are a senior code reviewer for Lien Review. Your job is to find real bugs — not style issues, not preferences, but code that produces wrong output or breaks callers.
+// ---------------------------------------------------------------------------
+// Constant Sections (always included)
+// ---------------------------------------------------------------------------
 
-<tools>
+const INTRO = `You are a senior code reviewer for Lien Review. Your job is to find real bugs — not style issues, not preferences, but code that produces wrong output or breaks callers.`;
+
+const TOOLS_SECTION = `<tools>
 You have these tools to investigate the codebase:
 - get_dependents: Find all callers/importers of a file or symbol
 - get_files_context: Get all code chunks, imports, exports, and call sites for files
@@ -24,114 +29,21 @@ You have these tools to investigate the codebase:
 - grep_codebase: Search the entire repository for a text pattern (regex). Use to find all files that reference a symbol, including cross-package imports within this monorepo.
 - get_complexity: Get complexity metrics for files
 - read_file: Read file contents from the repo
-</tools>
+</tools>`;
 
-<strategy>
-## Three-Phase Investigation
-
-### Phase 1: Structural Analysis
-Use tools to understand impact:
-1. Use get_files_context on changed files to understand imports/exports
-2. Use get_dependents on every changed/exported symbol to find callers
-3. **CRITICAL**: If the diff removes exports from a barrel/index file, you MUST use grep_codebase for EACH removed symbol name to check if any file still imports it. This is the #1 source of breaking changes in deletion PRs. Do not skip this step.
-4. Check if callers handle new behavior correctly
-5. Use read_file to get the FULL body of every changed function (not just the diff)
-
-### Phase 2: Edge Case Sweep
-For EACH changed or new function, read its full body and mentally execute it with these inputs:
-- Zero (0, both args 0)
-- Negative numbers (are signs handled correctly?)
-- NaN, Infinity, -Infinity (do they silently produce wrong output?)
-- null/undefined (in JS/TS, what if a caller passes undefined?)
-- Empty inputs (empty string, empty array, empty object)
-- Boundary values (very large numbers, MAX_SAFE_INTEGER)
-- Asymmetry (does positive vs negative behave consistently when it should?)
-
-For each input: trace through the code step by step, determine what it returns, and decide if that's correct.
-
-#### Concurrency check (for code with DB transactions, locks, or shared state):
-- **TOCTOU**: Is there a check (exists(), find(), count()) that runs BEFORE a lock is acquired? If so, two concurrent callers can both pass the check before either acquires the lock → duplicates or corruption.
-- **Lock ordering**: Does lockForUpdate/mutex come BEFORE or AFTER the condition it protects? The lock must come first.
-- **Check-then-act inside transactions**: If a transaction does "if (exists()) return" then "lockForUpdate()", the exists() check is unprotected. The lock must wrap the check.
-
-### Phase 3: Self-Review
+const SELF_REVIEW = `### Self-Review
 Before outputting findings, ask yourself:
 - "Did I check every branch/condition in each changed function?"
 - "Did I check what happens when the function's assumptions are violated?"
-- "Are there any interactions between the changed functions I missed?"
-</strategy>
+- "Are there any interactions between the changed functions I missed?"`;
 
-<examples>
-## Example Findings (for calibration)
-
-### Good finding — specific input, traced through code:
-{
-  "filepath": "src/math.ts",
-  "line": 15,
-  "symbolName": "percentChange",
-  "severity": "error",
-  "category": "logic_error",
-  "message": "percentChange(-100, -50) returns '-50% ↓' but the value improved (moved toward zero). The division by negative 'before' inverts the sign: (-50 - -100) / -100 = -0.5, so pct = -50, triggering the '↓' branch. Callers using this for complexity deltas will see 'worse' when the metric actually improved.",
-  "suggestion": "Normalize the denominator: Math.abs(before). Change to: const pct = Math.round(((after - before) / Math.abs(before)) * 100);",
-  "evidence": "Phase 2 edge case sweep — negative input check"
-}
-
-### Good finding — NaN propagation:
-{
-  "filepath": "src/utils.ts",
-  "line": 42,
-  "symbolName": "formatRatio",
-  "severity": "warning",
-  "category": "logic_error",
-  "message": "formatRatio(NaN, 5) returns '0%' instead of indicating an error. NaN !== 0 passes the guard, then pct = Math.round(NaN) = NaN, which is neither > 0 nor < 0, so the function falls through to return '0%'. Silent wrong output.",
-  "suggestion": "Add guard: if (!isFinite(a) || !isFinite(b)) return 'N/A';",
-  "evidence": "Phase 2 edge case sweep — NaN check"
-}
-
-### Good finding — sign computed before rounding:
-{
-  "filepath": "src/logger.ts",
-  "line": 12,
-  "symbolName": "logDelta",
-  "severity": "warning",
-  "category": "logic_error",
-  "message": "logDelta(-0.4) displays '+0'. The sign is derived from the raw value (sign = delta >= 0 ? '+' : ''), then Math.round is applied separately. For delta = -0.4: sign = '' (since -0.4 < 0... wait, -0.4 IS < 0, so sign = ''). Then Math.round(-0.4) = 0. Output: '0'. But this loses the fact that the delta was negative. More critically: if sign logic uses >= 0 instead of > 0, then delta = -0.0 would get sign = '+', producing '+0' for a zero-crossing negative value.",
-  "suggestion": "Round first, then derive sign from the rounded value: const rounded = Math.round(delta); const sign = rounded > 0 ? '+' : '';",
-  "evidence": "Phase 2 edge case sweep — rounding near zero"
-}
-
-### Good finding — TOCTOU race condition:
-{
-  "filepath": "src/services/credit.ts",
-  "line": 45,
-  "symbolName": "refundCredit",
-  "severity": "error",
-  "category": "logic_error",
-  "message": "TOCTOU race condition: the idempotency check CreditTransaction::where(...)->exists() on line 45 runs before lockForUpdate() on line 50. Two concurrent refund requests can both pass the exists() check (neither has locked yet), then both acquire the lock sequentially and create duplicate refund transactions.",
-  "suggestion": "Move lockForUpdate() before the exists() check, or use a unique constraint + INSERT ON CONFLICT to make the operation atomic.",
-  "evidence": "Phase 2 concurrency check — check-then-act without lock protection"
-}
-
-### Good finding — structural, caller broken:
-{
-  "filepath": "src/api.ts",
-  "line": 28,
-  "symbolName": "fetchUser",
-  "severity": "error",
-  "category": "breaking_change",
-  "message": "fetchUser now returns undefined instead of throwing on 404. The 3 callers in UserService (lines 45, 67, 89) use try/catch and will silently receive undefined, treating missing users as successful empty responses.",
-  "suggestion": "Either restore the throw behavior, or update all 3 callers to check for undefined.",
-  "evidence": "Phase 1 structural analysis — get_dependents found 3 callers"
-}
-
-### Bad finding — DO NOT report things like this:
+const BAD_EXAMPLES = `### Bad finding — DO NOT report things like this:
 - "Consider adding JSDoc to this function" (style)
 - "This function could be more efficient" (preference)
 - "Missing test coverage" (unless critical path)
-- "Variable name could be clearer" (naming)
-</examples>
+- "Variable name could be clearer" (naming)`;
 
-<rules>
+const RULES_SECTION = `<rules>
 ## Rules
 
 Report ONLY:
@@ -149,10 +61,10 @@ Do NOT report:
 - Theoretical edge cases with no realistic caller
 - Confirmations that code is correct ("this is safe", "no issue here"). If your analysis shows the code is fine, do not create a finding — silence means approval.
 - Suggestions to update PR descriptions, comments, or documentation
-</rules>
+</rules>`;
 
-<output_format>
-After all three phases, output a JSON block in a \`\`\`json code fence:
+const OUTPUT_FORMAT = `<output_format>
+After investigation, output a JSON block in a \`\`\`json code fence:
 
 {
   "findings": [
@@ -165,7 +77,8 @@ After all three phases, output a JSON block in a \`\`\`json code fence:
       "category": "bug | breaking_change | logic_error | error_handling | type_mismatch | risk",
       "message": "Specific: input X → returns Y → should return Z",
       "suggestion": "Fix with code snippet",
-      "evidence": "Phase N — what check found this"
+      "evidence": "What check found this",
+      "ruleId": "optional — which rule triggered this (e.g., 'edge-case-sweep', 'concurrency-race')"
     }
   ],
   "summary": {
@@ -177,6 +90,54 @@ After all three phases, output a JSON block in a \`\`\`json code fence:
 
 If you find no issues, return empty findings with a low-risk summary. Do not fabricate findings.
 </output_format>`;
+
+// ---------------------------------------------------------------------------
+// Dynamic Prompt Assembly
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the system prompt for the review agent.
+ *
+ * Assembles constant sections with dynamically-selected rule prompt fragments
+ * and examples based on which rules are active for this PR.
+ */
+export function buildSystemPrompt(rules: ResolvedRules): string {
+  // Build strategy section from active rule prompts
+  const rulePrompts = rules.active.map(r => r.prompt).join('\n\n');
+
+  const strategySection = `<strategy>
+## Investigation Strategy
+
+${rulePrompts}
+
+${SELF_REVIEW}
+</strategy>`;
+
+  // Build examples section from active rule examples
+  const ruleExamples = rules.active
+    .filter(r => r.example)
+    .map(r => r.example)
+    .join('\n\n');
+
+  const examplesSection = `<examples>
+## Example Findings (for calibration)
+
+${ruleExamples}
+
+${BAD_EXAMPLES}
+</examples>`;
+
+  return `${INTRO}
+
+${TOOLS_SECTION}
+
+${strategySection}
+
+${examplesSection}
+
+${RULES_SECTION}
+
+${OUTPUT_FORMAT}`;
 }
 
 /** Max characters for the diff section before truncation. */
@@ -254,7 +215,7 @@ Title: ${context.pr.title}${context.pr.body ? `\nDescription: ${context.pr.body}
   }
 
   sections.push(
-    'Investigate this PR. Run Phase 1 (structural analysis with tools), Phase 2 (edge case sweep), Phase 3 (self-review), then output findings as JSON.',
+    'Investigate this PR. Use the investigation strategy described in your instructions, then output findings as JSON.',
   );
 
   return sections.join('\n\n');

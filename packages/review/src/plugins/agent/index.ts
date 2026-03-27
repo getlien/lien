@@ -20,6 +20,7 @@ import type { AgentConfig, AgentFinding, AgentResult } from './types.js';
 import { AnthropicAgentClient } from './anthropic-client.js';
 import { OpenAIAgentClient, toOpenAITools } from './openai-client.js';
 import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
+import { BUILTIN_RULES, buildTriggerContext, selectRules } from './rules.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
 
 const configSchema = z.object({
@@ -77,6 +78,15 @@ export class AgentReviewPlugin implements ReviewPlugin {
         logger,
       });
 
+    // Select active rules based on PR content (languages, diff keywords)
+    const triggerCtx = buildTriggerContext(context);
+    const rules = selectRules(BUILTIN_RULES, triggerCtx);
+    logger.info(
+      `[${this.id}] Rules: ${rules.active.map(r => r.id).join(', ')} (skipped: ${rules.skipped.join(', ') || 'none'})`,
+    );
+
+    const systemPrompt = buildSystemPrompt(rules);
+    const initialMessage = buildInitialMessage(context);
     let result: AgentResult;
 
     if (provider === 'anthropic') {
@@ -90,12 +100,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
         maxTokenBudget: config.maxTokenBudget,
         logger,
       });
-      result = await client.run(
-        buildSystemPrompt(),
-        buildInitialMessage(context),
-        AGENT_TOOLS,
-        toolExecutor,
-      );
+      result = await client.run(systemPrompt, initialMessage, AGENT_TOOLS, toolExecutor);
     } else {
       const client = new OpenAIAgentClient({
         apiKey,
@@ -108,8 +113,8 @@ export class AgentReviewPlugin implements ReviewPlugin {
         logger,
       });
       result = await client.run(
-        buildSystemPrompt(),
-        buildInitialMessage(context),
+        systemPrompt,
+        initialMessage,
         toOpenAITools(AGENT_TOOLS),
         toolExecutor,
       );
@@ -200,6 +205,7 @@ function mapToReviewFinding(f: AgentFinding, pluginId: string): ReviewFinding {
     message: f.message,
     suggestion: f.suggestion,
     evidence: f.evidence,
+    ...(f.ruleId ? { metadata: { ruleId: f.ruleId } } : {}),
   };
 }
 
