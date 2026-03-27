@@ -10,6 +10,23 @@ import type { ReviewContext } from '../../plugin-types.js';
 import type { ReviewRule, ResolvedRules } from './types.js';
 
 // ---------------------------------------------------------------------------
+// Regex Safety
+// ---------------------------------------------------------------------------
+
+/** Reject patterns with nested quantifiers that cause catastrophic backtracking. */
+const REDOS_PATTERN = /\([^)]*(?:[+*?]|\{)\)\s*(?:[+*?]|\{)/;
+
+/** Compile a regex pattern, returning null for invalid syntax or ReDoS-prone patterns. */
+function safeRegex(pattern: string): RegExp | null {
+  if (REDOS_PATTERN.test(pattern)) return null;
+  try {
+    return new RegExp(pattern, 'i');
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Trigger Context
 // ---------------------------------------------------------------------------
 
@@ -82,12 +99,11 @@ function ruleMatchesTriggers(rule: ReviewRule, ctx: TriggerContext): boolean {
   )
     return true;
   if (t.keywords) {
+    // If diff text is unavailable, fail-open: include keyword rules
+    // rather than silently skipping them (e.g., CLI mode without patches)
+    if (!ctx.diffText) return true;
     for (const kw of t.keywords) {
-      try {
-        if (new RegExp(kw, 'i').test(ctx.diffText)) return true;
-      } catch {
-        // Invalid regex pattern — skip (relevant for custom rules)
-      }
+      if (safeRegex(kw)?.test(ctx.diffText)) return true;
     }
   }
 

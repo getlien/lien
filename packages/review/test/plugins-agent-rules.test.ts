@@ -168,6 +168,30 @@ describe('selectRules', () => {
     expect(result.active.map(r => r.id)).toContain('concurrency-race');
   });
 
+  it('fails open for keyword rules when diff is unavailable', () => {
+    const ctx = makeTriggerContext({ diffText: '' });
+    const result = selectRules(BUILTIN_RULES, ctx);
+    // concurrency-race should be included when diff is empty (fail-open)
+    expect(result.active.map(r => r.id)).toContain('concurrency-race');
+  });
+
+  it('skips ReDoS-prone keyword patterns', () => {
+    const rule: ReviewRule = {
+      id: 'test-redos',
+      name: 'Test',
+      description: 'test',
+      prompt: 'test',
+      triggers: { keywords: ['(a+)+'] },
+      severity: 'warning',
+      category: 'test',
+      enabled: true,
+      source: 'custom',
+    };
+    const ctx = makeTriggerContext({ diffText: 'aaaaaaaaaaaaaaaa' });
+    // Should not match (pattern rejected as ReDoS-prone), and should not hang
+    expect(selectRules([rule], ctx).skipped).toContain('test-redos');
+  });
+
   it('skips disabled rules regardless of trigger match', () => {
     const disabledRule: ReviewRule = {
       ...BUILTIN_RULES[0],
