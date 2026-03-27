@@ -43,6 +43,20 @@ class CreditService
         return DB::transaction(function () use ($org, $reviewRun) {
             $org = Organization::lockForUpdate()->find($org->id);
 
+            $alreadyDeducted = CreditTransaction::query()
+                ->where('organization_id', $org->id)
+                ->where('review_run_id', $reviewRun->id)
+                ->where('type', CreditTransactionType::Deduction)
+                ->exists();
+
+            if ($alreadyDeducted) {
+                return CreditTransaction::query()
+                    ->where('organization_id', $org->id)
+                    ->where('review_run_id', $reviewRun->id)
+                    ->where('type', CreditTransactionType::Deduction)
+                    ->first();
+            }
+
             if ($org->credit_balance < 1) {
                 throw new InsufficientCreditsException($org->id);
             }
@@ -64,6 +78,16 @@ class CreditService
     {
         return DB::transaction(function () use ($org, $reviewRun) {
             $org = Organization::lockForUpdate()->find($org->id);
+
+            $hasDeduction = CreditTransaction::query()
+                ->where('organization_id', $org->id)
+                ->where('review_run_id', $reviewRun->id)
+                ->where('type', CreditTransactionType::Deduction)
+                ->exists();
+
+            if (! $hasDeduction) {
+                return null;
+            }
 
             $alreadyRefunded = CreditTransaction::query()
                 ->where('organization_id', $org->id)

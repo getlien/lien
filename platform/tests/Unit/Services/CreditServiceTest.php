@@ -117,6 +117,13 @@ class CreditServiceTest extends TestCase
         $repo = Repository::factory()->create(['organization_id' => $org->id]);
         $run = ReviewRun::factory()->create(['repository_id' => $repo->id]);
 
+        // Prior deduction must exist for refund to work
+        CreditTransaction::factory()->deduction()->create([
+            'organization_id' => $org->id,
+            'review_run_id' => $run->id,
+            'balance_after' => 9,
+        ]);
+
         $tx1 = $this->creditService->refundCredit($org, $run);
         $tx2 = $this->creditService->refundCredit($org, $run);
 
@@ -125,6 +132,41 @@ class CreditServiceTest extends TestCase
 
         $org->refresh();
         $this->assertEquals(10, $org->credit_balance);
+    }
+
+    public function test_refund_requires_prior_deduction(): void
+    {
+        $org = Organization::factory()->withCredits(9)->create();
+        $repo = Repository::factory()->create(['organization_id' => $org->id]);
+        $run = ReviewRun::factory()->create(['repository_id' => $repo->id]);
+
+        // No deduction exists — refund should be rejected
+        $tx = $this->creditService->refundCredit($org, $run);
+
+        $this->assertNull($tx);
+
+        $org->refresh();
+        $this->assertEquals(9, $org->credit_balance);
+    }
+
+    public function test_deduction_is_idempotent_per_review_run(): void
+    {
+        $org = Organization::factory()->withCredits(10)->create();
+        $repo = Repository::factory()->create(['organization_id' => $org->id]);
+        $run = ReviewRun::factory()->create(['repository_id' => $repo->id]);
+
+        $tx1 = $this->creditService->deductCredit($org, $run);
+        $tx2 = $this->creditService->deductCredit($org, $run);
+
+        $this->assertEquals($tx1->id, $tx2->id);
+
+        $org->refresh();
+        $this->assertEquals(9, $org->credit_balance);
+
+        $this->assertEquals(1, CreditTransaction::where('organization_id', $org->id)
+            ->where('review_run_id', $run->id)
+            ->where('type', CreditTransactionType::Deduction)
+            ->count());
     }
 
     public function test_purchase_increments_balance_and_records_transaction(): void
