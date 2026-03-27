@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Enums\CreditPackage;
 use App\Enums\CreditTransactionType;
-use App\Exceptions\InsufficientCreditsException;
 use App\Models\CreditTransaction;
 use App\Models\Organization;
 use App\Models\ReviewRun;
@@ -57,10 +56,6 @@ class CreditService
                     ->first();
             }
 
-            if ($org->credit_balance < 1) {
-                throw new InsufficientCreditsException($org->id);
-            }
-
             $org->decrement('credit_balance');
 
             return CreditTransaction::create([
@@ -69,44 +64,6 @@ class CreditService
                 'amount' => -1,
                 'balance_after' => $org->fresh()->credit_balance,
                 'description' => "Review run #{$reviewRun->id}",
-                'review_run_id' => $reviewRun->id,
-            ]);
-        });
-    }
-
-    public function refundCredit(Organization $org, ReviewRun $reviewRun): ?CreditTransaction
-    {
-        return DB::transaction(function () use ($org, $reviewRun) {
-            $org = Organization::lockForUpdate()->find($org->id);
-
-            $hasDeduction = CreditTransaction::query()
-                ->where('organization_id', $org->id)
-                ->where('review_run_id', $reviewRun->id)
-                ->where('type', CreditTransactionType::Deduction)
-                ->exists();
-
-            if (! $hasDeduction) {
-                return null;
-            }
-
-            $alreadyRefunded = CreditTransaction::query()
-                ->where('organization_id', $org->id)
-                ->where('review_run_id', $reviewRun->id)
-                ->where('type', CreditTransactionType::Refund)
-                ->exists();
-
-            if ($alreadyRefunded) {
-                return null;
-            }
-
-            $org->increment('credit_balance');
-
-            return CreditTransaction::create([
-                'organization_id' => $org->id,
-                'type' => CreditTransactionType::Refund,
-                'amount' => 1,
-                'balance_after' => $org->fresh()->credit_balance,
-                'description' => "Refund for review run #{$reviewRun->id}",
                 'review_run_id' => $reviewRun->id,
             ]);
         });

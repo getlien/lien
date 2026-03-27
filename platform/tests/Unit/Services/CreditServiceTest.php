@@ -4,7 +4,6 @@ namespace Tests\Unit\Services;
 
 use App\Enums\CreditPackage;
 use App\Enums\CreditTransactionType;
-use App\Exceptions\InsufficientCreditsException;
 use App\Models\CreditTransaction;
 use App\Models\Organization;
 use App\Models\Repository;
@@ -75,78 +74,19 @@ class CreditServiceTest extends TestCase
         $this->assertEquals(9, $org->credit_balance);
     }
 
-    public function test_deduction_throws_on_insufficient_credits(): void
+    public function test_deduction_allows_negative_balance(): void
     {
         $org = Organization::factory()->withCredits(0)->create();
         $repo = Repository::factory()->create(['organization_id' => $org->id]);
         $run = ReviewRun::factory()->create(['repository_id' => $repo->id]);
 
-        $this->expectException(InsufficientCreditsException::class);
+        $tx = $this->creditService->deductCredit($org, $run);
 
-        $this->creditService->deductCredit($org, $run);
-    }
-
-    public function test_refunds_credit_after_failed_run(): void
-    {
-        $org = Organization::factory()->withCredits(9)->create();
-        $repo = Repository::factory()->create(['organization_id' => $org->id]);
-        $run = ReviewRun::factory()->create(['repository_id' => $repo->id]);
-
-        // Simulate prior deduction
-        CreditTransaction::factory()->deduction()->create([
-            'organization_id' => $org->id,
-            'review_run_id' => $run->id,
-            'balance_after' => 9,
-        ]);
-
-        $tx = $this->creditService->refundCredit($org, $run);
-
-        $this->assertNotNull($tx);
-        $this->assertEquals(CreditTransactionType::Refund, $tx->type);
-        $this->assertEquals(1, $tx->amount);
-        $this->assertEquals(10, $tx->balance_after);
-        $this->assertEquals($run->id, $tx->review_run_id);
+        $this->assertEquals(-1, $tx->amount);
+        $this->assertEquals(-1, $tx->balance_after);
 
         $org->refresh();
-        $this->assertEquals(10, $org->credit_balance);
-    }
-
-    public function test_refund_is_idempotent(): void
-    {
-        $org = Organization::factory()->withCredits(9)->create();
-        $repo = Repository::factory()->create(['organization_id' => $org->id]);
-        $run = ReviewRun::factory()->create(['repository_id' => $repo->id]);
-
-        // Prior deduction must exist for refund to work
-        CreditTransaction::factory()->deduction()->create([
-            'organization_id' => $org->id,
-            'review_run_id' => $run->id,
-            'balance_after' => 9,
-        ]);
-
-        $tx1 = $this->creditService->refundCredit($org, $run);
-        $tx2 = $this->creditService->refundCredit($org, $run);
-
-        $this->assertNotNull($tx1);
-        $this->assertNull($tx2);
-
-        $org->refresh();
-        $this->assertEquals(10, $org->credit_balance);
-    }
-
-    public function test_refund_requires_prior_deduction(): void
-    {
-        $org = Organization::factory()->withCredits(9)->create();
-        $repo = Repository::factory()->create(['organization_id' => $org->id]);
-        $run = ReviewRun::factory()->create(['repository_id' => $repo->id]);
-
-        // No deduction exists — refund should be rejected
-        $tx = $this->creditService->refundCredit($org, $run);
-
-        $this->assertNull($tx);
-
-        $org->refresh();
-        $this->assertEquals(9, $org->credit_balance);
+        $this->assertEquals(-1, $org->credit_balance);
     }
 
     public function test_deduction_is_idempotent_per_review_run(): void
@@ -243,5 +183,22 @@ class CreditServiceTest extends TestCase
 
         $org->refresh();
         $this->assertEquals(2000, $org->credit_balance);
+    }
+
+    public function test_purchase_recovers_negative_balance(): void
+    {
+        $org = Organization::factory()->withCredits(-3)->create();
+
+        $tx = $this->creditService->purchaseCredits(
+            $org,
+            CreditPackage::Starter,
+            'pi_test_recovery',
+        );
+
+        $this->assertEquals(100, $tx->amount);
+        $this->assertEquals(97, $tx->balance_after);
+
+        $org->refresh();
+        $this->assertEquals(97, $org->credit_balance);
     }
 }

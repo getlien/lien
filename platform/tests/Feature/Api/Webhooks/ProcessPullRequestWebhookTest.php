@@ -7,7 +7,6 @@ use App\Jobs\ProcessPullRequestWebhook;
 use App\Models\Organization;
 use App\Models\Repository;
 use App\Models\ReviewRun;
-use App\Services\CreditService;
 use App\Services\GitHubAppService;
 use App\Services\GitHubCheckService;
 use App\Services\NatsService;
@@ -77,6 +76,10 @@ class ProcessPullRequestWebhookTest extends TestCase
             'pr_number' => 42,
             'status' => 'pending',
         ]);
+
+        // Credits are NOT deducted at dispatch — only on completion
+        $org->refresh();
+        $this->assertEquals(10, $org->credit_balance);
     }
 
     public function test_ignores_unknown_repo(): void
@@ -208,36 +211,7 @@ class ProcessPullRequestWebhookTest extends TestCase
         $this->dispatchJob($payload);
     }
 
-    public function test_deducts_credit_before_nats_dispatch(): void
-    {
-        $org = Organization::factory()->withCredits(10)->create(['login' => 'test-org']);
-        Repository::factory()->create([
-            'organization_id' => $org->id,
-            'full_name' => 'test-org/test-repo',
-            'is_active' => true,
-        ]);
-
-        $this->mock(GitHubAppService::class, function (MockInterface $mock) {
-            $mock->shouldReceive('getInstallationToken')->andReturn('ghs_test_token');
-        });
-
-        $this->mock(NatsService::class, function (MockInterface $mock) {
-            $mock->shouldReceive('publish')->once();
-        });
-
-        $this->dispatchJob($this->webhookPayload());
-
-        $org->refresh();
-        $this->assertEquals(9, $org->credit_balance);
-
-        $this->assertDatabaseHas('credit_transactions', [
-            'organization_id' => $org->id,
-            'type' => 'deduction',
-            'amount' => -1,
-        ]);
-    }
-
-    public function test_skips_review_on_insufficient_credits(): void
+    public function test_skips_review_on_zero_credits(): void
     {
         $org = Organization::factory()->withCredits(0)->create(['login' => 'test-org']);
         $repo = Repository::factory()->create([
@@ -261,15 +235,12 @@ class ProcessPullRequestWebhookTest extends TestCase
             'pr_number' => 42,
             'status' => 'skipped',
         ]);
-
-        $org->refresh();
-        $this->assertEquals(0, $org->credit_balance);
     }
 
-    public function test_byok_org_dispatches_without_credit_deduction(): void
+    public function test_byok_org_dispatches_with_zero_credits(): void
     {
         $org = Organization::factory()->withCredits(0)->byok()->create(['login' => 'test-org']);
-        $repo = Repository::factory()->create([
+        Repository::factory()->create([
             'organization_id' => $org->id,
             'full_name' => 'test-org/test-repo',
             'is_active' => true,
@@ -286,15 +257,8 @@ class ProcessPullRequestWebhookTest extends TestCase
         $this->dispatchJob($this->webhookPayload());
 
         $this->assertDatabaseHas('review_runs', [
-            'repository_id' => $repo->id,
             'pr_number' => 42,
             'status' => 'pending',
-        ]);
-
-        // No credit transaction should be created
-        $this->assertDatabaseMissing('credit_transactions', [
-            'organization_id' => $org->id,
-            'type' => 'deduction',
         ]);
     }
 
@@ -307,7 +271,6 @@ class ProcessPullRequestWebhookTest extends TestCase
             app(RepoConfigService::class),
             app(NatsService::class),
             app(RunnerTokenService::class),
-            app(CreditService::class),
         );
     }
 

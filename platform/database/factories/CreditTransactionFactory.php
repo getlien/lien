@@ -58,13 +58,4 @@ class CreditTransactionFactory extends Factory
             'description' => 'Review run',
         ]);
     }
-
-    public function refund(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'type' => CreditTransactionType::Refund,
-            'amount' => 1,
-            'description' => 'Refund — trivial PR',
-        ]);
-    }
 }

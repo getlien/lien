@@ -5,11 +5,9 @@ namespace App\Jobs;
 use App\DataTransferObjects\ReviewJobPayload;
 use App\Enums\ReviewRunStatus;
 use App\Enums\ReviewRunType;
-use App\Exceptions\InsufficientCreditsException;
 use App\Models\Organization;
 use App\Models\Repository;
 use App\Models\ReviewRun;
-use App\Services\CreditService;
 use App\Services\GitHubAppService;
 use App\Services\GitHubCheckService;
 use App\Services\NatsService;
@@ -40,7 +38,6 @@ class ProcessPullRequestWebhook implements ShouldQueue
         RepoConfigService $configService,
         NatsService $nats,
         RunnerTokenService $tokenService,
-        CreditService $creditService,
     ): void {
         $fullName = $this->payload['repository']['full_name'] ?? null;
         $installationId = $this->payload['installation']['id'] ?? null;
@@ -82,11 +79,11 @@ class ProcessPullRequestWebhook implements ShouldQueue
             }
         }
 
-        if (! $this->ensureCredits($org, $reviewRun, $creditService, $checkService, $token)) {
+        if (! $this->hasCredits($org, $reviewRun, $checkService, $token)) {
             return;
         }
 
-        $this->dispatchToNats($repository, $reviewRun, $org, $configService, $nats, $tokenService, $creditService, $token);
+        $this->dispatchToNats($repository, $reviewRun, $configService, $nats, $tokenService, $token);
     }
 
     private function findOrCreateReviewRun(Repository $repository, ?string $fullName): ?ReviewRun
@@ -126,53 +123,44 @@ class ProcessPullRequestWebhook implements ShouldQueue
         return $reviewRun;
     }
 
-    private function ensureCredits(
+    private function hasCredits(
         Organization $org,
         ReviewRun $reviewRun,
-        CreditService $creditService,
         GitHubCheckService $checkService,
         string $token,
     ): bool {
-        if ($org->isByok()) {
+        if ($org->canRunReview()) {
             return true;
         }
 
-        try {
-            $creditService->deductCredit($org, $reviewRun);
+        Log::info('Insufficient credits, skipping review', [
+            'repo' => $reviewRun->repository->full_name,
+            'pr' => $reviewRun->pr_number,
+            'organization_id' => $org->id,
+        ]);
 
-            return true;
-        } catch (InsufficientCreditsException) {
-            Log::info('Insufficient credits, skipping review', [
-                'repo' => $reviewRun->repository->full_name,
-                'pr' => $reviewRun->pr_number,
-                'organization_id' => $org->id,
-            ]);
+        $reviewRun->update(['status' => ReviewRunStatus::Skipped]);
 
-            $reviewRun->update(['status' => ReviewRunStatus::Skipped]);
-
-            if ($reviewRun->github_check_run_id) {
-                $checkService->completeCheckRun(
-                    reviewRun: $reviewRun,
-                    checkRunId: $reviewRun->github_check_run_id,
-                    installationToken: $token,
-                    conclusion: 'neutral',
-                    title: 'No credits remaining',
-                    summary: 'This review was skipped because your organization has no credits remaining. [Purchase credits](https://lien.dev/billing) to continue receiving AI-powered reviews.',
-                );
-            }
-
-            return false;
+        if ($reviewRun->github_check_run_id) {
+            $checkService->completeCheckRun(
+                reviewRun: $reviewRun,
+                checkRunId: $reviewRun->github_check_run_id,
+                installationToken: $token,
+                conclusion: 'neutral',
+                title: 'No credits remaining',
+                summary: 'This review was skipped because your organization has no credits remaining. [Purchase credits](https://lien.dev/billing) to continue receiving AI-powered reviews.',
+            );
         }
+
+        return false;
     }
 
     private function dispatchToNats(
         Repository $repository,
         ReviewRun $reviewRun,
-        Organization $org,
         RepoConfigService $configService,
         NatsService $nats,
         RunnerTokenService $tokenService,
-        CreditService $creditService,
         string $token,
     ): void {
         $config = $configService->getRunnerConfig($repository);
@@ -187,15 +175,7 @@ class ProcessPullRequestWebhook implements ShouldQueue
             checkRunId: $reviewRun->github_check_run_id,
         );
 
-        try {
-            $nats->publish('reviews.pr', $payload->toArray());
-        } catch (\Throwable $e) {
-            if (! $org->isByok()) {
-                $creditService->refundCredit($org, $reviewRun);
-            }
-
-            throw $e;
-        }
+        $nats->publish('reviews.pr', $payload->toArray());
 
         Log::info('Dispatched PR review to NATS', [
             'repo' => $repository->full_name,
