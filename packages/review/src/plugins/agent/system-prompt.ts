@@ -147,6 +147,8 @@ Do NOT report:
 - Performance (unless clear regression)
 - Purely preferential suggestions
 - Theoretical edge cases with no realistic caller
+- Confirmations that code is correct ("this is safe", "no issue here"). If your analysis shows the code is fine, do not create a finding — silence means approval.
+- Suggestions to update PR descriptions, comments, or documentation
 </rules>
 
 <output_format>
