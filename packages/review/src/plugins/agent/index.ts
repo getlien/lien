@@ -15,11 +15,13 @@ import type {
   PresentContext,
 } from '../../plugin-types.js';
 import { buildDependencyGraph } from '../../dependency-graph.js';
+import type { Logger } from '../../logger.js';
 
 import type { AgentConfig, AgentFinding, AgentResult } from './types.js';
 import { AnthropicAgentClient } from './anthropic-client.js';
 import { OpenAIAgentClient, toOpenAITools } from './openai-client.js';
 import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
+import { BUILTIN_RULES, buildTriggerContext, selectRules } from './rules.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
 
 const configSchema = z.object({
@@ -77,43 +79,24 @@ export class AgentReviewPlugin implements ReviewPlugin {
         logger,
       });
 
-    let result: AgentResult;
+    // Select active rules based on PR content (languages, diff keywords)
+    const triggerCtx = buildTriggerContext(context);
+    const rules = selectRules(BUILTIN_RULES, triggerCtx);
+    logger.info(
+      `[${this.id}] Rules: ${rules.active.map(r => r.id).join(', ')} (skipped: ${rules.skipped.join(', ') || 'none'})`,
+    );
 
-    if (provider === 'anthropic') {
-      const client = new AnthropicAgentClient({
-        apiKey,
-        model: config.model,
-        baseUrl: config.baseUrl,
-        inputCostPerMTok: config.inputCostPerMTok,
-        outputCostPerMTok: config.outputCostPerMTok,
-        maxTurns: config.maxTurns,
-        maxTokenBudget: config.maxTokenBudget,
-        logger,
-      });
-      result = await client.run(
-        buildSystemPrompt(),
-        buildInitialMessage(context),
-        AGENT_TOOLS,
-        toolExecutor,
-      );
-    } else {
-      const client = new OpenAIAgentClient({
-        apiKey,
-        model: config.model,
-        baseUrl: config.baseUrl ?? 'https://openrouter.ai/api/v1',
-        inputCostPerMTok: config.inputCostPerMTok,
-        outputCostPerMTok: config.outputCostPerMTok,
-        maxTurns: config.maxTurns,
-        maxTokenBudget: config.maxTokenBudget,
-        logger,
-      });
-      result = await client.run(
-        buildSystemPrompt(),
-        buildInitialMessage(context),
-        toOpenAITools(AGENT_TOOLS),
-        toolExecutor,
-      );
-    }
+    const systemPrompt = buildSystemPrompt(rules);
+    const initialMessage = buildInitialMessage(context);
+    const result = await runAgentClient(
+      provider,
+      config,
+      apiKey,
+      logger,
+      systemPrompt,
+      initialMessage,
+      toolExecutor,
+    );
 
     logger.info(
       `[${this.id}] Review complete: ${result.findings.length} findings in ${result.turns} turns ($${result.usage.cost.toFixed(4)})`,
@@ -185,6 +168,48 @@ export class AgentReviewPlugin implements ReviewPlugin {
 }
 
 // ---------------------------------------------------------------------------
+// Agent client execution
+// ---------------------------------------------------------------------------
+
+type ToolExecutor = (name: string, input: Record<string, unknown>) => Promise<string>;
+
+function runAgentClient(
+  provider: string,
+  config: AgentConfig,
+  apiKey: string,
+  logger: Logger,
+  systemPrompt: string,
+  initialMessage: string,
+  toolExecutor: ToolExecutor,
+): Promise<AgentResult> {
+  if (provider === 'anthropic') {
+    const client = new AnthropicAgentClient({
+      apiKey,
+      model: config.model,
+      baseUrl: config.baseUrl,
+      inputCostPerMTok: config.inputCostPerMTok,
+      outputCostPerMTok: config.outputCostPerMTok,
+      maxTurns: config.maxTurns,
+      maxTokenBudget: config.maxTokenBudget,
+      logger,
+    });
+    return client.run(systemPrompt, initialMessage, AGENT_TOOLS, toolExecutor);
+  }
+
+  const client = new OpenAIAgentClient({
+    apiKey,
+    model: config.model,
+    baseUrl: config.baseUrl ?? 'https://openrouter.ai/api/v1',
+    inputCostPerMTok: config.inputCostPerMTok,
+    outputCostPerMTok: config.outputCostPerMTok,
+    maxTurns: config.maxTurns,
+    maxTokenBudget: config.maxTokenBudget,
+    logger,
+  });
+  return client.run(systemPrompt, initialMessage, toOpenAITools(AGENT_TOOLS), toolExecutor);
+}
+
+// ---------------------------------------------------------------------------
 // Finding mapping
 // ---------------------------------------------------------------------------
 
@@ -200,6 +225,7 @@ function mapToReviewFinding(f: AgentFinding, pluginId: string): ReviewFinding {
     message: f.message,
     suggestion: f.suggestion,
     evidence: f.evidence,
+    ...(f.ruleId ? { metadata: { ruleId: f.ruleId } } : {}),
   };
 }
 
