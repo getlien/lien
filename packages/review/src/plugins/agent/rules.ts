@@ -301,10 +301,55 @@ Focus on fields/variants introduced or modified in this PR. If a new field is ad
   source: 'builtin',
 };
 
+const ERROR_SWALLOWING: ReviewRule = {
+  id: 'error-swallowing',
+  name: 'Silent Error Swallowing',
+  description:
+    'Check for catch/except/rescue blocks that discard errors silently, hiding failures from callers',
+  prompt: `### Silent Error Swallowing Check
+For EACH error-handling block introduced or modified in this PR, check whether the error is actually handled or silently discarded:
+- **Empty catch/except**: A catch block with no body, or only a comment. The error vanishes — callers believe the operation succeeded.
+- **Log-only catch**: A catch that logs but doesn't rethrow, return an error, or set a failure state. Callers still receive a "success" result built from undefined/null/zero-value state.
+- **Blanket catch**: Catching a broad exception type (Exception, Error, object, BaseException) when only a specific error was expected. Masks unrelated failures like OOM or type errors.
+- **Discarded error return**: In Go, \`_ = err\` or \`if err != nil { return nil }\` without propagating the error. The caller has no way to know the operation failed.
+- **Promise swallowing**: \`.catch(() => {})\` or \`.catch(() => undefined)\` — the rejection is consumed and the chain continues with undefined as if it succeeded.
+
+The key question: if this operation fails, will the caller know? If the answer is no, that's a bug.`,
+  example: `### Good finding — catch block swallows error, caller sees stale data:
+{
+  "filepath": "src/services/config.ts",
+  "line": 82,
+  "symbolName": "loadConfig",
+  "severity": "error",
+  "category": "error_handling",
+  "ruleId": "error-swallowing",
+  "message": "The catch block on line 82 logs the error but returns the default config object instead of propagating the failure. Callers of loadConfig() will silently receive defaults when the config file is corrupt or permissions are wrong, with no indication that the loaded config is not the user's actual config.",
+  "suggestion": "Either rethrow the error, or return a result type that distinguishes 'loaded defaults' from 'loaded user config' so callers can react appropriately.",
+  "evidence": "Error swallowing check — catch logs but returns success value"
+}`,
+  triggers: {
+    keywords: [
+      'catch\\s*\\(',
+      'catch\\s*\\{',
+      '\\.catch\\(',
+      'except\\s*:',
+      'except\\s+\\w',
+      'rescue\\b',
+      'if err != nil',
+      'recover\\(',
+    ],
+  },
+  severity: 'warning',
+  category: 'error_handling',
+  enabled: true,
+  source: 'builtin',
+};
+
 /** All built-in review rules. */
 export const BUILTIN_RULES: ReviewRule[] = [
   STRUCTURAL_ANALYSIS,
   EDGE_CASE_SWEEP,
   CONCURRENCY_RACE,
   INCOMPLETE_HANDLING,
+  ERROR_SWALLOWING,
 ];

@@ -168,6 +168,38 @@ describe('selectRules', () => {
     expect(result.active.map(r => r.id)).toContain('concurrency-race');
   });
 
+  it('includes error-swallowing when diff contains catch block', () => {
+    const ctx = makeTriggerContext({
+      diffText: 'try {\n  doStuff();\n} catch (e) {\n  // ignore\n}',
+    });
+    const result = selectRules(BUILTIN_RULES, ctx);
+    expect(result.active.map(r => r.id)).toContain('error-swallowing');
+  });
+
+  it('includes error-swallowing for Go error handling', () => {
+    const ctx = makeTriggerContext({ diffText: 'if err != nil {\n  return nil\n}' });
+    const result = selectRules(BUILTIN_RULES, ctx);
+    expect(result.active.map(r => r.id)).toContain('error-swallowing');
+  });
+
+  it('includes error-swallowing for Python except', () => {
+    const ctx = makeTriggerContext({ diffText: 'except ValueError:\n    pass' });
+    const result = selectRules(BUILTIN_RULES, ctx);
+    expect(result.active.map(r => r.id)).toContain('error-swallowing');
+  });
+
+  it('includes error-swallowing for promise .catch()', () => {
+    const ctx = makeTriggerContext({ diffText: 'fetch(url).catch(() => {})' });
+    const result = selectRules(BUILTIN_RULES, ctx);
+    expect(result.active.map(r => r.id)).toContain('error-swallowing');
+  });
+
+  it('skips error-swallowing when diff has no error handling', () => {
+    const ctx = makeTriggerContext({ diffText: 'const x = a + b;\nreturn x;' });
+    const result = selectRules(BUILTIN_RULES, ctx);
+    expect(result.skipped).toContain('error-swallowing');
+  });
+
   it('fails open for keyword rules when diff is unavailable', () => {
     const ctx = makeTriggerContext({ diffText: '' });
     const result = selectRules(BUILTIN_RULES, ctx);
@@ -389,12 +421,18 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Unread fields');
     expect(prompt).toContain('Missing cases');
 
+    // Error swallowing rule
+    expect(prompt).toContain('Silent Error Swallowing');
+    expect(prompt).toContain('Empty catch/except');
+    expect(prompt).toContain('Blanket catch');
+
     // Examples
     expect(prompt).toContain('percentChange');
     expect(prompt).toContain('formatRatio');
     expect(prompt).toContain('refundCredit');
     expect(prompt).toContain('fetchUser');
     expect(prompt).toContain('ruleMatchesTriggers'); // incomplete-handling example
+    expect(prompt).toContain('loadConfig'); // error-swallowing example
 
     // Bad examples (always included)
     expect(prompt).toContain('DO NOT report');
@@ -448,5 +486,6 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('"ruleId": "edge-case-sweep"');
     expect(prompt).toContain('"ruleId": "concurrency-race"');
     expect(prompt).toContain('"ruleId": "incomplete-handling"');
+    expect(prompt).toContain('"ruleId": "error-swallowing"');
   });
 });
