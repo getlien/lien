@@ -13,6 +13,8 @@
  */
 
 import type { ReviewContext } from '../../plugin-types.js';
+import type { BlastRadiusReport } from '../../blast-radius.js';
+import { renderBlastRadiusMarkdown } from '../../blast-radius-render.js';
 import type { ResolvedRules } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -29,6 +31,8 @@ You have these tools to investigate the codebase:
 - grep_codebase: Search the entire repository for a text pattern (regex). Use to find all files that reference a symbol, including cross-package imports within this monorepo.
 - get_complexity: Get complexity metrics for files
 - read_file: Read file contents from the repo
+
+A <blast_radius> section may be present in your initial message. It lists pre-computed transitive dependents of the changed symbols, with test coverage and complexity overlay. Use it as your starting map. Call get_dependents only for drill-down on specific symbols not already covered there.
 </tools>`;
 
 const SELF_REVIEW = `### Self-Review
@@ -143,82 +147,104 @@ ${OUTPUT_FORMAT}`;
 /** Max characters for the diff section before truncation. */
 const MAX_DIFF_CHARS = 50_000;
 
+/** Options for initial-message assembly. */
+export interface BuildInitialMessageOptions {
+  /** Pre-computed blast-radius report to inject as a `<blast_radius>` block. */
+  blastRadius?: BlastRadiusReport | null;
+}
+
 /**
  * Build the initial user message from the review context.
  *
  * Uses XML tags to separate context sections (structured input technique
  * from aisnacks.io — reduces misinterpretation between instructions and data).
  */
-export function buildInitialMessage(context: ReviewContext): string {
+export function buildInitialMessage(
+  context: ReviewContext,
+  opts: BuildInitialMessageOptions = {},
+): string {
   const sections: string[] = [];
-
-  // PR metadata
-  if (context.pr) {
-    sections.push(`<pr_metadata>
-Title: ${context.pr.title}${context.pr.body ? `\nDescription: ${context.pr.body}` : ''}
-</pr_metadata>`);
-  }
-
-  // Changed files
-  sections.push(
-    `<changed_files>\n${context.changedFiles.map(f => `- ${f}`).join('\n')}\n</changed_files>`,
-  );
-
-  // Diff patches
-  if (context.pr?.patches && context.pr.patches.size > 0) {
-    let diffText = '';
-    for (const [file, patch] of context.pr.patches) {
-      diffText += `### ${file}\n\`\`\`diff\n${patch}\n\`\`\`\n\n`;
-    }
-
-    if (diffText.length > MAX_DIFF_CHARS) {
-      diffText = diffText.slice(0, MAX_DIFF_CHARS);
-      diffText += '\n\n[Diff truncated — use read_file to see full contents of specific files]';
-    }
-
-    sections.push(`<diff>\n${diffText}</diff>`);
-  }
-
-  // Complexity regressions (positive deltas only)
-  if (context.deltas && context.deltas.length > 0) {
-    const regressions = context.deltas.filter(d => d.delta > 0);
-    if (regressions.length > 0) {
-      const lines = regressions.map(
-        d =>
-          `- ${d.filepath} \`${d.symbolName ?? 'file'}\`: ${d.metricType} ${d.baseComplexity} -> ${d.headComplexity} (+${d.delta})`,
-      );
-      sections.push(`<complexity_regressions>\n${lines.join('\n')}\n</complexity_regressions>`);
-    }
-  }
-
-  // Changed function signatures
-  const functionChunks = context.chunks.filter(
-    c => c.metadata.symbolType === 'function' || c.metadata.symbolType === 'method',
-  );
-  if (functionChunks.length > 0) {
-    const lines = functionChunks.map(c => {
-      const sig = c.metadata.signature ?? c.metadata.symbolName ?? 'unknown';
-      const loc = `${c.metadata.file}:${c.metadata.startLine}`;
-      return `- \`${sig}\` at ${loc}`;
-    });
-    sections.push(`<changed_functions>\n${lines.join('\n')}\n</changed_functions>`);
-  }
-
-  // Detect deleted exports from diff — critical for finding breaking changes
-  if (context.pr?.patches) {
-    const deletedExports = extractDeletedExports(context.pr.patches);
-    if (deletedExports.length > 0) {
-      sections.push(
-        `<deleted_exports>\nThese exports were REMOVED in this PR. Use grep_codebase to check if any file still imports them. After checking deleted exports, continue with the rest of your investigation (edge case sweep on new/changed functions, self-review).\n${deletedExports.map(e => `- ${e}`).join('\n')}\n</deleted_exports>`,
-      );
-    }
-  }
-
+  appendIfPresent(sections, renderPrMetadata(context));
+  sections.push(renderChangedFiles(context));
+  appendIfPresent(sections, renderDiff(context));
+  appendIfPresent(sections, renderComplexityRegressions(context));
+  appendIfPresent(sections, renderChangedFunctions(context));
+  appendIfPresent(sections, renderBlastRadius(opts));
+  appendIfPresent(sections, renderDeletedExports(context));
   sections.push(
     'Investigate this PR. Use the investigation strategy described in your instructions, then output findings as JSON.',
   );
-
   return sections.join('\n\n');
+}
+
+function appendIfPresent(sections: string[], value: string | null): void {
+  if (value) sections.push(value);
+}
+
+function renderPrMetadata(context: ReviewContext): string | null {
+  if (!context.pr) return null;
+  const body = context.pr.body ? `\nDescription: ${context.pr.body}` : '';
+  return `<pr_metadata>\nTitle: ${context.pr.title}${body}\n</pr_metadata>`;
+}
+
+function renderChangedFiles(context: ReviewContext): string {
+  const list = context.changedFiles.map(f => `- ${f}`).join('\n');
+  return `<changed_files>\n${list}\n</changed_files>`;
+}
+
+function renderDiff(context: ReviewContext): string | null {
+  const patches = context.pr?.patches;
+  if (!patches || patches.size === 0) return null;
+  let diffText = '';
+  for (const [file, patch] of patches) {
+    diffText += `### ${file}\n\`\`\`diff\n${patch}\n\`\`\`\n\n`;
+  }
+  if (diffText.length > MAX_DIFF_CHARS) {
+    diffText =
+      diffText.slice(0, MAX_DIFF_CHARS) +
+      '\n\n[Diff truncated — use read_file to see full contents of specific files]';
+  }
+  return `<diff>\n${diffText}</diff>`;
+}
+
+function renderComplexityRegressions(context: ReviewContext): string | null {
+  const deltas = context.deltas;
+  if (!deltas || deltas.length === 0) return null;
+  const regressions = deltas.filter(d => d.delta > 0);
+  if (regressions.length === 0) return null;
+  const lines = regressions.map(
+    d =>
+      `- ${d.filepath} \`${d.symbolName ?? 'file'}\`: ${d.metricType} ${d.baseComplexity} -> ${d.headComplexity} (+${d.delta})`,
+  );
+  return `<complexity_regressions>\n${lines.join('\n')}\n</complexity_regressions>`;
+}
+
+function renderChangedFunctions(context: ReviewContext): string | null {
+  const functionChunks = context.chunks.filter(
+    c => c.metadata.symbolType === 'function' || c.metadata.symbolType === 'method',
+  );
+  if (functionChunks.length === 0) return null;
+  const lines = functionChunks.map(c => {
+    const sig = c.metadata.signature ?? c.metadata.symbolName ?? 'unknown';
+    const loc = `${c.metadata.file}:${c.metadata.startLine}`;
+    return `- \`${sig}\` at ${loc}`;
+  });
+  return `<changed_functions>\n${lines.join('\n')}\n</changed_functions>`;
+}
+
+function renderBlastRadius(opts: BuildInitialMessageOptions): string | null {
+  if (!opts.blastRadius) return null;
+  const rendered = renderBlastRadiusMarkdown(opts.blastRadius);
+  return rendered.length > 0 ? rendered : null;
+}
+
+function renderDeletedExports(context: ReviewContext): string | null {
+  const patches = context.pr?.patches;
+  if (!patches) return null;
+  const deletedExports = extractDeletedExports(patches);
+  if (deletedExports.length === 0) return null;
+  const list = deletedExports.map(e => `- ${e}`).join('\n');
+  return `<deleted_exports>\nThese exports were REMOVED in this PR. Use grep_codebase to check if any file still imports them. After checking deleted exports, continue with the rest of your investigation (edge case sweep on new/changed functions, self-review).\n${list}\n</deleted_exports>`;
 }
 
 /**

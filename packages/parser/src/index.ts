@@ -141,3 +141,10 @@ export { analyzeComplexityFromChunks } from './insights/chunk-complexity.js';
 
 export { performChunkOnlyIndex } from './chunk-only-index.js';
 export type { ChunkOnlyOptions, ChunkOnlyResult } from './chunk-only-index.js';
+
+// =============================================================================
+// RISK ANALYSIS
+// =============================================================================
+
+export { computeBlastRadiusRisk } from './risk/blast-radius-risk.js';
+export type { BlastRadiusRiskInput, BlastRadiusRisk } from './risk/blast-radius-risk.js';

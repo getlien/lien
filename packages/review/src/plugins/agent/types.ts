@@ -9,6 +9,18 @@ import type { CodeChunk } from '@liendev/parser';
 import type { DependencyGraph } from '../../dependency-graph.js';
 import type { Logger } from '../../logger.js';
 
+/** Configuration for the blast-radius context injection. */
+export interface BlastRadiusConfig {
+  /** Master switch. Default true. */
+  enabled?: boolean;
+  /** Max hop distance per seed. Default 2. */
+  depth?: number;
+  /** Max dependents emitted per seed. Default 30. */
+  maxNodes?: number;
+  /** Max seeds considered. Default 8. */
+  maxSeeds?: number;
+}
+
 /** Configuration for the agent review plugin. */
 export interface AgentConfig {
   /** API key (OpenRouter or Anthropic) */
@@ -24,6 +36,8 @@ export interface AgentConfig {
   outputCostPerMTok?: number;
   maxTurns: number;
   maxTokenBudget: number;
+  /** Inject transitive blast radius into the agent's initial message. */
+  blastRadius?: BlastRadiusConfig;
 }
 
 /** A single finding produced by the agent during review. */
