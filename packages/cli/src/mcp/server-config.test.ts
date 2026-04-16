@@ -25,6 +25,15 @@ describe('createMCPServerConfig', () => {
     expect(config.name).toBe('custom-server');
     expect(config.version).toBe('2.5.3-beta');
   });
+
+  it('should include instructions text for LLM guidance', () => {
+    const config = createMCPServerConfig('lien', '1.0.0');
+    expect(config.instructions).toBeDefined();
+    expect(typeof config.instructions).toBe('string');
+    expect(config.instructions.length).toBeGreaterThan(0);
+    expect(config.instructions).toContain('get_files_context');
+    expect(config.instructions).toContain('get_dependents');
+  });
 });
 
 describe('registerMCPHandlers', () => {

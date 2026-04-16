@@ -261,7 +261,10 @@ function createMCPServer(): Server {
   const serverConfig = createMCPServerConfig('lien', packageJson.version);
   return new Server(
     { name: serverConfig.name, version: serverConfig.version },
-    { capabilities: serverConfig.capabilities },
+    {
+      capabilities: serverConfig.capabilities,
+      instructions: serverConfig.instructions,
+    },
   );
 }
 

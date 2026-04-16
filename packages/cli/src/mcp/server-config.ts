@@ -2,6 +2,7 @@ import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { tools } from './tools.js';
 import { toolHandlers } from './handlers/index.js';
+import { SERVER_INSTRUCTIONS } from './instructions.js';
 import type { ToolContext, LogFn } from './types.js';
 import { LienError, LienErrorCode } from '@liendev/core';
 
@@ -11,6 +12,7 @@ import { LienError, LienErrorCode } from '@liendev/core';
 export interface MCPServerConfig {
   name: string;
   version: string;
+  instructions: string;
   capabilities: {
     tools: Record<string, unknown>;
     logging?: Record<string, unknown>;
@@ -24,6 +26,7 @@ export function createMCPServerConfig(name: string, version: string): MCPServerC
   return {
     name,
     version,
+    instructions: SERVER_INSTRUCTIONS,
     capabilities: {
       tools: {},
       logging: {},
