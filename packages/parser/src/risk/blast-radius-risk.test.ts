@@ -55,6 +55,9 @@ describe('computeBlastRadiusRisk', () => {
       hasHighComplexityUncovered: true,
     });
     expect(result.level).toBe('high');
+    // The escalation driver must be visible in reasoning; otherwise a caller
+    // sees only "3 callers, 1 untested" and can't tell why it isn't medium.
+    expect(result.reasoning).toContain('untested high-complexity dependent');
   });
 
   it('escalates to critical on very large blast radius', () => {

@@ -164,6 +164,12 @@ export function buildDependencyGraph(chunks: CodeChunk[]): DependencyGraph {
       if (expandedSymbols.has(currentKey)) continue;
       expandedSymbols.add(currentKey);
 
+      // Truncation is deterministic but ordering-dependent: when maxNodes is
+      // hit mid-expansion, the remaining callers of the current symbol (and
+      // any deeper symbols still in the queue) are dropped silently. Which
+      // callers survive therefore depends on the iteration order of
+      // directCallers — consumers should not rely on any particular subset
+      // appearing in a truncated result.
       const directCallers = getCallers(current.filepath, current.symbolName);
       for (const edge of directCallers) {
         const callerKey = `${edge.caller.filepath}::${edge.caller.symbolName}`;

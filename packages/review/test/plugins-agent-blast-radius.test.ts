@@ -94,10 +94,12 @@ describe('buildInitialMessage with blast-radius injection', () => {
     const blastIdx = message.indexOf('<blast_radius>');
     const deletedIdx = message.indexOf('<deleted_exports>');
 
+    // All three blocks must be present — otherwise the ordering assertion
+    // silently no-ops and this test loses its point.
     expect(changedFilesIdx).toBeGreaterThan(-1);
+    expect(blastIdx).toBeGreaterThan(-1);
+    expect(deletedIdx).toBeGreaterThan(-1);
     expect(blastIdx).toBeGreaterThan(changedFilesIdx);
-    if (deletedIdx > -1) {
-      expect(blastIdx).toBeLessThan(deletedIdx);
-    }
+    expect(blastIdx).toBeLessThan(deletedIdx);
   });
 });

@@ -29,13 +29,18 @@ export interface BlastRadiusRisk {
   /**
    * Short phrases describing why the level was assigned, in the order they
    * contributed. Used verbatim by renderers (e.g. "14 callers, 3 untested,
-   * max cognitive complexity 18").
+   * max complexity 18, untested high-complexity dependent").
    */
   reasoning: string[];
 }
 
 function buildReasoning(input: BlastRadiusRiskInput): string[] {
-  const { dependentCount, uncoveredDependents, maxDependentComplexity } = input;
+  const {
+    dependentCount,
+    uncoveredDependents,
+    maxDependentComplexity,
+    hasHighComplexityUncovered = false,
+  } = input;
   const reasoning: string[] = [];
   if (dependentCount > 0) {
     reasoning.push(`${dependentCount} ${dependentCount === 1 ? 'caller' : 'callers'}`);
@@ -45,6 +50,11 @@ function buildReasoning(input: BlastRadiusRiskInput): string[] {
   }
   if (typeof maxDependentComplexity === 'number' && maxDependentComplexity > 0) {
     reasoning.push(`max complexity ${maxDependentComplexity}`);
+  }
+  // Surface the escalation driver explicitly — otherwise a caller with only
+  // "3 callers, 1 untested" can't tell why the level came back as 'high'.
+  if (hasHighComplexityUncovered) {
+    reasoning.push('untested high-complexity dependent');
   }
   return reasoning;
 }
