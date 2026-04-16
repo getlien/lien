@@ -131,6 +131,13 @@ export type { GitState } from './git/tracker.js';
 // Use detectEcosystems() and getEcosystemExcludePatterns() instead.
 
 // =============================================================================
+// RISK ANALYSIS
+// =============================================================================
+
+export { computeBlastRadiusRisk } from './risk/blast-radius-risk.js';
+export type { BlastRadiusRiskInput, BlastRadiusRisk } from './risk/blast-radius-risk.js';
+
+// =============================================================================
 // ERRORS
 // =============================================================================
 
