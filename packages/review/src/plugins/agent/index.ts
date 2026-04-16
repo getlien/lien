@@ -15,6 +15,7 @@ import type {
   PresentContext,
 } from '../../plugin-types.js';
 import { buildDependencyGraph } from '../../dependency-graph.js';
+import { computeBlastRadius } from '../../blast-radius.js';
 import type { Logger } from '../../logger.js';
 
 import type { AgentConfig, AgentFinding, AgentResult } from './types.js';
@@ -36,6 +37,14 @@ const configSchema = z.object({
   maxTokenBudget: z.number().int().default(100_000),
   // Legacy — maps to apiKey
   anthropicApiKey: z.string().optional(),
+  blastRadius: z
+    .object({
+      enabled: z.boolean().default(true),
+      depth: z.number().int().min(1).max(4).default(2),
+      maxNodes: z.number().int().min(5).max(200).default(30),
+      maxSeeds: z.number().int().min(1).max(20).default(8),
+    })
+    .optional(),
 });
 
 export interface AgentReviewPluginOptions {
@@ -86,8 +95,26 @@ export class AgentReviewPlugin implements ReviewPlugin {
       `[${this.id}] Rules: ${rules.active.map(r => r.id).join(', ')} (skipped: ${rules.skipped.join(', ') || 'none'})`,
     );
 
+    // Pre-compute transitive blast radius so the agent sees it in the initial
+    // message instead of having to decide to call get_dependents itself.
+    const blastRadiusConfig = config.blastRadius ?? {};
+    const blastRadius =
+      blastRadiusConfig.enabled !== false
+        ? computeBlastRadius(context.chunks, graph, context.repoChunks!, {
+            depth: blastRadiusConfig.depth,
+            maxNodes: blastRadiusConfig.maxNodes,
+            maxSeeds: blastRadiusConfig.maxSeeds,
+            workspaceRoot: context.repoRootDir,
+          })
+        : null;
+    if (blastRadius) {
+      logger.info(
+        `[${this.id}] Blast radius: ${blastRadius.totalDistinctDependents} deps, risk=${blastRadius.globalRisk.level}${blastRadius.truncated ? ' (truncated)' : ''}`,
+      );
+    }
+
     const systemPrompt = buildSystemPrompt(rules);
-    const initialMessage = buildInitialMessage(context);
+    const initialMessage = buildInitialMessage(context, { blastRadius });
     const result = await runAgentClient(
       provider,
       config,

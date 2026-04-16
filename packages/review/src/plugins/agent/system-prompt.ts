@@ -13,6 +13,8 @@
  */
 
 import type { ReviewContext } from '../../plugin-types.js';
+import type { BlastRadiusReport } from '../../blast-radius.js';
+import { renderBlastRadiusMarkdown } from '../../blast-radius-render.js';
 import type { ResolvedRules } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -29,6 +31,8 @@ You have these tools to investigate the codebase:
 - grep_codebase: Search the entire repository for a text pattern (regex). Use to find all files that reference a symbol, including cross-package imports within this monorepo.
 - get_complexity: Get complexity metrics for files
 - read_file: Read file contents from the repo
+
+A <blast_radius> section may be present in your initial message. It lists pre-computed transitive dependents of the changed symbols, with test coverage and complexity overlay. Use it as your starting map. Call get_dependents only for drill-down on specific symbols not already covered there.
 </tools>`;
 
 const SELF_REVIEW = `### Self-Review
@@ -143,13 +147,22 @@ ${OUTPUT_FORMAT}`;
 /** Max characters for the diff section before truncation. */
 const MAX_DIFF_CHARS = 50_000;
 
+/** Options for initial-message assembly. */
+export interface BuildInitialMessageOptions {
+  /** Pre-computed blast-radius report to inject as a `<blast_radius>` block. */
+  blastRadius?: BlastRadiusReport | null;
+}
+
 /**
  * Build the initial user message from the review context.
  *
  * Uses XML tags to separate context sections (structured input technique
  * from aisnacks.io — reduces misinterpretation between instructions and data).
  */
-export function buildInitialMessage(context: ReviewContext): string {
+export function buildInitialMessage(
+  context: ReviewContext,
+  opts: BuildInitialMessageOptions = {},
+): string {
   const sections: string[] = [];
 
   // PR metadata
@@ -202,6 +215,14 @@ Title: ${context.pr.title}${context.pr.body ? `\nDescription: ${context.pr.body}
       return `- \`${sig}\` at ${loc}`;
     });
     sections.push(`<changed_functions>\n${lines.join('\n')}\n</changed_functions>`);
+  }
+
+  // Blast radius — pre-computed transitive dependents, test coverage, risk score.
+  if (opts.blastRadius) {
+    const rendered = renderBlastRadiusMarkdown(opts.blastRadius);
+    if (rendered.length > 0) {
+      sections.push(rendered);
+    }
   }
 
   // Detect deleted exports from diff — critical for finding breaking changes
