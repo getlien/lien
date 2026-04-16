@@ -34,21 +34,8 @@ export interface BlastRadiusRisk {
   reasoning: string[];
 }
 
-/**
- * Compute a consolidated risk level for a blast radius.
- *
- * Thresholds are deliberately conservative — the goal is to surface risk, not
- * to be statistically rigorous. Callers that want finer control should consume
- * the raw input fields directly.
- */
-export function computeBlastRadiusRisk(input: BlastRadiusRiskInput): BlastRadiusRisk {
-  const {
-    dependentCount,
-    uncoveredDependents,
-    maxDependentComplexity,
-    hasHighComplexityUncovered = false,
-  } = input;
-
+function buildReasoning(input: BlastRadiusRiskInput): string[] {
+  const { dependentCount, uncoveredDependents, maxDependentComplexity } = input;
   const reasoning: string[] = [];
   if (dependentCount > 0) {
     reasoning.push(`${dependentCount} ${dependentCount === 1 ? 'caller' : 'callers'}`);
@@ -59,17 +46,27 @@ export function computeBlastRadiusRisk(input: BlastRadiusRiskInput): BlastRadius
   if (typeof maxDependentComplexity === 'number' && maxDependentComplexity > 0) {
     reasoning.push(`max complexity ${maxDependentComplexity}`);
   }
+  return reasoning;
+}
 
-  let level: RiskLevel;
-  if (dependentCount > 50 || (hasHighComplexityUncovered && dependentCount > 20)) {
-    level = 'critical';
-  } else if (dependentCount > 20 || hasHighComplexityUncovered) {
-    level = 'high';
-  } else if (dependentCount > 5 || uncoveredDependents > 0) {
-    level = 'medium';
-  } else {
-    level = 'low';
-  }
+function classifyLevel(input: BlastRadiusRiskInput): RiskLevel {
+  const { dependentCount, uncoveredDependents, hasHighComplexityUncovered = false } = input;
+  if (dependentCount > 50) return 'critical';
+  if (hasHighComplexityUncovered && dependentCount > 20) return 'critical';
+  if (dependentCount > 20) return 'high';
+  if (hasHighComplexityUncovered) return 'high';
+  if (dependentCount > 5) return 'medium';
+  if (uncoveredDependents > 0) return 'medium';
+  return 'low';
+}
 
-  return { level, reasoning };
+/**
+ * Compute a consolidated risk level for a blast radius.
+ *
+ * Thresholds are deliberately conservative — the goal is to surface risk, not
+ * to be statistically rigorous. Callers that want finer control should consume
+ * the raw input fields directly.
+ */
+export function computeBlastRadiusRisk(input: BlastRadiusRiskInput): BlastRadiusRisk {
+  return { level: classifyLevel(input), reasoning: buildReasoning(input) };
 }

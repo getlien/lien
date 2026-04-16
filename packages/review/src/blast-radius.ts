@@ -161,6 +161,116 @@ function computeTestCoverage(
 }
 
 // ---------------------------------------------------------------------------
+// Per-entry enrichment
+// ---------------------------------------------------------------------------
+
+interface RawSeedResult {
+  seed: BlastRadiusSeed;
+  result: ReturnType<DependencyGraph['getCallersTransitive']>;
+}
+
+function buildDependent(
+  edge: RawSeedResult['result']['callers'][number],
+  chunkIndex: Map<string, CodeChunk>,
+  coveredFiles: Set<string>,
+): BlastRadiusDependent {
+  const chunkKey = `${edge.caller.filepath}::${edge.caller.symbolName}`;
+  const dependentChunk = chunkIndex.get(chunkKey);
+  const complexity = dependentChunk ? chunkComplexity(dependentChunk) : undefined;
+  return {
+    filepath: edge.caller.filepath,
+    symbolName: edge.caller.symbolName,
+    hops: edge.hops,
+    callSiteLine: edge.callSiteLine,
+    complexity: complexity && complexity > 0 ? complexity : undefined,
+    hasTestCoverage: coveredFiles.has(edge.caller.filepath),
+  };
+}
+
+function buildEntry(
+  raw: RawSeedResult,
+  chunkIndex: Map<string, CodeChunk>,
+  coveredFiles: Set<string>,
+  highComplexityThreshold: number,
+): BlastRadiusEntry {
+  const dependents = raw.result.callers.map(edge => buildDependent(edge, chunkIndex, coveredFiles));
+  const uncovered = dependents.filter(d => !d.hasTestCoverage);
+  const maxDependentComplexity = dependents.reduce((acc, d) => Math.max(acc, d.complexity ?? 0), 0);
+  const hasHighComplexityUncovered = uncovered.some(
+    d => (d.complexity ?? 0) >= highComplexityThreshold,
+  );
+
+  const risk = computeBlastRadiusRisk({
+    dependentCount: dependents.length,
+    uncoveredDependents: uncovered.length,
+    maxDependentComplexity: maxDependentComplexity > 0 ? maxDependentComplexity : undefined,
+    hasHighComplexityUncovered,
+  });
+
+  return { seed: raw.seed, dependents, risk, truncated: raw.result.truncated };
+}
+
+function sortEntries(entries: BlastRadiusEntry[]): void {
+  entries.sort((a, b) => {
+    const levelDelta = RISK_RANK[b.risk.level] - RISK_RANK[a.risk.level];
+    if (levelDelta !== 0) return levelDelta;
+    return b.dependents.length - a.dependents.length;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Global aggregation
+// ---------------------------------------------------------------------------
+
+interface GlobalAccumulator {
+  seen: Set<string>;
+  uncovered: number;
+  maxComplexity: number;
+  hasHighUncovered: boolean;
+}
+
+function accumulateDependent(
+  acc: GlobalAccumulator,
+  d: BlastRadiusDependent,
+  highComplexityThreshold: number,
+): void {
+  const key = `${d.filepath}::${d.symbolName}`;
+  if (acc.seen.has(key)) return;
+  acc.seen.add(key);
+  if (!d.hasTestCoverage) acc.uncovered += 1;
+  if (typeof d.complexity === 'number' && d.complexity > acc.maxComplexity) {
+    acc.maxComplexity = d.complexity;
+  }
+  if (!d.hasTestCoverage && (d.complexity ?? 0) >= highComplexityThreshold) {
+    acc.hasHighUncovered = true;
+  }
+}
+
+function computeGlobalRisk(
+  entries: BlastRadiusEntry[],
+  highComplexityThreshold: number,
+): { risk: BlastRadiusReport['globalRisk']; distinctCount: number } {
+  const acc: GlobalAccumulator = {
+    seen: new Set(),
+    uncovered: 0,
+    maxComplexity: 0,
+    hasHighUncovered: false,
+  };
+  for (const entry of entries) {
+    for (const d of entry.dependents) {
+      accumulateDependent(acc, d, highComplexityThreshold);
+    }
+  }
+  const risk = computeBlastRadiusRisk({
+    dependentCount: acc.seen.size,
+    uncoveredDependents: acc.uncovered,
+    maxDependentComplexity: acc.maxComplexity > 0 ? acc.maxComplexity : undefined,
+    hasHighComplexityUncovered: acc.hasHighUncovered,
+  });
+  return { risk, distinctCount: acc.seen.size };
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -176,105 +286,40 @@ export function computeBlastRadius(
   const highComplexityThreshold = opts.highComplexityThreshold ?? DEFAULT_HIGH_COMPLEXITY_THRESHOLD;
 
   const seeds = selectSeeds(changedChunks, maxSeeds);
-  if (seeds.length === 0) {
-    return emptyReport();
-  }
+  if (seeds.length === 0) return emptyReport();
 
   const chunkIndex = buildChunkIndex(repoChunks);
+  const rawPerSeed: RawSeedResult[] = seeds.map(seed => ({
+    seed,
+    result: graph.getCallersTransitive(seed.filepath, seed.symbolName, { depth, maxNodes }),
+  }));
 
-  // First pass: BFS per seed, collect raw edges. We'll overlay tests/complexity after,
-  // because test-association lookup over the full repo should be done once.
-  const rawPerSeed = seeds.map(seed => {
-    const result = graph.getCallersTransitive(seed.filepath, seed.symbolName, {
-      depth,
-      maxNodes,
-    });
-    return { seed, result };
-  });
-
-  const dependentFiles = new Set<string>();
-  for (const { result } of rawPerSeed) {
-    for (const edge of result.callers) {
-      dependentFiles.add(edge.caller.filepath);
-    }
-  }
+  const dependentFiles = collectDependentFiles(rawPerSeed);
   const coveredFiles = computeTestCoverage(dependentFiles, repoChunks, opts.workspaceRoot);
 
-  // Second pass: enrich + score per seed.
-  const entries: BlastRadiusEntry[] = rawPerSeed.map(({ seed, result }) => {
-    const dependents: BlastRadiusDependent[] = result.callers.map(edge => {
-      const chunkKey = `${edge.caller.filepath}::${edge.caller.symbolName}`;
-      const dependentChunk = chunkIndex.get(chunkKey);
-      const complexity = dependentChunk ? chunkComplexity(dependentChunk) : undefined;
-      return {
-        filepath: edge.caller.filepath,
-        symbolName: edge.caller.symbolName,
-        hops: edge.hops,
-        callSiteLine: edge.callSiteLine,
-        complexity: complexity && complexity > 0 ? complexity : undefined,
-        hasTestCoverage: coveredFiles.has(edge.caller.filepath),
-      };
-    });
+  const entries = rawPerSeed.map(raw =>
+    buildEntry(raw, chunkIndex, coveredFiles, highComplexityThreshold),
+  );
+  sortEntries(entries);
 
-    const uncovered = dependents.filter(d => !d.hasTestCoverage);
-    const maxDependentComplexity = dependents.reduce(
-      (acc, d) => Math.max(acc, d.complexity ?? 0),
-      0,
-    );
-    const hasHighComplexityUncovered = uncovered.some(
-      d => (d.complexity ?? 0) >= highComplexityThreshold,
-    );
-
-    const risk = computeBlastRadiusRisk({
-      dependentCount: dependents.length,
-      uncoveredDependents: uncovered.length,
-      maxDependentComplexity: maxDependentComplexity > 0 ? maxDependentComplexity : undefined,
-      hasHighComplexityUncovered,
-    });
-
-    return { seed, dependents, risk, truncated: result.truncated };
-  });
-
-  entries.sort((a, b) => {
-    const levelDelta = RISK_RANK[b.risk.level] - RISK_RANK[a.risk.level];
-    if (levelDelta !== 0) return levelDelta;
-    return b.dependents.length - a.dependents.length;
-  });
-
-  // Global aggregation
-  const distinct = new Set<string>();
-  let globalUncovered = 0;
-  let globalMaxComplexity = 0;
-  let globalHasHighUncovered = false;
-  for (const entry of entries) {
-    for (const d of entry.dependents) {
-      const key = `${d.filepath}::${d.symbolName}`;
-      if (!distinct.has(key)) {
-        distinct.add(key);
-        if (!d.hasTestCoverage) globalUncovered += 1;
-        if (typeof d.complexity === 'number' && d.complexity > globalMaxComplexity) {
-          globalMaxComplexity = d.complexity;
-        }
-        if (!d.hasTestCoverage && (d.complexity ?? 0) >= highComplexityThreshold) {
-          globalHasHighUncovered = true;
-        }
-      }
-    }
-  }
-
-  const globalRisk = computeBlastRadiusRisk({
-    dependentCount: distinct.size,
-    uncoveredDependents: globalUncovered,
-    maxDependentComplexity: globalMaxComplexity > 0 ? globalMaxComplexity : undefined,
-    hasHighComplexityUncovered: globalHasHighUncovered,
-  });
+  const { risk: globalRisk, distinctCount } = computeGlobalRisk(entries, highComplexityThreshold);
 
   return {
     entries,
-    totalDistinctDependents: distinct.size,
+    totalDistinctDependents: distinctCount,
     globalRisk,
     truncated: entries.some(e => e.truncated),
   };
+}
+
+function collectDependentFiles(rawPerSeed: RawSeedResult[]): Set<string> {
+  const files = new Set<string>();
+  for (const { result } of rawPerSeed) {
+    for (const edge of result.callers) {
+      files.add(edge.caller.filepath);
+    }
+  }
+  return files;
 }
 
 function emptyReport(): BlastRadiusReport {
