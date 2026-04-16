@@ -24,9 +24,41 @@ export interface CallerEdge {
   callSiteLine: number;
 }
 
+export interface TransitiveCallerEdge extends CallerEdge {
+  /** Distance from the seed symbol. Direct callers are 1, callers-of-callers are 2. */
+  hops: number;
+  /** The symbol on the call chain this caller resolved through. Equals the seed for hops=1. */
+  viaSymbol: string;
+}
+
+export interface TransitiveResult {
+  callers: TransitiveCallerEdge[];
+  /** True if BFS stopped because it hit maxNodes before exploring the full graph. */
+  truncated: boolean;
+  /** Count of distinct symbols whose callers were expanded (for diagnostics). */
+  visitedSymbols: number;
+}
+
+export interface TransitiveOptions {
+  /** Max hop distance from the seed. Default 2. */
+  depth?: number;
+  /** Max edges to emit. Default 30. */
+  maxNodes?: number;
+}
+
 export interface DependencyGraph {
   /** Find all chunks that call a given exported symbol. */
   getCallers(filepath: string, symbolName: string): CallerEdge[];
+  /**
+   * BFS-walk callers up to `depth` hops. Each caller is emitted exactly once,
+   * at its shortest hop distance from the seed. Stops when `maxNodes` edges
+   * have been emitted (sets `truncated=true`).
+   */
+  getCallersTransitive(
+    filepath: string,
+    symbolName: string,
+    opts?: TransitiveOptions,
+  ): TransitiveResult;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,11 +128,76 @@ export function buildDependencyGraph(chunks: CodeChunk[]): DependencyGraph {
   const chunkImportMaps = resolveChunkImports(chunks, fileSet);
   const callerEdges = buildCallerEdges(chunks, chunkImportMaps, exportIndex);
 
-  return {
-    getCallers(filepath: string, symbolName: string): CallerEdge[] {
-      return callerEdges.get(`${filepath}::${symbolName}`) ?? [];
-    },
+  const getCallers = (filepath: string, symbolName: string): CallerEdge[] => {
+    return callerEdges.get(`${filepath}::${symbolName}`) ?? [];
   };
+
+  const getCallersTransitive = (
+    filepath: string,
+    symbolName: string,
+    opts: TransitiveOptions = {},
+  ): TransitiveResult => {
+    const depth = opts.depth ?? 2;
+    const maxNodes = opts.maxNodes ?? 30;
+
+    if (depth < 1 || maxNodes < 1) {
+      return { callers: [], truncated: false, visitedSymbols: 0 };
+    }
+
+    const seedKey = `${filepath}::${symbolName}`;
+    const expandedSymbols = new Set<string>();
+    const emittedCallers = new Set<string>();
+    // Never emit the seed as its own caller — guards against cycles that
+    // would otherwise produce meaningless "X calls X" edges.
+    emittedCallers.add(seedKey);
+
+    const result: TransitiveCallerEdge[] = [];
+    const queue: Array<{ filepath: string; symbolName: string; hops: number }> = [
+      { filepath, symbolName, hops: 0 },
+    ];
+
+    let truncated = false;
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) break;
+      const currentKey = `${current.filepath}::${current.symbolName}`;
+      if (expandedSymbols.has(currentKey)) continue;
+      expandedSymbols.add(currentKey);
+
+      const directCallers = getCallers(current.filepath, current.symbolName);
+      for (const edge of directCallers) {
+        const callerKey = `${edge.caller.filepath}::${edge.caller.symbolName}`;
+        if (emittedCallers.has(callerKey)) continue;
+
+        if (result.length >= maxNodes) {
+          truncated = true;
+          break;
+        }
+
+        emittedCallers.add(callerKey);
+        const hops = current.hops + 1;
+        result.push({
+          caller: edge.caller,
+          callSiteLine: edge.callSiteLine,
+          hops,
+          viaSymbol: current.symbolName,
+        });
+
+        if (hops < depth) {
+          queue.push({
+            filepath: edge.caller.filepath,
+            symbolName: edge.caller.symbolName,
+            hops,
+          });
+        }
+      }
+      if (truncated) break;
+    }
+
+    return { callers: result, truncated, visitedSymbols: expandedSymbols.size };
+  };
+
+  return { getCallers, getCallersTransitive };
 }
 
 type ExportEntry = { filepath: string; chunk: CodeChunk };
