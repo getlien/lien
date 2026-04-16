@@ -13,7 +13,7 @@ variable "region" {
 variable "k8s_version" {
   description = "DOKS Kubernetes version prefix"
   type        = string
-  default     = "1.32"
+  default     = "1.33"
 }
 
 variable "node_size" {
