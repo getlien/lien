@@ -593,3 +593,234 @@ describe('buildDependencyGraph — cross-package fallback', () => {
     expect(graph.getCallers('src/utils.ts', 'helper')).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// getCallersTransitive
+// ---------------------------------------------------------------------------
+
+describe('getCallersTransitive', () => {
+  /**
+   * Two-level chain: seed <- bLevel1 <- cLevel2
+   * `bLevel1` directly calls the seed; `cLevel2` calls `bLevel1`.
+   */
+  function buildTwoLevelChain() {
+    const seed = createTestChunk({
+      metadata: {
+        file: 'src/seed.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'seed',
+        language: 'typescript',
+        exports: ['seed'],
+      },
+    });
+
+    const bLevel1 = createTestChunk({
+      metadata: {
+        file: 'src/b.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'bLevel1',
+        language: 'typescript',
+        exports: ['bLevel1'],
+        importedSymbols: { './seed': ['seed'] },
+        callSites: [{ symbol: 'seed', line: 5 }],
+      },
+    });
+
+    const cLevel2 = createTestChunk({
+      metadata: {
+        file: 'src/c.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'cLevel2',
+        language: 'typescript',
+        exports: ['cLevel2'],
+        importedSymbols: { './b': ['bLevel1'] },
+        callSites: [{ symbol: 'bLevel1', line: 5 }],
+      },
+    });
+
+    return { seed, bLevel1, cLevel2 };
+  }
+
+  it('walks two hops outward and labels each caller with its shortest hop', () => {
+    const { seed, bLevel1, cLevel2 } = buildTwoLevelChain();
+    const graph = buildDependencyGraph([seed, bLevel1, cLevel2]);
+
+    const result = graph.getCallersTransitive('src/seed.ts', 'seed', { depth: 2 });
+
+    expect(result.callers).toHaveLength(2);
+    const b = result.callers.find(e => e.caller.symbolName === 'bLevel1');
+    const c = result.callers.find(e => e.caller.symbolName === 'cLevel2');
+    expect(b?.hops).toBe(1);
+    expect(b?.viaSymbol).toBe('seed');
+    expect(c?.hops).toBe(2);
+    expect(c?.viaSymbol).toBe('bLevel1');
+    expect(result.truncated).toBe(false);
+  });
+
+  it('depth=1 matches the one-hop getCallers set', () => {
+    const { seed, bLevel1, cLevel2 } = buildTwoLevelChain();
+    const graph = buildDependencyGraph([seed, bLevel1, cLevel2]);
+
+    const oneHop = graph.getCallers('src/seed.ts', 'seed');
+    const transitive = graph.getCallersTransitive('src/seed.ts', 'seed', { depth: 1 });
+
+    expect(transitive.callers).toHaveLength(oneHop.length);
+    expect(transitive.callers.map(e => e.caller.symbolName).sort()).toEqual(
+      oneHop.map(e => e.caller.symbolName).sort(),
+    );
+    expect(transitive.callers.every(e => e.hops === 1)).toBe(true);
+  });
+
+  it('terminates cleanly when a cycle is present', () => {
+    // a <-> b mutual recursion at the symbol level
+    const a = createTestChunk({
+      metadata: {
+        file: 'src/a.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'a',
+        language: 'typescript',
+        exports: ['a'],
+        importedSymbols: { './b': ['b'] },
+        callSites: [{ symbol: 'b', line: 5 }],
+      },
+    });
+    const b = createTestChunk({
+      metadata: {
+        file: 'src/b.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'b',
+        language: 'typescript',
+        exports: ['b'],
+        importedSymbols: { './a': ['a'] },
+        callSites: [{ symbol: 'a', line: 5 }],
+      },
+    });
+    const graph = buildDependencyGraph([a, b]);
+
+    const result = graph.getCallersTransitive('src/a.ts', 'a', { depth: 5 });
+
+    // Only b is emitted; the seed a must never appear as its own caller.
+    expect(result.callers).toHaveLength(1);
+    expect(result.callers[0].caller.symbolName).toBe('b');
+    expect(result.callers[0].hops).toBe(1);
+  });
+
+  it('deduplicates callers that reach the seed via multiple paths', () => {
+    // Diamond: a calls seed, a calls b, b calls seed. "a" has two paths to seed.
+    const seed = createTestChunk({
+      metadata: {
+        file: 'src/seed.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'seed',
+        language: 'typescript',
+        exports: ['seed'],
+      },
+    });
+    const b = createTestChunk({
+      metadata: {
+        file: 'src/b.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'b',
+        language: 'typescript',
+        exports: ['b'],
+        importedSymbols: { './seed': ['seed'] },
+        callSites: [{ symbol: 'seed', line: 5 }],
+      },
+    });
+    const a = createTestChunk({
+      metadata: {
+        file: 'src/a.ts',
+        startLine: 1,
+        endLine: 10,
+        type: 'function',
+        symbolName: 'a',
+        language: 'typescript',
+        exports: ['a'],
+        importedSymbols: { './seed': ['seed'], './b': ['b'] },
+        callSites: [
+          { symbol: 'seed', line: 5 },
+          { symbol: 'b', line: 6 },
+        ],
+      },
+    });
+
+    const graph = buildDependencyGraph([seed, b, a]);
+    const result = graph.getCallersTransitive('src/seed.ts', 'seed', { depth: 3 });
+
+    // a and b are both callers. a must appear only once, at its shortest hop (1).
+    const aEdges = result.callers.filter(e => e.caller.symbolName === 'a');
+    expect(aEdges).toHaveLength(1);
+    expect(aEdges[0].hops).toBe(1);
+    expect(result.callers).toHaveLength(2);
+  });
+
+  it('truncates when maxNodes is exceeded', () => {
+    const seed = createTestChunk({
+      metadata: {
+        file: 'src/seed.ts',
+        startLine: 1,
+        endLine: 5,
+        type: 'function',
+        symbolName: 'seed',
+        language: 'typescript',
+        exports: ['seed'],
+      },
+    });
+    const callers = Array.from({ length: 5 }, (_, i) =>
+      createTestChunk({
+        metadata: {
+          file: `src/caller${i}.ts`,
+          startLine: 1,
+          endLine: 10,
+          type: 'function',
+          symbolName: `caller${i}`,
+          language: 'typescript',
+          importedSymbols: { './seed': ['seed'] },
+          callSites: [{ symbol: 'seed', line: 5 }],
+        },
+      }),
+    );
+
+    const graph = buildDependencyGraph([seed, ...callers]);
+    const result = graph.getCallersTransitive('src/seed.ts', 'seed', {
+      depth: 2,
+      maxNodes: 2,
+    });
+
+    expect(result.callers).toHaveLength(2);
+    expect(result.truncated).toBe(true);
+  });
+
+  it('returns an empty result for depth < 1 or maxNodes < 1', () => {
+    const { seed, bLevel1 } = buildTwoLevelChain();
+    const graph = buildDependencyGraph([seed, bLevel1]);
+
+    const zeroDepth = graph.getCallersTransitive('src/seed.ts', 'seed', { depth: 0 });
+    expect(zeroDepth.callers).toEqual([]);
+    expect(zeroDepth.visitedSymbols).toBe(0);
+
+    const zeroNodes = graph.getCallersTransitive('src/seed.ts', 'seed', { maxNodes: 0 });
+    expect(zeroNodes.callers).toEqual([]);
+  });
+
+  it('returns an empty result for an unknown seed', () => {
+    const graph = buildDependencyGraph([]);
+    const result = graph.getCallersTransitive('nonexistent.ts', 'noSuchSymbol', { depth: 2 });
+    expect(result.callers).toEqual([]);
+    expect(result.truncated).toBe(false);
+  });
+});
