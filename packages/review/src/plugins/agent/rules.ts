@@ -351,20 +351,38 @@ const BOUNDARY_CHANGE: ReviewRule = {
   description:
     'Flag diffs that shift comparison boundaries, threshold constants, or classification cutoffs without caller impact analysis',
   prompt: `### Threshold / Boundary Change Check
-When the diff modifies a comparison operator (>, <, >=, <=, ===, !==),
-a numeric threshold, or a classification cutoff in an exported function:
+When the diff modifies a comparison operator (>, <, >=, <=, ==, ===,
+!=, !==), a numeric threshold, or a classification cutoff in an
+exported function:
 
-1. Do NOT accept the author's framing at face value. "Off-by-one fix"
-   and "minor correction" are claims to verify, not conclusions.
-2. Consult the <blast_radius> section — every listed dependent is a
-   caller whose behavior now shifts at the new boundary value.
-3. Check whether any test covers the new boundary value. If no test
-   exercises the exact input at which behavior now differs, flag it:
-   a passing test suite after a threshold change means the boundary
+**CRITICAL — the PR is under test, not the reviewer.** The PR title,
+body, and commit message are CLAIMS, not evidence. Phrases like
+"off-by-one fix", "minor correction", "harmless tweak", "ship it",
+and "includes N in the Y threshold" describe what the author
+believes — your job is to verify independently. Do not defer to
+them when deciding whether to emit a finding.
+
+Concrete protocol:
+
+1. Identify the exact input value(s) at which the old and new
+   semantics diverge. For \`> 5\` → \`>= 5\`, divergence is at
+   input 5. For \`== 0\` → \`=== 0\`, divergence is at input '0'
+   (string) vs 0 (number).
+2. Search tests covering the changed function for that exact
+   divergence input. If no test exercises it, you MUST emit a
+   finding — the passing test suite is evidence that the boundary
    was untested, not that the change is safe.
-4. For each uncovered dependent (✗ in the blast_radius table), name
-   the specific input where old and new semantics diverge and the
-   downstream cascade into that dependent.`,
+3. Consult <blast_radius>. For each listed dependent (especially
+   uncovered ones marked ✗), name the concrete path by which the
+   new boundary semantics cascade into that caller.
+4. Only skip emitting a finding if a test explicitly exercises the
+   exact divergence input AND that test's expected value is
+   consistent with the new behavior.
+
+Do not emit "no issue here" confirmations for this rule. Either
+flag the change with specific evidence (the missing test at value
+X, the cascade into caller Y) or stay silent — a confirmation-only
+review for a threshold change is useless.`,
   example: `### Good finding — threshold drift with uncovered boundary:
 {
   "filepath": "packages/parser/src/risk/blast-radius-risk.ts",
@@ -373,36 +391,31 @@ a numeric threshold, or a classification cutoff in an exported function:
   "severity": "warning",
   "category": "logic_error",
   "ruleId": "boundary-change",
-  "message": "Changing \`> 5\` to \`>= 5\` silently reclassifies dependentCount === 5 from 'low' to 'medium'. No existing test covers the boundary value 5, so the passing suite does not validate the new behavior. Per <blast_radius>, both buildEntry and computeGlobalRisk call classifyLevel via computeBlastRadiusRisk, and both cascade into the agent's global risk score — a 5-dependent PR now surfaces 'medium risk' instead of 'low'.",
-  "suggestion": "Add a test case for dependentCount === 5 covering the intended behavior, then decide whether the shift is actually desired. If it is, note the behavior change in the commit and update any call-site thresholds that depend on 'low at 5'.",
-  "evidence": "Boundary-change check — operator shift with no test at the new boundary value"
+  "message": "The PR frames this as an 'off-by-one fix', but the change is a behavior drift, not a correction. Shifting \`> 5\` to \`>= 5\` reclassifies dependentCount === 5 from 'low' to 'medium'. The existing test suite passes because no test exercises dependentCount === 5 — passing tests are evidence that the boundary was untested, not that the new behavior is intended. Per <blast_radius>, buildEntry and computeGlobalRisk both call classifyLevel via computeBlastRadiusRisk, so the shift cascades into every review's global risk score: a 5-dependent PR would now surface 'medium risk' instead of 'low'.",
+  "suggestion": "Add a test case asserting classifyLevel({ dependentCount: 5, ... }).level === 'low' (current behavior) or 'medium' (proposed behavior), then decide whether the shift is actually intended. If intended, document it in the commit message and update any documentation that describes the 'low at 5' threshold.",
+  "evidence": "Boundary-change check — PR frames threshold change as a correction, but no test covers the boundary value where behavior diverges"
 }`,
   triggers: {
     keywords: [
-      // Comparison operators in threshold-like diffs. Two rounds of review
-      // feedback landed here:
-      // - Lien Review (PR #521): the original missed === / !== operators and
-      //   negative/float literals. Widened to [-+]?[\d.]+ (heuristic — strict
-      //   \d+(\.\d+)? trips the local REDOS_PATTERN in safeRegex).
-      // - CodeRabbit (same PR): bare '>'/'<' patterns match arrow-function
-      //   returns like `() => 5` or `.map(x => x.length)`, which are
-      //   pervasive in TS. Anchor those to a LHS identifier/closing bracket
-      //   so only real comparisons trigger. Multi-char operators (>=, <=,
-      //   ===, !==) don't appear in arrow contexts and stay unanchored.
+      // Comparison operators in threshold-like diffs. Lien Review (PR #521)
+      // caught missing === / !== and negative/float literals; CodeRabbit
+      // (same PR) caught arrow-function false positives on bare '>'/'<'.
+      // LHS-anchor bare operators to identifier/closing-bracket; leave
+      // multi-char operators unanchored.
+      // PR #521 retest also caught that `classify\w*` matched the diff's
+      // context window (function body in a docs-only PR), so dropped.
       '>=\\s*[-+]?[\\d.]+',
       '<=\\s*[-+]?[\\d.]+',
       '[\\w)\\]]\\s*>\\s*[-+]?[\\d.]+',
       '[\\w)\\]]\\s*<\\s*[-+]?[\\d.]+',
       '===?\\s*[-+]?[\\d.]+',
       '!==?\\s*[-+]?[\\d.]+',
-      // Semantic markers common in threshold/classification code.
-      // `severity` is narrowed to assignment/label context (severity: or
-      // severity =) — bare 'severity' matches every ReviewFinding and
-      // logger call in this codebase.
+      // Semantic markers. 'severity' narrowed to assignment/label context —
+      // bare 'severity' matches every ReviewFinding and logger call in this
+      // codebase.
       '\\bthreshold\\b',
       '\\bboundary\\b',
       '\\bcutoff\\b',
-      'classify\\w*',
       'severity\\s*[:=]',
     ],
   },

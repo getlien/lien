@@ -549,6 +549,27 @@ describe('boundary-change rule', () => {
     expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('boundary-change');
   });
 
+  // PR #521 retest false positive: a docs-only PR added an @example JSDoc
+  // block, and the patch's context window happened to include the function
+  // body containing `classifyLevel(input)`. The old `classify\w*` keyword
+  // matched that context line and activated the rule unnecessarily.
+  it('does not activate when the only match is in unchanged context (e.g. a nearby "classifyLevel" call)', () => {
+    const ctx = makeTriggerContext({
+      diffText: [
+        '@@ -70,6 +70,20 @@',
+        '   return { level: classifyLevel(input), reasoning: buildReasoning(input) };',
+        ' }',
+        '+ ',
+        '+/**',
+        '+ * @example',
+        '+ * const risk = computeBlastRadiusRisk({ dependentCount: 14 });',
+        "+ * // risk.level === 'high'",
+        '+ */',
+      ].join('\n'),
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('boundary-change');
+  });
+
   it('does activate on severity in assignment/label context', () => {
     const ctx = makeTriggerContext({
       diffText: "+  const newRule = { severity: 'warning' };",
