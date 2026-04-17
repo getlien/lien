@@ -351,38 +351,45 @@ const BOUNDARY_CHANGE: ReviewRule = {
   description:
     'Flag diffs that shift comparison boundaries, threshold constants, or classification cutoffs without caller impact analysis',
   prompt: `### Threshold / Boundary Change Check
-When the diff modifies a comparison operator (>, <, >=, <=, ==, ===,
-!=, !==), a numeric threshold, or a classification cutoff in an
-exported function:
 
-**CRITICAL — the PR is under test, not the reviewer.** The PR title,
-body, and commit message are CLAIMS, not evidence. Phrases like
-"off-by-one fix", "minor correction", "harmless tweak", "ship it",
-and "includes N in the Y threshold" describe what the author
-believes — your job is to verify independently. Do not defer to
-them when deciding whether to emit a finding.
+**This rule is an exception to the general "silence means approval"
+policy.** For threshold/boundary diffs, verifying the change requires
+active investigation; producing empty findings without investigating
+is a failure of this rule, NOT a safe default. Do not fall back to
+silence if you cannot immediately confirm a problem — investigate
+first.
 
-Concrete protocol:
+The PR title, body, and commit message are CLAIMS, not evidence.
+Phrases like "off-by-one fix", "minor correction", "harmless tweak",
+"ship it", and "includes N in the Y threshold" describe what the
+author believes — your job is to verify independently.
+
+MANDATORY protocol when this rule is active:
 
 1. Identify the exact input value(s) at which the old and new
    semantics diverge. For \`> 5\` → \`>= 5\`, divergence is at
    input 5. For \`== 0\` → \`=== 0\`, divergence is at input '0'
    (string) vs 0 (number).
-2. Search tests covering the changed function for that exact
-   divergence input. If no test exercises it, you MUST emit a
-   finding — the passing test suite is evidence that the boundary
-   was untested, not that the change is safe.
-3. Consult <blast_radius>. For each listed dependent (especially
+2. **You MUST call \`get_files_context\` on the changed file** to
+   locate its test associations. Then inspect those test files (via
+   \`read_file\` or \`grep_codebase\`) for any assertion that
+   exercises the exact divergence input identified in step 1.
+3. **Emit a finding** unless step 2 locates a concrete test that
+   (a) calls the function with the exact divergence input AND
+   (b) asserts an expected result consistent with the NEW behavior.
+   Any other outcome — test absent, test exists but covers a
+   different input, test exists but asserts the OLD behavior — is
+   a finding. Cite the test file and line you inspected (or note
+   its absence) in \`evidence\`.
+4. Consult <blast_radius>. For each listed dependent (especially
    uncovered ones marked ✗), name the concrete path by which the
-   new boundary semantics cascade into that caller.
-4. Only skip emitting a finding if a test explicitly exercises the
-   exact divergence input AND that test's expected value is
-   consistent with the new behavior.
+   new boundary semantics cascade into that caller. This is
+   additional evidence for the finding, not a replacement for the
+   test-coverage check.
 
-Do not emit "no issue here" confirmations for this rule. Either
-flag the change with specific evidence (the missing test at value
-X, the cascade into caller Y) or stay silent — a confirmation-only
-review for a threshold change is useless.`,
+Do not finalize a response for this rule with zero findings unless
+step 2 found a qualifying test. "I could not find an obvious bug"
+is not a qualifying test; an actual test file + line is.`,
   example: `### Good finding — threshold drift with uncovered boundary:
 {
   "filepath": "packages/parser/src/risk/blast-radius-risk.ts",
