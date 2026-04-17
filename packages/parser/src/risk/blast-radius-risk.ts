@@ -76,6 +76,19 @@ function classifyLevel(input: BlastRadiusRiskInput): RiskLevel {
  * Thresholds are deliberately conservative — the goal is to surface risk, not
  * to be statistically rigorous. Callers that want finer control should consume
  * the raw input fields directly.
+ *
+ * @example
+ * const risk = computeBlastRadiusRisk({
+ *   dependentCount: 14,
+ *   uncoveredDependents: 3,
+ *   maxDependentComplexity: 18,
+ *   hasHighComplexityUncovered: true,
+ * });
+ * // risk.level === 'high'
+ * // risk.reasoning === [
+ * //   '14 callers', '3 untested', 'max complexity 18',
+ * //   'untested high-complexity dependent',
+ * // ]
  */
 export function computeBlastRadiusRisk(input: BlastRadiusRiskInput): BlastRadiusRisk {
   return { level: classifyLevel(input), reasoning: buildReasoning(input) };
