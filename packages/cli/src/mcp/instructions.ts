@@ -18,7 +18,13 @@ REQUIRED before renaming, removing, or changing the signature of any exported
 symbol:
   get_dependents({ filepath, symbol }) — check dependentCount and riskLevel.
   If riskLevel is "high" or "critical", list affected dependents to the user
-  before editing.
+  before editing. Read riskReasoning for the "why" (e.g. "14 callers, 3
+  untested, max complexity 18") before deciding how cautious to be.
+
+  For "what else could break?" impact analysis, pass depth: 2 (or up to 5) to
+  walk the import graph transitively. Each dependent carries a 'hops' field;
+  'truncated: true' means the BFS stopped at 'maxNodes' (default 500).
+  Symbol-level queries stay at depth 1 — pass depth only for file-level.
 
 For discovery ("where is X?", "how does Y work?"), call semantic_search FIRST.
 Phrase queries as full questions ("How does the code handle auth?") — natural
