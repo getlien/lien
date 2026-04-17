@@ -16,8 +16,15 @@ import type { ReviewRule, ResolvedRules } from './types.js';
 /** Reject patterns with nested quantifiers that cause catastrophic backtracking. */
 const REDOS_PATTERN = /\([^)]*(?:[+*?]|\{)\)\s*(?:[+*?]|\{)/;
 
-/** Compile a regex pattern, returning null for invalid syntax or ReDoS-prone patterns. */
-function safeRegex(pattern: string): RegExp | null {
+/**
+ * Compile a regex pattern, returning null for invalid syntax or ReDoS-prone patterns.
+ *
+ * Exported for test-only usage: `plugins-agent-rules.test.ts` walks every
+ * keyword in every BUILTIN_RULES rule and asserts this function returns a
+ * RegExp. A null here silently disables a keyword at runtime, which is the
+ * kind of bug that's invisible at authoring time.
+ */
+export function safeRegex(pattern: string): RegExp | null {
   if (REDOS_PATTERN.test(pattern)) return null;
   try {
     return new RegExp(pattern, 'i');

@@ -5,6 +5,7 @@ import {
   BUILTIN_RULES,
   buildTriggerContext,
   globToRegex,
+  safeRegex,
   selectRules,
   type TriggerContext,
 } from '../src/plugins/agent/rules.js';
@@ -597,4 +598,43 @@ describe('boundary-change rule', () => {
     const requiring = BUILTIN_RULES.filter(r => r.requiresBlastRadius === true).map(r => r.id);
     expect(requiring).toEqual(['boundary-change']);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Keyword sanity invariant
+//
+// Rules use `safeRegex` (which rejects invalid syntax AND ReDoS-prone nested
+// quantifier groups) to compile keyword triggers. If a keyword fails to
+// compile, it's silently dropped at runtime — the rule stays registered but
+// the keyword never matches anything, and there's no diagnostic path. This
+// class of bug hit boundary-change during PR #521 iteration when the
+// `\d+(\.\d+)?` pattern tripped REDOS_PATTERN.
+//
+// This invariant catches the same failure at test time, with a message that
+// tells the next rule author exactly what went wrong.
+// ---------------------------------------------------------------------------
+
+describe('BUILTIN_RULES keyword sanity', () => {
+  for (const rule of BUILTIN_RULES) {
+    const keywords = rule.triggers.keywords;
+    if (!keywords || keywords.length === 0) continue;
+
+    describe(`${rule.id}`, () => {
+      for (const kw of keywords) {
+        it(`keyword "${kw}" compiles via safeRegex`, () => {
+          const compiled = safeRegex(kw);
+          if (compiled === null) {
+            throw new Error(
+              `Keyword ${JSON.stringify(kw)} in rule '${rule.id}' cannot be compiled by safeRegex. ` +
+                `It is either invalid regex syntax OR matches the ReDoS heuristic ` +
+                `(nested quantifier groups like \\(\\w+\\)+). ` +
+                `At runtime this keyword silently fails to match anything. ` +
+                `See rules.ts:safeRegex for the rejection rules.`,
+            );
+          }
+          expect(compiled).toBeInstanceOf(RegExp);
+        });
+      }
+    });
+  }
 });
