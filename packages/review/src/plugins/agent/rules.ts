@@ -379,27 +379,31 @@ a numeric threshold, or a classification cutoff in an exported function:
 }`,
   triggers: {
     keywords: [
-      // Comparison operators in threshold-like diffs. Cover negative and
-      // float literals and include the equality operators the rule prompt
-      // explicitly mentions. Lien Review (PR #521) caught the earlier
-      // version missing === / !== and negatives.
-      //
-      // Note: character class [\d.]+ is a trigger heuristic — not a strict
-      // numeric parser — because nested-quantifier groups like \d+(\.\d+)?
-      // trip the local REDOS_PATTERN in safeRegex (rules.ts:16) and would
-      // be silently dropped.
+      // Comparison operators in threshold-like diffs. Two rounds of review
+      // feedback landed here:
+      // - Lien Review (PR #521): the original missed === / !== operators and
+      //   negative/float literals. Widened to [-+]?[\d.]+ (heuristic — strict
+      //   \d+(\.\d+)? trips the local REDOS_PATTERN in safeRegex).
+      // - CodeRabbit (same PR): bare '>'/'<' patterns match arrow-function
+      //   returns like `() => 5` or `.map(x => x.length)`, which are
+      //   pervasive in TS. Anchor those to a LHS identifier/closing bracket
+      //   so only real comparisons trigger. Multi-char operators (>=, <=,
+      //   ===, !==) don't appear in arrow contexts and stay unanchored.
       '>=\\s*[-+]?[\\d.]+',
       '<=\\s*[-+]?[\\d.]+',
-      '>\\s*[-+]?[\\d.]+',
-      '<\\s*[-+]?[\\d.]+',
-      '===\\s*[-+]?[\\d.]+',
-      '!==\\s*[-+]?[\\d.]+',
-      // Semantic markers common in threshold/classification code
+      '[\\w)\\]]\\s*>\\s*[-+]?[\\d.]+',
+      '[\\w)\\]]\\s*<\\s*[-+]?[\\d.]+',
+      '===?\\s*[-+]?[\\d.]+',
+      '!==?\\s*[-+]?[\\d.]+',
+      // Semantic markers common in threshold/classification code.
+      // `severity` is narrowed to assignment/label context (severity: or
+      // severity =) — bare 'severity' matches every ReviewFinding and
+      // logger call in this codebase.
       '\\bthreshold\\b',
       '\\bboundary\\b',
       '\\bcutoff\\b',
       'classify\\w*',
-      'severity',
+      'severity\\s*[:=]',
     ],
   },
   requiresBlastRadius: true,

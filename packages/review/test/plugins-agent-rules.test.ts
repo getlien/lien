@@ -531,6 +531,31 @@ describe('boundary-change rule', () => {
     expect(selectRules(BUILTIN_RULES, floatCtx).active.map(r => r.id)).toContain('boundary-change');
   });
 
+  // CodeRabbit (PR #521) flagged false-positive cases these tests pin down:
+  // arrow-function returns and bare uses of the word "severity" must not
+  // activate the rule.
+
+  it('does not activate on arrow-function returns like `() => 5`', () => {
+    const ctx = makeTriggerContext({
+      diffText: '+  const items = arr.map(x => 5);\n+  const fn = () => 42;',
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('boundary-change');
+  });
+
+  it('does not activate on bare "severity" references in logger/finding code', () => {
+    const ctx = makeTriggerContext({
+      diffText: '+  logger.info(`severity is ${finding.severity}`);',
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('boundary-change');
+  });
+
+  it('does activate on severity in assignment/label context', () => {
+    const ctx = makeTriggerContext({
+      diffText: "+  const newRule = { severity: 'warning' };",
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).active.map(r => r.id)).toContain('boundary-change');
+  });
+
   it('is skipped on a diff with no operators, digits, or threshold markers', () => {
     const ctx = makeTriggerContext({
       diffText: '-// old comment\n+// new comment describing the function',
