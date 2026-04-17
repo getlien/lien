@@ -1,3 +1,4 @@
+import type { z } from 'zod';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetDependentsSchema } from '../schemas/index.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
@@ -15,14 +16,9 @@ import {
 // Matches the review-side blast-radius default (DEFAULT_HIGH_COMPLEXITY_THRESHOLD).
 const HIGH_COMPLEXITY_THRESHOLD = 15;
 
-// Types for validated args and response building
-interface ValidatedArgs {
-  filepath: string;
-  symbol?: string;
-  crossRepo?: boolean;
-  depth?: number;
-  maxNodes?: number;
-}
+// Validated args mirror the schema exactly — `depth` and `maxNodes` are
+// always present post-parse thanks to Zod `.default(...)`.
+type ValidatedArgs = z.infer<typeof GetDependentsSchema>;
 
 interface IndexInfo {
   indexVersion: number;
@@ -151,7 +147,7 @@ function buildDependentsResponse(
   const response: DependentsResponse = {
     indexInfo,
     filepath,
-    depth: depth ?? 1,
+    depth,
     dependentCount: analysis.dependents.length,
     productionDependentCount: analysis.productionDependentCount,
     testDependentCount: analysis.testDependentCount,
@@ -195,13 +191,17 @@ function buildDependentsResponse(
 export async function handleGetDependents(args: unknown, ctx: ToolContext): Promise<MCPToolResult> {
   const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
-  return await wrapToolHandler(GetDependentsSchema, async validatedArgs => {
+  return await wrapToolHandler(GetDependentsSchema, async raw => {
+    // `wrapToolHandler`'s generic loses Zod's input-vs-output distinction, so
+    // defaults aren't reflected in `raw`'s type. At runtime Zod has already
+    // applied them, so the cast is sound.
+    const validatedArgs = raw as ValidatedArgs;
     const { crossRepo, filepath, symbol, depth, maxNodes } = validatedArgs;
 
     // Log initial request
     const symbolSuffix = symbol ? ` (symbol: ${symbol})` : '';
     const crossRepoSuffix = crossRepo ? ' (cross-repo)' : '';
-    const depthSuffix = depth && depth > 1 ? ` (depth: ${depth})` : '';
+    const depthSuffix = depth > 1 ? ` (depth: ${depth})` : '';
     log(`Finding dependents of: ${filepath}${symbolSuffix}${crossRepoSuffix}${depthSuffix}`);
 
     await checkAndReconnect();

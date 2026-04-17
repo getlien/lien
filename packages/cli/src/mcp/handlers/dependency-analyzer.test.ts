@@ -614,6 +614,10 @@ describe('findDependents', () => {
 
       // At depth 1 for symbol fnA, only src/b.ts imports the symbol directly.
       expect(result.dependents.map(d => d.filepath)).toEqual(['src/b.ts']);
+      // And the caller is warned that depth > 1 was ignored.
+      expect(mockLog).toHaveBeenCalledWith(
+        expect.stringContaining('depth > 1 is ignored for symbol-level queries'),
+      );
     });
   });
 

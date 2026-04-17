@@ -65,9 +65,14 @@ export const GetDependentsSchema = z.object({
     .max(5000)
     .default(500)
     .describe(
-      'Maximum number of distinct dependent files to return.\n\n' +
-        'Acts as a guardrail for deep BFS on large repos. When the cap is\n' +
-        'hit, the response includes `truncated: true`.',
+      'Guardrail on BFS expansion (applies at depth >= 2).\n\n' +
+        'Caps the number of dependents discovered via the transitive walk\n' +
+        'performed by `expandBfsDependents` in `dependency-analyzer.ts`.\n' +
+        'Does NOT truncate the depth-1 frontier — direct importers and barrel\n' +
+        're-exporters are always returned in full (their only overall ceiling\n' +
+        'is the scan-level `hitLimit`). A `depth=1` response can therefore\n' +
+        'exceed `maxNodes` with `truncated: false`. When the BFS walk itself\n' +
+        'hits the cap mid-expansion, `truncated: true` is set.',
     ),
 
   crossRepo: z

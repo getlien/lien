@@ -377,6 +377,11 @@ describe('GetDependentsSchema', () => {
     expect(() => GetDependentsSchema.parse({ filepath: 'test.ts', maxNodes: 999999 })).toThrow();
   });
 
+  it('should accept maxNodes at the upper bound (5000)', () => {
+    const result = GetDependentsSchema.parse({ filepath: 'test.ts', maxNodes: 5000 });
+    expect(result.maxNodes).toBe(5000);
+  });
+
   it('should accept various filepath formats', () => {
     const paths = [
       'src/index.ts',
