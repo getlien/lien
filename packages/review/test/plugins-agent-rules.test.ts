@@ -512,6 +512,25 @@ describe('boundary-change rule', () => {
     expect(active).toContain('boundary-change');
   });
 
+  it('activates on strict-equality comparisons with numeric literals', () => {
+    const ctx = makeTriggerContext({
+      diffText: '-  if (status === 0) throw;\n+  if (status !== 0) throw;',
+    });
+    const active = selectRules(BUILTIN_RULES, ctx).active.map(r => r.id);
+    expect(active).toContain('boundary-change');
+  });
+
+  it('activates on comparisons against negative and float literals', () => {
+    const negCtx = makeTriggerContext({
+      diffText: '+  if (temperature > -10) alert();',
+    });
+    const floatCtx = makeTriggerContext({
+      diffText: '+  if (ratio <= 0.95) retry();',
+    });
+    expect(selectRules(BUILTIN_RULES, negCtx).active.map(r => r.id)).toContain('boundary-change');
+    expect(selectRules(BUILTIN_RULES, floatCtx).active.map(r => r.id)).toContain('boundary-change');
+  });
+
   it('is skipped on a diff with no operators, digits, or threshold markers', () => {
     const ctx = makeTriggerContext({
       diffText: '-// old comment\n+// new comment describing the function',

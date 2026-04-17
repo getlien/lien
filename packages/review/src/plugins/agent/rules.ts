@@ -379,11 +379,21 @@ a numeric threshold, or a classification cutoff in an exported function:
 }`,
   triggers: {
     keywords: [
-      // Comparison operators in threshold-like diffs
-      '>=\\s*\\d',
-      '<=\\s*\\d',
-      '>\\s*\\d',
-      '<\\s*\\d',
+      // Comparison operators in threshold-like diffs. Cover negative and
+      // float literals and include the equality operators the rule prompt
+      // explicitly mentions. Lien Review (PR #521) caught the earlier
+      // version missing === / !== and negatives.
+      //
+      // Note: character class [\d.]+ is a trigger heuristic — not a strict
+      // numeric parser — because nested-quantifier groups like \d+(\.\d+)?
+      // trip the local REDOS_PATTERN in safeRegex (rules.ts:16) and would
+      // be silently dropped.
+      '>=\\s*[-+]?[\\d.]+',
+      '<=\\s*[-+]?[\\d.]+',
+      '>\\s*[-+]?[\\d.]+',
+      '<\\s*[-+]?[\\d.]+',
+      '===\\s*[-+]?[\\d.]+',
+      '!==\\s*[-+]?[\\d.]+',
       // Semantic markers common in threshold/classification code
       '\\bthreshold\\b',
       '\\bboundary\\b',
