@@ -1,22 +1,24 @@
+import type { z } from 'zod';
 import { wrapToolHandler } from '../utils/tool-wrapper.js';
 import { GetDependentsSchema } from '../schemas/index.js';
 import type { ToolContext, MCPToolResult } from '../types.js';
 import type { VectorDBInterface } from '@liendev/core';
+import { computeBlastRadiusRisk, type BlastRadiusRisk } from '@liendev/parser';
 import {
   findDependents,
-  calculateRiskLevel,
   groupDependentsByRepo,
   type DependencyAnalysisResult,
   type DependentInfo,
   type ComplexityMetrics,
 } from './dependency-analyzer.js';
 
-// Types for validated args and response building
-interface ValidatedArgs {
-  filepath: string;
-  symbol?: string;
-  crossRepo?: boolean;
-}
+// Complexity threshold above which an uncovered dependent escalates risk.
+// Matches the review-side blast-radius default (DEFAULT_HIGH_COMPLEXITY_THRESHOLD).
+const HIGH_COMPLEXITY_THRESHOLD = 15;
+
+// Validated args mirror the schema exactly — `depth` and `maxNodes` are
+// always present post-parse thanks to Zod `.default(...)`.
+type ValidatedArgs = z.infer<typeof GetDependentsSchema>;
 
 interface IndexInfo {
   indexVersion: number;
@@ -30,11 +32,18 @@ interface DependentsResponse {
   indexInfo: IndexInfo;
   filepath: string;
   symbol?: string;
+  depth: number;
   dependentCount: number;
   productionDependentCount: number;
   testDependentCount: number;
   totalUsageCount?: number;
+  /** Alias for dependentCount following the CRG naming convention. */
+  totalImpacted: number;
+  /** True when BFS stopped at the maxNodes cap. */
+  truncated: boolean;
   riskLevel: string;
+  /** Short phrases explaining why the risk level was assigned. */
+  riskReasoning: string[];
   dependents: DependentInfo[];
   complexityMetrics: ComplexityMetrics;
   note?: string;
@@ -77,13 +86,14 @@ function logRiskAssessment(
   log: (msg: string) => void,
 ): void {
   const prodTest = `(${analysis.productionDependentCount} prod, ${analysis.testDependentCount} test)`;
+  const truncatedSuffix = analysis.truncated ? ' [truncated]' : '';
 
   if (symbol && analysis.totalUsageCount !== undefined) {
     if (analysis.totalUsageCount > 0) {
       // Symbol tracking with call sites found
       log(
         `Found ${analysis.totalUsageCount} tracked call sites across ${analysis.dependents.length} files ` +
-          `${prodTest} - risk: ${riskLevel}`,
+          `${prodTest} - risk: ${riskLevel}${truncatedSuffix}`,
       );
     } else {
       // Files import the symbol but no call sites were tracked
@@ -91,12 +101,33 @@ function logRiskAssessment(
       // (e.g., chunks without complexity analysis)
       log(
         `Found ${analysis.dependents.length} files importing '${symbol}' ` +
-          `${prodTest} - risk: ${riskLevel} (Note: Call site tracking unavailable for these chunks)`,
+          `${prodTest} - risk: ${riskLevel}${truncatedSuffix} (Note: Call site tracking unavailable for these chunks)`,
       );
     }
   } else {
-    log(`Found ${analysis.dependents.length} dependents ` + `${prodTest} - risk: ${riskLevel}`);
+    log(
+      `Found ${analysis.dependents.length} dependents ` +
+        `${prodTest} - risk: ${riskLevel}${truncatedSuffix}`,
+    );
   }
+}
+
+/**
+ * Compose blast-radius risk inputs from analysis results and compute the
+ * shared risk level via the parser primitive.
+ */
+function computeRisk(analysis: DependencyAnalysisResult): BlastRadiusRisk {
+  const { productionDependentCount, uncoveredProductionDependents, complexityMetrics } = analysis;
+  const maxComplexity = complexityMetrics.maxComplexity;
+  // Any high-complexity dependent that is also untested escalates risk.
+  const hasHighComplexityUncovered =
+    uncoveredProductionDependents > 0 && maxComplexity >= HIGH_COMPLEXITY_THRESHOLD;
+  return computeBlastRadiusRisk({
+    dependentCount: productionDependentCount,
+    uncoveredDependents: uncoveredProductionDependents,
+    maxDependentComplexity: maxComplexity > 0 ? maxComplexity : undefined,
+    hasHighComplexityUncovered,
+  });
 }
 
 /**
@@ -105,21 +136,25 @@ function logRiskAssessment(
 function buildDependentsResponse(
   analysis: DependencyAnalysisResult,
   args: ValidatedArgs,
-  riskLevel: string,
+  risk: BlastRadiusRisk,
   indexInfo: IndexInfo,
   notes: string[],
   crossRepo: boolean | undefined,
   vectorDB: VectorDBInterface,
 ): DependentsResponse {
-  const { symbol, filepath } = args;
+  const { symbol, filepath, depth } = args;
 
   const response: DependentsResponse = {
     indexInfo,
     filepath,
+    depth,
     dependentCount: analysis.dependents.length,
     productionDependentCount: analysis.productionDependentCount,
     testDependentCount: analysis.testDependentCount,
-    riskLevel,
+    totalImpacted: analysis.dependents.length,
+    truncated: analysis.truncated,
+    riskLevel: risk.level,
+    riskReasoning: risk.reasoning,
     dependents: analysis.dependents,
     complexityMetrics: analysis.complexityMetrics,
   };
@@ -156,13 +191,18 @@ function buildDependentsResponse(
 export async function handleGetDependents(args: unknown, ctx: ToolContext): Promise<MCPToolResult> {
   const { vectorDB, log, checkAndReconnect, getIndexMetadata } = ctx;
 
-  return await wrapToolHandler(GetDependentsSchema, async validatedArgs => {
-    const { crossRepo, filepath, symbol } = validatedArgs;
+  return await wrapToolHandler(GetDependentsSchema, async raw => {
+    // `wrapToolHandler`'s generic loses Zod's input-vs-output distinction, so
+    // defaults aren't reflected in `raw`'s type. At runtime Zod has already
+    // applied them, so the cast is sound.
+    const validatedArgs = raw as ValidatedArgs;
+    const { crossRepo, filepath, symbol, depth, maxNodes } = validatedArgs;
 
     // Log initial request
     const symbolSuffix = symbol ? ` (symbol: ${symbol})` : '';
     const crossRepoSuffix = crossRepo ? ' (cross-repo)' : '';
-    log(`Finding dependents of: ${filepath}${symbolSuffix}${crossRepoSuffix}`);
+    const depthSuffix = depth > 1 ? ` (depth: ${depth})` : '';
+    log(`Finding dependents of: ${filepath}${symbolSuffix}${crossRepoSuffix}${depthSuffix}`);
 
     await checkAndReconnect();
 
@@ -177,17 +217,15 @@ export async function handleGetDependents(args: unknown, ctx: ToolContext): Prom
       log,
       symbol,
       indexInfo.indexVersion,
+      depth,
+      maxNodes,
     );
 
-    // Calculate risk level
-    const riskLevel = calculateRiskLevel(
-      analysis.dependents.length,
-      analysis.complexityMetrics.complexityRiskBoost,
-      analysis.productionDependentCount,
-    );
+    // Compose risk via the shared parser primitive.
+    const risk = computeRisk(analysis);
 
     // Log results with risk assessment
-    logRiskAssessment(analysis, riskLevel, symbol, log);
+    logRiskAssessment(analysis, risk.level, symbol, log);
 
     // Build and return response
     const crossRepoFallback = checkCrossRepoFallback(crossRepo, vectorDB);
@@ -196,7 +234,7 @@ export async function handleGetDependents(args: unknown, ctx: ToolContext): Prom
     return buildDependentsResponse(
       analysis,
       validatedArgs,
-      riskLevel,
+      risk,
       indexInfo,
       notes,
       crossRepo,

@@ -47,11 +47,32 @@ export const GetDependentsSchema = z.object({
     .number()
     .int()
     .min(1)
-    .max(1)
+    .max(5)
     .default(1)
     .describe(
-      'Depth of transitive dependencies. Only depth=1 (direct dependents) is currently supported.\n\n' +
-        '1 = Direct dependents only',
+      'Depth of transitive dependency walk (BFS over the import graph).\n\n' +
+        '1 = Direct dependents only (default; matches prior behavior).\n' +
+        '2 = Direct dependents + their dependents.\n' +
+        'Up to 5. Each dependent carries a `hops` field indicating the depth\n' +
+        'at which it was first discovered. Ignored for symbol-level queries\n' +
+        '(when `symbol` is set, only direct callers are returned).',
+    ),
+
+  maxNodes: z
+    .number()
+    .int()
+    .min(1)
+    .max(5000)
+    .default(500)
+    .describe(
+      'Guardrail on BFS expansion (applies at depth >= 2).\n\n' +
+        'Caps the number of dependents discovered via the transitive walk\n' +
+        'performed by `expandBfsDependents` in `dependency-analyzer.ts`.\n' +
+        'Does NOT truncate the depth-1 frontier — direct importers and barrel\n' +
+        're-exporters are always returned in full (their only overall ceiling\n' +
+        'is the scan-level `hitLimit`). A `depth=1` response can therefore\n' +
+        'exceed `maxNodes` with `truncated: false`. When the BFS walk itself\n' +
+        'hits the cap mid-expansion, `truncated: true` is set.',
     ),
 
   crossRepo: z

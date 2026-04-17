@@ -349,21 +349,37 @@ describe('GetDependentsSchema', () => {
     ).toThrow();
   });
 
-  it('should reject depth greater than 1', () => {
+  it('should reject depth greater than 5', () => {
     expect(() =>
       GetDependentsSchema.parse({
         filepath: 'src/test.ts',
-        depth: 2,
+        depth: 6,
       }),
     ).toThrow();
   });
 
-  it('should accept only depth=1', () => {
-    const result = GetDependentsSchema.parse({
-      filepath: 'test.ts',
-      depth: 1,
-    });
-    expect(result.depth).toBe(1);
+  it('should accept depth in [1, 5]', () => {
+    for (const d of [1, 2, 3, 5]) {
+      const result = GetDependentsSchema.parse({
+        filepath: 'test.ts',
+        depth: d,
+      });
+      expect(result.depth).toBe(d);
+    }
+  });
+
+  it('should default maxNodes to 500', () => {
+    const result = GetDependentsSchema.parse({ filepath: 'test.ts' });
+    expect(result.maxNodes).toBe(500);
+  });
+
+  it('should reject maxNodes above the cap', () => {
+    expect(() => GetDependentsSchema.parse({ filepath: 'test.ts', maxNodes: 999999 })).toThrow();
+  });
+
+  it('should accept maxNodes at the upper bound (5000)', () => {
+    const result = GetDependentsSchema.parse({ filepath: 'test.ts', maxNodes: 5000 });
+    expect(result.maxNodes).toBe(5000);
   });
 
   it('should accept various filepath formats', () => {

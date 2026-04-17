@@ -399,6 +399,259 @@ describe('findDependents', () => {
       expect(result.dependents).toHaveLength(1);
       expect(result.dependents[0].filepath).toBe('src/b.ts');
     });
+
+    it('should not revisit the target when BFS loops back at depth 2', async () => {
+      // A <- B, B <- A cycle (via importedSymbols so B isn't flagged as a re-exporter).
+      // From A, depth 1 finds B; depth 2 would revisit A via B's importer list —
+      // the walk must exclude the original target.
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([
+          createChunk('src/a.ts', {
+            importedSymbols: { 'src/b': ['fnB'] },
+            exports: ['fnA'],
+          }),
+          createChunk('src/b.ts', {
+            importedSymbols: { 'src/a': ['fnA'] },
+            exports: ['fnB'],
+          }),
+        ]),
+      );
+
+      const result = await findDependents(
+        mockDB as any,
+        'src/a.ts',
+        false,
+        mockLog,
+        undefined,
+        undefined,
+        3,
+      );
+
+      expect(result.dependents.map(d => d.filepath)).toEqual(['src/b.ts']);
+      expect(result.dependents[0].hops).toBe(1);
+    });
+  });
+
+  describe('BFS over depth', () => {
+    // These tests use importedSymbols-only (no `imports` array) so chunks
+    // don't trip the '*' wildcard re-export sentinel that would otherwise
+    // pull transitive dependents in via the barrel-file walk at depth 1.
+
+    it('should stay at depth 1 by default (backwards compatible)', async () => {
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([
+          createChunk('src/a.ts', { exports: ['fnA'] }),
+          createChunk('src/b.ts', {
+            importedSymbols: { 'src/a': ['fnA'] },
+            exports: ['fnB'],
+          }),
+          createChunk('src/c.ts', {
+            importedSymbols: { 'src/b': ['fnB'] },
+          }),
+        ]),
+      );
+
+      const result = await findDependents(mockDB as any, 'src/a.ts', false, mockLog);
+
+      expect(result.dependents.map(d => d.filepath)).toEqual(['src/b.ts']);
+      expect(result.dependents[0].hops).toBe(1);
+      expect(result.truncated).toBe(false);
+    });
+
+    it('should discover depth-2 dependents and tag them with hops=2', async () => {
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([
+          createChunk('src/a.ts', { exports: ['fnA'] }),
+          createChunk('src/b.ts', {
+            importedSymbols: { 'src/a': ['fnA'] },
+            exports: ['fnB'],
+          }),
+          createChunk('src/c.ts', {
+            importedSymbols: { 'src/b': ['fnB'] },
+          }),
+        ]),
+      );
+
+      const result = await findDependents(
+        mockDB as any,
+        'src/a.ts',
+        false,
+        mockLog,
+        undefined,
+        undefined,
+        2,
+      );
+
+      const byFile = new Map(result.dependents.map(d => [d.filepath, d.hops]));
+      expect(byFile.get('src/b.ts')).toBe(1);
+      expect(byFile.get('src/c.ts')).toBe(2);
+      expect(result.dependents).toHaveLength(2);
+    });
+
+    it('should discover depth-3 dependents', async () => {
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([
+          createChunk('src/a.ts', { exports: ['fnA'] }),
+          createChunk('src/b.ts', {
+            importedSymbols: { 'src/a': ['fnA'] },
+            exports: ['fnB'],
+          }),
+          createChunk('src/c.ts', {
+            importedSymbols: { 'src/b': ['fnB'] },
+            exports: ['fnC'],
+          }),
+          createChunk('src/d.ts', {
+            importedSymbols: { 'src/c': ['fnC'] },
+          }),
+        ]),
+      );
+
+      const result = await findDependents(
+        mockDB as any,
+        'src/a.ts',
+        false,
+        mockLog,
+        undefined,
+        undefined,
+        3,
+      );
+
+      const byFile = new Map(result.dependents.map(d => [d.filepath, d.hops]));
+      expect(byFile.get('src/b.ts')).toBe(1);
+      expect(byFile.get('src/c.ts')).toBe(2);
+      expect(byFile.get('src/d.ts')).toBe(3);
+    });
+
+    it('should record the minimum hop for diamond-shaped graphs', async () => {
+      // A <- B (hop 1), A <- C (hop 1), D imports both B and C (hop 2 via either).
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([
+          createChunk('src/a.ts', { exports: ['fnA'] }),
+          createChunk('src/b.ts', {
+            importedSymbols: { 'src/a': ['fnA'] },
+            exports: ['fnB'],
+          }),
+          createChunk('src/c.ts', {
+            importedSymbols: { 'src/a': ['fnA'] },
+            exports: ['fnC'],
+          }),
+          createChunk('src/d.ts', {
+            importedSymbols: { 'src/b': ['fnB'], 'src/c': ['fnC'] },
+          }),
+        ]),
+      );
+
+      const result = await findDependents(
+        mockDB as any,
+        'src/a.ts',
+        false,
+        mockLog,
+        undefined,
+        undefined,
+        2,
+      );
+
+      const byFile = new Map(result.dependents.map(d => [d.filepath, d.hops]));
+      expect(byFile.get('src/d.ts')).toBe(2);
+    });
+
+    it('should truncate when maxNodes is hit and set truncated=true', async () => {
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([
+          createChunk('src/a.ts', { exports: ['fnA'] }),
+          createChunk('src/b.ts', {
+            importedSymbols: { 'src/a': ['fnA'] },
+            exports: ['fnB'],
+          }),
+          createChunk('src/c.ts', {
+            importedSymbols: { 'src/b': ['fnB'] },
+            exports: ['fnC'],
+          }),
+          createChunk('src/d.ts', {
+            importedSymbols: { 'src/c': ['fnC'] },
+          }),
+        ]),
+      );
+
+      const result = await findDependents(
+        mockDB as any,
+        'src/a.ts',
+        false,
+        mockLog,
+        undefined,
+        undefined,
+        3,
+        1,
+      );
+
+      expect(result.dependents).toHaveLength(1);
+      expect(result.truncated).toBe(true);
+    });
+
+    it('should ignore depth > 1 for symbol-level queries', async () => {
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([
+          createChunk('src/a.ts', { exports: ['fnA'] }),
+          createChunk('src/b.ts', {
+            importedSymbols: { 'src/a': ['fnA'] },
+            exports: ['fnB'],
+          }),
+          createChunk('src/c.ts', {
+            importedSymbols: { 'src/b': ['fnB'] },
+          }),
+        ]),
+      );
+
+      const result = await findDependents(
+        mockDB as any,
+        'src/a.ts',
+        false,
+        mockLog,
+        'fnA',
+        undefined,
+        3,
+      );
+
+      // At depth 1 for symbol fnA, only src/b.ts imports the symbol directly.
+      expect(result.dependents.map(d => d.filepath)).toEqual(['src/b.ts']);
+      // And the caller is warned that depth > 1 was ignored.
+      expect(mockLog).toHaveBeenCalledWith(
+        expect.stringContaining('depth > 1 is ignored for symbol-level queries'),
+      );
+    });
+  });
+
+  describe('uncovered production dependents', () => {
+    it('should count production dependents with no importing test file', async () => {
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([
+          createChunk('src/target.ts', { exports: ['util'] }),
+          createChunk('src/covered.ts', { imports: ['src/target.ts'], exports: ['foo'] }),
+          createChunk('src/covered.test.ts', { imports: ['src/covered.ts'] }),
+          createChunk('src/uncovered.ts', { imports: ['src/target.ts'] }),
+        ]),
+      );
+
+      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+
+      expect(result.productionDependentCount).toBe(2);
+      expect(result.uncoveredProductionDependents).toBe(1);
+    });
+
+    it('should treat production dependents as covered if any test file imports them', async () => {
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([
+          createChunk('src/target.ts', { exports: ['util'] }),
+          createChunk('src/a.ts', { imports: ['src/target.ts'], exports: ['a'] }),
+          createChunk('src/a.test.ts', { imports: ['src/a.ts'] }),
+        ]),
+      );
+
+      const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
+
+      expect(result.productionDependentCount).toBe(1);
+      expect(result.uncoveredProductionDependents).toBe(0);
+    });
   });
 
   describe('files with no imports or exports', () => {
