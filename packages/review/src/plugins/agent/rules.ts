@@ -345,6 +345,60 @@ The key question: if this operation fails, will the caller know? If the answer i
   source: 'builtin',
 };
 
+const BOUNDARY_CHANGE: ReviewRule = {
+  id: 'boundary-change',
+  name: 'Threshold / Boundary Condition Change',
+  description:
+    'Flag diffs that shift comparison boundaries, threshold constants, or classification cutoffs without caller impact analysis',
+  prompt: `### Threshold / Boundary Change Check
+When the diff modifies a comparison operator (>, <, >=, <=, ===, !==),
+a numeric threshold, or a classification cutoff in an exported function:
+
+1. Do NOT accept the author's framing at face value. "Off-by-one fix"
+   and "minor correction" are claims to verify, not conclusions.
+2. Consult the <blast_radius> section — every listed dependent is a
+   caller whose behavior now shifts at the new boundary value.
+3. Check whether any test covers the new boundary value. If no test
+   exercises the exact input at which behavior now differs, flag it:
+   a passing test suite after a threshold change means the boundary
+   was untested, not that the change is safe.
+4. For each uncovered dependent (✗ in the blast_radius table), name
+   the specific input where old and new semantics diverge and the
+   downstream cascade into that dependent.`,
+  example: `### Good finding — threshold drift with uncovered boundary:
+{
+  "filepath": "packages/parser/src/risk/blast-radius-risk.ts",
+  "line": 68,
+  "symbolName": "classifyLevel",
+  "severity": "warning",
+  "category": "logic_error",
+  "ruleId": "boundary-change",
+  "message": "Changing \`> 5\` to \`>= 5\` silently reclassifies dependentCount === 5 from 'low' to 'medium'. No existing test covers the boundary value 5, so the passing suite does not validate the new behavior. Per <blast_radius>, both buildEntry and computeGlobalRisk call classifyLevel via computeBlastRadiusRisk, and both cascade into the agent's global risk score — a 5-dependent PR now surfaces 'medium risk' instead of 'low'.",
+  "suggestion": "Add a test case for dependentCount === 5 covering the intended behavior, then decide whether the shift is actually desired. If it is, note the behavior change in the commit and update any call-site thresholds that depend on 'low at 5'.",
+  "evidence": "Boundary-change check — operator shift with no test at the new boundary value"
+}`,
+  triggers: {
+    keywords: [
+      // Comparison operators in threshold-like diffs
+      '>=\\s*\\d',
+      '<=\\s*\\d',
+      '>\\s*\\d',
+      '<\\s*\\d',
+      // Semantic markers common in threshold/classification code
+      '\\bthreshold\\b',
+      '\\bboundary\\b',
+      '\\bcutoff\\b',
+      'classify\\w*',
+      'severity',
+    ],
+  },
+  requiresBlastRadius: true,
+  severity: 'warning',
+  category: 'logic_error',
+  enabled: true,
+  source: 'builtin',
+};
+
 /** All built-in review rules. */
 export const BUILTIN_RULES: ReviewRule[] = [
   STRUCTURAL_ANALYSIS,
@@ -352,4 +406,5 @@ export const BUILTIN_RULES: ReviewRule[] = [
   CONCURRENCY_RACE,
   INCOMPLETE_HANDLING,
   ERROR_SWALLOWING,
+  BOUNDARY_CHANGE,
 ];

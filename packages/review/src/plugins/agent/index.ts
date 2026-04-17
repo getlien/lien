@@ -97,16 +97,19 @@ export class AgentReviewPlugin implements ReviewPlugin {
 
     // Pre-compute transitive blast radius so the agent sees it in the initial
     // message instead of having to decide to call get_dependents itself.
+    // Gated on an active rule opting in — saves compute on PRs where no
+    // pattern-specific rule needs dependency context (docs, formatting, etc.).
     const blastRadiusConfig = config.blastRadius ?? {};
-    const blastRadius =
-      blastRadiusConfig.enabled !== false
-        ? computeBlastRadius(context.chunks, graph, context.repoChunks!, {
-            depth: blastRadiusConfig.depth,
-            maxNodes: blastRadiusConfig.maxNodes,
-            maxSeeds: blastRadiusConfig.maxSeeds,
-            workspaceRoot: context.repoRootDir,
-          })
-        : null;
+    const needsBlastRadius =
+      blastRadiusConfig.enabled !== false && rules.active.some(r => r.requiresBlastRadius === true);
+    const blastRadius = needsBlastRadius
+      ? computeBlastRadius(context.chunks, graph, context.repoChunks!, {
+          depth: blastRadiusConfig.depth,
+          maxNodes: blastRadiusConfig.maxNodes,
+          maxSeeds: blastRadiusConfig.maxSeeds,
+          workspaceRoot: context.repoRootDir,
+        })
+      : null;
     if (blastRadius) {
       logger.info(
         `[${this.id}] Blast radius: ${blastRadius.totalDistinctDependents} deps, risk=${blastRadius.globalRisk.level}${blastRadius.truncated ? ' (truncated)' : ''}`,

@@ -489,3 +489,47 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('"ruleId": "error-swallowing"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// boundary-change rule + blast-radius gate
+// ---------------------------------------------------------------------------
+
+describe('boundary-change rule', () => {
+  it('activates on operator shifts in the diff', () => {
+    const ctx = makeTriggerContext({
+      diffText:
+        '-  if (dependentCount > 5) return "medium";\n+  if (dependentCount >= 5) return "medium";',
+    });
+    const active = selectRules(BUILTIN_RULES, ctx).active.map(r => r.id);
+    expect(active).toContain('boundary-change');
+  });
+
+  it('activates when the diff contains threshold-related vocabulary', () => {
+    const ctx = makeTriggerContext({
+      diffText: '+  const threshold = calculateCutoff(x);',
+    });
+    const active = selectRules(BUILTIN_RULES, ctx).active.map(r => r.id);
+    expect(active).toContain('boundary-change');
+  });
+
+  it('is skipped on a diff with no operators, digits, or threshold markers', () => {
+    const ctx = makeTriggerContext({
+      diffText: '-// old comment\n+// new comment describing the function',
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('boundary-change');
+  });
+
+  it('carries requiresBlastRadius=true so the agent gate can detect it', () => {
+    const ctx = makeTriggerContext({
+      diffText: '+  if (dependentCount >= 5) return "medium";',
+    });
+    const { active } = selectRules(BUILTIN_RULES, ctx);
+    expect(active.some(r => r.requiresBlastRadius === true)).toBe(true);
+  });
+
+  it('does not cause other existing rules to require blast radius', () => {
+    // Sanity check: only boundary-change opts in via requiresBlastRadius.
+    const requiring = BUILTIN_RULES.filter(r => r.requiresBlastRadius === true).map(r => r.id);
+    expect(requiring).toEqual(['boundary-change']);
+  });
+});

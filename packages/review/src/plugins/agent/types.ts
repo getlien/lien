@@ -93,6 +93,12 @@ export interface ReviewRule {
   enabled: boolean;
   /** 'builtin' for extracted rules, 'custom' for user-defined rules. */
   source: 'builtin' | 'custom';
+  /**
+   * When true, an active instance of this rule causes the agent to receive
+   * the pre-computed <blast_radius> block in the initial message. The rule's
+   * prompt should tell the agent how to act on it.
+   */
+  requiresBlastRadius?: boolean;
 }
 
 /** Resolved set of rules for a specific review run. */
