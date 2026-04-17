@@ -489,3 +489,91 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('"ruleId": "error-swallowing"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// boundary-change rule + blast-radius gate
+// ---------------------------------------------------------------------------
+
+describe('boundary-change rule', () => {
+  it('activates on operator shifts in the diff', () => {
+    const ctx = makeTriggerContext({
+      diffText:
+        '-  if (dependentCount > 5) return "medium";\n+  if (dependentCount >= 5) return "medium";',
+    });
+    const active = selectRules(BUILTIN_RULES, ctx).active.map(r => r.id);
+    expect(active).toContain('boundary-change');
+  });
+
+  it('activates when the diff contains threshold-related vocabulary', () => {
+    const ctx = makeTriggerContext({
+      diffText: '+  const threshold = calculateCutoff(x);',
+    });
+    const active = selectRules(BUILTIN_RULES, ctx).active.map(r => r.id);
+    expect(active).toContain('boundary-change');
+  });
+
+  it('activates on strict-equality comparisons with numeric literals', () => {
+    const ctx = makeTriggerContext({
+      diffText: '-  if (status === 0) throw;\n+  if (status !== 0) throw;',
+    });
+    const active = selectRules(BUILTIN_RULES, ctx).active.map(r => r.id);
+    expect(active).toContain('boundary-change');
+  });
+
+  it('activates on comparisons against negative and float literals', () => {
+    const negCtx = makeTriggerContext({
+      diffText: '+  if (temperature > -10) alert();',
+    });
+    const floatCtx = makeTriggerContext({
+      diffText: '+  if (ratio <= 0.95) retry();',
+    });
+    expect(selectRules(BUILTIN_RULES, negCtx).active.map(r => r.id)).toContain('boundary-change');
+    expect(selectRules(BUILTIN_RULES, floatCtx).active.map(r => r.id)).toContain('boundary-change');
+  });
+
+  // CodeRabbit (PR #521) flagged false-positive cases these tests pin down:
+  // arrow-function returns and bare uses of the word "severity" must not
+  // activate the rule.
+
+  it('does not activate on arrow-function returns like `() => 5`', () => {
+    const ctx = makeTriggerContext({
+      diffText: '+  const items = arr.map(x => 5);\n+  const fn = () => 42;',
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('boundary-change');
+  });
+
+  it('does not activate on bare "severity" references in logger/finding code', () => {
+    const ctx = makeTriggerContext({
+      diffText: '+  logger.info(`severity is ${finding.severity}`);',
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('boundary-change');
+  });
+
+  it('does activate on severity in assignment/label context', () => {
+    const ctx = makeTriggerContext({
+      diffText: "+  const newRule = { severity: 'warning' };",
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).active.map(r => r.id)).toContain('boundary-change');
+  });
+
+  it('is skipped on a diff with no operators, digits, or threshold markers', () => {
+    const ctx = makeTriggerContext({
+      diffText: '-// old comment\n+// new comment describing the function',
+    });
+    expect(selectRules(BUILTIN_RULES, ctx).skipped).toContain('boundary-change');
+  });
+
+  it('carries requiresBlastRadius=true so the agent gate can detect it', () => {
+    const ctx = makeTriggerContext({
+      diffText: '+  if (dependentCount >= 5) return "medium";',
+    });
+    const { active } = selectRules(BUILTIN_RULES, ctx);
+    expect(active.some(r => r.requiresBlastRadius === true)).toBe(true);
+  });
+
+  it('does not cause other existing rules to require blast radius', () => {
+    // Sanity check: only boundary-change opts in via requiresBlastRadius.
+    const requiring = BUILTIN_RULES.filter(r => r.requiresBlastRadius === true).map(r => r.id);
+    expect(requiring).toEqual(['boundary-change']);
+  });
+});
