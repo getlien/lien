@@ -12,7 +12,7 @@ vi.mock('./dependency-analyzer.js', async importOriginal => {
   };
 });
 
-import { findDependents, calculateRiskLevel } from './dependency-analyzer.js';
+import { findDependents } from './dependency-analyzer.js';
 
 describe('handleGetDependents', () => {
   const mockLog = vi.fn();
@@ -41,6 +41,7 @@ describe('handleGetDependents', () => {
         filepath: string;
         isTestFile: boolean;
         usages?: Array<{ callerSymbol: string; line: number; snippet: string }>;
+        hops?: number;
       }>;
       hitLimit?: boolean;
       complexityMetrics?: {
@@ -55,6 +56,8 @@ describe('handleGetDependents', () => {
         complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical';
       };
       totalUsageCount?: number;
+      truncated?: boolean;
+      uncoveredProductionDependents?: number;
     } = {},
   ) {
     const dependents = overrides.dependents ?? [{ filepath: 'src/consumer.ts', isTestFile: false }];
@@ -77,6 +80,8 @@ describe('handleGetDependents', () => {
       hitLimit: overrides.hitLimit ?? false,
       allChunks: [] as SearchResult[],
       totalUsageCount: overrides.totalUsageCount,
+      truncated: overrides.truncated ?? false,
+      uncoveredProductionDependents: overrides.uncoveredProductionDependents ?? 0,
     };
   }
 
@@ -140,6 +145,8 @@ describe('handleGetDependents', () => {
         mockLog,
         undefined, // symbol default
         1234567890, // indexVersion from mock
+        1, // depth default
+        500, // maxNodes default
       );
     });
 
@@ -218,10 +225,13 @@ describe('handleGetDependents', () => {
       expect(parsed.complexityMetrics).toEqual(complexityMetrics);
     });
 
-    it('should boost risk level when complexity is high', async () => {
+    it('should escalate to high when an untested dependent is highly complex', async () => {
+      // computeBlastRadiusRisk: hasHighComplexityUncovered (maxComplexity >= 15 with uncovered > 0)
+      // → high regardless of dependent count.
       vi.mocked(findDependents).mockResolvedValue(
         createMockAnalysis({
           dependents: [{ filepath: 'src/a.ts', isTestFile: false }],
+          uncoveredProductionDependents: 1,
           complexityMetrics: {
             averageComplexity: 20,
             maxComplexity: 30,
@@ -237,8 +247,34 @@ describe('handleGetDependents', () => {
       const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      // Even with 1 dependent, complexity can boost the risk
-      expect(['high', 'critical']).toContain(parsed.riskLevel);
+      expect(parsed.riskLevel).toBe('high');
+      expect(parsed.riskReasoning).toEqual(
+        expect.arrayContaining(['untested high-complexity dependent']),
+      );
+    });
+
+    it('should keep risk low when complexity is high but all dependents are tested', async () => {
+      // hasHighComplexityUncovered only fires when uncovered > 0.
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [{ filepath: 'src/a.ts', isTestFile: false }],
+          uncoveredProductionDependents: 0,
+          complexityMetrics: {
+            averageComplexity: 20,
+            maxComplexity: 30,
+            filesWithComplexityData: 1,
+            highComplexityDependents: [
+              { filepath: 'src/a.ts', maxComplexity: 30, avgComplexity: 20 },
+            ],
+            complexityRiskBoost: 'critical',
+          },
+        }),
+      );
+
+      const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.riskLevel).toBe('low');
     });
   });
 
@@ -316,6 +352,8 @@ describe('handleGetDependents', () => {
         mockLog,
         undefined,
         1234567890,
+        1,
+        500,
       );
     });
 
@@ -394,6 +432,8 @@ describe('handleGetDependents', () => {
         mockLog,
         undefined,
         1234567890,
+        1,
+        500,
       );
     });
   });
@@ -556,10 +596,13 @@ describe('handleGetDependents', () => {
       expect(parsed.riskLevel).toBe('low');
     });
 
-    it('should still boost risk level for high complexity even with few production dependents', async () => {
+    it('should escalate to high for an untested high-complexity dependent', async () => {
+      // Under computeBlastRadiusRisk, hasHighComplexityUncovered caps at "high"
+      // unless dependentCount also exceeds 20.
       vi.mocked(findDependents).mockResolvedValue(
         createMockAnalysis({
           dependents: [{ filepath: 'src/complex.ts', isTestFile: false }],
+          uncoveredProductionDependents: 1,
           complexityMetrics: {
             averageComplexity: 30,
             maxComplexity: 50,
@@ -576,7 +619,7 @@ describe('handleGetDependents', () => {
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.productionDependentCount).toBe(1);
-      expect(parsed.riskLevel).toBe('critical');
+      expect(parsed.riskLevel).toBe('high');
     });
   });
 
@@ -596,6 +639,8 @@ describe('handleGetDependents', () => {
         mockLog,
         'validateEmail',
         1234567890,
+        1,
+        500,
       );
     });
 
@@ -715,71 +760,98 @@ describe('handleGetDependents', () => {
       expect(parsed.totalUsageCount).toBeUndefined();
     });
   });
-});
 
-describe('calculateRiskLevel (unit tests)', () => {
-  it('should return low for 0 dependents', () => {
-    expect(calculateRiskLevel(0, 'low')).toBe('low');
-  });
+  describe('depth / maxNodes / transitive response fields', () => {
+    it('should thread depth and maxNodes through to findDependents', async () => {
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
 
-  it('should return low for 1-5 dependents with low complexity', () => {
-    expect(calculateRiskLevel(1, 'low')).toBe('low');
-    expect(calculateRiskLevel(5, 'low')).toBe('low');
-  });
+      await handleGetDependents({ filepath: 'src/target.ts', depth: 3, maxNodes: 50 }, mockCtx);
 
-  it('should return medium for 6-15 dependents with low complexity', () => {
-    expect(calculateRiskLevel(6, 'low')).toBe('medium');
-    expect(calculateRiskLevel(15, 'low')).toBe('medium');
-  });
-
-  it('should return high for 16-30 dependents with low complexity', () => {
-    expect(calculateRiskLevel(16, 'low')).toBe('high');
-    expect(calculateRiskLevel(30, 'low')).toBe('high');
-  });
-
-  it('should return critical for 31+ dependents', () => {
-    expect(calculateRiskLevel(31, 'low')).toBe('critical');
-    expect(calculateRiskLevel(100, 'low')).toBe('critical');
-  });
-
-  it('should boost risk level when complexity is higher', () => {
-    // Low dependent count but high complexity should boost to high
-    expect(calculateRiskLevel(2, 'high')).toBe('high');
-    expect(calculateRiskLevel(2, 'critical')).toBe('critical');
-  });
-
-  it('should not downgrade risk level from complexity', () => {
-    // High dependent count should not be reduced by low complexity
-    expect(calculateRiskLevel(50, 'low')).toBe('critical');
-  });
-
-  describe('with productionDependentCount', () => {
-    it('should use productionDependentCount for risk when provided', () => {
-      // 20 total dependents would be "high" risk
-      // But only 3 production dependents = "low" risk
-      expect(calculateRiskLevel(20, 'low', 3)).toBe('low');
+      expect(findDependents).toHaveBeenCalledWith(
+        mockVectorDB,
+        'src/target.ts',
+        false,
+        mockLog,
+        undefined,
+        1234567890,
+        3,
+        50,
+      );
     });
 
-    it('should return low risk when productionDependentCount is 0', () => {
-      // Even with many total dependents, 0 production = low risk
-      expect(calculateRiskLevel(50, 'low', 0)).toBe('low');
+    it('should echo the requested depth in the response', async () => {
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
+
+      const result = await handleGetDependents({ filepath: 'src/target.ts', depth: 2 }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.depth).toBe(2);
     });
 
-    it('should return medium risk for 6-15 production dependents', () => {
-      expect(calculateRiskLevel(50, 'low', 10)).toBe('medium');
+    it('should surface truncated and totalImpacted in the response', async () => {
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: [
+            { filepath: 'src/a.ts', isTestFile: false, hops: 1 },
+            { filepath: 'src/b.ts', isTestFile: false, hops: 2 },
+          ],
+          truncated: true,
+        }),
+      );
+
+      const result = await handleGetDependents(
+        { filepath: 'src/target.ts', depth: 2, maxNodes: 2 },
+        mockCtx,
+      );
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.truncated).toBe(true);
+      expect(parsed.totalImpacted).toBe(2);
+      expect(parsed.dependents[0].hops).toBe(1);
+      expect(parsed.dependents[1].hops).toBe(2);
     });
 
-    it('should return high risk for 16-30 production dependents', () => {
-      expect(calculateRiskLevel(100, 'low', 20)).toBe('high');
+    it('should include riskReasoning from computeBlastRadiusRisk', async () => {
+      vi.mocked(findDependents).mockResolvedValue(
+        createMockAnalysis({
+          dependents: Array.from({ length: 8 }, (_, i) => ({
+            filepath: `src/f${i}.ts`,
+            isTestFile: false,
+          })),
+          uncoveredProductionDependents: 3,
+          complexityMetrics: {
+            averageComplexity: 6,
+            maxComplexity: 12,
+            filesWithComplexityData: 8,
+            highComplexityDependents: [],
+            complexityRiskBoost: 'medium',
+          },
+        }),
+      );
+
+      const result = await handleGetDependents({ filepath: 'src/utils.ts' }, mockCtx);
+
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.riskLevel).toBe('medium');
+      expect(parsed.riskReasoning).toEqual(
+        expect.arrayContaining(['8 callers', '3 untested', 'max complexity 12']),
+      );
     });
 
-    it('should still boost from complexity even with low production count', () => {
-      expect(calculateRiskLevel(50, 'critical', 1)).toBe('critical');
+    it('should log transitive depth in the initial request line', async () => {
+      vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
+
+      await handleGetDependents({ filepath: 'src/target.ts', depth: 2 }, mockCtx);
+
+      expect(mockLog).toHaveBeenCalledWith('Finding dependents of: src/target.ts (depth: 2)');
     });
 
-    it('should fall back to dependentCount when productionDependentCount is undefined', () => {
-      // Backwards compatibility: undefined should use total count
-      expect(calculateRiskLevel(20, 'low', undefined)).toBe('high');
+    it('should reject depth above schema max', async () => {
+      const result = await handleGetDependents({ filepath: 'src/target.ts', depth: 99 }, mockCtx);
+
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse(result.content![0].text);
+      expect(parsed.error).toBe('Invalid parameters');
     });
   });
 });

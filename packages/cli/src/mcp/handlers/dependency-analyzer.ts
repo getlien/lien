@@ -89,6 +89,8 @@ export interface DependentInfo {
   isTestFile: boolean;
   /** Only present when symbol parameter is provided */
   usages?: SymbolUsage[];
+  /** Depth at which this dependent was first discovered (1 = direct). */
+  hops?: number;
 }
 
 /**
@@ -105,6 +107,10 @@ export interface DependencyAnalysisResult {
   allChunks: SearchResult[];
   /** Total count of usages across all files (when symbol is specified) */
   totalUsageCount?: number;
+  /** True when BFS stopped because it hit the maxNodes cap. */
+  truncated: boolean;
+  /** Count of production dependents that are NOT imported by any test file. */
+  uncoveredProductionDependents: number;
 }
 
 /**
@@ -582,6 +588,14 @@ function resolveTransitiveDependents(
 /**
  * Find all files that depend on a target file, including transitive dependents
  * through re-export chains. Optionally tracks usages of a specific symbol.
+ *
+ * When `depth > 1`, the walk continues outward (BFS) over the import graph
+ * using the same in-memory `importIndex`. Each newly discovered file is
+ * tagged with the depth (hops) at which it was first reached. BFS stops when
+ * `depth` is reached or `chunksByFile.size >= maxNodes` (sets `truncated`).
+ *
+ * Symbol-level queries (`symbol` set) always behave as depth=1 — transitive
+ * symbol tracking through re-renaming chains is out of scope for this tool.
  */
 export async function findDependents(
   vectorDB: VectorDBInterface,
@@ -590,6 +604,8 @@ export async function findDependents(
   log: (message: string, level?: 'warning') => void,
   symbol?: string,
   indexVersion?: number,
+  depth: number = 1,
+  maxNodes: number = 500,
 ): Promise<DependencyAnalysisResult> {
   const normalizePathCached = createPathNormalizer();
   const normalizedTarget = normalizePathCached(filepath);
@@ -616,6 +632,27 @@ export async function findDependents(
     log,
   );
 
+  // Depth-1 hops — every file discovered so far.
+  const hopsByFile = new Map<string, number>();
+  for (const file of chunksByFile.keys()) hopsByFile.set(file, 1);
+
+  // BFS for depth > 1 (file-level only; symbol queries stay at depth 1).
+  const effectiveDepth = symbol ? 1 : depth;
+  if (effectiveDepth > 1 && depth > 1 && symbol) {
+    log(`Note: depth > 1 is ignored for symbol-level queries (symbol=${symbol})`);
+  }
+  const bfsResult = expandBfsDependents({
+    chunksByFile,
+    hopsByFile,
+    normalizedTarget,
+    importIndex,
+    allChunksByFile,
+    normalizePathCached,
+    log,
+    depth: effectiveDepth,
+    maxNodes,
+  });
+
   // Calculate metrics
   const fileComplexities = calculateFileComplexities(chunksByFile);
   const complexityMetrics = calculateOverallComplexityMetrics(fileComplexities);
@@ -635,8 +672,15 @@ export async function findDependents(
     reExporterPaths,
   );
 
-  // Sort dependents: production files first, then test files
+  // Stamp hops on each dependent from the BFS map.
+  for (const d of dependents) {
+    d.hops = hopsByFile.get(d.filepath) ?? 1;
+  }
+
+  // Sort dependents: shallower first, then production before test, stable otherwise.
   dependents.sort((a, b) => {
+    const hopDelta = (a.hops ?? 1) - (b.hops ?? 1);
+    if (hopDelta !== 0) return hopDelta;
     if (a.isTestFile === b.isTestFile) return 0;
     return a.isTestFile ? 1 : -1;
   });
@@ -644,6 +688,12 @@ export async function findDependents(
   // Calculate test/production split
   const testDependentCount = dependents.filter(f => f.isTestFile).length;
   const productionDependentCount = dependents.length - testDependentCount;
+
+  const uncoveredProductionDependents = countUncoveredProductionDependents(
+    dependents,
+    importIndex,
+    normalizePathCached,
+  );
 
   // Only flatten all chunks when needed for cross-repo grouping (groupDependentsByRepo)
   const allChunks = crossRepo ? Array.from(allChunksByFile.values()).flat() : [];
@@ -658,7 +708,119 @@ export async function findDependents(
     hitLimit,
     allChunks,
     totalUsageCount,
+    truncated: bfsResult.truncated,
+    uncoveredProductionDependents,
   };
+}
+
+/**
+ * BFS over the import graph starting from the already-populated depth-1
+ * frontier in `chunksByFile`. Mutates `chunksByFile` and `hopsByFile` in place
+ * with newly discovered files and their hop counts.
+ */
+function expandBfsDependents(args: {
+  chunksByFile: Map<string, SearchResult[]>;
+  hopsByFile: Map<string, number>;
+  normalizedTarget: string;
+  importIndex: Map<string, SearchResult[]>;
+  allChunksByFile: Map<string, SearchResult[]>;
+  normalizePathCached: (p: string) => string;
+  log: (message: string, level?: 'warning') => void;
+  depth: number;
+  maxNodes: number;
+}): { truncated: boolean } {
+  const {
+    chunksByFile,
+    hopsByFile,
+    normalizedTarget,
+    importIndex,
+    allChunksByFile,
+    normalizePathCached,
+    log,
+    depth,
+    maxNodes,
+  } = args;
+
+  // `truncated` means "BFS was aborted mid-expansion because of maxNodes".
+  // If depth<=1, no BFS runs and the flag stays false regardless of size.
+  if (depth <= 1) return { truncated: false };
+
+  let truncated = false;
+  let currentFrontier: Set<string> = new Set(chunksByFile.keys());
+
+  for (let level = 2; level <= depth; level++) {
+    if (truncated || currentFrontier.size === 0) break;
+
+    const nextFrontier = new Set<string>();
+
+    for (const frontierFile of currentFrontier) {
+      if (chunksByFile.size >= maxNodes) {
+        truncated = true;
+        break;
+      }
+      const normalizedFrontier = normalizePathCached(frontierFile);
+      if (normalizedFrontier === normalizedTarget) continue;
+
+      const dependentChunks = findDependentChunks(importIndex, normalizedFrontier);
+      if (dependentChunks.length === 0) continue;
+
+      const localChunksByFile = groupChunksByFile(dependentChunks);
+      // Extend via barrel re-exports for this frontier file too.
+      resolveTransitiveDependents(
+        allChunksByFile,
+        normalizedFrontier,
+        normalizePathCached,
+        importIndex,
+        localChunksByFile,
+        log,
+      );
+
+      for (const [file, chunks] of localChunksByFile.entries()) {
+        // `file` uses getCanonicalPath; target/frontier use normalizePath.
+        // Normalize both sides before comparing.
+        const normalizedFile = normalizePathCached(file);
+        if (normalizedFile === normalizedTarget) continue;
+        if (normalizedFile === normalizedFrontier) continue;
+        if (chunksByFile.has(file)) continue;
+        if (chunksByFile.size >= maxNodes) {
+          truncated = true;
+          break;
+        }
+        chunksByFile.set(file, chunks);
+        hopsByFile.set(file, level);
+        nextFrontier.add(file);
+      }
+      if (truncated) break;
+    }
+
+    currentFrontier = nextFrontier;
+  }
+
+  if (truncated) {
+    log(`BFS stopped at maxNodes=${maxNodes} (dependents truncated)`);
+  }
+  return { truncated };
+}
+
+/**
+ * For each production dependent, check whether any test file imports it.
+ * Reuses the existing `importIndex` — no fresh scan.
+ */
+function countUncoveredProductionDependents(
+  dependents: DependentInfo[],
+  importIndex: Map<string, SearchResult[]>,
+  normalizePathCached: (p: string) => string,
+): number {
+  let uncovered = 0;
+  for (const d of dependents) {
+    if (d.isTestFile) continue;
+    const normalized = normalizePathCached(d.filepath);
+    const importers = findDependentChunks(importIndex, normalized);
+    const importerFiles = new Set(importers.map(c => c.metadata.file));
+    const hasTestImporter = Array.from(importerFiles).some(f => isTestFile(f));
+    if (!hasTestImporter) uncovered += 1;
+  }
+  return uncovered;
 }
 
 /**
@@ -787,48 +949,6 @@ function calculateComplexityRiskBoost(avgComplexity: number, maxComplexity: numb
     return 'medium';
   }
   return 'low';
-}
-
-/**
- * Calculate risk level based on dependent count and complexity.
- * @param dependentCount Total number of dependent files
- * @param complexityRiskBoost Risk boost from complexity analysis
- * @param productionDependentCount Optional: if provided, use this for risk calculation instead of dependentCount
- */
-export function calculateRiskLevel(
-  dependentCount: number,
-  complexityRiskBoost: 'low' | 'medium' | 'high' | 'critical',
-  productionDependentCount?: number,
-): 'low' | 'medium' | 'high' | 'critical' {
-  const DEPENDENT_COUNT_THRESHOLDS = {
-    LOW: 5,
-    MEDIUM: 15,
-    HIGH: 30,
-  } as const;
-
-  const RISK_ORDER = { low: 0, medium: 1, high: 2, critical: 3 } as const;
-  type RiskLevel = keyof typeof RISK_ORDER;
-
-  // Use production count if provided, otherwise fall back to total
-  const effectiveCount = productionDependentCount ?? dependentCount;
-
-  let riskLevel: RiskLevel =
-    effectiveCount === 0
-      ? 'low'
-      : effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.LOW
-        ? 'low'
-        : effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.MEDIUM
-          ? 'medium'
-          : effectiveCount <= DEPENDENT_COUNT_THRESHOLDS.HIGH
-            ? 'high'
-            : 'critical';
-
-  // Boost if complexity risk is higher
-  if (RISK_ORDER[complexityRiskBoost] > RISK_ORDER[riskLevel]) {
-    riskLevel = complexityRiskBoost;
-  }
-
-  return riskLevel;
 }
 
 /**

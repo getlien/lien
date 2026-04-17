@@ -192,7 +192,15 @@ describe('MCP Tools Schema', () => {
       const tool = tools.find(t => t.name === 'get_dependents');
       const schema = tool?.inputSchema as any;
       expect(schema.properties.depth?.minimum).toBe(1);
-      expect(schema.properties.depth?.maximum).toBe(1);
+      expect(schema.properties.depth?.maximum).toBe(5);
+    });
+
+    it('should expose maxNodes with a default and cap', () => {
+      const tool = tools.find(t => t.name === 'get_dependents');
+      const schema = tool?.inputSchema as any;
+      expect(schema.properties.maxNodes?.default).toBe(500);
+      expect(schema.properties.maxNodes?.minimum).toBe(1);
+      expect(schema.properties.maxNodes?.maximum).toBe(5000);
     });
   });
 
@@ -400,14 +408,24 @@ describe('MCP Tools Schema', () => {
         expect(invalid.success).toBe(false);
       });
 
-      it('should reject depth > 1', () => {
+      it('should accept depth up to 5', () => {
+        for (const d of [1, 2, 3, 5]) {
+          const parsed = GetDependentsSchema.safeParse({
+            filepath: 'src/test.ts',
+            depth: d,
+          });
+          expect(parsed.success).toBe(true);
+        }
+      });
+
+      it('should reject depth > 5', () => {
         const invalid = GetDependentsSchema.safeParse({
           filepath: 'src/test.ts',
-          depth: 2,
+          depth: 6,
         });
         expect(invalid.success).toBe(false);
         if (!invalid.success) {
-          expect(invalid.error.issues[0].message).toContain('less than or equal to 1');
+          expect(invalid.error.issues[0].message).toContain('less than or equal to 5');
         }
       });
 

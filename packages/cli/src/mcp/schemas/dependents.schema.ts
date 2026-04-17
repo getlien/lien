@@ -47,11 +47,27 @@ export const GetDependentsSchema = z.object({
     .number()
     .int()
     .min(1)
-    .max(1)
+    .max(5)
     .default(1)
     .describe(
-      'Depth of transitive dependencies. Only depth=1 (direct dependents) is currently supported.\n\n' +
-        '1 = Direct dependents only',
+      'Depth of transitive dependency walk (BFS over the import graph).\n\n' +
+        '1 = Direct dependents only (default; matches prior behavior).\n' +
+        '2 = Direct dependents + their dependents.\n' +
+        'Up to 5. Each dependent carries a `hops` field indicating the depth\n' +
+        'at which it was first discovered. Ignored for symbol-level queries\n' +
+        '(when `symbol` is set, only direct callers are returned).',
+    ),
+
+  maxNodes: z
+    .number()
+    .int()
+    .min(1)
+    .max(5000)
+    .default(500)
+    .describe(
+      'Maximum number of distinct dependent files to return.\n\n' +
+        'Acts as a guardrail for deep BFS on large repos. When the cap is\n' +
+        'hit, the response includes `truncated: true`.',
     ),
 
   crossRepo: z
