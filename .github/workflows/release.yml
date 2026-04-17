@@ -13,9 +13,9 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # Create releases
-      pull-requests: write  # Create "Version Packages" PR
-      id-token: write       # OIDC for npm provenance
+      contents: write # Create releases
+      pull-requests: write # Create "Version Packages" PR
+      id-token: write # OIDC for npm provenance
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,8 +24,10 @@ jobs:
           cache: 'npm'
           # Don't set registry-url - npm will use OIDC automatically with publishConfig.provenance
 
-      - name: Ensure npm version supports OIDC
-        run: npm install -g npm@latest
+      # Node 22's bundled npm (10.9+) supports --provenance natively, so we
+      # no longer self-upgrade. The previous `npm install -g npm@latest` step
+      # hit a recurring self-upgrade crash (`Cannot find module 'promise-retry'`
+      # from inside @npmcli/arborist), blocking releases.
 
       - name: Configure npm scope
         run: |
@@ -39,8 +41,8 @@ jobs:
         with:
           publish: npm run release
           version: npm run version
-          title: "chore: version packages"
-          commit: "chore: version packages"
+          title: 'chore: version packages'
+          commit: 'chore: version packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No NPM_TOKEN needed - uses OIDC provenance
