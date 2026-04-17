@@ -65,7 +65,7 @@ function classifyLevel(input: BlastRadiusRiskInput): RiskLevel {
   if (hasHighComplexityUncovered && dependentCount > 20) return 'critical';
   if (dependentCount > 20) return 'high';
   if (hasHighComplexityUncovered) return 'high';
-  if (dependentCount > 5) return 'medium';
+  if (dependentCount >= 5) return 'medium';
   if (uncoveredDependents > 0) return 'medium';
   return 'low';
 }
