@@ -472,10 +472,42 @@ describe('findDependents', () => {
     });
   });
 
+  describe('re-export walk: named-import requirement (#526)', () => {
+    // Pre-fix, a file that raw-imported the target AND exported anything at
+    // all was flagged as a re-exporter of everything the target exported.
+    // Then chains through that false re-exporter polluted depth-1 results.
+    it('should not treat "imports target + exports unrelated" as a re-exporter', async () => {
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([
+          // a.ts — the target
+          createChunk('src/a.ts', { exports: ['fnA'] }),
+          // b.ts — imports fnA from a, exports fnB (NOT a re-export of fnA)
+          createChunk('src/b.ts', {
+            imports: ['src/a.ts'],
+            importedSymbols: { 'src/a': ['fnA'] },
+            exports: ['fnB'],
+          }),
+          // c.ts — imports fnB from b. Must NOT be a transitive dependent of a.
+          createChunk('src/c.ts', {
+            imports: ['src/b.ts'],
+            importedSymbols: { 'src/b': ['fnB'] },
+          }),
+        ]),
+      );
+
+      const result = await findDependents(mockDB as any, 'src/a.ts', false, mockLog);
+
+      const filepaths = result.dependents.map(d => d.filepath);
+      // b is a direct dependent of a — correct.
+      expect(filepaths).toContain('src/b.ts');
+      // c only imports b, not a. Must not be pulled in via the re-export walk.
+      expect(filepaths).not.toContain('src/c.ts');
+    });
+  });
+
   describe('BFS over depth', () => {
-    // These tests use importedSymbols-only (no `imports` array) so chunks
-    // don't trip the '*' wildcard re-export sentinel that would otherwise
-    // pull transitive dependents in via the barrel-file walk at depth 1.
+    // Post-#526, chunks with raw `imports` no longer trip a '*' wildcard
+    // re-export sentinel — importedSymbols is the authoritative signal.
 
     it('should stay at depth 1 by default (backwards compatible)', async () => {
       mockDB.scanPaginated.mockReturnValue(

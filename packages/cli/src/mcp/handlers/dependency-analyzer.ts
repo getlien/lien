@@ -140,38 +140,19 @@ function collectNamedSymbolsFromChunk(
 }
 
 /**
- * Check if a chunk has raw imports matching the target path (adds '*' sentinel).
- */
-function collectRawImportSentinel(
-  chunk: SearchResult,
-  normalizedTarget: string,
-  normalizePathCached: (path: string) => string,
-  symbols: Set<string>,
-): void {
-  const imports = chunk.metadata.imports || [];
-  for (const imp of imports) {
-    if (matchesFile(normalizePathCached(imp), normalizedTarget)) symbols.add('*');
-  }
-}
-
-/**
- * Collect symbols from a single chunk that are imported from the target path.
- * Adds named symbols from importedSymbols and '*' sentinel for raw imports.
- */
-function collectSymbolsFromChunk(
-  chunk: SearchResult,
-  normalizedTarget: string,
-  normalizePathCached: (path: string) => string,
-  symbols: Set<string>,
-): void {
-  collectNamedSymbolsFromChunk(chunk, normalizedTarget, normalizePathCached, symbols);
-  collectRawImportSentinel(chunk, normalizedTarget, normalizePathCached, symbols);
-}
-
-/**
- * Collect symbols imported from a target path across all chunks of a file.
- * Returns a set of symbol names. Includes '*' sentinel for raw imports
- * where specific symbols are unknown.
+ * Collect symbols imported from a target path across all chunks of a file,
+ * sourced exclusively from `importedSymbols`.
+ *
+ * We deliberately do NOT fall back to the raw `imports` array to synthesize a
+ * `'*'` sentinel. Doing so flagged any file that raw-imports the target AND
+ * exports anything as a re-exporter of *all* the target's exports — even when
+ * the file had precise named imports (e.g. `import { x } from './a'`
+ * populates both `imports` and `importedSymbols['./a'] = ['x']`, so the
+ * sentinel would always fire). See #526.
+ *
+ * Legitimate wildcard cases (`import * as x` in JS, `use foo::*` in Rust)
+ * are already represented in `importedSymbols` as `'* as x'` or `'*'`, so
+ * `findReExportedSymbols` still handles them correctly.
  */
 function collectImportedSymbolsFromTarget(
   chunks: SearchResult[],
@@ -180,7 +161,7 @@ function collectImportedSymbolsFromTarget(
 ): Set<string> {
   const symbols = new Set<string>();
   for (const chunk of chunks) {
-    collectSymbolsFromChunk(chunk, normalizedTarget, normalizePathCached, symbols);
+    collectNamedSymbolsFromChunk(chunk, normalizedTarget, normalizePathCached, symbols);
   }
   return symbols;
 }

@@ -249,6 +249,28 @@ describe('analyzeDependencies', () => {
   });
 
   describe('barrel re-export tracking', () => {
+    it('should not flag "imports target + exports unrelated" as a re-exporter (#526)', () => {
+      // a.ts is the target. b.ts uses fnA from a but exports a different symbol
+      // (fnB). Pre-fix, b was wrongly flagged as a re-exporter — any consumer of
+      // b (like c.ts) would then be pulled in as a transitive dependent of a.
+      const chunks: CodeChunk[] = [
+        createChunk('src/a.ts', [], undefined, { exports: ['fnA'] }),
+        createChunk('src/b.ts', ['src/a.ts'], undefined, {
+          exports: ['fnB'],
+          importedSymbols: { './a': ['fnA'] },
+        }),
+        createChunk('src/c.ts', ['src/b.ts'], undefined, {
+          importedSymbols: { './b': ['fnB'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('src/a.ts', chunks, workspaceRoot);
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      expect(dependentPaths).toContain('src/b.ts'); // direct, correct
+      expect(dependentPaths).not.toContain('src/c.ts'); // must not leak through b
+    });
+
     it('should find transitive dependents through barrel files', () => {
       // auth.ts → index.ts (re-exports) → handler.ts (imports from index)
       const chunks: CodeChunk[] = [
@@ -308,18 +330,20 @@ describe('analyzeDependencies', () => {
     });
 
     it('should handle circular re-exports without infinite loops', () => {
-      // a.ts → b.ts → a.ts (circular) → c.ts imports from b.ts
+      // a.ts ↔ b.ts (circular). b genuinely re-exports foo from a, and c
+      // imports foo via b — so c is a transitive dependent of a.
       const chunks: CodeChunk[] = [
         createChunk('src/a.ts', ['src/b.ts'], undefined, {
           exports: ['foo'],
           importedSymbols: { './b': ['bar'] },
         }),
         createChunk('src/b.ts', ['src/a.ts'], undefined, {
-          exports: ['bar'],
+          // b re-exports foo (imported from a AND listed in exports).
+          exports: ['foo', 'bar'],
           importedSymbols: { './a': ['foo'] },
         }),
         createChunk('src/c.ts', ['src/b.ts'], undefined, {
-          importedSymbols: { './b': ['bar'] },
+          importedSymbols: { './b': ['foo'] },
         }),
       ];
 
