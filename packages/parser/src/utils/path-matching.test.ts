@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizePath, matchesFile, isTestFile } from './path-matching.js';
+import { normalizePath, matchesFile, isTestFile, resolveRelativeImport } from './path-matching.js';
 
 /**
  * Test cases for path matching logic in get_dependents tool.
@@ -367,5 +367,76 @@ describe('isTestFile - Precise Test Detection', () => {
       expect(isTestFile('src/test\\helper.ts')).toBe(true);
       expect(isTestFile('src\\auth.test.ts')).toBe(true);
     });
+  });
+});
+
+describe('resolveRelativeImport', () => {
+  it('resolves ./ against the importer directory', () => {
+    expect(resolveRelativeImport('packages/parser/src/chunker.ts', './symbols')).toBe(
+      'packages/parser/src/symbols',
+    );
+  });
+
+  it('resolves ../ and collapses segments', () => {
+    expect(resolveRelativeImport('packages/parser/src/ast/chunker.ts', '../utils/helpers')).toBe(
+      'packages/parser/src/utils/helpers',
+    );
+  });
+
+  it('resolves extensions through as-is (normalization happens later)', () => {
+    expect(resolveRelativeImport('packages/parser/src/foo.ts', './bar.js')).toBe(
+      'packages/parser/src/bar.js',
+    );
+  });
+
+  it('handles absolute importer paths', () => {
+    expect(resolveRelativeImport('/abs/repo/packages/a/src/x.ts', './y')).toBe(
+      '/abs/repo/packages/a/src/y',
+    );
+  });
+
+  it('normalizes Windows-style separators in the importer', () => {
+    expect(resolveRelativeImport('packages\\parser\\src\\chunker.ts', './foo')).toBe(
+      'packages/parser/src/foo',
+    );
+  });
+
+  it('passes package specifiers through unchanged', () => {
+    expect(resolveRelativeImport('packages/x/src/a.ts', '@liendev/core')).toBe('@liendev/core');
+    expect(resolveRelativeImport('packages/x/src/a.ts', 'lodash')).toBe('lodash');
+  });
+
+  it('passes absolute specifiers through unchanged', () => {
+    expect(resolveRelativeImport('packages/x/src/a.ts', '/abs/path')).toBe('/abs/path');
+  });
+
+  it('passes dotted Python-style imports through unchanged', () => {
+    // `.module` does not start with `./` — Python relative imports are out of scope.
+    expect(resolveRelativeImport('packages/x/src/a.py', '.module')).toBe('.module');
+    expect(resolveRelativeImport('packages/x/src/a.py', '..pkg.thing')).toBe('..pkg.thing');
+  });
+
+  it('lets specifiers that escape the workspace stay as relative paths', () => {
+    // Importer is 3 segments deep; the specifier climbs 4 levels out. The
+    // resolver collapses what it can and keeps a leading `..` — downstream
+    // matchesFile then treats it as a boundary-matched path without producing
+    // false positives for unrelated in-workspace files.
+    expect(resolveRelativeImport('packages/a/src/x.ts', '../../../../outside/thing')).toBe(
+      '../outside/thing',
+    );
+  });
+
+  it('prevents cross-package basename collisions (#525)', () => {
+    // The scenario that motivated this fix: two files share a basename in different
+    // packages. After resolution, their specifiers are distinct workspace-relative
+    // paths — matchesFile no longer conflates them.
+    const aResolved = resolveRelativeImport(
+      'packages/cli/src/mcp/handlers/foo.ts',
+      './dependency-analyzer',
+    );
+    const bResolved = resolveRelativeImport('packages/parser/src/bar.ts', './dependency-analyzer');
+    expect(aResolved).toBe('packages/cli/src/mcp/handlers/dependency-analyzer');
+    expect(bResolved).toBe('packages/parser/src/dependency-analyzer');
+    expect(aResolved).not.toBe(bResolved);
   });
 });

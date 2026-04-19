@@ -4,6 +4,8 @@ import type { LanguageSymbolExtractor } from './extractors/types.js';
 import { getExtractor, getImportExtractor, getSymbolExtractor } from './extractors/index.js';
 import { getLanguage } from './languages/registry.js';
 
+import { resolveRelativeImport } from '../utils/path-matching.js';
+
 /**
  * Extract symbol information from an AST node using language-specific extractors.
  *
@@ -30,10 +32,16 @@ export function extractSymbolInfo(
 
 /**
  * Extract import paths using the language-specific extractor.
+ *
+ * When `filepath` is provided, relative specifiers (`./foo`, `../bar`) are
+ * resolved against the importer's directory so that cross-package files with
+ * the same basename don't collide downstream. Non-relative specifiers pass
+ * through unchanged.
  */
 function extractImportPaths(
   rootNode: Parser.SyntaxNode,
   importExtractor: ReturnType<typeof getImportExtractor>,
+  filepath?: string,
 ): string[] {
   if (!importExtractor) return [];
 
@@ -44,7 +52,7 @@ function extractImportPaths(
     if (!nodeTypeSet.has(child.type)) continue;
 
     const result = importExtractor.extractImportPath(child);
-    if (result) imports.push(result);
+    if (result) imports.push(filepath ? resolveRelativeImport(filepath, result) : result);
   }
 
   return imports;
@@ -55,13 +63,18 @@ function extractImportPaths(
  *
  * When a language is provided, uses the language-specific import extractor.
  * Falls back to legacy behavior for backwards compatibility.
+ *
+ * @param filepath - Optional path of the file being chunked. Enables resolution
+ *   of `./` / `../` specifiers so they store workspace-relative paths instead
+ *   of bare basenames.
  */
 export function extractImports(
   rootNode: Parser.SyntaxNode,
   language?: SupportedLanguage,
+  filepath?: string,
 ): string[] {
   if (!language) return [];
-  return extractImportPaths(rootNode, getImportExtractor(language));
+  return extractImportPaths(rootNode, getImportExtractor(language), filepath);
 }
 
 /**
@@ -82,10 +95,14 @@ function addSymbolsToMap(
 
 /**
  * Extract symbols using the language-specific extractor.
+ *
+ * When `filepath` is provided, relative import paths in the returned map's
+ * keys are resolved to workspace-relative paths via `resolveRelativeImport`.
  */
 function extractSymbolsWithExtractor(
   rootNode: Parser.SyntaxNode,
   importExtractor: ReturnType<typeof getImportExtractor>,
+  filepath?: string,
 ): Record<string, string[]> {
   if (!importExtractor) return {};
 
@@ -97,7 +114,8 @@ function extractSymbolsWithExtractor(
 
     const result = importExtractor.processImportSymbols(node);
     if (result) {
-      addSymbolsToMap(importedSymbols, result.importPath, result.symbols);
+      const key = filepath ? resolveRelativeImport(filepath, result.importPath) : result.importPath;
+      addSymbolsToMap(importedSymbols, key, result.symbols);
     }
   }
 
@@ -107,17 +125,20 @@ function extractSymbolsWithExtractor(
 /**
  * Extract imported symbols mapped to their source paths.
  *
- * Returns a map like: { './validate': ['validateEmail', 'validatePhone'] }
+ * Returns a map like: { 'packages/parser/src/validate': ['validateEmail'] }
+ * when `filepath` is provided, or { './validate': ['validateEmail'] } for
+ * legacy callers that don't pass it.
  *
- * When a language is provided, uses the language-specific import extractor.
- * Falls back to legacy behavior for backwards compatibility.
+ * @param filepath - Optional path of the file being chunked. Enables resolution
+ *   of `./` / `../` specifiers into workspace-relative keys.
  */
 export function extractImportedSymbols(
   rootNode: Parser.SyntaxNode,
   language?: SupportedLanguage,
+  filepath?: string,
 ): Record<string, string[]> {
   if (!language) return {};
-  return extractSymbolsWithExtractor(rootNode, getImportExtractor(language));
+  return extractSymbolsWithExtractor(rootNode, getImportExtractor(language), filepath);
 }
 
 /**

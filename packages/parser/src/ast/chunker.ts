@@ -49,17 +49,43 @@ function parseAndValidate(filepath: string, content: string) {
 }
 
 /**
+ * Languages that use `./` / `../` specifiers with filesystem semantics, where
+ * resolving relative imports against the importer's path produces the correct
+ * workspace-relative target.
+ *
+ * Deliberately excludes Rust: its extractor emits `../x` as an internal
+ * storage convention for `super::x`, but that string does not describe the
+ * actual filesystem target. `super::x` from `src/foo.rs` resolves to the
+ * sibling module `src/x`, not to `src/../x` — so applying filesystem-style
+ * `..` resolution here would produce wrong keys.
+ *
+ * Python's `from . import x` passes through as-is (different mechanics: dot
+ * counting rather than path joining).
+ */
+const RESOLVE_RELATIVE_IMPORTS: ReadonlySet<SupportedLanguage> = new Set([
+  'javascript',
+  'typescript',
+]);
+
+/**
  * Prepare AST context by extracting imports, exports, and symbols.
+ *
+ * For JS/TS, `filepath` is threaded into the import extractors so that relative
+ * specifiers (`./foo`, `../bar`) are resolved to workspace-relative paths at
+ * index time. This prevents cross-package basename collisions in the downstream
+ * dependency analysis (see #525).
  */
 function prepareASTContext(
   content: string,
   rootNode: Parser.SyntaxNode,
   language: SupportedLanguage,
+  filepath: string,
 ): ASTContext {
+  const resolutionPath = RESOLVE_RELATIVE_IMPORTS.has(language) ? filepath : undefined;
   return {
     lines: content.split('\n'),
-    fileImports: extractImports(rootNode, language),
-    importedSymbols: extractImportedSymbols(rootNode, language),
+    fileImports: extractImports(rootNode, language, resolutionPath),
+    importedSymbols: extractImportedSymbols(rootNode, language, resolutionPath),
     fileExports: extractExports(rootNode, language),
     traverser: getTraverser(language),
   };
@@ -150,7 +176,7 @@ export function chunkByAST(
   const { language, rootNode } = parseAndValidate(filepath, content);
 
   // Prepare context
-  const context = prepareASTContext(content, rootNode, language);
+  const context = prepareASTContext(content, rootNode, language, filepath);
 
   // Find and process top-level nodes
   const topLevelNodes = findTopLevelNodes(rootNode, context.traverser);

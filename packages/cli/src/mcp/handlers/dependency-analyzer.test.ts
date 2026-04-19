@@ -432,6 +432,46 @@ describe('findDependents', () => {
     });
   });
 
+  describe('cross-package basename collisions (#525)', () => {
+    // Pre-fix, two files with the same basename in different packages would
+    // collide because relative specifiers were stored as bare basenames.
+    // With index-time resolution, importIndex keys are workspace-relative,
+    // and the collision no longer happens.
+    it('should not treat a same-basename file in another package as a dependent', async () => {
+      // Simulate what the indexer now stores: resolved workspace-relative
+      // paths in importedSymbols keys.
+      mockDB.scanPaginated.mockReturnValue(
+        mockAsyncGenerator([
+          // The query target — no dependents in this test setup.
+          createChunk('packages/cli/src/mcp/handlers/dependency-analyzer.ts', {
+            exports: ['findDependents'],
+          }),
+          // A different file with the SAME basename in a different package.
+          createChunk('packages/parser/src/dependency-analyzer.ts', {
+            exports: ['chunkImportsFrom'],
+          }),
+          // Parser-side consumer imports the PARSER's dependency-analyzer.
+          // Its importedSymbols key is now a resolved workspace-relative path.
+          createChunk('packages/parser/src/ast/chunker.ts', {
+            importedSymbols: { 'packages/parser/src/dependency-analyzer': ['chunkImportsFrom'] },
+          }),
+        ]),
+      );
+
+      const result = await findDependents(
+        mockDB as any,
+        'packages/cli/src/mcp/handlers/dependency-analyzer.ts',
+        false,
+        mockLog,
+      );
+
+      // The parser-side consumer must NOT appear as a dependent of the CLI file.
+      expect(result.dependents.map(d => d.filepath)).not.toContain(
+        'packages/parser/src/ast/chunker.ts',
+      );
+    });
+  });
+
   describe('BFS over depth', () => {
     // These tests use importedSymbols-only (no `imports` array) so chunks
     // don't trip the '*' wildcard re-export sentinel that would otherwise
