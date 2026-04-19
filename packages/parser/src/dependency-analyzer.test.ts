@@ -271,6 +271,50 @@ describe('analyzeDependencies', () => {
       expect(dependentPaths).not.toContain('src/c.ts'); // must not leak through b
     });
 
+    it('should short-circuit on a Rust-style "*" wildcard glob import', () => {
+      // Rust `use foo::*` writes a '*' marker into importedSymbols. A file
+      // that glob-imports the target AND exports anything counts as re-
+      // exporting everything the target exports.
+      const chunks: CodeChunk[] = [
+        createChunk('src/a.ts', [], undefined, { exports: ['fnA'] }),
+        createChunk('src/b.ts', ['src/a.ts'], undefined, {
+          importedSymbols: { './a': ['*'] },
+          exports: ['fnA'],
+        }),
+        createChunk('src/c.ts', ['src/b.ts'], undefined, {
+          importedSymbols: { './b': ['fnA'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('src/a.ts', chunks, workspaceRoot);
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      expect(dependentPaths).toContain('src/b.ts'); // direct
+      expect(dependentPaths).toContain('src/c.ts'); // transitive via glob re-export
+    });
+
+    it('should short-circuit on a JS-style "* as ns" namespace import', () => {
+      // `import * as ns from './a'; export { ns };` → importedSymbols stores
+      // '* as ns' and exports lists 'ns'. b counts as a re-exporter because
+      // the namespace import pulls in everything.
+      const chunks: CodeChunk[] = [
+        createChunk('src/a.ts', [], undefined, { exports: ['fnA'] }),
+        createChunk('src/b.ts', ['src/a.ts'], undefined, {
+          importedSymbols: { './a': ['* as ns'] },
+          exports: ['ns'],
+        }),
+        createChunk('src/c.ts', ['src/b.ts'], undefined, {
+          importedSymbols: { './b': ['ns'] },
+        }),
+      ];
+
+      const result = analyzeDependencies('src/a.ts', chunks, workspaceRoot);
+
+      const dependentPaths = result.dependents.map(d => d.filepath);
+      expect(dependentPaths).toContain('src/b.ts');
+      expect(dependentPaths).toContain('src/c.ts');
+    });
+
     it('should find transitive dependents through barrel files', () => {
       // auth.ts → index.ts (re-exports) → handler.ts (imports from index)
       const chunks: CodeChunk[] = [
@@ -329,9 +373,10 @@ describe('analyzeDependencies', () => {
       expect(result.dependentCount).toBe(3);
     });
 
-    it('should handle circular re-exports without infinite loops', () => {
-      // a.ts ↔ b.ts (circular). b genuinely re-exports foo from a, and c
-      // imports foo via b — so c is a transitive dependent of a.
+    it('should handle cyclic import graphs with re-exports without infinite loops', () => {
+      // a.ts and b.ts import from each other (cyclic import graph). b genuinely
+      // re-exports foo from a, and c imports foo via b — so c is a transitive
+      // dependent of a. The BFS must terminate despite the cycle.
       const chunks: CodeChunk[] = [
         createChunk('src/a.ts', ['src/b.ts'], undefined, {
           exports: ['foo'],
