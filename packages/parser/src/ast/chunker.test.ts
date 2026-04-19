@@ -156,6 +156,36 @@ function test() {
       // '../lib/bar' → 'src/lib/bar'
       expect(funcChunk?.metadata.imports).toContain('src/consumer/foo');
       expect(funcChunk?.metadata.imports).toContain('src/lib/bar');
+
+      // Same resolution must apply to importedSymbols keys — dependency
+      // analysis matches symbol-level via this map, not just `imports`.
+      expect(funcChunk?.metadata.importedSymbols).toMatchObject({
+        'src/consumer/foo': ['foo'],
+        'src/lib/bar': ['bar'],
+      });
+    });
+
+    it('should NOT resolve relative-looking specifiers for non-JS/TS languages (#525 scope)', () => {
+      // Rust's extractor rewrites `super::utils::helper` as `../utils/helper`
+      // as an internal storage convention, not as a filesystem path. Resolving
+      // that against the chunk's directory would produce incorrect keys, so
+      // the gate in prepareASTContext must keep Rust imports untouched.
+      const rustContent = `
+use super::utils::helper;
+
+pub fn run() {
+    helper();
+}
+      `.trim();
+
+      const chunks = chunkByAST('crates/app/src/foo.rs', rustContent);
+      const funcChunk = chunks.find(c => c.metadata.symbolName === 'run');
+
+      expect(funcChunk?.metadata.imports).toBeDefined();
+      // The Rust extractor's normalized form stays exactly as-is.
+      expect(funcChunk?.metadata.imports).toContain('../utils/helper');
+      // Explicitly NOT resolved against crates/app/src/foo.rs.
+      expect(funcChunk?.metadata.imports).not.toContain('crates/app/utils/helper');
     });
 
     it('should calculate cyclomatic complexity', () => {

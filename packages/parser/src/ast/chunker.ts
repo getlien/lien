@@ -49,12 +49,27 @@ function parseAndValidate(filepath: string, content: string) {
 }
 
 /**
+ * Languages that use `./` / `../` specifiers with filesystem semantics, where
+ * resolving relative imports against the importer's path produces the correct
+ * workspace-relative target.
+ *
+ * Deliberately excludes Rust, whose extractor rewrites `super::x` to `../x`
+ * as a normalized storage format — but Rust module paths don't map to parent
+ * filesystem directories, so resolving them here would produce wrong keys.
+ * Python's `from . import x` also passes through as-is (different mechanics).
+ */
+const RESOLVE_RELATIVE_IMPORTS: ReadonlySet<SupportedLanguage> = new Set([
+  'javascript',
+  'typescript',
+]);
+
+/**
  * Prepare AST context by extracting imports, exports, and symbols.
  *
- * `filepath` is threaded into the import extractors so that relative
- * specifiers (`./foo`, `../bar`) are resolved to workspace-relative paths
- * at index time. This prevents cross-package basename collisions in the
- * downstream dependency analysis (see #525).
+ * For JS/TS, `filepath` is threaded into the import extractors so that relative
+ * specifiers (`./foo`, `../bar`) are resolved to workspace-relative paths at
+ * index time. This prevents cross-package basename collisions in the downstream
+ * dependency analysis (see #525).
  */
 function prepareASTContext(
   content: string,
@@ -62,10 +77,11 @@ function prepareASTContext(
   language: SupportedLanguage,
   filepath: string,
 ): ASTContext {
+  const resolutionPath = RESOLVE_RELATIVE_IMPORTS.has(language) ? filepath : undefined;
   return {
     lines: content.split('\n'),
-    fileImports: extractImports(rootNode, language, filepath),
-    importedSymbols: extractImportedSymbols(rootNode, language, filepath),
+    fileImports: extractImports(rootNode, language, resolutionPath),
+    importedSymbols: extractImportedSymbols(rootNode, language, resolutionPath),
     fileExports: extractExports(rootNode, language),
     traverser: getTraverser(language),
   };
