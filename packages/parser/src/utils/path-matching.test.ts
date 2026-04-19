@@ -416,6 +416,16 @@ describe('resolveRelativeImport', () => {
     expect(resolveRelativeImport('packages/x/src/a.py', '..pkg.thing')).toBe('..pkg.thing');
   });
 
+  it('lets specifiers that escape the workspace stay as relative paths', () => {
+    // Importer is 3 segments deep; the specifier climbs 4 levels out. The
+    // resolver collapses what it can and keeps a leading `..` — downstream
+    // matchesFile then treats it as a boundary-matched path without producing
+    // false positives for unrelated in-workspace files.
+    expect(resolveRelativeImport('packages/a/src/x.ts', '../../../../outside/thing')).toBe(
+      '../outside/thing',
+    );
+  });
+
   it('prevents cross-package basename collisions (#525)', () => {
     // The scenario that motivated this fix: two files share a basename in different
     // packages. After resolution, their specifiers are distinct workspace-relative

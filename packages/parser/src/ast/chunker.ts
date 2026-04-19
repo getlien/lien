@@ -53,10 +53,14 @@ function parseAndValidate(filepath: string, content: string) {
  * resolving relative imports against the importer's path produces the correct
  * workspace-relative target.
  *
- * Deliberately excludes Rust, whose extractor rewrites `super::x` to `../x`
- * as a normalized storage format — but Rust module paths don't map to parent
- * filesystem directories, so resolving them here would produce wrong keys.
- * Python's `from . import x` also passes through as-is (different mechanics).
+ * Deliberately excludes Rust: its extractor emits `../x` as an internal
+ * storage convention for `super::x`, but that string does not describe the
+ * actual filesystem target. `super::x` from `src/foo.rs` resolves to the
+ * sibling module `src/x`, not to `src/../x` — so applying filesystem-style
+ * `..` resolution here would produce wrong keys.
+ *
+ * Python's `from . import x` passes through as-is (different mechanics: dot
+ * counting rather than path joining).
  */
 const RESOLVE_RELATIVE_IMPORTS: ReadonlySet<SupportedLanguage> = new Set([
   'javascript',

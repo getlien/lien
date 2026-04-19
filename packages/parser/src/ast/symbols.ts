@@ -3,6 +3,7 @@ import type { SymbolInfo, SupportedLanguage } from './types.js';
 import type { LanguageSymbolExtractor } from './extractors/types.js';
 import { getExtractor, getImportExtractor, getSymbolExtractor } from './extractors/index.js';
 import { getLanguage } from './languages/registry.js';
+
 import { resolveRelativeImport } from '../utils/path-matching.js';
 
 /**
