@@ -322,13 +322,6 @@ export function chunkImportsFrom(
 }
 
 /**
- * Check if a chunk has any exports.
- */
-function chunkHasExports(chunk: CodeChunk): boolean {
-  return chunk.metadata.exports != null && chunk.metadata.exports.length > 0;
-}
-
-/**
  * Group chunks by their normalized file path.
  */
 export function groupChunksByNormalizedPath(
@@ -349,24 +342,77 @@ export function groupChunksByNormalizedPath(
 }
 
 /**
- * Check if a file (given its chunks) is a re-exporter from a source path.
- * A re-exporter has both imports from the source and exports.
+ * Collect the symbols a file imports from a given source path, sourced
+ * exclusively from `importedSymbols`. Mirrors the CLI-side approach in
+ * `packages/cli/src/mcp/handlers/dependency-analyzer.ts`.
+ *
+ * Deliberately ignores the raw `imports` array — a raw-only match means the
+ * file imports for side effect or does `export * from`, neither of which
+ * should qualify it as a re-exporter on its own (#526).
+ */
+function collectImportedSymbolsFromSource(
+  chunks: CodeChunk[],
+  sourcePath: string,
+  normalizePathCached: (path: string) => string,
+): Set<string> {
+  const symbols = new Set<string>();
+  for (const chunk of chunks) {
+    const importedSymbols = chunk.metadata.importedSymbols;
+    if (!importedSymbols || typeof importedSymbols !== 'object') continue;
+    for (const [importPath, syms] of Object.entries(importedSymbols)) {
+      if (matchesFile(normalizePathCached(importPath), sourcePath)) {
+        for (const sym of syms) symbols.add(sym);
+      }
+    }
+  }
+  return symbols;
+}
+
+/**
+ * Collect all symbols the file exports across its chunks.
+ */
+function collectExportsFromChunks(chunks: CodeChunk[]): Set<string> {
+  const allExports = new Set<string>();
+  for (const chunk of chunks) {
+    for (const exp of chunk.metadata.exports || []) allExports.add(exp);
+  }
+  return allExports;
+}
+
+/**
+ * Check if a file (given its chunks) genuinely re-exports symbols from a
+ * source path.
+ *
+ * Requires a non-empty intersection between (a) symbols the file imports from
+ * the source and (b) symbols the file exports. A plain named import (`import
+ * { x } from './a'`) paired with an unrelated own export (`export function y`)
+ * is no longer a re-exporter — closing the #526 false positive.
+ *
+ * Wildcard markers (`'*'` from Rust `use foo::*`, `'* as x'` from JS
+ * namespace imports) still trigger re-export detection: both mean "we pulled
+ * in everything the source exports," so intersection against the file's own
+ * export list is the right signal.
  */
 export function fileIsReExporter(
   chunks: CodeChunk[],
   sourcePath: string,
   normalizePathCached: (path: string) => string,
 ): boolean {
-  let importsFromSource = false;
-  let hasExports = false;
-  for (const chunk of chunks) {
-    if (!importsFromSource && chunkImportsFrom(chunk, sourcePath, normalizePathCached)) {
-      importsFromSource = true;
-    }
-    if (!hasExports && chunkHasExports(chunk)) {
-      hasExports = true;
-    }
-    if (importsFromSource && hasExports) return true;
+  const importsFromSource = collectImportedSymbolsFromSource(
+    chunks,
+    sourcePath,
+    normalizePathCached,
+  );
+  if (importsFromSource.size === 0) return false;
+
+  const allExports = collectExportsFromChunks(chunks);
+  if (allExports.size === 0) return false;
+
+  // Wildcards mean "imported everything"; any own export then counts.
+  if (importsFromSource.has('*')) return true;
+  for (const sym of importsFromSource) {
+    if (sym.startsWith('* as ')) return true;
+    if (allExports.has(sym)) return true;
   }
   return false;
 }
