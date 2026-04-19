@@ -43,6 +43,11 @@ jobs:
           version: npm run version
           title: 'chore: version packages'
           commit: 'chore: version packages'
+          # Push via the GitHub Contents API so commits/tags are auto-signed
+          # by the GITHUB_TOKEN's owner. Required by the main-branch
+          # `required_signatures` ruleset — without this, the auto-opened
+          # Version Packages PR lands with unsigned commits and can't merge.
+          commitMode: github-api
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No NPM_TOKEN needed - uses OIDC provenance
