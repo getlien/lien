@@ -138,22 +138,24 @@ interface User {
       expect(interfaceChunk?.metadata.symbolType).toBe('interface');
     });
 
-    it('should extract imports', () => {
+    it('should extract imports and resolve relative specifiers against the file path', () => {
       const content = `
 import { foo } from './foo';
-import { bar } from './bar';
+import { bar } from '../lib/bar';
 
 function test() {
   return foo() + bar();
 }
       `.trim();
 
-      const chunks = chunkByAST('test.ts', content);
+      const chunks = chunkByAST('src/consumer/test.ts', content);
       const funcChunk = chunks.find(c => c.metadata.symbolName === 'test');
 
       expect(funcChunk?.metadata.imports).toBeDefined();
-      expect(funcChunk?.metadata.imports).toContain('./foo');
-      expect(funcChunk?.metadata.imports).toContain('./bar');
+      // './foo' relative to 'src/consumer/test.ts' → 'src/consumer/foo'
+      // '../lib/bar' → 'src/lib/bar'
+      expect(funcChunk?.metadata.imports).toContain('src/consumer/foo');
+      expect(funcChunk?.metadata.imports).toContain('src/lib/bar');
     });
 
     it('should calculate cyclomatic complexity', () => {

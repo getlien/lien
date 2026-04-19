@@ -50,16 +50,22 @@ function parseAndValidate(filepath: string, content: string) {
 
 /**
  * Prepare AST context by extracting imports, exports, and symbols.
+ *
+ * `filepath` is threaded into the import extractors so that relative
+ * specifiers (`./foo`, `../bar`) are resolved to workspace-relative paths
+ * at index time. This prevents cross-package basename collisions in the
+ * downstream dependency analysis (see #525).
  */
 function prepareASTContext(
   content: string,
   rootNode: Parser.SyntaxNode,
   language: SupportedLanguage,
+  filepath: string,
 ): ASTContext {
   return {
     lines: content.split('\n'),
-    fileImports: extractImports(rootNode, language),
-    importedSymbols: extractImportedSymbols(rootNode, language),
+    fileImports: extractImports(rootNode, language, filepath),
+    importedSymbols: extractImportedSymbols(rootNode, language, filepath),
     fileExports: extractExports(rootNode, language),
     traverser: getTraverser(language),
   };
@@ -150,7 +156,7 @@ export function chunkByAST(
   const { language, rootNode } = parseAndValidate(filepath, content);
 
   // Prepare context
-  const context = prepareASTContext(content, rootNode, language);
+  const context = prepareASTContext(content, rootNode, language, filepath);
 
   // Find and process top-level nodes
   const topLevelNodes = findTopLevelNodes(rootNode, context.traverser);

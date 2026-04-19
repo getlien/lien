@@ -45,4 +45,5 @@ export const DEFAULT_DEBOUNCE_MS = 1000;
 // v2: AST-based chunking + enhanced metadata (symbolName, complexity, etc.)
 // v3: Added cognitiveComplexity field to schema
 // v4: Added Halstead metrics (volume, difficulty, effort, bugs)
-export const INDEX_FORMAT_VERSION = 4;
+// v5: Resolved relative imports to workspace-relative paths in chunk metadata (#525)
+export const INDEX_FORMAT_VERSION = 5;

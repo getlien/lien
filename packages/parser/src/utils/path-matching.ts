@@ -5,6 +5,8 @@
  * the get_dependents tool to find reverse dependencies.
  */
 
+import * as path from 'node:path';
+
 import { getSupportedExtensions } from '../ast/languages/registry.js';
 
 /**
@@ -258,6 +260,30 @@ function matchesPHPNamespace(importPath: string, targetPath: string): boolean {
   // All import components must match (from the end)
   // This ensures App/Models/User matches web/app/Models/User but not app/Services/User
   return matched === importComponents.length;
+}
+
+/**
+ * Resolve a relative import specifier against its importer's file path.
+ *
+ * Only acts on specifiers starting with `./` or `../`. Package specifiers
+ * (e.g. `@liendev/core`, `lodash`), dotted Python-style imports, and absolute
+ * paths pass through unchanged.
+ *
+ * Returns the resolved path in the same form as `importerFile` — relative when
+ * `importerFile` is relative, absolute when absolute. The caller's downstream
+ * normalization (`normalizePath`) is what ultimately strips extensions and the
+ * workspace-root prefix, so no extra work is needed here.
+ *
+ * @param importerFile - File path of the chunk doing the importing
+ * @param specifier - The raw import specifier from source code
+ * @returns Resolved path for relative specifiers; the original string otherwise
+ */
+export function resolveRelativeImport(importerFile: string, specifier: string): string {
+  if (!specifier.startsWith('./') && !specifier.startsWith('../')) {
+    return specifier;
+  }
+  const importerDir = path.posix.dirname(importerFile.replace(/\\/g, '/'));
+  return path.posix.normalize(path.posix.join(importerDir, specifier));
 }
 
 /**
