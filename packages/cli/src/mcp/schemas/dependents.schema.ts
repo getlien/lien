@@ -11,8 +11,9 @@ import path from 'path';
  * for that exported symbol instead of just file-level dependencies.
  *
  * Limitations:
- * - Scans up to 10,000 code chunks. For very large codebases (>1M lines),
- *   results may be incomplete. A warning is returned if the limit is reached.
+ * - Single-repo scans iterate every indexed chunk with no chunk-count cap.
+ * - Cross-repo scans (`crossRepo: true`) cap at 100,000 chunks; if that cap is
+ *   reached, a warning is returned in the response `note`.
  */
 export const GetDependentsSchema = z.object({
   filepath: z
@@ -27,8 +28,9 @@ export const GetDependentsSchema = z.object({
       'Path to file to find dependents for (relative to workspace root).\n\n' +
         "Example: 'src/utils/validate.ts'\n\n" +
         'Returns all files that import or depend on this file.\n\n' +
-        'Note: Scans up to 10,000 code chunks. For very large codebases,\n' +
-        'results may be incomplete (a warning will be included if truncated).',
+        'Single-repo scans are unbounded. Cross-repo scans cap at 100,000\n' +
+        'chunks — a warning is included in the response `note` if the cap\n' +
+        'is reached.',
     ),
 
   symbol: z

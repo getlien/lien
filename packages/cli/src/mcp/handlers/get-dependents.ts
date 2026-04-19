@@ -71,7 +71,8 @@ function buildNotes(crossRepoFallback: boolean, hitLimit: boolean): string[] {
     );
   }
   if (hitLimit) {
-    notes.push('Scanned 10,000 chunks (limit reached). Results may be incomplete.');
+    // Only set by the cross-repo scan path (single-repo pagination is unbounded).
+    notes.push('Cross-repo scan reached its 100,000-chunk limit. Results may be incomplete.');
   }
   return notes;
 }

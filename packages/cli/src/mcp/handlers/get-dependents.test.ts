@@ -295,8 +295,8 @@ describe('handleGetDependents', () => {
       const result = await handleGetDependents({ filepath: 'src/widely-used.ts' }, mockCtx);
 
       const parsed = JSON.parse(result.content![0].text);
-      expect(parsed.note).toContain('10,000');
-      expect(parsed.note).toContain('limit reached');
+      expect(parsed.note).toContain('100,000');
+      expect(parsed.note).toContain('Cross-repo');
       expect(parsed.note).toContain('incomplete');
     });
 
