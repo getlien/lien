@@ -24,10 +24,13 @@ jobs:
           cache: 'npm'
           # Don't set registry-url - npm will use OIDC automatically with publishConfig.provenance
 
-      # Node 22's bundled npm (10.9+) supports --provenance natively, so we
-      # no longer self-upgrade. The previous `npm install -g npm@latest` step
-      # hit a recurring self-upgrade crash (`Cannot find module 'promise-retry'`
-      # from inside @npmcli/arborist), blocking releases.
+      # OIDC trusted publishing requires npm 11.5.1+ (the runner's Node 22
+      # bundled npm is 10.9.x). Pin to a specific 11.x rather than @latest —
+      # plain `npm install -g npm@latest` has hit a self-upgrade crash on the
+      # hosted runner image (`Cannot find module 'promise-retry'` from inside
+      # @npmcli/arborist), and pinning makes the install deterministic.
+      - name: Install npm 11.x for OIDC trusted publishing
+        run: npm install -g npm@11.5.1
 
       - name: Configure npm scope
         run: |
