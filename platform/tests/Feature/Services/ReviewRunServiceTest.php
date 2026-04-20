@@ -5,6 +5,7 @@ namespace Tests\Feature\Services;
 use App\Enums\CommentResolution;
 use App\Enums\ReviewRunStatus;
 use App\Enums\ReviewRunType;
+use App\Models\Organization;
 use App\Models\Repository;
 use App\Models\ReviewComment;
 use App\Models\ReviewRun;
@@ -512,6 +513,58 @@ class ReviewRunServiceTest extends TestCase
         $expected = hash('sha256', 'bugs:src/a.ts:funcA:null_check');
 
         $this->assertEquals($expected, $comment->fingerprint);
+    }
+
+    public function test_deducts_credit_on_completion(): void
+    {
+        $org = Organization::factory()->withCredits(10)->create();
+        $repo = Repository::factory()->create(['organization_id' => $org->id]);
+        $run = ReviewRun::factory()->running()->create(['repository_id' => $repo->id]);
+
+        $this->service->updateStatus($run, ReviewRunStatus::Completed);
+
+        $org->refresh();
+        $this->assertEquals(9, $org->credit_balance);
+
+        $this->assertDatabaseHas('credit_transactions', [
+            'organization_id' => $org->id,
+            'review_run_id' => $run->id,
+            'type' => 'deduction',
+            'amount' => -1,
+        ]);
+    }
+
+    public function test_does_not_deduct_credit_on_failure(): void
+    {
+        $org = Organization::factory()->withCredits(10)->create();
+        $repo = Repository::factory()->create(['organization_id' => $org->id]);
+        $run = ReviewRun::factory()->running()->create(['repository_id' => $repo->id]);
+
+        $this->service->updateStatus($run, ReviewRunStatus::Failed);
+
+        $org->refresh();
+        $this->assertEquals(10, $org->credit_balance);
+
+        $this->assertDatabaseMissing('credit_transactions', [
+            'organization_id' => $org->id,
+            'review_run_id' => $run->id,
+        ]);
+    }
+
+    public function test_does_not_deduct_credit_for_byok_org(): void
+    {
+        $org = Organization::factory()->withCredits(0)->byok()->create();
+        $repo = Repository::factory()->create(['organization_id' => $org->id]);
+        $run = ReviewRun::factory()->running()->create(['repository_id' => $repo->id]);
+
+        $this->service->updateStatus($run, ReviewRunStatus::Completed);
+
+        $org->refresh();
+        $this->assertEquals(0, $org->credit_balance);
+
+        $this->assertDatabaseMissing('credit_transactions', [
+            'organization_id' => $org->id,
+        ]);
     }
 
     /**

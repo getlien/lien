@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\DataTransferObjects\ReviewJobPayload;
 use App\Enums\ReviewRunStatus;
 use App\Enums\ReviewRunType;
+use App\Models\Organization;
 use App\Models\Repository;
 use App\Models\ReviewRun;
 use App\Services\GitHubAppService;
@@ -61,8 +62,32 @@ class ProcessPullRequestWebhook implements ShouldQueue
         $repository->organization()
             ->update(['github_installation_id' => $installationId]);
 
+        $org = $repository->organization;
         $token = $gitHubApp->getInstallationToken($installationId);
 
+        $reviewRun = $this->findOrCreateReviewRun($repository, $fullName);
+
+        if (! $reviewRun) {
+            return;
+        }
+
+        if (! $reviewRun->github_check_run_id) {
+            $checkRunId = $checkService->createCheckRun($reviewRun, $token);
+
+            if ($checkRunId) {
+                $reviewRun->update(['github_check_run_id' => $checkRunId]);
+            }
+        }
+
+        if (! $this->hasCredits($org, $reviewRun, $checkService, $token)) {
+            return;
+        }
+
+        $this->dispatchToNats($repository, $reviewRun, $configService, $nats, $tokenService, $token);
+    }
+
+    private function findOrCreateReviewRun(Repository $repository, ?string $fullName): ?ReviewRun
+    {
         $pr = $this->payload['pull_request'];
         $headSha = $pr['head']['sha'];
         $prNumber = $pr['number'];
@@ -92,17 +117,52 @@ class ProcessPullRequestWebhook implements ShouldQueue
                 'status' => $reviewRun->status->value,
             ]);
 
-            return;
+            return null;
         }
 
-        if (! $reviewRun->github_check_run_id) {
-            $checkRunId = $checkService->createCheckRun($reviewRun, $token);
+        return $reviewRun;
+    }
 
-            if ($checkRunId) {
-                $reviewRun->update(['github_check_run_id' => $checkRunId]);
-            }
+    private function hasCredits(
+        Organization $org,
+        ReviewRun $reviewRun,
+        GitHubCheckService $checkService,
+        string $token,
+    ): bool {
+        if ($org->canRunReview()) {
+            return true;
         }
 
+        Log::info('Insufficient credits, skipping review', [
+            'repo' => $reviewRun->repository->full_name,
+            'pr' => $reviewRun->pr_number,
+            'organization_id' => $org->id,
+        ]);
+
+        $reviewRun->update(['status' => ReviewRunStatus::Skipped]);
+
+        if ($reviewRun->github_check_run_id) {
+            $checkService->completeCheckRun(
+                reviewRun: $reviewRun,
+                checkRunId: $reviewRun->github_check_run_id,
+                installationToken: $token,
+                conclusion: 'neutral',
+                title: 'No credits remaining',
+                summary: 'This review was skipped because your organization has no credits remaining. [Purchase credits](https://lien.dev/billing) to continue receiving AI-powered reviews.',
+            );
+        }
+
+        return false;
+    }
+
+    private function dispatchToNats(
+        Repository $repository,
+        ReviewRun $reviewRun,
+        RepoConfigService $configService,
+        NatsService $nats,
+        RunnerTokenService $tokenService,
+        string $token,
+    ): void {
         $config = $configService->getRunnerConfig($repository);
 
         $payload = ReviewJobPayload::fromWebhook(
@@ -118,8 +178,8 @@ class ProcessPullRequestWebhook implements ShouldQueue
         $nats->publish('reviews.pr', $payload->toArray());
 
         Log::info('Dispatched PR review to NATS', [
-            'repo' => $fullName,
-            'pr' => $prNumber,
+            'repo' => $repository->full_name,
+            'pr' => $reviewRun->pr_number,
             'review_run_id' => $reviewRun->id,
             'check_run_id' => $reviewRun->github_check_run_id,
         ]);

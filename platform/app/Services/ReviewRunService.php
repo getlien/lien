@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\BillingMode;
 use App\Enums\CommentResolution;
 use App\Enums\ReviewRunStatus;
 use App\Enums\ReviewRunType;
@@ -185,6 +186,21 @@ class ReviewRunService
 
         $reviewRun->update($updates);
 
+        if ($status === ReviewRunStatus::Completed) {
+            $this->deductCreditOnCompletion($reviewRun);
+        }
+
         return $reviewRun;
+    }
+
+    private function deductCreditOnCompletion(ReviewRun $reviewRun): void
+    {
+        $org = $reviewRun->repository->organization;
+
+        if ($org->billing_mode === BillingMode::Byok) {
+            return;
+        }
+
+        app(CreditService::class)->deductCredit($org, $reviewRun);
     }
 }
