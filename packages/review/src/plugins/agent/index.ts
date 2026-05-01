@@ -27,7 +27,7 @@ import { AGENT_TOOLS, dispatchTool } from './tools.js';
 
 const configSchema = z.object({
   apiKey: z.string().min(1),
-  model: z.string().default('google/gemini-2.5-flash'),
+  model: z.string().default('google/gemini-3-flash-preview'),
   /** 'openai' for OpenRouter/Gemini/DeepSeek, 'anthropic' for Claude */
   provider: z.enum(['openai', 'anthropic']).default('openai'),
   baseUrl: z.string().default('https://openrouter.ai/api/v1'),
