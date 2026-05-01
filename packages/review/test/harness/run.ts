@@ -39,24 +39,47 @@ interface CliFlags {
   model?: string;
 }
 
+/**
+ * Each value-taking flag's setter. Bool flags and `--help` are handled
+ * inline in `parseFlags` since they don't follow the same shape.
+ */
+const VALUE_FLAG_SETTERS: Record<string, (f: CliFlags, value: string) => void> = {
+  '--rule': (f, v) => {
+    f.rule = v;
+  },
+  '--fixture': (f, v) => {
+    f.fixture = v;
+  },
+  '--votes': (f, v) => {
+    f.votes = parseInt(v, 10);
+  },
+  '--calibrate': (f, v) => {
+    f.calibrate = parseInt(v, 10);
+  },
+  '--model': (f, v) => {
+    f.model = v;
+  },
+};
+
 function parseFlags(argv: string[]): CliFlags {
   const flags: CliFlags = { votes: 3, json: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === '--rule') flags.rule = argv[++i];
-    else if (arg === '--fixture') flags.fixture = argv[++i];
-    else if (arg === '--votes') flags.votes = parseInt(argv[++i], 10);
-    else if (arg === '--calibrate') flags.calibrate = parseInt(argv[++i], 10);
-    else if (arg === '--model') flags.model = argv[++i];
-    else if (arg === '--json') flags.json = true;
-    else if (arg === '--help' || arg === '-h') {
+    if (arg === '--json') {
+      flags.json = true;
+      continue;
+    }
+    if (arg === '--help' || arg === '-h') {
       printUsage();
       process.exit(0);
-    } else {
+    }
+    const setter = VALUE_FLAG_SETTERS[arg];
+    if (!setter) {
       console.error(`Unknown flag: ${arg}`);
       printUsage();
       process.exit(2);
     }
+    setter(flags, argv[++i]);
   }
   return flags;
 }
@@ -136,15 +159,74 @@ async function loadAssertions(path: string): Promise<FixtureAssertions> {
   return mod.default;
 }
 
-async function main(): Promise<void> {
-  const flags = parseFlags(process.argv.slice(2));
+function requireApiKey(): string {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     console.error('OPENROUTER_API_KEY env required for OpenRouter mode.');
     console.error('For free iteration without an API key, use /test-harness in CC.');
     process.exit(2);
   }
+  return apiKey;
+}
 
+interface FixtureOutcome {
+  passed: boolean;
+  cost: number;
+  jsonEntry: unknown;
+  text: string;
+}
+
+async function runOneFixture(
+  f: FixturePair,
+  opts: RunnerOptions,
+  flags: CliFlags,
+): Promise<FixtureOutcome> {
+  const assertions = await loadAssertions(f.assertionsPath);
+  const label = `${f.rule}/${f.name}`;
+
+  if (flags.calibrate) {
+    const result = await calibrate(f.fixturePath, assertions, opts, flags.calibrate);
+    return {
+      passed: result.meetsReliabilityBar,
+      cost: result.totalCost,
+      jsonEntry: { label, mode: 'calibrate', result },
+      text: reportCalibrate(label, result),
+    };
+  }
+  const k = assertions.votes ?? flags.votes;
+  const result = await vote(f.fixturePath, assertions, opts, k);
+  return {
+    passed: result.agree && result.passes === result.votes.length,
+    cost: result.totalCost,
+    jsonEntry: { label, mode: 'vote', result },
+    text: reportVote(label, result),
+  };
+}
+
+function printSummary(
+  allPassed: boolean,
+  totalCost: number,
+  jsonReport: unknown[],
+  flags: CliFlags,
+): void {
+  if (flags.json) {
+    process.stdout.write(
+      JSON.stringify({ allPassed, totalCost, fixtures: jsonReport }, null, 2) + '\n',
+    );
+    return;
+  }
+  console.log('');
+  console.log(`Total cost: $${totalCost.toFixed(4)}`);
+  if (!allPassed) {
+    console.log(
+      '\n⚠️  One or more fixtures failed. Iterate prompts via /test-harness (CC mode), then re-calibrate here.',
+    );
+  }
+}
+
+async function main(): Promise<void> {
+  const flags = parseFlags(process.argv.slice(2));
+  const apiKey = requireApiKey();
   const fixtures = await discoverFixtures(flags);
   if (fixtures.length === 0) {
     console.error('No fixtures found.');
@@ -159,45 +241,14 @@ async function main(): Promise<void> {
   const jsonReport: unknown[] = [];
 
   for (const f of fixtures) {
-    const assertions = await loadAssertions(f.assertionsPath);
-    const label = `${f.rule}/${f.name}`;
-
-    if (flags.calibrate) {
-      const result = await calibrate(f.fixturePath, assertions, opts, flags.calibrate);
-      totalCost += result.totalCost;
-      if (!result.meetsReliabilityBar) allPassed = false;
-      if (flags.json) {
-        jsonReport.push({ label, mode: 'calibrate', result });
-      } else {
-        console.log(reportCalibrate(label, result));
-      }
-    } else {
-      const k = assertions.votes ?? flags.votes;
-      const result = await vote(f.fixturePath, assertions, opts, k);
-      totalCost += result.totalCost;
-      if (!result.agree || result.passes !== result.votes.length) allPassed = false;
-      if (flags.json) {
-        jsonReport.push({ label, mode: 'vote', result });
-      } else {
-        console.log(reportVote(label, result));
-      }
-    }
+    const outcome = await runOneFixture(f, opts, flags);
+    if (!outcome.passed) allPassed = false;
+    totalCost += outcome.cost;
+    if (flags.json) jsonReport.push(outcome.jsonEntry);
+    else console.log(outcome.text);
   }
 
-  if (flags.json) {
-    process.stdout.write(
-      JSON.stringify({ allPassed, totalCost, fixtures: jsonReport }, null, 2) + '\n',
-    );
-  } else {
-    console.log('');
-    console.log(`Total cost: $${totalCost.toFixed(4)}`);
-    if (!allPassed) {
-      console.log(
-        '\n⚠️  One or more fixtures failed. Iterate prompts via /test-harness (CC mode), then re-calibrate here.',
-      );
-    }
-  }
-
+  printSummary(allPassed, totalCost, jsonReport, flags);
   process.exit(allPassed ? 0 : 1);
 }
 
