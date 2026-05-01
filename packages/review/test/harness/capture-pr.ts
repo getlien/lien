@@ -16,7 +16,7 @@
 import { execSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve, dirname, join } from 'node:path';
+import { resolve, dirname, join, isAbsolute, relative } from 'node:path';
 
 import { performChunkOnlyIndex } from '@liendev/parser';
 
@@ -37,6 +37,21 @@ function sh(cmd: string): string {
   return execSync(cmd, { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
 }
 
+/**
+ * Mirror the per-line bookkeeping in `parsePatchLines` from
+ * `packages/review/src/github-api.ts` so captured fixtures' diffLines
+ * match what the runner builds in production:
+ *   - hunk header sets `currentLine` to the post-image start (1-based)
+ *   - both `+` (added) and ` ` (context) lines are added to the set and
+ *     advance the counter
+ *   - `-` (deleted) lines don't advance
+ *   - `+++ b/...` file header is skipped
+ *
+ * Engine consumers (`engine.ts:600`) use this to filter findings to
+ * diff-adjacent lines via `diffLines.get(file)?.has(line)`. If we only
+ * captured `+` lines, findings on context lines would silently fall out
+ * of the harness's filter behavior vs prod.
+ */
 function parseUnifiedDiff(diff: string): {
   patches: Map<string, string>;
   diffLines: Map<string, Set<number>>;
@@ -52,30 +67,37 @@ function parseUnifiedDiff(diff: string): {
     patches.set(path, body);
 
     const lines = new Set<number>();
-    let currentNew = 0;
+    let currentLine = 0; // overwritten by the first hunk header
     for (const line of block.split('\n')) {
       const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
       if (hunkMatch) {
-        currentNew = parseInt(hunkMatch[1], 10);
+        currentLine = parseInt(hunkMatch[1], 10);
         continue;
       }
-      if (line.startsWith('+') && !line.startsWith('+++')) {
-        lines.add(currentNew);
-        currentNew++;
-      } else if (line.startsWith(' ')) {
-        currentNew++;
-      } else if (line.startsWith('-')) {
-        // deletion: don't advance new-line counter
+      if (line.startsWith('+') || line.startsWith(' ')) {
+        if (!line.startsWith('+++')) {
+          lines.add(currentLine);
+          currentLine++;
+        }
       }
+      // `-` lines don't advance currentLine (post-image counter).
     }
     diffLines.set(path, lines);
   }
   return { patches, diffLines };
 }
 
-/** Normalize a repo-relative path for set membership checks. */
-function normalizeRepoPath(p: string): string {
-  return p.replace(/\\/g, '/').replace(/^\.\//, '');
+/**
+ * Normalize a path to repo-relative form for set membership.
+ * Handles three indexer-output shapes defensively:
+ *   1. Already repo-relative: 'src/risk.ts' (current behavior)
+ *   2. Absolute, inside the worktree: '/tmp/lien-capture-…/src/risk.ts'
+ *   3. Repo-relative with leading './': './src/risk.ts'
+ * On Windows, also normalizes backslashes.
+ */
+function toRepoRelative(p: string, repoRoot: string): string {
+  const rel = isAbsolute(p) ? relative(repoRoot, p) : p;
+  return rel.replace(/\\/g, '/').replace(/^\.\//, '');
 }
 
 async function withWorktree<T>(sha: string, fn: (path: string) => Promise<T>): Promise<T> {
@@ -144,9 +166,12 @@ async function main(): Promise<void> {
 
     // Path-shape between the parser's chunk metadata and `gh pr view`'s file
     // list isn't guaranteed to match byte-for-byte (Windows backslashes,
-    // ./ prefixes). Normalize both sides before set membership.
-    const changedSet = new Set(changedFiles.map(normalizeRepoPath));
-    const chunks = repoChunks.filter(c => changedSet.has(normalizeRepoPath(c.metadata.file)));
+    // ./ prefixes, absolute vs. repo-relative). Normalize both sides to
+    // repo-relative POSIX form before set membership.
+    const changedSet = new Set(changedFiles.map(f => toRepoRelative(f, worktree)));
+    const chunks = repoChunks.filter(c =>
+      changedSet.has(toRepoRelative(c.metadata.file, worktree)),
+    );
     console.error(`[capture] ${chunks.length} chunks for changed files`);
 
     // Real complexity analysis on the changed files so the captured ctx
