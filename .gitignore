@@ -81,4 +81,10 @@ coverage/
 .test-git-*
 .test-watcher-*
 
+# Captured agent-rule harness fixtures — large (10MB+), regenerate via
+# packages/review/test/harness/capture-pr.ts (#538). Hand-authored
+# placeholder fixtures stay committed via the negation rule below.
+packages/review/test/harness/fixtures/**/*.fixture.json
+!packages/review/test/harness/fixtures/**/placeholder*.fixture.json
+
 packages/cli/README.md

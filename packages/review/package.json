@@ -15,7 +15,11 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck:harness": "tsc --noEmit -p test/harness/tsconfig.json",
+    "test": "vitest run",
+    "test:harness": "tsx test/harness/run.ts",
+    "test:harness:build-prompts": "tsx test/harness/build-prompts.ts",
+    "test:harness:assert": "tsx test/harness/assert-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.61.0",

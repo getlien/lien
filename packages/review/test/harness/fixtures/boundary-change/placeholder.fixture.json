@@ -1,0 +1,79 @@
+{
+  "chunks": [
+    {
+      "content": "function classifyLevel(dependentCount: number): 'low' | 'medium' | 'high' {\n  if (dependentCount >= 5) return 'medium';\n  return 'low';\n}",
+      "metadata": {
+        "file": "src/risk.ts",
+        "startLine": 12,
+        "endLine": 15,
+        "type": "function",
+        "language": "typescript",
+        "symbolName": "classifyLevel",
+        "symbolType": "function",
+        "complexity": 2,
+        "parameters": ["dependentCount: number"],
+        "signature": "function classifyLevel(dependentCount: number): 'low' | 'medium' | 'high'",
+        "returnType": "'low' | 'medium' | 'high'",
+        "exports": ["classifyLevel"]
+      }
+    }
+  ],
+  "changedFiles": ["src/risk.ts"],
+  "allChangedFiles": ["src/risk.ts"],
+  "complexityReport": {
+    "summary": {
+      "filesAnalyzed": 1,
+      "totalViolations": 0,
+      "bySeverity": { "error": 0, "warning": 0 },
+      "avgComplexity": 2,
+      "maxComplexity": 2
+    },
+    "files": {}
+  },
+  "baselineReport": null,
+  "deltas": null,
+  "pluginConfigs": {},
+  "config": {},
+  "pr": {
+    "owner": "getlien",
+    "repo": "lien",
+    "pullNumber": 9001,
+    "title": "Off-by-one fix in classifyLevel threshold",
+    "body": "Minor correction: includes 5 in the medium threshold.",
+    "baseSha": "0000000000000000000000000000000000000000",
+    "headSha": "1111111111111111111111111111111111111111",
+    "patches": {
+      "__type": "Map",
+      "entries": [
+        [
+          "src/risk.ts",
+          "@@ -12,4 +12,4 @@\n function classifyLevel(dependentCount: number): 'low' | 'medium' | 'high' {\n-  if (dependentCount > 5) return 'medium';\n+  if (dependentCount >= 5) return 'medium';\n   return 'low';\n }"
+        ]
+      ]
+    },
+    "diffLines": {
+      "__type": "Map",
+      "entries": [["src/risk.ts", { "__type": "Set", "values": [13] }]]
+    }
+  },
+  "repoChunks": [
+    {
+      "content": "function classifyLevel(dependentCount: number): 'low' | 'medium' | 'high' {\n  if (dependentCount >= 5) return 'medium';\n  return 'low';\n}",
+      "metadata": {
+        "file": "src/risk.ts",
+        "startLine": 12,
+        "endLine": 15,
+        "type": "function",
+        "language": "typescript",
+        "symbolName": "classifyLevel",
+        "symbolType": "function",
+        "complexity": 2,
+        "parameters": ["dependentCount: number"],
+        "signature": "function classifyLevel(dependentCount: number): 'low' | 'medium' | 'high'",
+        "returnType": "'low' | 'medium' | 'high'",
+        "exports": ["classifyLevel"]
+      }
+    }
+  ],
+  "repoRootDir": "/repo"
+}

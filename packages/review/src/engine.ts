@@ -11,6 +11,8 @@
  * Everything else (formatting, filtering, posting) is the adapter's job.
  */
 
+import { promises as fs } from 'node:fs';
+
 import type {
   ReviewPlugin,
   ReviewContext,
@@ -97,6 +99,13 @@ export class ReviewEngine {
 
     // Phase 2: Lazy repo indexing — only when an active plugin needs it
     await ensureRepoChunks(activePlugins, context);
+
+    // Optional: capture the post-index context for the agent-rule offline harness.
+    // Gated by env var — zero overhead in prod when unset. See
+    // packages/review/test/harness/README.md (#538) for the replay flow.
+    if (process.env.LIEN_REVIEW_CAPTURE_CTX) {
+      await captureContext(context, process.env.LIEN_REVIEW_CAPTURE_CTX, logger);
+    }
 
     // Phase 3: Analysis — run all active plugins in parallel, except summary runs last
     const deferredId = 'summary';
@@ -269,6 +278,34 @@ async function ensureRepoChunks(
   // Update plugin contexts with repoChunks
   for (const entry of activePlugins) {
     entry.pluginContext = { ...entry.pluginContext, repoChunks: context.repoChunks };
+  }
+}
+
+/**
+ * Serialize the post-index ReviewContext to disk. Used by the agent-rule
+ * offline harness (#538) to snapshot real PR inputs for replay.
+ *
+ * Map and Set are tagged so the harness's fixture-loader can revive them.
+ * Octokit and other non-serializable references on adapterContext are not
+ * present here — context only carries plain data.
+ */
+async function captureContext(context: ReviewContext, path: string, logger: Logger): Promise<void> {
+  const replacer = (_key: string, value: unknown): unknown => {
+    if (value instanceof Map) {
+      return { __type: 'Map', entries: [...value.entries()] };
+    }
+    if (value instanceof Set) {
+      return { __type: 'Set', values: [...value.values()] };
+    }
+    return value;
+  };
+  try {
+    await fs.writeFile(path, JSON.stringify(context, replacer, 2));
+    logger.info(`[engine] captured ctx → ${path}`);
+  } catch (err) {
+    logger.warning(
+      `[engine] LIEN_REVIEW_CAPTURE_CTX write failed (${path}): ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 

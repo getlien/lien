@@ -75,6 +75,25 @@ Lien provides semantic code search via MCP. These tools are **not optional** —
 
 ---
 
+## Agent-Review Rule Development — Use the Test Harness
+
+Adding or tweaking a rule in `packages/review/src/plugins/agent/` MUST go
+through the offline test harness at `packages/review/test/harness/`. Don't
+ship prompt or rule changes via the deploy → synthetic-PR loop — the harness
+exists specifically to make that cycle ~30 minutes instead of hours.
+
+- Inner loop: invoke `/test-harness <rule-id>` from CC for free
+  Claude-subagent iteration on existing fixtures.
+- Shipping gate: `npm run test:harness -- --rule <rule-id> --calibrate 10`
+  must hit ≥ 9/10 against OpenRouter (Gemini) before merging the change.
+  The harness auto-loads `OPENROUTER_API_KEY` from `.env` at the repo root.
+- Workflow + failure modes: see `packages/review/test/harness/README.md`.
+  Includes the end-to-end recipe for capturing a real-PR fixture, authoring
+  Tier 1/2 assertions, iterating, and calibrating.
+
+A rule is not shippable until its calibration meets the bar. CC mode is
+necessary but not sufficient.
+
 ## Workflow Orchestration
 
 ### 1. Plan Mode Default
