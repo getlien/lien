@@ -16,7 +16,7 @@ import type { HarnessResult } from './assertions.js';
 export interface RunnerOptions {
   /** OpenRouter / OpenAI-compatible API key. Required. */
   apiKey: string;
-  /** Model id. Default 'google/gemini-2.5-flash' to mirror prod. */
+  /** Model id. Default 'google/gemini-3-flash-preview' to mirror prod (#539). */
   model?: string;
   /** Base URL. Default OpenRouter's. */
   baseUrl?: string;
@@ -111,7 +111,7 @@ export async function runFixture(
       // the runtime transport + API knobs the harness controls.
       ...(ctx.config ?? {}),
       apiKey: opts.apiKey,
-      model: opts.model ?? 'google/gemini-2.5-flash',
+      model: opts.model ?? 'google/gemini-3-flash-preview',
       provider: 'openai',
       baseUrl: opts.baseUrl ?? 'https://openrouter.ai/api/v1',
       maxTurns: opts.maxTurns ?? 15,
