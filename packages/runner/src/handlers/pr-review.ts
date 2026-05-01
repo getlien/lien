@@ -253,6 +253,13 @@ export async function handlePRReview(
     // Track agent usage separately (reported via callback since it bypasses LLMClient)
     let agentUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 };
 
+    // Selected model — used for both the agent-review plugin config and the
+    // adapterContext below so cost/metadata reporting stays consistent across
+    // the two providers we support.
+    const selectedModel = config.openrouterApiKey
+      ? 'google/gemini-3-flash-preview'
+      : 'claude-sonnet-4-6';
+
     // Run engine
     findings = await engine.run({
       chunks,
@@ -269,7 +276,7 @@ export async function handlePRReview(
         'agent-review': {
           apiKey: config.openrouterApiKey || config.anthropicApiKey,
           provider: config.openrouterApiKey ? 'openai' : 'anthropic',
-          model: config.openrouterApiKey ? 'google/gemini-3-flash-preview' : 'claude-sonnet-4-6',
+          model: selectedModel,
           baseUrl: config.openrouterApiKey ? 'https://openrouter.ai/api/v1' : undefined,
           inputCostPerMTok: config.openrouterApiKey ? 0.5 : 3,
           outputCostPerMTok: config.openrouterApiKey ? 3 : 15,
@@ -297,7 +304,7 @@ export async function handlePRReview(
       octokit,
       logger,
       llmUsage: agentUsage.totalTokens > 0 ? agentUsage : undefined,
-      model: 'claude-sonnet-4-6',
+      model: selectedModel,
       blockOnNewErrors: reviewConfig.blockOnNewErrors,
     };
 
