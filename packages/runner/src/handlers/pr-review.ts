@@ -256,9 +256,7 @@ export async function handlePRReview(
     // Selected model — used for both the agent-review plugin config and the
     // adapterContext below so cost/metadata reporting stays consistent across
     // the two providers we support.
-    const selectedModel = config.openrouterApiKey
-      ? 'google/gemini-3-flash-preview'
-      : 'claude-sonnet-4-6';
+    const selectedModel = selectAgentModel(!!config.openrouterApiKey);
 
     // Run engine
     findings = await engine.run({
@@ -387,6 +385,16 @@ export async function handlePRReview(
 
 // ---------------------------------------------------------------------------
 // Helpers
+
+/**
+ * Pick the agent-review model based on which provider key is configured.
+ * Extracted so the conditional doesn't add cyclomatic weight to the (large)
+ * handlePRReview body — and so the same value can be reused for the
+ * adapterContext metadata.
+ */
+function selectAgentModel(useOpenRouter: boolean): string {
+  return useOpenRouter ? 'google/gemini-3-flash-preview' : 'claude-sonnet-4-6';
+}
 
 /**
  * Scale agent turn count and token budget dynamically.
