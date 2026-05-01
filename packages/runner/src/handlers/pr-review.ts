@@ -269,10 +269,10 @@ export async function handlePRReview(
         'agent-review': {
           apiKey: config.openrouterApiKey || config.anthropicApiKey,
           provider: config.openrouterApiKey ? 'openai' : 'anthropic',
-          model: config.openrouterApiKey ? 'google/gemini-2.5-flash' : 'claude-sonnet-4-6',
+          model: config.openrouterApiKey ? 'google/gemini-3-flash-preview' : 'claude-sonnet-4-6',
           baseUrl: config.openrouterApiKey ? 'https://openrouter.ai/api/v1' : undefined,
-          inputCostPerMTok: config.openrouterApiKey ? 0.3 : 3,
-          outputCostPerMTok: config.openrouterApiKey ? 2.5 : 15,
+          inputCostPerMTok: config.openrouterApiKey ? 0.5 : 3,
+          outputCostPerMTok: config.openrouterApiKey ? 3 : 15,
           ...scaleAgentBudget(filesToAnalyze.length, chunks),
         },
       },
