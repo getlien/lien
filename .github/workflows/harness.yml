@@ -1,7 +1,7 @@
 name: Agent-Rule Test Harness (LLM)
 
-# Manual-trigger only. The harness hits a real LLM (Gemini 2.5 Flash via
-# OpenRouter) and costs real money per run. Do NOT add automatic triggers.
+# Manual-trigger only. The harness hits a real LLM (Gemini 3 Flash Preview
+# via OpenRouter) and costs real money per run. Do NOT add automatic triggers.
 #
 # Use this to:
 #   - Establish the 9/10 reliability baseline before changing a rule prompt

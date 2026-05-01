@@ -6,7 +6,13 @@
  * Uses a git worktree to avoid touching the current working branch.
  *
  * Usage:
- *   tsx capture-pr.ts <pr-number> <output-fixture-path>
+ *   tsx capture-pr.ts <pr-number> <output-fixture-path> [--sha <commit-sha>]
+ *
+ * `--sha` overrides the captured head: use it to snapshot a PR at an
+ * earlier commit (e.g., before a follow-up fix landed). When provided,
+ * the diff is computed via `git diff <base>..<sha>` instead of `gh pr
+ * diff`, so only the changes up to that commit are captured. The base
+ * remains the PR's `baseRefOid`.
  *
  * Prerequisites:
  *   - gh CLI authenticated
@@ -134,28 +140,121 @@ async function withWorktree<T>(sha: string, fn: (path: string) => Promise<T>): P
   return fn(wtPath);
 }
 
-async function main(): Promise<void> {
-  const [prArg, outArg] = process.argv.slice(2);
+interface ParsedArgs {
+  prNumber: number;
+  outputPath: string;
+  shaOverride?: string;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  const positional: string[] = [];
+  let shaOverride: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--sha') {
+      const value = argv[++i];
+      if (!value) {
+        console.error('--sha requires a value');
+        process.exit(2);
+      }
+      shaOverride = value;
+      continue;
+    }
+    if (arg.startsWith('--')) {
+      console.error(`Unknown flag: ${arg}`);
+      process.exit(2);
+    }
+    positional.push(arg);
+  }
+  const [prArg, outArg] = positional;
   if (!prArg || !outArg) {
-    console.error('Usage: tsx capture-pr.ts <pr-number> <output-fixture-path>');
+    console.error(
+      'Usage: tsx capture-pr.ts <pr-number> <output-fixture-path> [--sha <commit-sha>]',
+    );
     process.exit(2);
   }
-
   const prNumber = parseInt(prArg, 10);
-  const outputPath = resolve(outArg);
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    console.error(`pr-number must be a positive integer (got: ${prArg})`);
+    process.exit(2);
+  }
+  return { prNumber, outputPath: resolve(outArg), shaOverride };
+}
+
+/**
+ * Resolve a possibly-short SHA to its full 40-char form via the current
+ * checkout's git data. Throws if the SHA isn't reachable — gives a
+ * clearer error than a downstream `git worktree add` failure.
+ */
+function resolveSha(sha: string): string {
+  try {
+    return sh(`git rev-parse --verify "${sha}^{commit}"`).trim();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`could not resolve sha "${sha}": ${reason}`);
+  }
+}
+
+/**
+ * Assert that `sha` lives in PR #prNumber's lineage — i.e., the PR's
+ * baseRefOid is an ancestor of `sha`, and `sha` is an ancestor of the
+ * PR's headRefOid. Without this, `--sha` would happily accept any
+ * reachable commit and produce a fixture whose `pr` metadata claims a
+ * PR while the diff is from unrelated history. (Per CodeRabbit on #545.)
+ */
+function assertShaInPrRange(meta: PrMeta, prNumber: number, sha: string): void {
+  const inRange = (cmd: string): boolean => {
+    try {
+      sh(cmd);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const baseInSha = inRange(`git merge-base --is-ancestor "${meta.baseRefOid}" "${sha}"`);
+  const shaInHead = inRange(`git merge-base --is-ancestor "${sha}" "${meta.headRefOid}"`);
+  if (!baseInSha || !shaInHead) {
+    throw new Error(
+      `--sha ${sha} is not within PR #${prNumber} commit range ` +
+        `(${meta.baseRefOid}..${meta.headRefOid}). Pass a SHA that lives in the PR's lineage.`,
+    );
+  }
+}
+
+async function main(): Promise<void> {
+  const { prNumber, outputPath, shaOverride } = parseArgs(process.argv.slice(2));
 
   console.error(`[capture] fetching PR ${prNumber} metadata`);
   const meta = JSON.parse(
     sh(`gh pr view ${prNumber} --json title,body,baseRefOid,headRefOid,files`),
   ) as PrMeta;
 
-  console.error(`[capture] fetching PR ${prNumber} diff`);
-  const diffText = sh(`gh pr diff ${prNumber}`);
+  const headSha = shaOverride ? resolveSha(shaOverride) : meta.headRefOid;
+  if (shaOverride) {
+    assertShaInPrRange(meta, prNumber, headSha);
+    console.error(`[capture] overriding head: ${meta.headRefOid} -> ${headSha}`);
+  }
+
+  let diffText: string;
+  let changedFiles: string[];
+  if (shaOverride) {
+    // PR-level files include all commits; recompute against the target sha
+    // so the captured fixture reflects only the diff up to that commit.
+    console.error(`[capture] computing diff ${meta.baseRefOid}..${headSha}`);
+    diffText = sh(`git diff "${meta.baseRefOid}".."${headSha}"`);
+    changedFiles = sh(`git diff --name-only "${meta.baseRefOid}".."${headSha}"`)
+      .split('\n')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+  } else {
+    console.error(`[capture] fetching PR ${prNumber} diff`);
+    diffText = sh(`gh pr diff ${prNumber}`);
+    changedFiles = meta.files.map(f => f.path);
+  }
 
   const { patches, diffLines } = parseUnifiedDiff(diffText);
-  const changedFiles = meta.files.map(f => f.path);
 
-  await withWorktree(meta.headRefOid, async worktree => {
+  await withWorktree(headSha, async worktree => {
     console.error(`[capture] indexing worktree at ${worktree}`);
     const indexResult = await performChunkOnlyIndex(worktree);
     if (!indexResult.success || !indexResult.chunks) {
@@ -220,7 +319,7 @@ async function main(): Promise<void> {
         title: meta.title,
         body: meta.body ?? '',
         baseSha: meta.baseRefOid,
-        headSha: meta.headRefOid,
+        headSha,
         patches,
         diffLines,
       },

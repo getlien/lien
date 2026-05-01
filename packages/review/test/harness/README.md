@@ -3,11 +3,11 @@
 Replay code-review fixtures through the agent plugin's prompts to validate
 prompt changes offline. Two modes — pick the right one for the task:
 
-| Mode               | Entry                                            | Model                | Cost             | Use when                                |
-| ------------------ | ------------------------------------------------ | -------------------- | ---------------- | --------------------------------------- |
-| **CC iteration**   | `/test-harness <rule>`                           | Claude (subagent)    | Free             | Authoring / iterating on a prompt       |
-| **OpenRouter run** | `npm run test:harness -w @liendev/review`        | Gemini 2.5 Flash     | ~$0.05/run       | Final verification / 9/10 bar           |
-| **CI dispatch**    | Run "Agent-Rule Test Harness (LLM)" workflow     | Gemini 2.5 Flash     | ~$0.05/run       | Repeatable verification                 |
+| Mode               | Entry                                            | Model                    | Cost             | Use when                                |
+| ------------------ | ------------------------------------------------ | ------------------------ | ---------------- | --------------------------------------- |
+| **CC iteration**   | `/test-harness <rule>`                           | Claude (subagent)        | Free             | Authoring / iterating on a prompt       |
+| **OpenRouter run** | `npm run test:harness -w @liendev/review`        | Gemini 3 Flash Preview   | ~$0.05/run       | Final verification / 9/10 bar           |
+| **CI dispatch**    | Run "Agent-Rule Test Harness (LLM)" workflow     | Gemini 3 Flash Preview   | ~$0.05/run       | Repeatable verification                 |
 
 **The 9/10 reliability bar is measured in OpenRouter mode only.** Claude is
 materially smarter than Gemini, so a passing CC run does not certify
@@ -51,6 +51,7 @@ test PRs in this repo. Each fixture is gitignored (regenerate with
 | `concurrency-race`    | #511  | `concurrency-race/credit-service-toctou`                     |
 | `incomplete-handling` | #437  | `incomplete-handling/enum-variant-removed`                   |
 | `error-swallowing`    | #411  | `error-swallowing/payment-error-swallowed`                   |
+| `stale-duplicate`     | #539  | `stale-duplicate/model-partial-update` (capture at `--sha f780541`) |
 
 Regenerate the whole corpus:
 
@@ -62,6 +63,7 @@ npx tsx packages/review/test/harness/capture-pr.ts 509 "$ROOT/edge-case-sweep/pe
 npx tsx packages/review/test/harness/capture-pr.ts 511 "$ROOT/concurrency-race/credit-service-toctou.fixture.json"
 npx tsx packages/review/test/harness/capture-pr.ts 437 "$ROOT/incomplete-handling/enum-variant-removed.fixture.json"
 npx tsx packages/review/test/harness/capture-pr.ts 411 "$ROOT/error-swallowing/payment-error-swallowed.fixture.json"
+npx tsx packages/review/test/harness/capture-pr.ts 539 "$ROOT/stale-duplicate/model-partial-update.fixture.json" --sha f780541
 ```
 
 Run the full multi-model sweep:
