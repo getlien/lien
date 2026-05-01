@@ -19,6 +19,9 @@ import { resolve, dirname } from 'node:path';
 
 import { performChunkOnlyIndex } from '@liendev/parser';
 
+import { runComplexityAnalysis } from '../../src/analysis.js';
+import { silentLogger } from '../../src/test-helpers.js';
+
 import { saveFixture } from './fixture-loader.js';
 
 interface PrMeta {
@@ -71,15 +74,34 @@ function parseUnifiedDiff(diff: string): {
 
 async function withWorktree<T>(sha: string, fn: (path: string) => Promise<T>): Promise<T> {
   const wtPath = `/tmp/lien-capture-${sha.slice(0, 12)}`;
+  let addError: Error | undefined;
   // If a previous capture left this worktree in place, reuse it. Otherwise create.
   try {
     sh(`git worktree add --detach "${wtPath}" "${sha}"`);
-  } catch {
-    // assume it already exists (re-running capture is fine)
+  } catch (err) {
+    addError = err instanceof Error ? err : new Error(String(err));
   }
-  // We deliberately do NOT remove the worktree — the captured fixture's
-  // repoRootDir points here, so harness runs that need read_file/grep_codebase
-  // against the PR head still work. Clean up manually with:
+  // Verify the worktree actually exists at the expected sha — `git worktree
+  // add` may fail for reasons unrelated to "already there" (bad sha, perms,
+  // disk full). Without this check we'd silently feed a stale or missing
+  // path into indexing and produce a confusing downstream error.
+  let head: string;
+  try {
+    head = sh(`git -C "${wtPath}" rev-parse HEAD`).trim();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    const orig = addError ? `\n  underlying add error: ${addError.message}` : '';
+    throw new Error(`worktree at ${wtPath} not usable: ${reason}${orig}`);
+  }
+  if (!head.startsWith(sha.slice(0, head.length))) {
+    throw new Error(
+      `worktree at ${wtPath} is at ${head}, expected ${sha}. ` +
+        `Remove it with \`git worktree remove --force ${wtPath}\` and re-run.`,
+    );
+  }
+  // We deliberately do NOT remove the worktree on success — the captured
+  // fixture's repoRootDir points here, so harness runs that need
+  // read_file/grep_codebase against the PR head still work. Clean up manually:
   //   git worktree remove --force <path>
   return fn(wtPath);
 }
@@ -117,20 +139,41 @@ async function main(): Promise<void> {
     const chunks = repoChunks.filter(c => changedFiles.includes(c.metadata.file));
     console.error(`[capture] ${chunks.length} chunks for changed files`);
 
+    // Real complexity analysis on the changed files so the captured ctx
+    // matches what the production runner would build. Without this,
+    // complexity-aware rules (e.g. blast-radius risk) see an empty report
+    // and behave differently than they would in prod.
+    //
+    // Limitation: we don't check out the base ref, so `deltas` stays null —
+    // the runner computes deltas by diffing head vs base reports. For
+    // delta-aware fidelity, capture via the engine's
+    // LIEN_REVIEW_CAPTURE_CTX env hook against a live runner instead.
+    console.error(`[capture] analyzing complexity for ${changedFiles.length} changed files`);
+    const complexityResult = await runComplexityAnalysis(
+      changedFiles,
+      '50',
+      worktree,
+      silentLogger,
+    );
+    const complexityReport = complexityResult?.report ?? {
+      summary: {
+        filesAnalyzed: changedFiles.length,
+        totalViolations: 0,
+        bySeverity: { error: 0, warning: 0 },
+        avgComplexity: 0,
+        maxComplexity: 0,
+      },
+      files: {},
+    };
+    console.error(
+      `[capture] complexity: ${complexityReport.summary.totalViolations} violations, max=${complexityReport.summary.maxComplexity}`,
+    );
+
     const ctx = {
       chunks,
       changedFiles,
       allChangedFiles: changedFiles,
-      complexityReport: {
-        summary: {
-          filesAnalyzed: changedFiles.length,
-          totalViolations: 0,
-          bySeverity: { error: 0, warning: 0 },
-          avgComplexity: 0,
-          maxComplexity: 0,
-        },
-        files: {},
-      },
+      complexityReport,
       baselineReport: null,
       deltas: null,
       pluginConfigs: {},
