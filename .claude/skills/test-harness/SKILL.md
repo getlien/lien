@@ -127,6 +127,20 @@ Show finding excerpts (first 200 chars of `message`) for any fixture that failed
 4. **Fixture file path missing repoRootDir** — subagent has no real repo to read from. Use the working directory (the harness fixture's `repoRootDir` is informational; the subagent should default to grep'ing the current Lien repo).
 5. **Build-prompts errors out** — usually means fixture schema is wrong. Surface the error verbatim to the user.
 
+## What to do after a green CC run
+
+A passing CC run is **necessary but not sufficient** to ship a rule or prompt
+change. After CC mode is green, recommend the OpenRouter calibration
+explicitly so the user (or a follow-up autonomous run) closes the loop:
+
+```bash
+npm run test:harness -w @liendev/review -- --rule <rule-id> --calibrate 10
+```
+
+Auto-loads `OPENROUTER_API_KEY` from `.env` at the repo root via
+`process.loadEnvFile()`. Shippable when pass-rate ≥ 9/10. See
+`packages/review/test/harness/README.md` for the full failure-mode table.
+
 ## What this skill does NOT do
 
 - Run the actual `AgentReviewPlugin.analyze()` code path. (That requires OpenRouter mode, `npm run test:harness`.)

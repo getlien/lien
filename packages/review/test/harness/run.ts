@@ -30,6 +30,16 @@ import { reportVote, reportCalibrate } from './reporter.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_ROOT = resolve(HERE, 'fixtures');
 
+// Auto-load .env from the repo root so OPENROUTER_API_KEY can live there
+// instead of the user's shell rc. Node's process.loadEnvFile() does not
+// override variables that are already set, so an inline `OPENROUTER_API_KEY=…`
+// still wins. Silently skip if no .env is present.
+try {
+  process.loadEnvFile(resolve(HERE, '../../../../.env'));
+} catch {
+  /* no .env at repo root — that's fine; rely on the inherited environment */
+}
+
 interface CliFlags {
   rule?: string;
   fixture?: string;

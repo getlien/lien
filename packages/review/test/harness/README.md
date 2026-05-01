@@ -16,19 +16,26 @@ a prompt change. (Issue #538.)
 
 ## Quick start
 
+The harness auto-loads `OPENROUTER_API_KEY` from `.env` at the repo root via
+`process.loadEnvFile()` — set it once, run anywhere:
+
 ```bash
+# One-time setup (or use the existing platform .env)
+echo 'OPENROUTER_API_KEY=sk-or-v1-…' >> .env
+
 # 1. Free CC iteration (in a Claude Code session):
 /test-harness boundary-change
 
 # 2. Calibration baseline (the 9/10 bar):
-OPENROUTER_API_KEY=… npm run test:harness -w @liendev/review -- \
-  --rule boundary-change --calibrate 10
+npm run test:harness -w @liendev/review -- --rule boundary-change --calibrate 10
 
 # 3. Run a single fixture with K=3 voting:
-OPENROUTER_API_KEY=… npm run test:harness -w @liendev/review -- \
-  --fixture test/harness/fixtures/boundary-change/<name>.fixture.json \
-  --votes 3
+npm run test:harness -w @liendev/review -- \
+  --fixture test/harness/fixtures/boundary-change/<name>.fixture.json --votes 3
 ```
+
+An inline `OPENROUTER_API_KEY=…` still wins over the `.env` value if you want
+to override per-invocation (e.g., to test against a different account's quota).
 
 ## Canary corpus
 
@@ -235,6 +242,84 @@ The motivating example for #538. To execute:
 6. **Land the PR** — paste the calibrate output into the PR description as
    evidence. Bundle the rule change, the new fixture, and the new assertion
    in one commit.
+
+## Workflow: adding a new rule
+
+This is the end-to-end recipe a rule author (human or agent) follows. The
+harness lets you do it autonomously once `OPENROUTER_API_KEY` is in `.env`.
+
+1. **Find a candidate PR.** Look for a closed planted-regression PR that
+   exhibits the pattern the rule should catch. The repo has a tradition
+   of these (#519, #520, #399, #509, #437, #411, #511 are all "test:" or
+   small synthetic-bug PRs). `gh pr list --state closed --search "test:"`
+   is a good starting query. Pick one with <500 changed lines if possible
+   — the agent's investigation is faster on smaller diffs.
+
+2. **Capture the fixture.** From the repo root:
+
+   ```bash
+   npx tsx packages/review/test/harness/capture-pr.ts <pr-num> \
+     packages/review/test/harness/fixtures/<rule-id>/<scenario>.fixture.json
+   ```
+
+   `capture-pr.ts` clones the PR head into a `/tmp/lien-capture-<sha>` git
+   worktree, indexes it, and writes the JSON. The worktree stays in place
+   so the harness can resolve `repoRootDir` for tool calls; clean up with
+   `git worktree remove --force <path>` when done.
+
+3. **Author Tier 1 assertions.** Create the sibling
+   `<scenario>.assertions.ts`. Start with just `expectRuleFired` and
+   `expectToolCalled` for whatever tool the rule's prompt mandates.
+   Don't add Tier 2 keyword checks until after baseline calibration is
+   green — they're what proves the prompt produces the *right* finding,
+   and you need a reliable Tier 1 first.
+
+4. **Add the rule to `BUILTIN_RULES`** in
+   `packages/review/src/plugins/agent/rules.ts`. Mirror the existing
+   shape: `id`, `name`, `prompt`, optional `example`, `triggers`. The
+   prompt is the lever — start by copying a similar existing rule's
+   structure.
+
+5. **Iterate via CC mode (free).** Open a Claude Code session, run
+   `/test-harness <rule-id>`. The Skill spawns a Claude subagent per
+   fixture and reports pass/fail. Cycle through prompt edits in `rules.ts`
+   until CC reliably produces the expected finding. **CC mode is *not*
+   sufficient for shipping** — Claude is much smarter than Gemini, so
+   passing here doesn't certify production behavior. Treat it as
+   smoke-testing.
+
+6. **Calibrate against OpenRouter (the gate).**
+
+   ```bash
+   npm run test:harness -w @liendev/review -- \
+     --rule <rule-id> --calibrate 10
+   ```
+
+   The fixture's `passThreshold` (default 9 from `assertions.passThreshold`)
+   gates the run. If pass-rate < 9/10, iterate: widen Tier 2 keywords,
+   tighten the prompt, or capture a more realistic fixture. Don't ship
+   sub-9/10 prompts — that's the discipline that prevents silently flaky
+   rules.
+
+7. **Open a PR** with the rule, the new fixture's `.assertions.ts`, and
+   the calibrate output pasted into the PR description as evidence.
+
+The whole loop, end-to-end, is ~30 minutes once you have the fixture
+captured.
+
+## Failure modes — what each error means
+
+| Error in `failureMessage` | Cause | Action |
+|---|---|---|
+| `LLM error: API error (403): Key limit exceeded` | Daily-spend cap on the OpenRouter key (set in their dashboard) | Raise the limit, switch keys, or wait until midnight UTC |
+| `LLM error: terminated` | OpenRouter killed the request mid-stream — usually upstream (provider) capacity issue, occasionally rate-limit at high concurrency | Retry; if it persists for one specific model, that model is having problems — try another |
+| `LLM error: fetch failed` | Network blip between us and OpenRouter | Retry |
+| `Tier 1: expected rule 'X' to fire. Got: (no findings)` | Model bailed without producing a finding (silence-mode bias) | Tighten the rule prompt to mandate emission; check `.wip/retro-blast-radius.md` §2.3 |
+| `Tier 2: expected at least one finding to mention any of […]` | Rule fired but the suggestion uses different vocabulary | Widen the keyword set, or the prompt is producing wrong-shaped findings |
+| `0/10 passed cost $0.0000` | Every call failed silently | Re-run with `--votes 3 --json` and inspect `failureMessage` per vote |
+
+If you can't tell what's happening, `--json` is your friend — pipe through
+`jq` and look at each vote's `failureMessage`.
 
 ## Modes — when to use which
 
