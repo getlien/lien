@@ -106,6 +106,10 @@ export async function runFixture(
     logger,
     reportUsage,
     config: {
+      // Preserve any agent options serialized into the captured fixture
+      // (blastRadius config, custom token budgets, etc.) and only override
+      // the runtime transport + API knobs the harness controls.
+      ...(ctx.config ?? {}),
       apiKey: opts.apiKey,
       model: opts.model ?? 'google/gemini-2.5-flash',
       provider: 'openai',

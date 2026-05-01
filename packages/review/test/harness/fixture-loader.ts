@@ -39,19 +39,44 @@ function reviver(_key: string, value: unknown): unknown {
 }
 
 /**
- * Loose schema for fixtures. Not the full ReviewContext — just enough fields
- * to fail fast with a clear error when a fixture is malformed, instead of
- * crashing inside AgentReviewPlugin.analyze().
+ * Schema for fixtures. Covers every replay field the agent plugin reads,
+ * so a malformed fixture fails fast with a clear error here instead of
+ * crashing deeper inside AgentReviewPlugin.analyze() or its tools.
+ *
+ * Inner shapes use `z.unknown()` because the corresponding TS interfaces
+ * (CodeChunk, ComplexityReport, PRContext, ComplexityDelta) are large and
+ * captured by capture-pr.ts / engine.ts — we trust the shape produced by
+ * those code paths and only enforce the top-level keys + their primitive
+ * types here.
  */
 const FixtureShape = z.object({
   chunks: z.array(z.unknown()),
   changedFiles: z.array(z.string()),
+  allChangedFiles: z.array(z.string()).optional(),
+  // capture-pr.ts and engine.ts both populate complexityReport — even if the
+  // changed files have no violations, the summary object is required.
+  complexityReport: z.object({
+    summary: z.object({
+      filesAnalyzed: z.number(),
+      totalViolations: z.number(),
+      bySeverity: z.object({ error: z.number(), warning: z.number() }),
+      avgComplexity: z.number(),
+      maxComplexity: z.number(),
+    }),
+    files: z.record(z.unknown()),
+  }),
+  // baselineReport / deltas come from the runner's two-checkout analysis;
+  // capture-pr.ts can't reproduce that locally so they're allowed to be null.
+  baselineReport: z.unknown().nullable(),
+  deltas: z.array(z.unknown()).nullable(),
   pluginConfigs: z.record(z.unknown()),
   config: z.record(z.unknown()),
-  // pr is optional but recommended — without it the diff text is empty and
-  // many rules won't trigger
+  // pr is optional but most rules trigger via diff content, so a fixture
+  // without a pr usually has no triggers firing — warn at the runner if so.
   pr: z.unknown().optional(),
-  // repoChunks is required for the agent plugin (requiresRepoChunks=true)
+  // The agent plugin sets requiresRepoChunks=true, so this should be present
+  // for any fixture that drives the agent. The engine populates it lazily,
+  // so we accept undefined and fail later in the runner if missing.
   repoChunks: z.array(z.unknown()).optional(),
   repoRootDir: z.string().optional(),
 });

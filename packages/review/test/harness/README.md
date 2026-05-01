@@ -91,8 +91,8 @@ Hand-authored placeholder fixtures (small, committed) live alongside.
 
 ## Layout
 
-```
-test/harness/
+```text
+packages/review/test/harness/
   run.ts                # OpenRouter CLI entrypoint
   runner.ts             # drives a single fixture against AgentReviewPlugin
   build-prompts.ts      # emits {systemPrompt, initialMessage} for any fixture

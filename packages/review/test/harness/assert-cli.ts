@@ -35,11 +35,24 @@ async function loadAssertions(path: string): Promise<FixtureAssertions> {
 
 async function loadResult(path: string): Promise<HarnessResult> {
   const raw = await fs.readFile(path, 'utf8');
-  const parsed = JSON.parse(raw) as Partial<HarnessResult>;
+  const parsed: unknown = JSON.parse(raw);
+  if (parsed === null || typeof parsed !== 'object') {
+    throw new Error(`${path} must contain a JSON object`);
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (obj.findings !== undefined && !Array.isArray(obj.findings)) {
+    throw new Error(`${path}: findings must be an array, got ${typeof obj.findings}`);
+  }
+  if (obj.toolCalls !== undefined && !Array.isArray(obj.toolCalls)) {
+    throw new Error(`${path}: toolCalls must be an array, got ${typeof obj.toolCalls}`);
+  }
+  if (obj.turns !== undefined && typeof obj.turns !== 'number') {
+    throw new Error(`${path}: turns must be a number, got ${typeof obj.turns}`);
+  }
   return {
-    findings: parsed.findings ?? [],
-    toolCalls: parsed.toolCalls ?? [],
-    turns: parsed.turns ?? 0,
+    findings: (obj.findings as HarnessResult['findings']) ?? [],
+    toolCalls: (obj.toolCalls as string[]) ?? [],
+    turns: (obj.turns as number) ?? 0,
   };
 }
 
@@ -62,6 +75,9 @@ async function main(): Promise<void> {
     process.exit(3);
   }
 
+  // Use process.exitCode + return rather than process.exit() so the JSON we
+  // just wrote to stdout actually flushes before the process tears down —
+  // process.exit() can truncate pending I/O (Node docs).
   try {
     assertions.expect(result, harness);
     process.stdout.write(
@@ -73,7 +89,8 @@ async function main(): Promise<void> {
         turns: result.turns,
       }) + '\n',
     );
-    process.exit(0);
+    process.exitCode = 0;
+    return;
   } catch (err) {
     if (err instanceof HarnessAssertionError) {
       process.stdout.write(
@@ -87,10 +104,11 @@ async function main(): Promise<void> {
           turns: result.turns,
         }) + '\n',
       );
-      process.exit(err.tier === 2 ? 2 : 1);
+      process.exitCode = err.tier === 2 ? 2 : 1;
+      return;
     }
     console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 

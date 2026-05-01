@@ -15,7 +15,8 @@
 
 import { execSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { resolve, dirname, join } from 'node:path';
 
 import { performChunkOnlyIndex } from '@liendev/parser';
 
@@ -72,8 +73,13 @@ function parseUnifiedDiff(diff: string): {
   return { patches, diffLines };
 }
 
+/** Normalize a repo-relative path for set membership checks. */
+function normalizeRepoPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
 async function withWorktree<T>(sha: string, fn: (path: string) => Promise<T>): Promise<T> {
-  const wtPath = `/tmp/lien-capture-${sha.slice(0, 12)}`;
+  const wtPath = join(tmpdir(), `lien-capture-${sha.slice(0, 12)}`);
   let addError: Error | undefined;
   // If a previous capture left this worktree in place, reuse it. Otherwise create.
   try {
@@ -136,7 +142,11 @@ async function main(): Promise<void> {
     const repoChunks = indexResult.chunks;
     console.error(`[capture] indexed ${repoChunks.length} chunks`);
 
-    const chunks = repoChunks.filter(c => changedFiles.includes(c.metadata.file));
+    // Path-shape between the parser's chunk metadata and `gh pr view`'s file
+    // list isn't guaranteed to match byte-for-byte (Windows backslashes,
+    // ./ prefixes). Normalize both sides before set membership.
+    const changedSet = new Set(changedFiles.map(normalizeRepoPath));
+    const chunks = repoChunks.filter(c => changedSet.has(normalizeRepoPath(c.metadata.file)));
     console.error(`[capture] ${chunks.length} chunks for changed files`);
 
     // Real complexity analysis on the changed files so the captured ctx

@@ -31,9 +31,26 @@ export class HarnessAssertionError extends Error {
   }
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Recognized tool-call shapes:
+ *   - `tool=<name>` (our capturing logger format)
+ *   - `"name":"<name>"` (raw provider trace)
+ *   - bare `<name>` as a standalone token (CC-mode harness-meta lines like
+ *     `get_files_context: src/foo.ts`)
+ *
+ * The bare-token check uses \b so unrelated substrings can't false-match
+ * (e.g. `read_file` vs `file_reader`).
+ */
 function isToolCall(entry: string, tool: string): boolean {
+  const escaped = escapeRegExp(tool);
   return (
-    entry.includes(`tool=${tool}`) || entry.includes(`"name":"${tool}"`) || entry.includes(tool)
+    entry.includes(`tool=${tool}`) ||
+    entry.includes(`"name":"${tool}"`) ||
+    new RegExp(`\\b${escaped}\\b`).test(entry)
   );
 }
 
@@ -92,17 +109,20 @@ export function expectToolCalled(tool: string, result: HarnessResult): void {
  * verification — provide several accepted phrasings, not one exact string.
  */
 export function expectFindingMentions(keywords: string[], result: HarnessResult): void {
-  if (keywords.length === 0) {
-    throw new HarnessAssertionError('Tier 2: keywords list is empty', 2);
+  // Reject blank/whitespace keywords — `''.includes('')` is true, so a stray
+  // empty string would silently green-light every Tier 2 check.
+  const normalized = keywords.map(k => k.trim().toLowerCase()).filter(k => k.length > 0);
+  if (normalized.length === 0) {
+    throw new HarnessAssertionError('Tier 2: keywords list is empty (or contained only blanks)', 2);
   }
   const haystack = result.findings
     .flatMap(f => [f.message, f.suggestion ?? '', f.evidence ?? ''])
     .join('\n')
     .toLowerCase();
-  const hit = keywords.find(kw => haystack.includes(kw.toLowerCase()));
+  const hit = normalized.find(kw => haystack.includes(kw));
   if (!hit) {
     throw new HarnessAssertionError(
-      `Tier 2: expected at least one finding to mention any of [${keywords
+      `Tier 2: expected at least one finding to mention any of [${normalized
         .map(k => `"${k}"`)
         .join(', ')}]. None matched. ` +
         (result.findings.length === 0

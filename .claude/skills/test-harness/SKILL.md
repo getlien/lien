@@ -47,7 +47,17 @@ Wrapper template:
 
 > You are simulating an LLM inside an automated code-review tool. Your role is defined by the SYSTEM PROMPT below; the USER MESSAGE describes the PR you are reviewing. Investigate using your available tools (Read, Grep, Glob) against the local repo working directory. Follow the investigation strategy described in the SYSTEM PROMPT exactly.
 >
-> When done, output **exactly one** fenced JSON block at the end matching the `<output_format>` schema in the SYSTEM PROMPT. After that JSON block, output a second fenced block tagged `harness-meta` listing the tools you actually called, one per line in the form `tool: <descriptor>` (e.g. `Read: src/risk.ts`, `Grep: classifyLevel`). Do not include any text after the second block.
+> When done, output **exactly one** fenced JSON block at the end matching the `<output_format>` schema in the SYSTEM PROMPT. After that JSON block, output a second fenced block tagged `harness-meta` listing the **production tool names** you logically used during investigation, one per line. Map your CC tools to the production tool name vocabulary so assertions match across modes:
+>
+> | Your CC tool | Production tool name to log |
+> | --- | --- |
+> | `Read <file>` | `get_files_context` |
+> | `Grep <pattern>` (text or regex over files) | `grep_codebase` |
+> | `Glob` / file-pattern listing | `list_functions` |
+> | inspecting who calls a symbol | `get_dependents` |
+> | Reading a single file's contents | `read_file` |
+>
+> Output one production tool name per line (just the bare name, e.g. `get_files_context`). Do not include any text after the second block.
 >
 > SYSTEM PROMPT:
 > ```
@@ -66,16 +76,16 @@ Spawn the K subagents in parallel (single message, multiple Agent tool calls) wh
 For each returned subagent result:
 
 1. Extract the first ```json ... ``` block — parse it as `{findings, summary}`.
-2. Extract the ```harness-meta ... ``` block — split on newlines, drop blanks, treat each line as a tool-call descriptor.
+2. Extract the ```harness-meta ... ``` block — split on newlines, drop blanks, treat each line as a production tool name (per the mapping in Step 3).
 3. Build a HarnessResult object:
    ```json
    {
      "findings": [...],
-     "toolCalls": ["Read: src/risk.ts", ...],
+     "toolCalls": ["get_files_context", "grep_codebase", "read_file"],
      "turns": 1
    }
    ```
-   (`turns: 1` is a placeholder — we don't have access to the subagent's actual turn count.)
+   (`turns: 1` is a placeholder — we don't have access to the subagent's actual turn count. The toolCalls list MUST use production tool names so `expectToolCalled('get_files_context', …)` assertions work in both modes.)
 4. Write it to a temp file: `/tmp/harness-result-<rule>-<vote-index>.json`.
 
 If a subagent's response has no parseable JSON block, count it as a failure with a note.

@@ -7,7 +7,27 @@
 # data, not a script error. So we deliberately do NOT use `set -e` here.
 set -uo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+# Fail-fast preconditions — these surface clearly instead of producing
+# misleading "writing results to /tmp/sweep-…" with no actual results.
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "sweep.sh: could not resolve repository root (is this a git checkout?)" >&2
+  exit 1
+}
+cd "$REPO_ROOT" || {
+  echo "sweep.sh: could not cd to $REPO_ROOT" >&2
+  exit 1
+}
+
+# OpenRouter mode (which is what sweep.sh drives) auto-loads
+# OPENROUTER_API_KEY from .env via process.loadEnvFile() in run.ts. If
+# neither env nor .env supplies it, fail before burning subprocess startup
+# time.
+if [ -z "${OPENROUTER_API_KEY:-}" ] && [ ! -f "$REPO_ROOT/.env" ]; then
+  echo "sweep.sh: OPENROUTER_API_KEY is not set and no .env found at repo root" >&2
+  echo "         (set it inline, in your shell rc, or in .env at the repo root)" >&2
+  exit 1
+fi
 
 ROOT=packages/review/test/harness/fixtures
 if [ "$#" -gt 0 ]; then

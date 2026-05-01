@@ -27,6 +27,39 @@ export interface AssertedRun {
   failureTier?: 1 | 2;
 }
 
+/**
+ * Heuristic for "is this an LLM transport/runtime error worth treating as
+ * an honest Tier 1 fail" vs "this is a fixture/setup bug that should
+ * surface and abort calibration." We only downgrade the former — anything
+ * else (schema validation, missing repoChunks, programmer error in the
+ * agent plugin) re-throws so calibration crashes loudly instead of
+ * pretending the model was flaky.
+ *
+ * Match patterns the runner produces from real API failures: explicit
+ * `LLM error: ...` prefix from runner.ts, OpenAI/anthropic SDK error names,
+ * provider-side `terminated` / `fetch failed` strings, OpenRouter HTTP
+ * codes (`API error (4xx/5xx)` etc).
+ */
+const LLM_ERROR_PATTERNS = [
+  /^LLM error:/i,
+  /^API error \(/i,
+  /\bAPIError\b/,
+  /\bAnthropicError\b/,
+  /\bOpenAIError\b/,
+  /\bECONNRESET\b|\bETIMEDOUT\b|\bENOTFOUND\b|\bECONNREFUSED\b/,
+  /\bfetch failed\b/i,
+  /\bterminated\b/i,
+  /\brate ?limit\b/i,
+  /\b5\d\d\b/, // 500/502/503/504
+];
+
+function isTransientLLMError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  const name = err instanceof Error ? err.name : '';
+  const hay = `${name}: ${message}`;
+  return LLM_ERROR_PATTERNS.some(re => re.test(hay));
+}
+
 async function runOnce(
   fixturePath: string,
   assertions: FixtureAssertions,
@@ -39,15 +72,20 @@ async function runOnce(
   try {
     ({ findings, toolCalls, turns, cost } = await runFixture(fixturePath, opts));
   } catch (err) {
-    // LLM-side failure (network, 5xx, timeout). Don't crash the calibration —
-    // record it as a Tier 1 fail so the caller sees variance, not a thrown stack.
-    return {
-      result: { findings: [], toolCalls: [], turns: 0 },
-      cost: 0,
-      passed: false,
-      failureMessage: `LLM error: ${err instanceof Error ? err.message : String(err)}`,
-      failureTier: 1,
-    };
+    if (isTransientLLMError(err)) {
+      // LLM-side failure (network, 5xx, terminated). Record as a Tier 1 fail
+      // so calibration completes and the caller sees the variance.
+      return {
+        result: { findings: [], toolCalls: [], turns: 0 },
+        cost: 0,
+        passed: false,
+        failureMessage: `LLM error: ${err instanceof Error ? err.message : String(err)}`,
+        failureTier: 1,
+      };
+    }
+    // Setup/fixture/programmer error — re-throw so the run aborts loudly
+    // rather than masquerading as model flakiness across N votes.
+    throw err;
   }
 
   const result: HarnessResult = { findings, toolCalls, turns };
@@ -65,10 +103,13 @@ async function runOnce(
 }
 
 /**
- * Run K calls in parallel. Promise.all is fine here because runOnce never
- * throws on LLM-side failures (it converts them to a passed=false result),
- * so a single bad call doesn't poison the batch. OpenRouter handles 10
- * concurrent OpenAI-compat requests without rate-limit issues at our volume.
+ * Run K calls in parallel. Transient LLM errors are caught inside runOnce
+ * and become passed=false results, so flaky network/5xx doesn't poison the
+ * batch. Setup errors (fixture schema, programmer bugs) DO propagate and
+ * reject the whole calibration — that's intentional, those should surface
+ * loudly rather than masquerade as model flakiness across N votes.
+ * OpenRouter handles 10 concurrent OpenAI-compat requests without rate-limit
+ * issues at our volume.
  */
 async function runMany(
   fixturePath: string,

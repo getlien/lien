@@ -49,25 +49,46 @@ interface CliFlags {
   model?: string;
 }
 
+function requirePositiveInt(name: string, value: string | undefined): number {
+  if (value === undefined) {
+    console.error(`${name} requires a value`);
+    process.exit(2);
+  }
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) {
+    console.error(`${name} must be a positive integer (got: ${value})`);
+    process.exit(2);
+  }
+  return n;
+}
+
+function requireString(name: string, value: string | undefined): string {
+  if (value === undefined || value === '') {
+    console.error(`${name} requires a value`);
+    process.exit(2);
+  }
+  return value;
+}
+
 /**
  * Each value-taking flag's setter. Bool flags and `--help` are handled
  * inline in `parseFlags` since they don't follow the same shape.
  */
-const VALUE_FLAG_SETTERS: Record<string, (f: CliFlags, value: string) => void> = {
+const VALUE_FLAG_SETTERS: Record<string, (f: CliFlags, value: string | undefined) => void> = {
   '--rule': (f, v) => {
-    f.rule = v;
+    f.rule = requireString('--rule', v);
   },
   '--fixture': (f, v) => {
-    f.fixture = v;
+    f.fixture = requireString('--fixture', v);
   },
   '--votes': (f, v) => {
-    f.votes = parseInt(v, 10);
+    f.votes = requirePositiveInt('--votes', v);
   },
   '--calibrate': (f, v) => {
-    f.calibrate = parseInt(v, 10);
+    f.calibrate = requirePositiveInt('--calibrate', v);
   },
   '--model': (f, v) => {
-    f.model = v;
+    f.model = requireString('--model', v);
   },
 };
 
@@ -194,7 +215,7 @@ async function runOneFixture(
   const assertions = await loadAssertions(f.assertionsPath);
   const label = `${f.rule}/${f.name}`;
 
-  if (flags.calibrate) {
+  if (flags.calibrate !== undefined) {
     const result = await calibrate(f.fixturePath, assertions, opts, flags.calibrate);
     return {
       passed: result.meetsReliabilityBar,
