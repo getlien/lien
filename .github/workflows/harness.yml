@@ -1,0 +1,92 @@
+name: Agent-Rule Test Harness (LLM)
+
+# Manual-trigger only. The harness hits a real LLM (Gemini 2.5 Flash via
+# OpenRouter) and costs real money per run. Do NOT add automatic triggers.
+#
+# Use this to:
+#   - Establish the 9/10 reliability baseline before changing a rule prompt
+#   - Verify a prompt tweak still meets the 9/10 bar (per issue #538)
+#
+# For free iteration during prompt authoring, use the /test-harness Skill in
+# Claude Code instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rule:
+        description: 'Rule id to run (e.g., boundary-change). Empty = all rules.'
+        required: false
+        type: string
+      votes:
+        description: 'Votes per fixture (default 3)'
+        required: false
+        default: '3'
+        type: string
+      calibrate:
+        description: 'Calibration runs per fixture (e.g., 10 to check the 9/10 bar). Empty = vote mode.'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: harness-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  harness:
+    name: Run agent-rule harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build review package (for runtime imports)
+        run: npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review
+
+      - name: Run harness
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          ARGS=()
+          if [ -n "${{ inputs.rule }}" ]; then
+            ARGS+=("--rule" "${{ inputs.rule }}")
+          fi
+          if [ -n "${{ inputs.calibrate }}" ]; then
+            ARGS+=("--calibrate" "${{ inputs.calibrate }}")
+          else
+            ARGS+=("--votes" "${{ inputs.votes }}")
+          fi
+          ARGS+=("--json")
+          npm run test:harness -w @liendev/review -- "${ARGS[@]}" | tee harness-result.json
+
+      - name: Render summary
+        if: always()
+        run: |
+          if [ -f harness-result.json ]; then
+            {
+              echo '## Agent-Rule Harness Result'
+              echo ''
+              echo '```json'
+              cat harness-result.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-result
+          path: harness-result.json
+          retention-days: 14
