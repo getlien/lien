@@ -195,6 +195,32 @@ function resolveSha(sha: string): string {
   }
 }
 
+/**
+ * Assert that `sha` lives in PR #prNumber's lineage — i.e., the PR's
+ * baseRefOid is an ancestor of `sha`, and `sha` is an ancestor of the
+ * PR's headRefOid. Without this, `--sha` would happily accept any
+ * reachable commit and produce a fixture whose `pr` metadata claims a
+ * PR while the diff is from unrelated history. (Per CodeRabbit on #545.)
+ */
+function assertShaInPrRange(meta: PrMeta, prNumber: number, sha: string): void {
+  const inRange = (cmd: string): boolean => {
+    try {
+      sh(cmd);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const baseInSha = inRange(`git merge-base --is-ancestor "${meta.baseRefOid}" "${sha}"`);
+  const shaInHead = inRange(`git merge-base --is-ancestor "${sha}" "${meta.headRefOid}"`);
+  if (!baseInSha || !shaInHead) {
+    throw new Error(
+      `--sha ${sha} is not within PR #${prNumber} commit range ` +
+        `(${meta.baseRefOid}..${meta.headRefOid}). Pass a SHA that lives in the PR's lineage.`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const { prNumber, outputPath, shaOverride } = parseArgs(process.argv.slice(2));
 
@@ -205,6 +231,7 @@ async function main(): Promise<void> {
 
   const headSha = shaOverride ? resolveSha(shaOverride) : meta.headRefOid;
   if (shaOverride) {
+    assertShaInPrRange(meta, prNumber, headSha);
     console.error(`[capture] overriding head: ${meta.headRefOid} -> ${headSha}`);
   }
 
