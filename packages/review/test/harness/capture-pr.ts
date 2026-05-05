@@ -189,12 +189,26 @@ function parseArgs(argv: string[]): ParsedArgs {
   return { prNumber, outputPath: resolve(outArg), shaOverride };
 }
 
+/** Short or full git commit SHA — 7–40 hex chars, nothing else. */
+const SHA_PATTERN = /^[0-9a-fA-F]{7,40}$/;
+
 /**
  * Resolve a possibly-short SHA to its full 40-char form via the current
  * checkout's git data. Throws if the SHA isn't reachable — gives a
  * clearer error than a downstream `git worktree add` failure.
+ *
+ * Validates `sha` against a strict hex pattern before passing it to
+ * `sh()`. `sh()` shells out via `execSync`, so an unsanitised SHA
+ * (e.g. one containing a quote, semicolon, or backtick) would expand
+ * into the command string and execute arbitrary commands. Per
+ * CodeRabbit on #545.
  */
 function resolveSha(sha: string): string {
+  if (!SHA_PATTERN.test(sha)) {
+    throw new Error(
+      `invalid --sha "${sha}": expected 7–40 hex chars (commit SHA), got ${sha.length} chars including non-hex characters`,
+    );
+  }
   try {
     return sh(`git rev-parse --verify "${sha}^{commit}"`).trim();
   } catch (err) {
