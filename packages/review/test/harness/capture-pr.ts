@@ -172,13 +172,15 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
     positional.push(arg);
   }
-  const [prArg, outArg] = positional;
-  if (!prArg || !outArg) {
+  if (positional.length !== 2) {
+    const got = positional.length === 0 ? '(none)' : positional.join(' ');
     console.error(
-      'Usage: tsx capture-pr.ts <pr-number> <output-fixture-path> [--sha <commit-sha>]',
+      `Usage: tsx capture-pr.ts <pr-number> <output-fixture-path> [--sha <commit-sha>]\n` +
+        `  expected exactly 2 positional arguments, got ${positional.length}: ${got}`,
     );
     process.exit(2);
   }
+  const [prArg, outArg] = positional;
   const prNumber = parseInt(prArg, 10);
   if (!Number.isInteger(prNumber) || prNumber <= 0) {
     console.error(`pr-number must be a positive integer (got: ${prArg})`);
