@@ -58,37 +58,43 @@ function sh(cmd: string): string {
  * captured `+` lines, findings on context lines would silently fall out
  * of the harness's filter behavior vs prod.
  */
+/**
+ * Extract the post-image line numbers covered by a single file's diff
+ * block (the bit between two `diff --git` headers). Tracks both `+`
+ * (added) and ` ` (context) lines so the engine's diff-adjacent filter
+ * matches what production sees.
+ */
+function extractPostImageLines(block: string): Set<number> {
+  const lines = new Set<number>();
+  let currentLine = 0; // overwritten by the first hunk header
+  for (const line of block.split('\n')) {
+    const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunkMatch) {
+      currentLine = parseInt(hunkMatch[1], 10);
+      continue;
+    }
+    // `-` lines don't advance currentLine (post-image counter).
+    // `+++` is the file header, skip without advancing.
+    if ((line.startsWith('+') || line.startsWith(' ')) && !line.startsWith('+++')) {
+      lines.add(currentLine);
+      currentLine++;
+    }
+  }
+  return lines;
+}
+
 function parseUnifiedDiff(diff: string): {
   patches: Map<string, string>;
   diffLines: Map<string, Set<number>>;
 } {
   const patches = new Map<string, string>();
   const diffLines = new Map<string, Set<number>>();
-  const fileBlocks = diff.split(/^diff --git /m).slice(1);
-  for (const block of fileBlocks) {
+  for (const block of diff.split(/^diff --git /m).slice(1)) {
     const headerMatch = block.match(/^a\/(.+?) b\/(.+?)$/m);
     if (!headerMatch) continue;
     const path = headerMatch[2];
-    const body = `diff --git ${block}`.trimEnd();
-    patches.set(path, body);
-
-    const lines = new Set<number>();
-    let currentLine = 0; // overwritten by the first hunk header
-    for (const line of block.split('\n')) {
-      const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (hunkMatch) {
-        currentLine = parseInt(hunkMatch[1], 10);
-        continue;
-      }
-      if (line.startsWith('+') || line.startsWith(' ')) {
-        if (!line.startsWith('+++')) {
-          lines.add(currentLine);
-          currentLine++;
-        }
-      }
-      // `-` lines don't advance currentLine (post-image counter).
-    }
-    diffLines.set(path, lines);
+    patches.set(path, `diff --git ${block}`.trimEnd());
+    diffLines.set(path, extractPostImageLines(block));
   }
   return { patches, diffLines };
 }
@@ -221,6 +227,126 @@ function assertShaInPrRange(meta: PrMeta, prNumber: number, sha: string): void {
   }
 }
 
+/**
+ * Pick where to source the diff and changed-files list. Default path is
+ * `gh pr diff` (the PR's full diff). When a `--sha` override is in play,
+ * recompute against that SHA so PR-level files (which include every
+ * commit on the PR) don't bleed into a single-commit snapshot.
+ */
+function selectDiffSource(
+  meta: PrMeta,
+  prNumber: number,
+  headSha: string,
+  shaOverride: string | undefined,
+): { diffText: string; changedFiles: string[] } {
+  if (!shaOverride) {
+    console.error(`[capture] fetching PR ${prNumber} diff`);
+    return {
+      diffText: sh(`gh pr diff ${prNumber}`),
+      changedFiles: meta.files.map(f => f.path),
+    };
+  }
+  console.error(`[capture] computing diff ${meta.baseRefOid}..${headSha}`);
+  const range = `"${meta.baseRefOid}".."${headSha}"`;
+  return {
+    diffText: sh(`git diff ${range}`),
+    changedFiles: sh(`git diff --name-only ${range}`)
+      .split('\n')
+      .map(s => s.trim())
+      .filter(s => s.length > 0),
+  };
+}
+
+/** Index the worktree and return both repo-wide chunks and the
+ * subset belonging to the PR's changed files. */
+async function indexCapturedWorktree(worktree: string, changedFiles: string[]) {
+  console.error(`[capture] indexing worktree at ${worktree}`);
+  const indexResult = await performChunkOnlyIndex(worktree);
+  if (!indexResult.success || !indexResult.chunks) {
+    throw new Error(`index failed: ${indexResult.error ?? 'unknown'}`);
+  }
+  const repoChunks = indexResult.chunks;
+  console.error(`[capture] indexed ${repoChunks.length} chunks`);
+
+  // Path-shape between the parser's chunk metadata and `gh pr view`'s file
+  // list isn't guaranteed to match byte-for-byte (Windows backslashes,
+  // ./ prefixes, absolute vs. repo-relative). Normalize both sides to
+  // repo-relative POSIX form before set membership.
+  const changedSet = new Set(changedFiles.map(f => toRepoRelative(f, worktree)));
+  const chunks = repoChunks.filter(c => changedSet.has(toRepoRelative(c.metadata.file, worktree)));
+  console.error(`[capture] ${chunks.length} chunks for changed files`);
+  return { repoChunks, chunks };
+}
+
+/** Run real complexity analysis on the changed files so the captured
+ * ctx matches what the production runner would build. Falls back to an
+ * empty report shape if analysis returns nothing.
+ *
+ * Limitation: we don't check out the base ref, so `deltas` stays null —
+ * the runner computes deltas by diffing head vs base reports. For
+ * delta-aware fidelity, capture via the engine's
+ * LIEN_REVIEW_CAPTURE_CTX env hook against a live runner instead.
+ */
+async function analyzeCapturedComplexity(changedFiles: string[], worktree: string) {
+  console.error(`[capture] analyzing complexity for ${changedFiles.length} changed files`);
+  const result = await runComplexityAnalysis(changedFiles, '50', worktree, silentLogger);
+  const report = result?.report ?? {
+    summary: {
+      filesAnalyzed: changedFiles.length,
+      totalViolations: 0,
+      bySeverity: { error: 0, warning: 0 },
+      avgComplexity: 0,
+      maxComplexity: 0,
+    },
+    files: {},
+  };
+  console.error(
+    `[capture] complexity: ${report.summary.totalViolations} violations, max=${report.summary.maxComplexity}`,
+  );
+  return report;
+}
+
+interface CaptureInputs {
+  meta: PrMeta;
+  prNumber: number;
+  headSha: string;
+  outputPath: string;
+  patches: Map<string, string>;
+  diffLines: Map<string, Set<number>>;
+  changedFiles: string[];
+}
+
+async function captureFixtureFromWorktree(worktree: string, inputs: CaptureInputs): Promise<void> {
+  const { repoChunks, chunks } = await indexCapturedWorktree(worktree, inputs.changedFiles);
+  const complexityReport = await analyzeCapturedComplexity(inputs.changedFiles, worktree);
+  const ctx = {
+    chunks,
+    changedFiles: inputs.changedFiles,
+    allChangedFiles: inputs.changedFiles,
+    complexityReport,
+    baselineReport: null,
+    deltas: null,
+    pluginConfigs: {},
+    config: {},
+    pr: {
+      owner: 'getlien',
+      repo: 'lien',
+      pullNumber: inputs.prNumber,
+      title: inputs.meta.title,
+      body: inputs.meta.body ?? '',
+      baseSha: inputs.meta.baseRefOid,
+      headSha: inputs.headSha,
+      patches: inputs.patches,
+      diffLines: inputs.diffLines,
+    },
+    repoChunks,
+    repoRootDir: worktree,
+  };
+  await fs.mkdir(dirname(inputs.outputPath), { recursive: true });
+  await saveFixture(ctx, inputs.outputPath);
+  console.error(`[capture] wrote ${inputs.outputPath}`);
+}
+
 async function main(): Promise<void> {
   const { prNumber, outputPath, shaOverride } = parseArgs(process.argv.slice(2));
 
@@ -235,102 +361,20 @@ async function main(): Promise<void> {
     console.error(`[capture] overriding head: ${meta.headRefOid} -> ${headSha}`);
   }
 
-  let diffText: string;
-  let changedFiles: string[];
-  if (shaOverride) {
-    // PR-level files include all commits; recompute against the target sha
-    // so the captured fixture reflects only the diff up to that commit.
-    console.error(`[capture] computing diff ${meta.baseRefOid}..${headSha}`);
-    diffText = sh(`git diff "${meta.baseRefOid}".."${headSha}"`);
-    changedFiles = sh(`git diff --name-only "${meta.baseRefOid}".."${headSha}"`)
-      .split('\n')
-      .map(s => s.trim())
-      .filter(s => s.length > 0);
-  } else {
-    console.error(`[capture] fetching PR ${prNumber} diff`);
-    diffText = sh(`gh pr diff ${prNumber}`);
-    changedFiles = meta.files.map(f => f.path);
-  }
-
+  const { diffText, changedFiles } = selectDiffSource(meta, prNumber, headSha, shaOverride);
   const { patches, diffLines } = parseUnifiedDiff(diffText);
 
-  await withWorktree(headSha, async worktree => {
-    console.error(`[capture] indexing worktree at ${worktree}`);
-    const indexResult = await performChunkOnlyIndex(worktree);
-    if (!indexResult.success || !indexResult.chunks) {
-      throw new Error(`index failed: ${indexResult.error ?? 'unknown'}`);
-    }
-    const repoChunks = indexResult.chunks;
-    console.error(`[capture] indexed ${repoChunks.length} chunks`);
-
-    // Path-shape between the parser's chunk metadata and `gh pr view`'s file
-    // list isn't guaranteed to match byte-for-byte (Windows backslashes,
-    // ./ prefixes, absolute vs. repo-relative). Normalize both sides to
-    // repo-relative POSIX form before set membership.
-    const changedSet = new Set(changedFiles.map(f => toRepoRelative(f, worktree)));
-    const chunks = repoChunks.filter(c =>
-      changedSet.has(toRepoRelative(c.metadata.file, worktree)),
-    );
-    console.error(`[capture] ${chunks.length} chunks for changed files`);
-
-    // Real complexity analysis on the changed files so the captured ctx
-    // matches what the production runner would build. Without this,
-    // complexity-aware rules (e.g. blast-radius risk) see an empty report
-    // and behave differently than they would in prod.
-    //
-    // Limitation: we don't check out the base ref, so `deltas` stays null —
-    // the runner computes deltas by diffing head vs base reports. For
-    // delta-aware fidelity, capture via the engine's
-    // LIEN_REVIEW_CAPTURE_CTX env hook against a live runner instead.
-    console.error(`[capture] analyzing complexity for ${changedFiles.length} changed files`);
-    const complexityResult = await runComplexityAnalysis(
+  await withWorktree(headSha, worktree =>
+    captureFixtureFromWorktree(worktree, {
+      meta,
+      prNumber,
+      headSha,
+      outputPath,
+      patches,
+      diffLines,
       changedFiles,
-      '50',
-      worktree,
-      silentLogger,
-    );
-    const complexityReport = complexityResult?.report ?? {
-      summary: {
-        filesAnalyzed: changedFiles.length,
-        totalViolations: 0,
-        bySeverity: { error: 0, warning: 0 },
-        avgComplexity: 0,
-        maxComplexity: 0,
-      },
-      files: {},
-    };
-    console.error(
-      `[capture] complexity: ${complexityReport.summary.totalViolations} violations, max=${complexityReport.summary.maxComplexity}`,
-    );
-
-    const ctx = {
-      chunks,
-      changedFiles,
-      allChangedFiles: changedFiles,
-      complexityReport,
-      baselineReport: null,
-      deltas: null,
-      pluginConfigs: {},
-      config: {},
-      pr: {
-        owner: 'getlien',
-        repo: 'lien',
-        pullNumber: prNumber,
-        title: meta.title,
-        body: meta.body ?? '',
-        baseSha: meta.baseRefOid,
-        headSha,
-        patches,
-        diffLines,
-      },
-      repoChunks,
-      repoRootDir: worktree,
-    };
-
-    await fs.mkdir(dirname(outputPath), { recursive: true });
-    await saveFixture(ctx, outputPath);
-    console.error(`[capture] wrote ${outputPath}`);
-  });
+    }),
+  );
 }
 
 main().catch(err => {
