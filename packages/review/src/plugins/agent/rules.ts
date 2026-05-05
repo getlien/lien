@@ -440,6 +440,86 @@ is not a qualifying test; an actual test file + line is.`,
   source: 'builtin',
 };
 
+const STALE_DUPLICATE: ReviewRule = {
+  id: 'stale-duplicate',
+  name: 'Stale Duplicate Literal',
+  description:
+    'Flag PRs that replace a hardcoded literal in one site but leave identical hardcoded copies elsewhere unchanged',
+  prompt: `### Stale Duplicate Literal Check
+
+**This rule is an exception to the general "silence means approval"
+policy.** Stale-duplicate bugs are subtle and easily missed without
+active investigation; producing empty findings without checking is a
+failure of this rule, NOT a safe default. Do not fall back to silence
+if you cannot immediately confirm a problem — investigate first.
+
+The pattern: the diff touches a code site that emits a value
+(assignment RHS, config field, return value, parameter default), and
+the same or a closely related literal is hardcoded elsewhere in the
+same file/package in a position that should logically track the
+changed site. Common shapes: model/version bumps where one usage is
+missed, feature-flag or env-var renames where one consumer lags,
+magic numbers shared between a constant and its call sites, error
+messages copy-pasted across handlers, schema field renames where one
+reader still uses the old name. The defect can be a literal that the
+diff *removed*, a literal *introduced* by the diff, or a literal
+present *unchanged* on a \`+\` line whose adjacent code structure was
+edited (e.g., a conditional was added or modified above it).
+
+MANDATORY protocol when this rule is active:
+
+1. Walk the diff. Collect every quoted string literal and every
+   distinctive numeric/identifier constant that appears in either
+   the \`-\` lines, the \`+\` lines, or as part of a value-emitting
+   expression on a touched line (e.g., the branch values of a
+   conditional that the diff modified).
+2. **For each such literal, you MUST call \`grep_codebase\`** with
+   the literal's exact text (including quotes for strings; for
+   numbers and identifiers, prefer a pattern that anchors on the
+   surrounding syntax to reduce false matches). Look at the hits
+   that fall *outside* the diff hunks.
+3. For each outside-the-diff hit, decide whether that site should
+   logically track the changed site. Strong signals: same field
+   name on adjacent objects (e.g., \`model\`, \`version\`,
+   \`apiKey\`, \`baseUrl\`), same function body, parallel struct
+   literal, neighbouring config key. If the changed site is
+   conditional/parameterized but the outside hit is hardcoded, that
+   is itself a signal — the outside hit cannot track the
+   conditional and is by definition stale.
+4. **Emit a finding** for each stale site that should track the
+   changed site. The \`message\` must name the literal and BOTH
+   locations explicitly (the changed site's line number and the
+   stale site's line number). The \`evidence\` must cite the
+   \`grep_codebase\` invocation that found the stale site.
+5. The \`suggestion\` should propose either: (a) apply the same
+   replacement/parameterization to the stale copy, or (b) hoist the
+   literal to a shared \`const\` near the top of the function/file
+   so there's one source of truth. Pick whichever matches the
+   change's apparent intent.
+
+Do not finalize a response for this rule with zero findings unless
+you have called \`grep_codebase\` for at least one literal from the
+diff AND can confirm no semantically related copies survive
+elsewhere in the post-image.`,
+  example: `### Good finding — partial model bump leaves stale hardcoded copy:
+{
+  "filepath": "packages/runner/src/handlers/pr-review.ts",
+  "line": 300,
+  "symbolName": "handlePRReview",
+  "severity": "warning",
+  "category": "logic_error",
+  "ruleId": "stale-duplicate",
+  "message": "Line 272 was changed from a hardcoded \`'claude-sonnet-4-6'\` to a provider-conditional that picks 'google/gemini-3-flash-preview' when openrouterApiKey is set, but \`adapterContext.model\` on line 300 still has the literal \`'claude-sonnet-4-6'\` unchanged. OpenRouter runs will configure the agent with Gemini at line 272 yet report 'claude-sonnet-4-6' in the adapterContext metadata that drives cost displays and check-run output — wrong model attribution on every OpenRouter PR review.",
+  "suggestion": "Hoist the conditional into a single \`const selectedModel = config.openrouterApiKey ? 'google/gemini-3-flash-preview' : 'claude-sonnet-4-6';\` at the top of handlePRReview, then reference \`selectedModel\` on both line 272 and line 300. That gives a single source of truth instead of two parallel literals that can drift again on the next bump.",
+  "evidence": "Stale-duplicate check — diff at line 272 replaced the hardcoded literal with a conditional; grep_codebase for 'claude-sonnet-4-6' in pr-review.ts returned a remaining occurrence at line 300 (adapterContext.model), outside the diff hunks"
+}`,
+  triggers: { always: true },
+  severity: 'warning',
+  category: 'logic_error',
+  enabled: true,
+  source: 'builtin',
+};
+
 /** All built-in review rules. */
 export const BUILTIN_RULES: ReviewRule[] = [
   STRUCTURAL_ANALYSIS,
@@ -448,4 +528,5 @@ export const BUILTIN_RULES: ReviewRule[] = [
   INCOMPLETE_HANDLING,
   ERROR_SWALLOWING,
   BOUNDARY_CHANGE,
+  STALE_DUPLICATE,
 ];

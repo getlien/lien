@@ -6,7 +6,13 @@
  * Uses a git worktree to avoid touching the current working branch.
  *
  * Usage:
- *   tsx capture-pr.ts <pr-number> <output-fixture-path>
+ *   tsx capture-pr.ts <pr-number> <output-fixture-path> [--sha <commit-sha>]
+ *
+ * `--sha` overrides the captured head: use it to snapshot a PR at an
+ * earlier commit (e.g., before a follow-up fix landed). When provided,
+ * the diff is computed via `git diff <base>..<sha>` instead of `gh pr
+ * diff`, so only the changes up to that commit are captured. The base
+ * remains the PR's `baseRefOid`.
  *
  * Prerequisites:
  *   - gh CLI authenticated
@@ -52,37 +58,43 @@ function sh(cmd: string): string {
  * captured `+` lines, findings on context lines would silently fall out
  * of the harness's filter behavior vs prod.
  */
+/**
+ * Extract the post-image line numbers covered by a single file's diff
+ * block (the bit between two `diff --git` headers). Tracks both `+`
+ * (added) and ` ` (context) lines so the engine's diff-adjacent filter
+ * matches what production sees.
+ */
+function extractPostImageLines(block: string): Set<number> {
+  const lines = new Set<number>();
+  let currentLine = 0; // overwritten by the first hunk header
+  for (const line of block.split('\n')) {
+    const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunkMatch) {
+      currentLine = parseInt(hunkMatch[1], 10);
+      continue;
+    }
+    // `-` lines don't advance currentLine (post-image counter).
+    // `+++` is the file header, skip without advancing.
+    if ((line.startsWith('+') || line.startsWith(' ')) && !line.startsWith('+++')) {
+      lines.add(currentLine);
+      currentLine++;
+    }
+  }
+  return lines;
+}
+
 function parseUnifiedDiff(diff: string): {
   patches: Map<string, string>;
   diffLines: Map<string, Set<number>>;
 } {
   const patches = new Map<string, string>();
   const diffLines = new Map<string, Set<number>>();
-  const fileBlocks = diff.split(/^diff --git /m).slice(1);
-  for (const block of fileBlocks) {
+  for (const block of diff.split(/^diff --git /m).slice(1)) {
     const headerMatch = block.match(/^a\/(.+?) b\/(.+?)$/m);
     if (!headerMatch) continue;
     const path = headerMatch[2];
-    const body = `diff --git ${block}`.trimEnd();
-    patches.set(path, body);
-
-    const lines = new Set<number>();
-    let currentLine = 0; // overwritten by the first hunk header
-    for (const line of block.split('\n')) {
-      const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (hunkMatch) {
-        currentLine = parseInt(hunkMatch[1], 10);
-        continue;
-      }
-      if (line.startsWith('+') || line.startsWith(' ')) {
-        if (!line.startsWith('+++')) {
-          lines.add(currentLine);
-          currentLine++;
-        }
-      }
-      // `-` lines don't advance currentLine (post-image counter).
-    }
-    diffLines.set(path, lines);
+    patches.set(path, `diff --git ${block}`.trimEnd());
+    diffLines.set(path, extractPostImageLines(block));
   }
   return { patches, diffLines };
 }
@@ -134,104 +146,251 @@ async function withWorktree<T>(sha: string, fn: (path: string) => Promise<T>): P
   return fn(wtPath);
 }
 
-async function main(): Promise<void> {
-  const [prArg, outArg] = process.argv.slice(2);
-  if (!prArg || !outArg) {
-    console.error('Usage: tsx capture-pr.ts <pr-number> <output-fixture-path>');
+interface ParsedArgs {
+  prNumber: number;
+  outputPath: string;
+  shaOverride?: string;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  const positional: string[] = [];
+  let shaOverride: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--sha') {
+      const value = argv[++i];
+      if (!value) {
+        console.error('--sha requires a value');
+        process.exit(2);
+      }
+      shaOverride = value;
+      continue;
+    }
+    if (arg.startsWith('--')) {
+      console.error(`Unknown flag: ${arg}`);
+      process.exit(2);
+    }
+    positional.push(arg);
+  }
+  if (positional.length !== 2) {
+    const got = positional.length === 0 ? '(none)' : positional.join(' ');
+    console.error(
+      `Usage: tsx capture-pr.ts <pr-number> <output-fixture-path> [--sha <commit-sha>]\n` +
+        `  expected exactly 2 positional arguments, got ${positional.length}: ${got}`,
+    );
     process.exit(2);
   }
-
+  const [prArg, outArg] = positional;
   const prNumber = parseInt(prArg, 10);
-  const outputPath = resolve(outArg);
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    console.error(`pr-number must be a positive integer (got: ${prArg})`);
+    process.exit(2);
+  }
+  return { prNumber, outputPath: resolve(outArg), shaOverride };
+}
+
+/** Short or full git commit SHA — 7–40 hex chars, nothing else. */
+const SHA_PATTERN = /^[0-9a-fA-F]{7,40}$/;
+
+/**
+ * Resolve a possibly-short SHA to its full 40-char form via the current
+ * checkout's git data. Throws if the SHA isn't reachable — gives a
+ * clearer error than a downstream `git worktree add` failure.
+ *
+ * Validates `sha` against a strict hex pattern before passing it to
+ * `sh()`. `sh()` shells out via `execSync`, so an unsanitised SHA
+ * (e.g. one containing a quote, semicolon, or backtick) would expand
+ * into the command string and execute arbitrary commands. Per
+ * CodeRabbit on #545.
+ */
+function resolveSha(sha: string): string {
+  if (!SHA_PATTERN.test(sha)) {
+    throw new Error(
+      `invalid --sha "${sha}": expected 7–40 hex chars (commit SHA), got ${sha.length} chars including non-hex characters`,
+    );
+  }
+  try {
+    return sh(`git rev-parse --verify "${sha}^{commit}"`).trim();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`could not resolve sha "${sha}": ${reason}`);
+  }
+}
+
+/**
+ * Assert that `sha` lives in PR #prNumber's lineage — i.e., the PR's
+ * baseRefOid is an ancestor of `sha`, and `sha` is an ancestor of the
+ * PR's headRefOid. Without this, `--sha` would happily accept any
+ * reachable commit and produce a fixture whose `pr` metadata claims a
+ * PR while the diff is from unrelated history. (Per CodeRabbit on #545.)
+ */
+function assertShaInPrRange(meta: PrMeta, prNumber: number, sha: string): void {
+  const inRange = (cmd: string): boolean => {
+    try {
+      sh(cmd);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const baseInSha = inRange(`git merge-base --is-ancestor "${meta.baseRefOid}" "${sha}"`);
+  const shaInHead = inRange(`git merge-base --is-ancestor "${sha}" "${meta.headRefOid}"`);
+  if (!baseInSha || !shaInHead) {
+    throw new Error(
+      `--sha ${sha} is not within PR #${prNumber} commit range ` +
+        `(${meta.baseRefOid}..${meta.headRefOid}). Pass a SHA that lives in the PR's lineage.`,
+    );
+  }
+}
+
+/**
+ * Pick where to source the diff and changed-files list. Default path is
+ * `gh pr diff` (the PR's full diff). When a `--sha` override is in play,
+ * recompute against that SHA so PR-level files (which include every
+ * commit on the PR) don't bleed into a single-commit snapshot.
+ */
+function selectDiffSource(
+  meta: PrMeta,
+  prNumber: number,
+  headSha: string,
+  shaOverride: string | undefined,
+): { diffText: string; changedFiles: string[] } {
+  if (!shaOverride) {
+    console.error(`[capture] fetching PR ${prNumber} diff`);
+    return {
+      diffText: sh(`gh pr diff ${prNumber}`),
+      changedFiles: meta.files.map(f => f.path),
+    };
+  }
+  console.error(`[capture] computing diff ${meta.baseRefOid}..${headSha}`);
+  const range = `"${meta.baseRefOid}".."${headSha}"`;
+  return {
+    diffText: sh(`git diff ${range}`),
+    changedFiles: sh(`git diff --name-only ${range}`)
+      .split('\n')
+      .map(s => s.trim())
+      .filter(s => s.length > 0),
+  };
+}
+
+/** Index the worktree and return both repo-wide chunks and the
+ * subset belonging to the PR's changed files. */
+async function indexCapturedWorktree(worktree: string, changedFiles: string[]) {
+  console.error(`[capture] indexing worktree at ${worktree}`);
+  const indexResult = await performChunkOnlyIndex(worktree);
+  if (!indexResult.success || !indexResult.chunks) {
+    throw new Error(`index failed: ${indexResult.error ?? 'unknown'}`);
+  }
+  const repoChunks = indexResult.chunks;
+  console.error(`[capture] indexed ${repoChunks.length} chunks`);
+
+  // Path-shape between the parser's chunk metadata and `gh pr view`'s file
+  // list isn't guaranteed to match byte-for-byte (Windows backslashes,
+  // ./ prefixes, absolute vs. repo-relative). Normalize both sides to
+  // repo-relative POSIX form before set membership.
+  const changedSet = new Set(changedFiles.map(f => toRepoRelative(f, worktree)));
+  const chunks = repoChunks.filter(c => changedSet.has(toRepoRelative(c.metadata.file, worktree)));
+  console.error(`[capture] ${chunks.length} chunks for changed files`);
+  return { repoChunks, chunks };
+}
+
+/** Run real complexity analysis on the changed files so the captured
+ * ctx matches what the production runner would build. Falls back to an
+ * empty report shape if analysis returns nothing.
+ *
+ * Limitation: we don't check out the base ref, so `deltas` stays null —
+ * the runner computes deltas by diffing head vs base reports. For
+ * delta-aware fidelity, capture via the engine's
+ * LIEN_REVIEW_CAPTURE_CTX env hook against a live runner instead.
+ */
+async function analyzeCapturedComplexity(changedFiles: string[], worktree: string) {
+  console.error(`[capture] analyzing complexity for ${changedFiles.length} changed files`);
+  const result = await runComplexityAnalysis(changedFiles, '50', worktree, silentLogger);
+  const report = result?.report ?? {
+    summary: {
+      filesAnalyzed: changedFiles.length,
+      totalViolations: 0,
+      bySeverity: { error: 0, warning: 0 },
+      avgComplexity: 0,
+      maxComplexity: 0,
+    },
+    files: {},
+  };
+  console.error(
+    `[capture] complexity: ${report.summary.totalViolations} violations, max=${report.summary.maxComplexity}`,
+  );
+  return report;
+}
+
+interface CaptureInputs {
+  meta: PrMeta;
+  prNumber: number;
+  headSha: string;
+  outputPath: string;
+  patches: Map<string, string>;
+  diffLines: Map<string, Set<number>>;
+  changedFiles: string[];
+}
+
+async function captureFixtureFromWorktree(worktree: string, inputs: CaptureInputs): Promise<void> {
+  const { repoChunks, chunks } = await indexCapturedWorktree(worktree, inputs.changedFiles);
+  const complexityReport = await analyzeCapturedComplexity(inputs.changedFiles, worktree);
+  const ctx = {
+    chunks,
+    changedFiles: inputs.changedFiles,
+    allChangedFiles: inputs.changedFiles,
+    complexityReport,
+    baselineReport: null,
+    deltas: null,
+    pluginConfigs: {},
+    config: {},
+    pr: {
+      owner: 'getlien',
+      repo: 'lien',
+      pullNumber: inputs.prNumber,
+      title: inputs.meta.title,
+      body: inputs.meta.body ?? '',
+      baseSha: inputs.meta.baseRefOid,
+      headSha: inputs.headSha,
+      patches: inputs.patches,
+      diffLines: inputs.diffLines,
+    },
+    repoChunks,
+    repoRootDir: worktree,
+  };
+  await fs.mkdir(dirname(inputs.outputPath), { recursive: true });
+  await saveFixture(ctx, inputs.outputPath);
+  console.error(`[capture] wrote ${inputs.outputPath}`);
+}
+
+async function main(): Promise<void> {
+  const { prNumber, outputPath, shaOverride } = parseArgs(process.argv.slice(2));
 
   console.error(`[capture] fetching PR ${prNumber} metadata`);
   const meta = JSON.parse(
     sh(`gh pr view ${prNumber} --json title,body,baseRefOid,headRefOid,files`),
   ) as PrMeta;
 
-  console.error(`[capture] fetching PR ${prNumber} diff`);
-  const diffText = sh(`gh pr diff ${prNumber}`);
+  const headSha = shaOverride ? resolveSha(shaOverride) : meta.headRefOid;
+  if (shaOverride) {
+    assertShaInPrRange(meta, prNumber, headSha);
+    console.error(`[capture] overriding head: ${meta.headRefOid} -> ${headSha}`);
+  }
 
+  const { diffText, changedFiles } = selectDiffSource(meta, prNumber, headSha, shaOverride);
   const { patches, diffLines } = parseUnifiedDiff(diffText);
-  const changedFiles = meta.files.map(f => f.path);
 
-  await withWorktree(meta.headRefOid, async worktree => {
-    console.error(`[capture] indexing worktree at ${worktree}`);
-    const indexResult = await performChunkOnlyIndex(worktree);
-    if (!indexResult.success || !indexResult.chunks) {
-      throw new Error(`index failed: ${indexResult.error ?? 'unknown'}`);
-    }
-    const repoChunks = indexResult.chunks;
-    console.error(`[capture] indexed ${repoChunks.length} chunks`);
-
-    // Path-shape between the parser's chunk metadata and `gh pr view`'s file
-    // list isn't guaranteed to match byte-for-byte (Windows backslashes,
-    // ./ prefixes, absolute vs. repo-relative). Normalize both sides to
-    // repo-relative POSIX form before set membership.
-    const changedSet = new Set(changedFiles.map(f => toRepoRelative(f, worktree)));
-    const chunks = repoChunks.filter(c =>
-      changedSet.has(toRepoRelative(c.metadata.file, worktree)),
-    );
-    console.error(`[capture] ${chunks.length} chunks for changed files`);
-
-    // Real complexity analysis on the changed files so the captured ctx
-    // matches what the production runner would build. Without this,
-    // complexity-aware rules (e.g. blast-radius risk) see an empty report
-    // and behave differently than they would in prod.
-    //
-    // Limitation: we don't check out the base ref, so `deltas` stays null —
-    // the runner computes deltas by diffing head vs base reports. For
-    // delta-aware fidelity, capture via the engine's
-    // LIEN_REVIEW_CAPTURE_CTX env hook against a live runner instead.
-    console.error(`[capture] analyzing complexity for ${changedFiles.length} changed files`);
-    const complexityResult = await runComplexityAnalysis(
+  await withWorktree(headSha, worktree =>
+    captureFixtureFromWorktree(worktree, {
+      meta,
+      prNumber,
+      headSha,
+      outputPath,
+      patches,
+      diffLines,
       changedFiles,
-      '50',
-      worktree,
-      silentLogger,
-    );
-    const complexityReport = complexityResult?.report ?? {
-      summary: {
-        filesAnalyzed: changedFiles.length,
-        totalViolations: 0,
-        bySeverity: { error: 0, warning: 0 },
-        avgComplexity: 0,
-        maxComplexity: 0,
-      },
-      files: {},
-    };
-    console.error(
-      `[capture] complexity: ${complexityReport.summary.totalViolations} violations, max=${complexityReport.summary.maxComplexity}`,
-    );
-
-    const ctx = {
-      chunks,
-      changedFiles,
-      allChangedFiles: changedFiles,
-      complexityReport,
-      baselineReport: null,
-      deltas: null,
-      pluginConfigs: {},
-      config: {},
-      pr: {
-        owner: 'getlien',
-        repo: 'lien',
-        pullNumber: prNumber,
-        title: meta.title,
-        body: meta.body ?? '',
-        baseSha: meta.baseRefOid,
-        headSha: meta.headRefOid,
-        patches,
-        diffLines,
-      },
-      repoChunks,
-      repoRootDir: worktree,
-    };
-
-    await fs.mkdir(dirname(outputPath), { recursive: true });
-    await saveFixture(ctx, outputPath);
-    console.error(`[capture] wrote ${outputPath}`);
-  });
+    }),
+  );
 }
 
 main().catch(err => {
