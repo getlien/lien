@@ -52,6 +52,7 @@ test PRs in this repo. Each fixture is gitignored (regenerate with
 | `incomplete-handling` | #437  | `incomplete-handling/enum-variant-removed`                   |
 | `error-swallowing`    | #411  | `error-swallowing/payment-error-swallowed`                   |
 | `stale-duplicate`     | #539  | `stale-duplicate/model-partial-update` (capture at `--sha f780541`) |
+| `untrusted-input-validation` | #541 | `untrusted-input-validation/harness-initial` (capture at `--sha 7cb0149`) |
 
 Regenerate the whole corpus:
 
@@ -64,6 +65,7 @@ npx tsx packages/review/test/harness/capture-pr.ts 511 "$ROOT/concurrency-race/c
 npx tsx packages/review/test/harness/capture-pr.ts 437 "$ROOT/incomplete-handling/enum-variant-removed.fixture.json"
 npx tsx packages/review/test/harness/capture-pr.ts 411 "$ROOT/error-swallowing/payment-error-swallowed.fixture.json"
 npx tsx packages/review/test/harness/capture-pr.ts 539 "$ROOT/stale-duplicate/model-partial-update.fixture.json" --sha f780541
+npx tsx packages/review/test/harness/capture-pr.ts 541 "$ROOT/untrusted-input-validation/harness-initial.fixture.json" --sha 7cb0149
 ```
 
 Run the full multi-model sweep:
