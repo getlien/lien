@@ -520,6 +520,131 @@ elsewhere in the post-image.`,
   source: 'builtin',
 };
 
+const UNTRUSTED_INPUT_VALIDATION: ReviewRule = {
+  id: 'untrusted-input-validation',
+  name: 'Untrusted Input Validation',
+  description:
+    'Flag code that parses untrusted input (JSON, env, argv, request body, file contents) and lets the parsed result flow to a typed consumer without runtime validation',
+  prompt: `### Untrusted Input Validation Check
+
+**This rule is an exception to the general "silence means approval"
+policy.** When a diff parses untrusted input, an unguarded value
+escaping into typed consumer code is a real bug — silence is not a
+safe default. Investigate every parse site introduced or modified by
+the diff before deciding the rule has nothing to say.
+
+The pattern: a function reads untrusted bytes — \`JSON.parse\`,
+\`process.env\` / \`os.getenv\` / \`System.getenv\` / \`ENV[…]\`,
+\`process.argv\` consumed via \`parseInt\` / \`Integer.parseInt\` /
+\`strconv.Atoi\` / \`int(…)\`, schema-validated payload (Zod /
+Pydantic / struct-tag / Bean Validation / serde), file contents — and
+the parsed result flows to a typed consumer without runtime
+validation. \`as Type\`, \`Partial<T>\`, \`@ts-expect-error\`,
+defensive defaults, and TypeScript narrowing alone are NOT validation.
+
+MANDATORY protocol when this rule is active:
+
+1. Walk the diff. Identify every site that produces a value from
+   untrusted bytes (the keyword set above is a hint — if the diff
+   contains one, there's at least one site to inspect).
+2. **For each site, you MUST call \`get_files_context\` (or
+   \`read_file\`)** on the function and on each consumer of the parsed
+   value. Trace the parsed value to its uses. Look for one of these
+   four unguarded shapes:
+   - **Cast-without-validate**: \`JSON.parse(raw) as MyType\`,
+     \`Partial<T>\` casts, raw \`json.loads(s)\` consumed via attribute
+     access, \`json.Unmarshal(b, &v)\` whose \`err\` is dropped.
+   - **Schema gaps**: a Zod / Pydantic / struct-tag schema that omits
+     a field the consumer reads. The consumer compiles fine because
+     of the type narrowing the schema produces, but a real-world
+     payload missing the field surfaces as a runtime crash deeper in.
+   - **NaN-on-parse**: \`parseInt\` / \`int(s)\` / \`strconv.Atoi\` /
+     \`Integer.parseInt\` whose failure return (NaN, exception,
+     \`(0, err)\`) is not checked before the value is used numerically.
+   - **Blank-keyword / truthy-coerce**: empty-string, zero, or null
+     slipping past a truthiness check (\`if (x)\`, \`if x:\`) that
+     should have been a typed check (\`x !== undefined\`,
+     \`isinstance(x, int)\`).
+3. Emit a finding for each unguarded path. The \`message\` must name
+   the parse site by line, the consumer by line, and the exact
+   malformed input (e.g. \`{"findings": {}}\`,
+   \`--votes foo\`, missing \`complexityReport\` field) that survives
+   the cast and crashes the consumer.
+4. The \`evidence\` must cite the consumer code that reads the
+   unvalidated value — quote the access pattern (e.g.
+   \`.findings.length\`, \`config.x\` numeric ops). Don't just say
+   "the cast is the only validation" without naming a specific
+   downstream read.
+5. The \`suggestion\` should propose a concrete fix:
+   parse-as-unknown-then-validate (\`Array.isArray\`, \`typeof === 'number'\`),
+   schema completion (add the missing fields), \`Number.isFinite\` /
+   \`Number.isInteger\` guard, or \`x !== ''\` / \`isinstance(x, T)\`
+   typed check.
+
+Do not finalize a response for this rule with zero findings unless
+you have called \`get_files_context\` on the parse-site function AND
+on each downstream consumer AND none of the four unguarded shapes
+matches.`,
+  example: `### Good finding — cast-without-validate (CodeRabbit on PR #541):
+{
+  "filepath": "packages/review/test/harness/assert-cli.ts",
+  "line": 38,
+  "symbolName": "loadResult",
+  "severity": "warning",
+  "category": "logic_error",
+  "ruleId": "untrusted-input-validation",
+  "message": "loadResult parses an arbitrary JSON file via JSON.parse and casts the result to Partial<HarnessResult>. A malformed file like {\\"findings\\": {}} (object instead of array) will pass the cast but later fail inside the assertion runner with a misleading 'findings.length is not a function' rather than a clean exit-3 loader error. The downstream code at lines 65–94 reads .findings.length, .toolCalls.some, and .turns numerically — none are guarded.",
+  "suggestion": "Parse as unknown, then validate: type-check parsed.findings (Array.isArray), parsed.toolCalls (Array.isArray), and parsed.turns (typeof === 'number') before constructing the HarnessResult. Throw a descriptive error that the caller can surface as exit 3.",
+  "evidence": "Inspected loadResult and its callers in main(); the cast is the only validation layer. Consumer at line 67 calls parsed.findings.some(...) which crashes on a non-array."
+}
+
+### Good finding — NaN-on-parse:
+{
+  "filepath": "packages/review/test/harness/run.ts",
+  "line": 49,
+  "symbolName": "parseFlags",
+  "severity": "warning",
+  "category": "logic_error",
+  "ruleId": "untrusted-input-validation",
+  "message": "parseFlags accepts --votes and --calibrate via parseInt(argv[++i], 10) without checking for NaN. \`--votes foo\` produces NaN and silently propagates: vote() then runs Promise.all(new Array(NaN)) which is an empty array, the calibration shows 0/0 passed, and the user gets no error indication that their flag was malformed.",
+  "suggestion": "Use a Number.isInteger guard: const n = Number(argv[++i]); if (!Number.isInteger(n) || n <= 0) { console.error('--votes requires a positive integer'); process.exit(2); }. Same for --calibrate.",
+  "evidence": "Phase 2 untrusted-input check — parseInt return value flows directly into flags.votes / flags.calibrate, then into vote() and calibrate() at run.ts:218–227 which use the value as an array length."
+}`,
+  triggers: {
+    keywords: [
+      // JS / TS
+      '\\bJSON\\.parse\\b',
+      '\\bprocess\\.env\\b',
+      '\\bprocess\\.argv\\b',
+      '\\bparseInt\\b',
+      // Python
+      '\\bjson\\.loads\\b',
+      '\\bos\\.environ\\b',
+      '\\bos\\.getenv\\b',
+      // Go
+      '\\bjson\\.Unmarshal\\b',
+      '\\bos\\.Getenv\\b',
+      '\\bstrconv\\.Atoi\\b',
+      // Java
+      '\\breadValue\\b',
+      '\\bSystem\\.getenv\\b',
+      '\\bInteger\\.parseInt\\b',
+      // PHP
+      '\\bjson_decode\\b',
+      '\\bgetenv\\b',
+      // Rust
+      '\\bserde_json::from',
+      '\\benv::var\\b',
+      // Ruby
+      '\\bENV\\[',
+    ],
+  },
+  severity: 'warning',
+  category: 'logic_error',
+  enabled: true,
+  source: 'builtin',
+};
+
 /** All built-in review rules. */
 export const BUILTIN_RULES: ReviewRule[] = [
   STRUCTURAL_ANALYSIS,
@@ -529,4 +654,5 @@ export const BUILTIN_RULES: ReviewRule[] = [
   ERROR_SWALLOWING,
   BOUNDARY_CHANGE,
   STALE_DUPLICATE,
+  UNTRUSTED_INPUT_VALIDATION,
 ];
