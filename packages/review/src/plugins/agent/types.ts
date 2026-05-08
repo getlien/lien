@@ -147,6 +147,14 @@ export interface TurnTrace {
   turnNumber: number;
   /** Full assistant message content, captured before extractResponse. */
   responseText: string;
+  /**
+   * Extended-reasoning prose, captured from `message.reasoning` on
+   * OpenAI-compat responses (notably `google/gemini-3-flash-preview`,
+   * which emits its prose here on tool-calling turns and only puts the
+   * final JSON in `content`). Undefined when the model didn't emit
+   * reasoning or the provider doesn't support the field. (#552)
+   */
+  reasoning?: string;
   toolCalls: ToolInvocation[];
   finishReason?: string;
   inputTokens?: number;

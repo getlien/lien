@@ -57,6 +57,14 @@ async function loadVote(path: string): Promise<VoteDump> {
  */
 function renderTurn(turn: TurnTrace): string {
   const lines: string[] = [];
+  // Reasoning first because that's the model's "why" for this turn
+  // (when present — e.g. gemini-3-flash-preview emits it on tool-calling
+  // turns where `responseText` is typically empty). Skip the section
+  // entirely when absent so older traces render unchanged. (#552)
+  if (turn.reasoning && turn.reasoning.length > 0) {
+    lines.push('--- reasoning ---');
+    lines.push(turn.reasoning);
+  }
   lines.push('--- response ---');
   lines.push(turn.responseText || '(empty)');
   lines.push('--- tools ---');

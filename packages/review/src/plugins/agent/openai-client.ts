@@ -105,7 +105,18 @@ interface ToolDef {
 
 interface ChatResponse {
   choices: Array<{
-    message: { role: string; content: string | null; tool_calls?: ToolCall[] };
+    message: {
+      role: string;
+      content: string | null;
+      /**
+       * Extended-reasoning prose, surfaced by OpenRouter for models
+       * with reasoning support (e.g. gemini-3-flash-preview when we
+       * pass `reasoning: { effort: 'high' }`). Lives separate from
+       * `content`, which on tool-calling turns is typically null.
+       */
+      reasoning?: string | null;
+      tool_calls?: ToolCall[];
+    };
     finish_reason: string;
   }>;
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
@@ -184,6 +195,10 @@ export class OpenAIAgentClient {
       const turnTrace: TurnTrace = {
         turnNumber: turn,
         responseText: lastContent ?? '',
+        // OpenRouter surfaces extended-reasoning prose here for models
+        // like gemini-3-flash-preview; on tool-calling turns this is
+        // where the model's intermediate thinking lives (#552).
+        reasoning: choice.message.reasoning ?? undefined,
         toolCalls: [],
         finishReason: choice.finish_reason,
         inputTokens: turnInputTokens,
@@ -327,6 +342,7 @@ export class OpenAIAgentClient {
       const traceTurn: TurnTrace = {
         turnNumber: turn + 1,
         responseText: choice?.message.content ?? '',
+        reasoning: choice?.message.reasoning ?? undefined,
         toolCalls: [],
         finishReason: choice?.finish_reason,
         inputTokens,
