@@ -71,10 +71,10 @@ class GitHubAuthTest extends TestCase
         $this->assertEquals('Updated Name', $user->name);
     }
 
-    public function test_github_callback_redirects_to_dashboard_when_user_has_orgs(): void
+    public function test_github_callback_redirects_to_dashboard_when_org_is_on_trial(): void
     {
         $user = User::factory()->create(['github_id' => 12345]);
-        $org = Organization::factory()->create();
+        $org = Organization::factory()->create(['trial_ends_at' => now()->addDays(7)]);
         $user->organizations()->attach($org->id, ['role' => 'admin']);
 
         $this->mockSocialiteUser([
@@ -89,6 +89,26 @@ class GitHubAuthTest extends TestCase
         $response = $this->get('/auth/github/callback');
 
         $response->assertRedirect('/dashboard');
+    }
+
+    public function test_github_callback_redirects_to_billing_when_trial_expired_and_not_subscribed(): void
+    {
+        $user = User::factory()->create(['github_id' => 12345]);
+        $org = Organization::factory()->create(['trial_ends_at' => now()->subDay()]);
+        $user->organizations()->attach($org->id, ['role' => 'admin']);
+
+        $this->mockSocialiteUser([
+            'id' => 12345,
+            'nickname' => $user->github_username,
+            'name' => $user->name,
+            'email' => $user->email,
+            'avatar' => $user->avatar_url,
+            'token' => 'gho_test_token',
+        ]);
+
+        $response = $this->get('/auth/github/callback');
+
+        $response->assertRedirect('/billing');
     }
 
     public function test_logout(): void

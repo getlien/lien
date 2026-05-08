@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Models\Organization;
 use App\Services\GitHubAppService;
 use App\Services\NatsService;
 use App\Services\RunnerTokenService;
@@ -9,6 +10,7 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Cashier\Cashier;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -45,6 +47,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Cashier::useCustomerModel(Organization::class);
+
         RateLimiter::for('api', function (Request $request) {
             $authType = $request->attributes->get('auth_type');
             $key = $authType === 'service' ? 'service-token' : $request->ip();

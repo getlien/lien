@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\SubscriptionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -19,7 +20,7 @@ class GitHubAuthController extends Controller
             ->redirect();
     }
 
-    public function callback(Request $request): RedirectResponse
+    public function callback(Request $request, SubscriptionService $subscriptions): RedirectResponse
     {
         try {
             $githubUser = Socialite::driver('github')->user();
@@ -47,8 +48,14 @@ class GitHubAuthController extends Controller
         Auth::login($user, remember: true);
         $request->session()->regenerate();
 
-        if ($user->organizations()->count() === 0) {
+        $organization = $user->organizations()->orderBy('organizations.created_at')->first();
+
+        if ($organization === null) {
             return redirect()->route('onboarding.organizations');
+        }
+
+        if (! $subscriptions->isOrganizationActive($organization)) {
+            return redirect()->route('billing');
         }
 
         return redirect()->route('dashboard');

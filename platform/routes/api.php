@@ -17,3 +17,6 @@ Route::middleware(['auth.service-token', 'throttle:api'])->prefix('v1')->group(f
 Route::middleware(['verify.github-webhook'])->prefix('webhooks')->group(function () {
     Route::post('/github', GitHubWebhookController::class);
 });
+
+Route::post('/webhooks/stripe', [\Laravel\Cashier\Http\Controllers\WebhookController::class, 'handleWebhook'])
+    ->name('cashier.webhook');

@@ -56,4 +56,8 @@ return [
         'port' => (int) env('NATS_PORT', 4222),
     ],
 
+    'stripe' => [
+        'price_id' => env('STRIPE_PRICE_ID_DEFAULT'),
+    ],
+
 ];

@@ -7,11 +7,12 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Laravel\Cashier\Billable;
 
 class Organization extends Model
 {
     /** @use HasFactory<\Database\Factories\OrganizationFactory> */
-    use HasFactory;
+    use Billable, HasFactory;
 
     protected $fillable = [
         'github_id',
@@ -32,7 +33,22 @@ class Organization extends Model
         return [
             'plan_tier' => PlanTier::class,
             'settings' => 'array',
+            'trial_ends_at' => 'datetime',
         ];
+    }
+
+    public function stripeName(): ?string
+    {
+        return $this->name;
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (Organization $organization): void {
+            if ($organization->trial_ends_at === null) {
+                $organization->trial_ends_at = now()->addDays(14);
+            }
+        });
     }
 
     /**

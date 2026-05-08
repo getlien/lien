@@ -10,6 +10,7 @@
         "basis-company/nats": "^1.1",
         "firebase/php-jwt": "^7.0",
         "inertiajs/inertia-laravel": "^2.0",
+        "laravel/cashier": "^16.5",
         "laravel/framework": "^12.0",
         "laravel/socialite": "^5.24",
         "laravel/tinker": "^2.10.1",

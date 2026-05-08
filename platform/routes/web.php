@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\GitHubAuthController;
+use App\Http\Controllers\BillingController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FindingsController;
 use App\Http\Controllers\FindingSourceController;
@@ -46,4 +47,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/repos/{repository}/runs', [ReviewRunController::class, 'index'])->name('repositories.runs.index');
     Route::get('/repos/{repository}/runs/{reviewRun}', [ReviewRunController::class, 'show'])->name('repositories.runs.show');
     Route::get('/repos/{repository}/runs/{reviewRun}/logs', [ReviewRunController::class, 'logs'])->name('repositories.runs.logs');
+
+    Route::get('/billing', [BillingController::class, 'show'])->name('billing');
+    Route::post('/billing/checkout', [BillingController::class, 'checkout'])->name('billing.checkout');
+    Route::get('/billing/portal', [BillingController::class, 'portal'])->name('billing.portal');
 });
