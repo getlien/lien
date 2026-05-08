@@ -257,7 +257,16 @@ export class OpenAIAgentClient {
     }
 
     let parsed = extractResponse(lastContent);
-    if (!parsed.summary && lastContent !== null) {
+    // Fire the summary-retry whenever we have *any* loop history but no
+    // findings JSON. The previous guard `lastContent !== null` skipped
+    // retry whenever the model emitted reasoning but null content — the
+    // exact case gemini-3-flash-preview produces when it ends a turn
+    // with finish_reason=tool_calls but no actual tool_calls (its
+    // mid-investigation reasoning lives in the separate `reasoning`
+    // field, not `content`). Result: silent-bail failures on rules
+    // whose runs the model was actively investigating. Trace evidence
+    // gathered after #553 — see PR description.
+    if (!parsed.summary && turn > 0) {
       const retry = await this.runSummaryRetry(messages, turn);
       if (retry) {
         totalInputTokens += retry.inputTokens;
