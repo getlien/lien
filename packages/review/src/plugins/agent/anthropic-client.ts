@@ -275,6 +275,20 @@ export class AnthropicAgentClient {
         totalInputTokens += summaryResponse.usage.input_tokens;
         totalOutputTokens += summaryResponse.usage.output_tokens;
 
+        // Record the retry as its own turn so trace.turns and usage
+        // stay consistent — without this, the summary-retry's tokens
+        // count toward the cost while its response is invisible in the
+        // trace, defeating the "read why the model bailed" use case
+        // (per CodeRabbit on #550).
+        turnTraces.push({
+          turnNumber: turn + 1,
+          responseText: joinTextBlocks(summaryResponse.content),
+          toolCalls: [],
+          finishReason: summaryResponse.stop_reason ?? undefined,
+          inputTokens: summaryResponse.usage.input_tokens,
+          outputTokens: summaryResponse.usage.output_tokens,
+        });
+
         const retryParsed = extractResponse(summaryResponse.content);
         if (retryParsed.summary || retryParsed.findings.length > 0) {
           parsed = retryParsed;

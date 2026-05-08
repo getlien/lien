@@ -238,10 +238,27 @@ export class OpenAIAgentClient {
 
       try {
         const retryResponse = await this.chatCompletion(messages, []);
-        totalInputTokens += retryResponse.usage?.prompt_tokens ?? 0;
-        totalOutputTokens += retryResponse.usage?.completion_tokens ?? 0;
+        const retryInputTokens = retryResponse.usage?.prompt_tokens ?? 0;
+        const retryOutputTokens = retryResponse.usage?.completion_tokens ?? 0;
+        totalInputTokens += retryInputTokens;
+        totalOutputTokens += retryOutputTokens;
 
-        const retryParsed = extractResponse(retryResponse.choices[0]?.message.content);
+        // Record the retry as its own turn so trace.turns and usage
+        // stay consistent — without this, the summary-retry's tokens
+        // count toward the cost while its response is invisible in the
+        // trace, defeating the "read why the model bailed" use case
+        // (per CodeRabbit on #550).
+        const retryChoice = retryResponse.choices[0];
+        turnTraces.push({
+          turnNumber: turn + 1,
+          responseText: retryChoice?.message.content ?? '',
+          toolCalls: [],
+          finishReason: retryChoice?.finish_reason,
+          inputTokens: retryInputTokens,
+          outputTokens: retryOutputTokens,
+        });
+
+        const retryParsed = extractResponse(retryChoice?.message.content);
         if (retryParsed.summary || retryParsed.findings.length > 0) {
           parsed = retryParsed;
         }
