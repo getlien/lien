@@ -69,8 +69,9 @@ async function runOnce(
   let toolCalls: string[];
   let turns: number;
   let cost: number;
+  let trace: HarnessResult['trace'];
   try {
-    ({ findings, toolCalls, turns, cost } = await runFixture(fixturePath, opts));
+    ({ findings, toolCalls, turns, cost, trace } = await runFixture(fixturePath, opts));
   } catch (err) {
     if (isTransientLLMError(err)) {
       // LLM-side failure (network, 5xx, terminated). Record as a Tier 1 fail
@@ -88,7 +89,7 @@ async function runOnce(
     throw err;
   }
 
-  const result: HarnessResult = { findings, toolCalls, turns };
+  const result: HarnessResult = { findings, toolCalls, turns, trace };
   try {
     assertions.expect(result, harness);
     return { result, cost, passed: true };

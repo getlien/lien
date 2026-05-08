@@ -9,6 +9,7 @@
 import type { Logger } from '../../src/logger.js';
 import type { ReviewContext, ReviewFinding } from '../../src/plugin-types.js';
 import { AgentReviewPlugin } from '../../src/plugins/agent/index.js';
+import type { AgentTrace } from '../../src/plugins/agent/types.js';
 
 import { loadFixture } from './fixture-loader.js';
 import type { HarnessResult } from './assertions.js';
@@ -101,10 +102,16 @@ export async function runFixture(
     cost += usage.cost;
   };
 
+  let trace: AgentTrace | undefined;
+  const reportTrace = (t: AgentTrace): void => {
+    trace = t;
+  };
+
   const pluginCtx: ReviewContext = {
     ...ctx,
     logger,
     reportUsage,
+    reportTrace,
     config: {
       // Preserve any agent options serialized into the captured fixture
       // (blastRadius config, custom token budgets, etc.) and only override
@@ -126,6 +133,7 @@ export async function runFixture(
     findings: findingsToHarness(findings),
     toolCalls: extractToolCalls(logger.lines),
     turns: extractTurns(logger.lines),
+    trace,
     cost,
   };
 }

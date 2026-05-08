@@ -8,7 +8,28 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from '../../logger.js';
-import type { AgentFinding, AgentSummary, AgentResult } from './types.js';
+import type {
+  AgentFinding,
+  AgentSummary,
+  AgentResult,
+  TurnTrace,
+  ToolInvocation,
+} from './types.js';
+
+/** Cap a single tool's recorded output so traces stay readable. */
+const TRACE_TOOL_OUTPUT_MAX = 4096;
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
+}
+
+/** Extract the assistant's text content from an Anthropic response for trace. */
+function joinTextBlocks(content: Anthropic.Messages.ContentBlock[]): string {
+  return content
+    .filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text')
+    .map(b => b.text)
+    .join('\n');
+}
 
 /** Default Sonnet pricing: $3/MTok input, $15/MTok output. */
 const DEFAULT_INPUT_COST_PER_MTOK = 3;
@@ -77,6 +98,7 @@ export class AnthropicAgentClient {
     let totalOutputTokens = 0;
     let turn = 0;
     let lastResponse: Anthropic.Messages.Message | null = null;
+    const turnTraces: TurnTrace[] = [];
 
     while (turn < this.maxTurns) {
       turn++;
@@ -98,8 +120,10 @@ export class AnthropicAgentClient {
       lastResponse = response;
 
       // Accumulate usage
-      totalInputTokens += response.usage.input_tokens;
-      totalOutputTokens += response.usage.output_tokens;
+      const turnInputTokens = response.usage.input_tokens;
+      const turnOutputTokens = response.usage.output_tokens;
+      totalInputTokens += turnInputTokens;
+      totalOutputTokens += turnOutputTokens;
 
       const totalTokens = totalInputTokens + totalOutputTokens;
       this.logger.info(
@@ -114,6 +138,18 @@ export class AnthropicAgentClient {
         const toolNames = toolUseBlocks.map(b => b.name).join(', ');
         this.logger.info(`[agent] Turn ${turn} tools: ${toolNames}`);
       }
+
+      // Trace accumulator for this turn — tool inputs/outputs get
+      // populated below as the loop dispatches them.
+      const turnTrace: TurnTrace = {
+        turnNumber: turn,
+        responseText: joinTextBlocks(response.content),
+        toolCalls: [],
+        finishReason: response.stop_reason ?? undefined,
+        inputTokens: turnInputTokens,
+        outputTokens: turnOutputTokens,
+      };
+      turnTraces.push(turnTrace);
 
       // Done: model finished naturally
       if (response.stop_reason === 'end_turn') {
@@ -135,35 +171,14 @@ export class AnthropicAgentClient {
 
       // Process tool_use blocks
       if (response.stop_reason === 'tool_use' && toolUseBlocks.length > 0) {
-        // Append assistant message with all content blocks
-        messages.push({ role: 'assistant', content: response.content });
-
-        // Execute each tool and collect results
-        const toolResults: Anthropic.Messages.ToolResultBlockParam[] = await Promise.all(
-          toolUseBlocks.map(async block => {
-            let result: string;
-            try {
-              result = await toolExecutor(block.name, block.input as Record<string, unknown>);
-            } catch (error) {
-              result = `Tool error: ${error instanceof Error ? error.message : String(error)}`;
-            }
-            return {
-              type: 'tool_result' as const,
-              tool_use_id: block.id,
-              content: result,
-            };
-          }),
+        await this.dispatchToolUseBlocks(
+          toolUseBlocks,
+          response.content,
+          messages,
+          turnTrace,
+          toolExecutor,
+          shouldWrapUp,
         );
-
-        // Nudge the agent to wrap up when budget is running low
-        if (shouldWrapUp) {
-          toolResults.push({
-            type: 'text',
-            text: 'You are running low on budget. Stop investigating and output your findings JSON now. Do not make any more tool calls. If you found no issues, output an empty findings array.',
-          } as unknown as Anthropic.Messages.ToolResultBlockParam);
-        }
-
-        messages.push({ role: 'user', content: toolResults });
       } else {
         // Unexpected stop reason (max_tokens, stop_sequence, etc.) — stop looping
         this.logger.warning(`[agent] Unexpected stop_reason: ${response.stop_reason}, stopping`);
@@ -175,59 +190,16 @@ export class AnthropicAgentClient {
       this.logger.warning(`[agent] Max turns reached (${this.maxTurns}), stopping`);
     }
 
-    // Parse findings and summary from the final response
     let parsed = lastResponse ? extractResponse(lastResponse.content) : { findings: [] };
-
-    // If the agent didn't produce a JSON block (e.g., budget hit mid-investigation),
-    // make one final cheap call asking just for the summary
     if (!parsed.summary && lastResponse) {
-      this.logger.info('[agent] No JSON output — requesting summary...');
-
-      // Wait briefly to avoid rate limits (the main loop just used most of the budget)
-      await new Promise(resolve => setTimeout(resolve, 3_000));
-
-      messages.push({ role: 'assistant', content: lastResponse.content });
-
-      // If the last response had tool_use blocks, add dummy tool_results
-      // so the Anthropic API accepts the conversation
-      const pendingToolUse = lastResponse.content.filter(
-        (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use',
-      );
-      const retryContent: Anthropic.Messages.ContentBlockParam[] = pendingToolUse.map(b => ({
-        type: 'tool_result' as const,
-        tool_use_id: b.id,
-        content: '[Budget exceeded — tool not executed]',
-      }));
-      retryContent.push({
-        type: 'text' as const,
-        text: 'You ran out of budget before outputting findings. Based on what you investigated so far, output ONLY the JSON block now with your findings and summary. No more tool calls.',
-      });
-      messages.push({ role: 'user', content: retryContent });
-
-      try {
-        const summaryResponse = await this.client.messages.create({
-          model: this.model,
-          max_tokens: 4096,
-          system: [
-            {
-              type: 'text',
-              text: 'Output only a ```json code fence with findings and summary. No other text.',
-            },
-          ],
-          messages,
-        });
-
-        totalInputTokens += summaryResponse.usage.input_tokens;
-        totalOutputTokens += summaryResponse.usage.output_tokens;
-
-        const retryParsed = extractResponse(summaryResponse.content);
-        if (retryParsed.summary || retryParsed.findings.length > 0) {
-          parsed = retryParsed;
+      const retry = await this.runSummaryRetry(messages, lastResponse, turn);
+      if (retry) {
+        totalInputTokens += retry.inputTokens;
+        totalOutputTokens += retry.outputTokens;
+        turnTraces.push(retry.traceTurn);
+        if (retry.parsed.summary || retry.parsed.findings.length > 0) {
+          parsed = retry.parsed;
         }
-      } catch (err) {
-        this.logger.warning(
-          `[agent] Summary retry failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
       }
     }
 
@@ -244,9 +216,163 @@ export class AnthropicAgentClient {
         cost,
       },
       turns: turn,
+      trace: {
+        systemPrompt,
+        initialMessage,
+        model: this.model,
+        turns: turnTraces,
+      },
     };
   }
+
+  /**
+   * Append the assistant's tool_use turn, dispatch each tool in
+   * parallel (preserving declaration order in the trace), and append
+   * tool_result blocks. Pulled out of `run()` to keep its
+   * time-to-understand under the complexity threshold.
+   */
+  private async dispatchToolUseBlocks(
+    toolUseBlocks: Anthropic.Messages.ToolUseBlock[],
+    responseContent: Anthropic.Messages.ContentBlock[],
+    messages: Anthropic.Messages.MessageParam[],
+    turnTrace: TurnTrace,
+    toolExecutor: (name: string, input: Record<string, unknown>) => Promise<string>,
+    shouldWrapUp: boolean,
+  ): Promise<void> {
+    messages.push({ role: 'assistant', content: responseContent });
+
+    // Promise.all preserves input order on its output array regardless
+    // of which task settles first, so the trace's toolCalls reflect
+    // declaration order, not completion order (per Lien Review on #550).
+    const executed = await Promise.all(
+      toolUseBlocks.map(async block => executeOneToolUse(block, toolExecutor)),
+    );
+    turnTrace.toolCalls = executed.map(e => e.invocation);
+    const toolResults: Anthropic.Messages.ToolResultBlockParam[] = executed.map(e => e.toolResult);
+
+    if (shouldWrapUp) {
+      toolResults.push({
+        type: 'text',
+        text: WRAP_UP_NUDGE,
+      } as unknown as Anthropic.Messages.ToolResultBlockParam);
+    }
+
+    messages.push({ role: 'user', content: toolResults });
+  }
+
+  /**
+   * Final cheap call asking the model to emit just the findings JSON
+   * after the main loop ran out of budget. Returns the parsed result,
+   * a TurnTrace for the retry call, and per-call token counts. Returns
+   * null if the retry itself fails (logged); the caller falls back to
+   * the (empty) findings already extracted.
+   */
+  private async runSummaryRetry(
+    messages: Anthropic.Messages.MessageParam[],
+    lastResponse: Anthropic.Messages.Message,
+    turn: number,
+  ): Promise<{
+    parsed: { findings: AgentFinding[]; summary?: AgentSummary };
+    traceTurn: TurnTrace;
+    inputTokens: number;
+    outputTokens: number;
+  } | null> {
+    this.logger.info('[agent] No JSON output — requesting summary...');
+    await new Promise(resolve => setTimeout(resolve, 3_000));
+    appendRetryPrompt(messages, lastResponse);
+    try {
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 4096,
+        system: [{ type: 'text', text: RETRY_SYSTEM_PROMPT }],
+        messages,
+      });
+      const inputTokens = response.usage.input_tokens;
+      const outputTokens = response.usage.output_tokens;
+      const traceTurn: TurnTrace = {
+        turnNumber: turn + 1,
+        responseText: joinTextBlocks(response.content),
+        toolCalls: [],
+        finishReason: response.stop_reason ?? undefined,
+        inputTokens,
+        outputTokens,
+      };
+      const parsed = extractResponse(response.content);
+      return { parsed, traceTurn, inputTokens, outputTokens };
+    } catch (err) {
+      this.logger.warning(
+        `[agent] Summary retry failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
 }
+
+/**
+ * Dispatch a single tool_use block, build its trace invocation and
+ * tool_result block. Pulled out so dispatchToolUseBlocks reads
+ * top-to-bottom without nested async lambda complexity.
+ */
+async function executeOneToolUse(
+  block: Anthropic.Messages.ToolUseBlock,
+  toolExecutor: (name: string, input: Record<string, unknown>) => Promise<string>,
+): Promise<{
+  invocation: ToolInvocation;
+  toolResult: Anthropic.Messages.ToolResultBlockParam;
+}> {
+  const startedAt = Date.now();
+  let result: string;
+  try {
+    result = await toolExecutor(block.name, block.input as Record<string, unknown>);
+  } catch (error) {
+    result = `Tool error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  return {
+    invocation: {
+      name: block.name,
+      input: block.input,
+      output: truncate(result, TRACE_TOOL_OUTPUT_MAX),
+      durationMs: Date.now() - startedAt,
+    },
+    toolResult: {
+      type: 'tool_result' as const,
+      tool_use_id: block.id,
+      content: result,
+    },
+  };
+}
+
+/**
+ * Append the dummy tool_results + retry instruction the Anthropic API
+ * needs to accept the truncated conversation. If the last response had
+ * pending tool_use blocks, we have to satisfy them before the user
+ * turn or the API rejects the request.
+ */
+function appendRetryPrompt(
+  messages: Anthropic.Messages.MessageParam[],
+  lastResponse: Anthropic.Messages.Message,
+): void {
+  messages.push({ role: 'assistant', content: lastResponse.content });
+  const pendingToolUse = lastResponse.content.filter(
+    (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use',
+  );
+  const retryContent: Anthropic.Messages.ContentBlockParam[] = pendingToolUse.map(b => ({
+    type: 'tool_result' as const,
+    tool_use_id: b.id,
+    content: '[Budget exceeded — tool not executed]',
+  }));
+  retryContent.push({ type: 'text' as const, text: RETRY_USER_PROMPT });
+  messages.push({ role: 'user', content: retryContent });
+}
+
+const WRAP_UP_NUDGE =
+  'You are running low on budget. Stop investigating and output your findings JSON now. Do not make any more tool calls. If you found no issues, output an empty findings array.';
+
+const RETRY_SYSTEM_PROMPT =
+  'Output only a ```json code fence with findings and summary. No other text.';
+
+const RETRY_USER_PROMPT =
+  'You ran out of budget before outputting findings. Based on what you investigated so far, output ONLY the JSON block now with your findings and summary. No more tool calls.';
 
 /**
  * Extract findings from the model's final response content.

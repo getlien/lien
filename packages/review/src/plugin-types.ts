@@ -102,6 +102,13 @@ export interface ReviewContext {
     totalTokens: number;
     cost: number;
   }) => void;
+  /**
+   * Callback for plugins to report a per-run agent trace (rendered
+   * prompts, per-turn responses, tool inputs/outputs). Used by the
+   * harness's `--trace` mode for prompt-iteration debugging; production
+   * runners leave this unset and the client skips trace accumulation.
+   */
+  reportTrace?: (trace: import('./plugins/agent/types.js').AgentTrace) => void;
 }
 
 // ---------------------------------------------------------------------------

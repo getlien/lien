@@ -128,31 +128,11 @@ export class AgentReviewPlugin implements ReviewPlugin {
       toolExecutor,
     );
 
-    logger.info(
-      `[${this.id}] Review complete: ${result.findings.length} findings in ${result.turns} turns ($${result.usage.cost.toFixed(4)})`,
-    );
-
-    context.reportUsage?.(result.usage);
+    reportAgentRun(this.id, context, logger, result);
 
     const pluginId = this.id;
     const findings = result.findings.map(f => mapToReviewFinding(f, pluginId));
-
-    // Add summary as a special finding so present() can render it
-    if (result.summary) {
-      findings.push({
-        pluginId,
-        filepath: '',
-        line: 0,
-        severity: 'info' as const,
-        category: 'summary',
-        message: result.summary.overview,
-        metadata: {
-          riskLevel: result.summary.riskLevel,
-          overview: result.summary.overview,
-          keyChanges: result.summary.keyChanges,
-        },
-      });
-    }
+    appendSummaryFinding(findings, pluginId, result.summary);
 
     return findings;
   }
@@ -237,6 +217,52 @@ function runAgentClient(
     logger,
   });
   return client.run(systemPrompt, initialMessage, toOpenAITools(AGENT_TOOLS), toolExecutor);
+}
+
+/**
+ * Log the run summary, forward usage and trace via the context's
+ * optional callbacks. Pulled out of `analyze()` to keep its
+ * time-to-understand under the threshold.
+ */
+function reportAgentRun(
+  pluginId: string,
+  context: ReviewContext,
+  logger: Logger,
+  result: AgentResult,
+): void {
+  logger.info(
+    `[${pluginId}] Review complete: ${result.findings.length} findings in ${result.turns} turns ($${result.usage.cost.toFixed(4)})`,
+  );
+  context.reportUsage?.(result.usage);
+  if (result.trace) {
+    context.reportTrace?.(result.trace);
+  }
+}
+
+/**
+ * Append the agent's summary as a special finding so `present()` can
+ * render it. No-op when the agent didn't return a summary (e.g.,
+ * budget exhausted before the wrap-up turn).
+ */
+function appendSummaryFinding(
+  findings: ReviewFinding[],
+  pluginId: string,
+  summary: AgentResult['summary'],
+): void {
+  if (!summary) return;
+  findings.push({
+    pluginId,
+    filepath: '',
+    line: 0,
+    severity: 'info' as const,
+    category: 'summary',
+    message: summary.overview,
+    metadata: {
+      riskLevel: summary.riskLevel,
+      overview: summary.overview,
+      keyChanges: summary.keyChanges,
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
