@@ -174,8 +174,15 @@ export class AnthropicAgentClient {
         // Append assistant message with all content blocks
         messages.push({ role: 'assistant', content: response.content });
 
-        // Execute each tool and collect results
-        const toolResults: Anthropic.Messages.ToolResultBlockParam[] = await Promise.all(
+        // Execute each tool and collect results. We collect invocations
+        // and toolResults together inside the parallel map and split them
+        // afterwards — Promise.all preserves input order on its output
+        // array regardless of which task settles first, so the trace's
+        // toolCalls reflect declaration order rather than completion
+        // order. Pushing into turnTrace.toolCalls inside the lambda
+        // would have been timing-dependent and added noise to
+        // compare-votes diffs (per Lien Review on #550).
+        const executed = await Promise.all(
           toolUseBlocks.map(async block => {
             let result: string;
             const startedAt = Date.now();
@@ -190,13 +197,17 @@ export class AnthropicAgentClient {
               output: truncate(result, TRACE_TOOL_OUTPUT_MAX),
               durationMs: Date.now() - startedAt,
             };
-            turnTrace.toolCalls.push(invocation);
-            return {
+            const toolResult: Anthropic.Messages.ToolResultBlockParam = {
               type: 'tool_result' as const,
               tool_use_id: block.id,
               content: result,
             };
+            return { invocation, toolResult };
           }),
+        );
+        turnTrace.toolCalls = executed.map(e => e.invocation);
+        const toolResults: Anthropic.Messages.ToolResultBlockParam[] = executed.map(
+          e => e.toolResult,
         );
 
         // Nudge the agent to wrap up when budget is running low

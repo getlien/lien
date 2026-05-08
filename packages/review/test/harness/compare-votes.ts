@@ -13,18 +13,16 @@
  *                         /tmp/cal/X/<scenario>/vote-7.json
  *
  * Output: a header summary (passed?, failure tier/message, turn count,
- * tool-call summary) followed by `diff -u`-style per-turn response-text
- * diffs. The systemPrompt and initialMessage are only diffed if they
- * actually differ between the two files (usually identical for
- * same-fixture voting).
+ * tool-call summary) followed by unified-diff-style per-turn diffs that
+ * include the assistant's response text and each tool call's args + output.
+ * The systemPrompt and initialMessage are only diffed if they actually
+ * differ between the two files (usually identical for same-fixture voting).
  */
 
-import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { resolve } from 'node:path';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+
+import { createPatch } from 'diff';
 
 import type { AgentTrace, TurnTrace, ToolInvocation } from '../../src/plugins/agent/types.js';
 
@@ -49,9 +47,57 @@ async function loadVote(path: string): Promise<VoteDump> {
   return parsed;
 }
 
-function summariseInvocations(calls: ToolInvocation[]): string {
-  if (calls.length === 0) return '(none)';
-  return calls.map(c => c.name).join(', ');
+/**
+ * Render a turn (response text + each tool call's name, args, and output)
+ * as a deterministic multi-line string suitable for `diff -u`-style
+ * comparison. Including args + output is critical: the model can call the
+ * same tool with materially different arguments (e.g.,
+ * grep_codebase("foo") vs grep_codebase("bar")), and a name-only summary
+ * would silently report turns as identical (per Lien Review on #550).
+ */
+function renderTurn(turn: TurnTrace): string {
+  const lines: string[] = [];
+  lines.push('--- response ---');
+  lines.push(turn.responseText || '(empty)');
+  lines.push('--- tools ---');
+  if (turn.toolCalls.length === 0) {
+    lines.push('(none)');
+  } else {
+    turn.toolCalls.forEach((c, i) => {
+      lines.push(renderInvocation(i, c));
+    });
+  }
+  return lines.join('\n');
+}
+
+function renderInvocation(index: number, c: ToolInvocation): string {
+  // Stringify args/output deterministically so the diff is line-stable.
+  // JSON.stringify with 2-space indent gives multi-line output that
+  // unified-diff handles cleanly. Output is already 4 KB-capped at
+  // capture time.
+  const input = stableJsonString(c.input, 2);
+  return [
+    `[${index}] ${c.name}`,
+    `  input:`,
+    indent(input, '    '),
+    `  output:`,
+    indent(c.output, '    '),
+  ].join('\n');
+}
+
+function indent(s: string, prefix: string): string {
+  return s
+    .split('\n')
+    .map(line => prefix + line)
+    .join('\n');
+}
+
+function stableJsonString(value: unknown, indentSpaces: number): string {
+  try {
+    return JSON.stringify(value, null, indentSpaces);
+  } catch {
+    return String(value);
+  }
 }
 
 function header(label: string, vote: VoteDump): string {
@@ -72,45 +118,34 @@ function header(label: string, vote: VoteDump): string {
 }
 
 /**
- * Pipe two strings to `diff -u` via temp files. Falls back to "(diff
- * unavailable)" if the system has no diff binary, but every dev box and
- * CI we ship to has one.
+ * Pure-JS unified diff via the `diff` npm package — works on every
+ * platform Node runs on, no `sh` / system `diff` binary required (per
+ * Lien Review on #550). Returns "(identical)" if the strings match;
+ * otherwise the unified-patch text minus the leading "Index:" /
+ * "==" boilerplate that `createPatch` emits.
  */
 function diffStrings(a: string, b: string, labelA: string, labelB: string): string {
   if (a === b) return '(identical)';
-  const dir = mkdtempSync(join(tmpdir(), 'compare-votes-'));
-  try {
-    const fileA = join(dir, 'a');
-    const fileB = join(dir, 'b');
-    execFileSync('sh', ['-c', `cat > ${JSON.stringify(fileA)}`], { input: a });
-    execFileSync('sh', ['-c', `cat > ${JSON.stringify(fileB)}`], { input: b });
-    try {
-      execFileSync('diff', ['-u', '--label', labelA, '--label', labelB, fileA, fileB], {
-        encoding: 'utf8',
-      });
-      return '(identical)';
-    } catch (err) {
-      // diff exits 1 when files differ — that's the success path here.
-      const e = err as { stdout?: Buffer | string };
-      const out = e.stdout;
-      return typeof out === 'string' ? out : (out?.toString('utf8') ?? '(diff failed)');
-    }
-  } finally {
-    // Best-effort cleanup; not critical.
-    try {
-      execFileSync('rm', ['-rf', dir]);
-    } catch {
-      /* ignore */
-    }
+  const patch = createPatch(labelA, a, b, '', '', { context: 3 });
+  // createPatch prefixes with "Index: <name>\n===…===\n--- …\n+++ …" — the
+  // first three lines are noise for our use case; replace the second
+  // header with the second label.
+  const lines = patch.split('\n');
+  // lines[0] = "Index: <labelA>", lines[1] = "===…", lines[2] = "--- <labelA>",
+  // lines[3] = "+++ <labelA>" (createPatch reuses the filename for both
+  // headers when newFileName is empty). Rewrite the +++ line to labelB.
+  if (lines.length >= 4 && lines[3].startsWith('+++ ')) {
+    lines[3] = `+++ ${labelB}`;
   }
+  return lines.slice(2).join('\n');
 }
 
 function diffTurn(a: TurnTrace | undefined, b: TurnTrace | undefined, n: number): string {
   if (!a && !b) return '';
-  if (!a) return `\n--- turn ${n}: only in B ---\n${b!.responseText}\n`;
-  if (!b) return `\n--- turn ${n}: only in A ---\n${a.responseText}\n`;
-  const sectionA = `${a.responseText}\n[tools: ${summariseInvocations(a.toolCalls)}]`;
-  const sectionB = `${b.responseText}\n[tools: ${summariseInvocations(b.toolCalls)}]`;
+  if (!a) return `\n--- turn ${n}: only in B ---\n${renderTurn(b!)}\n`;
+  if (!b) return `\n--- turn ${n}: only in A ---\n${renderTurn(a)}\n`;
+  const sectionA = renderTurn(a);
+  const sectionB = renderTurn(b);
   if (sectionA === sectionB) return `\n--- turn ${n}: identical ---\n`;
   return `\n--- turn ${n} ---\n${diffStrings(sectionA, sectionB, `A.turn${n}`, `B.turn${n}`)}`;
 }
