@@ -14,16 +14,18 @@
  *   --votes <k>          K-of-M voting per fixture (default 3)
  *   --calibrate <n>      run each fixture N times, report pass rate (the 9/10 bar)
  *   --json               emit machine-readable JSON instead of text
+ *   --trace <dir>        write per-vote trace JSON to <dir>/<rule>/<scenario>/vote-<N>.json
  *
  * Env: OPENROUTER_API_KEY required.
  */
 
 import { promises as fs } from 'node:fs';
-import { dirname, basename, resolve } from 'node:path';
+import { dirname, basename, resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { FixtureAssertions } from './assertions.js';
 import { vote, calibrate } from './voting.js';
+import type { AssertedRun } from './voting.js';
 import type { RunnerOptions } from './runner.js';
 import { reportVote, reportCalibrate } from './reporter.js';
 
@@ -47,6 +49,7 @@ interface CliFlags {
   calibrate?: number;
   json: boolean;
   model?: string;
+  traceDir?: string;
 }
 
 function requirePositiveInt(name: string, value: string | undefined): number {
@@ -90,6 +93,9 @@ const VALUE_FLAG_SETTERS: Record<string, (f: CliFlags, value: string | undefined
   '--model': (f, v) => {
     f.model = requireString('--model', v);
   },
+  '--trace': (f, v) => {
+    f.traceDir = resolve(requireString('--trace', v));
+  },
 };
 
 function parseFlags(argv: string[]): CliFlags {
@@ -118,10 +124,11 @@ function parseFlags(argv: string[]): CliFlags {
 function printUsage(): void {
   console.error(
     [
-      'Usage: tsx run.ts [--rule <id>] [--fixture <path>] [--votes K] [--calibrate N] [--json]',
+      'Usage: tsx run.ts [--rule <id>] [--fixture <path>] [--votes K] [--calibrate N] [--json] [--trace <dir>]',
       '',
       '  Default: K=3 voting on every fixture under test/harness/fixtures/',
       '  --calibrate 10: runs N times and checks the 9/10 reliability bar',
+      '  --trace <dir>:  write per-vote trace JSON to <dir>/<rule>/<scenario>/vote-<N>.json',
       '  Env: OPENROUTER_API_KEY required',
     ].join('\n'),
   );
@@ -217,6 +224,9 @@ async function runOneFixture(
 
   if (flags.calibrate !== undefined) {
     const result = await calibrate(f.fixturePath, assertions, opts, flags.calibrate);
+    if (flags.traceDir) {
+      await writeTraces(flags.traceDir, label, f.rule, f.name, result.runs);
+    }
     return {
       passed: result.meetsReliabilityBar,
       cost: result.totalCost,
@@ -226,12 +236,52 @@ async function runOneFixture(
   }
   const k = assertions.votes ?? flags.votes;
   const result = await vote(f.fixturePath, assertions, opts, k);
+  if (flags.traceDir) {
+    await writeTraces(flags.traceDir, label, f.rule, f.name, result.votes);
+  }
   return {
     passed: result.agree && result.passes === result.votes.length,
     cost: result.totalCost,
     jsonEntry: { label, mode: 'vote', result },
     text: reportVote(label, result),
   };
+}
+
+/**
+ * Dump one JSON file per vote/run under <traceDir>/<rule>/<scenario>/.
+ * Each file packages the vote's pass/fail outcome with its full trace
+ * (rendered prompts + per-turn responses + tool calls) so iterating on
+ * a failing prompt becomes "diff vote-N.json against vote-M.json".
+ */
+async function writeTraces(
+  traceDir: string,
+  label: string,
+  rule: string,
+  scenario: string,
+  runs: AssertedRun[],
+): Promise<void> {
+  const outDir = join(traceDir, rule, scenario);
+  await fs.mkdir(outDir, { recursive: true });
+  await Promise.all(
+    runs.map(async (run, i) => {
+      const voteIndex = i + 1;
+      const { trace, ...rest } = run.result;
+      const dump = {
+        label,
+        voteIndex,
+        passed: run.passed,
+        failureMessage: run.failureMessage,
+        failureTier: run.failureTier,
+        cost: run.cost,
+        trace,
+        result: rest,
+      };
+      await fs.writeFile(
+        join(outDir, `vote-${voteIndex}.json`),
+        JSON.stringify(dump, null, 2) + '\n',
+      );
+    }),
+  );
 }
 
 function printSummary(

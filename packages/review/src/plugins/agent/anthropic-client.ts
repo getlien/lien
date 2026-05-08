@@ -8,7 +8,28 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import type { Logger } from '../../logger.js';
-import type { AgentFinding, AgentSummary, AgentResult } from './types.js';
+import type {
+  AgentFinding,
+  AgentSummary,
+  AgentResult,
+  TurnTrace,
+  ToolInvocation,
+} from './types.js';
+
+/** Cap a single tool's recorded output so traces stay readable. */
+const TRACE_TOOL_OUTPUT_MAX = 4096;
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
+}
+
+/** Extract the assistant's text content from an Anthropic response for trace. */
+function joinTextBlocks(content: Anthropic.Messages.ContentBlock[]): string {
+  return content
+    .filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text')
+    .map(b => b.text)
+    .join('\n');
+}
 
 /** Default Sonnet pricing: $3/MTok input, $15/MTok output. */
 const DEFAULT_INPUT_COST_PER_MTOK = 3;
@@ -77,6 +98,7 @@ export class AnthropicAgentClient {
     let totalOutputTokens = 0;
     let turn = 0;
     let lastResponse: Anthropic.Messages.Message | null = null;
+    const turnTraces: TurnTrace[] = [];
 
     while (turn < this.maxTurns) {
       turn++;
@@ -98,8 +120,10 @@ export class AnthropicAgentClient {
       lastResponse = response;
 
       // Accumulate usage
-      totalInputTokens += response.usage.input_tokens;
-      totalOutputTokens += response.usage.output_tokens;
+      const turnInputTokens = response.usage.input_tokens;
+      const turnOutputTokens = response.usage.output_tokens;
+      totalInputTokens += turnInputTokens;
+      totalOutputTokens += turnOutputTokens;
 
       const totalTokens = totalInputTokens + totalOutputTokens;
       this.logger.info(
@@ -114,6 +138,18 @@ export class AnthropicAgentClient {
         const toolNames = toolUseBlocks.map(b => b.name).join(', ');
         this.logger.info(`[agent] Turn ${turn} tools: ${toolNames}`);
       }
+
+      // Trace accumulator for this turn — tool inputs/outputs get
+      // populated below as the loop dispatches them.
+      const turnTrace: TurnTrace = {
+        turnNumber: turn,
+        responseText: joinTextBlocks(response.content),
+        toolCalls: [],
+        finishReason: response.stop_reason ?? undefined,
+        inputTokens: turnInputTokens,
+        outputTokens: turnOutputTokens,
+      };
+      turnTraces.push(turnTrace);
 
       // Done: model finished naturally
       if (response.stop_reason === 'end_turn') {
@@ -142,11 +178,19 @@ export class AnthropicAgentClient {
         const toolResults: Anthropic.Messages.ToolResultBlockParam[] = await Promise.all(
           toolUseBlocks.map(async block => {
             let result: string;
+            const startedAt = Date.now();
             try {
               result = await toolExecutor(block.name, block.input as Record<string, unknown>);
             } catch (error) {
               result = `Tool error: ${error instanceof Error ? error.message : String(error)}`;
             }
+            const invocation: ToolInvocation = {
+              name: block.name,
+              input: block.input,
+              output: truncate(result, TRACE_TOOL_OUTPUT_MAX),
+              durationMs: Date.now() - startedAt,
+            };
+            turnTrace.toolCalls.push(invocation);
             return {
               type: 'tool_result' as const,
               tool_use_id: block.id,
@@ -244,6 +288,12 @@ export class AnthropicAgentClient {
         cost,
       },
       turns: turn,
+      trace: {
+        systemPrompt,
+        initialMessage,
+        model: this.model,
+        turns: turnTraces,
+      },
     };
   }
 }

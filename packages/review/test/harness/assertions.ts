@@ -12,12 +12,14 @@
  * Tier 3 (exact text match) is intentionally not exposed.
  */
 
-import type { AgentFinding } from '../../src/plugins/agent/types.js';
+import type { AgentFinding, AgentTrace } from '../../src/plugins/agent/types.js';
 
 export interface HarnessResult {
   findings: AgentFinding[];
   toolCalls: string[];
   turns: number;
+  /** Populated when the harness was invoked with `--trace`. */
+  trace?: AgentTrace;
 }
 
 export type AssertionTier = 1 | 2;

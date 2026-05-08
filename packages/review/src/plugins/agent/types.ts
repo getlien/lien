@@ -124,6 +124,48 @@ export interface AgentSummary {
   keyChanges: string[];
 }
 
+/**
+ * One tool invocation captured during an agent turn — the model-sent
+ * arguments and the tool's return value. Used by the harness's `--trace`
+ * mode to read what the agent actually saw when iterating on prompts.
+ */
+export interface ToolInvocation {
+  name: string;
+  /** Model-sent JSON args (parsed). */
+  input: unknown;
+  /** Tool's return string. Truncated to ~4 KB to keep traces readable. */
+  output: string;
+  durationMs?: number;
+}
+
+/**
+ * One assistant turn captured during a run — full response text including
+ * any reasoning prose outside the JSON fence (which `extractResponse`
+ * normally strips), plus the tool calls made on this turn.
+ */
+export interface TurnTrace {
+  turnNumber: number;
+  /** Full assistant message content, captured before extractResponse. */
+  responseText: string;
+  toolCalls: ToolInvocation[];
+  finishReason?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
+/**
+ * End-to-end agent trace: rendered prompts the model saw, plus every
+ * turn's response and tool calls. Populated by the agent client when
+ * the harness opts in via `reportTrace`. Kept structured (not raw log
+ * text) so consumers can diff or filter without reparsing.
+ */
+export interface AgentTrace {
+  systemPrompt: string;
+  initialMessage: string;
+  model: string;
+  turns: TurnTrace[];
+}
+
 /** Result of an agent review run, including findings, usage, and turn count. */
 export interface AgentResult {
   findings: AgentFinding[];
@@ -135,4 +177,6 @@ export interface AgentResult {
     cost: number;
   };
   turns: number;
+  /** Per-turn trace data — only populated when the caller wires up trace capture. */
+  trace?: AgentTrace;
 }

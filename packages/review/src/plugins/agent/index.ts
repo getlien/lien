@@ -133,6 +133,9 @@ export class AgentReviewPlugin implements ReviewPlugin {
     );
 
     context.reportUsage?.(result.usage);
+    if (result.trace) {
+      context.reportTrace?.(result.trace);
+    }
 
     const pluginId = this.id;
     const findings = result.findings.map(f => mapToReviewFinding(f, pluginId));

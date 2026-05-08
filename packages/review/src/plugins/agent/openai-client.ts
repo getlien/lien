@@ -6,7 +6,20 @@
  */
 
 import type { Logger } from '../../logger.js';
-import type { AgentFinding, AgentSummary, AgentResult } from './types.js';
+import type {
+  AgentFinding,
+  AgentSummary,
+  AgentResult,
+  TurnTrace,
+  ToolInvocation,
+} from './types.js';
+
+/** Cap a single tool's recorded output so traces stay readable. */
+const TRACE_TOOL_OUTPUT_MAX = 4096;
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
+}
 
 /** Default Gemini Flash pricing via OpenRouter: $0.30/$2.50 per MTok. */
 const DEFAULT_INPUT_COST_PER_MTOK = 0.3;
@@ -93,14 +106,17 @@ export class OpenAIAgentClient {
     let totalOutputTokens = 0;
     let turn = 0;
     let lastContent: string | null = null;
+    const turnTraces: TurnTrace[] = [];
 
     while (turn < this.maxTurns) {
       turn++;
 
       const response = await this.chatCompletion(messages, tools);
 
-      totalInputTokens += response.usage?.prompt_tokens ?? 0;
-      totalOutputTokens += response.usage?.completion_tokens ?? 0;
+      const turnInputTokens = response.usage?.prompt_tokens ?? 0;
+      const turnOutputTokens = response.usage?.completion_tokens ?? 0;
+      totalInputTokens += turnInputTokens;
+      totalOutputTokens += turnOutputTokens;
 
       const totalTokens = totalInputTokens + totalOutputTokens;
       const choice = response.choices[0];
@@ -116,6 +132,19 @@ export class OpenAIAgentClient {
       }
 
       lastContent = choice.message.content;
+
+      // Trace accumulator for this turn — tool inputs/outputs get
+      // populated below as the loop dispatches them. Cheap (in-memory)
+      // and only consumed if the caller wires up a trace recipient.
+      const turnTrace: TurnTrace = {
+        turnNumber: turn,
+        responseText: lastContent ?? '',
+        toolCalls: [],
+        finishReason: choice.finish_reason,
+        inputTokens: turnInputTokens,
+        outputTokens: turnOutputTokens,
+      };
+      turnTraces.push(turnTrace);
 
       // Done: model finished naturally
       if (choice.finish_reason === 'stop') {
@@ -146,12 +175,22 @@ export class OpenAIAgentClient {
         // Execute each tool and add results
         for (const tc of choice.message.tool_calls) {
           let result: string;
+          let parsedInput: unknown = null;
+          const startedAt = Date.now();
           try {
-            const input = JSON.parse(tc.function.arguments);
-            result = await toolExecutor(tc.function.name, input);
+            parsedInput = JSON.parse(tc.function.arguments);
+            result = await toolExecutor(tc.function.name, parsedInput as Record<string, unknown>);
           } catch (error) {
             result = `Tool error: ${error instanceof Error ? error.message : String(error)}`;
           }
+          const durationMs = Date.now() - startedAt;
+          const invocation: ToolInvocation = {
+            name: tc.function.name,
+            input: parsedInput,
+            output: truncate(result, TRACE_TOOL_OUTPUT_MAX),
+            durationMs,
+          };
+          turnTrace.toolCalls.push(invocation);
           messages.push({
             role: 'tool',
             content: result,
@@ -221,6 +260,12 @@ export class OpenAIAgentClient {
         cost,
       },
       turns: turn,
+      trace: {
+        systemPrompt,
+        initialMessage,
+        model: this.model,
+        turns: turnTraces,
+      },
     };
   }
 

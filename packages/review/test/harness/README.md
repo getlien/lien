@@ -325,6 +325,53 @@ captured.
 If you can't tell what's happening, `--json` is your friend — pipe through
 `jq` and look at each vote's `failureMessage`.
 
+## Debugging a failing vote with `--trace`
+
+When the `failureMessage` alone doesn't tell you why a vote bailed —
+typically `Tier 1: ... (no findings)` where the model investigated but
+decided silence — capture per-vote traces and compare a passing vote to
+a failing one.
+
+```bash
+npm run test:harness -w @liendev/review -- \
+  --rule concurrency-race --calibrate 10 --trace /tmp/cal-trace
+```
+
+Each vote produces `/tmp/cal-trace/<rule>/<scenario>/vote-<N>.json`
+containing the rendered system prompt, the rendered initial message, the
+full per-turn assistant response (including reasoning prose outside the
+JSON fence — normally stripped), and tool-call inputs + outputs.
+
+To compare a passing vote (say vote 3) with a failing one (vote 7):
+
+```bash
+npx tsx packages/review/test/harness/compare-votes.ts \
+  /tmp/cal-trace/concurrency-race/credit-service-toctou/vote-3.json \
+  /tmp/cal-trace/concurrency-race/credit-service-toctou/vote-7.json
+```
+
+Output starts with a header (passed?, failure tier, turn count,
+tool-call summary for each vote), then prints `diff -u` per turn
+between the two response texts. If the systemPrompt or initialMessage
+differ across votes (rare for same-fixture voting; common when comparing
+across fixtures), those diffs print first.
+
+Typical reads:
+
+- Both votes call the same tools but the failing one's last-turn prose
+  says "I could not identify a race condition" — silence-mode bias the
+  rule's MUST-emit language didn't overcome.
+- The failing vote made fewer tool calls and never opened the file
+  containing the bug — the rule's protocol step "MUST call
+  get_files_context" needs strengthening.
+- Tool output for `read_file` was truncated to 4 KB, missing the lines
+  with the bug — investigate whether the fixture's `repoRootDir` is
+  correct or the file is huge.
+
+Trace files are typically 10-50 KB per vote (5-15 turns × ~2 KB each
+including 4 KB-capped tool outputs). A `--calibrate 10` run on one
+fixture writes ~100-500 KB to disk.
+
 ## Modes — when to use which
 
 - **`/test-harness <rule>` (CC)** — fast inner loop. Free. Use while
