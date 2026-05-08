@@ -184,6 +184,26 @@ export class OpenAIAgentClient {
           const startedAt = Date.now();
           try {
             parsedInput = JSON.parse(tc.function.arguments);
+            // JSON.parse succeeds on primitives (`null`, `"foo"`, `42`,
+            // arrays). Tool executors expect a plain object — without
+            // an explicit shape check the cast is a lie and the crash
+            // we surface is "Cannot read properties of null" rather
+            // than a clear "got X, expected object" (per CodeRabbit on #550).
+            if (
+              typeof parsedInput !== 'object' ||
+              parsedInput === null ||
+              Array.isArray(parsedInput)
+            ) {
+              throw new Error(
+                `Invalid tool arguments: expected JSON object, got ${
+                  parsedInput === null
+                    ? 'null'
+                    : Array.isArray(parsedInput)
+                      ? 'array'
+                      : typeof parsedInput
+                }`,
+              );
+            }
             result = await toolExecutor(tc.function.name, parsedInput as Record<string, unknown>);
           } catch (error) {
             result = `Tool error: ${error instanceof Error ? error.message : String(error)}`;
