@@ -92,9 +92,27 @@ function indent(s: string, prefix: string): string {
     .join('\n');
 }
 
+/**
+ * Recursively sort object keys so two semantically-identical inputs
+ * with different key insertion orders produce byte-identical JSON.
+ * Without this, a model that emits `{"a":1,"b":2}` on one vote and
+ * `{"b":2,"a":1}` on another would render as a fake diff in
+ * compare-votes (per Lien Review on #550). Arrays preserve order
+ * (positional semantics matter); primitives pass through.
+ */
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value === null || typeof value !== 'object') return value;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    sorted[key] = sortKeys((value as Record<string, unknown>)[key]);
+  }
+  return sorted;
+}
+
 function stableJsonString(value: unknown, indentSpaces: number): string {
   try {
-    return JSON.stringify(value, null, indentSpaces);
+    return JSON.stringify(sortKeys(value), null, indentSpaces);
   } catch {
     return String(value);
   }

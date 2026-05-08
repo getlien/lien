@@ -172,10 +172,15 @@ export class OpenAIAgentClient {
           tool_calls: choice.message.tool_calls,
         });
 
-        // Execute each tool and add results
+        // Execute each tool and add results. Seed `parsedInput` with
+        // the raw arguments string so a JSON.parse failure leaves the
+        // malformed input on the trace — that's exactly what a developer
+        // needs when debugging "model emitted invalid tool args" prompt
+        // failures (per Lien Review on #550). On success it gets
+        // overwritten with the parsed object.
         for (const tc of choice.message.tool_calls) {
           let result: string;
-          let parsedInput: unknown = null;
+          let parsedInput: unknown = tc.function.arguments;
           const startedAt = Date.now();
           try {
             parsedInput = JSON.parse(tc.function.arguments);
