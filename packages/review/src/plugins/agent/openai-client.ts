@@ -17,8 +17,53 @@ import type {
 /** Cap a single tool's recorded output so traces stay readable. */
 const TRACE_TOOL_OUTPUT_MAX = 4096;
 
+const WRAP_UP_NUDGE =
+  'You are running low on budget. Stop investigating and output your findings JSON now. Do not make any more tool calls. If you found no issues, output an empty findings array.';
+
+const RETRY_NUDGE =
+  'You ran out of budget. Output ONLY the JSON block now with your findings and summary. No tool calls.';
+
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
+}
+
+/**
+ * Parse + validate a tool call's JSON arguments. Returns the parsed
+ * input on success, throws on parse failure or non-object payload (a
+ * cleaner surface than letting the executor crash on a primitive cast).
+ */
+function parseToolArguments(raw: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `Invalid tool arguments JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    const got = parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed;
+    throw new Error(`Invalid tool arguments: expected JSON object, got ${got}`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/** Build a ToolInvocation from a tool call's name, parsed input, and raw output. */
+function buildInvocation(
+  name: string,
+  rawArgs: string,
+  parsed: unknown,
+  output: string,
+  startedAt: number,
+): ToolInvocation {
+  return {
+    name,
+    // Keep the raw args string on parse-failure so the trace shows the
+    // exact malformed payload rather than `null`.
+    input: parsed === undefined ? rawArgs : parsed,
+    output: truncate(output, TRACE_TOOL_OUTPUT_MAX),
+    durationMs: Date.now() - startedAt,
+  };
 }
 
 /** Default Gemini Flash pricing via OpenRouter: $0.30/$2.50 per MTok. */
@@ -165,71 +210,15 @@ export class OpenAIAgentClient {
 
       // Process tool calls
       if (choice.finish_reason === 'tool_calls' && choice.message.tool_calls) {
-        // Add assistant message with tool calls
-        messages.push({
-          role: 'assistant',
-          content: choice.message.content,
-          tool_calls: choice.message.tool_calls,
-        });
-
-        // Execute each tool and add results. Seed `parsedInput` with
-        // the raw arguments string so a JSON.parse failure leaves the
-        // malformed input on the trace — that's exactly what a developer
-        // needs when debugging "model emitted invalid tool args" prompt
-        // failures (per Lien Review on #550). On success it gets
-        // overwritten with the parsed object.
-        for (const tc of choice.message.tool_calls) {
-          let result: string;
-          let parsedInput: unknown = tc.function.arguments;
-          const startedAt = Date.now();
-          try {
-            parsedInput = JSON.parse(tc.function.arguments);
-            // JSON.parse succeeds on primitives (`null`, `"foo"`, `42`,
-            // arrays). Tool executors expect a plain object — without
-            // an explicit shape check the cast is a lie and the crash
-            // we surface is "Cannot read properties of null" rather
-            // than a clear "got X, expected object" (per CodeRabbit on #550).
-            if (
-              typeof parsedInput !== 'object' ||
-              parsedInput === null ||
-              Array.isArray(parsedInput)
-            ) {
-              throw new Error(
-                `Invalid tool arguments: expected JSON object, got ${
-                  parsedInput === null
-                    ? 'null'
-                    : Array.isArray(parsedInput)
-                      ? 'array'
-                      : typeof parsedInput
-                }`,
-              );
-            }
-            result = await toolExecutor(tc.function.name, parsedInput as Record<string, unknown>);
-          } catch (error) {
-            result = `Tool error: ${error instanceof Error ? error.message : String(error)}`;
-          }
-          const durationMs = Date.now() - startedAt;
-          const invocation: ToolInvocation = {
-            name: tc.function.name,
-            input: parsedInput,
-            output: truncate(result, TRACE_TOOL_OUTPUT_MAX),
-            durationMs,
-          };
-          turnTrace.toolCalls.push(invocation);
-          messages.push({
-            role: 'tool',
-            content: result,
-            tool_call_id: tc.id,
-          });
-        }
-
-        // Nudge to wrap up if near budget
+        await this.dispatchToolCalls(
+          choice.message.tool_calls,
+          choice.message.content,
+          messages,
+          turnTrace,
+          toolExecutor,
+        );
         if (nearBudget || lastTurn) {
-          messages.push({
-            role: 'user',
-            content:
-              'You are running low on budget. Stop investigating and output your findings JSON now. Do not make any more tool calls. If you found no issues, output an empty findings array.',
-          });
+          messages.push({ role: 'user', content: WRAP_UP_NUDGE });
         }
       } else {
         this.logger.warning(`[agent] Unexpected finish_reason: ${choice.finish_reason}, stopping`);
@@ -241,51 +230,16 @@ export class OpenAIAgentClient {
       this.logger.warning(`[agent] Max turns reached (${this.maxTurns}), stopping`);
     }
 
-    // Parse findings from the final response
     let parsed = extractResponse(lastContent);
-
-    // If no JSON output, request summary
     if (!parsed.summary && lastContent !== null) {
-      this.logger.info('[agent] No JSON output — requesting summary...');
-      await new Promise(resolve => setTimeout(resolve, 3_000));
-
-      // Add a wrap-up request
-      messages.push({
-        role: 'user',
-        content:
-          'You ran out of budget. Output ONLY the JSON block now with your findings and summary. No tool calls.',
-      });
-
-      try {
-        const retryResponse = await this.chatCompletion(messages, []);
-        const retryInputTokens = retryResponse.usage?.prompt_tokens ?? 0;
-        const retryOutputTokens = retryResponse.usage?.completion_tokens ?? 0;
-        totalInputTokens += retryInputTokens;
-        totalOutputTokens += retryOutputTokens;
-
-        // Record the retry as its own turn so trace.turns and usage
-        // stay consistent — without this, the summary-retry's tokens
-        // count toward the cost while its response is invisible in the
-        // trace, defeating the "read why the model bailed" use case
-        // (per CodeRabbit on #550).
-        const retryChoice = retryResponse.choices[0];
-        turnTraces.push({
-          turnNumber: turn + 1,
-          responseText: retryChoice?.message.content ?? '',
-          toolCalls: [],
-          finishReason: retryChoice?.finish_reason,
-          inputTokens: retryInputTokens,
-          outputTokens: retryOutputTokens,
-        });
-
-        const retryParsed = extractResponse(retryChoice?.message.content);
-        if (retryParsed.summary || retryParsed.findings.length > 0) {
-          parsed = retryParsed;
+      const retry = await this.runSummaryRetry(messages, turn);
+      if (retry) {
+        totalInputTokens += retry.inputTokens;
+        totalOutputTokens += retry.outputTokens;
+        turnTraces.push(retry.traceTurn);
+        if (retry.parsed.summary || retry.parsed.findings.length > 0) {
+          parsed = retry.parsed;
         }
-      } catch (err) {
-        this.logger.warning(
-          `[agent] Summary retry failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
       }
     }
 
@@ -309,6 +263,83 @@ export class OpenAIAgentClient {
         turns: turnTraces,
       },
     };
+  }
+
+  /**
+   * Append the assistant's tool_calls turn to the message history,
+   * dispatch each tool, record its invocation on the trace, and append
+   * the tool_result messages. Pulled out of `run()` to keep its
+   * time-to-understand under the complexity threshold.
+   */
+  private async dispatchToolCalls(
+    toolCalls: ToolCall[],
+    assistantContent: string | null,
+    messages: ChatMessage[],
+    turnTrace: TurnTrace,
+    toolExecutor: (name: string, input: Record<string, unknown>) => Promise<string>,
+  ): Promise<void> {
+    messages.push({
+      role: 'assistant',
+      content: assistantContent,
+      tool_calls: toolCalls,
+    });
+    for (const tc of toolCalls) {
+      const startedAt = Date.now();
+      let parsed: Record<string, unknown> | undefined;
+      let result: string;
+      try {
+        parsed = parseToolArguments(tc.function.arguments);
+        result = await toolExecutor(tc.function.name, parsed);
+      } catch (error) {
+        result = `Tool error: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      turnTrace.toolCalls.push(
+        buildInvocation(tc.function.name, tc.function.arguments, parsed, result, startedAt),
+      );
+      messages.push({ role: 'tool', content: result, tool_call_id: tc.id });
+    }
+  }
+
+  /**
+   * Final cheap call asking the model to emit just the findings JSON
+   * after the main loop ran out of budget. Returns the parsed result,
+   * a TurnTrace for the retry call, and per-call token counts. Returns
+   * null if the retry itself fails (logged); the caller falls back to
+   * the (empty) findings already extracted.
+   */
+  private async runSummaryRetry(
+    messages: ChatMessage[],
+    turn: number,
+  ): Promise<{
+    parsed: { findings: AgentFinding[]; summary?: AgentSummary };
+    traceTurn: TurnTrace;
+    inputTokens: number;
+    outputTokens: number;
+  } | null> {
+    this.logger.info('[agent] No JSON output — requesting summary...');
+    await new Promise(resolve => setTimeout(resolve, 3_000));
+    messages.push({ role: 'user', content: RETRY_NUDGE });
+    try {
+      const response = await this.chatCompletion(messages, []);
+      const inputTokens = response.usage?.prompt_tokens ?? 0;
+      const outputTokens = response.usage?.completion_tokens ?? 0;
+      const choice = response.choices[0];
+      const traceTurn: TurnTrace = {
+        turnNumber: turn + 1,
+        responseText: choice?.message.content ?? '',
+        toolCalls: [],
+        finishReason: choice?.finish_reason,
+        inputTokens,
+        outputTokens,
+      };
+      const parsed = extractResponse(choice?.message.content);
+      return { parsed, traceTurn, inputTokens, outputTokens };
+    } catch (err) {
+      this.logger.warning(
+        `[agent] Summary retry failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
   }
 
   private async chatCompletion(messages: ChatMessage[], tools: ToolDef[]): Promise<ChatResponse> {

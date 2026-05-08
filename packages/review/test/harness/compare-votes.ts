@@ -168,6 +168,29 @@ function diffTurn(a: TurnTrace | undefined, b: TurnTrace | undefined, n: number)
   return `\n--- turn ${n} ---\n${diffStrings(sectionA, sectionB, `A.turn${n}`, `B.turn${n}`)}`;
 }
 
+function diffPromptsIfDifferent(a: AgentTrace, b: AgentTrace): void {
+  if (a.systemPrompt !== b.systemPrompt) {
+    console.log('--- systemPrompt differs ---');
+    console.log(diffStrings(a.systemPrompt, b.systemPrompt, 'A.system', 'B.system'));
+  }
+  if (a.initialMessage !== b.initialMessage) {
+    console.log('--- initialMessage differs ---');
+    console.log(diffStrings(a.initialMessage, b.initialMessage, 'A.initial', 'B.initial'));
+  }
+}
+
+function printVoteDiff(a: VoteDump, b: VoteDump): void {
+  console.log(header('A', a));
+  console.log('');
+  console.log(header('B', b));
+  console.log('');
+  diffPromptsIfDifferent(a.trace!, b.trace!);
+  const turnCount = Math.max(a.trace!.turns.length, b.trace!.turns.length);
+  for (let i = 0; i < turnCount; i++) {
+    process.stdout.write(diffTurn(a.trace!.turns[i], b.trace!.turns[i], i + 1));
+  }
+}
+
 async function main(): Promise<void> {
   const [pathA, pathB] = process.argv.slice(2);
   if (!pathA || !pathB) {
@@ -175,27 +198,7 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   const [a, b] = await Promise.all([loadVote(resolve(pathA)), loadVote(resolve(pathB))]);
-
-  console.log(header('A', a));
-  console.log('');
-  console.log(header('B', b));
-  console.log('');
-
-  if (a.trace!.systemPrompt !== b.trace!.systemPrompt) {
-    console.log('--- systemPrompt differs ---');
-    console.log(diffStrings(a.trace!.systemPrompt, b.trace!.systemPrompt, 'A.system', 'B.system'));
-  }
-  if (a.trace!.initialMessage !== b.trace!.initialMessage) {
-    console.log('--- initialMessage differs ---');
-    console.log(
-      diffStrings(a.trace!.initialMessage, b.trace!.initialMessage, 'A.initial', 'B.initial'),
-    );
-  }
-
-  const turnCount = Math.max(a.trace!.turns.length, b.trace!.turns.length);
-  for (let i = 0; i < turnCount; i++) {
-    process.stdout.write(diffTurn(a.trace!.turns[i], b.trace!.turns[i], i + 1));
-  }
+  printVoteDiff(a, b);
 }
 
 main().catch(err => {

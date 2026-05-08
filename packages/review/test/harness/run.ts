@@ -141,51 +141,52 @@ interface FixturePair {
   assertionsPath: string;
 }
 
-async function discoverFixtures(flags: CliFlags): Promise<FixturePair[]> {
-  if (flags.fixture) {
-    const fixturePath = resolve(flags.fixture);
-    const assertionsPath = fixturePath.replace(/\.fixture\.json$/, '.assertions.ts');
-    return [
-      {
-        rule: basename(dirname(fixturePath)),
-        name: basename(fixturePath, '.fixture.json'),
-        fixturePath,
-        assertionsPath,
-      },
-    ];
+function fixturePairFromPath(fixturePath: string): FixturePair {
+  const assertionsPath = fixturePath.replace(/\.fixture\.json$/, '.assertions.ts');
+  return {
+    rule: basename(dirname(fixturePath)),
+    name: basename(fixturePath, '.fixture.json'),
+    fixturePath,
+    assertionsPath,
+  };
+}
+
+async function listRuleDirs(rule: string | undefined): Promise<string[]> {
+  if (rule) return [resolve(FIXTURES_ROOT, rule)];
+  const entries = await fs.readdir(FIXTURES_ROOT, { withFileTypes: true });
+  return entries.filter(d => d.isDirectory()).map(d => resolve(FIXTURES_ROOT, d.name));
+}
+
+async function collectFixturesInDir(ruleDir: string): Promise<FixturePair[]> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(ruleDir);
+  } catch {
+    return [];
   }
-
-  const ruleDirs = flags.rule
-    ? [resolve(FIXTURES_ROOT, flags.rule)]
-    : (await fs.readdir(FIXTURES_ROOT, { withFileTypes: true }))
-        .filter(d => d.isDirectory())
-        .map(d => resolve(FIXTURES_ROOT, d.name));
-
   const pairs: FixturePair[] = [];
-  for (const ruleDir of ruleDirs) {
-    let entries;
+  for (const entry of entries) {
+    if (!entry.endsWith('.fixture.json')) continue;
+    const pair = fixturePairFromPath(resolve(ruleDir, entry));
     try {
-      entries = await fs.readdir(ruleDir);
+      await fs.access(pair.assertionsPath);
     } catch {
+      console.error(`skip ${pair.fixturePath} — no sibling .assertions.ts`);
       continue;
     }
-    for (const entry of entries) {
-      if (!entry.endsWith('.fixture.json')) continue;
-      const fixturePath = resolve(ruleDir, entry);
-      const assertionsPath = fixturePath.replace(/\.fixture\.json$/, '.assertions.ts');
-      try {
-        await fs.access(assertionsPath);
-      } catch {
-        console.error(`skip ${fixturePath} — no sibling .assertions.ts`);
-        continue;
-      }
-      pairs.push({
-        rule: basename(ruleDir),
-        name: basename(fixturePath, '.fixture.json'),
-        fixturePath,
-        assertionsPath,
-      });
-    }
+    pairs.push(pair);
+  }
+  return pairs;
+}
+
+async function discoverFixtures(flags: CliFlags): Promise<FixturePair[]> {
+  if (flags.fixture) {
+    return [fixturePairFromPath(resolve(flags.fixture))];
+  }
+  const ruleDirs = await listRuleDirs(flags.rule);
+  const pairs: FixturePair[] = [];
+  for (const ruleDir of ruleDirs) {
+    pairs.push(...(await collectFixturesInDir(ruleDir)));
   }
   return pairs;
 }
