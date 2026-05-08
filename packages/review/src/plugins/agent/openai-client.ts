@@ -48,6 +48,32 @@ function parseToolArguments(raw: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+/**
+ * Assemble a per-turn trace entry from a chat-completion choice.
+ * Pulled out of `run()` so the turn-trace shape can grow (e.g. the
+ * reasoning field added in #552) without bumping the loop body's
+ * time-to-understand against the complexity threshold.
+ */
+function buildTurnTrace(
+  turnNumber: number,
+  choice: ChatResponse['choices'][number],
+  inputTokens: number,
+  outputTokens: number,
+): TurnTrace {
+  return {
+    turnNumber,
+    responseText: choice.message.content ?? '',
+    // OpenRouter surfaces extended-reasoning prose here for models like
+    // gemini-3-flash-preview; on tool-calling turns this is where the
+    // model's intermediate thinking lives (#552).
+    reasoning: choice.message.reasoning ?? undefined,
+    toolCalls: [],
+    finishReason: choice.finish_reason,
+    inputTokens,
+    outputTokens,
+  };
+}
+
 /** Build a ToolInvocation from a tool call's name, parsed input, and raw output. */
 function buildInvocation(
   name: string,
@@ -188,22 +214,7 @@ export class OpenAIAgentClient {
       }
 
       lastContent = choice.message.content;
-
-      // Trace accumulator for this turn — tool inputs/outputs get
-      // populated below as the loop dispatches them. Cheap (in-memory)
-      // and only consumed if the caller wires up a trace recipient.
-      const turnTrace: TurnTrace = {
-        turnNumber: turn,
-        responseText: lastContent ?? '',
-        // OpenRouter surfaces extended-reasoning prose here for models
-        // like gemini-3-flash-preview; on tool-calling turns this is
-        // where the model's intermediate thinking lives (#552).
-        reasoning: choice.message.reasoning ?? undefined,
-        toolCalls: [],
-        finishReason: choice.finish_reason,
-        inputTokens: turnInputTokens,
-        outputTokens: turnOutputTokens,
-      };
+      const turnTrace = buildTurnTrace(turn, choice, turnInputTokens, turnOutputTokens);
       turnTraces.push(turnTrace);
 
       // Done: model finished naturally
