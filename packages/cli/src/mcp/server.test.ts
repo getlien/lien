@@ -36,8 +36,8 @@ const {
   },
   mockSetupGitDetection: vi.fn().mockResolvedValue({ gitPollInterval: null }),
   mockSetupCleanupHandlers: vi.fn().mockReturnValue(vi.fn().mockResolvedValue(undefined)),
-  mockIsGitRepo: vi.fn(async () => true),
-  mockIndexCodebase: vi.fn(async () => undefined),
+  mockIsGitRepo: vi.fn(async (_dir: string) => true),
+  mockIndexCodebase: vi.fn(async (_opts: { rootDir: string; verbose?: boolean }) => undefined),
 }));
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
@@ -295,6 +295,32 @@ describe('startMCPServer', () => {
         rootDir: '/test/no-git-dir',
         verbose: true,
       });
+    });
+
+    it('indexes when rootDir is a subdirectory of a git repo', async () => {
+      // .git lives at /test/repo, but rootDir is the nested package.
+      mockIsGitRepo.mockImplementation(async (dir: string) => dir === '/test/repo');
+
+      await startMCPServer({ rootDir: '/test/repo/packages/foo' });
+
+      expect(mockIsGitRepo).toHaveBeenCalledWith('/test/repo/packages/foo');
+      expect(mockIsGitRepo).toHaveBeenCalledWith('/test/repo');
+      expect(mockIndexCodebase).toHaveBeenCalledWith({
+        rootDir: '/test/repo/packages/foo',
+        verbose: true,
+      });
+    });
+
+    it('does not block server.connect on initial indexing', async () => {
+      mockIsGitRepo.mockResolvedValue(true);
+      // Simulate a slow index. If handleAutoIndexing awaited this, the test
+      // would hang on startMCPServer's promise instead of resolving.
+      mockIndexCodebase.mockImplementation(() => new Promise(() => {}));
+
+      await startMCPServer({ rootDir: '/test/project' });
+
+      expect(mockServerInstance.connect).toHaveBeenCalledOnce();
+      expect(mockIndexCodebase).toHaveBeenCalledOnce();
     });
   });
 });
