@@ -27,7 +27,7 @@ Lien connects AI coding assistants like Cursor and Claude Code to your codebase 
 
 ### Claude Code (recommended) — one-time plugin install
 
-```
+```text
 /plugin marketplace add getlien/lien
 /plugin install lien
 ```

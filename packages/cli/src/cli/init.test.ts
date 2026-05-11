@@ -323,7 +323,7 @@ describe('initCommand', () => {
     const perProjectEditors: EditorId[] = ['cursor', 'claude-code', 'opencode', 'kilo-code'];
 
     for (const editorId of perProjectEditors) {
-      await initCommand({ editor: editorId });
+      await initCommand({ editor: editorId, legacy: editorId === 'claude-code' });
     }
 
     // Check cursor config doesn't have --root
