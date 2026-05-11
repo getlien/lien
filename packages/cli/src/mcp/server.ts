@@ -4,7 +4,12 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import type { EmbeddingService, VectorDBInterface } from '@liendev/core';
-import { WorkerEmbeddings, VERSION_CHECK_INTERVAL_MS, createVectorDB } from '@liendev/core';
+import {
+  WorkerEmbeddings,
+  VERSION_CHECK_INTERVAL_MS,
+  createVectorDB,
+  isGitRepo,
+} from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import { createReindexStateManager } from './reindex-state-manager.js';
@@ -78,6 +83,16 @@ async function handleAutoIndexing(
   const hasIndex = await vectorDB.hasData();
 
   if (!hasIndex) {
+    const forceIndex = process.env.LIEN_FORCE_INDEX === '1';
+    if (!forceIndex && !(await isGitRepo(rootDir))) {
+      log(
+        `Skipped auto-indexing: ${rootDir} has no .git directory. ` +
+          `Run 'lien index' or set LIEN_FORCE_INDEX=1 to index anyway.`,
+        'warning',
+      );
+      return;
+    }
+
     log('📦 No index found - running initial indexing...');
     log('⏱️  This may take 5-20 minutes depending on project size');
 

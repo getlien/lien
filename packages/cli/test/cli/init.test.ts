@@ -20,20 +20,20 @@ describe('initCommand', () => {
   });
 
   describe('Explore agent installation', () => {
-    it('installs .claude/agents/Explore.md for claude-code', async () => {
-      await initCommand({ editor: 'claude-code', path: tmpDir });
+    it('installs .claude/agents/Explore.md for claude-code under --legacy', async () => {
+      await initCommand({ editor: 'claude-code', path: tmpDir, legacy: true });
 
       const agentPath = path.join(tmpDir, '.claude', 'agents', 'Explore.md');
       const content = await fs.readFile(agentPath, 'utf-8');
       expect(content).toBe(EXPLORE_AGENT_CONTENT);
     });
 
-    it('does not overwrite existing Explore.md', async () => {
+    it('does not overwrite existing Explore.md under --legacy', async () => {
       const agentPath = path.join(tmpDir, '.claude', 'agents', 'Explore.md');
       await fs.mkdir(path.dirname(agentPath), { recursive: true });
       await fs.writeFile(agentPath, 'custom content');
 
-      await initCommand({ editor: 'claude-code', path: tmpDir });
+      await initCommand({ editor: 'claude-code', path: tmpDir, legacy: true });
 
       const content = await fs.readFile(agentPath, 'utf-8');
       expect(content).toBe('custom content');
@@ -41,6 +41,13 @@ describe('initCommand', () => {
 
     it('does not install Explore agent for non-claude-code editors', async () => {
       await initCommand({ editor: 'cursor', path: tmpDir });
+
+      const agentPath = path.join(tmpDir, '.claude', 'agents', 'Explore.md');
+      await expect(fs.access(agentPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('does not install Explore agent for claude-code without --legacy (plugin path)', async () => {
+      await initCommand({ editor: 'claude-code', path: tmpDir });
 
       const agentPath = path.join(tmpDir, '.claude', 'agents', 'Explore.md');
       await expect(fs.access(agentPath)).rejects.toMatchObject({ code: 'ENOENT' });

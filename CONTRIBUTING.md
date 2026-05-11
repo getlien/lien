@@ -20,6 +20,26 @@ cd packages/cli
 npm link
 ```
 
+### Dogfooding Lien while working on Lien
+
+The repo contains a Claude Code plugin at `plugins/claude/` and a marketplace manifest at `.claude-plugin/marketplace.json` — these are distribution files for end users. **Do not `/plugin install lien` in your dev environment** when working on Lien itself: that points the MCP server at the npm-published `@liendev/lien`, so you'd be testing the released build instead of your local changes.
+
+Instead, register Lien per-project against your local `dist/`:
+
+```jsonc
+// .mcp.json in this repo, or the corresponding entry in ~/.claude.json
+{
+  "mcpServers": {
+    "lien": {
+      "command": "node",
+      "args": ["/absolute/path/to/lien/packages/cli/dist/index.js", "serve", "-r", "."]
+    }
+  }
+}
+```
+
+Rebuild (`npm run build`) and restart your MCP client to pick up changes.
+
 ## Project Structure
 
 ```

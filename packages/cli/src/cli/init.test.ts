@@ -94,8 +94,19 @@ describe('initCommand', () => {
 
   // --- Claude Code ---
 
-  it('should create .mcp.json for claude-code', async () => {
+  it('should point users at the plugin by default and skip writing .mcp.json', async () => {
+    const logSpy = vi.spyOn(console, 'log');
+
     await initCommand({ editor: 'claude-code' });
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('/plugin install lien'));
+
+    const configPath = path.join(testDir, '.mcp.json');
+    await expect(fs.access(configPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('should create .mcp.json for claude-code with --legacy', async () => {
+    await initCommand({ editor: 'claude-code', legacy: true });
 
     const configPath = path.join(testDir, '.mcp.json');
     const raw = await fs.readFile(configPath, 'utf-8');
@@ -108,11 +119,11 @@ describe('initCommand', () => {
     });
   });
 
-  it('should merge into existing .mcp.json for claude-code', async () => {
+  it('should merge into existing .mcp.json for claude-code with --legacy', async () => {
     const configPath = path.join(testDir, '.mcp.json');
     await fs.writeFile(configPath, JSON.stringify({ mcpServers: { other: { command: 'other' } } }));
 
-    await initCommand({ editor: 'claude-code' });
+    await initCommand({ editor: 'claude-code', legacy: true });
 
     const raw = await fs.readFile(configPath, 'utf-8');
     const config = JSON.parse(raw);
@@ -121,9 +132,9 @@ describe('initCommand', () => {
     expect(config.mcpServers.other).toEqual({ command: 'other' });
   });
 
-  it('should show Claude Code restart message', async () => {
+  it('should show Claude Code restart message under --legacy', async () => {
     const logSpy = vi.spyOn(console, 'log');
-    await initCommand({ editor: 'claude-code' });
+    await initCommand({ editor: 'claude-code', legacy: true });
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('Restart Claude Code to activate.'),
     );

@@ -9,6 +9,8 @@ const {
   mockEmbeddings,
   mockSetupGitDetection,
   mockSetupCleanupHandlers,
+  mockIsGitRepo,
+  mockIndexCodebase,
 } = vi.hoisted(() => ({
   mockServerInstance: {
     connect: vi.fn().mockResolvedValue(undefined),
@@ -34,6 +36,8 @@ const {
   },
   mockSetupGitDetection: vi.fn().mockResolvedValue({ gitPollInterval: null }),
   mockSetupCleanupHandlers: vi.fn().mockReturnValue(vi.fn().mockResolvedValue(undefined)),
+  mockIsGitRepo: vi.fn(async () => true),
+  mockIndexCodebase: vi.fn(async () => undefined),
 }));
 
 vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
@@ -54,6 +58,8 @@ vi.mock('@liendev/core', () => ({
   }),
   createVectorDB: vi.fn(async () => mockVectorDB),
   VERSION_CHECK_INTERVAL_MS: 60000,
+  isGitRepo: mockIsGitRepo,
+  indexCodebase: mockIndexCodebase,
 }));
 
 vi.mock('../watcher/index.js', () => ({
@@ -244,5 +250,51 @@ describe('startMCPServer', () => {
     expect(typeof toolContext.checkAndReconnect).toBe('function');
     expect(typeof toolContext.getIndexMetadata).toBe('function');
     expect(typeof toolContext.getReindexState).toBe('function');
+  });
+
+  describe('auto-indexing guard', () => {
+    beforeEach(() => {
+      mockVectorDB.hasData.mockResolvedValue(false);
+      mockIndexCodebase.mockClear();
+      mockIsGitRepo.mockReset();
+      delete process.env.LIEN_FORCE_INDEX;
+    });
+
+    afterEach(() => {
+      delete process.env.LIEN_FORCE_INDEX;
+    });
+
+    it('runs initial index when rootDir is a git repo', async () => {
+      mockIsGitRepo.mockResolvedValue(true);
+
+      await startMCPServer({ rootDir: '/test/project' });
+
+      expect(mockIsGitRepo).toHaveBeenCalledWith('/test/project');
+      expect(mockIndexCodebase).toHaveBeenCalledWith({
+        rootDir: '/test/project',
+        verbose: true,
+      });
+    });
+
+    it('skips initial index when rootDir has no .git', async () => {
+      mockIsGitRepo.mockResolvedValue(false);
+
+      await startMCPServer({ rootDir: '/test/no-git-dir' });
+
+      expect(mockIsGitRepo).toHaveBeenCalledWith('/test/no-git-dir');
+      expect(mockIndexCodebase).not.toHaveBeenCalled();
+    });
+
+    it('still indexes a non-git dir when LIEN_FORCE_INDEX=1', async () => {
+      mockIsGitRepo.mockResolvedValue(false);
+      process.env.LIEN_FORCE_INDEX = '1';
+
+      await startMCPServer({ rootDir: '/test/no-git-dir' });
+
+      expect(mockIndexCodebase).toHaveBeenCalledWith({
+        rootDir: '/test/no-git-dir',
+        verbose: true,
+      });
+    });
   });
 });
