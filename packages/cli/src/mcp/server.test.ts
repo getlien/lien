@@ -124,6 +124,7 @@ import { FileWatcher } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import { setupCleanupHandlers } from './cleanup.js';
 import { setupGitDetection } from './git-detection.js';
+import { createReindexStateManager } from './reindex-state-manager.js';
 
 describe('startMCPServer', () => {
   let processOnSpy: ReturnType<typeof vi.spyOn>;
@@ -279,6 +280,39 @@ describe('startMCPServer', () => {
       const metadata = toolContext.getIndexMetadata();
       expect(metadata.indexedBranch).toBe('feature-x');
       expect(metadata.indexedCommit).toBe('abc1234');
+    });
+  });
+
+  describe('getIndexMetadata indexDate source', () => {
+    it('uses lastReindexTimestamp when set (advances on incremental reindexes)', async () => {
+      const fixedTimestamp = 1714521600000; // 2024-05-01T00:00:00Z
+      vi.mocked(createReindexStateManager).mockReturnValueOnce({
+        getState: vi.fn().mockReturnValue({
+          inProgress: false,
+          pendingFiles: [],
+          lastReindexTimestamp: fixedTimestamp,
+          lastReindexDurationMs: 200,
+        }),
+        startReindex: vi.fn(),
+        completeReindex: vi.fn(),
+        failReindex: vi.fn(),
+      } as unknown as ReturnType<typeof createReindexStateManager>);
+
+      await startMCPServer({ rootDir: '/test/project' });
+
+      const toolContext = vi.mocked(registerMCPHandlers).mock.calls[0][1];
+      const metadata = toolContext.getIndexMetadata();
+      expect(metadata.indexDate).toBe(new Date(fixedTimestamp).toLocaleString());
+    });
+
+    it('falls back to vectorDB.getVersionDate() when no reindex has run', async () => {
+      // Default reindexStateManager mock returns lastReindexTimestamp: null.
+      // getVersionDate is mocked to return '2026-01-01' in the suite beforeEach.
+      await startMCPServer({ rootDir: '/test/project' });
+
+      const toolContext = vi.mocked(registerMCPHandlers).mock.calls[0][1];
+      const metadata = toolContext.getIndexMetadata();
+      expect(metadata.indexDate).toBe('2026-01-01');
     });
   });
 

@@ -220,9 +220,18 @@ function setupVersionChecking(
   const getIndexMetadata = () => {
     const reindex = reindexStateManager.getState();
     const gitState = getGitState();
+    // Prefer the last *content* reindex time over the version-file date.
+    // `getVersionDate()` only advances on full `indexCodebase` runs (the
+    // version file is a cross-process invalidation token), so it stays frozen
+    // across the incremental reindexes that file-watcher and git-poll fire.
+    // `reindexStateManager.lastReindexTimestamp` tracks every reindex op,
+    // which is what users / AI clients actually want to see.
+    const indexDate = reindex.lastReindexTimestamp
+      ? new Date(reindex.lastReindexTimestamp).toLocaleString()
+      : vectorDB.getVersionDate();
     return {
       indexVersion: vectorDB.getCurrentVersion(),
-      indexDate: vectorDB.getVersionDate(),
+      indexDate,
       reindexInProgress: reindex.inProgress,
       pendingFileCount: reindex.pendingFiles.length,
       lastReindexDurationMs: reindex.lastReindexDurationMs,
