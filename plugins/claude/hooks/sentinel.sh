@@ -33,8 +33,21 @@ fi
 session_dir="$store/gate-sessions/$session_id"
 mkdir -p "$session_dir" 2>/dev/null || exit 0
 
+canonicalize() {
+  # Strip $cwd/ prefix from an absolute path so the sentinel hash agrees
+  # with the gate's hash regardless of which form the caller used.
+  local p="$1"
+  if [ -n "$cwd" ]; then
+    case "$p" in
+      "$cwd"/*) p="${p#$cwd/}";;
+      "$cwd") p="";;
+    esac
+  fi
+  printf '%s' "$p"
+}
+
 hash_path() {
-  # $1 = file path → 8-char md5 hex
+  # $1 = canonical file path → 8-char md5 hex
   if command -v md5sum >/dev/null 2>&1; then
     printf '%s' "$1" | md5sum | awk '{print substr($1,1,8)}'
   else
@@ -43,10 +56,11 @@ hash_path() {
 }
 
 write_sentinel() {
-  # $1 = prefix (fc|dep|fs), $2 = file path
-  local prefix="$1" file_path="$2" h
+  # $1 = prefix (fc|dep|fs), $2 = file path (absolute or relative)
+  local prefix="$1" file_path="$2" rel h
   [ -n "$file_path" ] || return
-  h="$(hash_path "$file_path")"
+  rel="$(canonicalize "$file_path")"
+  h="$(hash_path "$rel")"
   [ -n "$h" ] || return
   : > "$session_dir/$prefix-$h"
 }

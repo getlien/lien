@@ -68,18 +68,28 @@ fi
 ttl_min="${LIEN_GATE_TTL_MIN:-60}"
 session_dir="$store/gate-sessions/$session_id"
 
-# Hash the file path to keep sentinel filenames bounded and filesystem-safe.
-# Use md5 first 8 chars to mirror extractRepoId's scheme.
-hash="$(printf '%s' "$file_path" | md5sum 2>/dev/null | awk '{print substr($1,1,8)}')"
+# Canonicalize file_path to a workspace-relative form before hashing, so
+# that the gate matches sentinels written by sentinel.sh regardless of
+# whether the caller used absolute or relative paths. Claude Code's
+# Edit/Write payloads carry absolute paths; the model typically passes
+# relative paths to MCP tools.
+rel_path="$file_path"
+if [ -n "$cwd" ]; then
+  case "$file_path" in
+    "$cwd"/*) rel_path="${file_path#$cwd/}";;
+    "$cwd") rel_path="";;
+  esac
+fi
+
+# Hash the canonical path. md5 first 8 chars mirrors extractRepoId.
+hash="$(printf '%s' "$rel_path" | md5sum 2>/dev/null | awk '{print substr($1,1,8)}')"
 if [ -z "$hash" ]; then
-  hash="$(printf '%s' "$file_path" | md5 2>/dev/null | awk '{print substr($NF,1,8)}')"
+  hash="$(printf '%s' "$rel_path" | md5 2>/dev/null | awk '{print substr($NF,1,8)}')"
 fi
 [ -n "$hash" ] || exit 0
 
-# A sentinel younger than TTL satisfies the gate.
-# For an existing file, accept fc-/dep-/fs- for that path.
-# For a new file (Write of a non-existent path), accept any recent fs-* OR
-# any recent fc-* (loose: "you at least looked around the codebase").
+# Resolve absolute target for the existence check (gate semantic depends
+# on whether the file exists yet).
 target_path="$file_path"
 [ -n "$cwd" ] && [ "${file_path#/}" = "$file_path" ] && target_path="$cwd/$file_path"
 
@@ -109,14 +119,15 @@ if [ "$satisfied" = "1" ]; then
   exit 0
 fi
 
-# Build the nudge message.
+# Build the nudge message — show the canonical (relative) path.
+display_path="${rel_path:-$file_path}"
 if [ -e "$target_path" ]; then
-  msg="Lien gate: no recent impact analysis for $file_path. Run one of:
-  • mcp__plugin_lien_lien__get_files_context({ filepaths: \"$file_path\" })  — required before Edit/Write
-  • mcp__plugin_lien_lien__get_dependents({ filepath: \"$file_path\" })       — required before changing an exported symbol
+  msg="Lien gate: no recent impact analysis for $display_path. Run one of:
+  • mcp__plugin_lien_lien__get_files_context({ filepaths: \"$display_path\" })  — required before Edit/Write
+  • mcp__plugin_lien_lien__get_dependents({ filepath: \"$display_path\" })       — required before changing an exported symbol
 Disable for this session: \`lien gate off\` (or LIEN_GATE=off)."
 else
-  msg="Lien gate: about to create $file_path with no prior find_similar call. Consider:
+  msg="Lien gate: about to create $display_path with no prior find_similar call. Consider:
   • mcp__plugin_lien_lien__find_similar({ code: \"<the pattern you're about to write>\" })
 to see if this already exists. Disable for this session: \`lien gate off\`."
 fi
