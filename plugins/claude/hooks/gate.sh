@@ -133,8 +133,13 @@ if [ -d "$session_dir" ]; then
       fi
     done
   else
-    # New file — any recent fs-* or fc-* sentinel.
-    if find "$session_dir" -maxdepth 1 -type f \( -name 'fs-*' -o -name 'fc-*' \) -mmin -"$ttl_min" 2>/dev/null | grep -q .; then
+    # New file — only a recent find_similar call satisfies the gate.
+    # Accepting unrelated fc-* sentinels would defeat the nudge, since
+    # the model almost always calls get_files_context for context.
+    # sentinel.sh writes fs-any on every successful find_similar so a
+    # zero-result search still satisfies (avoids an infinite nudge loop
+    # for genuinely novel files).
+    if find "$session_dir" -maxdepth 1 -type f -name 'fs-*' -mmin -"$ttl_min" 2>/dev/null | grep -q .; then
       satisfied=1
     fi
   fi

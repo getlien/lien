@@ -7,6 +7,7 @@
 #   mcp__plugin_lien_lien__get_files_context  → fc-<hash>
 #   mcp__plugin_lien_lien__get_dependents     → dep-<hash>
 #   mcp__plugin_lien_lien__find_similar       → fs-<hash> (per cited file)
+#                                              + fs-any (any successful call)
 #
 # Best-effort: never fails the post-tool-use pipeline.
 
@@ -85,7 +86,7 @@ write_sentinel() {
 
 case "$tool_name" in
   mcp__plugin_lien_lien__get_files_context)
-    # tool_input.filepaths is string | string[]
+    # tool_input.filepaths is string | string[].
     paths_json="$(printf '%s' "$input" | jq -c '.tool_input.filepaths // empty')"
     if [ -n "$paths_json" ]; then
       if printf '%s' "$paths_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
@@ -105,8 +106,13 @@ case "$tool_name" in
     ;;
 
   mcp__plugin_lien_lien__find_similar)
-    # tool_result is the MCP wire format: { content: [ { type: "text", text: "<json string>" } ] }
-    # The inner JSON has { results: [ { metadata: { file: "..." } } ] }
+    # Always mark "find_similar was called this session" so the new-file
+    # gate is satisfied even when the search returns zero results.
+    : > "$session_dir/fs-any"
+
+    # Also write per-cited-file sentinels so subsequent strict-match
+    # edits on those files pass. tool_result is the MCP wire format:
+    # { content: [ { type: "text", text: "<json string>" } ] }
     text="$(printf '%s' "$input" | jq -r '.tool_result.content[0].text // .tool_response.content[0].text // empty' 2>/dev/null)"
     if [ -n "$text" ]; then
       printf '%s' "$text" | jq -r '.results[]?.metadata.file // empty' 2>/dev/null | while IFS= read -r p; do
