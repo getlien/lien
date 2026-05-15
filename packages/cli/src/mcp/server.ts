@@ -220,26 +220,33 @@ function setupVersionChecking(
   const getIndexMetadata = () => {
     const reindex = reindexStateManager.getState();
     const gitState = getGitState();
-    // Prefer the last *content* reindex time over the version-file date.
-    // `getVersionDate()` only advances on full `indexCodebase` runs (the
-    // version file is a cross-process invalidation token), so it stays frozen
-    // across the incremental reindexes that file-watcher and git-poll fire.
-    // `reindexStateManager.lastReindexTimestamp` tracks every reindex op,
-    // which is what users / AI clients actually want to see.
-    const indexDate = reindex.lastReindexTimestamp
-      ? new Date(reindex.lastReindexTimestamp).toLocaleString()
-      : vectorDB.getVersionDate();
+    // `getCurrentVersion()` is the version-file timestamp — only bumped on
+    // full `indexCodebase` runs (it's a cross-process invalidation token).
+    // `lastReindexTimestamp` is bumped on every in-process reindex (full or
+    // incremental). Neither one alone is the right freshness signal:
+    //   - external `lien index` updates the version file but never touches
+    //     this process's reindex state → version is newer.
+    //   - in-session incremental reindexes update reindex state but never
+    //     touch the version file → reindex state is newer.
+    // Take the max so the field always reports the most recent reconciliation
+    // regardless of which path caused it.
+    const versionTs = vectorDB.getCurrentVersion();
+    const reindexTs = reindex.lastReindexTimestamp ?? 0;
+    const effectiveTimestamp = Math.max(versionTs, reindexTs);
+    const indexDate =
+      effectiveTimestamp > 0
+        ? new Date(effectiveTimestamp).toLocaleString()
+        : vectorDB.getVersionDate(); // 'Unknown' when both sources are empty
     return {
-      indexVersion: vectorDB.getCurrentVersion(),
+      indexVersion: versionTs,
       indexDate,
       reindexInProgress: reindex.inProgress,
       pendingFileCount: reindex.pendingFiles.length,
       lastReindexDurationMs: reindex.lastReindexDurationMs,
-      // Note: msSinceLastReindex is computed at call time, not cached.
-      // This ensures AI assistants always get current freshness info.
-      msSinceLastReindex: reindex.lastReindexTimestamp
-        ? Date.now() - reindex.lastReindexTimestamp
-        : null,
+      // Computed at call time, not cached, so AI clients always see current
+      // freshness. Same max-of-both source as `indexDate` — index built in a
+      // previous session should report its age, not "unknown".
+      msSinceLastReindex: effectiveTimestamp > 0 ? Date.now() - effectiveTimestamp : null,
       indexedBranch: gitState?.branch ?? null,
       indexedCommit: gitState?.commit ?? null,
     };
