@@ -49,6 +49,12 @@ fi
 # touchfile so we can use the raw file_path's md5 directly — no abs/rel
 # canonicalization required.
 ttl_min="${LIEN_ANNOTATE_TTL_MIN:-5}"
+# Guard against malformed env values: a non-numeric ttl would make
+# `find -mmin -<X>` a syntax error, defeat suppression, and let every
+# Read re-annotate. Fall back to the default if not a positive integer.
+case "$ttl_min" in
+  ''|*[!0-9]*) ttl_min=5;;
+esac
 hash="$(printf '%s' "$file_path" | md5sum 2>/dev/null | awk '{print substr($1,1,8)}')"
 if [ -z "$hash" ]; then
   hash="$(printf '%s' "$file_path" | md5 2>/dev/null | awk '{print substr($NF,1,8)}')"
@@ -60,6 +66,9 @@ touchfile="$session_dir/$hash"
 if [ -f "$touchfile" ]; then
   if find "$touchfile" -mmin -"$ttl_min" 2>/dev/null | grep -q .; then
     # Within TTL — already annotated this file recently. Stay silent.
+    # Touch the session dir so SessionStart cleanup sees this session as
+    # active even if no new annotation is emitted for >24h.
+    [ -d "$session_dir" ] && touch "$session_dir" 2>/dev/null
     exit 0
   fi
 fi

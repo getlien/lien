@@ -26,12 +26,11 @@ describe('pathCommand', () => {
 
   it('--store prints ~/.lien/indices/<repoId> resolved against the project root', () => {
     pathCommand({ store: true });
-    const expected = path.join(
-      os.homedir(),
-      '.lien',
-      'indices',
-      extractRepoId(resolveProjectRoot(process.cwd())),
-    );
+    // getStoreRoot() normalizes to forward slashes for Windows compatibility,
+    // so the test expectation has to do the same.
+    const expected = path
+      .join(os.homedir(), '.lien', 'indices', extractRepoId(resolveProjectRoot(process.cwd())))
+      .replace(/\\/g, '/');
     expect(logSpy).toHaveBeenCalledWith(expected);
   });
 

@@ -9,10 +9,13 @@ import path from 'path';
 export function resolveProjectRoot(start: string = process.cwd()): string {
   let dir = path.resolve(start);
   const fsRoot = path.parse(dir).root;
-  while (dir !== fsRoot) {
+  // Loop is inclusive of fsRoot — a repo rooted at / (or a drive root) is
+  // rare but valid, and should still be detected before falling back.
+  while (true) {
     if (fs.existsSync(path.join(dir, '.git'))) {
       return dir;
     }
+    if (dir === fsRoot) break;
     dir = path.dirname(dir);
   }
   return path.resolve(start);
