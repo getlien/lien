@@ -40,6 +40,21 @@ describe('incremental indexing across git branch switch', () => {
     await cleanupTestDir(repoDir);
   });
 
+  it('indexes a file passed as a path relative to rootDir', async () => {
+    // Regression for the Lien Review finding: fs ops in the indexer used the
+    // raw filepath, so a relative path against a non-cwd rootDir failed silently.
+    const fooDir = path.join(repoDir, 'foo');
+    await fs.mkdir(fooDir, { recursive: true });
+    await fs.writeFile(path.join(fooDir, 'bar.py'), 'def quux():\n    return 42\n');
+
+    // Pass the path RELATIVE TO rootDir, not absolute. Process cwd is the lien
+    // package dir at test time, so this is the precise scenario the fix covers.
+    await indexMultipleFiles(['foo/bar.py'], vectorDB, embeddings, { rootDir: repoDir });
+
+    const chunks = await vectorDB.scanWithFilter({ file: 'foo/bar.py' });
+    expect(chunks.length).toBeGreaterThan(0);
+  });
+
   it('drops chunks for a file deleted on the new branch', async () => {
     // Arrange: commit a file on main and index it.
     const fooDir = path.join(repoDir, 'foo');
