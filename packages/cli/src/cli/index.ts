@@ -8,6 +8,8 @@ import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
 import { complexityCommand } from './complexity.js';
 import { configSetCommand, configGetCommand, configListCommand } from './config.js';
+import { pathCommand } from './path-cmd.js';
+import { gateCommand } from './gate-cmd.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -95,6 +97,18 @@ configCmd
 configCmd.command('get <key>').description('Get a config value').action(configGetCommand);
 
 configCmd.command('list').description('Show all current config').action(configListCommand);
+
+program
+  .command('path')
+  .description('Print Lien storage paths and supported extensions (for hook scripts)')
+  .option('--store', 'Print the storage root for the current repo')
+  .option('--extensions', 'Print the indexed-file extensions, one per line')
+  .action(pathCommand);
+
+program
+  .command('gate <action>')
+  .description('Control the Lien edit-gate hook: on | off | block | status')
+  .action(gateCommand);
 
 program.action(() => {
   program.help();

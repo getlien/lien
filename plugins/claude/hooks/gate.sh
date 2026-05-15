@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# PreToolUse hook: gate Edit/Write on Lien-indexed files until impact
+# analysis (get_files_context / get_dependents / find_similar) has run
+# in the current session.
+#
+# Advisory by default: emits a systemMessage and exits 0.
+# Blocking mode via `lien gate block` or LIEN_GATE=block: exits 2 on miss.
+# Disabled via `lien gate off` or LIEN_GATE=off: silent exit 0.
+#
+# Gracefully degrades (silent exit 0) if `jq` or `lien` are missing.
+
+set -u
+
+emit_message() {
+  # $1 = message string
+  printf '{"systemMessage":%s}\n' "$(printf '%s' "$1" | jq -Rs .)"
+}
+
+# Hard prerequisites — if missing, do nothing.
+command -v jq >/dev/null 2>&1 || exit 0
+command -v lien >/dev/null 2>&1 || exit 0
+
+# Environment kill switch (matches LIEN_FORCE_INDEX pattern in mcp/server.ts).
+if [ "${LIEN_GATE:-}" = "off" ]; then
+  exit 0
+fi
+
+input="$(cat)"
+file_path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')"
+session_id="$(printf '%s' "$input" | jq -r '.session_id // empty')"
+cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
+
+# No file path or session — can't gate; silently pass.
+[ -n "$file_path" ] || exit 0
+[ -n "$session_id" ] || exit 0
+
+# Resolve the storage root from the same source-of-truth the indexer uses.
+# Run from the session's cwd so extractRepoId picks up the right repo.
+if [ -n "$cwd" ] && [ -d "$cwd" ]; then
+  store="$(cd "$cwd" && lien path --store 2>/dev/null)"
+else
+  store="$(lien path --store 2>/dev/null)"
+fi
+[ -n "$store" ] || exit 0
+
+# Persistent kill switch from `lien gate off`.
+if [ -f "$store/gate-disabled" ]; then
+  exit 0
+fi
+
+# Determine blocking mode (file flag or env var).
+mode="advisory"
+if [ -f "$store/gate-blocking" ] || [ "${LIEN_GATE:-}" = "block" ]; then
+  mode="block"
+fi
+
+# Extension filter: skip if file extension isn't in Lien's indexed set.
+# getSupportedExtensions returns bare extensions (e.g. "ts"), no leading dot.
+ext="${file_path##*.}"
+if [ "$ext" = "$file_path" ]; then
+  # No extension at all — skip.
+  exit 0
+fi
+if ! lien path --extensions 2>/dev/null | grep -Fxq "$ext"; then
+  exit 0
+fi
+
+ttl_min="${LIEN_GATE_TTL_MIN:-60}"
+session_dir="$store/gate-sessions/$session_id"
+
+# Hash the file path to keep sentinel filenames bounded and filesystem-safe.
+# Use md5 first 8 chars to mirror extractRepoId's scheme.
+hash="$(printf '%s' "$file_path" | md5sum 2>/dev/null | awk '{print substr($1,1,8)}')"
+if [ -z "$hash" ]; then
+  hash="$(printf '%s' "$file_path" | md5 2>/dev/null | awk '{print substr($NF,1,8)}')"
+fi
+[ -n "$hash" ] || exit 0
+
+# A sentinel younger than TTL satisfies the gate.
+# For an existing file, accept fc-/dep-/fs- for that path.
+# For a new file (Write of a non-existent path), accept any recent fs-* OR
+# any recent fc-* (loose: "you at least looked around the codebase").
+target_path="$file_path"
+[ -n "$cwd" ] && [ "${file_path#/}" = "$file_path" ] && target_path="$cwd/$file_path"
+
+satisfied=0
+if [ -d "$session_dir" ]; then
+  if [ -e "$target_path" ]; then
+    # Existing file — strict match.
+    for prefix in fc dep fs; do
+      f="$session_dir/$prefix-$hash"
+      if [ -f "$f" ]; then
+        # mtime within TTL?
+        if find "$f" -mmin -"$ttl_min" 2>/dev/null | grep -q .; then
+          satisfied=1
+          break
+        fi
+      fi
+    done
+  else
+    # New file — any recent fs-* or fc-* sentinel.
+    if find "$session_dir" -maxdepth 1 -type f \( -name 'fs-*' -o -name 'fc-*' \) -mmin -"$ttl_min" 2>/dev/null | grep -q .; then
+      satisfied=1
+    fi
+  fi
+fi
+
+if [ "$satisfied" = "1" ]; then
+  exit 0
+fi
+
+# Build the nudge message.
+if [ -e "$target_path" ]; then
+  msg="Lien gate: no recent impact analysis for $file_path. Run one of:
+  • mcp__plugin_lien_lien__get_files_context({ filepaths: \"$file_path\" })  — required before Edit/Write
+  • mcp__plugin_lien_lien__get_dependents({ filepath: \"$file_path\" })       — required before changing an exported symbol
+Disable for this session: \`lien gate off\` (or LIEN_GATE=off)."
+else
+  msg="Lien gate: about to create $file_path with no prior find_similar call. Consider:
+  • mcp__plugin_lien_lien__find_similar({ code: \"<the pattern you're about to write>\" })
+to see if this already exists. Disable for this session: \`lien gate off\`."
+fi
+
+if [ "$mode" = "block" ]; then
+  printf '%s\n' "$msg" >&2
+  exit 2
+fi
+
+emit_message "$msg"
+exit 0

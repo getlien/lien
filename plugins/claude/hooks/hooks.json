@@ -1,0 +1,40 @@
+{
+  "description": "Lien edit-gate: nudges Claude to run impact analysis (get_files_context / get_dependents / find_similar) before Edit/Write on indexed files",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/gate.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__plugin_lien_lien__(get_files_context|get_dependents|find_similar)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/sentinel.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-clean.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
