@@ -1,0 +1,6 @@
+{
+  "name": "lien",
+  "description": "Local semantic code search and dependency analysis for your codebase via MCP. Ships the Explore agent plus Lien's MCP tools (semantic_search, get_files_context, get_dependents, list_functions, get_complexity, find_similar). No per-project setup required.",
+  "author": { "name": "Lien" },
+  "homepage": "https://lien.dev"
+}

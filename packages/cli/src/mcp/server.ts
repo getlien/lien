@@ -2,9 +2,14 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import type { EmbeddingService, VectorDBInterface } from '@liendev/core';
-import { WorkerEmbeddings, VERSION_CHECK_INTERVAL_MS, createVectorDB } from '@liendev/core';
+import {
+  WorkerEmbeddings,
+  VERSION_CHECK_INTERVAL_MS,
+  createVectorDB,
+  isGitRepo,
+} from '@liendev/core';
 import { FileWatcher } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import { createReindexStateManager } from './reindex-state-manager.js';
@@ -66,9 +71,26 @@ async function initializeDatabase(
   return { embeddings, vectorDB };
 }
 
+// Walk parent directories to detect whether startDir is inside a git work tree.
+// Plain isGitRepo only checks the exact dir, so it misses subdir invocations
+// (e.g. opening Claude Code in a monorepo package).
+async function isInsideGitWorkTree(startDir: string): Promise<boolean> {
+  let cur = resolve(startDir);
+  while (true) {
+    if (await isGitRepo(cur)) return true;
+    const parent = dirname(cur);
+    if (parent === cur) return false;
+    cur = parent;
+  }
+}
+
 /**
  * Run auto-indexing if needed (first run with no index).
  * Always enabled by default - no config needed.
+ *
+ * The actual indexCodebase call is fired without await — initial indexing can
+ * take minutes, and blocking before server.connect() would time out the MCP
+ * handshake. Tools return empty results until the background index lands.
  */
 async function handleAutoIndexing(
   vectorDB: VectorDBInterface,
@@ -76,20 +98,28 @@ async function handleAutoIndexing(
   log: LogFn,
 ): Promise<void> {
   const hasIndex = await vectorDB.hasData();
+  if (hasIndex) return;
 
-  if (!hasIndex) {
-    log('📦 No index found - running initial indexing...');
-    log('⏱️  This may take 5-20 minutes depending on project size');
+  const forceIndex = process.env.LIEN_FORCE_INDEX === '1';
+  if (!forceIndex && !(await isInsideGitWorkTree(rootDir))) {
+    log(
+      `Skipped auto-indexing: ${rootDir} is not inside a git work tree. ` +
+        `Set LIEN_FORCE_INDEX=1 to index anyway.`,
+      'warning',
+    );
+    return;
+  }
 
-    try {
-      const { indexCodebase } = await import('@liendev/core');
-      await indexCodebase({ rootDir, verbose: true });
-      log('✅ Initial indexing complete!');
-    } catch (error) {
+  log('📦 No index found - running initial indexing in the background...');
+  log('⏱️  Server is ready; tools will return empty results until indexing completes.');
+
+  const { indexCodebase } = await import('@liendev/core');
+  void indexCodebase({ rootDir, verbose: true })
+    .then(() => log('✅ Initial indexing complete!'))
+    .catch(error => {
       log(`⚠️  Initial indexing failed: ${error}`, 'warning');
       log('You can manually run: lien index', 'warning');
-    }
-  }
+    });
 }
 
 /**

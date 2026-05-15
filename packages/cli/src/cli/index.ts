@@ -42,6 +42,10 @@ program
     ]),
   )
   .option('-p, --path <path>', 'Path to initialize (defaults to current directory)')
+  .option(
+    '--legacy',
+    'Use legacy per-project setup for Claude Code instead of recommending the plugin',
+  )
   .action(initCommand);
 
 program

@@ -72,6 +72,7 @@ const EDITORS: Record<EditorId, EditorDefinition> = {
 export interface InitOptions {
   editor?: EditorId;
   path?: string;
+  legacy?: boolean;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -173,6 +174,17 @@ export async function initCommand(options: InitOptions = {}) {
     process.exit(1);
   } else {
     editorId = await promptForEditor();
+  }
+
+  if (editorId === 'claude-code' && !options.legacy) {
+    console.log(chalk.cyan('\nLien now ships as a Claude Code plugin.'));
+    console.log('\nInstall it once and it works in every session, in every repo:\n');
+    console.log(chalk.bold('  /plugin marketplace add getlien/lien'));
+    console.log(chalk.bold('  /plugin install lien\n'));
+    console.log(
+      chalk.dim('Pass --legacy to fall back to per-project .mcp.json + Explore agent install.\n'),
+    );
+    return;
   }
 
   const editor = EDITORS[editorId];

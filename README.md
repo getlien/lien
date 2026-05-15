@@ -25,24 +25,28 @@ Lien connects AI coding assistants like Cursor and Claude Code to your codebase 
 
 ## Quick Start
 
+### Claude Code (recommended) — one-time plugin install
+
+```text
+/plugin marketplace add getlien/lien
+/plugin install lien
+```
+
+That's it. Lien's MCP tools and the Explore agent are now available in every Claude Code session, in every repo. First use in a new git repo triggers a one-time index automatically — no `lien init` per project.
+
+### Other editors (Cursor, Windsurf, OpenCode, Kilo Code, Antigravity)
+
 ```bash
 # 1. Install
 npm install -g @liendev/lien
 
-# 2. Add to your project - create .cursor/mcp.json
-{
-  "mcpServers": {
-    "lien": {
-      "command": "lien",
-      "args": ["serve"]
-    }
-  }
-}
+# 2. Wire it up for your editor
+lien init
 
-# 3. Restart your AI assistant (Cursor, Claude Code) and start asking questions!
+# 3. Restart your editor and start asking questions
 ```
 
-That's it—zero configuration needed. Lien auto-detects your project and indexes on first use.
+`lien init` writes the right MCP config for your editor and (for Claude Code's legacy per-project flow, via `lien init --legacy`) copies an Explore agent into `.claude/agents/`. Lien auto-detects your project and indexes on first use.
 
 **👉 [Full installation guide](https://lien.dev/guide/installation)**
 
