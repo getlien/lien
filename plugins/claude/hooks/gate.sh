@@ -34,6 +34,12 @@ cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 [ -n "$file_path" ] || exit 0
 [ -n "$session_id" ] || exit 0
 
+# Defensive: session_id will be embedded in a filesystem path. Reject anything
+# outside [A-Za-z0-9_-] so a crafted value can't traverse out of gate-sessions/.
+case "$session_id" in
+  *[!A-Za-z0-9_-]*) exit 0;;
+esac
+
 # Resolve the project root and storage root via `lien path`, so the
 # results stay invariant whether Claude Code's cwd is the repo root or
 # a subdirectory.

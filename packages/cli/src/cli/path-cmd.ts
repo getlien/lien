@@ -1,8 +1,7 @@
-import path from 'path';
-import os from 'os';
 import chalk from 'chalk';
-import { extractRepoId, getSupportedExtensions } from '@liendev/parser';
+import { getSupportedExtensions } from '@liendev/parser';
 import { resolveProjectRoot } from './project-root.js';
+import { getStoreRoot } from './store-paths.js';
 
 interface PathOptions {
   store?: boolean;
@@ -29,8 +28,7 @@ export function pathCommand(options: PathOptions): void {
   }
 
   if (options.store) {
-    const repoId = extractRepoId(resolveProjectRoot(process.cwd()));
-    console.log(path.join(os.homedir(), '.lien', 'indices', repoId));
+    console.log(getStoreRoot());
     return;
   }
 

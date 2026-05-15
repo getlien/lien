@@ -6,15 +6,6 @@ import { extractRepoId } from '@liendev/parser';
 import { gateCommand } from './gate-cmd.js';
 import { resolveProjectRoot } from './project-root.js';
 
-const STORE = path.join(
-  os.homedir(),
-  '.lien',
-  'indices',
-  extractRepoId(resolveProjectRoot(process.cwd())),
-);
-const DISABLED = path.join(STORE, 'gate-disabled');
-const BLOCKING = path.join(STORE, 'gate-blocking');
-
 async function exists(p: string): Promise<boolean> {
   try {
     await fs.access(p);
@@ -25,26 +16,42 @@ async function exists(p: string): Promise<boolean> {
 }
 
 describe('gateCommand', () => {
+  let tmpHome: string;
+  let STORE: string;
+  let DISABLED: string;
+  let BLOCKING: string;
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errSpy: ReturnType<typeof vi.spyOn>;
   let exitSpy: ReturnType<typeof vi.spyOn>;
+  let homeSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
+    // Redirect $HOME so the test never touches the developer's real ~/.lien.
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-gate-test-'));
+    homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+
+    STORE = path.join(
+      tmpHome,
+      '.lien',
+      'indices',
+      extractRepoId(resolveProjectRoot(process.cwd())),
+    );
+    DISABLED = path.join(STORE, 'gate-disabled');
+    BLOCKING = path.join(STORE, 'gate-blocking');
+
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new Error(`exit:${code ?? 0}`);
     }) as never);
-    await fs.rm(DISABLED, { force: true });
-    await fs.rm(BLOCKING, { force: true });
   });
 
   afterEach(async () => {
     logSpy.mockRestore();
     errSpy.mockRestore();
     exitSpy.mockRestore();
-    await fs.rm(DISABLED, { force: true });
-    await fs.rm(BLOCKING, { force: true });
+    homeSpy.mockRestore();
+    await fs.rm(tmpHome, { recursive: true, force: true });
   });
 
   it('off writes gate-disabled and clears gate-blocking', async () => {

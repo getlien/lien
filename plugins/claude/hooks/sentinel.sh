@@ -23,6 +23,18 @@ cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 [ -n "$tool_name" ] || exit 0
 [ -n "$session_id" ] || exit 0
 
+# Defensive: see gate.sh — keep session_id confined to safe filename chars.
+case "$session_id" in
+  *[!A-Za-z0-9_-]*) exit 0;;
+esac
+
+# Skip sentinel write if the tool itself failed — otherwise a malformed
+# get_files_context call would still satisfy the gate on its target file.
+tool_error="$(printf '%s' "$input" | jq -r '
+  .tool_response.isError // .tool_result.isError // empty
+')"
+[ "$tool_error" = "true" ] && exit 0
+
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
   root="$(cd "$cwd" && lien path --root 2>/dev/null)"
   store="$(cd "$cwd" && lien path --store 2>/dev/null)"

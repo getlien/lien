@@ -1,17 +1,10 @@
 import path from 'path';
-import os from 'os';
 import fs from 'fs/promises';
 import chalk from 'chalk';
-import { extractRepoId } from '@liendev/parser';
-import { resolveProjectRoot } from './project-root.js';
+import { getStoreRoot } from './store-paths.js';
 
 const VALID_ACTIONS = ['on', 'off', 'block', 'status'] as const;
 type GateAction = (typeof VALID_ACTIONS)[number];
-
-function getStoreRoot(): string {
-  const repoId = extractRepoId(resolveProjectRoot(process.cwd()));
-  return path.join(os.homedir(), '.lien', 'indices', repoId);
-}
 
 function getFlagPath(name: 'disabled' | 'blocking'): string {
   return path.join(getStoreRoot(), `gate-${name}`);
@@ -47,29 +40,35 @@ export async function gateCommand(action: string): Promise<void> {
     process.exit(1);
   }
 
-  switch (action as GateAction) {
-    case 'on':
-      await removeFlag('disabled');
-      await removeFlag('blocking');
-      console.log(chalk.green('Lien gate: on (advisory)'));
-      return;
-    case 'off':
-      await writeFlag('disabled');
-      await removeFlag('blocking');
-      console.log(chalk.yellow('Lien gate: off (sentinels still recorded)'));
-      return;
-    case 'block':
-      await removeFlag('disabled');
-      await writeFlag('blocking');
-      console.log(chalk.green('Lien gate: blocking (exit 2 on miss)'));
-      return;
-    case 'status': {
-      const disabled = await exists(getFlagPath('disabled'));
-      const blocking = await exists(getFlagPath('blocking'));
-      const state = disabled ? 'off' : blocking ? 'blocking' : 'on (advisory)';
-      console.log(chalk.dim('Lien gate:'), state);
-      console.log(chalk.dim('Flag dir:'), getStoreRoot());
-      return;
+  try {
+    switch (action as GateAction) {
+      case 'on':
+        await removeFlag('disabled');
+        await removeFlag('blocking');
+        console.log(chalk.green('Lien gate: on (advisory)'));
+        return;
+      case 'off':
+        await writeFlag('disabled');
+        await removeFlag('blocking');
+        console.log(chalk.yellow('Lien gate: off (sentinels still recorded)'));
+        return;
+      case 'block':
+        await removeFlag('disabled');
+        await writeFlag('blocking');
+        console.log(chalk.green('Lien gate: blocking (exit 2 on miss)'));
+        return;
+      case 'status': {
+        const disabled = await exists(getFlagPath('disabled'));
+        const blocking = await exists(getFlagPath('blocking'));
+        const state = disabled ? 'off' : blocking ? 'blocking' : 'on (advisory)';
+        console.log(chalk.dim('Lien gate:'), state);
+        console.log(chalk.dim('Flag dir:'), getStoreRoot());
+        return;
+      }
     }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`Error: gate ${action} failed: ${msg}`));
+    process.exit(1);
   }
 }

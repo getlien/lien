@@ -11,6 +11,11 @@ input="$(cat)"
 session_id="$(printf '%s' "$input" | jq -r '.session_id // empty')"
 cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 
+# Defensive: session_id is matched against directory names below.
+case "$session_id" in
+  *[!A-Za-z0-9_-]*) session_id="";;
+esac
+
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
   store="$(cd "$cwd" && lien path --store 2>/dev/null)"
 else
