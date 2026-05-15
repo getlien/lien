@@ -124,6 +124,7 @@ import { FileWatcher } from '../watcher/index.js';
 import { createMCPServerConfig, registerMCPHandlers } from './server-config.js';
 import { setupCleanupHandlers } from './cleanup.js';
 import { setupGitDetection } from './git-detection.js';
+import { createReindexStateManager } from './reindex-state-manager.js';
 
 describe('startMCPServer', () => {
   let processOnSpy: ReturnType<typeof vi.spyOn>;
@@ -279,6 +280,79 @@ describe('startMCPServer', () => {
       const metadata = toolContext.getIndexMetadata();
       expect(metadata.indexedBranch).toBe('feature-x');
       expect(metadata.indexedCommit).toBe('abc1234');
+    });
+  });
+
+  describe('getIndexMetadata indexDate / msSinceLastReindex sources', () => {
+    function withReindexTimestamp(ts: number | null) {
+      vi.mocked(createReindexStateManager).mockReturnValueOnce({
+        getState: vi.fn().mockReturnValue({
+          inProgress: false,
+          pendingFiles: [],
+          lastReindexTimestamp: ts,
+          lastReindexDurationMs: ts === null ? null : 200,
+        }),
+        startReindex: vi.fn(),
+        completeReindex: vi.fn(),
+        failReindex: vi.fn(),
+      } as unknown as ReturnType<typeof createReindexStateManager>);
+    }
+
+    it('uses lastReindexTimestamp when it is the most recent reconciliation', async () => {
+      const reindexTs = 1714521600000; // 2024-05-01
+      mockVectorDB.getCurrentVersion.mockReturnValue(1); // very old
+      withReindexTimestamp(reindexTs);
+
+      await startMCPServer({ rootDir: '/test/project' });
+
+      const toolContext = vi.mocked(registerMCPHandlers).mock.calls[0][1];
+      const metadata = toolContext.getIndexMetadata();
+      expect(metadata.indexDate).toBe(new Date(reindexTs).toLocaleString());
+    });
+
+    it('uses vectorDB.getCurrentVersion() when it is newer (external full reindex)', async () => {
+      // Scenario: an external `lien index` bumped the version file mid-session.
+      // Lien Review caught this — we previously preferred the older incremental
+      // timestamp unconditionally.
+      const versionTs = 2000000000000; // 2033
+      const olderReindexTs = 1714521600000; // 2024
+      mockVectorDB.getCurrentVersion.mockReturnValue(versionTs);
+      withReindexTimestamp(olderReindexTs);
+
+      await startMCPServer({ rootDir: '/test/project' });
+
+      const toolContext = vi.mocked(registerMCPHandlers).mock.calls[0][1];
+      const metadata = toolContext.getIndexMetadata();
+      expect(metadata.indexDate).toBe(new Date(versionTs).toLocaleString());
+    });
+
+    it('reports msSinceLastReindex based on the version file when no in-session reindex has run', async () => {
+      // Scenario: server restart, index was built hours ago via prior `lien
+      // index`. Should report "hours ago", not "unknown". Lien Review's
+      // second finding.
+      const versionTs = Date.now() - 60 * 60 * 1000; // 1h ago
+      mockVectorDB.getCurrentVersion.mockReturnValue(versionTs);
+      // No override → default mock returns lastReindexTimestamp: null.
+
+      await startMCPServer({ rootDir: '/test/project' });
+
+      const toolContext = vi.mocked(registerMCPHandlers).mock.calls[0][1];
+      const metadata = toolContext.getIndexMetadata();
+      expect(metadata.msSinceLastReindex).not.toBeNull();
+      expect(metadata.msSinceLastReindex).toBeGreaterThanOrEqual(60 * 60 * 1000);
+      expect(metadata.msSinceLastReindex).toBeLessThan(60 * 60 * 1000 + 10_000);
+    });
+
+    it('falls back to getVersionDate() (and null msSinceLastReindex) when neither source has a value', async () => {
+      mockVectorDB.getCurrentVersion.mockReturnValue(0);
+      mockVectorDB.getVersionDate.mockReturnValue('Unknown');
+
+      await startMCPServer({ rootDir: '/test/project' });
+
+      const toolContext = vi.mocked(registerMCPHandlers).mock.calls[0][1];
+      const metadata = toolContext.getIndexMetadata();
+      expect(metadata.indexDate).toBe('Unknown');
+      expect(metadata.msSinceLastReindex).toBeNull();
     });
   });
 
