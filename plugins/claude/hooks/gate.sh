@@ -108,11 +108,13 @@ fi
 # on whether the file exists yet).
 target_path="$file_path"
 if [ "${file_path#/}" = "$file_path" ]; then
-  # Relative — resolve against root if available, else cwd.
-  if [ -n "$root" ]; then
-    target_path="$root/$file_path"
-  elif [ -n "$cwd" ]; then
+  # Relative — Claude Code's file_path is conventionally process-cwd
+  # relative, so prefer $cwd. Fall back to $root only if cwd is absent
+  # from the hook payload.
+  if [ -n "$cwd" ]; then
     target_path="$cwd/$file_path"
+  elif [ -n "$root" ]; then
+    target_path="$root/$file_path"
   fi
 fi
 
