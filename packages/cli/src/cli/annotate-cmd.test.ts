@@ -50,18 +50,55 @@ describe('isTrivial', () => {
 });
 
 describe('formatDependents', () => {
-  it('singular form for one dependent', () => {
-    expect(formatDependents(1, 'low', [])).toBe('1 file imports this; risk: low.');
-  });
+  const dep = (filepath: string, isTestFile = false) => ({ filepath, isTestFile });
 
-  it('plural form and reasoning when present', () => {
-    expect(formatDependents(14, 'high', ['14 callers', '3 untested'])).toBe(
-      '14 files import this; risk: high (14 callers, 3 untested).',
+  it('singular form for one dependent, with its path listed', () => {
+    expect(formatDependents([dep('src/auth.ts')], 'low', [])).toBe(
+      '1 file imports this — src/auth.ts; risk: low.',
     );
   });
 
-  it('omits the parenthetical when reasoning is empty', () => {
-    expect(formatDependents(3, 'medium', [])).toBe('3 files import this; risk: medium.');
+  it('plural form, listing up to MAX_DEPS_LISTED files, with reasoning', () => {
+    const deps = [
+      dep('handlers/login.ts'),
+      dep('handlers/logout.ts'),
+      dep('handlers/refresh.ts'),
+      dep('handlers/session.ts'),
+    ];
+    expect(formatDependents(deps, 'high', ['4 callers', '1 untested'])).toBe(
+      '4 files import this — handlers/login.ts, handlers/logout.ts, handlers/refresh.ts, handlers/session.ts; risk: high (4 callers, 1 untested).',
+    );
+  });
+
+  it('truncates with +N more when over the listed cap', () => {
+    const many = Array.from({ length: 14 }, (_, i) => dep(`src/file-${i}.ts`));
+    const formatted = formatDependents(many, 'critical', ['14 callers']);
+    expect(formatted).toContain('14 files import this');
+    expect(formatted).toContain('src/file-0.ts');
+    expect(formatted).toContain('src/file-3.ts');
+    expect(formatted).toContain('+10 more');
+    expect(formatted).toContain('risk: critical (14 callers)');
+  });
+
+  it('sorts production dependents before tests', () => {
+    const deps = [
+      dep('test/auth.test.ts', true),
+      dep('src/api.ts'),
+      dep('test/api.test.ts', true),
+      dep('src/handlers.ts'),
+    ];
+    const formatted = formatDependents(deps, 'medium', []);
+    // Both prod files should appear before either test file in the listing.
+    const idxApi = formatted.indexOf('src/api.ts');
+    const idxHandlers = formatted.indexOf('src/handlers.ts');
+    const idxAuthTest = formatted.indexOf('test/auth.test.ts');
+    expect(Math.max(idxApi, idxHandlers)).toBeLessThan(idxAuthTest);
+  });
+
+  it('omits the risk parenthetical when reasoning is empty', () => {
+    expect(formatDependents([dep('src/a.ts'), dep('src/b.ts')], 'medium', [])).toBe(
+      '2 files import this — src/a.ts, src/b.ts; risk: medium.',
+    );
   });
 });
 

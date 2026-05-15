@@ -6,11 +6,12 @@ import {
   computeBlastRadiusRisk,
   type CodeChunk,
 } from '@liendev/parser';
-import { findDependents } from '../mcp/handlers/dependency-analyzer.js';
+import { findDependents, type DependentInfo } from '../mcp/handlers/dependency-analyzer.js';
 import { resolveProjectRoot } from './project-root.js';
 
 const HIGH_COMPLEXITY_THRESHOLD = 15;
 const MAX_TESTS_LISTED = 2;
+const MAX_DEPS_LISTED = 4;
 
 /**
  * Produce a short impact summary for a single file. Output is empty when
@@ -64,7 +65,7 @@ async function run(file: string): Promise<void> {
 
   const lines: string[] = [`Lien impact for ${filepath}:`];
   if (dependentCount > 0) {
-    lines.push(`  • ${formatDependents(dependentCount, risk.level, risk.reasoning)}`);
+    lines.push(`  • ${formatDependents(result.dependents, risk.level, risk.reasoning)}`);
   }
   lines.push(`  • ${formatTests(tests)}`);
   if (complexity.warningCount > 0) {
@@ -109,10 +110,20 @@ function computeComplexitySummary(chunks: CodeChunk[], filepath: string): Comple
   }
 }
 
-export function formatDependents(count: number, level: string, reasoning: string[]): string {
+export function formatDependents(
+  dependents: DependentInfo[],
+  level: string,
+  reasoning: string[],
+): string {
+  const count = dependents.length;
+  // Production dependents first — those are the ones whose breakage matters
+  // most when changing this file. Tests follow as secondary context.
+  const ordered = [...dependents].sort((a, b) => Number(a.isTestFile) - Number(b.isTestFile));
+  const shown = ordered.slice(0, MAX_DEPS_LISTED).map(d => d.filepath);
+  const extra = count > MAX_DEPS_LISTED ? `, +${count - MAX_DEPS_LISTED} more` : '';
   const noun = count === 1 ? 'file imports' : 'files import';
   const reason = reasoning.length > 0 ? ` (${reasoning.join(', ')})` : '';
-  return `${count} ${noun} this; risk: ${level}${reason}.`;
+  return `${count} ${noun} this — ${shown.join(', ')}${extra}; risk: ${level}${reason}.`;
 }
 
 export function formatTests(tests: string[]): string {
