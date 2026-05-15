@@ -318,5 +318,39 @@ describe('Git Utils', () => {
       expect(Array.isArray(changedFiles)).toBe(true);
       expect(changedFiles.some(f => f.endsWith('file2.txt'))).toBe(true);
     });
+
+    it('lists branch-exclusive files in both diff directions (tip-to-tip)', async () => {
+      // Regression for #556 round 2: getChangedFiles must use direct tip-to-tip
+      // (two-dot) semantics, not three-dot. Three-dot would silently omit files
+      // that exist only on the FROM branch when diffing FROM...TO.
+      if (!isGitInstalled) {
+        console.log('Skipping test - git not installed');
+        return;
+      }
+
+      await execAsync('git init', { cwd: testDir });
+      await execAsync('git config user.email "test@example.com"', { cwd: testDir });
+      await execAsync('git config user.name "Test User"', { cwd: testDir });
+
+      // main has nothing yet — empty initial commit so a branch can exist.
+      await execAsync('git commit --allow-empty -m "init"', { cwd: testDir });
+      const mainBranch = await getCurrentBranch(testDir);
+
+      // feature adds foo.txt.
+      await execAsync('git checkout -b feature', { cwd: testDir });
+      await fs.writeFile(path.join(testDir, 'foo.txt'), 'hello');
+      await execAsync('git add .', { cwd: testDir });
+      await execAsync('git commit -m "add foo.txt"', { cwd: testDir });
+
+      // feature -> main: foo.txt exists on feature but not main. Direct tip-to-tip
+      // diff lists foo.txt as a deletion. Three-dot diff would return empty
+      // because main added nothing relative to merge base.
+      const featureToMain = await getChangedFiles(testDir, 'feature', mainBranch);
+      expect(featureToMain.some(f => f.endsWith('foo.txt'))).toBe(true);
+
+      // main -> feature: foo.txt also shows up (added on feature).
+      const mainToFeature = await getChangedFiles(testDir, mainBranch, 'feature');
+      expect(mainToFeature.some(f => f.endsWith('foo.txt'))).toBe(true);
+    });
   });
 });

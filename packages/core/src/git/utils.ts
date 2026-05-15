@@ -88,14 +88,14 @@ export async function getChangedFiles(
   validateGitRef(toRef, 'toRef');
 
   try {
-    const { stdout } = await execFileAsync(
-      'git',
-      ['diff', '--name-only', `${fromRef}...${toRef}`],
-      {
-        cwd: rootDir,
-        timeout: 10000, // 10 second timeout for diffs
-      },
-    );
+    // Direct tip-to-tip diff (two refs as separate args). Three-dot (`A...B`)
+    // is the merge-base / PR-diff form, which silently omits files that exist
+    // only on `fromRef` — wrong semantic for branch-switch reconciliation
+    // (see #556). Mirrors `getChangedFilesBetweenCommits` below.
+    const { stdout } = await execFileAsync('git', ['diff', '--name-only', fromRef, toRef], {
+      cwd: rootDir,
+      timeout: 10000, // 10 second timeout for diffs
+    });
 
     const files = stdout
       .trim()
