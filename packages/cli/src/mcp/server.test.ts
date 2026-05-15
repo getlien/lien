@@ -252,6 +252,36 @@ describe('startMCPServer', () => {
     expect(typeof toolContext.getReindexState).toBe('function');
   });
 
+  describe('getIndexMetadata indexedRef fields', () => {
+    it('returns null indexedBranch/indexedCommit when git detection is unavailable', async () => {
+      mockSetupGitDetection.mockResolvedValue({ gitTracker: null, gitPollInterval: null });
+
+      await startMCPServer({ rootDir: '/test/project' });
+
+      const toolContext = vi.mocked(registerMCPHandlers).mock.calls[0][1];
+      const metadata = toolContext.getIndexMetadata();
+      expect(metadata.indexedBranch).toBeNull();
+      expect(metadata.indexedCommit).toBeNull();
+    });
+
+    it('surfaces branch + commit from GitStateTracker.getState() when available', async () => {
+      const fakeGitTracker = {
+        getState: () => ({ branch: 'feature-x', commit: 'abc1234', timestamp: 1234567890 }),
+      };
+      mockSetupGitDetection.mockResolvedValue({
+        gitTracker: fakeGitTracker,
+        gitPollInterval: null,
+      });
+
+      await startMCPServer({ rootDir: '/test/project' });
+
+      const toolContext = vi.mocked(registerMCPHandlers).mock.calls[0][1];
+      const metadata = toolContext.getIndexMetadata();
+      expect(metadata.indexedBranch).toBe('feature-x');
+      expect(metadata.indexedCommit).toBe('abc1234');
+    });
+  });
+
   describe('auto-indexing guard', () => {
     beforeEach(() => {
       mockVectorDB.hasData.mockResolvedValue(false);

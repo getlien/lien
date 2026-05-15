@@ -165,7 +165,7 @@ export async function indexSingleFile(
 
   // Normalize to relative path for consistent storage and queries
   // This ensures paths from git diff (absolute) match paths from scanner (relative)
-  const normalizedPath = normalizeToRelativePath(filepath);
+  const normalizedPath = normalizeToRelativePath(filepath, rootDir);
 
   try {
     // Check if file exists (use original filepath for filesystem operations)
@@ -446,7 +446,7 @@ export async function indexMultipleFiles(
 
   for (const filepath of filepaths) {
     const task = limit(async () => {
-      const normalizedPath = normalizeToRelativePath(filepath);
+      const normalizedPath = normalizeToRelativePath(filepath, rootDir);
       const result = await processSingleFileForIndexing(
         filepath,
         normalizedPath,
