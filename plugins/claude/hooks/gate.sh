@@ -58,10 +58,14 @@ if [ -f "$store/gate-disabled" ]; then
   exit 0
 fi
 
-# Determine blocking mode (file flag or env var).
-mode="advisory"
-if [ -f "$store/gate-blocking" ] || [ "${LIEN_GATE:-}" = "block" ]; then
-  mode="block"
+# Determine mode. Default is "block" because Claude Code's hook channels
+# don't actually surface a PreToolUse systemMessage back to the model on
+# the next turn (verified live in 2.1.142). Only exit 2 + stderr reaches
+# the model. Advisory mode stays available as an opt-down for users who
+# only want the UI signal without behavior change.
+mode="block"
+if [ -f "$store/gate-advisory" ] || [ "${LIEN_GATE:-}" = "advisory" ]; then
+  mode="advisory"
 fi
 
 # Extension filter: skip if file extension isn't in Lien's indexed set.

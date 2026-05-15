@@ -3,10 +3,10 @@ import fs from 'fs/promises';
 import chalk from 'chalk';
 import { getStoreRoot } from './store-paths.js';
 
-const VALID_ACTIONS = ['on', 'off', 'block', 'status'] as const;
+const VALID_ACTIONS = ['on', 'off', 'block', 'advisory', 'status'] as const;
 type GateAction = (typeof VALID_ACTIONS)[number];
 
-function getFlagPath(name: 'disabled' | 'blocking'): string {
+function getFlagPath(name: 'disabled' | 'advisory'): string {
   return path.join(getStoreRoot(), `gate-${name}`);
 }
 
@@ -23,13 +23,20 @@ async function ensureStoreDir(): Promise<void> {
   await fs.mkdir(getStoreRoot(), { recursive: true });
 }
 
-async function writeFlag(name: 'disabled' | 'blocking'): Promise<void> {
+async function writeFlag(name: 'disabled' | 'advisory'): Promise<void> {
   await ensureStoreDir();
   await fs.writeFile(getFlagPath(name), '');
 }
 
-async function removeFlag(name: 'disabled' | 'blocking'): Promise<void> {
+async function removeFlag(name: 'disabled' | 'advisory'): Promise<void> {
   await fs.rm(getFlagPath(name), { force: true });
+}
+
+async function removeLegacyBlockingFlag(): Promise<void> {
+  // Older versions wrote ~/.lien/indices/<id>/gate-blocking to mean "enforce".
+  // Now enforcement is the default; the flag is orphaned. Clean it up so
+  // `status` doesn't surface stale state.
+  await fs.rm(path.join(getStoreRoot(), 'gate-blocking'), { force: true });
 }
 
 export async function gateCommand(action: string): Promise<void> {
@@ -43,24 +50,30 @@ export async function gateCommand(action: string): Promise<void> {
   try {
     switch (action as GateAction) {
       case 'on':
+      case 'block':
         await removeFlag('disabled');
-        await removeFlag('blocking');
-        console.log(chalk.green('Lien gate: on (advisory)'));
+        await removeFlag('advisory');
+        await removeLegacyBlockingFlag();
+        console.log(chalk.green('Lien gate: on (blocking; exit 2 on miss)'));
         return;
       case 'off':
         await writeFlag('disabled');
-        await removeFlag('blocking');
+        await removeFlag('advisory');
+        await removeLegacyBlockingFlag();
         console.log(chalk.yellow('Lien gate: off (sentinels still recorded)'));
         return;
-      case 'block':
+      case 'advisory':
         await removeFlag('disabled');
-        await writeFlag('blocking');
-        console.log(chalk.green('Lien gate: blocking (exit 2 on miss)'));
+        await writeFlag('advisory');
+        await removeLegacyBlockingFlag();
+        console.log(
+          chalk.yellow('Lien gate: advisory (UI-only nudge; model is NOT shown the message)'),
+        );
         return;
       case 'status': {
         const disabled = await exists(getFlagPath('disabled'));
-        const blocking = await exists(getFlagPath('blocking'));
-        const state = disabled ? 'off' : blocking ? 'blocking' : 'on (advisory)';
+        const advisory = await exists(getFlagPath('advisory'));
+        const state = disabled ? 'off' : advisory ? 'advisory (UI-only)' : 'on (blocking)';
         console.log(chalk.dim('Lien gate:'), state);
         console.log(chalk.dim('Flag dir:'), getStoreRoot());
         return;

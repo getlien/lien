@@ -19,14 +19,14 @@ describe('gateCommand', () => {
   let tmpHome: string;
   let STORE: string;
   let DISABLED: string;
-  let BLOCKING: string;
+  let ADVISORY: string;
+  let LEGACY_BLOCKING: string;
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errSpy: ReturnType<typeof vi.spyOn>;
   let exitSpy: ReturnType<typeof vi.spyOn>;
   let homeSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    // Redirect $HOME so the test never touches the developer's real ~/.lien.
     tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-gate-test-'));
     homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(tmpHome);
 
@@ -37,7 +37,8 @@ describe('gateCommand', () => {
       extractRepoId(resolveProjectRoot(process.cwd())),
     );
     DISABLED = path.join(STORE, 'gate-disabled');
-    BLOCKING = path.join(STORE, 'gate-blocking');
+    ADVISORY = path.join(STORE, 'gate-advisory');
+    LEGACY_BLOCKING = path.join(STORE, 'gate-blocking');
 
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -54,37 +55,64 @@ describe('gateCommand', () => {
     await fs.rm(tmpHome, { recursive: true, force: true });
   });
 
-  it('off writes gate-disabled and clears gate-blocking', async () => {
-    await fs.mkdir(STORE, { recursive: true });
-    await fs.writeFile(BLOCKING, '');
-    await gateCommand('off');
-    expect(await exists(DISABLED)).toBe(true);
-    expect(await exists(BLOCKING)).toBe(false);
-  });
-
-  it('on clears both flags', async () => {
+  it('on clears every flag (blocking is the default, no flag needed)', async () => {
     await fs.mkdir(STORE, { recursive: true });
     await fs.writeFile(DISABLED, '');
-    await fs.writeFile(BLOCKING, '');
+    await fs.writeFile(ADVISORY, '');
+    await fs.writeFile(LEGACY_BLOCKING, '');
     await gateCommand('on');
     expect(await exists(DISABLED)).toBe(false);
-    expect(await exists(BLOCKING)).toBe(false);
+    expect(await exists(ADVISORY)).toBe(false);
+    expect(await exists(LEGACY_BLOCKING)).toBe(false);
   });
 
-  it('block writes gate-blocking and clears gate-disabled', async () => {
+  it('block is an alias of on', async () => {
     await fs.mkdir(STORE, { recursive: true });
-    await fs.writeFile(DISABLED, '');
+    await fs.writeFile(ADVISORY, '');
     await gateCommand('block');
-    expect(await exists(BLOCKING)).toBe(true);
+    expect(await exists(ADVISORY)).toBe(false);
     expect(await exists(DISABLED)).toBe(false);
   });
 
-  it('status reports the current mode without mutating state', async () => {
+  it('off writes gate-disabled and clears advisory/legacy flags', async () => {
+    await fs.mkdir(STORE, { recursive: true });
+    await fs.writeFile(ADVISORY, '');
+    await fs.writeFile(LEGACY_BLOCKING, '');
+    await gateCommand('off');
+    expect(await exists(DISABLED)).toBe(true);
+    expect(await exists(ADVISORY)).toBe(false);
+    expect(await exists(LEGACY_BLOCKING)).toBe(false);
+  });
+
+  it('advisory writes gate-advisory and clears disabled/legacy flags', async () => {
+    await fs.mkdir(STORE, { recursive: true });
+    await fs.writeFile(DISABLED, '');
+    await fs.writeFile(LEGACY_BLOCKING, '');
+    await gateCommand('advisory');
+    expect(await exists(ADVISORY)).toBe(true);
+    expect(await exists(DISABLED)).toBe(false);
+    expect(await exists(LEGACY_BLOCKING)).toBe(false);
+  });
+
+  it('status reports off when gate-disabled exists', async () => {
     await fs.mkdir(STORE, { recursive: true });
     await fs.writeFile(DISABLED, '');
     await gateCommand('status');
     expect(logSpy).toHaveBeenCalledWith(expect.anything(), 'off');
     expect(await exists(DISABLED)).toBe(true);
+  });
+
+  it('status reports advisory when gate-advisory exists', async () => {
+    await fs.mkdir(STORE, { recursive: true });
+    await fs.writeFile(ADVISORY, '');
+    await gateCommand('status');
+    expect(logSpy).toHaveBeenCalledWith(expect.anything(), 'advisory (UI-only)');
+  });
+
+  it('status reports on (blocking) when no flags are set', async () => {
+    await fs.mkdir(STORE, { recursive: true });
+    await gateCommand('status');
+    expect(logSpy).toHaveBeenCalledWith(expect.anything(), 'on (blocking)');
   });
 
   it('rejects unknown actions with exit 1', async () => {
