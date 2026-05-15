@@ -1,10 +1,27 @@
 # Quick Start
 
-This guide walks you through setting up Lien with Cursor or Claude Code in under 2 minutes.
+This guide walks you through setting up Lien with your editor in under 2 minutes.
 
 ## Step 1: Configure Your Editor
 
-Run `lien init` and select your editor:
+### Claude Code (recommended path)
+
+Install the plugin once and you're done — no per-project setup:
+
+```text
+/plugin marketplace add getlien/lien
+/plugin install lien
+```
+
+Lien's MCP tools and the Explore agent become available in every Claude Code session, in every repo.
+
+::: tip
+If you previously used `lien init --editor claude-code` per project, you can leave those `.mcp.json` files in place or remove them — the plugin's MCP server replaces them. `lien init --editor claude-code --legacy` is still available if you need the old per-project flow for any reason.
+:::
+
+### Other editors (Cursor, Windsurf, OpenCode, Kilo Code, Antigravity)
+
+These editors don't have a plugin marketplace yet. Run `lien init` per project and select your editor:
 
 ```bash
 lien init
@@ -14,21 +31,20 @@ Or specify it directly:
 
 ```bash
 lien init --editor cursor
-lien init --editor claude-code
 lien init --editor windsurf
 lien init --editor opencode
 lien init --editor kilo-code
 lien init --editor antigravity
 ```
 
-This writes the correct MCP config for your editor. That's it—Lien works with **zero configuration**.
+This writes the correct MCP config for your editor.
 
 ::: details What does `lien init` create?
 
 | Editor | Config File | Scope |
 |--------|-------------|-------|
 | Cursor | `.cursor/mcp.json` | Per-project |
-| Claude Code | `.mcp.json` | Per-project |
+| Claude Code (`--legacy` only) | `.mcp.json` | Per-project |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | Global (with `--root`) |
 | OpenCode | `opencode.json` | Per-project |
 | Kilo Code | `.kilocode/mcp.json` | Per-project |
