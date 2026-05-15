@@ -6,8 +6,7 @@
 # Matched tools:
 #   mcp__plugin_lien_lien__get_files_context  → fc-<hash>
 #   mcp__plugin_lien_lien__get_dependents     → dep-<hash>
-#   mcp__plugin_lien_lien__find_similar       → fs-<hash> (per cited file)
-#                                              + fs-any (any successful call)
+#   mcp__plugin_lien_lien__find_similar       → fs-any
 #
 # Best-effort: never fails the post-tool-use pipeline.
 
@@ -106,19 +105,11 @@ case "$tool_name" in
     ;;
 
   mcp__plugin_lien_lien__find_similar)
-    # Always mark "find_similar was called this session" so the new-file
-    # gate is satisfied even when the search returns zero results.
+    # find_similar is a search, not impact analysis on a specific file.
+    # Writing only fs-any keeps the semantic honest: "the model has
+    # checked for duplication once this session." Strict-match Edits
+    # still need their own get_files_context call.
     : > "$session_dir/fs-any"
-
-    # Also write per-cited-file sentinels so subsequent strict-match
-    # edits on those files pass. tool_result is the MCP wire format:
-    # { content: [ { type: "text", text: "<json string>" } ] }
-    text="$(printf '%s' "$input" | jq -r '.tool_result.content[0].text // .tool_response.content[0].text // empty' 2>/dev/null)"
-    if [ -n "$text" ]; then
-      printf '%s' "$text" | jq -r '.results[]?.metadata.file // empty' 2>/dev/null | while IFS= read -r p; do
-        [ -n "$p" ] && write_sentinel fs "$p"
-      done
-    fi
     ;;
 esac
 
