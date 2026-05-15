@@ -3,12 +3,13 @@ import os from 'os';
 import fs from 'fs/promises';
 import chalk from 'chalk';
 import { extractRepoId } from '@liendev/parser';
+import { resolveProjectRoot } from './project-root.js';
 
 const VALID_ACTIONS = ['on', 'off', 'block', 'status'] as const;
 type GateAction = (typeof VALID_ACTIONS)[number];
 
 function getStoreRoot(): string {
-  const repoId = extractRepoId(process.cwd());
+  const repoId = extractRepoId(resolveProjectRoot(process.cwd()));
   return path.join(os.homedir(), '.lien', 'indices', repoId);
 }
 

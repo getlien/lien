@@ -24,24 +24,28 @@ cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 [ -n "$session_id" ] || exit 0
 
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
+  root="$(cd "$cwd" && lien path --root 2>/dev/null)"
   store="$(cd "$cwd" && lien path --store 2>/dev/null)"
 else
+  root="$(lien path --root 2>/dev/null)"
   store="$(lien path --store 2>/dev/null)"
 fi
 [ -n "$store" ] || exit 0
+[ -n "$root" ] || root="$cwd"
 
 session_dir="$store/gate-sessions/$session_id"
 mkdir -p "$session_dir" 2>/dev/null || exit 0
 
 canonicalize() {
-  # Match gate.sh: strip $cwd/ prefix, then strip a leading "./".
-  local p="$1"
-  if [ -n "$cwd" ]; then
+  # Match gate.sh: try $root then $cwd, then strip a leading "./".
+  local p="$1" base
+  for base in "$root" "$cwd"; do
+    [ -z "$base" ] && continue
     case "$p" in
-      "$cwd"/*) p="${p#$cwd/}";;
-      "$cwd") p="";;
+      "$base"/*) p="${p#$base/}"; break;;
+      "$base") p=""; break;;
     esac
-  fi
+  done
   case "$p" in
     ./*) p="${p#./}";;
   esac

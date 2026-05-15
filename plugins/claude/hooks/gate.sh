@@ -34,14 +34,18 @@ cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
 [ -n "$file_path" ] || exit 0
 [ -n "$session_id" ] || exit 0
 
-# Resolve the storage root from the same source-of-truth the indexer uses.
-# Run from the session's cwd so extractRepoId picks up the right repo.
+# Resolve the project root and storage root via `lien path`, so the
+# results stay invariant whether Claude Code's cwd is the repo root or
+# a subdirectory.
 if [ -n "$cwd" ] && [ -d "$cwd" ]; then
+  root="$(cd "$cwd" && lien path --root 2>/dev/null)"
   store="$(cd "$cwd" && lien path --store 2>/dev/null)"
 else
+  root="$(lien path --root 2>/dev/null)"
   store="$(lien path --store 2>/dev/null)"
 fi
 [ -n "$store" ] || exit 0
+[ -n "$root" ] || root="$cwd"
 
 # Persistent kill switch from `lien gate off`.
 if [ -f "$store/gate-disabled" ]; then
@@ -68,18 +72,20 @@ fi
 ttl_min="${LIEN_GATE_TTL_MIN:-60}"
 session_dir="$store/gate-sessions/$session_id"
 
-# Canonicalize file_path to a workspace-relative form before hashing, so
-# that the gate matches sentinels written by sentinel.sh regardless of
-# whether the caller used absolute or relative paths. Claude Code's
-# Edit/Write payloads carry absolute paths; the model typically passes
-# relative paths to MCP tools.
+# Canonicalize file_path to a project-root-relative form before hashing,
+# so the gate matches sentinels written by sentinel.sh regardless of
+# whether the caller used absolute, root-relative, or cwd-relative paths.
+# Claude Code's Edit/Write carry absolute paths; the model typically
+# passes root-relative paths to MCP tools because Lien's index is
+# root-relative.
 rel_path="$file_path"
-if [ -n "$cwd" ]; then
-  case "$file_path" in
-    "$cwd"/*) rel_path="${file_path#$cwd/}";;
-    "$cwd") rel_path="";;
+for base in "$root" "$cwd"; do
+  [ -z "$base" ] && continue
+  case "$rel_path" in
+    "$base"/*) rel_path="${rel_path#$base/}"; break;;
+    "$base") rel_path=""; break;;
   esac
-fi
+done
 # Strip a leading "./" so "./foo.ts" and "foo.ts" hash identically.
 case "$rel_path" in
   ./*) rel_path="${rel_path#./}";;
@@ -95,7 +101,14 @@ fi
 # Resolve absolute target for the existence check (gate semantic depends
 # on whether the file exists yet).
 target_path="$file_path"
-[ -n "$cwd" ] && [ "${file_path#/}" = "$file_path" ] && target_path="$cwd/$file_path"
+if [ "${file_path#/}" = "$file_path" ]; then
+  # Relative — resolve against root if available, else cwd.
+  if [ -n "$root" ]; then
+    target_path="$root/$file_path"
+  elif [ -n "$cwd" ]; then
+    target_path="$cwd/$file_path"
+  fi
+fi
 
 satisfied=0
 if [ -d "$session_dir" ]; then

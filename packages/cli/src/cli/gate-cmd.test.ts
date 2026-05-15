@@ -4,8 +4,14 @@ import os from 'os';
 import fs from 'fs/promises';
 import { extractRepoId } from '@liendev/parser';
 import { gateCommand } from './gate-cmd.js';
+import { resolveProjectRoot } from './project-root.js';
 
-const STORE = path.join(os.homedir(), '.lien', 'indices', extractRepoId(process.cwd()));
+const STORE = path.join(
+  os.homedir(),
+  '.lien',
+  'indices',
+  extractRepoId(resolveProjectRoot(process.cwd())),
+);
 const DISABLED = path.join(STORE, 'gate-disabled');
 const BLOCKING = path.join(STORE, 'gate-blocking');
 

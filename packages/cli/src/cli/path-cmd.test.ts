@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { extractRepoId } from '@liendev/parser';
 import { pathCommand } from './path-cmd.js';
+import { resolveProjectRoot } from './project-root.js';
 
 describe('pathCommand', () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -23,10 +24,20 @@ describe('pathCommand', () => {
     exitSpy.mockRestore();
   });
 
-  it('--store prints ~/.lien/indices/<repoId> for the current cwd', () => {
+  it('--store prints ~/.lien/indices/<repoId> resolved against the project root', () => {
     pathCommand({ store: true });
-    const expected = path.join(os.homedir(), '.lien', 'indices', extractRepoId(process.cwd()));
+    const expected = path.join(
+      os.homedir(),
+      '.lien',
+      'indices',
+      extractRepoId(resolveProjectRoot(process.cwd())),
+    );
     expect(logSpy).toHaveBeenCalledWith(expected);
+  });
+
+  it('--root prints the resolved project root', () => {
+    pathCommand({ root: true });
+    expect(logSpy).toHaveBeenCalledWith(resolveProjectRoot(process.cwd()));
   });
 
   it('--extensions prints supported extensions, one per line, with no leading dot', () => {

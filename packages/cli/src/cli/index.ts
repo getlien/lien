@@ -103,6 +103,7 @@ program
   .description('Print Lien storage paths and supported extensions (for hook scripts)')
   .option('--store', 'Print the storage root for the current repo')
   .option('--extensions', 'Print the indexed-file extensions, one per line')
+  .option('--root', 'Print the resolved project root (walks up for .git)')
   .action(pathCommand);
 
 program
