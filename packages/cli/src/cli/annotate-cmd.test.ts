@@ -13,20 +13,30 @@ import {
 describe('toRelative', () => {
   const root = '/repo/root';
 
-  it('returns clean relative input untouched', () => {
-    expect(toRelative('src/foo.ts', root)).toBe('src/foo.ts');
+  it('resolves a relative input against cwd, not root', () => {
+    // CLI invoked from /repo/root → cwd === root → behavior matches naive form.
+    expect(toRelative('src/foo.ts', root, root)).toBe('src/foo.ts');
+  });
+
+  it('handles a subdir cwd: src/foo.ts means <subdir>/src/foo.ts', () => {
+    // Running `lien annotate src/foo.ts` from /repo/root/packages/cli
+    // should resolve to /repo/root/packages/cli/src/foo.ts → relative
+    // form against the root is packages/cli/src/foo.ts.
+    expect(toRelative('src/foo.ts', root, '/repo/root/packages/cli')).toBe(
+      'packages/cli/src/foo.ts',
+    );
   });
 
   it('strips an absolute path that lives under root', () => {
-    expect(toRelative('/repo/root/src/foo.ts', root)).toBe('src/foo.ts');
+    expect(toRelative('/repo/root/src/foo.ts', root, root)).toBe('src/foo.ts');
   });
 
   it('returns the input untouched when resolved path escapes root', () => {
-    expect(toRelative('../outside.ts', root)).toBe('../outside.ts');
+    expect(toRelative('../outside.ts', root, root)).toBe('../outside.ts');
   });
 
   it('returns empty for empty input', () => {
-    expect(toRelative('', root)).toBe('');
+    expect(toRelative('', root, root)).toBe('');
   });
 });
 

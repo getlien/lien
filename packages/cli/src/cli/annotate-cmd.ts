@@ -30,14 +30,16 @@ export async function annotateCommand(file: string): Promise<void> {
 }
 
 async function run(file: string): Promise<void> {
-  const rootDir = resolveProjectRoot(process.cwd());
-  const filepath = toRelative(file, rootDir);
+  const cwd = process.cwd();
+  const rootDir = resolveProjectRoot(cwd);
+  const filepath = toRelative(file, rootDir, cwd);
   if (!filepath) return;
 
   // Guard against non-existent paths — findDependents's suffix matching
   // can otherwise return spurious hits for unrelated imports that happen
-  // to share a basename.
-  const abs = path.isAbsolute(file) ? file : path.resolve(rootDir, file);
+  // to share a basename. Resolve relative inputs against cwd, not rootDir,
+  // so `lien annotate src/foo.ts` from a subdir finds <subdir>/src/foo.ts.
+  const abs = path.isAbsolute(file) ? file : path.resolve(cwd, file);
   if (!fs.existsSync(abs)) return;
 
   const vectorDB = new VectorDB(rootDir);
@@ -75,9 +77,12 @@ async function run(file: string): Promise<void> {
   console.log(lines.join('\n'));
 }
 
-export function toRelative(file: string, rootDir: string): string {
+export function toRelative(file: string, rootDir: string, cwd: string = process.cwd()): string {
   if (!file) return '';
-  const abs = path.isAbsolute(file) ? file : path.resolve(rootDir, file);
+  // Relative inputs are conventionally process-cwd-relative (POSIX). Only
+  // fall back to rootDir if cwd is somehow empty.
+  const base = cwd || rootDir;
+  const abs = path.isAbsolute(file) ? file : path.resolve(base, file);
   const rel = path.relative(rootDir, abs).replace(/\\/g, '/');
   // Edge: file outside the resolved root. Hand back the input unchanged
   // and let findDependents come up empty — silent exit downstream.

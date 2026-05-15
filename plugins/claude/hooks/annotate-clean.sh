@@ -18,9 +18,12 @@ else
 fi
 [ -n "$store" ] || exit 0
 
+# `find -mtime +N` truncates partial days; +1 actually means ">48h old",
+# not ">24h". Use -mmin +1440 (24 * 60 minutes) to express "older than 24
+# hours" exactly.
 sessions_root="$store/annotated-sessions"
 if [ -d "$sessions_root" ]; then
-  find "$sessions_root" -mindepth 1 -maxdepth 1 -type d -mtime +1 -exec rm -rf {} + 2>/dev/null
+  find "$sessions_root" -mindepth 1 -maxdepth 1 -type d -mmin +1440 -exec rm -rf {} + 2>/dev/null
 fi
 
 exit 0
