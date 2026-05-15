@@ -49,6 +49,7 @@ async function handleGitStartup(
       await checkAndReconnect();
       const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, {
         verbose: false,
+        rootDir,
       });
       const duration = Date.now() - startTime;
       reindexStateManager.completeReindex(duration);
@@ -120,6 +121,7 @@ function createGitPollInterval(
           await checkAndReconnect();
           const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, {
             verbose: false,
+            rootDir,
           });
           const duration = Date.now() - startTime;
           reindexStateManager.completeReindex(duration);
@@ -193,6 +195,7 @@ async function detectAndFilterGitChanges(
  */
 async function executeGitReindex(
   filteredFiles: string[],
+  rootDir: string,
   vectorDB: VectorDBInterface,
   embeddings: EmbeddingService,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
@@ -205,7 +208,10 @@ async function executeGitReindex(
 
   try {
     await checkAndReconnect();
-    const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, { verbose: false });
+    const count = await indexMultipleFiles(filteredFiles, vectorDB, embeddings, {
+      verbose: false,
+      rootDir,
+    });
     const duration = Date.now() - startTime;
     reindexStateManager.completeReindex(duration);
     log(`✓ Reindexed ${count} files in ${duration}ms`);
@@ -263,6 +269,7 @@ function createGitChangeHandler(
 
       await executeGitReindex(
         filteredFiles,
+        rootDir,
         vectorDB,
         embeddings,
         reindexStateManager,

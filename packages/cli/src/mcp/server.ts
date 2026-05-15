@@ -3,7 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
-import type { EmbeddingService, VectorDBInterface } from '@liendev/core';
+import type { EmbeddingService, VectorDBInterface, GitState } from '@liendev/core';
 import {
   WorkerEmbeddings,
   VERSION_CHECK_INTERVAL_MS,
@@ -188,16 +188,23 @@ interface VersionCheckingResult {
     pendingFileCount?: number;
     lastReindexDurationMs?: number | null;
     msSinceLastReindex?: number | null;
+    indexedBranch?: string | null;
+    indexedCommit?: string | null;
   };
 }
 
 /**
  * Setup version checking and reconnection logic.
+ *
+ * @param getGitState - Returns the GitStateTracker's current state if git
+ *   detection is active for this rootDir. Wired in by `startMCPServer` after
+ *   `setupGitDetection` populates the tracker.
  */
 function setupVersionChecking(
   vectorDB: VectorDBInterface,
   log: LogFn,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
+  getGitState: () => GitState | null,
 ): VersionCheckingResult {
   const checkAndReconnect = async () => {
     try {
@@ -212,6 +219,7 @@ function setupVersionChecking(
 
   const getIndexMetadata = () => {
     const reindex = reindexStateManager.getState();
+    const gitState = getGitState();
     return {
       indexVersion: vectorDB.getCurrentVersion(),
       indexDate: vectorDB.getVersionDate(),
@@ -223,6 +231,8 @@ function setupVersionChecking(
       msSinceLastReindex: reindex.lastReindexTimestamp
         ? Date.now() - reindex.lastReindexTimestamp
         : null,
+      indexedBranch: gitState?.branch ?? null,
+      indexedCommit: gitState?.commit ?? null,
     };
   };
 
@@ -307,9 +317,13 @@ async function setupAndConnectServer(
   log: LogFn,
   versionCheckInterval: NodeJS.Timeout,
   reindexStateManager: ReturnType<typeof createReindexStateManager>,
-  options: { rootDir: string; watch: boolean | undefined },
+  options: {
+    rootDir: string;
+    watch: boolean | undefined;
+    onGitTrackerReady: (state: () => GitState | null) => void;
+  },
 ): Promise<void> {
-  const { rootDir, watch } = options;
+  const { rootDir, watch, onGitTrackerReady } = options;
   const { vectorDB, embeddings } = toolContext;
 
   // Register all MCP handlers
@@ -330,7 +344,7 @@ async function setupAndConnectServer(
   );
 
   // Setup git detection (will use event-driven approach if fileWatcher is available)
-  const { gitPollInterval } = await setupGitDetection(
+  const { gitTracker, gitPollInterval } = await setupGitDetection(
     rootDir,
     vectorDB,
     embeddings,
@@ -339,6 +353,7 @@ async function setupAndConnectServer(
     fileWatcher,
     toolContext.checkAndReconnect,
   );
+  onGitTrackerReady(() => (gitTracker ? gitTracker.getState() : null));
 
   // Setup cleanup handlers
   const cleanup = setupCleanupHandlers(
@@ -379,11 +394,15 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   // Create reindex state manager
   const reindexStateManager = createReindexStateManager();
 
+  // Holder for the GitStateTracker state getter. setupGitDetection runs later
+  // inside setupAndConnectServer; until then, indexed-ref fields read as null.
+  let getGitState: () => GitState | null = () => null;
+
   const {
     interval: versionCheckInterval,
     checkAndReconnect,
     getIndexMetadata,
-  } = setupVersionChecking(vectorDB, log, reindexStateManager);
+  } = setupVersionChecking(vectorDB, log, reindexStateManager, () => getGitState());
   const toolContext: ToolContext = {
     vectorDB,
     embeddings,
@@ -397,5 +416,8 @@ export async function startMCPServer(options: MCPServerOptions): Promise<void> {
   await setupAndConnectServer(server, toolContext, log, versionCheckInterval, reindexStateManager, {
     rootDir,
     watch,
+    onGitTrackerReady: state => {
+      getGitState = state;
+    },
   });
 }

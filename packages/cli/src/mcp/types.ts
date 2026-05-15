@@ -58,6 +58,10 @@ export interface IndexMetadata {
   pendingFileCount?: number;
   lastReindexDurationMs?: number | null;
   msSinceLastReindex?: number | null;
+  /** Git branch the index was last reconciled with. Null when not in a git repo. */
+  indexedBranch?: string | null;
+  /** Git commit SHA the index was last reconciled with. Null when not in a git repo. */
+  indexedCommit?: string | null;
 }
 
 /**

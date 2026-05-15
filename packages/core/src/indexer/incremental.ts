@@ -35,15 +35,14 @@ export function normalizeToRelativePath(filepath: string, rootDir?: string): str
     return normalized;
   }
 
-  // Convert absolute to relative
+  // Convert absolute to relative. Require a separator after `root` so that
+  // `/app` does not falsely prefix-match `/apple/...` — fall through to
+  // path.relative for everything else (incl. paths outside root, which
+  // produce a leading `../`).
   if (normalized.startsWith(root + '/')) {
     return normalized.slice(root.length + 1);
   }
-  if (normalized.startsWith(root)) {
-    return normalized.slice(root.length);
-  }
 
-  // Fallback: use path.relative
   return path.relative(root, filepath).replace(/\\/g, '/');
 }
 
@@ -165,12 +164,19 @@ export async function indexSingleFile(
 
   // Normalize to relative path for consistent storage and queries
   // This ensures paths from git diff (absolute) match paths from scanner (relative)
-  const normalizedPath = normalizeToRelativePath(filepath);
+  const normalizedPath = normalizeToRelativePath(filepath, rootDir);
+
+  // Resolve to an absolute path for filesystem operations. Callers (esp. git
+  // integration) may pass repo-relative paths that would otherwise be resolved
+  // against process.cwd() — which can differ from rootDir.
+  const absolutePath = path.isAbsolute(filepath)
+    ? filepath
+    : path.resolve(rootDir || process.cwd(), filepath);
 
   try {
-    // Check if file exists (use original filepath for filesystem operations)
+    // Check if file exists (use absolute filepath for filesystem operations)
     try {
-      await fs.access(filepath);
+      await fs.access(absolutePath);
     } catch {
       // File doesn't exist - delete from index and manifest using normalized path
       if (verbose) {
@@ -184,7 +190,7 @@ export async function indexSingleFile(
     }
 
     // Read file content
-    const content = await fs.readFile(filepath, 'utf-8');
+    const content = await fs.readFile(absolutePath, 'utf-8');
 
     // Process file content (chunking + embeddings) - use normalized path for storage
     const result = await processFileContent(
@@ -196,8 +202,8 @@ export async function indexSingleFile(
     );
 
     // Get actual file mtime and compute content hash for manifest
-    const stats = await fs.stat(filepath);
-    const contentHash = await computeContentHash(filepath);
+    const stats = await fs.stat(absolutePath);
+    const contentHash = await computeContentHash(absolutePath);
     const manifest = new ManifestManager(vectorDB.dbPath);
 
     if (result === null) {
@@ -252,10 +258,16 @@ async function processSingleFileForIndexing(
   rootDir?: string,
 ): Promise<Result<FileProcessResult, string>> {
   try {
-    // Read file stats and content using original path (for filesystem access)
-    const stats = await fs.stat(filepath);
-    const content = await fs.readFile(filepath, 'utf-8');
-    const contentHash = await computeContentHash(filepath);
+    // Resolve to an absolute path for filesystem operations. Callers may pass
+    // repo-relative paths that would otherwise resolve against process.cwd().
+    const absolutePath = path.isAbsolute(filepath)
+      ? filepath
+      : path.resolve(rootDir || process.cwd(), filepath);
+
+    // Read file stats and content using the absolute path
+    const stats = await fs.stat(absolutePath);
+    const content = await fs.readFile(absolutePath, 'utf-8');
+    const contentHash = await computeContentHash(absolutePath);
 
     // Process content using normalized path (for storage)
     const result = await processFileContent(normalizedPath, content, embeddings, verbose, rootDir);
@@ -446,7 +458,7 @@ export async function indexMultipleFiles(
 
   for (const filepath of filepaths) {
     const task = limit(async () => {
-      const normalizedPath = normalizeToRelativePath(filepath);
+      const normalizedPath = normalizeToRelativePath(filepath, rootDir);
       const result = await processSingleFileForIndexing(
         filepath,
         normalizedPath,
