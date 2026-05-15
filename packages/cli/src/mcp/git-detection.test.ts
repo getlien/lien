@@ -129,4 +129,46 @@ describe('setupGitDetection — poll gate', () => {
     expect(result.gitTracker).toBeNull();
     expect(result.gitPollInterval).toBeNull();
   });
+
+  it('does NOT call detectChanges when a reindex is already in progress', async () => {
+    // Regression for the Lien Review finding on PR #561: detectChanges has the
+    // side effect of advancing the tracker's saved state. If the poll calls
+    // detectChanges and THEN bails because another reindex is running, the
+    // returned changedFiles are dropped on the floor and the tracker's state
+    // has already moved past them — they'll never be processed.
+    const reindexStateManager = {
+      ...makeReindexStateManager(),
+      getState: () => ({
+        inProgress: true,
+        pendingFiles: ['foo.ts'],
+        lastReindexTimestamp: null,
+        lastReindexDurationMs: null,
+      }),
+    };
+
+    vi.useFakeTimers();
+    try {
+      const result = await setupGitDetection(
+        '/tmp/fake-repo',
+        {} as VectorDBInterface,
+        {} as EmbeddingService,
+        () => {},
+        reindexStateManager,
+        { watchGit: vi.fn() } as unknown as FileWatcher,
+        async () => {},
+      );
+
+      // Trigger one poll cycle by advancing the timer.
+      await vi.advanceTimersByTimeAsync(10000);
+      await vi.advanceTimersByTimeAsync(0); // flush pending microtasks
+
+      // The tick should have observed inProgress=true and bailed BEFORE
+      // calling detectChanges (which would mutate tracker state).
+      expect(mockGitStateTrackerInstance.detectChanges).not.toHaveBeenCalled();
+
+      clearInterval(result.gitPollInterval!);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

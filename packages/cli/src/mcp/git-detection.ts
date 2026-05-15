@@ -88,18 +88,22 @@ function createGitPollInterval(
     if (pollInProgress) return;
     pollInProgress = true;
     try {
+      // Check inProgress BEFORE calling detectChanges: detectChanges has the
+      // side effect of advancing the tracker's saved state. If we return
+      // after calling it, we'd lose the diff — the next call would only see
+      // changes since this point. Skipping the whole tick when another
+      // reindex is running preserves the change set for the next cycle.
+      const currentState = reindexStateManager.getState();
+      if (currentState.inProgress) {
+        log(
+          `Background reindex already in progress (${currentState.pendingFiles.length} files pending), skipping git poll cycle`,
+          'debug',
+        );
+        return;
+      }
+
       const changedFiles = await gitTracker.detectChanges();
       if (changedFiles && changedFiles.length > 0) {
-        // Check if a reindex is already in progress (file watch or previous git poll)
-        const currentState = reindexStateManager.getState();
-        if (currentState.inProgress) {
-          log(
-            `Background reindex already in progress (${currentState.pendingFiles.length} files pending), skipping git poll cycle`,
-            'debug',
-          );
-          return;
-        }
-
         // Invalidate filter when .gitignore files change
         if (changedFiles.some(isGitignoreFile)) {
           isIgnored = null;
