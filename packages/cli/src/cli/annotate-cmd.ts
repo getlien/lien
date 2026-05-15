@@ -48,7 +48,17 @@ async function run(file: string): Promise<void> {
   const log = () => undefined;
   const result = await findDependents(vectorDB, filepath, false, log);
 
-  const allChunks = result.allChunks as unknown as CodeChunk[];
+  // LanceDB returns chunks whose `metadata.imports` is an Apache Arrow
+  // Vector — iterable but lacking .some() and other array methods.
+  // findTestAssociationsFromChunks uses .some(), so coerce per-chunk
+  // before handing it off.
+  const allChunks = result.allChunks.map(c => ({
+    ...c,
+    metadata: {
+      ...c.metadata,
+      imports: c.metadata?.imports ? Array.from(c.metadata.imports as Iterable<string>) : [],
+    },
+  })) as unknown as CodeChunk[];
   const testsMap = findTestAssociationsFromChunks([filepath], allChunks, rootDir);
   const tests = testsMap.get(filepath) ?? [];
 

@@ -646,8 +646,11 @@ export async function findDependents(
   const productionDependentCount = dependents.length - testDependentCount;
   const uncoveredProductionDependents = countUncoveredProductionDependents(dependents, ctx);
 
-  // Only flatten all chunks when needed for cross-repo grouping (groupDependentsByRepo).
-  const allChunks = crossRepo ? Array.from(allChunksByFile.values()).flat() : [];
+  // Surface the full normalized chunk set on the result. Cross-repo callers
+  // need it for groupDependentsByRepo; single-repo callers (e.g. the
+  // post-Read annotator) use it for test-association and complexity
+  // analysis without paying for a second scan.
+  const allChunks = Array.from(allChunksByFile.values()).flat();
 
   return {
     dependents,
