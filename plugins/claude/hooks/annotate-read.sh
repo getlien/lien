@@ -83,9 +83,13 @@ fi
 # Trivial impact → lien annotate prints nothing → stay silent.
 [ -n "$annotation" ] || exit 0
 
-# Record the annotation so suppression kicks in next time.
+# Record the annotation so suppression kicks in next time. Truncating an
+# existing touchfile doesn't update the parent dir's mtime on most
+# filesystems, so touch the dir explicitly to keep SessionStart cleanup
+# from GC'ing this session at the 24h threshold.
 mkdir -p "$session_dir" 2>/dev/null || exit 0
 : > "$touchfile"
+touch "$session_dir" 2>/dev/null
 
 # Emit the hookSpecificOutput JSON. additionalContext is the channel that
 # actually reaches the model on the next turn (verified in CC 2.1.142).
