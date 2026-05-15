@@ -88,18 +88,22 @@ function createGitPollInterval(
     if (pollInProgress) return;
     pollInProgress = true;
     try {
+      // Check inProgress BEFORE calling detectChanges: detectChanges has the
+      // side effect of advancing the tracker's saved state. If we return
+      // after calling it, we'd lose the diff — the next call would only see
+      // changes since this point. Skipping the whole tick when another
+      // reindex is running preserves the change set for the next cycle.
+      const currentState = reindexStateManager.getState();
+      if (currentState.inProgress) {
+        log(
+          `Background reindex already in progress (${currentState.pendingFiles.length} files pending), skipping git poll cycle`,
+          'debug',
+        );
+        return;
+      }
+
       const changedFiles = await gitTracker.detectChanges();
       if (changedFiles && changedFiles.length > 0) {
-        // Check if a reindex is already in progress (file watch or previous git poll)
-        const currentState = reindexStateManager.getState();
-        if (currentState.inProgress) {
-          log(
-            `Background reindex already in progress (${currentState.pendingFiles.length} files pending), skipping git poll cycle`,
-            'debug',
-          );
-          return;
-        }
-
         // Invalidate filter when .gitignore files change
         if (changedFiles.some(isGitignoreFile)) {
           isIgnored = null;
@@ -329,7 +333,12 @@ async function setupGitDetection(
     log(`Failed to check git state on startup: ${error}`, 'warning');
   }
 
-  // If file watcher is available, use event-driven detection
+  // Register the event-driven handler when the file watcher is available — it's
+  // the fast path when it works. But ALWAYS also run the poll as a backstop:
+  // chokidar/FSEvents can miss git's atomic ref rewrites (write .git/HEAD.lock,
+  // rename over .git/HEAD), in which case the watcher never fires and the
+  // tracker never reconciles. The poll guarantees eventual consistency.
+  // Concurrency between the two is handled by `reindexStateManager`.
   if (fileWatcher) {
     const gitChangeHandler = createGitChangeHandler(
       rootDir,
@@ -341,14 +350,14 @@ async function setupGitDetection(
       checkAndReconnect,
     );
     fileWatcher.watchGit(gitChangeHandler);
-
-    log('✓ Git detection enabled (event-driven via file watcher)');
-    return { gitTracker, gitPollInterval: null };
   }
 
-  // Fallback to polling if no file watcher (--no-watch mode)
   const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
-  log(`✓ Git detection enabled (polling fallback every ${pollIntervalSeconds}s)`);
+  const detectionMode = fileWatcher
+    ? `event-driven via file watcher + ${pollIntervalSeconds}s safety poll`
+    : `polling every ${pollIntervalSeconds}s`;
+  log(`✓ Git detection enabled (${detectionMode})`);
+
   const gitPollInterval = createGitPollInterval(
     rootDir,
     gitTracker,
