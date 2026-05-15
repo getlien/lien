@@ -329,7 +329,12 @@ async function setupGitDetection(
     log(`Failed to check git state on startup: ${error}`, 'warning');
   }
 
-  // If file watcher is available, use event-driven detection
+  // Register the event-driven handler when the file watcher is available — it's
+  // the fast path when it works. But ALWAYS also run the poll as a backstop:
+  // chokidar/FSEvents can miss git's atomic ref rewrites (write .git/HEAD.lock,
+  // rename over .git/HEAD), in which case the watcher never fires and the
+  // tracker never reconciles. The poll guarantees eventual consistency.
+  // Concurrency between the two is handled by `reindexStateManager`.
   if (fileWatcher) {
     const gitChangeHandler = createGitChangeHandler(
       rootDir,
@@ -341,14 +346,14 @@ async function setupGitDetection(
       checkAndReconnect,
     );
     fileWatcher.watchGit(gitChangeHandler);
-
-    log('✓ Git detection enabled (event-driven via file watcher)');
-    return { gitTracker, gitPollInterval: null };
   }
 
-  // Fallback to polling if no file watcher (--no-watch mode)
   const pollIntervalSeconds = DEFAULT_GIT_POLL_INTERVAL_MS / 1000;
-  log(`✓ Git detection enabled (polling fallback every ${pollIntervalSeconds}s)`);
+  const detectionMode = fileWatcher
+    ? `event-driven via file watcher + ${pollIntervalSeconds}s safety poll`
+    : `polling every ${pollIntervalSeconds}s`;
+  log(`✓ Git detection enabled (${detectionMode})`);
+
   const gitPollInterval = createGitPollInterval(
     rootDir,
     gitTracker,
