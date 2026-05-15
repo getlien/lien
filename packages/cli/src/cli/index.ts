@@ -8,6 +8,8 @@ import { indexCommand } from './index-cmd.js';
 import { serveCommand } from './serve.js';
 import { complexityCommand } from './complexity.js';
 import { configSetCommand, configGetCommand, configListCommand } from './config.js';
+import { pathCommand } from './path-cmd.js';
+import { annotateCommand } from './annotate-cmd.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -95,6 +97,19 @@ configCmd
 configCmd.command('get <key>').description('Get a config value').action(configGetCommand);
 
 configCmd.command('list').description('Show all current config').action(configListCommand);
+
+program
+  .command('path')
+  .description('Print Lien storage paths and supported extensions (for hook scripts)')
+  .option('--store', 'Print the storage root for the current repo')
+  .option('--extensions', 'Print the indexed-file extensions, one per line')
+  .option('--root', 'Print the resolved project root (walks up for .git)')
+  .action(pathCommand);
+
+program
+  .command('annotate <file>')
+  .description('Print a short impact summary for a single file (for hook annotation)')
+  .action(annotateCommand);
 
 program.action(() => {
   program.help();
