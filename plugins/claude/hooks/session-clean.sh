@@ -21,9 +21,12 @@ fi
 # `lien gate off` clears at session boundary; explicit `block` persists.
 rm -f "$store/gate-disabled"
 
+# Only GC sessions that have been inactive for >24h. The dir's mtime
+# tracks the last sentinel write, so concurrent Claude Code sessions
+# for the same repo keep each other's sentinels intact.
 sessions_root="$store/gate-sessions"
 if [ -d "$sessions_root" ] && [ -n "$session_id" ]; then
-  find "$sessions_root" -mindepth 1 -maxdepth 1 -type d ! -name "$session_id" -exec rm -rf {} + 2>/dev/null
+  find "$sessions_root" -mindepth 1 -maxdepth 1 -type d ! -name "$session_id" -mtime +1 -exec rm -rf {} + 2>/dev/null
 fi
 
 exit 0

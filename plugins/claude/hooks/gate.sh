@@ -80,6 +80,10 @@ if [ -n "$cwd" ]; then
     "$cwd") rel_path="";;
   esac
 fi
+# Strip a leading "./" so "./foo.ts" and "foo.ts" hash identically.
+case "$rel_path" in
+  ./*) rel_path="${rel_path#./}";;
+esac
 
 # Hash the canonical path. md5 first 8 chars mirrors extractRepoId.
 hash="$(printf '%s' "$rel_path" | md5sum 2>/dev/null | awk '{print substr($1,1,8)}')"

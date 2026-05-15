@@ -34,8 +34,7 @@ session_dir="$store/gate-sessions/$session_id"
 mkdir -p "$session_dir" 2>/dev/null || exit 0
 
 canonicalize() {
-  # Strip $cwd/ prefix from an absolute path so the sentinel hash agrees
-  # with the gate's hash regardless of which form the caller used.
+  # Match gate.sh: strip $cwd/ prefix, then strip a leading "./".
   local p="$1"
   if [ -n "$cwd" ]; then
     case "$p" in
@@ -43,6 +42,9 @@ canonicalize() {
       "$cwd") p="";;
     esac
   fi
+  case "$p" in
+    ./*) p="${p#./}";;
+  esac
   printf '%s' "$p"
 }
 
