@@ -309,10 +309,14 @@ function addChunkToFileMap(
 }
 
 /**
- * Scan chunks from the database using paginated iteration.
- * Builds import index and file groupings incrementally to avoid loading all chunks at once.
+ * Scan chunks from the database and build the import index + per-file
+ * chunk groupings. Uses a single full-table read rather than offset-based
+ * pagination — LanceDB's OFFSET cost is O(N²) in chunk count, and a
+ * single `.toArray()` is ~24x faster on monorepo-scale indexes (5.3s →
+ * 217ms locally). Memory is unchanged in practice since this function
+ * already accumulates every chunk into JS-side maps.
  */
-async function scanChunksPaginated(
+async function scanAllChunks(
   vectorDB: VectorDBInterface,
   crossRepo: boolean,
   log: (message: string, level?: 'warning') => void,
@@ -326,14 +330,11 @@ async function scanChunksPaginated(
   const importIndex = new Map<string, SearchResult[]>();
   const allChunksByFile = new Map<string, SearchResult[]>();
   const seenRanges = new Map<string, Set<string>>();
-  let totalChunks = 0;
 
-  // Cross-repo: fall back to bulk scan (scanCrossRepo doesn't have paginated variant)
   if (crossRepo && vectorDB.supportsCrossRepo) {
     const CROSS_REPO_LIMIT = 100000;
     const allChunks = await vectorDB.scanCrossRepo({ limit: CROSS_REPO_LIMIT });
-    totalChunks = allChunks.length;
-    const hitLimit = totalChunks >= CROSS_REPO_LIMIT;
+    const hitLimit = allChunks.length >= CROSS_REPO_LIMIT;
     if (hitLimit) {
       log(
         `Warning: cross-repo scan hit ${CROSS_REPO_LIMIT} chunk limit. Results may be incomplete.`,
@@ -344,26 +345,23 @@ async function scanChunksPaginated(
       addChunkToImportIndex(chunk, normalizePathCached, importIndex);
       addChunkToFileMap(chunk, normalizePathCached, allChunksByFile, seenRanges);
     }
-    return { importIndex, allChunksByFile, totalChunks, hitLimit };
+    return { importIndex, allChunksByFile, totalChunks: allChunks.length, hitLimit };
   }
 
   if (crossRepo) {
     log(
-      'Warning: crossRepo=true requires a cross-repo-capable backend. Falling back to single-repo paginated scan.',
+      'Warning: crossRepo=true requires a cross-repo-capable backend. Falling back to single-repo scan.',
       'warning',
     );
   }
 
-  // Paginated scan: build indexes incrementally
-  for await (const page of vectorDB.scanPaginated({ pageSize: 1000 })) {
-    totalChunks += page.length;
-    for (const chunk of page) {
-      addChunkToImportIndex(chunk, normalizePathCached, importIndex);
-      addChunkToFileMap(chunk, normalizePathCached, allChunksByFile, seenRanges);
-    }
+  const allChunks = await vectorDB.scanAll();
+  for (const chunk of allChunks) {
+    addChunkToImportIndex(chunk, normalizePathCached, importIndex);
+    addChunkToFileMap(chunk, normalizePathCached, allChunksByFile, seenRanges);
   }
 
-  return { importIndex, allChunksByFile, totalChunks, hitLimit: false };
+  return { importIndex, allChunksByFile, totalChunks: allChunks.length, hitLimit: false };
 }
 
 /**
@@ -531,7 +529,7 @@ async function getOrScanChunks(
     return scanCache;
   }
 
-  const scanResult = await scanChunksPaginated(vectorDB, crossRepo, log, normalizePathCached);
+  const scanResult = await scanAllChunks(vectorDB, crossRepo, log, normalizePathCached);
 
   if (indexVersion !== undefined) {
     scanCache = { indexVersion, crossRepo, ...scanResult };
