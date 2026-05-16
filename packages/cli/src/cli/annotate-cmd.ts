@@ -30,28 +30,71 @@ export async function annotateCommand(file: string): Promise<void> {
   }
 }
 
-async function run(file: string): Promise<void> {
-  // Path-handling contract for this whole flow:
-  //   - `originalCwd` and `rootDir` are AbsolutePath (process.cwd /
-  //     path.resolve guarantee absolute).
-  //   - `filepath` is RelativePath — project-root-relative. This is the
-  //     form Lien's indexer stores in chunk metadata, so passing the
-  //     relative form keeps matching consistent regardless of caller cwd.
-  //   - `abs` is AbsolutePath, used only for the on-disk existence check.
-  const originalCwd: AbsolutePath = toAbsolutePath(process.cwd());
-  const rootDir: AbsolutePath = resolveProjectRoot(originalCwd);
-  const filepath: RelativePath = toRelative(file, rootDir, originalCwd);
-  if (!filepath) return;
+interface ResolvedPaths {
+  originalCwd: AbsolutePath;
+  rootDir: AbsolutePath;
+  filepath: RelativePath;
+  abs: AbsolutePath;
+}
+
+/**
+ * Resolve the input path into the four forms `run()` needs, or return
+ * null if the path is unusable (empty, escapes the project root, or
+ * doesn't exist on disk).
+ *
+ * Path-handling contract:
+ *   - originalCwd / rootDir are AbsolutePath (process.cwd / path.resolve
+ *     guarantee absolute).
+ *   - filepath is RelativePath — project-root-relative. This is the form
+ *     Lien's indexer stores in chunk metadata, so passing the relative
+ *     form keeps matching consistent regardless of caller cwd.
+ *   - abs is AbsolutePath, used only for the on-disk existence check.
+ *     Resolved against the *original* cwd so `lien annotate src/foo.ts`
+ *     from a subdir means <subdir>/src/foo.ts to the user.
+ */
+function resolvePaths(file: string): ResolvedPaths | null {
+  const originalCwd = toAbsolutePath(process.cwd());
+  const rootDir = resolveProjectRoot(originalCwd);
+  const filepath = toRelative(file, rootDir, originalCwd);
+  if (!filepath) return null;
 
   // Guard against non-existent paths — findDependents's suffix matching
   // can otherwise return spurious hits for unrelated imports that happen
-  // to share a basename. Resolve relative inputs against the *original*
-  // cwd, not rootDir, so `lien annotate src/foo.ts` from a subdir still
-  // means <subdir>/src/foo.ts to the user.
+  // to share a basename.
   const abs: AbsolutePath = path.isAbsolute(file)
     ? toAbsolutePath(file)
     : toAbsolutePath(path.resolve(originalCwd, file));
-  if (!fs.existsSync(abs)) return;
+  if (!fs.existsSync(abs)) return null;
+
+  return { originalCwd, rootDir, filepath, abs };
+}
+
+/**
+ * Coerce per-chunk `metadata.imports` to a plain array.
+ *
+ * LanceDB returns chunks whose `imports` field is an Apache Arrow Vector
+ * — iterable but lacking `.some()` and other array methods.
+ * `findTestAssociationsFromChunks` uses `.some()`, so the coercion has to
+ * happen at the annotate-cmd boundary before the chunks flow downstream.
+ */
+function adaptChunkImports(chunks: DependencyAnalysisChunk[]): CodeChunk[] {
+  return chunks.map(c => ({
+    ...c,
+    metadata: {
+      ...c.metadata,
+      imports: c.metadata?.imports ? Array.from(c.metadata.imports as Iterable<string>) : [],
+    },
+  })) as unknown as CodeChunk[];
+}
+
+// Aliasing the chunk type findDependents returns — keeps the helper's
+// signature honest without leaking the SearchResult import here.
+type DependencyAnalysisChunk = Awaited<ReturnType<typeof findDependents>>['allChunks'][number];
+
+async function run(file: string): Promise<void> {
+  const paths = resolvePaths(file);
+  if (!paths) return;
+  const { originalCwd, rootDir, filepath } = paths;
 
   // Align cwd with the project root for the analysis pass. Lien's
   // internal path normalizers (createPathNormalizer in findDependents,
@@ -69,21 +112,10 @@ async function run(file: string): Promise<void> {
 
     const log = () => undefined;
     const result = await findDependents(vectorDB, filepath, false, log);
+    const allChunks = adaptChunkImports(result.allChunks);
 
-    // LanceDB returns chunks whose `metadata.imports` is an Apache Arrow
-    // Vector — iterable but lacking .some() and other array methods.
-    // findTestAssociationsFromChunks uses .some(), so coerce per-chunk
-    // before handing it off.
-    const allChunks = result.allChunks.map(c => ({
-      ...c,
-      metadata: {
-        ...c.metadata,
-        imports: c.metadata?.imports ? Array.from(c.metadata.imports as Iterable<string>) : [],
-      },
-    })) as unknown as CodeChunk[];
-    const testsMap = findTestAssociationsFromChunks([filepath], allChunks, rootDir);
-    const tests = testsMap.get(filepath) ?? [];
-
+    const tests =
+      findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
     const complexity = computeComplexitySummary(allChunks, filepath);
     const dependentCount = result.dependents.length;
     const uncovered = result.uncoveredProductionDependents;
