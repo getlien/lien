@@ -53,18 +53,33 @@ interface ResolvedPaths {
  *     from a subdir means <subdir>/src/foo.ts to the user.
  */
 function resolvePaths(file: string): ResolvedPaths | null {
+  if (!file) return null;
   const originalCwd = toAbsolutePath(process.cwd());
   const rootDir = resolveProjectRoot(originalCwd);
-  const filepath = toRelative(file, rootDir, originalCwd);
-  if (!filepath) return null;
 
-  // Guard against non-existent paths — findDependents's suffix matching
-  // can otherwise return spurious hits for unrelated imports that happen
-  // to share a basename.
-  const abs: AbsolutePath = path.isAbsolute(file)
+  // Resolve to an absolute path that actually exists on disk. POSIX
+  // convention is cwd-relative for relative inputs, so try that first.
+  // If the file isn't there, fall back to root-relative — handles the
+  // case where a user (or the model) pastes a repo-relative path like
+  // `packages/cli/src/foo.ts` while invoked from a subdirectory. Without
+  // the fallback `path.resolve('/repo/packages/cli', 'packages/cli/...')`
+  // produces `/repo/packages/cli/packages/cli/...`, which doesn't exist,
+  // and the annotator exits silently for a file that really does.
+  let abs: AbsolutePath = path.isAbsolute(file)
     ? toAbsolutePath(file)
     : toAbsolutePath(path.resolve(originalCwd, file));
+  if (!fs.existsSync(abs) && !path.isAbsolute(file)) {
+    const rootRelative = toAbsolutePath(path.resolve(rootDir, file));
+    if (fs.existsSync(rootRelative)) abs = rootRelative;
+  }
   if (!fs.existsSync(abs)) return null;
+
+  // Compute project-root-relative form from the validated abs so it
+  // matches whatever Lien's indexer stored. Reject paths outside the
+  // root (path.relative would produce a `..`-prefixed traversal).
+  const rel = path.relative(rootDir, abs).replace(/\\/g, '/');
+  if (!rel || rel.startsWith('..')) return null;
+  const filepath = rel as RelativePath;
 
   return { originalCwd, rootDir, filepath, abs };
 }
