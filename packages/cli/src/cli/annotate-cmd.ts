@@ -134,10 +134,22 @@ async function run(file: string): Promise<void> {
     const complexity = computeComplexitySummary(allChunks, filepath);
     const dependentCount = result.dependents.length;
     const uncovered = result.uncoveredProductionDependents;
+    // Dependents' max complexity feeds the blast-radius risk score. The
+    // target file's own complexity (`complexity.max`) is reported
+    // separately on the display line below — different signal.
+    const maxDependentComplexity = result.complexityMetrics.maxComplexity;
 
     if (isTrivial(dependentCount, complexity.warningCount, tests.length)) return;
 
-    emitAnnotation(filepath, result.dependents, tests, complexity, dependentCount, uncovered);
+    emitAnnotation(
+      filepath,
+      result.dependents,
+      tests,
+      complexity,
+      dependentCount,
+      uncovered,
+      maxDependentComplexity,
+    );
   } finally {
     if (needsChdir) process.chdir(originalCwd);
   }
@@ -150,12 +162,18 @@ function emitAnnotation(
   complexity: ComplexitySummary,
   dependentCount: number,
   uncovered: number,
+  maxDependentComplexity: number,
 ): void {
   const risk = computeBlastRadiusRisk({
     dependentCount,
     uncoveredDependents: uncovered,
-    maxDependentComplexity: complexity.max,
-    hasHighComplexityUncovered: uncovered > 0 && complexity.max >= HIGH_COMPLEXITY_THRESHOLD,
+    maxDependentComplexity,
+    // Approximation: any uncovered dependent + at least one high-complexity
+    // dependent in the set. We don't have per-dependent test-coverage joined
+    // with per-dependent complexity here; this proxy errs toward escalating
+    // risk when both conditions are present in the population.
+    hasHighComplexityUncovered:
+      uncovered > 0 && maxDependentComplexity >= HIGH_COMPLEXITY_THRESHOLD,
   });
 
   const lines: string[] = [`Lien impact for ${filepath}:`];
@@ -168,24 +186,6 @@ function emitAnnotation(
   }
 
   console.log(lines.join('\n'));
-}
-
-export function toRelative(
-  file: string,
-  rootDir: AbsolutePath,
-  cwd: AbsolutePath = toAbsolutePath(process.cwd()),
-): RelativePath {
-  if (!file) return '' as RelativePath;
-  // Relative inputs are conventionally process-cwd-relative (POSIX). Only
-  // fall back to rootDir if cwd is somehow empty.
-  const base = cwd || rootDir;
-  const abs = path.isAbsolute(file) ? file : path.resolve(base, file);
-  const rel = path.relative(rootDir, abs).replace(/\\/g, '/');
-  // Edge: file outside the resolved root. Return an empty sentinel — the
-  // caller's `if (!filepath) return` short-circuits downstream, and the
-  // RelativePath brand stays sound (we never return an absolute string).
-  if (rel.startsWith('..')) return '' as RelativePath;
-  return rel as RelativePath;
 }
 
 export function isTrivial(

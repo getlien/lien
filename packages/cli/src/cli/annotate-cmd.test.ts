@@ -3,46 +3,11 @@ import path from 'path';
 import os from 'os';
 import {
   annotateCommand,
-  toRelative,
   isTrivial,
   formatDependents,
   formatTests,
   formatComplexity,
 } from './annotate-cmd.js';
-import { toAbsolutePath } from '../types/paths.js';
-
-describe('toRelative', () => {
-  const root = toAbsolutePath('/repo/root');
-
-  it('resolves a relative input against cwd, not root', () => {
-    // CLI invoked from /repo/root → cwd === root → behavior matches naive form.
-    expect(toRelative('src/foo.ts', root, root)).toBe('src/foo.ts');
-  });
-
-  it('handles a subdir cwd: src/foo.ts means <subdir>/src/foo.ts', () => {
-    // Running `lien annotate src/foo.ts` from /repo/root/packages/cli
-    // should resolve to /repo/root/packages/cli/src/foo.ts → relative
-    // form against the root is packages/cli/src/foo.ts.
-    expect(toRelative('src/foo.ts', root, toAbsolutePath('/repo/root/packages/cli'))).toBe(
-      'packages/cli/src/foo.ts',
-    );
-  });
-
-  it('strips an absolute path that lives under root', () => {
-    expect(toRelative('/repo/root/src/foo.ts', root, root)).toBe('src/foo.ts');
-  });
-
-  it('returns empty sentinel when the resolved path escapes root', () => {
-    // Returning a relative-but-escaping path would violate the
-    // RelativePath brand contract (which guarantees a path under root).
-    // Empty is the explicit "no useful relative form" signal.
-    expect(toRelative('../outside.ts', root, root)).toBe('');
-  });
-
-  it('returns empty for empty input', () => {
-    expect(toRelative('', root, root)).toBe('');
-  });
-});
 
 describe('isTrivial', () => {
   it('is trivial when no deps, no complexity, and tests present', () => {
