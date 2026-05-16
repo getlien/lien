@@ -23,6 +23,17 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/annotate-end.sh",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }
