@@ -68,6 +68,24 @@ npx tsx packages/review/test/harness/capture-pr.ts 539 "$ROOT/stale-duplicate/mo
 npx tsx packages/review/test/harness/capture-pr.ts 541 "$ROOT/untrusted-input-validation/harness-initial.fixture.json" --sha 7cb0149
 ```
 
+## Negative-regression fixtures
+
+These capture real-world false positives the rule produced on a non-bug
+PR. The assertion is `expectEmpty` — the rule must stay quiet on this
+diff. Bundled with the canary so calibration covers both directions
+(must-fire on planted regressions, must-stay-silent on these).
+
+| Rule | PR | Fixture | Why |
+|---|---|---|---|
+| `error-swallowing` | #574 | `error-swallowing/scanall-null-guard-fp` | Early `if (!table) throw` before try/catch was flagged as unguarded deref ([thread](https://github.com/getlien/lien/pull/574#discussion_r3252525960)) |
+
+Regenerate:
+
+```bash
+ROOT=packages/review/test/harness/fixtures
+npx tsx packages/review/test/harness/capture-pr.ts 574 "$ROOT/error-swallowing/scanall-null-guard-fp.fixture.json"
+```
+
 Run the full multi-model sweep:
 
 ```bash
