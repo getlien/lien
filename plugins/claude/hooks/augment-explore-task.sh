@@ -44,6 +44,18 @@ case "$prompt" in
   *mcp__plugin_lien_lien__*) exit 0;;
 esac
 
+# Don't inject the mandate if the repo has no usable Lien index — would
+# point the subagent at tools that return empty for everything and
+# burn calls on dead ends. The LanceDB table dir is the canonical
+# "is this repo indexed?" signal.
+cwd="$(printf '%s' "$input" | jq -r '.cwd // empty')"
+if [ -n "$cwd" ] && [ -d "$cwd" ]; then
+  store="$(cd "$cwd" && lien path --store 2>/dev/null)"
+else
+  store="$(lien path --store 2>/dev/null)"
+fi
+[ -n "$store" ] && [ -d "$store/code_chunks.lance" ] || exit 0
+
 injection='
 
 [Lien] MCP tools are REQUIRED for meaning-based and structural codebase queries in this repo. Use Lien tools as your primary discovery mechanism — grep/glob/Read are fallbacks ONLY for exact-literal lookups (error strings, config keys, TODOs).
