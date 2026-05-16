@@ -10,7 +10,11 @@ import { findDependents, type DependentInfo } from '../mcp/handlers/dependency-a
 import { resolveProjectRoot } from './project-root.js';
 import { type AbsolutePath, type RelativePath, toAbsolutePath } from '../types/paths.js';
 
-const HIGH_COMPLEXITY_THRESHOLD = 15;
+// Complexity threshold lives in @liendev/core (dependency-analyzer's
+// COMPLEXITY_THRESHOLDS.HIGH_COMPLEXITY_DEPENDENT = 10) and surfaces
+// pre-filtered via result.complexityMetrics.highComplexityDependents.
+// Don't define a local threshold — keeps this annotator from drifting
+// from the rest of Lien's risk semantics.
 const MAX_TESTS_LISTED = 2;
 const MAX_DEPS_LISTED = 4;
 
@@ -126,7 +130,19 @@ async function run(file: string): Promise<void> {
     await vectorDB.initialize();
 
     const log = () => undefined;
-    const result = await findDependents(vectorDB, filepath, false, log);
+    // includeAllChunks=true: annotator needs the chunks for test-association
+    // and complexity lookups. The default (false) keeps the MCP path cheap.
+    const result = await findDependents(
+      vectorDB,
+      filepath,
+      false,
+      log,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
     const allChunks = adaptChunkImports(result.allChunks);
 
     const tests =
@@ -138,6 +154,16 @@ async function run(file: string): Promise<void> {
     // target file's own complexity (`complexity.max`) is reported
     // separately on the display line below — different signal.
     const maxDependentComplexity = result.complexityMetrics.maxComplexity;
+    // Strict join: is any high-complexity dependent (per the core's
+    // threshold of 10) actually untested? Avoids the previous proxy that
+    // could escalate risk when uncovered/complex pairs were unrelated.
+    // Uses the core-filtered highComplexityDependents so this code never
+    // drifts from the rest of Lien's risk semantics.
+    const hasHighComplexityUncovered = anyHighComplexityUncovered(
+      result.complexityMetrics.highComplexityDependents,
+      allChunks,
+      rootDir,
+    );
 
     if (isTrivial(dependentCount, complexity.warningCount, tests.length)) return;
 
@@ -149,6 +175,7 @@ async function run(file: string): Promise<void> {
       dependentCount,
       uncovered,
       maxDependentComplexity,
+      hasHighComplexityUncovered,
     );
   } finally {
     if (needsChdir) process.chdir(originalCwd);
@@ -163,17 +190,13 @@ function emitAnnotation(
   dependentCount: number,
   uncovered: number,
   maxDependentComplexity: number,
+  hasHighComplexityUncovered: boolean,
 ): void {
   const risk = computeBlastRadiusRisk({
     dependentCount,
     uncoveredDependents: uncovered,
     maxDependentComplexity,
-    // Approximation: any uncovered dependent + at least one high-complexity
-    // dependent in the set. We don't have per-dependent test-coverage joined
-    // with per-dependent complexity here; this proxy errs toward escalating
-    // risk when both conditions are present in the population.
-    hasHighComplexityUncovered:
-      uncovered > 0 && maxDependentComplexity >= HIGH_COMPLEXITY_THRESHOLD,
+    hasHighComplexityUncovered,
   });
 
   const lines: string[] = [`Lien impact for ${filepath}:`];
@@ -199,6 +222,23 @@ export function isTrivial(
 interface ComplexitySummary {
   max: number;
   warningCount: number;
+}
+
+/**
+ * Returns true when at least one dependent that the core classifies as
+ * high-complexity (>= COMPLEXITY_THRESHOLDS.HIGH_COMPLEXITY_DEPENDENT)
+ * has no test coverage. Performs the strict join the blast-radius risk
+ * model wants: "is a complex blast-radius node actually untested?"
+ */
+function anyHighComplexityUncovered(
+  highComplexityDependents: ReadonlyArray<{ filepath: string }>,
+  allChunks: CodeChunk[],
+  rootDir: string,
+): boolean {
+  if (highComplexityDependents.length === 0) return false;
+  const filepaths = highComplexityDependents.map(d => d.filepath);
+  const testsMap = findTestAssociationsFromChunks(filepaths, allChunks, rootDir);
+  return filepaths.some(p => (testsMap.get(p) ?? []).length === 0);
 }
 
 function computeComplexitySummary(chunks: CodeChunk[], filepath: string): ComplexitySummary {

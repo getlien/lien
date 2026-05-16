@@ -598,6 +598,14 @@ export async function findDependents(
   indexVersion?: number,
   depth: number = 1,
   maxNodes: number = 500,
+  /**
+   * Surface the full normalized chunk set on the result.
+   * Cross-repo callers always get it (used by groupDependentsByRepo);
+   * other callers opt in by passing `true` only if they need the chunks
+   * (e.g., the annotator for test-association + complexity lookups).
+   * Default `false` keeps memory cost down for the common MCP path.
+   */
+  includeAllChunks: boolean = false,
 ): Promise<DependencyAnalysisResult> {
   const normalizePathCached = createPathNormalizer();
   const normalizedTarget = normalizePathCached(filepath);
@@ -646,11 +654,13 @@ export async function findDependents(
   const productionDependentCount = dependents.length - testDependentCount;
   const uncoveredProductionDependents = countUncoveredProductionDependents(dependents, ctx);
 
-  // Surface the full normalized chunk set on the result. Cross-repo callers
-  // need it for groupDependentsByRepo; single-repo callers (e.g. the
-  // post-Read annotator) use it for test-association and complexity
-  // analysis without paying for a second scan.
-  const allChunks = Array.from(allChunksByFile.values()).flat();
+  // Surface the full normalized chunk set only when the caller asks for it.
+  // Cross-repo paths always need it (groupDependentsByRepo); single-repo
+  // callers opt in via the `includeAllChunks` flag. Leaving it `[]` for
+  // the common case avoids allocating a flat array of every indexed chunk
+  // on each MCP get_dependents call.
+  const allChunks =
+    crossRepo || includeAllChunks ? Array.from(allChunksByFile.values()).flat() : [];
 
   return {
     dependents,
