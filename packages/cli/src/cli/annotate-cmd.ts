@@ -32,52 +32,78 @@ export async function annotateCommand(file: string): Promise<void> {
 
 async function run(file: string): Promise<void> {
   // Path-handling contract for this whole flow:
-  //   - `cwd` and `rootDir` are AbsolutePath (process.cwd / path.resolve
-  //     guarantee absolute).
+  //   - `originalCwd` and `rootDir` are AbsolutePath (process.cwd /
+  //     path.resolve guarantee absolute).
   //   - `filepath` is RelativePath — project-root-relative. This is the
   //     form Lien's indexer stores in chunk metadata, so passing the
   //     relative form keeps matching consistent regardless of caller cwd.
   //   - `abs` is AbsolutePath, used only for the on-disk existence check.
-  const cwd: AbsolutePath = toAbsolutePath(process.cwd());
-  const rootDir: AbsolutePath = resolveProjectRoot(cwd);
-  const filepath: RelativePath = toRelative(file, rootDir, cwd);
+  const originalCwd: AbsolutePath = toAbsolutePath(process.cwd());
+  const rootDir: AbsolutePath = resolveProjectRoot(originalCwd);
+  const filepath: RelativePath = toRelative(file, rootDir, originalCwd);
   if (!filepath) return;
 
   // Guard against non-existent paths — findDependents's suffix matching
   // can otherwise return spurious hits for unrelated imports that happen
-  // to share a basename. Resolve relative inputs against cwd, not rootDir,
-  // so `lien annotate src/foo.ts` from a subdir finds <subdir>/src/foo.ts.
+  // to share a basename. Resolve relative inputs against the *original*
+  // cwd, not rootDir, so `lien annotate src/foo.ts` from a subdir still
+  // means <subdir>/src/foo.ts to the user.
   const abs: AbsolutePath = path.isAbsolute(file)
     ? toAbsolutePath(file)
-    : toAbsolutePath(path.resolve(cwd, file));
+    : toAbsolutePath(path.resolve(originalCwd, file));
   if (!fs.existsSync(abs)) return;
 
-  const vectorDB = new VectorDB(rootDir);
-  await vectorDB.initialize();
+  // Align cwd with the project root for the analysis pass. Lien's
+  // internal path normalizers (createPathNormalizer in findDependents,
+  // ComplexityAnalyzer.normalizeFilePath) read process.cwd() as the
+  // workspace root. Today this happens to work because they only strip
+  // the prefix when present and chunks store project-root-relative
+  // paths; aligning cwd makes the contract robust to future internal
+  // changes without threading workspaceRoot through every signature.
+  // Restored in `finally` so test runs don't pollute each other.
+  const needsChdir = originalCwd !== rootDir;
+  if (needsChdir) process.chdir(rootDir);
+  try {
+    const vectorDB = new VectorDB(rootDir);
+    await vectorDB.initialize();
 
-  const log = () => undefined;
-  const result = await findDependents(vectorDB, filepath, false, log);
+    const log = () => undefined;
+    const result = await findDependents(vectorDB, filepath, false, log);
 
-  // LanceDB returns chunks whose `metadata.imports` is an Apache Arrow
-  // Vector — iterable but lacking .some() and other array methods.
-  // findTestAssociationsFromChunks uses .some(), so coerce per-chunk
-  // before handing it off.
-  const allChunks = result.allChunks.map(c => ({
-    ...c,
-    metadata: {
-      ...c.metadata,
-      imports: c.metadata?.imports ? Array.from(c.metadata.imports as Iterable<string>) : [],
-    },
-  })) as unknown as CodeChunk[];
-  const testsMap = findTestAssociationsFromChunks([filepath], allChunks, rootDir);
-  const tests = testsMap.get(filepath) ?? [];
+    // LanceDB returns chunks whose `metadata.imports` is an Apache Arrow
+    // Vector — iterable but lacking .some() and other array methods.
+    // findTestAssociationsFromChunks uses .some(), so coerce per-chunk
+    // before handing it off.
+    const allChunks = result.allChunks.map(c => ({
+      ...c,
+      metadata: {
+        ...c.metadata,
+        imports: c.metadata?.imports ? Array.from(c.metadata.imports as Iterable<string>) : [],
+      },
+    })) as unknown as CodeChunk[];
+    const testsMap = findTestAssociationsFromChunks([filepath], allChunks, rootDir);
+    const tests = testsMap.get(filepath) ?? [];
 
-  const complexity = computeComplexitySummary(allChunks, filepath);
-  const dependentCount = result.dependents.length;
-  const uncovered = result.uncoveredProductionDependents;
+    const complexity = computeComplexitySummary(allChunks, filepath);
+    const dependentCount = result.dependents.length;
+    const uncovered = result.uncoveredProductionDependents;
 
-  if (isTrivial(dependentCount, complexity.warningCount, tests.length)) return;
+    if (isTrivial(dependentCount, complexity.warningCount, tests.length)) return;
 
+    emitAnnotation(filepath, result.dependents, tests, complexity, dependentCount, uncovered);
+  } finally {
+    if (needsChdir) process.chdir(originalCwd);
+  }
+}
+
+function emitAnnotation(
+  filepath: RelativePath,
+  dependents: DependentInfo[],
+  tests: string[],
+  complexity: ComplexitySummary,
+  dependentCount: number,
+  uncovered: number,
+): void {
   const risk = computeBlastRadiusRisk({
     dependentCount,
     uncoveredDependents: uncovered,
@@ -87,7 +113,7 @@ async function run(file: string): Promise<void> {
 
   const lines: string[] = [`Lien impact for ${filepath}:`];
   if (dependentCount > 0) {
-    lines.push(`  • ${formatDependents(result.dependents, risk.level, risk.reasoning)}`);
+    lines.push(`  • ${formatDependents(dependents, risk.level, risk.reasoning)}`);
   }
   lines.push(`  • ${formatTests(tests)}`);
   if (complexity.warningCount > 0) {
