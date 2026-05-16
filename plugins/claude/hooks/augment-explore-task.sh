@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# PreToolUse hook on Task: when the parent launches an Explore-flavor
+# subagent, append a short reminder about Lien's MCP tools to the
+# subagent's prompt. Subagents start fresh and don't inherit parent
+# context, so the prompt is the only channel to nudge them toward Lien
+# tools for codebase exploration.
+#
+# Idempotent — skips when the prompt already references a Lien MCP tool.
+# Disable via LIEN_EXPLORE_INJECT=off.
+#
+# Best-effort: any failure passes the original input through unchanged.
+
+set -u
+
+command -v jq >/dev/null 2>&1 || exit 0
+
+# Env kill switch.
+if [ "${LIEN_EXPLORE_INJECT:-}" = "off" ]; then
+  exit 0
+fi
+
+input="$(cat)"
+tool_name="$(printf '%s' "$input" | jq -r '.tool_name // empty')"
+[ "$tool_name" = "Task" ] || exit 0
+
+subagent="$(printf '%s' "$input" | jq -r '.tool_input.subagent_type // empty')"
+case "$subagent" in
+  Explore|lien:Explore|"project:Explore") ;;
+  *) exit 0 ;;
+esac
+
+prompt="$(printf '%s' "$input" | jq -r '.tool_input.prompt // empty')"
+[ -n "$prompt" ] || exit 0
+
+# Idempotence: if the parent already pointed the subagent at a Lien MCP
+# tool, don't double-instruct.
+case "$prompt" in
+  *mcp__plugin_lien_lien__*) exit 0;;
+esac
+
+injection='
+
+[Lien] You can use these MCP tools during exploration — they are materially faster than grep for meaning-based queries and the right choice when the question is "where is X?" / "how does Y work?" / "what depends on Z?":
+  • mcp__plugin_lien_lien__semantic_search — discovery by meaning
+  • mcp__plugin_lien_lien__list_functions — by-name / pattern lookup, 10× faster than grep for structural queries
+  • mcp__plugin_lien_lien__get_files_context — full context (imports, callers, tests) for a known file
+  • mcp__plugin_lien_lien__get_dependents — impact analysis before reporting completeness
+Phrase semantic_search queries as full questions for best results.'
+
+new_prompt="${prompt}${injection}"
+
+# Echo back the full tool_input with only the prompt mutated. updatedInput
+# replaces the whole object — missing fields would silently break the
+# subagent call.
+printf '%s' "$input" | jq --arg new_prompt "$new_prompt" '
+  {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+      updatedInput: (.tool_input | .prompt = $new_prompt)
+    }
+  }
+'
+
+exit 0

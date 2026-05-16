@@ -1,6 +1,18 @@
 {
   "description": "Lien Read-time impact annotator: surfaces dependents/coverage/complexity as a system reminder when the model reads an indexed file. Suppresses repeats per session for 5 minutes.",
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/augment-explore-task.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Read",
