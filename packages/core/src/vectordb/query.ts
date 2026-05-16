@@ -650,11 +650,22 @@ export async function scanAll(
   try {
     // Get total row count to use as the output limit
     const totalRows = await table.countRows();
+    const limit = Math.max(totalRows, 1000);
 
-    // scanWithFilter now handles the full scan internally
+    // Fast path for the common filterless case: `table.query()` is a direct
+    // scan and runs ~10x faster than routing through `scanWithFilter`'s
+    // zero-vector ANN search (~250ms vs ~2.2s on a 57k-chunk index).
+    // Callers that pass language/pattern still fall through to the filtered
+    // path below.
+    if (!options.language && !options.pattern) {
+      const results = await table.query().limit(limit).toArray();
+      const filtered = (results as unknown as DBRecord[]).filter(isValidRecord);
+      return toUnscoredSearchResults(filtered, limit);
+    }
+
     return await scanWithFilter(table, {
       ...options,
-      limit: Math.max(totalRows, 1000),
+      limit,
     });
   } catch (error) {
     throw wrapError(error, 'Failed to scan all chunks');
