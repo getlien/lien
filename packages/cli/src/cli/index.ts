@@ -10,6 +10,7 @@ import { complexityCommand } from './complexity.js';
 import { configSetCommand, configGetCommand, configListCommand } from './config.js';
 import { pathCommand } from './path-cmd.js';
 import { annotateCommand } from './annotate-cmd.js';
+import { annotateDaemonCommand } from './annotate-daemon-cmd.js';
 
 // Get version from package.json dynamically
 const __filename = fileURLToPath(import.meta.url);
@@ -110,6 +111,15 @@ program
   .command('annotate <file>')
   .description('Print a short impact summary for a single file (for hook annotation)')
   .action(annotateCommand);
+
+program
+  .command('annotate-daemon')
+  .description(
+    'Run the per-repo annotation daemon. Holds an open VectorDB connection and in-memory suppression state so PostToolUse:Read hooks can amortize cold-start cost.',
+  )
+  .option('--detach', 'Spawn detached and exit 0 (daemon orphans to init)')
+  .option('-v, --verbose', 'Log lifecycle events to stderr')
+  .action(annotateDaemonCommand);
 
 program.action(() => {
   program.help();

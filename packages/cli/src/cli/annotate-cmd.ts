@@ -28,13 +28,65 @@ const MAX_DEPS_LISTED = 4;
  */
 export async function annotateCommand(file: string): Promise<void> {
   try {
-    await run(file);
+    const annotation = await annotateWithOwnVectorDB(file);
+    if (annotation) console.log(annotation);
   } catch {
     // Silent — never break the consuming hook.
   }
 }
 
-interface ResolvedPaths {
+/**
+ * One-shot path: resolve paths, initialize a VectorDB, run the annotator,
+ * tear down. Used by the CLI for terminal invocations and as the hook
+ * fall-through when the daemon is unavailable.
+ */
+async function annotateWithOwnVectorDB(file: string): Promise<string | null> {
+  const paths = resolvePaths(file);
+  if (!paths) return null;
+  const { originalCwd, rootDir } = paths;
+
+  const needsChdir = originalCwd !== rootDir;
+  if (needsChdir) process.chdir(rootDir);
+  try {
+    const vectorDB = new VectorDB(rootDir);
+    await vectorDB.initialize();
+    return await runAnnotateOnce(vectorDB, paths);
+  } finally {
+    if (needsChdir) process.chdir(originalCwd);
+  }
+}
+
+/**
+ * Core annotator: given an already-initialized VectorDB and resolved paths,
+ * produce the annotation string (or `null` for trivial impact). Does not
+ * touch process.cwd, does not write to stdout — caller decides emission.
+ *
+ * The daemon calls this directly with a shared VectorDB; one-shot CLI calls
+ * it via `annotateWithOwnVectorDB`. Caller is responsible for aligning cwd
+ * with the project root before calling — internal normalizers in
+ * findDependents / ComplexityAnalyzer read process.cwd().
+ */
+export async function runAnnotateOnce(
+  vectorDB: VectorDB,
+  paths: ResolvedPaths,
+): Promise<string | null> {
+  try {
+    return await run(vectorDB, paths);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve `file` (a CLI arg or hook payload) against the given `cwd` and
+ * produce the same `ResolvedPaths` the one-shot path uses. Exported so the
+ * daemon can prepare the paths without owning a VectorDB.
+ */
+export function resolvePathsForFile(file: string, cwd: string): ResolvedPaths | null {
+  return resolvePathsWithCwd(file, toAbsolutePath(cwd));
+}
+
+export interface ResolvedPaths {
   originalCwd: AbsolutePath;
   rootDir: AbsolutePath;
   filepath: RelativePath;
@@ -57,8 +109,11 @@ interface ResolvedPaths {
  *     from a subdir means <subdir>/src/foo.ts to the user.
  */
 function resolvePaths(file: string): ResolvedPaths | null {
+  return resolvePathsWithCwd(file, toAbsolutePath(process.cwd()));
+}
+
+function resolvePathsWithCwd(file: string, originalCwd: AbsolutePath): ResolvedPaths | null {
   if (!file) return null;
-  const originalCwd = toAbsolutePath(process.cwd());
   const rootDir = resolveProjectRoot(originalCwd);
 
   // Resolve to an absolute path that actually exists on disk. POSIX
@@ -110,79 +165,58 @@ function adaptChunkImports(chunks: DependencyAnalysisChunk[]): CodeChunk[] {
 // signature honest without leaking the SearchResult import here.
 type DependencyAnalysisChunk = Awaited<ReturnType<typeof findDependents>>['allChunks'][number];
 
-async function run(file: string): Promise<void> {
-  const paths = resolvePaths(file);
-  if (!paths) return;
-  const { originalCwd, rootDir, filepath } = paths;
+async function run(vectorDB: VectorDB, paths: ResolvedPaths): Promise<string | null> {
+  const { rootDir, filepath } = paths;
+  const log = () => undefined;
+  // includeAllChunks=true: annotator needs the chunks for test-association
+  // and complexity lookups. The default (false) keeps the MCP path cheap.
+  const result = await findDependents(
+    vectorDB,
+    filepath,
+    false,
+    log,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    true,
+  );
+  const allChunks = adaptChunkImports(result.allChunks);
 
-  // Align cwd with the project root for the analysis pass. Lien's
-  // internal path normalizers (createPathNormalizer in findDependents,
-  // ComplexityAnalyzer.normalizeFilePath) read process.cwd() as the
-  // workspace root. Today this happens to work because they only strip
-  // the prefix when present and chunks store project-root-relative
-  // paths; aligning cwd makes the contract robust to future internal
-  // changes without threading workspaceRoot through every signature.
-  // Restored in `finally` so test runs don't pollute each other.
-  const needsChdir = originalCwd !== rootDir;
-  if (needsChdir) process.chdir(rootDir);
-  try {
-    const vectorDB = new VectorDB(rootDir);
-    await vectorDB.initialize();
+  const tests = findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
+  const complexity = computeComplexitySummary(allChunks, filepath);
+  const dependentCount = result.dependents.length;
+  const uncovered = result.uncoveredProductionDependents;
+  // Dependents' max complexity feeds the blast-radius risk score. The
+  // target file's own complexity (`complexity.max`) is reported
+  // separately on the display line below — different signal.
+  const maxDependentComplexity = result.complexityMetrics.maxComplexity;
+  // Strict join: is any high-complexity dependent (per the core's
+  // threshold of 10) actually untested? Avoids the previous proxy that
+  // could escalate risk when uncovered/complex pairs were unrelated.
+  // Uses the core-filtered highComplexityDependents so this code never
+  // drifts from the rest of Lien's risk semantics.
+  const hasHighComplexityUncovered = anyHighComplexityUncovered(
+    result.complexityMetrics.highComplexityDependents,
+    allChunks,
+    rootDir,
+  );
 
-    const log = () => undefined;
-    // includeAllChunks=true: annotator needs the chunks for test-association
-    // and complexity lookups. The default (false) keeps the MCP path cheap.
-    const result = await findDependents(
-      vectorDB,
-      filepath,
-      false,
-      log,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      true,
-    );
-    const allChunks = adaptChunkImports(result.allChunks);
+  if (isTrivial(dependentCount, complexity.warningCount, tests.length)) return null;
 
-    const tests =
-      findTestAssociationsFromChunks([filepath], allChunks, rootDir).get(filepath) ?? [];
-    const complexity = computeComplexitySummary(allChunks, filepath);
-    const dependentCount = result.dependents.length;
-    const uncovered = result.uncoveredProductionDependents;
-    // Dependents' max complexity feeds the blast-radius risk score. The
-    // target file's own complexity (`complexity.max`) is reported
-    // separately on the display line below — different signal.
-    const maxDependentComplexity = result.complexityMetrics.maxComplexity;
-    // Strict join: is any high-complexity dependent (per the core's
-    // threshold of 10) actually untested? Avoids the previous proxy that
-    // could escalate risk when uncovered/complex pairs were unrelated.
-    // Uses the core-filtered highComplexityDependents so this code never
-    // drifts from the rest of Lien's risk semantics.
-    const hasHighComplexityUncovered = anyHighComplexityUncovered(
-      result.complexityMetrics.highComplexityDependents,
-      allChunks,
-      rootDir,
-    );
-
-    if (isTrivial(dependentCount, complexity.warningCount, tests.length)) return;
-
-    emitAnnotation(
-      filepath,
-      result.dependents,
-      tests,
-      complexity,
-      dependentCount,
-      uncovered,
-      maxDependentComplexity,
-      hasHighComplexityUncovered,
-    );
-  } finally {
-    if (needsChdir) process.chdir(originalCwd);
-  }
+  return formatAnnotation(
+    filepath,
+    result.dependents,
+    tests,
+    complexity,
+    dependentCount,
+    uncovered,
+    maxDependentComplexity,
+    hasHighComplexityUncovered,
+  );
 }
 
-function emitAnnotation(
+function formatAnnotation(
   filepath: RelativePath,
   dependents: DependentInfo[],
   tests: string[],
@@ -191,7 +225,7 @@ function emitAnnotation(
   uncovered: number,
   maxDependentComplexity: number,
   hasHighComplexityUncovered: boolean,
-): void {
+): string {
   const risk = computeBlastRadiusRisk({
     dependentCount,
     uncoveredDependents: uncovered,
@@ -208,7 +242,7 @@ function emitAnnotation(
     lines.push(`  • ${formatComplexity(complexity)}`);
   }
 
-  console.log(lines.join('\n'));
+  return lines.join('\n');
 }
 
 export function isTrivial(

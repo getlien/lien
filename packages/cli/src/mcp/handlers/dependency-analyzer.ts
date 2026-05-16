@@ -53,20 +53,38 @@ type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
  * Keyed by indexVersion — when the index is rebuilt, the version changes
  * and the cache is invalidated automatically.
  */
-let scanCache: {
-  indexVersion: number;
-  crossRepo: boolean;
+type ScanResult = {
   importIndex: Map<string, SearchResult[]>;
   allChunksByFile: Map<string, SearchResult[]>;
   totalChunks: number;
   hitLimit: boolean;
+};
+
+let scanCache:
+  | (ScanResult & {
+      indexVersion: number;
+      crossRepo: boolean;
+    })
+  | null = null;
+
+/**
+ * Single-flight: when the cache is cold and multiple callers race to rebuild,
+ * they share one in-flight scan. Matters in the annotate-daemon (concurrent
+ * connections); harmless in the per-call CLI/MCP paths.
+ */
+let scanInFlight: {
+  indexVersion: number | undefined;
+  crossRepo: boolean;
+  promise: Promise<ScanResult>;
 } | null = null;
 
 /**
- * Clear the dependency scan cache. Exported for testing.
+ * Clear the dependency scan cache. Called from tests and from the
+ * annotate-daemon on `.lien-index-version` change.
  */
 export function clearDependencyCache(): void {
   scanCache = null;
+  scanInFlight = null;
 }
 
 /**
@@ -515,12 +533,7 @@ async function getOrScanChunks(
   log: (message: string, level?: 'warning') => void,
   normalizePathCached: (path: string) => string,
   indexVersion?: number,
-): Promise<{
-  importIndex: Map<string, SearchResult[]>;
-  allChunksByFile: Map<string, SearchResult[]>;
-  totalChunks: number;
-  hitLimit: boolean;
-}> {
+): Promise<ScanResult> {
   if (
     indexVersion !== undefined &&
     scanCache !== null &&
@@ -531,13 +544,35 @@ async function getOrScanChunks(
     return scanCache;
   }
 
-  const scanResult = await scanChunksPaginated(vectorDB, crossRepo, log, normalizePathCached);
-
-  if (indexVersion !== undefined) {
-    scanCache = { indexVersion, crossRepo, ...scanResult };
+  // Single-flight: if another caller is already rebuilding the same
+  // (indexVersion, crossRepo) shape, await the same promise. Avoids
+  // duplicate full scans on cache miss under daemon concurrency.
+  if (
+    scanInFlight !== null &&
+    scanInFlight.indexVersion === indexVersion &&
+    scanInFlight.crossRepo === crossRepo
+  ) {
+    return scanInFlight.promise;
   }
-  log(`Scanned ${scanResult.totalChunks} chunks for imports...`);
-  return scanResult;
+
+  const promise = (async () => {
+    const scanResult = await scanChunksPaginated(vectorDB, crossRepo, log, normalizePathCached);
+    if (indexVersion !== undefined) {
+      scanCache = { indexVersion, crossRepo, ...scanResult };
+    }
+    log(`Scanned ${scanResult.totalChunks} chunks for imports...`);
+    return scanResult;
+  })();
+  scanInFlight = { indexVersion, crossRepo, promise };
+  try {
+    return await promise;
+  } finally {
+    // Clear only if still pointing at our promise — a later cache invalidation
+    // may have replaced it.
+    if (scanInFlight?.promise === promise) {
+      scanInFlight = null;
+    }
+  }
 }
 
 /**
