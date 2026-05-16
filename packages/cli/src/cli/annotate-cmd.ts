@@ -8,6 +8,7 @@ import {
 } from '@liendev/parser';
 import { findDependents, type DependentInfo } from '../mcp/handlers/dependency-analyzer.js';
 import { resolveProjectRoot } from './project-root.js';
+import { type AbsolutePath, type RelativePath, toAbsolutePath } from '../types/paths.js';
 
 const HIGH_COMPLEXITY_THRESHOLD = 15;
 const MAX_TESTS_LISTED = 2;
@@ -30,16 +31,25 @@ export async function annotateCommand(file: string): Promise<void> {
 }
 
 async function run(file: string): Promise<void> {
-  const cwd = process.cwd();
-  const rootDir = resolveProjectRoot(cwd);
-  const filepath = toRelative(file, rootDir, cwd);
+  // Path-handling contract for this whole flow:
+  //   - `cwd` and `rootDir` are AbsolutePath (process.cwd / path.resolve
+  //     guarantee absolute).
+  //   - `filepath` is RelativePath — project-root-relative. This is the
+  //     form Lien's indexer stores in chunk metadata, so passing the
+  //     relative form keeps matching consistent regardless of caller cwd.
+  //   - `abs` is AbsolutePath, used only for the on-disk existence check.
+  const cwd: AbsolutePath = toAbsolutePath(process.cwd());
+  const rootDir: AbsolutePath = resolveProjectRoot(cwd);
+  const filepath: RelativePath = toRelative(file, rootDir, cwd);
   if (!filepath) return;
 
   // Guard against non-existent paths — findDependents's suffix matching
   // can otherwise return spurious hits for unrelated imports that happen
   // to share a basename. Resolve relative inputs against cwd, not rootDir,
   // so `lien annotate src/foo.ts` from a subdir finds <subdir>/src/foo.ts.
-  const abs = path.isAbsolute(file) ? file : path.resolve(cwd, file);
+  const abs: AbsolutePath = path.isAbsolute(file)
+    ? toAbsolutePath(file)
+    : toAbsolutePath(path.resolve(cwd, file));
   if (!fs.existsSync(abs)) return;
 
   const vectorDB = new VectorDB(rootDir);
@@ -87,16 +97,22 @@ async function run(file: string): Promise<void> {
   console.log(lines.join('\n'));
 }
 
-export function toRelative(file: string, rootDir: string, cwd: string = process.cwd()): string {
-  if (!file) return '';
+export function toRelative(
+  file: string,
+  rootDir: AbsolutePath,
+  cwd: AbsolutePath = toAbsolutePath(process.cwd()),
+): RelativePath {
+  if (!file) return '' as RelativePath;
   // Relative inputs are conventionally process-cwd-relative (POSIX). Only
   // fall back to rootDir if cwd is somehow empty.
   const base = cwd || rootDir;
   const abs = path.isAbsolute(file) ? file : path.resolve(base, file);
   const rel = path.relative(rootDir, abs).replace(/\\/g, '/');
-  // Edge: file outside the resolved root. Hand back the input unchanged
-  // and let findDependents come up empty — silent exit downstream.
-  return rel.startsWith('..') ? file : rel;
+  // Edge: file outside the resolved root. Return an empty sentinel — the
+  // caller's `if (!filepath) return` short-circuits downstream, and the
+  // RelativePath brand stays sound (we never return an absolute string).
+  if (rel.startsWith('..')) return '' as RelativePath;
+  return rel as RelativePath;
 }
 
 export function isTrivial(
