@@ -46,12 +46,15 @@ esac
 
 injection='
 
-[Lien] You can use these MCP tools during exploration — they are materially faster than grep for meaning-based queries and the right choice when the question is "where is X?" / "how does Y work?" / "what depends on Z?":
-  • mcp__plugin_lien_lien__semantic_search — discovery by meaning
-  • mcp__plugin_lien_lien__list_functions — by-name / pattern lookup, 10× faster than grep for structural queries
-  • mcp__plugin_lien_lien__get_files_context — full context (imports, callers, tests) for a known file
-  • mcp__plugin_lien_lien__get_dependents — impact analysis before reporting completeness
-Phrase semantic_search queries as full questions for best results.'
+[Lien] MCP tools are REQUIRED for meaning-based and structural codebase queries in this repo. Use Lien tools as your primary discovery mechanism — grep/glob/Read are fallbacks ONLY for exact-literal lookups (error strings, config keys, TODOs).
+
+Required tools:
+  • mcp__plugin_lien_lien__semantic_search — REQUIRED for "where is X?" / "how does Y work?" / "what depends on Z?". Phrase queries as full questions.
+  • mcp__plugin_lien_lien__list_functions — REQUIRED for "find all X" / pattern-based structural lookup (10× faster than grep).
+  • mcp__plugin_lien_lien__get_files_context — REQUIRED before reporting on any file you exploratively read (returns imports, callers, test associations).
+  • mcp__plugin_lien_lien__get_dependents — REQUIRED before reporting an exported symbol change is "safe" or complete.
+
+Grep/glob are only acceptable when the query is for an exact literal that semantic search cannot answer.'
 
 new_prompt="${prompt}${injection}"
 
