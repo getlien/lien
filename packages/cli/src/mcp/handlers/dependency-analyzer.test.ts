@@ -7,16 +7,6 @@ import {
 } from './dependency-analyzer.js';
 
 /**
- * Helper retained for source diff hygiene against the pre-`scanAll` test suite.
- * Now `vectorDB.scanAll()` returns a plain `Promise<SearchResult[]>`, so this
- * is a passthrough — but keeping it named lets test setup read identically
- * to the pre-refactor version.
- */
-function mockAsyncGenerator<T>(items: T[]): T[] {
-  return items;
-}
-
-/**
  * Helper to create a mock SearchResult chunk with sensible defaults.
  */
 function createChunk(
@@ -69,12 +59,10 @@ describe('findDependents', () => {
 
   describe('direct dependencies via imports array', () => {
     it('should find a file that imports the target via imports array', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
-          createChunk('src/target.ts', { exports: ['doStuff'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+        createChunk('src/target.ts', { exports: ['doStuff'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -83,15 +71,13 @@ describe('findDependents', () => {
     });
 
     it('should not include the target file itself as a dependent', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', {
-            imports: ['src/other.ts'],
-            exports: ['foo'],
-          }),
-          createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', {
+          imports: ['src/other.ts'],
+          exports: ['foo'],
+        }),
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -103,14 +89,12 @@ describe('findDependents', () => {
 
   describe('importedSymbols-based dependencies', () => {
     it('should find a file via importedSymbols keys', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/consumer.ts', {
-            importedSymbols: { './target': ['Foo', 'Bar'] },
-          }),
-          createChunk('src/target.ts', { exports: ['Foo', 'Bar'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/consumer.ts', {
+          importedSymbols: { './target': ['Foo', 'Bar'] },
+        }),
+        createChunk('src/target.ts', { exports: ['Foo', 'Bar'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -121,12 +105,10 @@ describe('findDependents', () => {
 
   describe('fuzzy path matching', () => {
     it('should match relative imports like ./utils to src/utils.ts', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/consumer.ts', { imports: ['./utils'] }),
-          createChunk('src/utils.ts', { exports: ['helper'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/consumer.ts', { imports: ['./utils'] }),
+        createChunk('src/utils.ts', { exports: ['helper'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/utils.ts', false, mockLog);
 
@@ -140,20 +122,18 @@ describe('findDependents', () => {
       // target.ts exports Foo
       // index.ts imports from target.ts and re-exports Foo
       // consumer.ts imports from index.ts
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['Foo'] }),
-          createChunk('src/index.ts', {
-            imports: ['src/target.ts'],
-            importedSymbols: { 'src/target': ['Foo'] },
-            exports: ['Foo'],
-          }),
-          createChunk('src/consumer.ts', {
-            imports: ['src/index.ts'],
-            importedSymbols: { 'src/index': ['Foo'] },
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['Foo'] }),
+        createChunk('src/index.ts', {
+          imports: ['src/target.ts'],
+          importedSymbols: { 'src/target': ['Foo'] },
+          exports: ['Foo'],
+        }),
+        createChunk('src/consumer.ts', {
+          imports: ['src/index.ts'],
+          importedSymbols: { 'src/index': ['Foo'] },
+        }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -165,27 +145,25 @@ describe('findDependents', () => {
 
   describe('symbol-level search', () => {
     it('should only return files that import the specific symbol', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['Foo', 'Bar'] }),
-          createChunk('src/uses-foo.ts', {
-            imports: ['src/target.ts'],
-            importedSymbols: { 'src/target': ['Foo'] },
-            callSites: [{ symbol: 'Foo', line: 5 }],
-            symbolName: 'useFoo',
-            startLine: 1,
-            endLine: 10,
-          }),
-          createChunk('src/uses-bar.ts', {
-            imports: ['src/target.ts'],
-            importedSymbols: { 'src/target': ['Bar'] },
-            callSites: [{ symbol: 'Bar', line: 8 }],
-            symbolName: 'useBar',
-            startLine: 1,
-            endLine: 10,
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['Foo', 'Bar'] }),
+        createChunk('src/uses-foo.ts', {
+          imports: ['src/target.ts'],
+          importedSymbols: { 'src/target': ['Foo'] },
+          callSites: [{ symbol: 'Foo', line: 5 }],
+          symbolName: 'useFoo',
+          startLine: 1,
+          endLine: 10,
+        }),
+        createChunk('src/uses-bar.ts', {
+          imports: ['src/target.ts'],
+          importedSymbols: { 'src/target': ['Bar'] },
+          callSites: [{ symbol: 'Bar', line: 8 }],
+          symbolName: 'useBar',
+          startLine: 1,
+          endLine: 10,
+        }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog, 'Foo');
 
@@ -207,9 +185,10 @@ describe('findDependents', () => {
       chunk.content =
         'function handleRequest() {\n  const data = prepare();\n  doWork(data);\n  return data;\n}';
 
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([createChunk('src/target.ts', { exports: ['doWork'] }), chunk]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['doWork'] }),
+        chunk,
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog, 'doWork');
 
@@ -225,15 +204,13 @@ describe('findDependents', () => {
 
   describe('symbol validation warning', () => {
     it('should log a warning when target does not export the symbol', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['Foo'] }),
-          createChunk('src/consumer.ts', {
-            imports: ['src/target.ts'],
-            importedSymbols: { 'src/target': ['Bar'] },
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['Foo'] }),
+        createChunk('src/consumer.ts', {
+          imports: ['src/target.ts'],
+          importedSymbols: { 'src/target': ['Bar'] },
+        }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog, 'Bar');
 
@@ -249,25 +226,23 @@ describe('findDependents', () => {
 
   describe('complexity metrics', () => {
     it('should calculate correct file and overall complexity metrics', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['util'] }),
-          createChunk('src/complex-a.ts', {
-            imports: ['src/target.ts'],
-            complexity: 12,
-          }),
-          createChunk('src/complex-a.ts', {
-            imports: ['src/target.ts'],
-            complexity: 8,
-            startLine: 20,
-            endLine: 30,
-          }),
-          createChunk('src/simple-b.ts', {
-            imports: ['src/target.ts'],
-            complexity: 3,
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['util'] }),
+        createChunk('src/complex-a.ts', {
+          imports: ['src/target.ts'],
+          complexity: 12,
+        }),
+        createChunk('src/complex-a.ts', {
+          imports: ['src/target.ts'],
+          complexity: 8,
+          startLine: 20,
+          endLine: 30,
+        }),
+        createChunk('src/simple-b.ts', {
+          imports: ['src/target.ts'],
+          complexity: 3,
+        }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -286,12 +261,10 @@ describe('findDependents', () => {
     });
 
     it('should return zero metrics when no chunks have complexity data', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['util'] }),
-          createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['util'] }),
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -304,14 +277,12 @@ describe('findDependents', () => {
 
   describe('production vs test split', () => {
     it('should correctly identify test files and split counts', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['util'] }),
-          createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
-          createChunk('src/__tests__/consumer.test.ts', { imports: ['src/target.ts'] }),
-          createChunk('test/integration.ts', { imports: ['src/target.ts'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['util'] }),
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+        createChunk('src/__tests__/consumer.test.ts', { imports: ['src/target.ts'] }),
+        createChunk('test/integration.ts', { imports: ['src/target.ts'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -323,14 +294,12 @@ describe('findDependents', () => {
 
   describe('sort order', () => {
     it('should sort production files before test files', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['util'] }),
-          createChunk('src/__tests__/a.test.ts', { imports: ['src/target.ts'] }),
-          createChunk('src/prod-consumer.ts', { imports: ['src/target.ts'] }),
-          createChunk('test/b.spec.ts', { imports: ['src/target.ts'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['util'] }),
+        createChunk('src/__tests__/a.test.ts', { imports: ['src/target.ts'] }),
+        createChunk('src/prod-consumer.ts', { imports: ['src/target.ts'] }),
+        createChunk('test/b.spec.ts', { imports: ['src/target.ts'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -346,12 +315,10 @@ describe('findDependents', () => {
 
   describe('hitLimit', () => {
     it('should set hitLimit to false for single-repo paginated scanning', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['foo'] }),
-          createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['foo'] }),
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -361,12 +328,10 @@ describe('findDependents', () => {
 
   describe('no dependents', () => {
     it('should return empty dependents with low-risk metrics when nothing imports target', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['foo'] }),
-          createChunk('src/unrelated.ts', { imports: ['src/other.ts'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['foo'] }),
+        createChunk('src/unrelated.ts', { imports: ['src/other.ts'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -379,18 +344,16 @@ describe('findDependents', () => {
 
   describe('circular dependency chains', () => {
     it('should handle A -> B -> A without infinite loops', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/a.ts', {
-            imports: ['src/b.ts'],
-            exports: ['fnA'],
-          }),
-          createChunk('src/b.ts', {
-            imports: ['src/a.ts'],
-            exports: ['fnB'],
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/a.ts', {
+          imports: ['src/b.ts'],
+          exports: ['fnA'],
+        }),
+        createChunk('src/b.ts', {
+          imports: ['src/a.ts'],
+          exports: ['fnB'],
+        }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/a.ts', false, mockLog);
 
@@ -403,18 +366,16 @@ describe('findDependents', () => {
       // A <- B, B <- A cycle (via importedSymbols so B isn't flagged as a re-exporter).
       // From A, depth 1 finds B; depth 2 would revisit A via B's importer list —
       // the walk must exclude the original target.
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/a.ts', {
-            importedSymbols: { 'src/b': ['fnB'] },
-            exports: ['fnA'],
-          }),
-          createChunk('src/b.ts', {
-            importedSymbols: { 'src/a': ['fnA'] },
-            exports: ['fnB'],
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/a.ts', {
+          importedSymbols: { 'src/b': ['fnB'] },
+          exports: ['fnA'],
+        }),
+        createChunk('src/b.ts', {
+          importedSymbols: { 'src/a': ['fnA'] },
+          exports: ['fnB'],
+        }),
+      ]);
 
       const result = await findDependents(
         mockDB as any,
@@ -439,23 +400,21 @@ describe('findDependents', () => {
     it('should not treat a same-basename file in another package as a dependent', async () => {
       // Simulate what the indexer now stores: resolved workspace-relative
       // paths in importedSymbols keys.
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          // The query target — no dependents in this test setup.
-          createChunk('packages/cli/src/mcp/handlers/dependency-analyzer.ts', {
-            exports: ['findDependents'],
-          }),
-          // A different file with the SAME basename in a different package.
-          createChunk('packages/parser/src/dependency-analyzer.ts', {
-            exports: ['chunkImportsFrom'],
-          }),
-          // Parser-side consumer imports the PARSER's dependency-analyzer.
-          // Its importedSymbols key is now a resolved workspace-relative path.
-          createChunk('packages/parser/src/ast/chunker.ts', {
-            importedSymbols: { 'packages/parser/src/dependency-analyzer': ['chunkImportsFrom'] },
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        // The query target — no dependents in this test setup.
+        createChunk('packages/cli/src/mcp/handlers/dependency-analyzer.ts', {
+          exports: ['findDependents'],
+        }),
+        // A different file with the SAME basename in a different package.
+        createChunk('packages/parser/src/dependency-analyzer.ts', {
+          exports: ['chunkImportsFrom'],
+        }),
+        // Parser-side consumer imports the PARSER's dependency-analyzer.
+        // Its importedSymbols key is now a resolved workspace-relative path.
+        createChunk('packages/parser/src/ast/chunker.ts', {
+          importedSymbols: { 'packages/parser/src/dependency-analyzer': ['chunkImportsFrom'] },
+        }),
+      ]);
 
       const result = await findDependents(
         mockDB as any,
@@ -476,23 +435,21 @@ describe('findDependents', () => {
     // all was flagged as a re-exporter of everything the target exported.
     // Then chains through that false re-exporter polluted depth-1 results.
     it('should not treat "imports target + exports unrelated" as a re-exporter', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          // a.ts — the target
-          createChunk('src/a.ts', { exports: ['fnA'] }),
-          // b.ts — imports fnA from a, exports fnB (NOT a re-export of fnA)
-          createChunk('src/b.ts', {
-            imports: ['src/a.ts'],
-            importedSymbols: { 'src/a': ['fnA'] },
-            exports: ['fnB'],
-          }),
-          // c.ts — imports fnB from b. Must NOT be a transitive dependent of a.
-          createChunk('src/c.ts', {
-            imports: ['src/b.ts'],
-            importedSymbols: { 'src/b': ['fnB'] },
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        // a.ts — the target
+        createChunk('src/a.ts', { exports: ['fnA'] }),
+        // b.ts — imports fnA from a, exports fnB (NOT a re-export of fnA)
+        createChunk('src/b.ts', {
+          imports: ['src/a.ts'],
+          importedSymbols: { 'src/a': ['fnA'] },
+          exports: ['fnB'],
+        }),
+        // c.ts — imports fnB from b. Must NOT be a transitive dependent of a.
+        createChunk('src/c.ts', {
+          imports: ['src/b.ts'],
+          importedSymbols: { 'src/b': ['fnB'] },
+        }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/a.ts', false, mockLog);
 
@@ -509,18 +466,16 @@ describe('findDependents', () => {
     // re-export sentinel — importedSymbols is the authoritative signal.
 
     it('should stay at depth 1 by default (backwards compatible)', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/a.ts', { exports: ['fnA'] }),
-          createChunk('src/b.ts', {
-            importedSymbols: { 'src/a': ['fnA'] },
-            exports: ['fnB'],
-          }),
-          createChunk('src/c.ts', {
-            importedSymbols: { 'src/b': ['fnB'] },
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/a.ts', { exports: ['fnA'] }),
+        createChunk('src/b.ts', {
+          importedSymbols: { 'src/a': ['fnA'] },
+          exports: ['fnB'],
+        }),
+        createChunk('src/c.ts', {
+          importedSymbols: { 'src/b': ['fnB'] },
+        }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/a.ts', false, mockLog);
 
@@ -530,18 +485,16 @@ describe('findDependents', () => {
     });
 
     it('should discover depth-2 dependents and tag them with hops=2', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/a.ts', { exports: ['fnA'] }),
-          createChunk('src/b.ts', {
-            importedSymbols: { 'src/a': ['fnA'] },
-            exports: ['fnB'],
-          }),
-          createChunk('src/c.ts', {
-            importedSymbols: { 'src/b': ['fnB'] },
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/a.ts', { exports: ['fnA'] }),
+        createChunk('src/b.ts', {
+          importedSymbols: { 'src/a': ['fnA'] },
+          exports: ['fnB'],
+        }),
+        createChunk('src/c.ts', {
+          importedSymbols: { 'src/b': ['fnB'] },
+        }),
+      ]);
 
       const result = await findDependents(
         mockDB as any,
@@ -560,22 +513,20 @@ describe('findDependents', () => {
     });
 
     it('should discover depth-3 dependents', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/a.ts', { exports: ['fnA'] }),
-          createChunk('src/b.ts', {
-            importedSymbols: { 'src/a': ['fnA'] },
-            exports: ['fnB'],
-          }),
-          createChunk('src/c.ts', {
-            importedSymbols: { 'src/b': ['fnB'] },
-            exports: ['fnC'],
-          }),
-          createChunk('src/d.ts', {
-            importedSymbols: { 'src/c': ['fnC'] },
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/a.ts', { exports: ['fnA'] }),
+        createChunk('src/b.ts', {
+          importedSymbols: { 'src/a': ['fnA'] },
+          exports: ['fnB'],
+        }),
+        createChunk('src/c.ts', {
+          importedSymbols: { 'src/b': ['fnB'] },
+          exports: ['fnC'],
+        }),
+        createChunk('src/d.ts', {
+          importedSymbols: { 'src/c': ['fnC'] },
+        }),
+      ]);
 
       const result = await findDependents(
         mockDB as any,
@@ -595,22 +546,20 @@ describe('findDependents', () => {
 
     it('should record the minimum hop for diamond-shaped graphs', async () => {
       // A <- B (hop 1), A <- C (hop 1), D imports both B and C (hop 2 via either).
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/a.ts', { exports: ['fnA'] }),
-          createChunk('src/b.ts', {
-            importedSymbols: { 'src/a': ['fnA'] },
-            exports: ['fnB'],
-          }),
-          createChunk('src/c.ts', {
-            importedSymbols: { 'src/a': ['fnA'] },
-            exports: ['fnC'],
-          }),
-          createChunk('src/d.ts', {
-            importedSymbols: { 'src/b': ['fnB'], 'src/c': ['fnC'] },
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/a.ts', { exports: ['fnA'] }),
+        createChunk('src/b.ts', {
+          importedSymbols: { 'src/a': ['fnA'] },
+          exports: ['fnB'],
+        }),
+        createChunk('src/c.ts', {
+          importedSymbols: { 'src/a': ['fnA'] },
+          exports: ['fnC'],
+        }),
+        createChunk('src/d.ts', {
+          importedSymbols: { 'src/b': ['fnB'], 'src/c': ['fnC'] },
+        }),
+      ]);
 
       const result = await findDependents(
         mockDB as any,
@@ -627,22 +576,20 @@ describe('findDependents', () => {
     });
 
     it('should truncate when maxNodes is hit and set truncated=true', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/a.ts', { exports: ['fnA'] }),
-          createChunk('src/b.ts', {
-            importedSymbols: { 'src/a': ['fnA'] },
-            exports: ['fnB'],
-          }),
-          createChunk('src/c.ts', {
-            importedSymbols: { 'src/b': ['fnB'] },
-            exports: ['fnC'],
-          }),
-          createChunk('src/d.ts', {
-            importedSymbols: { 'src/c': ['fnC'] },
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/a.ts', { exports: ['fnA'] }),
+        createChunk('src/b.ts', {
+          importedSymbols: { 'src/a': ['fnA'] },
+          exports: ['fnB'],
+        }),
+        createChunk('src/c.ts', {
+          importedSymbols: { 'src/b': ['fnB'] },
+          exports: ['fnC'],
+        }),
+        createChunk('src/d.ts', {
+          importedSymbols: { 'src/c': ['fnC'] },
+        }),
+      ]);
 
       const result = await findDependents(
         mockDB as any,
@@ -660,18 +607,16 @@ describe('findDependents', () => {
     });
 
     it('should ignore depth > 1 for symbol-level queries', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/a.ts', { exports: ['fnA'] }),
-          createChunk('src/b.ts', {
-            importedSymbols: { 'src/a': ['fnA'] },
-            exports: ['fnB'],
-          }),
-          createChunk('src/c.ts', {
-            importedSymbols: { 'src/b': ['fnB'] },
-          }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/a.ts', { exports: ['fnA'] }),
+        createChunk('src/b.ts', {
+          importedSymbols: { 'src/a': ['fnA'] },
+          exports: ['fnB'],
+        }),
+        createChunk('src/c.ts', {
+          importedSymbols: { 'src/b': ['fnB'] },
+        }),
+      ]);
 
       const result = await findDependents(
         mockDB as any,
@@ -694,14 +639,12 @@ describe('findDependents', () => {
 
   describe('uncovered production dependents', () => {
     it('should count production dependents with no importing test file', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['util'] }),
-          createChunk('src/covered.ts', { imports: ['src/target.ts'], exports: ['foo'] }),
-          createChunk('src/covered.test.ts', { imports: ['src/covered.ts'] }),
-          createChunk('src/uncovered.ts', { imports: ['src/target.ts'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['util'] }),
+        createChunk('src/covered.ts', { imports: ['src/target.ts'], exports: ['foo'] }),
+        createChunk('src/covered.test.ts', { imports: ['src/covered.ts'] }),
+        createChunk('src/uncovered.ts', { imports: ['src/target.ts'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -710,13 +653,11 @@ describe('findDependents', () => {
     });
 
     it('should treat production dependents as covered if any test file imports them', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['util'] }),
-          createChunk('src/a.ts', { imports: ['src/target.ts'], exports: ['a'] }),
-          createChunk('src/a.test.ts', { imports: ['src/a.ts'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['util'] }),
+        createChunk('src/a.ts', { imports: ['src/target.ts'], exports: ['a'] }),
+        createChunk('src/a.test.ts', { imports: ['src/a.ts'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -727,13 +668,11 @@ describe('findDependents', () => {
 
   describe('files with no imports or exports', () => {
     it('should ignore chunks with no imports and no exports', async () => {
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([
-          createChunk('src/target.ts', { exports: ['foo'] }),
-          createChunk('src/standalone.ts'), // no imports, no exports
-          createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
-        ]),
-      );
+      mockDB.scanAll.mockResolvedValue([
+        createChunk('src/target.ts', { exports: ['foo'] }),
+        createChunk('src/standalone.ts'), // no imports, no exports
+        createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
+      ]);
 
       const result = await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
 
@@ -745,7 +684,7 @@ describe('findDependents', () => {
   describe('cross-repo with QdrantDB', () => {
     it('should call scanCrossRepo when vectorDB supports cross-repo and crossRepo=true', async () => {
       const mockQdrantDB: any = {
-        scanAll: vi.fn().mockReturnValue(mockAsyncGenerator([])),
+        scanAll: vi.fn().mockResolvedValue([]),
         scanCrossRepo: vi.fn().mockResolvedValue([]),
         supportsCrossRepo: true,
       };
@@ -776,7 +715,7 @@ describe('findDependents', () => {
         createChunk('src/target.ts', { exports: ['foo'] }),
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
       ];
-      mockDB.scanAll.mockReturnValue(mockAsyncGenerator(chunks));
+      mockDB.scanAll.mockResolvedValue(chunks);
 
       // First call: should scan
       const result1 = await findDependents(
@@ -791,7 +730,7 @@ describe('findDependents', () => {
       expect(result1.dependents).toHaveLength(1);
 
       // Second call with same indexVersion: should use cache
-      mockDB.scanAll.mockReturnValue(mockAsyncGenerator([]));
+      mockDB.scanAll.mockResolvedValue([]);
       const result2 = await findDependents(
         mockDB as any,
         'src/target.ts',
@@ -809,16 +748,14 @@ describe('findDependents', () => {
         createChunk('src/target.ts', { exports: ['foo'] }),
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
       ];
-      mockDB.scanAll.mockReturnValue(mockAsyncGenerator(chunks));
+      mockDB.scanAll.mockResolvedValue(chunks);
 
       // First call with version 100
       await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
 
       // Second call with version 200: should re-scan
-      mockDB.scanAll.mockReturnValue(
-        mockAsyncGenerator([createChunk('src/target.ts', { exports: ['foo'] })]),
-      );
+      mockDB.scanAll.mockResolvedValue([createChunk('src/target.ts', { exports: ['foo'] })]);
       const result2 = await findDependents(
         mockDB as any,
         'src/target.ts',
@@ -836,7 +773,7 @@ describe('findDependents', () => {
         createChunk('src/target.ts', { exports: ['foo'] }),
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
       ];
-      mockDB.scanAll.mockReturnValue(mockAsyncGenerator(chunks));
+      mockDB.scanAll.mockResolvedValue(chunks);
 
       // First call: populates cache
       await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
@@ -846,7 +783,7 @@ describe('findDependents', () => {
       clearDependencyCache();
 
       // Same version but cache cleared: should re-scan
-      mockDB.scanAll.mockReturnValue(mockAsyncGenerator(chunks));
+      mockDB.scanAll.mockResolvedValue(chunks);
       await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(2);
     });
@@ -856,14 +793,14 @@ describe('findDependents', () => {
         createChunk('src/target.ts', { exports: ['foo'] }),
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
       ];
-      mockDB.scanAll.mockReturnValue(mockAsyncGenerator(chunks));
+      mockDB.scanAll.mockResolvedValue(chunks);
 
       // First call with crossRepo=false
       await findDependents(mockDB as any, 'src/target.ts', false, mockLog, undefined, 100);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
 
       // Second call with crossRepo=true, same indexVersion: should re-scan
-      mockDB.scanCrossRepo.mockReturnValue(mockAsyncGenerator(chunks));
+      mockDB.scanCrossRepo.mockResolvedValue(chunks);
       await findDependents(mockDB as any, 'src/target.ts', true, mockLog, undefined, 100);
       expect(mockDB.scanAll.mock.calls.length + mockDB.scanCrossRepo.mock.calls.length).toBe(2);
     });
@@ -873,14 +810,14 @@ describe('findDependents', () => {
         createChunk('src/target.ts', { exports: ['foo'] }),
         createChunk('src/consumer.ts', { imports: ['src/target.ts'] }),
       ];
-      mockDB.scanAll.mockReturnValue(mockAsyncGenerator(chunks));
+      mockDB.scanAll.mockResolvedValue(chunks);
 
       // First call without indexVersion
       await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(1);
 
       // Second call without indexVersion: should scan again
-      mockDB.scanAll.mockReturnValue(mockAsyncGenerator(chunks));
+      mockDB.scanAll.mockResolvedValue(chunks);
       await findDependents(mockDB as any, 'src/target.ts', false, mockLog);
       expect(mockDB.scanAll).toHaveBeenCalledTimes(2);
     });
