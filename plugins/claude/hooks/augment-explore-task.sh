@@ -21,7 +21,13 @@ fi
 
 input="$(cat)"
 tool_name="$(printf '%s' "$input" | jq -r '.tool_name // empty')"
-[ "$tool_name" = "Task" ] || exit 0
+# Different Claude Code versions name this tool differently:
+#   newer: Agent      older: Task
+# Accept both so the hook keeps working across upgrades.
+case "$tool_name" in
+  Agent|Task) ;;
+  *) exit 0 ;;
+esac
 
 subagent="$(printf '%s' "$input" | jq -r '.tool_input.subagent_type // empty')"
 case "$subagent" in
