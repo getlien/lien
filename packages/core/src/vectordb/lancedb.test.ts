@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { VectorDB } from './lancedb.js';
+import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -408,7 +409,7 @@ describe('VectorDB - column projection end-to-end', () => {
     db = new VectorDB(testDir);
     await db.initialize();
     await db.insertBatch(
-      [new Float32Array(384).fill(0.1)],
+      [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)],
       [
         {
           file: 'src/foo.ts',
@@ -482,7 +483,7 @@ describe('VectorDB - column projection end-to-end', () => {
   });
 
   it('search projects columns and auto-injects _distance for ranking', async () => {
-    const rows = await db.search(new Float32Array(384).fill(0.1), 5, undefined, {
+    const rows = await db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.1), 5, undefined, {
       // Omit `_distance` intentionally — the wrapper must add it.
       columns: ['file', 'content', 'startLine', 'endLine'],
     });

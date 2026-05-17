@@ -55,6 +55,8 @@ export class ComplexityAnalyzer {
     //     symbolName, symbolType, language, startLine, endLine, file
     //   - enrichWithDependencies → analyzeDependencies: imports,
     //     importedSymbolPaths, importedSymbolNames, exports, file
+    //   - getUniqueFunctionChunks: keys on repoId (required for cross-repo
+    //     dedupe; filtered out by LanceDB wrapper since not in Arrow schema)
     const ANALYZER_COLUMNS = [
       'file',
       'startLine',
@@ -72,6 +74,7 @@ export class ComplexityAnalyzer {
       'importedSymbolPaths',
       'importedSymbolNames',
       'exports',
+      'repoId',
     ];
     let allChunks: SearchResult[];
     if (crossRepo && this.vectorDB.supportsCrossRepo) {

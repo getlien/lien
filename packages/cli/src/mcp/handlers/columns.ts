@@ -54,7 +54,12 @@ export type ColumnName =
   | 'callSiteSymbols'
   | 'callSiteLines'
   | 'callSiteCaptured'
-  | '_distance';
+  | '_distance'
+  // `repoId` lives in the Qdrant payload (not the LanceDB Arrow schema).
+  // Callers include it so cross-repo grouping survives once Qdrant honors
+  // `columns` (#576). The LanceDB wrapper silently filters unknown columns
+  // before invoking `.select()`, so this is safe on both backends.
+  | 'repoId';
 
 /**
  * Always-required columns. Every scan-family caller includes these:
@@ -100,6 +105,9 @@ export const DEPENDENCY_GRAPH_COLUMNS: ColumnName[] = [
   'callSiteLines',
   'callSiteCaptured',
   'content',
+  // Required by `groupDependentsByRepo` on Qdrant. Filtered out by the
+  // LanceDB wrapper since it's not in the Arrow schema.
+  'repoId',
 ];
 
 /**

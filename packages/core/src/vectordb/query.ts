@@ -338,6 +338,46 @@ function dbRecordToSearchResult(r: DBRecord, query?: string): SearchResult {
 }
 
 /**
+ * The set of column names actually present in the LanceDB Arrow schema.
+ * `repoId`, `orgId`, `branch`, `commitSha` live in the Qdrant payload but
+ * are NOT LanceDB columns — passing them to LanceDB's `.select()` raises a
+ * "no field named X" schema error. Callers don't need to know which
+ * columns are backend-specific; `applySelect` filters down to this set
+ * before invoking `.select()`.
+ */
+const LANCEDB_COLUMN_NAMES: ReadonlySet<string> = new Set([
+  'vector',
+  'content',
+  'file',
+  'startLine',
+  'endLine',
+  'type',
+  'language',
+  'functionNames',
+  'classNames',
+  'interfaceNames',
+  'symbolName',
+  'symbolType',
+  'parentClass',
+  'complexity',
+  'cognitiveComplexity',
+  'parameters',
+  'signature',
+  'imports',
+  'halsteadVolume',
+  'halsteadDifficulty',
+  'halsteadEffort',
+  'halsteadBugs',
+  'exports',
+  'importedSymbolPaths',
+  'importedSymbolNames',
+  'callSiteSymbols',
+  'callSiteLines',
+  'callSiteCaptured',
+  '_distance',
+]);
+
+/**
  * Push `_distance` onto a caller-supplied column list if it's not already
  * there. LanceDB's `.search().select([...])` does NOT auto-include
  * `_distance` (unlike a bare `.search()` which always returns it), so
@@ -346,6 +386,23 @@ function dbRecordToSearchResult(r: DBRecord, query?: string): SearchResult {
  */
 function ensureDistanceColumn(columns: readonly string[]): string[] {
   return columns.includes('_distance') ? [...columns] : [...columns, '_distance'];
+}
+
+/**
+ * Apply `.select()` to a LanceDB query builder, filtering the caller's
+ * column list down to columns LanceDB actually stores. Non-LanceDB columns
+ * like `repoId` (Qdrant payload) pass through caller lists for backend
+ * symmetry; this is where we drop them so LanceDB doesn't raise a schema
+ * error.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applySelect<B extends { select: (cols: string[]) => any }>(
+  builder: B,
+  columns: readonly string[],
+): B {
+  const filtered = columns.filter(c => LANCEDB_COLUMN_NAMES.has(c));
+  if (filtered.length === 0) return builder;
+  return builder.select(filtered);
 }
 
 /**
@@ -369,7 +426,7 @@ export async function search(
     // to 0 and ranking collapses to storage order. Callers shouldn't need
     // to remember this LanceDB quirk.
     if (options.columns) {
-      builder = builder.select(ensureDistanceColumn(options.columns));
+      builder = applySelect(builder, ensureDistanceColumn(options.columns));
     }
     const results = await builder.toArray();
 
@@ -410,7 +467,9 @@ function filterByLanguage(records: DBRecord[], language: string): DBRecord[] {
 function filterByPattern(records: DBRecord[], pattern: string): DBRecord[] {
   const regex = safeRegex(pattern);
   if (!regex) return records;
-  return records.filter((r: DBRecord) => regex.test(r.content) || regex.test(r.file));
+  // `r.content` may be `undefined` under column projection — coerce so the
+  // regex doesn't see the literal string "undefined" and match spuriously.
+  return records.filter((r: DBRecord) => regex.test(r.content ?? '') || regex.test(r.file));
 }
 
 /**
@@ -512,7 +571,7 @@ export async function scanWithFilter(
     }
 
     let query = table.search(zeroVector).where(whereClause).limit(queryLimit);
-    if (columns) query = query.select(columns);
+    if (columns) query = applySelect(query, columns);
 
     const results = await query.toArray();
 
@@ -638,7 +697,7 @@ export async function querySymbols(
     // This is the recommended approach for LanceDB full scans
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
     let query = table.search(zeroVector).where('file != ""').limit(Math.max(totalRows, 1000));
-    if (columns) query = query.select(columns);
+    if (columns) query = applySelect(query, columns);
 
     const results = await query.toArray();
 
@@ -688,7 +747,7 @@ export async function scanAll(
     // path below.
     if (!options.language && !options.pattern) {
       let q = table.query().limit(limit);
-      if (options.columns) q = q.select(options.columns);
+      if (options.columns) q = applySelect(q, options.columns);
       const results = await q.toArray();
       const filtered = (results as unknown as DBRecord[]).filter(isValidRecord);
       return toUnscoredSearchResults(filtered, limit);
@@ -731,7 +790,7 @@ export async function* scanPaginated(
     let results: Record<string, unknown>[];
     try {
       let q = table.query().where(whereClause).limit(pageSize).offset(offset);
-      if (columns) q = q.select(columns);
+      if (columns) q = applySelect(q, columns);
       results = await q.toArray();
     } catch (error) {
       throw wrapError(error, 'Failed to scan paginated chunks', { offset, pageSize });

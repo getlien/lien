@@ -143,10 +143,12 @@ describe('get_files_context - Helper Functions', () => {
 
       // Should use scanWithFilter, not embeddings
       expect(result[0]).toHaveLength(1);
-      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith(expect.objectContaining({
-        file: ['src/auth.ts'],
-        limit: 100,
-      }));
+      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          file: ['src/auth.ts'],
+          limit: 100,
+        }),
+      );
       expect(mockEmbeddings.embed).not.toHaveBeenCalled();
     });
 
@@ -201,10 +203,12 @@ describe('get_files_context - Helper Functions', () => {
 
       // Should make a single scanWithFilter call with all filepaths
       expect(mockVectorDB.scanWithFilter).toHaveBeenCalledTimes(1);
-      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith(expect.objectContaining({
-        file: ['src/auth.ts', 'src/user.ts', 'src/api.ts'],
-        limit: 300,
-      }));
+      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          file: ['src/auth.ts', 'src/user.ts', 'src/api.ts'],
+          limit: 300,
+        }),
+      );
     });
   });
 
