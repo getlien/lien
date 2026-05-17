@@ -100,10 +100,13 @@ interface DBRecord {
  */
 function isValidRecord(r: DBRecord): boolean {
   if (!r.file || r.file.length === 0) return false;
-  // r.content is undefined when not selected; null is also possible if a
-  // future schema marks the column nullable. `!= null` covers both without
-  // throwing on `.trim()`.
-  if (r.content != null && r.content.trim().length === 0) return false;
+  // Treat null content (DB nullable column with a missing value) the same
+  // as empty-string content. `undefined` (column not selected) is allowed
+  // through — projection-aware callers handle the absence via the mapper's
+  // `?? ''` coercion. Order matters: check null/empty before .trim() so
+  // null doesn't fall through and throw.
+  if (r.content === null) return false;
+  if (typeof r.content === 'string' && r.content.trim().length === 0) return false;
   return true;
 }
 
@@ -332,7 +335,12 @@ function dbRecordToSearchResult(r: DBRecord, query?: string): SearchResult {
   const boostedScore = applyRelevanceBoosting(query, r.file, baseScore);
 
   return {
-    content: r.content,
+    // Coerce to string: `r.content` may be `undefined` under column
+    // projection. The `SearchResult.content: string` contract requires a
+    // string — downstream consumers (e.g., `chunk.content.split('\n')`)
+    // would crash on `undefined`. Callers that project out content
+    // intentionally see an empty string here; that's a safe default.
+    content: r.content ?? '',
     metadata: buildSearchResultMetadata(r),
     score: boostedScore,
     relevance: calculateRelevance(boostedScore),
@@ -392,18 +400,34 @@ function ensureDistanceColumn(columns: readonly string[]): string[] {
 
 /**
  * Apply `.select()` to a LanceDB query builder, filtering the caller's
- * column list down to columns LanceDB actually stores. Non-LanceDB columns
- * like `repoId` (Qdrant payload) pass through caller lists for backend
- * symmetry; this is where we drop them so LanceDB doesn't raise a schema
- * error.
+ * column list down to columns LanceDB actually stores AND always
+ * including `file` (required by `isValidRecord` to identify each row).
+ *
+ * Non-LanceDB columns like `repoId` (Qdrant payload) pass through caller
+ * lists for backend symmetry; this is where we drop them so LanceDB
+ * doesn't raise a schema error.
+ *
+ * `kind` controls `_distance` handling:
+ *   - 'search' → `_distance` is kept (the vector-search builder
+ *     supports it; callers depend on it for ranking).
+ *   - 'scan'   → `_distance` is stripped (the `table.query()` builder
+ *     errors with "no field named _distance" since it's a virtual
+ *     column only synthesized by `.search()`).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function applySelect<B extends { select: (cols: string[]) => any }>(
   builder: B,
   columns: readonly string[],
+  kind: 'search' | 'scan' = 'scan',
 ): B {
-  const filtered = columns.filter(c => LANCEDB_COLUMN_NAMES.has(c));
-  if (filtered.length === 0) return builder;
+  const filtered = columns.filter(c => {
+    if (!LANCEDB_COLUMN_NAMES.has(c)) return false;
+    if (kind === 'scan' && c === '_distance') return false;
+    return true;
+  });
+  // `file` is required by isValidRecord — without it every record is
+  // filtered as "missing file". Always include it.
+  if (!filtered.includes('file')) filtered.push('file');
   return builder.select(filtered);
 }
 
@@ -460,7 +484,7 @@ export async function search(
     // to 0 and ranking collapses to storage order. Callers shouldn't need
     // to remember this LanceDB quirk.
     if (options.columns) {
-      builder = applySelect(builder, ensureDistanceColumn(options.columns));
+      builder = applySelect(builder, ensureDistanceColumn(options.columns), 'search');
     }
     const results = await builder.toArray();
 
@@ -501,9 +525,11 @@ function filterByLanguage(records: DBRecord[], language: string): DBRecord[] {
 function filterByPattern(records: DBRecord[], pattern: string): DBRecord[] {
   const regex = safeRegex(pattern);
   if (!regex) return records;
-  // `r.content` may be `undefined` under column projection — coerce so the
+  // Both fields may be `undefined` under column projection — coerce so the
   // regex doesn't see the literal string "undefined" and match spuriously.
-  return records.filter((r: DBRecord) => regex.test(r.content ?? '') || regex.test(r.file));
+  // `applySelect` always injects `file`, but be defensive in case the
+  // helper changes.
+  return records.filter((r: DBRecord) => regex.test(r.content ?? '') || regex.test(r.file ?? ''));
 }
 
 /**
@@ -526,7 +552,8 @@ function filterBySymbolType(
  */
 function toUnscoredSearchResults(records: DBRecord[], limit: number): SearchResult[] {
   return records.slice(0, limit).map((r: DBRecord) => ({
-    content: r.content,
+    // Coerce — see dbRecordToSearchResult for rationale.
+    content: r.content ?? '',
     metadata: buildSearchResultMetadata(r),
     score: 0,
     relevance: 'not_relevant' as const,
@@ -606,7 +633,7 @@ export async function scanWithFilter(
 
     let query = table.search(zeroVector).where(whereClause).limit(queryLimit);
     const augmented = augmentColumnsForFilters(columns, { language, pattern, symbolType });
-    if (augmented) query = applySelect(query, augmented);
+    if (augmented) query = applySelect(query, augmented, 'scan');
 
     const results = await query.toArray();
 
@@ -733,7 +760,7 @@ export async function querySymbols(
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
     let query = table.search(zeroVector).where('file != ""').limit(Math.max(totalRows, 1000));
     const augmented = augmentColumnsForFilters(columns, { language, pattern, symbolType });
-    if (augmented) query = applySelect(query, augmented);
+    if (augmented) query = applySelect(query, augmented, 'scan');
 
     const results = await query.toArray();
 
@@ -742,7 +769,7 @@ export async function querySymbols(
     );
 
     return filtered.slice(0, limit).map((r: DBRecord) => ({
-      content: r.content,
+      content: r.content ?? '',
       metadata: {
         ...buildSearchResultMetadata(r),
         symbols: buildLegacySymbols(r),
@@ -783,7 +810,7 @@ export async function scanAll(
     // path below.
     if (!options.language && !options.pattern) {
       let q = table.query().limit(limit);
-      if (options.columns) q = applySelect(q, options.columns);
+      if (options.columns) q = applySelect(q, options.columns, 'scan');
       const results = await q.toArray();
       const filtered = (results as unknown as DBRecord[]).filter(isValidRecord);
       return toUnscoredSearchResults(filtered, limit);
@@ -826,7 +853,7 @@ export async function* scanPaginated(
     let results: Record<string, unknown>[];
     try {
       let q = table.query().where(whereClause).limit(pageSize).offset(offset);
-      if (columns) q = applySelect(q, columns);
+      if (columns) q = applySelect(q, columns, 'scan');
       results = await q.toArray();
     } catch (error) {
       throw wrapError(error, 'Failed to scan paginated chunks', { offset, pageSize });
@@ -835,7 +862,7 @@ export async function* scanPaginated(
     if (results.length === 0) break;
 
     const page = (results as unknown as DBRecord[]).filter(isValidRecord).map((r: DBRecord) => ({
-      content: r.content,
+      content: r.content ?? '',
       metadata: buildSearchResultMetadata(r),
       score: 0,
       relevance: 'not_relevant' as const,

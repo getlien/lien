@@ -482,6 +482,47 @@ describe('VectorDB - column projection end-to-end', () => {
     expect(rows[0].metadata.callSites?.[0].symbol).toBe('Bar');
   });
 
+  it('scanAll auto-injects file when caller omits it', async () => {
+    // Without auto-injection, isValidRecord drops every row as
+    // "missing file" and the call returns empty.
+    const rows = await db.scanAll({ columns: ['symbolName', 'startLine', 'endLine'] });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0].metadata.file).toBe('src/foo.ts');
+  });
+
+  it('scanAll strips _distance from columns (table.query does not allow it)', async () => {
+    // Without stripping, LanceDB throws "no field named _distance".
+    // applySelect with kind='scan' should drop it silently.
+    const rows = await db.scanAll({
+      columns: ['file', 'startLine', '_distance'],
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    // score is 0 because scanAll is unscored.
+    expect(rows[0].score).toBe(0);
+  });
+
+  it('search keeps _distance under column projection', async () => {
+    // Search path uses 'search' kind so _distance is allowed (and
+    // auto-injected by ensureDistanceColumn anyway).
+    const rows = await db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.1), 5, undefined, {
+      columns: ['file', 'startLine'],
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(typeof rows[0].score).toBe('number');
+  });
+
+  it('scanWithFilter coerces undefined content to empty string', async () => {
+    // Project away content; downstream consumers should see '' not undefined.
+    const rows = await db.scanWithFilter({
+      file: 'src/foo.ts',
+      limit: 1,
+      columns: ['file', 'startLine', 'endLine'],
+    });
+    expect(rows).toHaveLength(1);
+    expect(typeof rows[0].content).toBe('string');
+    expect(rows[0].content).toBe('');
+  });
+
   it('scanWithFilter auto-augments columns for active language/symbolType filters', async () => {
     // Caller projects a minimal column list AND passes a symbolType filter.
     // Without augmentation, `r.symbolType` would be undefined and
