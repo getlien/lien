@@ -482,6 +482,21 @@ describe('VectorDB - column projection end-to-end', () => {
     expect(rows[0].metadata.callSites?.[0].symbol).toBe('Bar');
   });
 
+  it('scanWithFilter auto-augments columns for active language/symbolType filters', async () => {
+    // Caller projects a minimal column list AND passes a symbolType filter.
+    // Without augmentation, `r.symbolType` would be undefined and
+    // `filterBySymbolType` would drop every row → zero results despite
+    // matching data on disk.
+    const rows = await db.scanWithFilter({
+      symbolType: 'function',
+      language: 'typescript',
+      limit: 10,
+      columns: ['file', 'startLine', 'endLine'], // intentionally omits the filter columns
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].metadata.file).toBe('src/foo.ts');
+  });
+
   it('search projects columns and auto-injects _distance for ranking', async () => {
     const rows = await db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.1), 5, undefined, {
       // Omit `_distance` intentionally — the wrapper must add it.

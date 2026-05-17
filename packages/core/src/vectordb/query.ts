@@ -1,7 +1,7 @@
 import type { LanceDBTable } from './lancedb-types.js';
 import type { SearchResult } from './types.js';
-import { SYMBOL_TYPE_MATCHES } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
+import { SYMBOL_TYPE_MATCHES } from './types.js';
 import { MAX_CHUNKS_PER_FILE } from '../constants.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
@@ -100,8 +100,10 @@ interface DBRecord {
  */
 function isValidRecord(r: DBRecord): boolean {
   if (!r.file || r.file.length === 0) return false;
-  // r.content is undefined when not selected; only fail on selected-but-empty.
-  if (r.content !== undefined && r.content.trim().length === 0) return false;
+  // r.content is undefined when not selected; null is also possible if a
+  // future schema marks the column nullable. `!= null` covers both without
+  // throwing on `.trim()`.
+  if (r.content != null && r.content.trim().length === 0) return false;
   return true;
 }
 
@@ -406,6 +408,38 @@ function applySelect<B extends { select: (cols: string[]) => any }>(
 }
 
 /**
+ * Augment a caller's column list with the columns each active JS-side
+ * filter needs to read. Without this, a caller passing
+ * `{ symbolType: 'function', columns: ['file'] }` gets zero results
+ * because `filterBySymbolType` reads `r.symbolType` which wasn't fetched.
+ *
+ * Returns the input unchanged if `columns` is undefined (no projection ⇒
+ * all columns are present) or if no filters are active.
+ */
+function augmentColumnsForFilters(
+  columns: readonly string[] | undefined,
+  filters: { language?: string; pattern?: string; symbolType?: string },
+): string[] | undefined {
+  if (!columns) return undefined;
+  const required = new Set(columns);
+  if (filters.language) required.add('language');
+  if (filters.pattern) {
+    // filterByPattern reads r.content and r.file. file is in every list.
+    required.add('content');
+  }
+  if (filters.symbolType) {
+    // filterBySymbolType + matchesSymbolType read r.symbolType plus the
+    // pre-AST fallback symbol arrays via getSymbolsForType.
+    required.add('symbolType');
+    required.add('symbolName');
+    required.add('functionNames');
+    required.add('classNames');
+    required.add('interfaceNames');
+  }
+  return [...required];
+}
+
+/**
  * Search the vector database
  */
 export async function search(
@@ -571,7 +605,8 @@ export async function scanWithFilter(
     }
 
     let query = table.search(zeroVector).where(whereClause).limit(queryLimit);
-    if (columns) query = applySelect(query, columns);
+    const augmented = augmentColumnsForFilters(columns, { language, pattern, symbolType });
+    if (augmented) query = applySelect(query, augmented);
 
     const results = await query.toArray();
 
@@ -697,7 +732,8 @@ export async function querySymbols(
     // This is the recommended approach for LanceDB full scans
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
     let query = table.search(zeroVector).where('file != ""').limit(Math.max(totalRows, 1000));
-    if (columns) query = applySelect(query, columns);
+    const augmented = augmentColumnsForFilters(columns, { language, pattern, symbolType });
+    if (augmented) query = applySelect(query, augmented);
 
     const results = await query.toArray();
 
