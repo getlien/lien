@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { VectorDB } from './lancedb.js';
+import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -392,5 +393,163 @@ describe('VectorDB - Batch Insert Retry Logic', () => {
 
     const results = await db.scanWithFilter({ limit: batchSize + 100 });
     expect(results.length).toBe(batchSize);
+  });
+});
+
+describe('VectorDB - column projection end-to-end', () => {
+  // Integration tests against a real LanceDB instance. Validates that the
+  // column names used by each handler's column list are actually present in
+  // the Arrow schema, and that absent columns produce `undefined` (not
+  // crashes) downstream of buildSearchResultMetadata.
+  let db: VectorDB;
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lien-test-cols-'));
+    db = new VectorDB(testDir);
+    await db.initialize();
+    await db.insertBatch(
+      [new Float32Array(EMBEDDING_DIMENSION).fill(0.1)],
+      [
+        {
+          file: 'src/foo.ts',
+          startLine: 1,
+          endLine: 5,
+          type: 'function' as const,
+          language: 'typescript',
+          symbolName: 'getFoo',
+          symbolType: 'function' as const,
+          complexity: 3,
+          cognitiveComplexity: 2,
+          imports: ['./bar'],
+          exports: ['getFoo'],
+          importedSymbols: { './bar': ['Bar'] },
+          callSites: [{ symbol: 'Bar', line: 3, isResultCaptured: true }],
+          halsteadVolume: 10,
+          halsteadDifficulty: 1,
+          halsteadEffort: 10,
+          halsteadBugs: 0.01,
+        },
+      ],
+      ['function getFoo() { return Bar(); }'],
+    );
+  });
+
+  afterEach(async () => {
+    await db.clear();
+    if (fs.existsSync(testDir)) {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('scanWithFilter with minimal columns returns only requested fields populated', async () => {
+    const rows = await db.scanWithFilter({
+      file: 'src/foo.ts',
+      limit: 10,
+      columns: ['file', 'startLine', 'endLine', 'language'],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].metadata.file).toBe('src/foo.ts');
+    expect(rows[0].metadata.language).toBe('typescript');
+    // Fields NOT in the column list should be undefined after materialization.
+    expect(rows[0].metadata.importedSymbols).toBeUndefined();
+    expect(rows[0].metadata.callSites).toBeUndefined();
+    expect(rows[0].metadata.complexity).toBeUndefined();
+  });
+
+  it('scanAll with packed-array columns returns hydrated importedSymbols + callSites', async () => {
+    const rows = await db.scanAll({
+      columns: [
+        'file',
+        'startLine',
+        'endLine',
+        'imports',
+        'importedSymbolPaths',
+        'importedSymbolNames',
+        'exports',
+        'callSiteSymbols',
+        'callSiteLines',
+        'callSiteCaptured',
+      ],
+    });
+    expect(rows).toHaveLength(1);
+    // `imports` comes back as an Arrow Vector for non-search paths;
+    // callers iterate it directly. Coerce via Array.from for comparison.
+    expect(Array.from(rows[0].metadata.imports ?? [])).toEqual(['./bar']);
+    expect(rows[0].metadata.exports).toEqual(['getFoo']);
+    expect(rows[0].metadata.importedSymbols).toEqual({ './bar': ['Bar'] });
+    expect(rows[0].metadata.callSites).toHaveLength(1);
+    expect(rows[0].metadata.callSites?.[0].symbol).toBe('Bar');
+  });
+
+  it('scanAll auto-injects file when caller omits it', async () => {
+    // Without auto-injection, isValidRecord drops every row as
+    // "missing file" and the call returns empty.
+    const rows = await db.scanAll({ columns: ['symbolName', 'startLine', 'endLine'] });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0].metadata.file).toBe('src/foo.ts');
+  });
+
+  it('scanAll strips _distance from columns (table.query does not allow it)', async () => {
+    // Without stripping, LanceDB throws "no field named _distance".
+    // applySelect with kind='scan' should drop it silently.
+    const rows = await db.scanAll({
+      columns: ['file', 'startLine', '_distance'],
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    // score is 0 because scanAll is unscored.
+    expect(rows[0].score).toBe(0);
+  });
+
+  it('search keeps _distance under column projection', async () => {
+    // Search path uses 'search' kind so _distance is allowed (and
+    // auto-injected by ensureDistanceColumn anyway).
+    const rows = await db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.1), 5, undefined, {
+      columns: ['file', 'startLine'],
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(typeof rows[0].score).toBe('number');
+  });
+
+  it('scanWithFilter coerces undefined content to empty string', async () => {
+    // Project away content; downstream consumers should see '' not undefined.
+    const rows = await db.scanWithFilter({
+      file: 'src/foo.ts',
+      limit: 1,
+      columns: ['file', 'startLine', 'endLine'],
+    });
+    expect(rows).toHaveLength(1);
+    expect(typeof rows[0].content).toBe('string');
+    expect(rows[0].content).toBe('');
+  });
+
+  it('scanWithFilter auto-augments columns for active language/symbolType filters', async () => {
+    // Caller projects a minimal column list AND passes a symbolType filter.
+    // Without augmentation, `r.symbolType` would be undefined and
+    // `filterBySymbolType` would drop every row → zero results despite
+    // matching data on disk.
+    const rows = await db.scanWithFilter({
+      symbolType: 'function',
+      language: 'typescript',
+      limit: 10,
+      columns: ['file', 'startLine', 'endLine'], // intentionally omits the filter columns
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].metadata.file).toBe('src/foo.ts');
+  });
+
+  it('search projects columns and auto-injects _distance for ranking', async () => {
+    const rows = await db.search(new Float32Array(EMBEDDING_DIMENSION).fill(0.1), 5, undefined, {
+      // Omit `_distance` intentionally — the wrapper must add it.
+      columns: ['file', 'content', 'startLine', 'endLine'],
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    // If `_distance` had been dropped, score would default to 0 for every
+    // row; sort would degenerate. The fact that scores are numeric (and
+    // possibly non-zero) confirms `_distance` came through.
+    expect(typeof rows[0].score).toBe('number');
+    // Fields not selected → undefined
+    expect(rows[0].metadata.complexity).toBeUndefined();
+    expect(rows[0].metadata.importedSymbols).toBeUndefined();
   });
 });

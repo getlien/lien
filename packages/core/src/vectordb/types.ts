@@ -40,20 +40,35 @@ export interface VectorDBInterface {
     metadatas: ChunkMetadata[],
     contents: string[],
   ): Promise<void>;
-  search(queryVector: Float32Array, limit?: number, query?: string): Promise<SearchResult[]>;
+  search(
+    queryVector: Float32Array,
+    limit?: number,
+    query?: string,
+    options?: { columns?: string[] },
+  ): Promise<SearchResult[]>;
   scanWithFilter(options: {
     file?: string | string[];
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
+    /**
+     * LanceDB column projection — return only these columns. When omitted,
+     * all columns are returned. Backends other than LanceDB may ignore.
+     */
+    columns?: string[];
   }): Promise<SearchResult[]>;
-  scanAll(options?: { language?: string; pattern?: string }): Promise<SearchResult[]>;
+  scanAll(options?: {
+    language?: string;
+    pattern?: string;
+    columns?: string[];
+  }): Promise<SearchResult[]>;
   querySymbols(options: {
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
+    columns?: string[];
   }): Promise<SearchResult[]>;
   clear(): Promise<void>;
   deleteByFile(filepath: string): Promise<void>;
@@ -66,7 +81,10 @@ export interface VectorDBInterface {
   hasData(): Promise<boolean>;
   checkVersion(): Promise<boolean>;
   /** Scan all chunks using paginated iteration. Yields pages to avoid loading everything into memory. */
-  scanPaginated(options?: { pageSize?: number }): AsyncGenerator<SearchResult[]>;
+  scanPaginated(options?: {
+    pageSize?: number;
+    columns?: string[];
+  }): AsyncGenerator<SearchResult[]>;
   reconnect(): Promise<void>;
   getCurrentVersion(): number;
   getVersionDate(): string;
@@ -76,7 +94,7 @@ export interface VectorDBInterface {
   searchCrossRepo(
     queryVector: Float32Array,
     limit?: number,
-    options?: { repoIds?: string[]; branch?: string },
+    options?: { repoIds?: string[]; branch?: string; columns?: string[] },
   ): Promise<SearchResult[]>;
   /** Scan across all repos in the organization. Returns [] if unsupported. */
   scanCrossRepo(options: {
@@ -85,5 +103,6 @@ export interface VectorDBInterface {
     limit?: number;
     repoIds?: string[];
     branch?: string;
+    columns?: string[];
   }): Promise<SearchResult[]>;
 }

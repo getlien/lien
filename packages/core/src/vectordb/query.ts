@@ -1,7 +1,7 @@
 import type { LanceDBTable } from './lancedb-types.js';
 import type { SearchResult } from './types.js';
-import { SYMBOL_TYPE_MATCHES } from './types.js';
 import { EMBEDDING_DIMENSION } from '../embeddings/types.js';
+import { SYMBOL_TYPE_MATCHES } from './types.js';
 import { MAX_CHUNKS_PER_FILE } from '../constants.js';
 import { DatabaseError, wrapError } from '../errors/index.js';
 import { calculateRelevance } from './relevance.js';
@@ -91,11 +91,23 @@ interface DBRecord {
 }
 
 /**
- * Check if a DB record has valid content and file path.
- * Used to filter out empty/invalid records from query results.
+ * Check if a DB record has a valid file path and (when present) non-empty
+ * content. `file` is required — it's the row's identity. `content` is only
+ * checked when it was actually selected; column projection may omit it
+ * deliberately (e.g., callers that only need metadata fields). Without this
+ * tolerance, projection that drops `content` would silently filter every
+ * row out as "empty".
  */
 function isValidRecord(r: DBRecord): boolean {
-  return Boolean(r.content && r.content.trim().length > 0 && r.file && r.file.length > 0);
+  if (!r.file || r.file.length === 0) return false;
+  // Treat null content (DB nullable column with a missing value) the same
+  // as empty-string content. `undefined` (column not selected) is allowed
+  // through — projection-aware callers handle the absence via the mapper's
+  // `?? ''` coercion. Order matters: check null/empty before .trim() so
+  // null doesn't fall through and throw.
+  if (r.content === null) return false;
+  if (typeof r.content === 'string' && r.content.trim().length === 0) return false;
+  return true;
 }
 
 /**
@@ -323,11 +335,132 @@ function dbRecordToSearchResult(r: DBRecord, query?: string): SearchResult {
   const boostedScore = applyRelevanceBoosting(query, r.file, baseScore);
 
   return {
-    content: r.content,
+    // Coerce to string: `r.content` may be `undefined` under column
+    // projection. The `SearchResult.content: string` contract requires a
+    // string — downstream consumers (e.g., `chunk.content.split('\n')`)
+    // would crash on `undefined`. Callers that project out content
+    // intentionally see an empty string here; that's a safe default.
+    content: r.content ?? '',
     metadata: buildSearchResultMetadata(r),
     score: boostedScore,
     relevance: calculateRelevance(boostedScore),
   };
+}
+
+/**
+ * The set of column names actually present in the LanceDB Arrow schema.
+ * `repoId`, `orgId`, `branch`, `commitSha` live in the Qdrant payload but
+ * are NOT LanceDB columns — passing them to LanceDB's `.select()` raises a
+ * "no field named X" schema error. Callers don't need to know which
+ * columns are backend-specific; `applySelect` filters down to this set
+ * before invoking `.select()`.
+ */
+const LANCEDB_COLUMN_NAMES: ReadonlySet<string> = new Set([
+  'vector',
+  'content',
+  'file',
+  'startLine',
+  'endLine',
+  'type',
+  'language',
+  'functionNames',
+  'classNames',
+  'interfaceNames',
+  'symbolName',
+  'symbolType',
+  'parentClass',
+  'complexity',
+  'cognitiveComplexity',
+  'parameters',
+  'signature',
+  'imports',
+  'halsteadVolume',
+  'halsteadDifficulty',
+  'halsteadEffort',
+  'halsteadBugs',
+  'exports',
+  'importedSymbolPaths',
+  'importedSymbolNames',
+  'callSiteSymbols',
+  'callSiteLines',
+  'callSiteCaptured',
+  '_distance',
+]);
+
+/**
+ * Push `_distance` onto a caller-supplied column list if it's not already
+ * there. LanceDB's `.search().select([...])` does NOT auto-include
+ * `_distance` (unlike a bare `.search()` which always returns it), so
+ * forgetting it silently zeros every result's score. Used by `search` and
+ * `searchCrossRepo`; non-search scans don't surface `_distance`.
+ */
+function ensureDistanceColumn(columns: readonly string[]): string[] {
+  return columns.includes('_distance') ? [...columns] : [...columns, '_distance'];
+}
+
+/**
+ * Apply `.select()` to a LanceDB query builder, filtering the caller's
+ * column list down to columns LanceDB actually stores AND always
+ * including `file` (required by `isValidRecord` to identify each row).
+ *
+ * Non-LanceDB columns like `repoId` (Qdrant payload) pass through caller
+ * lists for backend symmetry; this is where we drop them so LanceDB
+ * doesn't raise a schema error.
+ *
+ * `kind` controls `_distance` handling:
+ *   - 'search' → `_distance` is kept (the vector-search builder
+ *     supports it; callers depend on it for ranking).
+ *   - 'scan'   → `_distance` is stripped (the `table.query()` builder
+ *     errors with "no field named _distance" since it's a virtual
+ *     column only synthesized by `.search()`).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applySelect<B extends { select: (cols: string[]) => any }>(
+  builder: B,
+  columns: readonly string[],
+  kind: 'search' | 'scan' = 'scan',
+): B {
+  const filtered = columns.filter(c => {
+    if (!LANCEDB_COLUMN_NAMES.has(c)) return false;
+    if (kind === 'scan' && c === '_distance') return false;
+    return true;
+  });
+  // `file` is required by isValidRecord — without it every record is
+  // filtered as "missing file". Always include it.
+  if (!filtered.includes('file')) filtered.push('file');
+  return builder.select(filtered);
+}
+
+/**
+ * Augment a caller's column list with the columns each active JS-side
+ * filter needs to read. Without this, a caller passing
+ * `{ symbolType: 'function', columns: ['file'] }` gets zero results
+ * because `filterBySymbolType` reads `r.symbolType` which wasn't fetched.
+ *
+ * Returns the input unchanged if `columns` is undefined (no projection ⇒
+ * all columns are present) or if no filters are active.
+ */
+function augmentColumnsForFilters(
+  columns: readonly string[] | undefined,
+  filters: { language?: string; pattern?: string; symbolType?: string },
+): string[] | undefined {
+  if (!columns) return undefined;
+  const required = new Set(columns);
+  if (filters.language) required.add('language');
+  if (filters.pattern) {
+    // filterByPattern reads r.content and r.file. file is in every list.
+    required.add('content');
+  }
+  if (filters.symbolType) {
+    // filterBySymbolType + matchesSymbolType read r.symbolType plus the
+    // pre-AST fallback symbol arrays via getSymbolsForType.
+    required.add('symbolType');
+    required.add('symbolName');
+    required.add('functionNames');
+    required.add('classNames');
+    required.add('interfaceNames');
+  }
+  return [...required];
 }
 
 /**
@@ -338,16 +471,22 @@ export async function search(
   queryVector: Float32Array,
   limit: number = 5,
   query?: string,
+  options: { columns?: string[] } = {},
 ): Promise<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
 
   try {
-    const results = await table
-      .search(Array.from(queryVector))
-      .limit(limit + 20)
-      .toArray();
+    let builder = table.search(Array.from(queryVector)).limit(limit + 20);
+    // Auto-inject `_distance` whenever column projection is used on a
+    // search builder: without it, `dbRecordToSearchResult` defaults score
+    // to 0 and ranking collapses to storage order. Callers shouldn't need
+    // to remember this LanceDB quirk.
+    if (options.columns) {
+      builder = applySelect(builder, ensureDistanceColumn(options.columns), 'search');
+    }
+    const results = await builder.toArray();
 
     const filtered = (results as unknown as DBRecord[])
       .filter(isValidRecord)
@@ -386,7 +525,11 @@ function filterByLanguage(records: DBRecord[], language: string): DBRecord[] {
 function filterByPattern(records: DBRecord[], pattern: string): DBRecord[] {
   const regex = safeRegex(pattern);
   if (!regex) return records;
-  return records.filter((r: DBRecord) => regex.test(r.content) || regex.test(r.file));
+  // Both fields may be `undefined` under column projection — coerce so the
+  // regex doesn't see the literal string "undefined" and match spuriously.
+  // `applySelect` always injects `file`, but be defensive in case the
+  // helper changes.
+  return records.filter((r: DBRecord) => regex.test(r.content ?? '') || regex.test(r.file ?? ''));
 }
 
 /**
@@ -409,7 +552,8 @@ function filterBySymbolType(
  */
 function toUnscoredSearchResults(records: DBRecord[], limit: number): SearchResult[] {
   return records.slice(0, limit).map((r: DBRecord) => ({
-    content: r.content,
+    // Coerce — see dbRecordToSearchResult for rationale.
+    content: r.content ?? '',
     metadata: buildSearchResultMetadata(r),
     score: 0,
     relevance: 'not_relevant' as const,
@@ -461,13 +605,14 @@ export async function scanWithFilter(
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
+    columns?: string[];
   },
 ): Promise<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
 
-  const { file, language, pattern, symbolType, limit = 100 } = options;
+  const { file, language, pattern, symbolType, limit = 100, columns } = options;
 
   try {
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
@@ -486,7 +631,9 @@ export async function scanWithFilter(
       queryLimit = Math.max(totalRows, 1000);
     }
 
-    const query = table.search(zeroVector).where(whereClause).limit(queryLimit);
+    let query = table.search(zeroVector).where(whereClause).limit(queryLimit);
+    const augmented = augmentColumnsForFilters(columns, { language, pattern, symbolType });
+    if (augmented) query = applySelect(query, augmented, 'scan');
 
     const results = await query.toArray();
 
@@ -594,13 +741,14 @@ export async function querySymbols(
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
+    columns?: string[];
   },
 ): Promise<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
 
-  const { language, pattern, symbolType, limit = 50 } = options;
+  const { language, pattern, symbolType, limit = 50, columns } = options;
   const filterOpts: SymbolQueryOptions = { language, pattern, symbolType };
 
   try {
@@ -610,7 +758,9 @@ export async function querySymbols(
     // Use zero-vector search with limit >= totalRows to get all records
     // This is the recommended approach for LanceDB full scans
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
-    const query = table.search(zeroVector).where('file != ""').limit(Math.max(totalRows, 1000));
+    let query = table.search(zeroVector).where('file != ""').limit(Math.max(totalRows, 1000));
+    const augmented = augmentColumnsForFilters(columns, { language, pattern, symbolType });
+    if (augmented) query = applySelect(query, augmented, 'scan');
 
     const results = await query.toArray();
 
@@ -619,7 +769,7 @@ export async function querySymbols(
     );
 
     return filtered.slice(0, limit).map((r: DBRecord) => ({
-      content: r.content,
+      content: r.content ?? '',
       metadata: {
         ...buildSearchResultMetadata(r),
         symbols: buildLegacySymbols(r),
@@ -641,6 +791,7 @@ export async function scanAll(
   options: {
     language?: string;
     pattern?: string;
+    columns?: string[];
   } = {},
 ): Promise<SearchResult[]> {
   if (!table) {
@@ -658,7 +809,9 @@ export async function scanAll(
     // Callers that pass language/pattern still fall through to the filtered
     // path below.
     if (!options.language && !options.pattern) {
-      const results = await table.query().limit(limit).toArray();
+      let q = table.query().limit(limit);
+      if (options.columns) q = applySelect(q, options.columns, 'scan');
+      const results = await q.toArray();
       const filtered = (results as unknown as DBRecord[]).filter(isValidRecord);
       return toUnscoredSearchResults(filtered, limit);
     }
@@ -681,6 +834,7 @@ export async function* scanPaginated(
   options: {
     pageSize?: number;
     filter?: string;
+    columns?: string[];
   } = {},
 ): AsyncGenerator<SearchResult[]> {
   if (!table) {
@@ -692,12 +846,15 @@ export async function* scanPaginated(
     throw new DatabaseError('pageSize must be a positive number');
   }
   const whereClause = options.filter || 'file != ""';
+  const { columns } = options;
   let offset = 0;
 
   while (true) {
     let results: Record<string, unknown>[];
     try {
-      results = await table.query().where(whereClause).limit(pageSize).offset(offset).toArray();
+      let q = table.query().where(whereClause).limit(pageSize).offset(offset);
+      if (columns) q = applySelect(q, columns, 'scan');
+      results = await q.toArray();
     } catch (error) {
       throw wrapError(error, 'Failed to scan paginated chunks', { offset, pageSize });
     }
@@ -705,7 +862,7 @@ export async function* scanPaginated(
     if (results.length === 0) break;
 
     const page = (results as unknown as DBRecord[]).filter(isValidRecord).map((r: DBRecord) => ({
-      content: r.content,
+      content: r.content ?? '',
       metadata: buildSearchResultMetadata(r),
       score: 0,
       relevance: 'not_relevant' as const,

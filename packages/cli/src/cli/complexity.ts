@@ -5,6 +5,7 @@ import { VectorDB } from '@liendev/core';
 import { ComplexityAnalyzer } from '@liendev/core';
 import { formatReport } from '@liendev/core';
 import type { OutputFormat } from '@liendev/core';
+import { EXISTENCE_COLUMNS } from '../mcp/handlers/columns.js';
 
 interface ComplexityOptions {
   files?: string[];
@@ -54,7 +55,7 @@ function validateFilesExist(files: string[] | undefined, rootDir: string): void 
 /** Check if index exists */
 async function ensureIndexExists(vectorDB: VectorDB): Promise<void> {
   try {
-    await vectorDB.scanWithFilter({ limit: 1 });
+    await vectorDB.scanWithFilter({ limit: 1, columns: EXISTENCE_COLUMNS });
   } catch {
     console.error(chalk.red('Error: Index not found'));
     console.log(

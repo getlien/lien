@@ -39,10 +39,12 @@ describe('searchFileChunks', () => {
 
     const results = await searchFileChunks(['src/foo.ts', 'src/bar.ts'], ctx);
 
-    expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
-      file: ['src/foo.ts', 'src/bar.ts'],
-      limit: 200,
-    });
+    expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        file: ['src/foo.ts', 'src/bar.ts'],
+        limit: 200,
+      }),
+    );
     expect(results).toHaveLength(2);
     expect(results[0]).toHaveLength(1);
     expect(results[0][0].metadata.file).toBe('src/foo.ts');

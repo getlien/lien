@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { search, scanWithFilter, querySymbols, scanPaginated } from './query.js';
+import { search, scanWithFilter, scanAll, querySymbols, scanPaginated } from './query.js';
 import type { SearchResult } from './types.js';
 import type { LanceDBTable } from './lancedb-types.js';
 import { DatabaseError } from '../errors/index.js';
@@ -1158,6 +1158,127 @@ describe('VectorDB Query Operations', () => {
       // offset and queries again, getting an empty page which breaks the loop.
       expect(pages).toHaveLength(1);
       expect(pages[0][0].content).toBe('fn a() {}');
+    });
+  });
+
+  describe('column projection (.select())', () => {
+    it('scanWithFilter forwards columns to .select() on the query builder', async () => {
+      const select = vi.fn().mockReturnThis();
+      const where = vi.fn().mockReturnThis();
+      const limit = vi.fn().mockReturnThis();
+      const toArray = vi
+        .fn()
+        .mockResolvedValue([{ content: 'x', file: 'a.ts', startLine: 1, endLine: 2 }]);
+      const mockTable = {
+        search: vi.fn().mockReturnValue({ where, limit, select, toArray }),
+        countRows: vi.fn().mockResolvedValue(100),
+      };
+      await scanWithFilter(asTable(mockTable), {
+        file: 'a.ts',
+        columns: ['file', 'startLine', 'endLine'],
+      });
+      expect(select).toHaveBeenCalledWith(['file', 'startLine', 'endLine']);
+    });
+
+    it('scanWithFilter does NOT call .select() when columns omitted', async () => {
+      const select = vi.fn().mockReturnThis();
+      const where = vi.fn().mockReturnThis();
+      const limit = vi.fn().mockReturnThis();
+      const toArray = vi
+        .fn()
+        .mockResolvedValue([{ content: 'x', file: 'a.ts', startLine: 1, endLine: 2 }]);
+      const mockTable = {
+        search: vi.fn().mockReturnValue({ where, limit, select, toArray }),
+        countRows: vi.fn().mockResolvedValue(100),
+      };
+      await scanWithFilter(asTable(mockTable), { file: 'a.ts' });
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it('scanAll fast-path forwards columns to .select()', async () => {
+      const select = vi.fn().mockReturnThis();
+      const limit = vi.fn().mockReturnThis();
+      const toArray = vi
+        .fn()
+        .mockResolvedValue([{ content: 'x', file: 'a.ts', startLine: 1, endLine: 2 }]);
+      const mockTable = {
+        query: vi.fn().mockReturnValue({ limit, select, toArray }),
+        countRows: vi.fn().mockResolvedValue(100),
+      };
+      await scanAll(asTable(mockTable), { columns: ['file'] });
+      expect(select).toHaveBeenCalledWith(['file']);
+    });
+
+    it('search auto-injects _distance when columns is set and missing it', async () => {
+      const select = vi.fn().mockReturnThis();
+      const limit = vi.fn().mockReturnThis();
+      const toArray = vi.fn().mockResolvedValue([
+        {
+          content: 'x',
+          file: 'a.ts',
+          startLine: 1,
+          endLine: 2,
+          type: 'function',
+          language: 'typescript',
+          _distance: 0.3,
+        },
+      ]);
+      const mockTable = {
+        search: vi.fn().mockReturnValue({ limit, select, toArray }),
+      };
+      await search(asTable(mockTable), new Float32Array([1, 2, 3]), 5, undefined, {
+        columns: ['file', 'content'],
+      });
+      expect(select).toHaveBeenCalledWith(['file', 'content', '_distance']);
+    });
+
+    it('search does NOT duplicate _distance when caller passes it explicitly', async () => {
+      const select = vi.fn().mockReturnThis();
+      const limit = vi.fn().mockReturnThis();
+      const toArray = vi.fn().mockResolvedValue([
+        {
+          content: 'x',
+          file: 'a.ts',
+          startLine: 1,
+          endLine: 2,
+          type: 'function',
+          language: 'typescript',
+          _distance: 0.3,
+        },
+      ]);
+      const mockTable = {
+        search: vi.fn().mockReturnValue({ limit, select, toArray }),
+      };
+      await search(asTable(mockTable), new Float32Array([1, 2, 3]), 5, undefined, {
+        columns: ['file', '_distance'],
+      });
+      expect(select).toHaveBeenCalledWith(['file', '_distance']);
+    });
+
+    it('buildSearchResultMetadata returns undefined for absent packed-array columns', async () => {
+      // Simulates what LanceDB returns when callSites/importedSymbols columns
+      // aren't selected — keys are absent, not null. The patterns in
+      // buildSearchResultMetadata must continue to produce `undefined` (not
+      // throw, not return empty objects).
+      const mockTable = {
+        search: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          select: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockResolvedValue([
+            // No importedSymbolPaths / callSiteSymbols keys at all
+            { content: 'x', file: 'a.ts', startLine: 1, endLine: 2 },
+          ]),
+        }),
+        countRows: vi.fn().mockResolvedValue(100),
+      };
+      const results = await scanWithFilter(asTable(mockTable), {
+        file: 'a.ts',
+        columns: ['file', 'startLine', 'endLine'],
+      });
+      expect(results).toHaveLength(1);
+      expect(results[0].metadata.importedSymbols).toBeUndefined();
+      expect(results[0].metadata.callSites).toBeUndefined();
     });
   });
 });

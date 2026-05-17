@@ -69,12 +69,14 @@ describe('handleListFunctions', () => {
 
       const result = await handleListFunctions({ pattern: '.*Command.*' }, mockCtx);
 
-      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith({
-        language: undefined,
-        pattern: '.*Command.*',
-        symbolType: undefined,
-        limit: 51, // 50 + 0 + 1 (over-fetch by 1 for hasMore detection)
-      });
+      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith(
+        expect.objectContaining({
+          language: undefined,
+          pattern: '.*Command.*',
+          symbolType: undefined,
+          limit: 51, // 50 + 0 + 1 (over-fetch by 1 for hasMore detection)
+        }),
+      );
       expect(mockVectorDB.scanWithFilter).not.toHaveBeenCalled();
 
       const parsed = JSON.parse(result.content![0].text);
@@ -104,12 +106,14 @@ describe('handleListFunctions', () => {
 
       const result = await handleListFunctions({ symbolType: 'class' }, mockCtx);
 
-      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith({
-        language: undefined,
-        pattern: undefined,
-        symbolType: 'class',
-        limit: 51,
-      });
+      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith(
+        expect.objectContaining({
+          language: undefined,
+          pattern: undefined,
+          symbolType: 'class',
+          limit: 51,
+        }),
+      );
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.method).toBe('symbols');
@@ -133,11 +137,13 @@ describe('handleListFunctions', () => {
 
       const result = await handleListFunctions({ symbolType: 'method' }, mockCtx);
 
-      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
-        language: undefined,
-        symbolType: 'method',
-        limit: 51,
-      });
+      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          language: undefined,
+          symbolType: 'method',
+          limit: 51,
+        }),
+      );
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(1);
@@ -173,11 +179,13 @@ describe('handleListFunctions', () => {
 
       const result = await handleListFunctions({ symbolType: 'function' }, mockCtx);
 
-      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
-        language: undefined,
-        symbolType: 'function',
-        limit: 51,
-      });
+      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          language: undefined,
+          symbolType: 'function',
+          limit: 51,
+        }),
+      );
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(2);
@@ -218,12 +226,14 @@ describe('handleListFunctions', () => {
 
       const result = await handleListFunctions({}, mockCtx);
 
-      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith({
-        language: undefined,
-        pattern: undefined,
-        symbolType: undefined,
-        limit: 51,
-      });
+      expect(mockVectorDB.querySymbols).toHaveBeenCalledWith(
+        expect.objectContaining({
+          language: undefined,
+          pattern: undefined,
+          symbolType: undefined,
+          limit: 51,
+        }),
+      );
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(2);
@@ -277,11 +287,13 @@ describe('handleListFunctions', () => {
 
       const result = await handleListFunctions({ symbolType: 'class' }, mockCtx);
 
-      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith({
-        language: undefined,
-        symbolType: 'class',
-        limit: 51,
-      });
+      expect(mockVectorDB.scanWithFilter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          language: undefined,
+          symbolType: 'class',
+          limit: 51,
+        }),
+      );
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.method).toBe('content');

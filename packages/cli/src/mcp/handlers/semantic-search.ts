@@ -3,6 +3,7 @@ import { SemanticSearchSchema } from '../schemas/index.js';
 import { shapeResults, deduplicateResults } from '../utils/metadata-shaper.js';
 import type { ToolContext, MCPToolResult, LogFn } from '../types.js';
 import type { VectorDBInterface, SearchResult } from '@liendev/core';
+import { SYMBOL_SEARCH_COLUMNS } from './columns.js';
 
 /**
  * Group search results by repository ID.
@@ -40,7 +41,10 @@ async function executeSearch(
   const { query, limit, crossRepo, repoIds } = params;
 
   if (crossRepo && vectorDB.supportsCrossRepo) {
-    const results = await vectorDB.searchCrossRepo(queryEmbedding, limit, { repoIds });
+    const results = await vectorDB.searchCrossRepo(queryEmbedding, limit, {
+      repoIds,
+      columns: SYMBOL_SEARCH_COLUMNS,
+    });
     log(
       `Found ${results.length} results across ${Object.keys(groupResultsByRepo(results)).length} repos`,
     );
@@ -53,7 +57,9 @@ async function executeSearch(
       'warning',
     );
   }
-  const results = await vectorDB.search(queryEmbedding, limit, query);
+  const results = await vectorDB.search(queryEmbedding, limit, query, {
+    columns: SYMBOL_SEARCH_COLUMNS,
+  });
   log(`Found ${results.length} results`);
   return { results, crossRepoFallback: !!crossRepo };
 }

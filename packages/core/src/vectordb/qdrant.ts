@@ -21,6 +21,27 @@ import * as maintenanceOps from './qdrant-maintenance.js';
 export { validateFilterOptions } from './qdrant-filter-builder.js';
 
 /**
+ * Tracks whether we've already emitted the "columns option ignored" warning
+ * for the Qdrant backend. `VectorDBInterface.columns` is wired through for
+ * LanceDB column projection; on Qdrant we accept-and-ignore it for now and
+ * surface a one-time hint so operators comparing latency to LanceDB users
+ * have a starting point for diagnostics.
+ *
+ * Native Qdrant payload projection is tracked in #576.
+ */
+let qdrantColumnsWarningEmitted = false;
+function warnColumnsIgnoredOnce(): void {
+  if (qdrantColumnsWarningEmitted) return;
+  qdrantColumnsWarningEmitted = true;
+  // stderr — same channel the rest of @liendev/core uses for advisory logs.
+  console.error(
+    '[Lien] QdrantDB: `columns` option is currently ignored (LanceDB-only). ' +
+      'Operators may see higher scan latency vs LanceDB until native payload ' +
+      'projection lands.',
+  );
+}
+
+/**
  * QdrantDB implements VectorDBInterface using Qdrant vector database.
  *
  * Features:
@@ -259,68 +280,95 @@ export class QdrantDB implements VectorDBInterface {
     }
   }
 
+  /**
+   * @param options.columns — `VectorDBInterface` accepts column projection
+   *   for LanceDB. The Qdrant backend ignores it (Qdrant returns the full
+   *   payload as JSON; native projection support is tracked in #576).
+   *   Emits one debug warning per process the first time it's
+   *   seen so operators comparing latency to LanceDB users have a hint.
+   */
   async search(
     queryVector: Float32Array,
     limit: number = 5,
     _query?: string, // Optional query string (not used in vector search, but kept for interface compatibility)
+    options: { columns?: string[] } = {},
   ): Promise<SearchResult[]> {
+    if (options.columns) warnColumnsIgnoredOnce();
     return queryOps.search(this.queryCtx, queryVector, limit);
   }
 
+  /** @see search — `columns` is accepted for type symmetry and ignored. */
   async searchCrossRepo(
     queryVector: Float32Array,
     limit: number = 5,
     options?: {
       repoIds?: string[];
       branch?: string;
+      columns?: string[];
     },
   ): Promise<SearchResult[]> {
+    if (options?.columns) warnColumnsIgnoredOnce();
     return queryOps.searchCrossRepo(this.queryCtx, queryVector, limit, options);
   }
 
+  /** @see search — `columns` is accepted for type symmetry and ignored. */
   async scanWithFilter(options: {
     file?: string | string[];
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
+    columns?: string[];
   }): Promise<SearchResult[]> {
+    if (options.columns) warnColumnsIgnoredOnce();
     return queryOps.scanWithFilter(this.queryCtx, options);
   }
 
+  /** @see search — `columns` is accepted for type symmetry and ignored. */
   async scanAll(
     options: {
       language?: string;
       pattern?: string;
+      columns?: string[];
     } = {},
   ): Promise<SearchResult[]> {
+    if (options.columns) warnColumnsIgnoredOnce();
     return queryOps.scanAll(this.queryCtx, options);
   }
 
+  /** @see search — `columns` is accepted for type symmetry and ignored. */
   async *scanPaginated(
     options: {
       pageSize?: number;
+      columns?: string[];
     } = {},
   ): AsyncGenerator<SearchResult[]> {
+    if (options.columns) warnColumnsIgnoredOnce();
     yield* queryOps.scanPaginated(this.queryCtx, options);
   }
 
+  /** @see search — `columns` is accepted for type symmetry and ignored. */
   async scanCrossRepo(options: {
     language?: string;
     pattern?: string;
     limit?: number;
     repoIds?: string[];
     branch?: string;
+    columns?: string[];
   }): Promise<SearchResult[]> {
+    if (options.columns) warnColumnsIgnoredOnce();
     return queryOps.scanCrossRepo(this.queryCtx, options);
   }
 
+  /** @see search — `columns` is accepted for type symmetry and ignored. */
   async querySymbols(options: {
     language?: string;
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
+    columns?: string[];
   }): Promise<SearchResult[]> {
+    if (options.columns) warnColumnsIgnoredOnce();
     return queryOps.querySymbols(this.queryCtx, options);
   }
 

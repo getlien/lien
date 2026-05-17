@@ -6,6 +6,7 @@ import {
   getCanonicalPath,
   isTestFile,
 } from '@liendev/parser';
+import { DEPENDENCY_GRAPH_COLUMNS } from './columns.js';
 
 /**
  * Complexity metrics for a single dependent file.
@@ -333,7 +334,10 @@ async function scanAllChunks(
 
   if (crossRepo && vectorDB.supportsCrossRepo) {
     const CROSS_REPO_LIMIT = 100000;
-    const allChunks = await vectorDB.scanCrossRepo({ limit: CROSS_REPO_LIMIT });
+    const allChunks = await vectorDB.scanCrossRepo({
+      limit: CROSS_REPO_LIMIT,
+      columns: DEPENDENCY_GRAPH_COLUMNS,
+    });
     const hitLimit = allChunks.length >= CROSS_REPO_LIMIT;
     if (hitLimit) {
       log(
@@ -355,7 +359,7 @@ async function scanAllChunks(
     );
   }
 
-  const allChunks = await vectorDB.scanAll();
+  const allChunks = await vectorDB.scanAll({ columns: DEPENDENCY_GRAPH_COLUMNS });
   for (const chunk of allChunks) {
     addChunkToImportIndex(chunk, normalizePathCached, importIndex);
     addChunkToFileMap(chunk, normalizePathCached, allChunksByFile, seenRanges);
