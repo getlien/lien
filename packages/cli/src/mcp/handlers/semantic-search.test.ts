@@ -119,6 +119,7 @@ describe('handleSemanticSearch', () => {
         expect.any(Float32Array),
         10,
         'test query here',
+        expect.objectContaining({ columns: expect.any(Array) }),
       );
     });
 
@@ -131,6 +132,7 @@ describe('handleSemanticSearch', () => {
         expect.any(Float32Array),
         5,
         'test query here',
+        expect.objectContaining({ columns: expect.any(Array) }),
       );
     });
 
@@ -211,9 +213,11 @@ describe('handleSemanticSearch', () => {
         mockCtx,
       );
 
-      expect(mockQdrantDB.searchCrossRepo).toHaveBeenCalledWith(expect.any(Float32Array), 5, {
-        repoIds: undefined,
-      });
+      expect(mockQdrantDB.searchCrossRepo).toHaveBeenCalledWith(
+        expect.any(Float32Array),
+        5,
+        expect.objectContaining({ repoIds: undefined }),
+      );
       expect(mockQdrantDB.search).not.toHaveBeenCalled();
 
       const parsed = JSON.parse(result.content![0].text);
@@ -257,9 +261,11 @@ describe('handleSemanticSearch', () => {
         mockCtx,
       );
 
-      expect(mockQdrantDB.searchCrossRepo).toHaveBeenCalledWith(expect.any(Float32Array), 5, {
-        repoIds: ['repo-a', 'repo-c'],
-      });
+      expect(mockQdrantDB.searchCrossRepo).toHaveBeenCalledWith(
+        expect.any(Float32Array),
+        5,
+        expect.objectContaining({ repoIds: ['repo-a', 'repo-c'] }),
+      );
     });
   });
 

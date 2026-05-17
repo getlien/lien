@@ -49,11 +49,39 @@ export class ComplexityAnalyzer {
     // For cross-repo, use scanCrossRepo
     // Note: We fetch all chunks even with --files filter because dependency analysis
     // needs the complete dataset to find dependents accurately
+    // Inline column list (rather than importing from cli/handlers/columns.ts —
+    // wrong package-direction dependency). Must satisfy:
+    //   - findViolations: complexity, cognitiveComplexity, halstead*,
+    //     symbolName, symbolType, language, startLine, endLine, file
+    //   - enrichWithDependencies → analyzeDependencies: imports,
+    //     importedSymbolPaths, importedSymbolNames, exports, file
+    const ANALYZER_COLUMNS = [
+      'file',
+      'startLine',
+      'endLine',
+      'language',
+      'symbolName',
+      'symbolType',
+      'complexity',
+      'cognitiveComplexity',
+      'halsteadVolume',
+      'halsteadDifficulty',
+      'halsteadEffort',
+      'halsteadBugs',
+      'imports',
+      'importedSymbolPaths',
+      'importedSymbolNames',
+      'exports',
+    ];
     let allChunks: SearchResult[];
     if (crossRepo && this.vectorDB.supportsCrossRepo) {
-      allChunks = await this.vectorDB.scanCrossRepo({ limit: 100000, repoIds });
+      allChunks = await this.vectorDB.scanCrossRepo({
+        limit: 100000,
+        repoIds,
+        columns: ANALYZER_COLUMNS,
+      });
     } else {
-      allChunks = await this.vectorDB.scanAll();
+      allChunks = await this.vectorDB.scanAll({ columns: ANALYZER_COLUMNS });
     }
 
     // 2. Filter to specified files if provided

@@ -691,7 +691,7 @@ describe('findDependents', () => {
 
       await findDependents(mockQdrantDB, 'src/target.ts', true, mockLog);
 
-      expect(mockQdrantDB.scanCrossRepo).toHaveBeenCalledWith({ limit: 100000 });
+      expect(mockQdrantDB.scanCrossRepo).toHaveBeenCalledWith(expect.objectContaining({ limit: 100000 }));
       expect(mockQdrantDB.scanAll).not.toHaveBeenCalled();
     });
   });

@@ -91,11 +91,18 @@ interface DBRecord {
 }
 
 /**
- * Check if a DB record has valid content and file path.
- * Used to filter out empty/invalid records from query results.
+ * Check if a DB record has a valid file path and (when present) non-empty
+ * content. `file` is required — it's the row's identity. `content` is only
+ * checked when it was actually selected; column projection may omit it
+ * deliberately (e.g., callers that only need metadata fields). Without this
+ * tolerance, projection that drops `content` would silently filter every
+ * row out as "empty".
  */
 function isValidRecord(r: DBRecord): boolean {
-  return Boolean(r.content && r.content.trim().length > 0 && r.file && r.file.length > 0);
+  if (!r.file || r.file.length === 0) return false;
+  // r.content is undefined when not selected; only fail on selected-but-empty.
+  if (r.content !== undefined && r.content.trim().length === 0) return false;
+  return true;
 }
 
 /**
@@ -331,6 +338,17 @@ function dbRecordToSearchResult(r: DBRecord, query?: string): SearchResult {
 }
 
 /**
+ * Push `_distance` onto a caller-supplied column list if it's not already
+ * there. LanceDB's `.search().select([...])` does NOT auto-include
+ * `_distance` (unlike a bare `.search()` which always returns it), so
+ * forgetting it silently zeros every result's score. Used by `search` and
+ * `searchCrossRepo`; non-search scans don't surface `_distance`.
+ */
+function ensureDistanceColumn(columns: readonly string[]): string[] {
+  return columns.includes('_distance') ? [...columns] : [...columns, '_distance'];
+}
+
+/**
  * Search the vector database
  */
 export async function search(
@@ -338,16 +356,22 @@ export async function search(
   queryVector: Float32Array,
   limit: number = 5,
   query?: string,
+  options: { columns?: string[] } = {},
 ): Promise<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
 
   try {
-    const results = await table
-      .search(Array.from(queryVector))
-      .limit(limit + 20)
-      .toArray();
+    let builder = table.search(Array.from(queryVector)).limit(limit + 20);
+    // Auto-inject `_distance` whenever column projection is used on a
+    // search builder: without it, `dbRecordToSearchResult` defaults score
+    // to 0 and ranking collapses to storage order. Callers shouldn't need
+    // to remember this LanceDB quirk.
+    if (options.columns) {
+      builder = builder.select(ensureDistanceColumn(options.columns));
+    }
+    const results = await builder.toArray();
 
     const filtered = (results as unknown as DBRecord[])
       .filter(isValidRecord)
@@ -461,13 +485,14 @@ export async function scanWithFilter(
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
+    columns?: string[];
   },
 ): Promise<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
 
-  const { file, language, pattern, symbolType, limit = 100 } = options;
+  const { file, language, pattern, symbolType, limit = 100, columns } = options;
 
   try {
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
@@ -486,7 +511,8 @@ export async function scanWithFilter(
       queryLimit = Math.max(totalRows, 1000);
     }
 
-    const query = table.search(zeroVector).where(whereClause).limit(queryLimit);
+    let query = table.search(zeroVector).where(whereClause).limit(queryLimit);
+    if (columns) query = query.select(columns);
 
     const results = await query.toArray();
 
@@ -594,13 +620,14 @@ export async function querySymbols(
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
+    columns?: string[];
   },
 ): Promise<SearchResult[]> {
   if (!table) {
     throw new DatabaseError('Vector database not initialized');
   }
 
-  const { language, pattern, symbolType, limit = 50 } = options;
+  const { language, pattern, symbolType, limit = 50, columns } = options;
   const filterOpts: SymbolQueryOptions = { language, pattern, symbolType };
 
   try {
@@ -610,7 +637,8 @@ export async function querySymbols(
     // Use zero-vector search with limit >= totalRows to get all records
     // This is the recommended approach for LanceDB full scans
     const zeroVector = Array(EMBEDDING_DIMENSION).fill(0);
-    const query = table.search(zeroVector).where('file != ""').limit(Math.max(totalRows, 1000));
+    let query = table.search(zeroVector).where('file != ""').limit(Math.max(totalRows, 1000));
+    if (columns) query = query.select(columns);
 
     const results = await query.toArray();
 
@@ -641,6 +669,7 @@ export async function scanAll(
   options: {
     language?: string;
     pattern?: string;
+    columns?: string[];
   } = {},
 ): Promise<SearchResult[]> {
   if (!table) {
@@ -658,7 +687,9 @@ export async function scanAll(
     // Callers that pass language/pattern still fall through to the filtered
     // path below.
     if (!options.language && !options.pattern) {
-      const results = await table.query().limit(limit).toArray();
+      let q = table.query().limit(limit);
+      if (options.columns) q = q.select(options.columns);
+      const results = await q.toArray();
       const filtered = (results as unknown as DBRecord[]).filter(isValidRecord);
       return toUnscoredSearchResults(filtered, limit);
     }
@@ -681,6 +712,7 @@ export async function* scanPaginated(
   options: {
     pageSize?: number;
     filter?: string;
+    columns?: string[];
   } = {},
 ): AsyncGenerator<SearchResult[]> {
   if (!table) {
@@ -692,12 +724,15 @@ export async function* scanPaginated(
     throw new DatabaseError('pageSize must be a positive number');
   }
   const whereClause = options.filter || 'file != ""';
+  const { columns } = options;
   let offset = 0;
 
   while (true) {
     let results: Record<string, unknown>[];
     try {
-      results = await table.query().where(whereClause).limit(pageSize).offset(offset).toArray();
+      let q = table.query().where(whereClause).limit(pageSize).offset(offset);
+      if (columns) q = q.select(columns);
+      results = await q.toArray();
     } catch (error) {
       throw wrapError(error, 'Failed to scan paginated chunks', { offset, pageSize });
     }

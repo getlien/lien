@@ -75,13 +75,14 @@ export class VectorDB implements VectorDBInterface {
     queryVector: Float32Array,
     limit: number = 5,
     query?: string,
+    options: { columns?: string[] } = {},
   ): Promise<SearchResult[]> {
     if (!this.table) {
       throw new DatabaseError('Vector database not initialized');
     }
 
     try {
-      return await queryOps.search(this.table, queryVector, limit, query);
+      return await queryOps.search(this.table, queryVector, limit, query, options);
     } catch (error) {
       const errorMsg = String(error);
 
@@ -93,7 +94,7 @@ export class VectorDB implements VectorDBInterface {
           if (!this.table) {
             throw new DatabaseError('Vector database not initialized after reconnection');
           }
-          return await queryOps.search(this.table, queryVector, limit, query);
+          return await queryOps.search(this.table, queryVector, limit, query, options);
         } catch (retryError: unknown) {
           throw new DatabaseError(
             `Index appears corrupted or outdated. Please restart the MCP server or run 'lien index' in the project directory.`,
@@ -112,6 +113,7 @@ export class VectorDB implements VectorDBInterface {
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
+    columns?: string[];
   }): Promise<SearchResult[]> {
     if (!this.table) {
       throw new DatabaseError('Vector database not initialized');
@@ -122,13 +124,14 @@ export class VectorDB implements VectorDBInterface {
   /**
    * Scan all chunks in the database
    * Fetches total count first, then retrieves all chunks in a single optimized query
-   * @param options - Filter options (language, pattern)
+   * @param options - Filter options (language, pattern) and column projection
    * @returns All matching chunks
    */
   async scanAll(
     options: {
       language?: string;
       pattern?: string;
+      columns?: string[];
     } = {},
   ): Promise<SearchResult[]> {
     if (!this.table) {
@@ -144,6 +147,7 @@ export class VectorDB implements VectorDBInterface {
   async *scanPaginated(
     options: {
       pageSize?: number;
+      columns?: string[];
     } = {},
   ): AsyncGenerator<SearchResult[]> {
     if (!this.table) {
@@ -157,6 +161,7 @@ export class VectorDB implements VectorDBInterface {
     pattern?: string;
     symbolType?: 'function' | 'method' | 'class' | 'interface';
     limit?: number;
+    columns?: string[];
   }): Promise<SearchResult[]> {
     if (!this.table) {
       throw new DatabaseError('Vector database not initialized');
@@ -285,7 +290,7 @@ export class VectorDB implements VectorDBInterface {
   async searchCrossRepo(
     _queryVector: Float32Array,
     _limit?: number,
-    _options?: { repoIds?: string[]; branch?: string },
+    _options?: { repoIds?: string[]; branch?: string; columns?: string[] },
   ): Promise<SearchResult[]> {
     return [];
   }
@@ -296,6 +301,7 @@ export class VectorDB implements VectorDBInterface {
     limit?: number;
     repoIds?: string[];
     branch?: string;
+    columns?: string[];
   }): Promise<SearchResult[]> {
     return [];
   }

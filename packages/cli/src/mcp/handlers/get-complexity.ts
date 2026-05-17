@@ -92,7 +92,14 @@ async function fetchCrossRepoChunks(
   }
 
   if (vectorDB.supportsCrossRepo) {
-    const chunks = await vectorDB.scanCrossRepo({ limit: 100000, repoIds });
+    // Chunks here feed only `groupViolationsByRepo` (file → repoId mapping).
+    // The actual analyzer scan that reads complexity/halstead/imports
+    // happens inside ComplexityAnalyzer.analyze.
+    const chunks = await vectorDB.scanCrossRepo({
+      limit: 100000,
+      repoIds,
+      columns: ['file', 'startLine', 'endLine'],
+    });
     log(`Scanned ${chunks.length} chunks across repos`);
     return { chunks, fallback: false };
   }

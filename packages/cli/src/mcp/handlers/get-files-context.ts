@@ -10,6 +10,11 @@ import {
   MAX_CHUNKS_PER_FILE,
 } from '@liendev/parser';
 import type { SearchResult, EmbeddingService, VectorDBInterface } from '@liendev/core';
+import {
+  FILE_CONTEXT_COLUMNS,
+  RELATED_CHUNKS_COLUMNS,
+  TEST_ASSOCIATIONS_COLUMNS,
+} from './columns.js';
 
 /**
  * Maximum number of chunks to scan for test association analysis.
@@ -70,6 +75,7 @@ export async function searchFileChunks(
   const allResults = await vectorDB.scanWithFilter({
     file: filepaths,
     limit: filepaths.length * MAX_CHUNKS_PER_FILE,
+    columns: FILE_CONTEXT_COLUMNS,
   });
 
   // Group results by target file using canonical path matching
@@ -117,7 +123,9 @@ export async function findRelatedChunks(
   // Batch all related chunk searches
   const relatedSearches = await Promise.all(
     relatedEmbeddings.map((embedding, i) =>
-      vectorDB.search(embedding, 5, filesWithChunks[i].chunks[0].content),
+      vectorDB.search(embedding, 5, filesWithChunks[i].chunks[0].content, {
+        columns: RELATED_CHUNKS_COLUMNS,
+      }),
     ),
   );
 
@@ -374,7 +382,10 @@ export async function handleGetFilesContext(
     }
 
     // Step 3: Scan for test associations
-    const allChunks = await vectorDB.scanWithFilter({ limit: SCAN_LIMIT });
+    const allChunks = await vectorDB.scanWithFilter({
+      limit: SCAN_LIMIT,
+      columns: TEST_ASSOCIATIONS_COLUMNS,
+    });
     const hitScanLimit = allChunks.length === SCAN_LIMIT;
 
     if (hitScanLimit) {
