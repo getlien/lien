@@ -27,7 +27,7 @@ export { validateFilterOptions } from './qdrant-filter-builder.js';
  * surface a one-time hint so operators comparing latency to LanceDB users
  * have a starting point for diagnostics.
  *
- * Native Qdrant payload projection is tracked as a follow-up.
+ * Native Qdrant payload projection is tracked in #576.
  */
 let qdrantColumnsWarningEmitted = false;
 function warnColumnsIgnoredOnce(): void {
@@ -283,8 +283,8 @@ export class QdrantDB implements VectorDBInterface {
   /**
    * @param options.columns — `VectorDBInterface` accepts column projection
    *   for LanceDB. The Qdrant backend ignores it (Qdrant returns the full
-   *   payload as JSON; native projection support is tracked as a
-   *   follow-up). Emits one debug warning per process the first time it's
+   *   payload as JSON; native projection support is tracked in #576).
+   *   Emits one debug warning per process the first time it's
    *   seen so operators comparing latency to LanceDB users have a hint.
    */
   async search(
