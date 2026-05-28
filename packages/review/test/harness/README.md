@@ -78,12 +78,14 @@ diff. Bundled with the canary so calibration covers both directions
 | Rule | PR | Fixture | Why |
 |---|---|---|---|
 | `error-swallowing` | #574 | `error-swallowing/scanall-null-guard-fp` | Early `if (!table) throw` before try/catch was flagged as unguarded deref ([thread](https://github.com/getlien/lien/pull/574#discussion_r3252525960)) |
+| `error-swallowing` | #575 | `error-swallowing/harness-gitignore-convention-fp` | Gitignored `.fixture.json` (per project-wide convention) flagged as missing test data ([thread](https://github.com/getlien/lien/pull/575#discussion_r3252554373)) |
 
 Regenerate:
 
 ```bash
 ROOT=packages/review/test/harness/fixtures
 npx tsx packages/review/test/harness/capture-pr.ts 574 "$ROOT/error-swallowing/scanall-null-guard-fp.fixture.json"
+npx tsx packages/review/test/harness/capture-pr.ts 575 "$ROOT/error-swallowing/harness-gitignore-convention-fp.fixture.json" --sha b1e36fc
 ```
 
 Run the full multi-model sweep:
