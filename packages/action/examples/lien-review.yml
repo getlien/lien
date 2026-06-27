@@ -1,19 +1,19 @@
 # Copy this into your repo at .github/workflows/lien-review.yml
 #
-# Lien Review runs on every pull request, posts a check run + inline comments,
-# and writes a summary to the job step summary. No `actions/checkout` is needed —
-# the action self-clones the PR by SHA using the built-in GITHUB_TOKEN.
+# Lien Review runs on every pull request: it posts inline comments + workflow
+# annotations and writes a step summary. The workflow job is the single status
+# check. No `actions/checkout` is needed — the action self-clones the PR by SHA
+# using the built-in GITHUB_TOKEN.
 
 name: Lien Review
 
 on:
   pull_request:
 
-# Required so the built-in GITHUB_TOKEN can post the check run and comments.
+# The built-in GITHUB_TOKEN needs these to clone the PR and post inline comments.
 permissions:
   contents: read # clone the PR head/base by SHA
   pull-requests: write # post inline review comments
-  checks: write # create/update the Lien check run
 
 jobs:
   review:
@@ -36,10 +36,10 @@ jobs:
 # ─── Fork PRs (pull_request_target variant) ──────────────────────────────────
 #
 # On a `pull_request` from a FORK, the built-in GITHUB_TOKEN is read-only, so
-# Lien can review the code but cannot post the check run / comments (it emits a
-# warning instead). To review fork PRs with full output, use a SEPARATE workflow
-# file on the `pull_request_target` event, which runs in the base repo's context
-# and gets a writable token.
+# Lien can review the code and emit annotations + a step summary, but cannot post
+# inline comments (it warns instead). To get inline comments on fork PRs, use a
+# SEPARATE workflow file on the `pull_request_target` event, which runs in the
+# base repo's context and gets a writable token.
 #
 # SECURITY: Lien is safe under pull_request_target because it only clones-by-SHA
 # and PARSES code — it never executes it (no npm install, no build, no scripts).
@@ -54,7 +54,6 @@ jobs:
 # permissions:
 #   contents: read
 #   pull-requests: write
-#   checks: write
 #
 # jobs:
 #   review:

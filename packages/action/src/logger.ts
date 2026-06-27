@@ -20,6 +20,11 @@ function escapeData(value: string): string {
   return value.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
 }
 
+/** Escape a workflow-command property value (stricter than message: also `:` and `,`). */
+function escapeProperty(value: string): string {
+  return escapeData(value).replace(/:/g, '%3A').replace(/,/g, '%2C');
+}
+
 function emit(line: string): void {
   process.stdout.write(`${line}\n`);
 }
@@ -41,4 +46,21 @@ export function group(title: string): void {
 /** Close the current collapsible group. */
 export function endGroup(): void {
   emit('::endgroup::');
+}
+
+/**
+ * Emit a GitHub Actions annotation bound to a file + line, so it renders inline
+ * on the PR diff and on the job's check. Used in single-check mode (no separate
+ * Lien Review check run) to surface findings where the check-run annotations
+ * would otherwise have appeared.
+ */
+export function annotate(
+  level: 'notice' | 'warning' | 'error',
+  loc: { file: string; line: number; endLine?: number; title?: string },
+  message: string,
+): void {
+  const props = [`file=${escapeProperty(loc.file)}`, `line=${loc.line}`];
+  if (loc.endLine != null) props.push(`endLine=${loc.endLine}`);
+  if (loc.title) props.push(`title=${escapeProperty(loc.title)}`);
+  emit(`::${level} ${props.join(',')}::${escapeData(message)}`);
 }

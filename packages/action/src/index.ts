@@ -1,13 +1,13 @@
 /**
  * Lien Review GitHub Action entrypoint.
  *
- * Flow: inputs → context → octokit → reviewPullRequest → step summary +
- * outputs → exit code per `fail-on`. Reviews same-repo PRs out of the box; on
- * fork PRs the built-in `GITHUB_TOKEN` is read-only, so the review core can't
- * post its check run or comments. It reports that via `writeForbidden`, and we
- * surface a single `::warning::` with the `pull_request_target` remedy (still
- * writing outputs and exiting 0) rather than failing the consumer's CI on a
- * config limitation.
+ * Flow: inputs → context → octokit → reviewPullRequest → workflow annotations +
+ * step summary + outputs → exit code per `fail-on`. The action posts no Checks
+ * API check run of its own — the workflow job is the single status check, and
+ * findings render as annotations (inline on the diff), the step summary, and
+ * inline PR comments. On fork PRs the built-in `GITHUB_TOKEN` is read-only, so
+ * inline comments can't post (annotations + summary still do); we note that once
+ * with the `pull_request_target` remedy.
  */
 
 import { argv } from 'node:process';
@@ -17,21 +17,37 @@ import {
   createOctokit,
   type ReviewCoreContext,
   type ReviewCoreResult,
+  type ReviewFinding,
   reviewPullRequest,
 } from '@liendev/review';
 
 import { readInputs, type FailOn } from './inputs.js';
 import { loadContext } from './context.js';
 import { writeStepSummary, writeOutputs, countErrors } from './summary.js';
-import { actionLogger, group, endGroup } from './logger.js';
+import { actionLogger, group, endGroup, annotate } from './logger.js';
+
+/**
+ * Surface findings as GitHub Actions annotations (single-check mode, `check-run:
+ * false`). With no separate check run, these put each finding inline on the diff
+ * and on the workflow job's check — where the check-run annotations would be.
+ */
+export function emitFindingAnnotations(findings: ReviewFinding[]): void {
+  for (const f of findings) {
+    const level =
+      f.severity === 'error' ? 'error' : f.severity === 'warning' ? 'warning' : 'notice';
+    const title = f.category ? `Lien Review (${f.category})` : 'Lien Review';
+    const message = f.suggestion ? `${f.message}\n\n${f.suggestion}` : f.message;
+    annotate(level, { file: f.filepath, line: f.line, endLine: f.endLine, title }, message);
+  }
+}
 
 function emitForkWarning(): void {
   actionLogger.warning(
-    'This PR comes from a fork, so the built-in GITHUB_TOKEN is read-only and Lien ' +
-      'could not post the check run or comments. To review fork PRs, run Lien on the ' +
-      'pull_request_target event instead (it is safe — Lien only clones and parses ' +
-      'code, never executes it). See the action README for the pull_request_target ' +
-      'workflow example.',
+    'This PR is from a fork, so the built-in GITHUB_TOKEN is read-only — Lien could ' +
+      'not post inline PR comments (findings still appear as annotations and in the ' +
+      'job summary). For inline comments on fork PRs, run Lien on the ' +
+      'pull_request_target event instead (safe — Lien only clones and parses code, ' +
+      'never executes it). See the action README for the workflow example.',
   );
 }
 
@@ -43,22 +59,22 @@ function exitCodeFor(
   warningCount: number,
 ): number {
   if (failOn === 'never') return 0;
-  if (failOn === 'any') return errorCount + warningCount > 0 ? 1 : 0;
+  // 'any' is strictly stricter than 'error': fail on a failure conclusion (e.g.
+  // analysis failed with no findings) OR on any error/warning finding.
+  if (failOn === 'any') return conclusion === 'failure' || errorCount + warningCount > 0 ? 1 : 0;
   // failOn === 'error'
   return conclusion === 'failure' ? 1 : 0;
 }
 
 /**
- * Finalize a completed review: write the step summary + outputs, and decide the
- * process exit code. On a fork PR where the read-only token blocked all writes
- * (`writeForbidden`), emit exactly one fork warning and force a clean exit
- * (the missing PR output is a token limitation, not a CI failure). Returns the
- * exit code so the entrypoint and tests can assert it without reading
+ * Finalize a completed review: write the step summary + outputs, note the fork
+ * read-only-token limitation if applicable, and return the process exit code
+ * (per `fail-on`) so the entrypoint and tests can assert it without reading
  * `process.exitCode`.
  */
 export async function finishRun(
   result: ReviewCoreResult,
-  isFork: boolean,
+  forkReadOnly: boolean,
   failOn: FailOn,
 ): Promise<number> {
   const errorCount = countErrors(result.findings);
@@ -70,10 +86,10 @@ export async function finishRun(
     errorCount,
   });
 
-  if (isFork && result.writeForbidden) {
-    emitForkWarning();
-    return 0;
-  }
+  // Read-only fork token (a `pull_request` from a fork): inline comments can't
+  // post (annotations + the step summary still do). Note it once. Skipped under
+  // pull_request_target, which grants forks a writable token.
+  if (forkReadOnly) emitForkWarning();
 
   const warningCount = result.findings.filter(f => f.severity === 'warning').length;
   actionLogger.info(
@@ -117,7 +133,13 @@ async function main(): Promise<void> {
     endGroup();
   }
 
-  process.exitCode = await finishRun(result, context.isFork, inputs.failOn);
+  // The job is the only check, so surface findings inline as workflow annotations.
+  emitFindingAnnotations(result.findings);
+
+  // A fork's GITHUB_TOKEN is read-only on `pull_request` (inline comments can't
+  // post), but pull_request_target grants a writable token — only warn in the former.
+  const forkReadOnly = context.isFork && process.env.GITHUB_EVENT_NAME !== 'pull_request_target';
+  process.exitCode = await finishRun(result, forkReadOnly, inputs.failOn);
 }
 
 /** True when this module is the process entrypoint (not imported by a test). */

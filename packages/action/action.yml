@@ -1,7 +1,8 @@
 name: 'Lien Review'
 description: >-
   Self-contained PR review — complexity analysis, agent bug review, and a summary,
-  posted as a check run and inline comments. No server, no database.
+  surfaced as inline PR comments + workflow annotations + a step summary. The
+  workflow job is the single status check. No server, no database.
 author: 'Lien'
 branding:
   icon: 'git-pull-request'
@@ -10,9 +11,9 @@ branding:
 inputs:
   github-token:
     description: >-
-      Token used to clone the PR and post the check run + comments. Defaults to
-      the workflow's built-in GITHUB_TOKEN. Needs contents:read,
-      pull-requests:write, checks:write.
+      Token used to clone the PR and post inline comments. Defaults to the
+      workflow's built-in GITHUB_TOKEN. Needs contents:read and
+      pull-requests:write.
     required: false
     default: ${{ github.token }}
   openrouter-api-key:
