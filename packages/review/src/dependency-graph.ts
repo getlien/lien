@@ -356,89 +356,158 @@ function chunkImportsFromFile(
   return false;
 }
 
+/** A single resolved call site on a chunk (symbol + line it was called from). */
+type CallSiteInfo = NonNullable<CodeChunk['metadata']['callSites']>[number];
+
+/** Shared lookups + the edge accumulator threaded through the resolution strategies. */
+interface EdgeResolutionContext {
+  edges: Map<string, CallerEdge[]>;
+  exportIndex: ExportIndex;
+  exportFileMap: Map<string, Set<string>>;
+}
+
+/** Directory portion of a posix path, including the trailing slash ('' at the root). */
+function dirOf(filepath: string): string {
+  return filepath.substring(0, filepath.lastIndexOf('/') + 1);
+}
+
 /** Pass 3: Build caller edges from call sites + resolved imports. */
 function buildCallerEdges(
   chunks: CodeChunk[],
   chunkImportMaps: Map<CodeChunk, ChunkImportMap>,
   exportIndex: ExportIndex,
 ): Map<string, CallerEdge[]> {
-  const edges = new Map<string, CallerEdge[]>();
   const packageImports = buildPackageImportedSymbols(chunks);
-  const exportFileMap = buildExportFileMap(exportIndex);
+  const ctx: EdgeResolutionContext = {
+    edges: new Map<string, CallerEdge[]>(),
+    exportIndex,
+    exportFileMap: buildExportFileMap(exportIndex),
+  };
 
   for (const chunk of chunks) {
-    if (!chunk.metadata.callSites || chunk.metadata.callSites.length === 0) continue;
+    const callSites = chunk.metadata.callSites;
+    if (!callSites || callSites.length === 0) continue;
 
     const importMap = chunkImportMaps.get(chunk);
-    const callerFile = chunk.metadata.file;
     const pkgSymbols = packageImports.get(chunk);
 
-    for (const callSite of chunk.metadata.callSites) {
-      const calledSymbol = callSite.symbol;
-
-      // 1. Try to resolve via relative imports
-      const resolved = importMap?.get(calledSymbol);
-      if (resolved) {
-        addEdge(edges, `${resolved.definitionFilepath}::${calledSymbol}`, chunk, callSite.line);
-        continue;
-      }
-
-      // 2. Try same-file: symbol is exported by the same file
-      const exportLocations = exportIndex.get(calledSymbol);
-      if (exportLocations?.some(e => e.filepath === callerFile)) {
-        addEdge(edges, `${callerFile}::${calledSymbol}`, chunk, callSite.line);
-        continue;
-      }
-
-      // 3a. Symbol-name fallback for cross-package imports (direct symbol match)
-      //     Works across languages: @liendev/review (TS), from package import ... (Python),
-      //     use crate::... (Rust). Handles re-exports from barrel/index files.
-      if (exportLocations && pkgSymbols?.has(calledSymbol)) {
-        for (const loc of exportLocations) {
-          if (loc.filepath === callerFile) continue;
-          addEdge(edges, `${loc.filepath}::${calledSymbol}`, chunk, callSite.line);
-        }
-        continue;
-      }
-
-      // 3b. OOP method fallback: the caller imports a class (e.g., `use App\Models\Order`)
-      //     and calls one of its methods (e.g., `findById`). The import is for the class,
-      //     not the method, so direct symbol matching fails. Instead, check if the caller
-      //     imports ANY symbol from a file that defines the called method.
-      if (exportLocations) {
-        let matched = false;
-        for (const loc of exportLocations) {
-          if (loc.filepath === callerFile) continue;
-          if (chunkImportsFromFile(chunk, loc.filepath, pkgSymbols, exportFileMap)) {
-            addEdge(edges, `${loc.filepath}::${calledSymbol}`, chunk, callSite.line);
-            matched = true;
-          }
-        }
-        if (matched) continue;
-
-        // 3c. Same-namespace/module fallback: in PHP/Python/Rust, classes in the same
-        //     namespace can reference each other without explicit imports. If the method
-        //     is defined in a file within the same directory, create the edge.
-        //     Skip for TS/JS which always require explicit imports.
-        const lang = chunk.metadata.language;
-        const supportsImplicitNamespace = lang && !['typescript', 'javascript'].includes(lang);
-        if (supportsImplicitNamespace) {
-          const otherFileLocations = exportLocations.filter(e => e.filepath !== callerFile);
-          if (otherFileLocations.length > 0) {
-            const callerDir = callerFile.substring(0, callerFile.lastIndexOf('/') + 1);
-            for (const loc of otherFileLocations) {
-              const locDir = loc.filepath.substring(0, loc.filepath.lastIndexOf('/') + 1);
-              if (locDir === callerDir) {
-                addEdge(edges, `${loc.filepath}::${calledSymbol}`, chunk, callSite.line);
-              }
-            }
-          }
-        }
-      }
+    for (const callSite of callSites) {
+      resolveCallSiteEdges(chunk, callSite, importMap, pkgSymbols, ctx);
     }
   }
 
-  return edges;
+  return ctx.edges;
+}
+
+/**
+ * Resolve and record caller edges for one call site, trying each strategy in
+ * priority order and stopping at the first that applies:
+ *   1. relative import       2. same-file export      3a. cross-package symbol match
+ *   3b. OOP method (caller imports the class)          3c. same-namespace (implicit imports)
+ */
+function resolveCallSiteEdges(
+  chunk: CodeChunk,
+  callSite: CallSiteInfo,
+  importMap: ChunkImportMap | undefined,
+  pkgSymbols: Set<string> | undefined,
+  ctx: EdgeResolutionContext,
+): void {
+  const calledSymbol = callSite.symbol;
+  const callerFile = chunk.metadata.file;
+
+  // 1. Relative import resolves straight to the definition file.
+  const resolved = importMap?.get(calledSymbol);
+  if (resolved) {
+    addEdge(ctx.edges, `${resolved.definitionFilepath}::${calledSymbol}`, chunk, callSite.line);
+    return;
+  }
+
+  const exportLocations = ctx.exportIndex.get(calledSymbol);
+  if (!exportLocations) return;
+
+  // 2. The same file both calls and exports the symbol.
+  if (exportLocations.some(e => e.filepath === callerFile)) {
+    addEdge(ctx.edges, `${callerFile}::${calledSymbol}`, chunk, callSite.line);
+    return;
+  }
+
+  // 3a. Cross-package direct symbol match. Works across languages (TS @liendev/review,
+  //     Python `from package import ...`, Rust `use crate::...`) incl. barrel re-exports.
+  if (pkgSymbols?.has(calledSymbol)) {
+    addCrossPackageEdges(chunk, callSite, exportLocations, ctx);
+    return;
+  }
+
+  // 3b. OOP method fallback (caller imports the class, calls one of its methods).
+  if (addOopMethodEdges(chunk, callSite, exportLocations, pkgSymbols, ctx)) return;
+
+  // 3c. Same-namespace fallback for languages with implicit imports.
+  addSameNamespaceEdges(chunk, callSite, exportLocations, ctx);
+}
+
+/** 3a. The caller's package imports the symbol by name — edge to every defining file. */
+function addCrossPackageEdges(
+  chunk: CodeChunk,
+  callSite: CallSiteInfo,
+  exportLocations: ExportEntry[],
+  ctx: EdgeResolutionContext,
+): void {
+  const callerFile = chunk.metadata.file;
+  for (const loc of exportLocations) {
+    if (loc.filepath === callerFile) continue;
+    addEdge(ctx.edges, `${loc.filepath}::${callSite.symbol}`, chunk, callSite.line);
+  }
+}
+
+/**
+ * 3b. OOP method fallback: the caller imports a class (e.g. `use App\Models\Order`) and
+ * calls one of its methods (e.g. `findById`). The import names the class, not the method,
+ * so direct symbol matching fails — instead match any file the caller imports from that
+ * also defines the called method. Returns true if any edge was added.
+ */
+function addOopMethodEdges(
+  chunk: CodeChunk,
+  callSite: CallSiteInfo,
+  exportLocations: ExportEntry[],
+  pkgSymbols: Set<string> | undefined,
+  ctx: EdgeResolutionContext,
+): boolean {
+  const callerFile = chunk.metadata.file;
+  let matched = false;
+  for (const loc of exportLocations) {
+    if (loc.filepath === callerFile) continue;
+    if (chunkImportsFromFile(chunk, loc.filepath, pkgSymbols, ctx.exportFileMap)) {
+      addEdge(ctx.edges, `${loc.filepath}::${callSite.symbol}`, chunk, callSite.line);
+      matched = true;
+    }
+  }
+  return matched;
+}
+
+/**
+ * 3c. Same-namespace fallback: in PHP/Python/Rust, classes in the same namespace
+ * reference each other without explicit imports. If the method is defined in a file
+ * in the same directory as the caller, create the edge. Skipped for TS/JS, which
+ * always require explicit imports.
+ */
+function addSameNamespaceEdges(
+  chunk: CodeChunk,
+  callSite: CallSiteInfo,
+  exportLocations: ExportEntry[],
+  ctx: EdgeResolutionContext,
+): void {
+  const lang = chunk.metadata.language;
+  const supportsImplicitNamespace = lang && !['typescript', 'javascript'].includes(lang);
+  if (!supportsImplicitNamespace) return;
+
+  const callerFile = chunk.metadata.file;
+  const callerDir = dirOf(callerFile);
+  for (const loc of exportLocations) {
+    if (loc.filepath === callerFile) continue;
+    if (dirOf(loc.filepath) === callerDir) {
+      addEdge(ctx.edges, `${loc.filepath}::${callSite.symbol}`, chunk, callSite.line);
+    }
+  }
 }
 
 function addEdge(
