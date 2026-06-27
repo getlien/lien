@@ -166,7 +166,7 @@ export class ReviewEngine {
     findings: ReviewFinding[],
     adapterContext: AdapterContext,
     opts?: { pluginFilter?: string; checkRunId?: number; skipCheckRun?: boolean },
-  ): Promise<void> {
+  ): Promise<{ conclusion: 'success' | 'failure' | 'neutral'; summary: string }> {
     const octokit = adapterContext.octokit as Octokit | undefined;
     const pr = adapterContext.pr;
     const pendingAnnotations: CheckAnnotation[] = [];
@@ -199,7 +199,7 @@ export class ReviewEngine {
     await finalizeDescription(descriptionParts, octokit, pr, adapterContext.logger);
 
     if (octokit && pr && checkRunId != null) {
-      await finalizePresentation(
+      return await finalizePresentation(
         octokit,
         pr,
         checkRunId,
@@ -210,6 +210,14 @@ export class ReviewEngine {
         adapterContext.logger,
       );
     }
+
+    // No check run was finalized (no octokit/pr/checkRunId), but callers still
+    // want the conclusion + summary for step summaries and exit codes.
+    const ordered = reorderSections(summarySections);
+    return {
+      conclusion: determineConclusion(findings),
+      summary: ordered.length > 0 ? ordered.join('\n\n') : buildCheckSummary(findings),
+    };
   }
 }
 
@@ -462,7 +470,7 @@ async function finalizePresentation(
   pendingAnnotations: CheckAnnotation[],
   debugLog: string[],
   logger: Logger,
-): Promise<void> {
+): Promise<{ conclusion: 'success' | 'failure' | 'neutral'; summary: string }> {
   const conclusion = determineConclusion(findings);
   const title = buildCheckTitle(findings);
   const ordered = reorderSections(summarySections);
@@ -483,6 +491,7 @@ async function finalizePresentation(
   ).catch(err =>
     logger.warning(`Failed to finalize check run: ${err instanceof Error ? err.message : err}`),
   );
+  return { conclusion, summary };
 }
 
 // ---------------------------------------------------------------------------

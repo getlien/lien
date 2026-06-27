@@ -1,7 +1,7 @@
 /**
- * Hardened shallow clone for review runner.
+ * Hardened shallow clone for review.
  *
- * Key differences from packages/app/src/clone.ts:
+ * Hardening:
  * - GIT_TERMINAL_PROMPT=0 to prevent token leakage
  * - transfer.fsckObjects=true for git bomb protection
  * - Post-clone symlink check via fs.realpath()
@@ -15,8 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import type { Logger } from '@liendev/review';
-import { assertValidRepoName } from './validate.js';
+import type { Logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -26,6 +25,17 @@ const GIT_ENV = {
 };
 
 const GIT_TIMEOUT = 120_000;
+
+// GitHub: owner is alphanumeric + hyphens (no start/end hyphen),
+// repo is alphanumeric + hyphens + underscores + periods (no leading period)
+const REPO_NAME_PATTERN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
+
+export function assertValidRepoName(fullName: string): void {
+  if (!REPO_NAME_PATTERN.test(fullName)) {
+    throw new Error(`Invalid repository name: ${JSON.stringify(fullName.slice(0, 100))}`);
+  }
+}
 
 export interface CloneResult {
   dir: string;
@@ -62,7 +72,7 @@ export async function cloneBySha(
   logger: Logger,
 ): Promise<CloneResult> {
   assertValidRepoName(repoFullName);
-  const dir = await mkdtemp(join(tmpdir(), 'lien-runner-'));
+  const dir = await mkdtemp(join(tmpdir(), 'lien-review-'));
   const cloneUrl = `https://x-access-token:${token}@github.com/${repoFullName}.git`;
 
   logger.info(`Cloning ${repoFullName}@${sha.slice(0, 7)} (by SHA) into ${dir}`);
@@ -108,7 +118,7 @@ export async function cloneByBranch(
   logger: Logger,
 ): Promise<CloneResult> {
   assertValidRepoName(repoFullName);
-  const dir = await mkdtemp(join(tmpdir(), 'lien-runner-'));
+  const dir = await mkdtemp(join(tmpdir(), 'lien-review-'));
   const cloneUrl = `https://x-access-token:${token}@github.com/${repoFullName}.git`;
 
   logger.info(`Cloning ${repoFullName}@${branch} (by branch) into ${dir}`);

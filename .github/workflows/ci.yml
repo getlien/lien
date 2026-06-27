@@ -32,7 +32,7 @@ jobs:
       - name: Format check
         run: npm run format:check
 
-      - name: Build Parser, Core & Review (required by CLI & Runner)
+      - name: Build Parser, Core & Review (required by CLI, Runner & Action)
         run: npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review
 
       - name: Lint
@@ -47,11 +47,17 @@ jobs:
       - name: Type check (Runner)
         run: npm run typecheck --workspace=packages/runner
 
+      - name: Type check (Action)
+        run: npm run typecheck --workspace=packages/action
+
       - name: Run tests (CLI)
         run: npm run test --workspace=packages/cli
 
       - name: Run tests (Review)
         run: npm run test --workspace=packages/review
+
+      - name: Run tests (Action)
+        run: npm run test --workspace=packages/action
 
       - name: Build all packages
         run: npm run build
@@ -60,3 +66,6 @@ jobs:
         run: |
           node packages/cli/dist/index.js --version
           node packages/cli/dist/index.js --help
+
+      - name: Build Action image (Dockerfile smoke test)
+        run: docker build -f packages/action/Dockerfile -t lien-review:ci .

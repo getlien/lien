@@ -26,6 +26,9 @@ import {
   ReviewEngine,
   ComplexityPlugin,
   AgentReviewPlugin,
+  cloneBySha,
+  resolveCommitTimestamp,
+  type CloneResult,
 } from '@liendev/review';
 import type { CodeChunk } from '@liendev/parser';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
@@ -37,7 +40,6 @@ import type {
   ReviewCommentResult,
 } from '../types.js';
 import type { RunnerConfig } from '../config.js';
-import { cloneBySha, resolveCommitTimestamp, type CloneResult } from '../clone.js';
 import { postReviewRunResult, postReviewRunStatus } from '../api-client.js';
 import { LogBuffer } from '../log-buffer.js';
 

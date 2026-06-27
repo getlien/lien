@@ -4,6 +4,7 @@ vi.mock('@liendev/review', () => ({
   runComplexityAnalysis: vi.fn(),
   enrichWithTestAssociations: vi.fn(),
   calculateDeltas: vi.fn(),
+  cloneBySha: vi.fn(),
 }));
 
 vi.mock('@liendev/parser', () => ({
@@ -11,17 +12,13 @@ vi.mock('@liendev/parser', () => ({
   analyzeComplexityFromChunks: vi.fn(),
 }));
 
-vi.mock('../src/clone.js', () => ({
-  cloneBySha: vi.fn(),
-}));
-
 import {
   runComplexityAnalysis,
   enrichWithTestAssociations,
   calculateDeltas,
+  cloneBySha,
 } from '@liendev/review';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
-import { cloneBySha } from '../src/clone.js';
 import { runAnalysisPhase } from '../src/handlers/pr-review.js';
 
 const mockRunComplexityAnalysis = vi.mocked(runComplexityAnalysis);

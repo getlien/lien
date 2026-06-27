@@ -14,16 +14,13 @@ vi.mock('@liendev/review', () => ({
   enrichWithTestAssociations: vi.fn(),
   calculateDeltas: vi.fn(),
   calculateDeltaSummary: vi.fn(),
+  cloneBySha: vi.fn(),
+  resolveCommitTimestamp: vi.fn(),
 }));
 
 vi.mock('@liendev/parser', () => ({
   performChunkOnlyIndex: vi.fn(),
   analyzeComplexityFromChunks: vi.fn(),
-}));
-
-vi.mock('../src/clone.js', () => ({
-  cloneBySha: vi.fn(),
-  resolveCommitTimestamp: vi.fn(),
 }));
 
 vi.mock('../src/api-client.js', () => ({
@@ -43,9 +40,10 @@ import {
   getPRPatchData,
   ReviewEngine,
   AgentReviewPlugin,
+  cloneBySha,
+  resolveCommitTimestamp,
 } from '@liendev/review';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
-import { cloneBySha, resolveCommitTimestamp } from '../src/clone.js';
 import { postReviewRunResult, postReviewRunStatus } from '../src/api-client.js';
 import { LogBuffer } from '../src/log-buffer.js';
 import { handlePRReview } from '../src/handlers/pr-review.js';

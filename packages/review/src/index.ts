@@ -166,3 +166,23 @@ export { formatTime, formatDeltaValue } from './format.js';
 // ─── Git utilities ──────────────────────────────────────────────────────────
 
 export { assertValidSha } from './git-utils.js';
+
+// ─── Clone ──────────────────────────────────────────────────────────────────
+
+export {
+  type CloneResult,
+  assertValidRepoName,
+  cloneBySha,
+  cloneByBranch,
+  resolveHeadSha,
+  resolveCommitTimestamp,
+} from './clone.js';
+
+// ─── Review core ────────────────────────────────────────────────────────────
+
+export {
+  type ReviewCoreContext,
+  type ReviewCoreResult,
+  type ReviewLLMConfig,
+  reviewPullRequest,
+} from './review-pr.js';

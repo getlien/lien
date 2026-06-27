@@ -5,19 +5,23 @@ vi.mock('@liendev/parser', () => ({
   analyzeComplexityFromChunks: vi.fn(),
 }));
 
-vi.mock('../src/clone.js', () => ({
-  cloneBySha: vi.fn(),
-  cloneByBranch: vi.fn(),
-  resolveHeadSha: vi.fn(),
-  resolveCommitTimestamp: vi.fn(),
-}));
+vi.mock('@liendev/review', async () => {
+  const actual = await vi.importActual<typeof import('@liendev/review')>('@liendev/review');
+  return {
+    ...actual,
+    cloneBySha: vi.fn(),
+    cloneByBranch: vi.fn(),
+    resolveHeadSha: vi.fn(),
+    resolveCommitTimestamp: vi.fn(),
+  };
+});
 
 vi.mock('../src/api-client.js', () => ({
   postReviewRunResult: vi.fn(),
 }));
 
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
-import { cloneBySha, cloneByBranch, resolveHeadSha, resolveCommitTimestamp } from '../src/clone.js';
+import { cloneBySha, cloneByBranch, resolveHeadSha, resolveCommitTimestamp } from '@liendev/review';
 import { postReviewRunResult } from '../src/api-client.js';
 import { handleBaseline } from '../src/handlers/baseline.js';
 import type { BaselineJobPayload } from '../src/types.js';

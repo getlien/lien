@@ -8,17 +8,17 @@
 import { createHash } from 'node:crypto';
 
 import type { Logger, ComplexityReport } from '@liendev/review';
-import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
-
-import type { BaselineJobPayload, ReviewRunResult, ComplexitySnapshotResult } from '../types.js';
-import type { RunnerConfig } from '../config.js';
 import {
   cloneByBranch,
   cloneBySha,
   resolveHeadSha,
   resolveCommitTimestamp,
   type CloneResult,
-} from '../clone.js';
+} from '@liendev/review';
+import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
+
+import type { BaselineJobPayload, ReviewRunResult, ComplexitySnapshotResult } from '../types.js';
+import type { RunnerConfig } from '../config.js';
 import { postReviewRunResult } from '../api-client.js';
 
 export async function handleBaseline(
