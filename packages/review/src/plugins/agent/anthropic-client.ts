@@ -118,6 +118,9 @@ export class AnthropicAgentClient {
     // Defaults to 'max_turns': if the loop exits via its `while` condition
     // without any explicit break below, the turn budget was the limit.
     let stopReason: AgentStopReason = 'max_turns';
+    // Once near budget we drop the tools so the model is *forced* to emit its
+    // verdict next turn, rather than tool-calling until the hard cap.
+    let forceFinish = false;
 
     while (turn < this.maxTurns) {
       turn++;
@@ -133,7 +136,7 @@ export class AnthropicAgentClient {
           },
         ],
         messages,
-        tools,
+        tools: forceFinish ? [] : tools,
       });
 
       lastResponse = response;
@@ -192,6 +195,8 @@ export class AnthropicAgentClient {
       const nearBudget = totalTokens >= this.maxTokenBudget * 0.6;
       const lastTurn = turn >= this.maxTurns - 1;
       const shouldWrapUp = nearBudget || lastTurn;
+      // Drop tools next turn so the model must produce its verdict.
+      if (shouldWrapUp) forceFinish = true;
 
       // Process tool_use blocks
       if (response.stop_reason === 'tool_use' && toolUseBlocks.length > 0) {

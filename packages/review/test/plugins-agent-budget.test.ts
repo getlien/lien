@@ -141,6 +141,23 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(toolMessage!.content).toContain('…[truncated');
   });
 
+  it('forces a verdict by dropping tools once near budget', async () => {
+    // Turn 1 crosses the 0.6 wrap-up threshold (7k/10k) but not the hard cap;
+    // turn 2 must run without tools so the model produces findings.
+    const { bodies } = mockFetch([toolCallTurn(7000), stopTurn(CLEAN_JSON, 1000)]);
+    const client = makeClient(10_000);
+    const tools = [
+      { type: 'function', function: { name: 'read_file', description: 'd', parameters: {} } },
+    ];
+
+    const result = await client.run('sys', 'init', tools as never, noopTool);
+
+    expect(result.stopReason).toBe('completed');
+    expect(result.incomplete).toBe(false);
+    expect(bodies[0].tools).toBeDefined(); // turn 1 had tools
+    expect(bodies[1].tools).toBeUndefined(); // turn 2 forced: no tools
+  });
+
   it('logs the last-turn reasoning when a run is incomplete', async () => {
     const { logger, lines } = capturingLogger();
     const reasoning = 'I am tracing the credit-service lock path for a race condition';

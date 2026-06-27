@@ -209,11 +209,15 @@ export class OpenAIAgentClient {
     // Defaults to 'max_turns': if the loop exits via its `while` condition
     // without any explicit break below, the turn budget was the limit.
     let stopReason: AgentStopReason = 'max_turns';
+    // Once near budget we drop the tools so the model is *forced* to emit its
+    // verdict next turn. Kimi otherwise ignores the soft wrap-up nudge and
+    // keeps tool-calling until the hard cap, bailing without findings.
+    let forceFinish = false;
 
     while (turn < this.maxTurns) {
       turn++;
 
-      const response = await this.chatCompletion(messages, tools);
+      const response = await this.chatCompletion(messages, forceFinish ? [] : tools);
 
       const turnInputTokens = response.usage?.prompt_tokens ?? 0;
       const turnOutputTokens = response.usage?.completion_tokens ?? 0;
@@ -270,6 +274,8 @@ export class OpenAIAgentClient {
         );
         if (nearBudget || lastTurn) {
           messages.push({ role: 'user', content: WRAP_UP_NUDGE });
+          // Next turn runs without tools so the model must produce findings.
+          forceFinish = true;
         }
       } else {
         this.logger.warning(`[agent] Unexpected finish_reason: ${choice.finish_reason}, stopping`);
