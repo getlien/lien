@@ -191,6 +191,30 @@ describe('scaleAgentBudget — model-aware multiplier', () => {
       MAX_REVIEW_TOKEN_BUDGET,
     );
   });
+
+  it('always returns an integer budget (the config schema requires int)', () => {
+    // 40002 chars → ceil(/4)=10001 → base 96001 (odd); ×1.5 = 144001.5 must round.
+    const odd = [{ content: 'x'.repeat(40_002) }];
+    const { maxTokenBudget } = scaleAgentBudget(5, odd, DEFAULT_REVIEW_MODEL);
+    expect(Number.isInteger(maxTokenBudget)).toBe(true);
+    expect(maxTokenBudget).toBe(144_002);
+  });
+
+  it('produces a config the agent-review schema accepts', () => {
+    // Guards the exact failure a float budget caused: the schema rejects the
+    // whole config (dropping the API key), so the agent silently doesn't run.
+    const plugin = new AgentReviewPlugin();
+    const cfg = {
+      apiKey: 'k',
+      provider: 'openai' as const,
+      model: DEFAULT_REVIEW_MODEL,
+      baseUrl: 'http://mock.local',
+      inputCostPerMTok: 0.74,
+      outputCostPerMTok: 3.5,
+      ...scaleAgentBudget(5, [{ content: 'x'.repeat(40_002) }], DEFAULT_REVIEW_MODEL),
+    };
+    expect(() => plugin.configSchema.parse(cfg)).not.toThrow();
+  });
 });
 
 describe('AgentReviewPlugin.present — incomplete review', () => {

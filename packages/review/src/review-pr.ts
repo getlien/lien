@@ -322,7 +322,10 @@ export function scaleAgentBudget(
 
   // Scale by the model's token appetite — the breakdown above is per the
   // Gemini-era ~8K/turn assumption; Kimi spends far more (see defaults.ts).
-  const scaled = baseBudget * reviewTokenBudgetMultiplier(model);
+  // Math.round keeps the result an integer: the agent-review config schema
+  // requires an int, and a fractional budget makes it reject the whole config
+  // (dropping the API key with it, so the agent silently doesn't run).
+  const scaled = Math.round(baseBudget * reviewTokenBudgetMultiplier(model));
 
   // Clamp: minimum 60K (small PRs still need room), maximum MAX_REVIEW_TOKEN_BUDGET
   const maxTokenBudget = Math.min(Math.max(scaled, 60_000), MAX_REVIEW_TOKEN_BUDGET);
