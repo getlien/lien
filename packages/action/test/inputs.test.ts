@@ -37,7 +37,7 @@ describe('readInputs — defaults', () => {
   it('applies sensible defaults when only the token is set', () => {
     const inputs = readInputs();
     expect(inputs.threshold).toBe('15');
-    expect(inputs.failOn).toBe('error');
+    expect(inputs.failOn).toBe('never');
     expect(inputs.blockOnNewErrors).toBe(false);
     expect(inputs.reviewTypes).toEqual({
       complexity: true,

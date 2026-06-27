@@ -59,7 +59,10 @@ function readBool(name: string, fallback: boolean): boolean {
 
 function parseFailOn(raw: string): FailOn {
   if (raw === 'never' || raw === 'any' || raw === 'error') return raw;
-  if (raw === '') return 'error';
+  // Default: 'never' — the review is advisory out of the box (findings show as
+  // annotations + comments without failing CI). Consumers opt into gating with
+  // fail-on: error | any.
+  if (raw === '') return 'never';
   throw new Error(`Invalid fail-on value "${raw}" — expected one of: error, never, any`);
 }
 

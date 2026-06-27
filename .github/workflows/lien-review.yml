@@ -11,9 +11,9 @@ name: Lien Review
 # image + the public dist repo aren't published yet, so here we build the action
 # from source and run its entrypoint directly. Same code path, no publish needed.
 #
-# fail-on: never — the check stays green whenever the action *runs*; findings are
-# advisory (annotations + comments). External consumers can set fail-on: error
-# to make this job gate the PR.
+# The review is advisory by default (fail-on defaults to 'never'), so the check
+# stays green whenever the action *runs*; findings show as annotations + comments.
+# Set fail-on: error/any here (or in any consumer workflow) to gate the PR.
 
 on:
   pull_request:
@@ -48,4 +48,3 @@ jobs:
         env:
           INPUT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          INPUT_FAIL-ON: never
