@@ -1,6 +1,11 @@
-name: Lien Review
+name: Lien Self-Review
 
 # Dogfoods the Lien Review action on this monorepo's own PRs.
+#
+# NB: this workflow is named "Lien Self-Review" (not "Lien Review") on purpose —
+# the action posts its own check run named "Lien Review", so naming the workflow
+# the same would surface a confusing "Lien Review" (the verdict) alongside
+# "Lien Review / review" (this runner job).
 #
 # The public, external-consumer path is `uses: getlien/lien-review@v1` (a Docker
 # action backed by a prebuilt GHCR image — see packages/action/README.md). That
