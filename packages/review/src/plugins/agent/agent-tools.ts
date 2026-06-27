@@ -9,6 +9,7 @@
  */
 
 import fs from 'fs/promises';
+import type { Dirent } from 'fs';
 import path from 'path';
 
 import { analyzeComplexityFromChunks, createGitignoreFilter } from '@liendev/parser';
@@ -264,14 +265,48 @@ interface GrepMatch {
 }
 
 /**
+ * Decide whether a symlink entry should be grepped. Follows the link with
+ * realpath and includes it only when it resolves to a regular file whose real
+ * location stays inside `rootDir`. Directory symlinks (traversal cycle / escape
+ * risk), out-of-tree targets, and broken links are excluded. This lets grep see
+ * references behind symlinked config/source while never reading outside the
+ * repo. `rootDir` must already be canonical (see grepCodebase) so the
+ * containment comparison is like-for-like.
+ */
+async function symlinkPointsToFileInRepo(rootDir: string, linkPath: string): Promise<boolean> {
+  try {
+    const real = await fs.realpath(linkPath);
+    const rel = path.relative(rootDir, real);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    return (await fs.stat(real)).isFile();
+  } catch {
+    return false; // broken link / permission
+  }
+}
+
+/**
+ * Classify a directory entry for the grep walk: 'file' to scan, 'dir' to
+ * descend into, or 'skip'. Regular files scan; non-skip directories descend;
+ * symlinks scan only when they point to a regular file inside the repo
+ * (directory symlinks are skipped to avoid cycles/escapes).
+ */
+async function classifyGrepEntry(
+  rootDir: string,
+  entry: Dirent,
+  full: string,
+): Promise<'file' | 'dir' | 'skip'> {
+  if (entry.isFile()) return 'file';
+  if (entry.isDirectory()) return GREP_SKIP_DIRS.has(entry.name) ? 'skip' : 'dir';
+  if (entry.isSymbolicLink() && (await symlinkPointsToFileInRepo(rootDir, full))) return 'file';
+  return 'skip';
+}
+
+/**
  * Recursively collect file paths under `dir`, pruning GREP_SKIP_DIRS and
- * gitignored paths. ALL symlinks (files and directories) are skipped — this
- * guards against traversal cycles and reading targets outside repoRootDir, at
- * the cost of missing references that live only behind a symlink (rare in a
- * reviewed repo; read_file can still reach them by path). Applying `isIgnored`
- * during traversal means ignored directories (e.g. coverage/, .next/) are never
- * descended into, rather than walked and discarded afterward. Dotfiles and
- * dot-directories other than the skip set ARE included.
+ * gitignored paths. Applying `isIgnored` during traversal means ignored
+ * directories (e.g. coverage/, .next/) are never descended into, rather than
+ * walked and discarded afterward. Dotfiles and dot-directories other than the
+ * skip set ARE included.
  */
 async function collectGrepFiles(
   rootDir: string,
@@ -286,14 +321,11 @@ async function collectGrepFiles(
     return; // unreadable directory — skip rather than abort the whole grep
   }
   for (const entry of entries) {
-    if (entry.isSymbolicLink()) continue;
     const full = path.join(dir, entry.name);
     if (isIgnored(path.relative(rootDir, full))) continue;
-    if (entry.isFile()) {
-      acc.push(full);
-    } else if (entry.isDirectory() && !GREP_SKIP_DIRS.has(entry.name)) {
-      await collectGrepFiles(rootDir, full, isIgnored, acc);
-    }
+    const kind = await classifyGrepEntry(rootDir, entry, full);
+    if (kind === 'file') acc.push(full);
+    else if (kind === 'dir') await collectGrepFiles(rootDir, full, isIgnored, acc);
   }
 }
 
@@ -380,16 +412,18 @@ export async function grepCodebase(
     // Search the real working tree (not just parser-chunked source) so refs in
     // config, YAML, CI workflows, etc. are visible. Respect .gitignore +
     // built-in excludes via the shared parser filter, pruning ignored paths
-    // during the walk rather than after.
-    const isIgnored = await createGitignoreFilter(ctx.repoRootDir);
+    // during the walk rather than after. Canonicalize the root first so symlink
+    // containment checks compare like-for-like (e.g. macOS /var vs /private/var).
+    const rootDir = await fs.realpath(ctx.repoRootDir);
+    const isIgnored = await createGitignoreFilter(rootDir);
     const files: string[] = [];
-    await collectGrepFiles(ctx.repoRootDir, ctx.repoRootDir, isIgnored, files);
+    await collectGrepFiles(rootDir, rootDir, isIgnored, files);
     files.sort(); // deterministic ordering across filesystems
 
     const { matches, truncated } = await scanForMatches(
       files,
       regex,
-      ctx.repoRootDir,
+      rootDir,
       Date.now() + GREP_TIME_BUDGET_MS,
     );
 

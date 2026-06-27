@@ -83,6 +83,38 @@ describe('grepCodebase — real working-tree search', () => {
     expect(files).not.toContain('bin.dat');
   });
 
+  it('follows in-repo file symlinks but skips out-of-repo, directory, and broken links', async () => {
+    const SYM = 'OpenRouterClient';
+    // Real target inside the repo, plus a symlink to it → should be followed.
+    await write(root, 'shared/config.ts', `export const c = '${SYM}';\n`);
+    await fs.symlink(path.join(root, 'shared', 'config.ts'), path.join(root, 'linked-config.ts'));
+
+    // Symlink to a file OUTSIDE the repo → must be skipped (no escape).
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-grep-out-'));
+    await write(outside, 'secrets.ts', `const leak = '${SYM}';\n`);
+    await fs.symlink(path.join(outside, 'secrets.ts'), path.join(root, 'escape.ts'));
+
+    // Directory symlink → skipped (cycle/escape guard).
+    await write(root, 'realdir/inside.ts', `const d = '${SYM}';\n`);
+    await fs.symlink(path.join(root, 'realdir'), path.join(root, 'linkdir'));
+
+    // Broken symlink → skipped.
+    await fs.symlink(path.join(root, 'does-not-exist.ts'), path.join(root, 'broken.ts'));
+
+    try {
+      const res = await runGrep(root, SYM);
+      const files = new Set((res.results ?? []).map(r => r.filepath));
+
+      expect(files).toContain('linked-config.ts'); // followed in-repo file symlink
+      expect(files).toContain(path.join('shared', 'config.ts')); // and the real target
+      expect(files).not.toContain('escape.ts'); // out-of-repo target excluded
+      expect([...files]).not.toContain(path.join('linkdir', 'inside.ts')); // dir symlink not traversed
+      expect(files).not.toContain('broken.ts'); // broken link excluded
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it('reports true 1-based file line numbers', async () => {
     await write(root, 'multi.ts', 'line one\nNEEDLE here\nline three\n');
     const res = await runGrep(root, 'NEEDLE');
