@@ -24,13 +24,14 @@ import { OpenAIAgentClient, toOpenAITools } from './openai-client.js';
 import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
 import { BUILTIN_RULES, buildTriggerContext, selectRules } from './rules.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
+import { DEFAULT_REVIEW_MODEL, DEFAULT_OPENROUTER_BASE_URL } from '../../defaults.js';
 
 const configSchema = z.object({
   apiKey: z.string().min(1),
-  model: z.string().default('google/gemini-3-flash-preview'),
+  model: z.string().default(DEFAULT_REVIEW_MODEL),
   /** 'openai' for OpenRouter/Gemini/DeepSeek, 'anthropic' for Claude */
   provider: z.enum(['openai', 'anthropic']).default('openai'),
-  baseUrl: z.string().default('https://openrouter.ai/api/v1'),
+  baseUrl: z.string().default(DEFAULT_OPENROUTER_BASE_URL),
   inputCostPerMTok: z.number().optional(),
   outputCostPerMTok: z.number().optional(),
   maxTurns: z.number().int().min(1).max(30).default(15),

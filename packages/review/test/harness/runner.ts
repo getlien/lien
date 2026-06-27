@@ -10,6 +10,7 @@ import type { Logger } from '../../src/logger.js';
 import type { ReviewContext, ReviewFinding } from '../../src/plugin-types.js';
 import { AgentReviewPlugin } from '../../src/plugins/agent/index.js';
 import type { AgentTrace } from '../../src/plugins/agent/types.js';
+import { DEFAULT_REVIEW_MODEL, DEFAULT_OPENROUTER_BASE_URL } from '../../src/defaults.js';
 
 import { loadFixture } from './fixture-loader.js';
 import type { HarnessResult } from './assertions.js';
@@ -17,7 +18,7 @@ import type { HarnessResult } from './assertions.js';
 export interface RunnerOptions {
   /** OpenRouter / OpenAI-compatible API key. Required. */
   apiKey: string;
-  /** Model id. Default 'google/gemini-3-flash-preview' to mirror prod (#539). */
+  /** Model id. Defaults to DEFAULT_REVIEW_MODEL to mirror prod. */
   model?: string;
   /** Base URL. Default OpenRouter's. */
   baseUrl?: string;
@@ -118,9 +119,9 @@ export async function runFixture(
       // the runtime transport + API knobs the harness controls.
       ...(ctx.config ?? {}),
       apiKey: opts.apiKey,
-      model: opts.model ?? 'google/gemini-3-flash-preview',
+      model: opts.model ?? DEFAULT_REVIEW_MODEL,
       provider: 'openai',
-      baseUrl: opts.baseUrl ?? 'https://openrouter.ai/api/v1',
+      baseUrl: opts.baseUrl ?? DEFAULT_OPENROUTER_BASE_URL,
       maxTurns: opts.maxTurns ?? 15,
       maxTokenBudget: opts.maxTokenBudget ?? 100_000,
     },

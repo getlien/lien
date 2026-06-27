@@ -3,21 +3,23 @@
  *
  * Reads and validates the `INPUT_*` environment variables GitHub injects from
  * the workflow `with:` block, and resolves the LLM provider from the supplied
- * API keys. OpenRouter wins if present (cheaper Gemini path), Anthropic is the
- * fallback, and absent both we run complexity-only (`llm === null`).
+ * API keys. OpenRouter wins if present (the primary agent-review path),
+ * Anthropic is the fallback, and absent both we run complexity-only
+ * (`llm === null`).
  */
 
 import type { ReviewLLMConfig } from '@liendev/review';
+import {
+  DEFAULT_REVIEW_MODEL,
+  DEFAULT_OPENROUTER_BASE_URL,
+  DEFAULT_OPENROUTER_INPUT_COST_PER_MTOK,
+  DEFAULT_OPENROUTER_OUTPUT_COST_PER_MTOK,
+} from '@liendev/review';
 
-/** OpenRouter cost per million tokens (matches the retired runner's numbers). */
-const OPENROUTER_INPUT_COST_PER_MTOK = 0.5;
-const OPENROUTER_OUTPUT_COST_PER_MTOK = 3;
 /** Anthropic cost per million tokens (claude-sonnet-4-6). */
 const ANTHROPIC_INPUT_COST_PER_MTOK = 3;
 const ANTHROPIC_OUTPUT_COST_PER_MTOK = 15;
 
-const OPENROUTER_MODEL = 'google/gemini-3-flash-preview';
-const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 
 export type FailOn = 'error' | 'never' | 'any';
@@ -125,10 +127,10 @@ function resolveLLM(openrouterKey: string, anthropicKey: string): ReviewLLMConfi
     return {
       provider: 'openai',
       apiKey: openrouterKey,
-      model: OPENROUTER_MODEL,
-      baseUrl: OPENROUTER_BASE_URL,
-      inputCostPerMTok: OPENROUTER_INPUT_COST_PER_MTOK,
-      outputCostPerMTok: OPENROUTER_OUTPUT_COST_PER_MTOK,
+      model: DEFAULT_REVIEW_MODEL,
+      baseUrl: DEFAULT_OPENROUTER_BASE_URL,
+      inputCostPerMTok: DEFAULT_OPENROUTER_INPUT_COST_PER_MTOK,
+      outputCostPerMTok: DEFAULT_OPENROUTER_OUTPUT_COST_PER_MTOK,
     };
   }
   if (anthropicKey) {

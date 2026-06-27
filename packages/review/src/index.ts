@@ -186,3 +186,12 @@ export {
   type ReviewLLMConfig,
   reviewPullRequest,
 } from './review-pr.js';
+
+// ─── Defaults ───────────────────────────────────────────────────────────────
+
+export {
+  DEFAULT_REVIEW_MODEL,
+  DEFAULT_OPENROUTER_BASE_URL,
+  DEFAULT_OPENROUTER_INPUT_COST_PER_MTOK,
+  DEFAULT_OPENROUTER_OUTPUT_COST_PER_MTOK,
+} from './defaults.js';

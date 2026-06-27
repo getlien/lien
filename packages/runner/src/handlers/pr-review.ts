@@ -29,6 +29,10 @@ import {
   cloneBySha,
   resolveCommitTimestamp,
   type CloneResult,
+  DEFAULT_REVIEW_MODEL,
+  DEFAULT_OPENROUTER_BASE_URL,
+  DEFAULT_OPENROUTER_INPUT_COST_PER_MTOK,
+  DEFAULT_OPENROUTER_OUTPUT_COST_PER_MTOK,
 } from '@liendev/review';
 import type { CodeChunk } from '@liendev/parser';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
@@ -277,9 +281,9 @@ export async function handlePRReview(
           apiKey: config.openrouterApiKey || config.anthropicApiKey,
           provider: config.openrouterApiKey ? 'openai' : 'anthropic',
           model: selectedModel,
-          baseUrl: config.openrouterApiKey ? 'https://openrouter.ai/api/v1' : undefined,
-          inputCostPerMTok: config.openrouterApiKey ? 0.5 : 3,
-          outputCostPerMTok: config.openrouterApiKey ? 3 : 15,
+          baseUrl: config.openrouterApiKey ? DEFAULT_OPENROUTER_BASE_URL : undefined,
+          inputCostPerMTok: config.openrouterApiKey ? DEFAULT_OPENROUTER_INPUT_COST_PER_MTOK : 3,
+          outputCostPerMTok: config.openrouterApiKey ? DEFAULT_OPENROUTER_OUTPUT_COST_PER_MTOK : 15,
           ...scaleAgentBudget(filesToAnalyze.length, chunks),
         },
       },
@@ -395,7 +399,7 @@ export async function handlePRReview(
  * adapterContext metadata.
  */
 function selectAgentModel(useOpenRouter: boolean): string {
-  return useOpenRouter ? 'google/gemini-3-flash-preview' : 'claude-sonnet-4-6';
+  return useOpenRouter ? DEFAULT_REVIEW_MODEL : 'claude-sonnet-4-6';
 }
 
 /**
