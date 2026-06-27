@@ -15,9 +15,15 @@
  * actually recommends testing *both* sides — both emit the same correct
  * single-sided rec (add a test for dependentCount: 5 -> 'medium'). gemini hit
  * 10/10 only because it says "divergence" every run; kimi says it in ~40% of
- * runs, so it failed the brittle check despite an equivalent finding. The
- * check now asserts the real shared substance; the deeper "both sides" terms
- * are kept as bonus matches for a future model that does reason that way.
+ * runs, so it failed the brittle check despite an equivalent finding.
+ *
+ * The check now asserts the real shared substance as a conjunction: the finding
+ * must name the boundary value (=== 5) AND state the low->medium flip. Two
+ * separate expectFindingMentions calls => AND; each is any-of for phrasing
+ * robustness. The aspirational "both sides" terms are deliberately NOT in the
+ * gating lists — expectFindingMentions is an any-substring matcher, so mixing
+ * them in would let a finding pass on vocabulary alone (the very brittleness
+ * this recalibration removes). See PR #591 review (CodeRabbit + Lien self-review).
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -28,24 +34,12 @@ const assertions: FixtureAssertions = {
   expect: (result, h) => {
     h.expectRuleFired('boundary-change', result);
     h.expectToolCalled('get_files_context', result);
-    h.expectFindingMentions(
-      [
-        // Core: the finding must state the boundary-value reclassification
-        // (low -> medium at exactly 5). Each of these is present in 100% of
-        // gemini-3-flash and kimi-k2.7-code runs (calibrate-10 + traces).
-        'reclassif',
-        "'low' to 'medium'",
-        'dependentCount === 5',
-        // Bonus: deeper "test both sides of the boundary" framing. No current
-        // model reliably produces it; kept so a stronger one still matches.
-        'test pair',
-        'both sides',
-        'divergence',
-        'either side',
-        'adjacent',
-      ],
-      result,
-    );
+    // (1) names the boundary value, AND (2) states the low->medium flip.
+    // Both required (two calls = AND). Quote-tolerant variants so a model that
+    // omits or changes quotes still matches. Verified present in 100% of
+    // gemini-3-flash and kimi-k2.7-code runs (calibrate-10 + per-vote traces).
+    h.expectFindingMentions(['dependentCount === 5', 'dependentCount: 5', 'exactly 5'], result);
+    h.expectFindingMentions(["low' to 'medium'", 'low to medium'], result);
   },
   votes: 3,
   passThreshold: 9,
