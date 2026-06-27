@@ -36,6 +36,12 @@ export interface ActionInputs {
   failOn: FailOn;
   reviewTypes: ReviewTypes;
   llm: ReviewLLMConfig;
+  /**
+   * Post the verdict as a separate "Lien Review" check run (default true). Set
+   * false to skip it and surface findings as workflow annotations on the job
+   * instead, leaving the workflow job as the single status check.
+   */
+  checkRun: boolean;
 }
 
 /**
@@ -151,6 +157,7 @@ export function readInputs(): ActionInputs {
   const failOn = parseFailOn(readInput('fail-on'));
   const reviewTypes = parseReviewTypes(readInput('review-types'));
   const llm = resolveLLM(readInput('openrouter-api-key'), readInput('anthropic-api-key'));
+  const checkRun = readBool('check-run', true);
 
-  return { githubToken, threshold, blockOnNewErrors, failOn, reviewTypes, llm };
+  return { githubToken, threshold, blockOnNewErrors, failOn, reviewTypes, llm, checkRun };
 }

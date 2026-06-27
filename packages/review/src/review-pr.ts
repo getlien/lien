@@ -83,6 +83,14 @@ export interface ReviewCoreContext {
   llm: ReviewLLMConfig;
   /** Pre-created check run ID. If omitted, the core creates its own. */
   checkRunId?: number;
+  /**
+   * Post the verdict as a Checks API check run (default true). When false, the
+   * core skips creating/finalizing a check run — findings still post as inline
+   * PR comments and are returned in the result, so a caller (e.g. a GitHub
+   * Action) can surface them as workflow annotations and let the workflow job
+   * itself be the single status check.
+   */
+  postCheckRun?: boolean;
   logger: Logger;
 }
 
@@ -113,7 +121,10 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
 
   logger.info(`Processing PR #${pr.pullNumber} on ${ctx.baseRepoFullName}`);
 
-  const { checkRunId, writeForbidden } = await resolveCheckRun(ctx);
+  const postCheckRun = ctx.postCheckRun !== false;
+  const { checkRunId, writeForbidden } = postCheckRun
+    ? await resolveCheckRun(ctx)
+    : { checkRunId: undefined, writeForbidden: false };
 
   let headClone: CloneResult | null = null;
   let baseClone: CloneResult | null = null;
@@ -257,6 +268,7 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
       findings,
       adapterContext,
       checkRunId,
+      !postCheckRun,
       octokit,
       pr,
       logger,
@@ -508,6 +520,7 @@ async function tryPresentFindings(
   findings: ReviewFinding[],
   adapterContext: AdapterContext,
   checkRunId: number | undefined,
+  skipCheckRun: boolean,
   octokit: Octokit,
   prContext: PRContext,
   logger: Logger,
@@ -522,7 +535,7 @@ async function tryPresentFindings(
   // primary read-only-token (fork) signal remains the first write in
   // resolveCheckRun(), which 403s before any analysis on a read-only token.
   try {
-    const result = await engine.present(findings, adapterContext, { checkRunId });
+    const result = await engine.present(findings, adapterContext, { checkRunId, skipCheckRun });
     return { ...result, writeForbidden: false };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

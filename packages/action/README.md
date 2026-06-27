@@ -90,6 +90,16 @@ OpenRouter wins.
 | `review-types`        | no       | `complexity,bugs,summary`       | Comma-separated review types to enable. `complexity` toggles the complexity check. `bugs`, `architectural`, and `summary` all come from the single agent reviewer, so they switch it on/off as a group (and only when an API key is set) — they can't be toggled independently. |
 | `block-on-new-errors` | no       | `false`                         | Post `REQUEST_CHANGES` (instead of `COMMENT`) when the PR introduces new error-level complexity violations.                               |
 | `fail-on`             | no       | `error`                         | Controls the action's exit code so a Required check can block the PR: `error` (only on a failure conclusion), `any` (any error or warning finding), or `never`. |
+| `check-run`           | no       | `true`                          | Post the verdict as a separate `Lien Review` check run (so it can be marked Required). Set `false` for **single-check mode**: skip the posted check and surface findings as workflow annotations on the job instead — leaving the workflow job as the only status check (inline PR comments + step summary still post). |
+
+### Single-check mode (`check-run: false`)
+
+By default you get two checks: your workflow's job (mechanics) **and** a posted
+`Lien Review` check run (the verdict, with inline annotations). If you'd rather
+have just one, set `check-run: false`. The action then skips its own check run
+and emits findings as GitHub Actions annotations on the job (still inline on the
+diff), plus the usual PR comments and step summary — so the job itself is the
+single status check. Pair with `fail-on` to decide whether that one check gates.
 
 ## Outputs
 

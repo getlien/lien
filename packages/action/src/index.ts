@@ -17,13 +17,29 @@ import {
   createOctokit,
   type ReviewCoreContext,
   type ReviewCoreResult,
+  type ReviewFinding,
   reviewPullRequest,
 } from '@liendev/review';
 
 import { readInputs, type FailOn } from './inputs.js';
 import { loadContext } from './context.js';
 import { writeStepSummary, writeOutputs, countErrors } from './summary.js';
-import { actionLogger, group, endGroup } from './logger.js';
+import { actionLogger, group, endGroup, annotate } from './logger.js';
+
+/**
+ * Surface findings as GitHub Actions annotations (single-check mode, `check-run:
+ * false`). With no separate check run, these put each finding inline on the diff
+ * and on the workflow job's check — where the check-run annotations would be.
+ */
+export function emitFindingAnnotations(findings: ReviewFinding[]): void {
+  for (const f of findings) {
+    const level =
+      f.severity === 'error' ? 'error' : f.severity === 'warning' ? 'warning' : 'notice';
+    const title = f.category ? `Lien Review (${f.category})` : 'Lien Review';
+    const message = f.suggestion ? `${f.message}\n\n${f.suggestion}` : f.message;
+    annotate(level, { file: f.filepath, line: f.line, endLine: f.endLine, title }, message);
+  }
+}
 
 function emitForkWarning(): void {
   actionLogger.warning(
@@ -106,6 +122,7 @@ async function main(): Promise<void> {
       },
     },
     llm: inputs.llm,
+    postCheckRun: inputs.checkRun,
     logger: actionLogger,
   };
 
@@ -116,6 +133,9 @@ async function main(): Promise<void> {
   } finally {
     endGroup();
   }
+
+  // Single-check mode: no separate check run, so put findings inline as annotations.
+  if (!inputs.checkRun) emitFindingAnnotations(result.findings);
 
   process.exitCode = await finishRun(result, context.isFork, inputs.failOn);
 }

@@ -12,6 +12,7 @@ const INPUT_KEYS = [
   'INPUT_BLOCK-ON-NEW-ERRORS',
   'INPUT_OPENROUTER-API-KEY',
   'INPUT_ANTHROPIC-API-KEY',
+  'INPUT_CHECK-RUN',
 ];
 
 let saved: Record<string, string | undefined>;
@@ -46,6 +47,7 @@ describe('readInputs — defaults', () => {
       architectural: false,
     });
     expect(inputs.llm).toBeNull();
+    expect(inputs.checkRun).toBe(true);
   });
 
   it('requires a github-token', () => {
@@ -106,5 +108,16 @@ describe('readInputs — LLM resolution', () => {
   it('falls back to Anthropic when only its key is present', () => {
     process.env['INPUT_ANTHROPIC-API-KEY'] = 'sk_key';
     expect(readInputs().llm?.provider).toBe('anthropic');
+  });
+});
+
+describe('readInputs — check-run', () => {
+  it('defaults to true (post a separate check run)', () => {
+    expect(readInputs().checkRun).toBe(true);
+  });
+
+  it('parses false (single-check mode)', () => {
+    process.env['INPUT_CHECK-RUN'] = 'false';
+    expect(readInputs().checkRun).toBe(false);
   });
 });

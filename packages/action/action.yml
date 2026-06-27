@@ -53,6 +53,14 @@ inputs:
       warning finding), or 'never'.
     required: false
     default: 'error'
+  check-run:
+    description: >-
+      Post the verdict as a separate "Lien Review" check run (default true) so it
+      can be marked Required. Set 'false' to skip it and instead surface findings
+      as workflow annotations on the job — leaving the workflow job as the single
+      status check (findings still post as inline PR comments + a step summary).
+    required: false
+    default: 'true'
 
 outputs:
   conclusion:
