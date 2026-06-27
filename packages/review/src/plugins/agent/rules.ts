@@ -387,7 +387,13 @@ MANDATORY protocol when this rule is active:
    Any other outcome — test absent, test exists but covers a
    different input, test exists but asserts the OLD behavior — is
    a finding. Cite the test file and line you inspected (or note
-   its absence) in \`evidence\`.
+   its absence) in \`evidence\`. In your \`suggestion\`, recommend
+   a **test pair** that pins the boundary from BOTH sides: the
+   divergence input (where classification changes) AND the
+   adjacent value on the unchanged side. For \`> 5\` → \`>= 5\`,
+   that is tests for both 5 (now medium) and 4 (still low) — a
+   single test at the boundary value alone leaves the other side
+   unverified.
 4. Consult <blast_radius>. For each listed dependent (especially
    uncovered ones marked ✗), name the concrete path by which the
    new boundary semantics cascade into that caller. This is
@@ -406,7 +412,7 @@ is not a qualifying test; an actual test file + line is.`,
   "category": "logic_error",
   "ruleId": "boundary-change",
   "message": "The PR frames this as an 'off-by-one fix', but the change is a behavior drift, not a correction. Shifting \`> 5\` to \`>= 5\` reclassifies dependentCount === 5 from 'low' to 'medium'. The existing test suite passes because no test exercises dependentCount === 5 — passing tests are evidence that the boundary was untested, not that the new behavior is intended. Per <blast_radius>, buildEntry and computeGlobalRisk both call classifyLevel via computeBlastRadiusRisk, so the shift cascades into every review's global risk score: a 5-dependent PR would now surface 'medium risk' instead of 'low'.",
-  "suggestion": "Add a test case asserting classifyLevel({ dependentCount: 5, ... }).level === 'low' (current behavior) or 'medium' (proposed behavior), then decide whether the shift is actually intended. If intended, document it in the commit message and update any documentation that describes the 'low at 5' threshold.",
+  "suggestion": "Add a test pair that pins the boundary from both sides: (a) classifyLevel({ dependentCount: 5, ... }).level === 'medium' (the new behavior at the divergence input) AND (b) classifyLevel({ dependentCount: 4, ... }).level === 'low' (the adjacent value, unchanged) — testing 5 alone leaves the other side unverified. Then decide whether the shift is intended; if so, document it in the commit message and update any docs describing the 'low at 5' threshold.",
   "evidence": "Boundary-change check — PR frames threshold change as a correction, but no test covers the boundary value where behavior diverges"
 }`,
   triggers: {
