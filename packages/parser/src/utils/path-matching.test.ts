@@ -352,6 +352,26 @@ describe('isTestFile - Precise Test Detection', () => {
     });
   });
 
+  describe('suffix and directory conventions (_spec/_test, spec/)', () => {
+    it('should match _spec. and _test. suffix files (Ruby/Go conventions)', () => {
+      expect(isTestFile('models/user_spec.rb')).toBe(true);
+      expect(isTestFile('lib/calculator_test.rb')).toBe(true);
+      expect(isTestFile('pkg/math_test.go')).toBe(true);
+    });
+
+    it('should match files in spec/ and specs/ directories', () => {
+      expect(isTestFile('spec/models/user_spec.rb')).toBe(true);
+      expect(isTestFile('app/specs/helper.rb')).toBe(true);
+    });
+
+    it('should not treat _spec/_test lookalikes as tests', () => {
+      // No `_` boundary before test/spec
+      expect(isTestFile('mytest.rb')).toBe(false);
+      expect(isTestFile('respec/config.rb')).toBe(false);
+      expect(isTestFile('spec.rb')).toBe(false);
+    });
+  });
+
   describe('edge cases', () => {
     it('should handle files at root level', () => {
       expect(isTestFile('auth.test.ts')).toBe(true);

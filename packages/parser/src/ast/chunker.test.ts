@@ -25,8 +25,13 @@ describe('AST Chunker', () => {
       expect(shouldUseAST('script.py')).toBe(true);
     });
 
+    it('should return true for Ruby files', () => {
+      expect(shouldUseAST('test.rb')).toBe(true);
+      expect(shouldUseAST('app/models/user.rb')).toBe(true);
+    });
+
     it('should return false for unsupported files', () => {
-      expect(shouldUseAST('test.rb')).toBe(false);
+      expect(shouldUseAST('test.swift')).toBe(false);
       expect(shouldUseAST('test.txt')).toBe(false);
     });
   });
@@ -520,10 +525,10 @@ export { default as qux } from './qux';`;
 
   describe('error handling', () => {
     it('should throw error for unsupported language', () => {
-      const content = 'puts "Hello"';
+      const content = 'print("Hello")';
 
-      // Ruby is not yet supported
-      expect(() => chunkByAST('test.rb', content)).toThrow();
+      // Swift is not AST-supported
+      expect(() => chunkByAST('test.swift', content)).toThrow();
     });
 
     it('should handle invalid syntax gracefully', () => {

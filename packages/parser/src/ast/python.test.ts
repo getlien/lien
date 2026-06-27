@@ -170,6 +170,9 @@ def calculate_sum(numbers: list[int]) -> int:
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.signature).toBeDefined();
     expect(chunks[0].metadata.signature).toContain('calculate_sum');
+    // Signature must stop at the body — not swallow the function body (regression
+    // guard: the old brace-oriented extractor walked no-brace bodies into the signature).
+    expect(chunks[0].metadata.signature).not.toContain('return');
   });
 
   it('should handle multiline function definitions', () => {
@@ -187,5 +190,13 @@ def long_function(
     expect(chunks).toHaveLength(1);
     expect(chunks[0].metadata.symbolName).toBe('long_function');
     expect(chunks[0].metadata.parameters?.length).toBe(3);
+    // The signature should span the full multiline parameter list (collapsed to one
+    // line) and stop at the return type — without bleeding the body in.
+    const signature = chunks[0].metadata.signature ?? '';
+    expect(signature).toContain('long_function');
+    expect(signature).toContain('param1');
+    expect(signature).toContain('param3');
+    expect(signature).toContain('-> dict');
+    expect(signature).not.toContain('return');
   });
 });

@@ -6,7 +6,7 @@ This package provides the core parsing and analysis capabilities used by Lien's 
 
 ## Features
 
-- **AST Parsing** — Tree-sitter-based parsing for TypeScript, JavaScript, Python, PHP, Rust, and Go
+- **AST Parsing** — Tree-sitter-based parsing for TypeScript, JavaScript, Python, PHP, Rust, Go, Java, C#, and Ruby
 - **Semantic Chunking** — Split code into meaningful chunks respecting function/class boundaries
 - **Complexity Analysis** — Cyclomatic, cognitive, and Halstead complexity metrics
 - **Dependency Analysis** — Import/export tracking with transitive dependent resolution
@@ -24,8 +24,11 @@ This package provides the core parsing and analysis capabilities used by Lien's 
 | PHP | Yes | Yes | Yes |
 | Rust | Yes | Yes | Yes |
 | Go | Yes | Yes | Yes |
+| Java | Yes | Yes | Yes |
+| C# | Yes | Yes | Yes |
+| Ruby | Yes | Yes | Yes |
 
-Line-based chunking and symbol extraction are available for additional languages including Java, C#, Ruby, and Vue.
+Line-based chunking and symbol extraction are available for additional languages including Vue, Liquid, C/C++, Swift, Kotlin, Scala, and Markdown.
 
 ## Usage
 
