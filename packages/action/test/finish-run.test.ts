@@ -72,4 +72,13 @@ describe('finishRun', () => {
 
     expect(exitCode).toBe(0);
   });
+
+  it('fail-on=any fails on a failure conclusion even with no findings', async () => {
+    vi.spyOn(actionLogger, 'info').mockImplementation(() => {});
+    const result = makeResult({ conclusion: 'failure', findings: [] });
+
+    const exitCode = await finishRun(result, /* isFork */ false, 'any');
+
+    expect(exitCode).toBe(1);
+  });
 });

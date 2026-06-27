@@ -59,7 +59,9 @@ function exitCodeFor(
   warningCount: number,
 ): number {
   if (failOn === 'never') return 0;
-  if (failOn === 'any') return errorCount + warningCount > 0 ? 1 : 0;
+  // 'any' is strictly stricter than 'error': fail on a failure conclusion (e.g.
+  // analysis failed with no findings) OR on any error/warning finding.
+  if (failOn === 'any') return conclusion === 'failure' || errorCount + warningCount > 0 ? 1 : 0;
   // failOn === 'error'
   return conclusion === 'failure' ? 1 : 0;
 }

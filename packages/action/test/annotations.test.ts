@@ -61,4 +61,12 @@ describe('emitFindingAnnotations', () => {
   it('emits nothing for an empty findings list', () => {
     expect(capture(() => emitFindingAnnotations([]))).toBe('');
   });
+
+  it('escapes `:` and `,` in filepath and title property values', () => {
+    const out = capture(() =>
+      emitFindingAnnotations([finding({ filepath: 'src/a,b:c.ts', category: 'bug:regression' })]),
+    );
+    expect(out).toContain('file=src/a%2Cb%3Ac.ts');
+    expect(out).toContain('title=Lien Review (bug%3Aregression)');
+  });
 });
