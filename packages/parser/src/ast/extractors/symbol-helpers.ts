@@ -4,7 +4,23 @@ import type Parser from 'tree-sitter';
  * Extract function/method signature
  */
 export function extractSignature(node: Parser.SyntaxNode, content: string): string {
-  // Get the first line of the function (up to opening brace or arrow)
+  // Preferred: bound the signature by where the function body begins. This is
+  // language-agnostic — it works for brace languages (`… ) {`), colon languages
+  // (Python `… ):`), and `end` languages (Ruby `def … )`). The legacy brace/arrow
+  // scan below walked an entire no-brace body into the "signature" (e.g. Python,
+  // Ruby), which this avoids.
+  const bodyNode = node.childForFieldName('body');
+  if (bodyNode) {
+    const signature = content
+      .slice(node.startIndex, bodyNode.startIndex)
+      .replace(/\s+/g, ' ') // collapse newlines/indentation (matches the old join-with-space)
+      .replace(/(\{|=>|:)\s*$/, '') // drop a dangling block-opener if it was captured
+      .trim();
+    return clampSignatureLength(signature);
+  }
+
+  // Fallback: nodes with no `body` field (e.g. Rust trait signatures, abstract
+  // interface methods). Preserve the original first-line / brace-scan behavior.
   const startLine = node.startPosition.row;
   const lines = content.split('\n');
   let signature = lines[startLine] || '';
@@ -23,12 +39,14 @@ export function extractSignature(node: Parser.SyntaxNode, content: string): stri
   // Clean up signature
   signature = signature.split('{')[0].split('=>')[0].trim();
 
-  // Limit length
-  if (signature.length > 200) {
-    signature = signature.substring(0, 197) + '...';
-  }
+  return clampSignatureLength(signature);
+}
 
-  return signature;
+/**
+ * Truncate an over-long signature to keep stored chunks compact.
+ */
+function clampSignatureLength(signature: string): string {
+  return signature.length > 200 ? signature.substring(0, 197) + '...' : signature;
 }
 
 /**
