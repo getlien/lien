@@ -3,10 +3,8 @@ name: CI
 on:
   push:
     branches: [main, develop]
-    paths-ignore: ['platform/**']
   pull_request:
     branches: [main, develop]
-    paths-ignore: ['platform/**']
 
 jobs:
   build-and-test:
@@ -32,7 +30,7 @@ jobs:
       - name: Format check
         run: npm run format:check
 
-      - name: Build Parser, Core & Review (required by CLI, Runner & Action)
+      - name: Build Parser, Core & Review (required by CLI & Action)
         run: npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review
 
       - name: Lint
@@ -43,9 +41,6 @@ jobs:
 
       - name: Type check (Review)
         run: npm run typecheck --workspace=packages/review
-
-      - name: Type check (Runner)
-        run: npm run typecheck --workspace=packages/runner
 
       - name: Type check (Action)
         run: npm run typecheck --workspace=packages/action

@@ -16,15 +16,14 @@
     "packages/core",
     "packages/review",
     "packages/cli",
-    "packages/runner",
     "packages/action",
     "packages/site"
   ],
   "scripts": {
-    "build": "npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review && npm run build -w packages/cli && npm run build -w @liendev/runner && npm run build -w @liendev/action",
+    "build": "npm run build -w @liendev/parser && npm run build -w @liendev/core && npm run build -w @liendev/review && npm run build -w packages/cli && npm run build -w @liendev/action",
     "build:core": "npm run build -w @liendev/parser && npm run build -w @liendev/core",
     "dev": "npm run dev -w packages/cli",
-    "typecheck": "npm run build -w @liendev/parser -w @liendev/core -w @liendev/review && npm run typecheck -w packages/cli -w packages/review -w packages/runner -w packages/action",
+    "typecheck": "npm run build -w @liendev/parser -w @liendev/core -w @liendev/review && npm run typecheck -w packages/cli -w packages/review -w packages/action",
     "clean": "rm -rf packages/*/dist",
     "changeset": "changeset",
     "version": "changeset version",

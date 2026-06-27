@@ -10,8 +10,7 @@ Local-first semantic code search tool providing context to AI coding assistants 
 - License: AGPL-3.0 | Domain: lien.dev
 
 **Monorepo Structure:**
-- `packages/` — TypeScript packages (parser, core, review, cli, runner, site)
-- `platform/` — Laravel 12 web app for Lien Review (see `platform/CLAUDE.md` for platform-specific rules)
+- `packages/` — TypeScript packages (parser, core, review, cli, action, site)
 
 **Package Structure:**
 ```
