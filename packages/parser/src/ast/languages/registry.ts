@@ -8,6 +8,7 @@ import { rustDefinition } from './rust.js';
 import { goDefinition } from './go.js';
 import { javaDefinition } from './java.js';
 import { csharpDefinition } from './csharp.js';
+import { rubyDefinition } from './ruby.js';
 
 /**
  * All registered language definitions.
@@ -22,6 +23,7 @@ const definitions: LanguageDefinition[] = [
   goDefinition,
   javaDefinition,
   csharpDefinition,
+  rubyDefinition,
 ];
 
 /**
@@ -38,6 +40,7 @@ export const LANGUAGE_IDS = [
   'go',
   'java',
   'csharp',
+  'ruby',
 ] as const;
 export type SupportedLanguage = (typeof LANGUAGE_IDS)[number];
 
