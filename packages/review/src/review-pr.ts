@@ -38,6 +38,7 @@ import {
 } from './index.js';
 import type { CodeChunk } from '@liendev/parser';
 import { performChunkOnlyIndex, analyzeComplexityFromChunks } from '@liendev/parser';
+import { reviewTokenBudgetMultiplier, MAX_REVIEW_TOKEN_BUDGET } from './defaults.js';
 
 import { cloneBySha, type CloneResult } from './clone.js';
 
@@ -200,7 +201,7 @@ function buildPluginConfigs(
           baseUrl: ctx.llm.provider === 'openai' ? ctx.llm.baseUrl : undefined,
           inputCostPerMTok: ctx.llm.inputCostPerMTok,
           outputCostPerMTok: ctx.llm.outputCostPerMTok,
-          ...scaleAgentBudget(filesToAnalyze.length, chunks),
+          ...scaleAgentBudget(filesToAnalyze.length, chunks, ctx.llm.model),
         }
       : {},
   };
@@ -300,9 +301,10 @@ async function presentFindings(
  * the initial message, so the budget must accommodate it plus tool
  * calls and the final JSON output.
  */
-function scaleAgentBudget(
+export function scaleAgentBudget(
   fileCount: number,
   chunks: { content: string }[],
+  model: string,
 ): { maxTurns: number; maxTokenBudget: number } {
   // Estimate tokens in the changed code (~4 chars/token)
   const contentChars = chunks.reduce((sum, c) => sum + c.content.length, 0);
@@ -318,8 +320,15 @@ function scaleAgentBudget(
   const toolBudget = maxTurns * 8_000;
   const baseBudget = 4_000 + estimatedContentTokens + toolBudget + 2_000;
 
-  // Clamp: minimum 60K (small PRs still need room), maximum 200K
-  const maxTokenBudget = Math.min(Math.max(baseBudget, 60_000), 200_000);
+  // Scale by the model's token appetite — the breakdown above is per the
+  // Gemini-era ~8K/turn assumption; Kimi spends far more (see defaults.ts).
+  // Math.round keeps the result an integer: the agent-review config schema
+  // requires an int, and a fractional budget makes it reject the whole config
+  // (dropping the API key with it, so the agent silently doesn't run).
+  const scaled = Math.round(baseBudget * reviewTokenBudgetMultiplier(model));
+
+  // Clamp: minimum 60K (small PRs still need room), maximum MAX_REVIEW_TOKEN_BUDGET
+  const maxTokenBudget = Math.min(Math.max(scaled, 60_000), MAX_REVIEW_TOKEN_BUDGET);
 
   return { maxTurns, maxTokenBudget };
 }

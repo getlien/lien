@@ -18,6 +18,9 @@ import type {
 /** Cap a single tool's recorded output so traces stay readable. */
 const TRACE_TOOL_OUTPUT_MAX = 4096;
 
+/** Cap per-turn reasoning/output printed to CI logs. */
+const AGENT_LOG_MAX = 4000;
+
 /**
  * Cap a single tool result fed back to the model. A large file read or
  * batched get_files_context can otherwise return tens of thousands of tokens
@@ -34,6 +37,15 @@ const RETRY_NUDGE =
 
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
+}
+
+/**
+ * Parse a boolean-ish env flag. Only '1'/'true' (case-insensitive) enable —
+ * `!!process.env.X` would treat 'false'/'0' as truthy and leak logs.
+ */
+export function envEnabled(value: string | undefined): boolean {
+  const v = value?.trim().toLowerCase();
+  return v === '1' || v === 'true';
 }
 
 /**
@@ -169,6 +181,10 @@ export class OpenAIAgentClient {
   private logger: Logger;
   private inputCostPerToken: number;
   private outputCostPerToken: number;
+  // Verbose per-turn reasoning/output logging, gated by env so normal runs
+  // stay readable. The last turn's reasoning is always logged on an
+  // incomplete run (see below) regardless of this flag.
+  private logAgentTurns: boolean;
 
   constructor(options: OpenAIClientOptions) {
     this.apiKey = options.apiKey;
@@ -177,6 +193,7 @@ export class OpenAIAgentClient {
     this.maxTurns = options.maxTurns;
     this.maxTokenBudget = options.maxTokenBudget;
     this.logger = options.logger;
+    this.logAgentTurns = envEnabled(process.env.LIEN_REVIEW_LOG_AGENT);
     this.inputCostPerToken = (options.inputCostPerMTok ?? DEFAULT_INPUT_COST_PER_MTOK) / 1_000_000;
     this.outputCostPerToken =
       (options.outputCostPerMTok ?? DEFAULT_OUTPUT_COST_PER_MTOK) / 1_000_000;
@@ -201,11 +218,15 @@ export class OpenAIAgentClient {
     // Defaults to 'max_turns': if the loop exits via its `while` condition
     // without any explicit break below, the turn budget was the limit.
     let stopReason: AgentStopReason = 'max_turns';
+    // Once near budget we drop the tools so the model is *forced* to emit its
+    // verdict next turn. Kimi otherwise ignores the soft wrap-up nudge and
+    // keeps tool-calling until the hard cap, bailing without findings.
+    let forceFinish = false;
 
     while (turn < this.maxTurns) {
       turn++;
 
-      const response = await this.chatCompletion(messages, tools);
+      const response = await this.chatCompletion(messages, tools, forceFinish);
 
       const turnInputTokens = response.usage?.prompt_tokens ?? 0;
       const turnOutputTokens = response.usage?.completion_tokens ?? 0;
@@ -228,6 +249,7 @@ export class OpenAIAgentClient {
       lastContent = choice.message.content;
       const turnTrace = buildTurnTrace(turn, choice, turnInputTokens, turnOutputTokens);
       turnTraces.push(turnTrace);
+      if (this.logAgentTurns) this.logTurn(turnTrace);
 
       // Done: model finished naturally
       if (choice.finish_reason === 'stop') {
@@ -261,6 +283,8 @@ export class OpenAIAgentClient {
         );
         if (nearBudget || lastTurn) {
           messages.push({ role: 'user', content: WRAP_UP_NUDGE });
+          // Next turn is forced to emit a JSON verdict (no tools).
+          forceFinish = true;
         }
       } else {
         this.logger.warning(`[agent] Unexpected finish_reason: ${choice.finish_reason}, stopping`);
@@ -272,6 +296,10 @@ export class OpenAIAgentClient {
     if (turn >= this.maxTurns) {
       this.logger.warning(`[agent] Max turns reached (${this.maxTurns}), stopping`);
     }
+
+    // Capture the last *investigation* turn before the summary-retry appends
+    // its own (reasoning-less) trace — that's what we want to surface on bail.
+    const lastLoopTurn = turnTraces[turnTraces.length - 1];
 
     let parsed = extractResponse(lastContent);
     // Fire the summary-retry whenever we have *any* loop history but no
@@ -306,6 +334,9 @@ export class OpenAIAgentClient {
       this.logger.warning(
         `[agent] Review incomplete (stopReason=${stopReason}, no summary after ${turn} turns)`,
       );
+      // Always surface what the agent was doing when it bailed — the single
+      // most useful datum for diagnosing an incomplete run in CI logs.
+      this.logTurn(lastLoopTurn, 'last turn before bail');
     }
 
     return {
@@ -388,7 +419,9 @@ export class OpenAIAgentClient {
     await new Promise(resolve => setTimeout(resolve, 3_000));
     messages.push({ role: 'user', content: RETRY_NUDGE });
     try {
-      const response = await this.chatCompletion(messages, []);
+      // forceVerdict: response_format:json_object guarantees a JSON response,
+      // the reliable safety net when the loop bailed without a verdict.
+      const response = await this.chatCompletion(messages, [], true);
       const inputTokens = response.usage?.prompt_tokens ?? 0;
       const outputTokens = response.usage?.completion_tokens ?? 0;
       const choice = response.choices[0];
@@ -411,7 +444,31 @@ export class OpenAIAgentClient {
     }
   }
 
-  private async chatCompletion(messages: ChatMessage[], tools: ToolDef[]): Promise<ChatResponse> {
+  /**
+   * Print a turn's reasoning + output to the logger so CI logs show what the
+   * agent was actually thinking. Truncated so a verbose reasoning model (Kimi)
+   * doesn't flood the log.
+   */
+  private logTurn(turn: TurnTrace | undefined, label?: string): void {
+    if (!turn) return;
+    const tag = label ? ` (${label})` : '';
+    if (turn.reasoning) {
+      this.logger.info(
+        `[agent] Turn ${turn.turnNumber} reasoning${tag}:\n${truncate(turn.reasoning, AGENT_LOG_MAX)}`,
+      );
+    }
+    if (turn.responseText) {
+      this.logger.info(
+        `[agent] Turn ${turn.turnNumber} output${tag}:\n${truncate(turn.responseText, AGENT_LOG_MAX)}`,
+      );
+    }
+  }
+
+  private async chatCompletion(
+    messages: ChatMessage[],
+    tools: ToolDef[],
+    forceVerdict = false,
+  ): Promise<ChatResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages,
@@ -419,7 +476,14 @@ export class OpenAIAgentClient {
       temperature: 0,
       reasoning: { effort: 'high' },
     };
-    if (tools.length > 0) {
+    if (forceVerdict) {
+      // Force a JSON verdict (no tools). response_format:json_object makes the
+      // output be a JSON object — the model cannot emit tool calls. It's more
+      // reliably honored across OpenRouter providers than tool_choice:'none'
+      // (which a Kimi provider ignored mid-investigation), and an empty tools
+      // array is too weak (the model still emits tool calls from the prompt).
+      body.response_format = { type: 'json_object' };
+    } else if (tools.length > 0) {
       body.tools = tools;
     }
 
@@ -474,11 +538,13 @@ function extractResponse(content: string | null): {
 } {
   if (!content) return { findings: [] };
 
+  // Prefer a ```json fence (normal turns); fall back to the raw body, which is
+  // what response_format:json_object returns on a forced-verdict turn.
   const jsonMatch = content.match(/```json\s*\n([\s\S]*?)\n\s*```/);
-  if (!jsonMatch) return { findings: [] };
+  const raw = jsonMatch ? jsonMatch[1] : content.trim();
 
   try {
-    const parsed = JSON.parse(jsonMatch[1]);
+    const parsed = JSON.parse(raw);
     const findings: unknown[] = Array.isArray(parsed) ? parsed : (parsed.findings ?? []);
     const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
     return { findings: findings.filter(isValidFinding), summary };

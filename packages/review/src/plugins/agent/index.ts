@@ -24,7 +24,11 @@ import { OpenAIAgentClient, toOpenAITools } from './openai-client.js';
 import { buildSystemPrompt, buildInitialMessage } from './system-prompt.js';
 import { BUILTIN_RULES, buildTriggerContext, selectRules } from './rules.js';
 import { AGENT_TOOLS, dispatchTool } from './tools.js';
-import { DEFAULT_REVIEW_MODEL, DEFAULT_OPENROUTER_BASE_URL } from '../../defaults.js';
+import {
+  DEFAULT_REVIEW_MODEL,
+  DEFAULT_OPENROUTER_BASE_URL,
+  MAX_REVIEW_TOKEN_BUDGET,
+} from '../../defaults.js';
 
 const configSchema = z.object({
   apiKey: z.string().min(1),
@@ -281,9 +285,6 @@ function appendSummaryFinding(
   });
 }
 
-/** Hard ceiling for the agent token budget (mirrors review-pr.ts scaling). */
-const MAX_AGENT_TOKEN_BUDGET = 200_000;
-
 /** Extra budget headroom for high-impact PRs, keyed by blast-radius risk. */
 const BLAST_RADIUS_BUDGET_MULTIPLIER: Record<string, number> = {
   critical: 1.5,
@@ -294,11 +295,11 @@ const BLAST_RADIUS_BUDGET_MULTIPLIER: Record<string, number> = {
  * Scale the agent's token budget up for high-impact changes. A critical
  * blast radius means the agent has many dependents to investigate, which is
  * exactly when a too-tight budget causes it to bail before a verdict. Clamped
- * to the same ceiling as the file-size-based scaling in review-pr.ts.
+ * to the shared ceiling (MAX_REVIEW_TOKEN_BUDGET) used by review-pr.ts scaling.
  */
 export function scaleBudgetForBlastRadius(baseBudget: number, riskLevel?: string): number {
   const multiplier = riskLevel ? (BLAST_RADIUS_BUDGET_MULTIPLIER[riskLevel] ?? 1) : 1;
-  return Math.min(Math.round(baseBudget * multiplier), MAX_AGENT_TOKEN_BUDGET);
+  return Math.min(Math.round(baseBudget * multiplier), MAX_REVIEW_TOKEN_BUDGET);
 }
 
 /**
