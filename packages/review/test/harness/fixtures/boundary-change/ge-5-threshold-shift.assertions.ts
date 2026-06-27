@@ -47,10 +47,28 @@ const assertions: FixtureAssertions = {
     h.expectFindingMentions(['dependentCount === 5', 'dependentCount: 5', 'exactly 5'], result);
     h.expectFindingMentions(["low' to 'medium'", '"low" to "medium"', 'low to medium'], result);
     // (3) recommends a TEST PAIR — pin BOTH sides of the boundary, not just the
-    // value that crosses. Now achievable: after the boundary-change rule was
-    // updated to ask for it, "test pair" appears in 12/12 traced runs across
-    // gemini-3-flash + kimi-k2.7-code (was 0 before the rule change).
-    h.expectFindingMentions(['test pair', 'both sides', 'either side', 'adjacent', 'pin'], result);
+    // value that crosses. Accept either an explicit pair phrase OR a reference
+    // to the adjacent value (4): since gate (1) already requires the boundary
+    // value (5), a finding that also names 4 is recommending both sides — the
+    // real substance, independent of wording. The generic words "pin"/"adjacent"
+    // are deliberately NOT gated on (they can appear in a single-sided finding —
+    // PR #594 review). Now achievable after the boundary-change rule was updated
+    // to ask for a test pair; this list matches 22/22 traced gemini-3-flash +
+    // kimi-k2.7-code runs (was 0 before the rule change).
+    h.expectFindingMentions(
+      [
+        'test pair',
+        'both sides',
+        'either side',
+        'dependentCount: 4',
+        'dependentCount === 4',
+        'value 4',
+        'input 4',
+        '4 (low',
+        'and 4',
+      ],
+      result,
+    );
   },
   votes: 3,
   passThreshold: 9,
