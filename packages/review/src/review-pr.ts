@@ -138,16 +138,17 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
     if (summaryEnabled) await tryFetchPRPatches(octokit, pr, logger);
 
     if (filesToAnalyze.length === 0 && !summaryEnabled) {
-      logger.info('No analyzable files — running full-repo complexity scan');
-      await computeRepoComplexity(headClone.dir, ctx.config.threshold, logger);
-      const summaryMarkdown = await finalizeCheckRunNoFiles(checkRunId, octokit, pr, logger);
+      // Nothing analyzable and no summary requested — finalize without the
+      // (previously wasted) full-repo complexity scan, whose result was discarded.
+      logger.info('No analyzable files changed — skipping complexity/agent review');
+      const noFiles = await finalizeCheckRunNoFiles(checkRunId, octokit, pr, logger);
       return {
         findings: [],
         conclusion: 'success',
-        summaryMarkdown,
+        summaryMarkdown: noFiles.summary,
         filesAnalyzed,
         usage: { totalTokens: 0, cost: 0 },
-        writeForbidden,
+        writeForbidden: writeForbidden || noFiles.writeForbidden,
       };
     }
 
@@ -163,14 +164,20 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
     );
     if (!analysis) {
       const summaryMarkdown = 'Review failed — could not produce a complexity report.';
-      await finalizeCheckRunFailed(checkRunId, octokit, pr, summaryMarkdown, logger);
+      const failedForbidden = await finalizeCheckRunFailed(
+        checkRunId,
+        octokit,
+        pr,
+        summaryMarkdown,
+        logger,
+      );
       return {
         findings: [],
         conclusion: 'failure',
         summaryMarkdown,
         filesAnalyzed,
         usage: { totalTokens: 0, cost: 0 },
-        writeForbidden,
+        writeForbidden: writeForbidden || failedForbidden,
       };
     }
     const { currentReport, chunks, baselineReport, deltas } = analysis;
@@ -264,7 +271,7 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
       summaryMarkdown: presentation.summary,
       filesAnalyzed,
       usage: { totalTokens: tokenUsage, cost },
-      writeForbidden,
+      writeForbidden: writeForbidden || presentation.writeForbidden,
     };
   } finally {
     if (headClone) await headClone.cleanup().catch(() => {});
@@ -343,9 +350,10 @@ async function finalizeCheckRunNoFiles(
   octokit: Octokit,
   prContext: PRContext,
   logger: Logger,
-): Promise<string> {
+): Promise<{ summary: string; writeForbidden: boolean }> {
   const summary = 'No files eligible for complexity analysis.';
-  if (!checkRunId) return summary;
+  if (!checkRunId) return { summary, writeForbidden: false };
+  let writeForbidden = false;
   await updateCheckRun(
     octokit,
     {
@@ -360,8 +368,11 @@ async function finalizeCheckRunNoFiles(
       },
     },
     logger,
-  ).catch(err => logger.warning(`Failed to finalize check run: ${err}`));
-  return summary;
+  ).catch(err => {
+    writeForbidden = isWriteForbidden(err);
+    logger.warning(`Failed to finalize check run: ${err}`);
+  });
+  return { summary, writeForbidden };
 }
 
 async function finalizeCheckRunFailed(
@@ -370,8 +381,9 @@ async function finalizeCheckRunFailed(
   prContext: PRContext,
   summary: string,
   logger: Logger,
-): Promise<void> {
-  if (!checkRunId) return;
+): Promise<boolean> {
+  if (!checkRunId) return false;
+  let writeForbidden = false;
   await updateCheckRun(
     octokit,
     {
@@ -386,7 +398,11 @@ async function finalizeCheckRunFailed(
       },
     },
     logger,
-  ).catch(err => logger.warning(`Failed to finalize check run: ${err}`));
+  ).catch(err => {
+    writeForbidden = isWriteForbidden(err);
+    logger.warning(`Failed to finalize check run: ${err}`);
+  });
+  return writeForbidden;
 }
 
 interface AnalysisPhaseResult {
@@ -495,12 +511,23 @@ async function tryPresentFindings(
   octokit: Octokit,
   prContext: PRContext,
   logger: Logger,
-): Promise<{ conclusion: 'success' | 'failure' | 'neutral'; summary: string }> {
+): Promise<{
+  conclusion: 'success' | 'failure' | 'neutral';
+  summary: string;
+  writeForbidden: boolean;
+}> {
+  // Note: engine.present() swallows individual comment-post failures internally,
+  // so a 403 on an inline comment won't surface here — we can only observe a 403
+  // that propagates out of present() or hits the fallback finalizer below. The
+  // primary read-only-token (fork) signal remains the first write in
+  // resolveCheckRun(), which 403s before any analysis on a read-only token.
   try {
-    return await engine.present(findings, adapterContext, { checkRunId });
+    const result = await engine.present(findings, adapterContext, { checkRunId });
+    return { ...result, writeForbidden: false };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`engine.present() failed: ${message}`);
+    let writeForbidden = isWriteForbidden(error);
     if (checkRunId) {
       await updateCheckRun(
         octokit,
@@ -516,9 +543,12 @@ async function tryPresentFindings(
           },
         },
         logger,
-      ).catch(err => logger.warning(`Failed to finalize check run after error: ${err}`));
+      ).catch(err => {
+        writeForbidden = writeForbidden || isWriteForbidden(err);
+        logger.warning(`Failed to finalize check run after error: ${err}`);
+      });
     }
-    return { conclusion: 'neutral', summary: `An error occurred: ${message}` };
+    return { conclusion: 'neutral', summary: `An error occurred: ${message}`, writeForbidden };
   }
 }
 

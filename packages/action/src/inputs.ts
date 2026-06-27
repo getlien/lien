@@ -64,20 +64,46 @@ function parseFailOn(raw: string): FailOn {
 }
 
 /**
+ * Parse the `threshold` input. Must be a positive integer (it is consumed as
+ * `parseInt(threshold, 10)` downstream); a non-numeric value like "high" would
+ * otherwise silently degrade into NaN and produce misleading complexity output.
+ */
+function parseThreshold(raw: string): string {
+  const value = raw === '' ? '15' : raw;
+  if (!/^\d+$/.test(value) || parseInt(value, 10) <= 0) {
+    throw new Error(`Invalid threshold value "${raw}" — expected a positive integer`);
+  }
+  return value;
+}
+
+const VALID_REVIEW_TYPES = ['complexity', 'bugs', 'summary', 'architectural'] as const;
+type ReviewTypeName = (typeof VALID_REVIEW_TYPES)[number];
+
+/**
  * Parse the `review-types` input — a comma-separated list of the review types
  * to enable (complexity, bugs, summary, architectural). When unset we use
  * sensible defaults: complexity + bugs + summary on, architectural off.
+ *
+ * Rejects unknown or empty values rather than silently dropping them: a typo
+ * like `summmary` or a stray `,` would otherwise leave every flag false, so the
+ * review would register no plugins and report success having checked nothing.
  */
 function parseReviewTypes(raw: string): ReviewTypes {
   if (raw === '') {
     return { complexity: true, bugs: true, summary: true, architectural: false };
   }
-  const enabled = new Set(
-    raw
-      .split(',')
-      .map(s => s.trim().toLowerCase())
-      .filter(Boolean),
-  );
+  const tokens = raw
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+  const unknown = tokens.filter(t => !VALID_REVIEW_TYPES.includes(t as ReviewTypeName));
+  if (tokens.length === 0 || unknown.length > 0) {
+    const detail = unknown.length > 0 ? `unknown type(s): ${unknown.join(', ')}` : 'no valid types';
+    throw new Error(
+      `Invalid review-types value "${raw}" (${detail}) — expected a comma-separated list of: ${VALID_REVIEW_TYPES.join(', ')}`,
+    );
+  }
+  const enabled = new Set(tokens);
   return {
     complexity: enabled.has('complexity'),
     bugs: enabled.has('bugs'),
@@ -120,7 +146,7 @@ export function readInputs(): ActionInputs {
     throw new Error('github-token input is required (defaults to ${{ github.token }})');
   }
 
-  const threshold = readInput('threshold') || '15';
+  const threshold = parseThreshold(readInput('threshold'));
   const blockOnNewErrors = readBool('block-on-new-errors', false);
   const failOn = parseFailOn(readInput('fail-on'));
   const reviewTypes = parseReviewTypes(readInput('review-types'));
