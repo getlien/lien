@@ -9,14 +9,14 @@
 
 import type { ReviewLLMConfig } from '@liendev/review';
 
-/** OpenRouter cost per million tokens (matches the retired runner's numbers). */
-const OPENROUTER_INPUT_COST_PER_MTOK = 0.5;
+/** OpenRouter cost per million tokens (z-ai/glm-5.2 pricing). */
+const OPENROUTER_INPUT_COST_PER_MTOK = 0.95;
 const OPENROUTER_OUTPUT_COST_PER_MTOK = 3;
 /** Anthropic cost per million tokens (claude-sonnet-4-6). */
 const ANTHROPIC_INPUT_COST_PER_MTOK = 3;
 const ANTHROPIC_OUTPUT_COST_PER_MTOK = 15;
 
-const OPENROUTER_MODEL = 'google/gemini-3-flash-preview';
+const OPENROUTER_MODEL = 'z-ai/glm-5.2';
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 
