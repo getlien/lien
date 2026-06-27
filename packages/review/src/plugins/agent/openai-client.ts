@@ -10,12 +10,21 @@ import type {
   AgentFinding,
   AgentSummary,
   AgentResult,
+  AgentStopReason,
   TurnTrace,
   ToolInvocation,
 } from './types.js';
 
 /** Cap a single tool's recorded output so traces stay readable. */
 const TRACE_TOOL_OUTPUT_MAX = 4096;
+
+/**
+ * Cap a single tool result fed back to the model. A large file read or
+ * batched get_files_context can otherwise return tens of thousands of tokens
+ * in one turn, blowing the whole budget before the wrap-up nudge can fire.
+ * ~24K chars ≈ 6K tokens — enough context for a review, bounded per call.
+ */
+const TOOL_RESULT_MAX_CHARS = 24_000;
 
 const WRAP_UP_NUDGE =
   'You are running low on budget. Stop investigating and output your findings JSON now. Do not make any more tool calls. If you found no issues, output an empty findings array.';
@@ -189,6 +198,9 @@ export class OpenAIAgentClient {
     let turn = 0;
     let lastContent: string | null = null;
     const turnTraces: TurnTrace[] = [];
+    // Defaults to 'max_turns': if the loop exits via its `while` condition
+    // without any explicit break below, the turn budget was the limit.
+    let stopReason: AgentStopReason = 'max_turns';
 
     while (turn < this.maxTurns) {
       turn++;
@@ -219,6 +231,7 @@ export class OpenAIAgentClient {
 
       // Done: model finished naturally
       if (choice.finish_reason === 'stop') {
+        stopReason = 'completed';
         break;
       }
 
@@ -227,11 +240,14 @@ export class OpenAIAgentClient {
         this.logger.warning(
           `[agent] Token budget exceeded (${totalTokens}/${this.maxTokenBudget}), stopping`,
         );
+        stopReason = 'budget';
         break;
       }
 
-      // Approaching budget or last turn — nudge to wrap up
-      const nearBudget = totalTokens >= this.maxTokenBudget * 0.7;
+      // Approaching budget or last turn — nudge to wrap up.
+      // Threshold kept below the hard cap with headroom so a single capped
+      // tool result can't skip past the wrap-up window into the hard stop.
+      const nearBudget = totalTokens >= this.maxTokenBudget * 0.6;
       const lastTurn = turn >= this.maxTurns - 1;
 
       // Process tool calls
@@ -248,6 +264,7 @@ export class OpenAIAgentClient {
         }
       } else {
         this.logger.warning(`[agent] Unexpected finish_reason: ${choice.finish_reason}, stopping`);
+        stopReason = 'error';
         break;
       }
     }
@@ -281,6 +298,16 @@ export class OpenAIAgentClient {
     const cost =
       totalInputTokens * this.inputCostPerToken + totalOutputTokens * this.outputCostPerToken;
 
+    // Incomplete = the loop bailed on a limit (or error) AND never produced a
+    // verdict (no summary, even after the retry). Such a run must not be shown
+    // as a clean review.
+    const incomplete = stopReason !== 'completed' && !parsed.summary;
+    if (incomplete) {
+      this.logger.warning(
+        `[agent] Review incomplete (stopReason=${stopReason}, no summary after ${turn} turns)`,
+      );
+    }
+
     return {
       findings: parsed.findings,
       summary: parsed.summary,
@@ -291,6 +318,8 @@ export class OpenAIAgentClient {
         cost,
       },
       turns: turn,
+      stopReason,
+      incomplete,
       trace: {
         systemPrompt,
         initialMessage,
@@ -331,7 +360,11 @@ export class OpenAIAgentClient {
       turnTrace.toolCalls.push(
         buildInvocation(tc.function.name, tc.function.arguments, parsed, result, startedAt),
       );
-      messages.push({ role: 'tool', content: result, tool_call_id: tc.id });
+      messages.push({
+        role: 'tool',
+        content: truncate(result, TOOL_RESULT_MAX_CHARS),
+        tool_call_id: tc.id,
+      });
     }
   }
 

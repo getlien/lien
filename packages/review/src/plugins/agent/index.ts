@@ -117,6 +117,18 @@ export class AgentReviewPlugin implements ReviewPlugin {
       );
     }
 
+    // High-impact PRs need more room to investigate; a too-tight budget is the
+    // common cause of the agent bailing before producing a verdict.
+    const maxTokenBudget = scaleBudgetForBlastRadius(
+      config.maxTokenBudget,
+      blastRadius?.globalRisk.level,
+    );
+    if (maxTokenBudget !== config.maxTokenBudget) {
+      logger.info(
+        `[${this.id}] Token budget scaled ${config.maxTokenBudget} → ${maxTokenBudget} for ${blastRadius?.globalRisk.level} blast radius`,
+      );
+    }
+
     const systemPrompt = buildSystemPrompt(rules);
     const initialMessage = buildInitialMessage(context, { blastRadius });
     const result = await runAgentClient(
@@ -127,6 +139,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
       systemPrompt,
       initialMessage,
       toolExecutor,
+      maxTokenBudget,
     );
 
     reportAgentRun(this.id, context, logger, result);
@@ -134,6 +147,7 @@ export class AgentReviewPlugin implements ReviewPlugin {
     const pluginId = this.id;
     const findings = result.findings.map(f => mapToReviewFinding(f, pluginId));
     appendSummaryFinding(findings, pluginId, result.summary);
+    appendIncompleteNotice(findings, pluginId, result);
 
     return findings;
   }
@@ -192,6 +206,7 @@ function runAgentClient(
   systemPrompt: string,
   initialMessage: string,
   toolExecutor: ToolExecutor,
+  maxTokenBudget: number,
 ): Promise<AgentResult> {
   if (provider === 'anthropic') {
     const client = new AnthropicAgentClient({
@@ -201,7 +216,7 @@ function runAgentClient(
       inputCostPerMTok: config.inputCostPerMTok,
       outputCostPerMTok: config.outputCostPerMTok,
       maxTurns: config.maxTurns,
-      maxTokenBudget: config.maxTokenBudget,
+      maxTokenBudget,
       logger,
     });
     return client.run(systemPrompt, initialMessage, AGENT_TOOLS, toolExecutor);
@@ -214,7 +229,7 @@ function runAgentClient(
     inputCostPerMTok: config.inputCostPerMTok,
     outputCostPerMTok: config.outputCostPerMTok,
     maxTurns: config.maxTurns,
-    maxTokenBudget: config.maxTokenBudget,
+    maxTokenBudget,
     logger,
   });
   return client.run(systemPrompt, initialMessage, toOpenAITools(AGENT_TOOLS), toolExecutor);
@@ -266,6 +281,57 @@ function appendSummaryFinding(
   });
 }
 
+/** Hard ceiling for the agent token budget (mirrors review-pr.ts scaling). */
+const MAX_AGENT_TOKEN_BUDGET = 200_000;
+
+/** Extra budget headroom for high-impact PRs, keyed by blast-radius risk. */
+const BLAST_RADIUS_BUDGET_MULTIPLIER: Record<string, number> = {
+  critical: 1.5,
+  high: 1.25,
+};
+
+/**
+ * Scale the agent's token budget up for high-impact changes. A critical
+ * blast radius means the agent has many dependents to investigate, which is
+ * exactly when a too-tight budget causes it to bail before a verdict. Clamped
+ * to the same ceiling as the file-size-based scaling in review-pr.ts.
+ */
+export function scaleBudgetForBlastRadius(baseBudget: number, riskLevel?: string): number {
+  const multiplier = riskLevel ? (BLAST_RADIUS_BUDGET_MULTIPLIER[riskLevel] ?? 1) : 1;
+  return Math.min(Math.round(baseBudget * multiplier), MAX_AGENT_TOKEN_BUDGET);
+}
+
+/**
+ * When the agent bailed on a budget/turn limit before producing a verdict,
+ * append a `summary` finding flagged `incomplete` so `present()` surfaces a
+ * clear warning instead of a misleading "no issues found" / clean review.
+ */
+function appendIncompleteNotice(
+  findings: ReviewFinding[],
+  pluginId: string,
+  result: AgentResult,
+): void {
+  if (!result.incomplete) return;
+  const reason =
+    result.stopReason === 'budget'
+      ? 'hit the token budget limit'
+      : result.stopReason === 'max_turns'
+        ? 'hit the turn limit'
+        : 'stopped unexpectedly';
+  const message =
+    `Lien Review did not finish — it ${reason} while investigating and stopped before ` +
+    `producing a verdict. Any findings shown are partial; re-run the review to retry.`;
+  findings.push({
+    pluginId,
+    filepath: '',
+    line: 0,
+    severity: 'warning' as const,
+    category: 'summary',
+    message,
+    metadata: { incomplete: true, stopReason: result.stopReason, overview: message },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Finding mapping
 // ---------------------------------------------------------------------------
@@ -310,10 +376,16 @@ function formatCheckSummary(findings: ReviewFinding[], name: string): string {
   const sections: string[] = [`### ${name}`];
 
   if (summary) {
-    const meta = summary.metadata as { riskLevel?: string; overview?: string } | undefined;
-    sections.push(
-      `**${capitalize(meta?.riskLevel ?? 'unknown')} Risk** — ${meta?.overview ?? summary.message}`,
-    );
+    const meta = summary.metadata as
+      | { riskLevel?: string; overview?: string; incomplete?: boolean }
+      | undefined;
+    if (meta?.incomplete) {
+      sections.push(`⚠️ **Review incomplete** — ${meta.overview ?? summary.message}`);
+    } else {
+      sections.push(
+        `**${capitalize(meta?.riskLevel ?? 'unknown')} Risk** — ${meta?.overview ?? summary.message}`,
+      );
+    }
   }
 
   if (bugs.length > 0) {
@@ -347,14 +419,17 @@ function buildDescription(
   commitSha?: string,
 ): string {
   const meta = summaryFinding?.metadata as
-    | { riskLevel?: string; overview?: string; keyChanges?: string[] }
+    | { riskLevel?: string; overview?: string; keyChanges?: string[]; incomplete?: boolean }
     | undefined;
   const risk = meta?.riskLevel ?? 'low';
   const overview = meta?.overview ?? summaryFinding?.message ?? '';
+  const incomplete = meta?.incomplete === true;
 
-  const calloutType = bugFindings.length > 0 ? 'WARNING' : 'NOTE';
-  const headline =
-    bugFindings.length > 0
+  // An incomplete review must never read as a clean/approving NOTE.
+  const calloutType = bugFindings.length > 0 || incomplete ? 'WARNING' : 'NOTE';
+  const headline = incomplete
+    ? '⚠️ **Review did not complete**'
+    : bugFindings.length > 0
       ? `**${bugFindings.length} issue${bugFindings.length === 1 ? '' : 's'} found** · ${capitalize(risk)} Risk`
       : `**${capitalize(risk)} Risk**`;
 
