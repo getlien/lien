@@ -250,6 +250,14 @@ const MAX_GREP_FILE_BYTES = 1_000_000;
  */
 const GREP_TIME_BUDGET_MS = 5_000;
 /**
+ * Cap each line at this length before regex matching. Bounds the input handed to
+ * a potentially backtracking pattern on very long (usually minified or data)
+ * lines. Not a full ReDoS defense — a crafted catastrophic pattern on a short
+ * line is still uninterruptible in JS — but it removes the easy long-line vector
+ * and pairs with the wall-clock budget below.
+ */
+const MAX_GREP_LINE_LENGTH = 2_000;
+/**
  * Directories never worth walking. Mirrors the heavy entries in
  * ALWAYS_IGNORE_PATTERNS so we prune them up front instead of reading every
  * entry and discarding it. `.github` is deliberately NOT skipped — CI
@@ -346,23 +354,30 @@ async function readGrepCandidate(absFile: string): Promise<string | null> {
 }
 
 /**
- * Append matching lines from `content` to `matches`. Collects one past the
- * result cap (a sentinel) so the caller can tell "exactly cap matches" from
- * "more than cap"; the extra is trimmed before returning. Line numbers are
- * 1-based.
+ * Append matching lines from `content` to `matches`; returns true if the
+ * wall-clock deadline was hit mid-file (checked per line, so a many-line file
+ * can't blow the budget). Collects one past the result cap (a sentinel) so the
+ * caller can tell "exactly cap matches" from "more than cap"; the extra is
+ * trimmed before returning. Each line is capped at MAX_GREP_LINE_LENGTH before
+ * testing to bound the regex input. Line numbers are 1-based.
  */
 function collectLineMatches(
   content: string,
   regex: RegExp,
   filepath: string,
   matches: GrepMatch[],
-): void {
+  deadline: number,
+): boolean {
   const lines = content.split('\n');
   for (let i = 0; i < lines.length && matches.length <= MAX_GREP_RESULTS; i++) {
-    if (regex.test(lines[i])) {
-      matches.push({ filepath, line: i + 1, match: lines[i].trim().slice(0, 200) });
+    if (Date.now() > deadline) return true;
+    const line = lines[i];
+    const probe = line.length > MAX_GREP_LINE_LENGTH ? line.slice(0, MAX_GREP_LINE_LENGTH) : line;
+    if (regex.test(probe)) {
+      matches.push({ filepath, line: i + 1, match: line.trim().slice(0, 200) });
     }
   }
+  return false;
 }
 
 /**
@@ -386,8 +401,10 @@ async function scanForMatches(
       break;
     }
     const content = await readGrepCandidate(absFile);
-    if (content !== null) {
-      collectLineMatches(content, regex, path.relative(rootDir, absFile), matches);
+    if (content === null) continue;
+    if (collectLineMatches(content, regex, path.relative(rootDir, absFile), matches, deadline)) {
+      timedOut = true;
+      break;
     }
   }
   const truncated = timedOut || matches.length > MAX_GREP_RESULTS;

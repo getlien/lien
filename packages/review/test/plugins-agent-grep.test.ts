@@ -115,6 +115,14 @@ describe('grepCodebase — real working-tree search', () => {
     }
   });
 
+  it('still matches on very long lines (past the per-line cap) when the hit is near the start', async () => {
+    // A single line far longer than MAX_GREP_LINE_LENGTH with the needle early.
+    await write(root, 'long.ts', `const NEEDLE = '${'x'.repeat(5000)}';\n`);
+    const res = await runGrep(root, 'NEEDLE');
+    const files = new Set((res.results ?? []).map(r => r.filepath));
+    expect(files).toContain('long.ts');
+  });
+
   it('reports true 1-based file line numbers', async () => {
     await write(root, 'multi.ts', 'line one\nNEEDLE here\nline three\n');
     const res = await runGrep(root, 'NEEDLE');
