@@ -49,11 +49,13 @@ inputs:
     default: 'false'
   fail-on:
     description: >-
-      When the action's exit code is non-zero (so a Required check blocks the
-      PR): 'error' (default — only on a failure conclusion), 'any' (any error or
-      warning finding), or 'never'.
+      Whether the review fails the check (non-zero exit, so a Required check can
+      block the PR): 'never' (default — advisory; the review never fails CI),
+      'error' (fail on a failure conclusion, i.e. new error-level findings), or
+      'any' (fail on any error or warning finding). Opt into gating by setting
+      this to 'error' or 'any'.
     required: false
-    default: 'error'
+    default: 'never'
 
 outputs:
   conclusion:

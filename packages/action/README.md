@@ -87,7 +87,7 @@ OpenRouter wins.
 | `threshold`           | no       | `15`                            | Complexity threshold above which violations are reported.                                                                                 |
 | `review-types`        | no       | `complexity,bugs,summary`       | Comma-separated review types to enable. `complexity` toggles the complexity check. `bugs`, `architectural`, and `summary` all come from the single agent reviewer, so they switch it on/off as a group (and only when an API key is set) — they can't be toggled independently. |
 | `block-on-new-errors` | no       | `false`                         | Post `REQUEST_CHANGES` (instead of `COMMENT`) when the PR introduces new error-level complexity violations.                               |
-| `fail-on`             | no       | `error`                         | Controls the action's exit code so a Required check can block the PR: `error` (only on a failure conclusion), `any` (any error or warning finding), or `never`. |
+| `fail-on`             | no       | `never`                         | Whether the review fails the check (so a Required check can block the PR). Default `never` — **advisory**, never fails CI. Opt into gating with `error` (a failure conclusion / new error-level findings) or `any` (any error or warning finding). |
 
 > The action posts **no check run of its own** — the workflow job is the single
 > status check. Findings surface as workflow annotations (inline on the diff),
@@ -114,11 +114,13 @@ Reference them from a later step via the step `id`:
 
 ## Blocking a PR on the review
 
-Set `fail-on` to control the exit code, then mark the workflow's job as a
-**Required status check** in your branch protection rules. With `fail-on: error`
-the action exits non-zero only when the review's overall conclusion is a
-failure (driven by `block-on-new-errors`); `fail-on: any` is stricter (any
-error- or warning-level finding fails the check); `fail-on: never` never blocks.
+By default the review is **advisory** (`fail-on: never`) — it never fails CI, so
+adding the action can't break anyone's pipeline. To gate merges on it, opt in by
+setting `fail-on` and marking the workflow's job as a **Required status check**
+in your branch protection rules. With `fail-on: error` the action exits non-zero
+only when the review's overall conclusion is a failure (driven by
+`block-on-new-errors`); `fail-on: any` is stricter (any error- or warning-level
+finding fails the check).
 
 ## Fork PRs
 

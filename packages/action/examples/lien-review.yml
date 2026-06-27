@@ -31,7 +31,7 @@ jobs:
           # threshold: '15'
           # review-types: 'complexity,bugs,summary'  # also: architectural
           # block-on-new-errors: 'false'
-          # fail-on: 'error'                         # also: any, never
+          # fail-on: 'never'                        # default (advisory); set 'error'/'any' to gate
 
 # ─── Fork PRs (pull_request_target variant) ──────────────────────────────────
 #
