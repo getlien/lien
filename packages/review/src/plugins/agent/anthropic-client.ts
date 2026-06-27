@@ -12,12 +12,21 @@ import type {
   AgentFinding,
   AgentSummary,
   AgentResult,
+  AgentStopReason,
   TurnTrace,
   ToolInvocation,
 } from './types.js';
 
 /** Cap a single tool's recorded output so traces stay readable. */
 const TRACE_TOOL_OUTPUT_MAX = 4096;
+
+/**
+ * Cap a single tool result fed back to the model. A large file read or
+ * batched get_files_context can otherwise return tens of thousands of tokens
+ * in one turn, blowing the whole budget before the wrap-up nudge can fire.
+ * ~24K chars ≈ 6K tokens — enough context for a review, bounded per call.
+ */
+const TOOL_RESULT_MAX_CHARS = 24_000;
 
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
@@ -99,6 +108,9 @@ export class AnthropicAgentClient {
     let turn = 0;
     let lastResponse: Anthropic.Messages.Message | null = null;
     const turnTraces: TurnTrace[] = [];
+    // Defaults to 'max_turns': if the loop exits via its `while` condition
+    // without any explicit break below, the turn budget was the limit.
+    let stopReason: AgentStopReason = 'max_turns';
 
     while (turn < this.maxTurns) {
       turn++;
@@ -153,6 +165,7 @@ export class AnthropicAgentClient {
 
       // Done: model finished naturally
       if (response.stop_reason === 'end_turn') {
+        stopReason = 'completed';
         break;
       }
 
@@ -161,11 +174,14 @@ export class AnthropicAgentClient {
         this.logger.warning(
           `[agent] Token budget exceeded (${totalTokens}/${this.maxTokenBudget}), stopping`,
         );
+        stopReason = 'budget';
         break;
       }
 
-      // Approaching budget or last turn — tell the agent to wrap up
-      const nearBudget = totalTokens >= this.maxTokenBudget * 0.7;
+      // Approaching budget or last turn — tell the agent to wrap up.
+      // Threshold kept below the hard cap with headroom so a single capped
+      // tool result can't skip past the wrap-up window into the hard stop.
+      const nearBudget = totalTokens >= this.maxTokenBudget * 0.6;
       const lastTurn = turn >= this.maxTurns - 1;
       const shouldWrapUp = nearBudget || lastTurn;
 
@@ -182,6 +198,7 @@ export class AnthropicAgentClient {
       } else {
         // Unexpected stop reason (max_tokens, stop_sequence, etc.) — stop looping
         this.logger.warning(`[agent] Unexpected stop_reason: ${response.stop_reason}, stopping`);
+        stopReason = 'error';
         break;
       }
     }
@@ -206,6 +223,16 @@ export class AnthropicAgentClient {
     const cost =
       totalInputTokens * this.inputCostPerToken + totalOutputTokens * this.outputCostPerToken;
 
+    // Incomplete = the loop bailed on a limit (or error) AND never produced a
+    // verdict (no summary, even after the retry). Such a run must not be shown
+    // as a clean review.
+    const incomplete = stopReason !== 'completed' && !parsed.summary;
+    if (incomplete) {
+      this.logger.warning(
+        `[agent] Review incomplete (stopReason=${stopReason}, no summary after ${turn} turns)`,
+      );
+    }
+
     return {
       findings: parsed.findings,
       summary: parsed.summary,
@@ -216,6 +243,8 @@ export class AnthropicAgentClient {
         cost,
       },
       turns: turn,
+      stopReason,
+      incomplete,
       trace: {
         systemPrompt,
         initialMessage,
@@ -337,7 +366,7 @@ async function executeOneToolUse(
     toolResult: {
       type: 'tool_result' as const,
       tool_use_id: block.id,
-      content: result,
+      content: truncate(result, TOOL_RESULT_MAX_CHARS),
     },
   };
 }

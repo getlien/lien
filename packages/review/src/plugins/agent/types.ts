@@ -174,6 +174,9 @@ export interface AgentTrace {
   turns: TurnTrace[];
 }
 
+/** Why the agent's tool-use loop ended. */
+export type AgentStopReason = 'completed' | 'budget' | 'max_turns' | 'error';
+
 /** Result of an agent review run, including findings, usage, and turn count. */
 export interface AgentResult {
   findings: AgentFinding[];
@@ -185,6 +188,14 @@ export interface AgentResult {
     cost: number;
   };
   turns: number;
+  /** Why the loop ended. 'completed' means the model finished naturally. */
+  stopReason: AgentStopReason;
+  /**
+   * True when the run stopped on a budget/turn limit (or error) before the
+   * agent produced a verdict (no summary). The findings are partial and the
+   * result must NOT be presented as a clean/approving review.
+   */
+  incomplete: boolean;
   /** Per-turn trace data — only populated when the caller wires up trace capture. */
   trace?: AgentTrace;
 }
