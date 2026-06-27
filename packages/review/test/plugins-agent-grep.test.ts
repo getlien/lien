@@ -63,11 +63,12 @@ describe('grepCodebase — real working-tree search', () => {
     expect(files).toContain('README.md');
   });
 
-  it('respects .gitignore, prunes node_modules, and skips binary files', async () => {
+  it('respects .gitignore (files and dirs), prunes node_modules, and skips binary files', async () => {
     const SYM = 'OpenRouterClient';
     await write(root, 'src/app.ts', `const x = '${SYM}';\n`);
-    await write(root, '.gitignore', 'secret.txt\n');
-    await write(root, 'secret.txt', `${SYM} should be ignored\n`); // gitignored
+    await write(root, '.gitignore', 'secret.txt\ncoverage/\n');
+    await write(root, 'secret.txt', `${SYM} should be ignored\n`); // gitignored file
+    await write(root, 'coverage/report.txt', `${SYM} in ignored dir\n`); // gitignored dir, pruned in walk
     await write(root, 'node_modules/foo/index.js', `${SYM}\n`); // pruned + always-ignored
     // Binary: an embedded NUL byte trips the binary guard.
     await write(root, 'bin.dat', `\0${SYM}\0`);
@@ -77,6 +78,7 @@ describe('grepCodebase — real working-tree search', () => {
 
     expect(files).toContain('src/app.ts');
     expect(files).not.toContain('secret.txt');
+    expect(files).not.toContain(path.join('coverage', 'report.txt'));
     expect(files).not.toContain(path.join('node_modules', 'foo', 'index.js'));
     expect(files).not.toContain('bin.dat');
   });

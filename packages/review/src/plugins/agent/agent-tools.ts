@@ -240,6 +240,15 @@ const MAX_GREP_RESULTS = 30;
 /** Skip files larger than this — lockfiles, bundles, and binaries are noise. */
 const MAX_GREP_FILE_BYTES = 1_000_000;
 /**
+ * Wall-clock backstop for a single grep call. The agent-supplied pattern is
+ * compiled with `new RegExp` and could backtrack pathologically (ReDoS) or the
+ * repo could simply be huge; this bounds total scan time and returns partial
+ * results rather than hanging the worker. It does not interrupt a single
+ * `regex.test` already in flight — a non-backtracking engine (e.g. RE2) would,
+ * but that is a native dependency we avoid to keep the Action portable.
+ */
+const GREP_TIME_BUDGET_MS = 5_000;
+/**
  * Directories never worth walking. Mirrors the heavy entries in
  * ALWAYS_IGNORE_PATTERNS so we prune them up front instead of reading every
  * entry and discarding it. `.github` is deliberately NOT skipped — CI
@@ -247,12 +256,26 @@ const MAX_GREP_FILE_BYTES = 1_000_000;
  */
 const GREP_SKIP_DIRS = new Set(['node_modules', '.git', 'vendor', 'dist', 'build', '.lien']);
 
+/** A single grep hit: file path, 1-based line number, and trimmed matching text. */
+interface GrepMatch {
+  filepath: string;
+  line: number;
+  match: string;
+}
+
 /**
- * Recursively collect file paths under `dir`, pruning GREP_SKIP_DIRS and
- * symlinked directories (cycle/escape guard). Dotfiles and dot-directories
- * other than the skip set ARE included.
+ * Recursively collect file paths under `dir`, pruning GREP_SKIP_DIRS, gitignored
+ * paths, and symlinked directories (cycle/escape guard). Applying `isIgnored`
+ * during traversal means ignored directories (e.g. coverage/, .next/) are never
+ * descended into, rather than walked and discarded afterward. Dotfiles and
+ * dot-directories other than the skip set ARE included.
  */
-async function collectGrepFiles(dir: string, acc: string[]): Promise<void> {
+async function collectGrepFiles(
+  rootDir: string,
+  dir: string,
+  isIgnored: (relPath: string) => boolean,
+  acc: string[],
+): Promise<void> {
   let entries;
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
@@ -262,13 +285,70 @@ async function collectGrepFiles(dir: string, acc: string[]): Promise<void> {
   for (const entry of entries) {
     if (entry.isSymbolicLink()) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (GREP_SKIP_DIRS.has(entry.name)) continue;
-      await collectGrepFiles(full, acc);
-    } else if (entry.isFile()) {
+    if (isIgnored(path.relative(rootDir, full))) continue;
+    if (entry.isFile()) {
       acc.push(full);
+    } else if (entry.isDirectory() && !GREP_SKIP_DIRS.has(entry.name)) {
+      await collectGrepFiles(rootDir, full, isIgnored, acc);
     }
   }
+}
+
+/**
+ * Read a file's text for grepping, or null if it should be skipped: too large,
+ * binary (contains a NUL byte), or unreadable. Keeps those guards out of the
+ * main loop.
+ */
+async function readGrepCandidate(absFile: string): Promise<string | null> {
+  try {
+    const { size } = await fs.stat(absFile);
+    if (size > MAX_GREP_FILE_BYTES) return null;
+    const content = await fs.readFile(absFile, 'utf-8');
+    return content.includes('\0') ? null : content;
+  } catch {
+    return null; // disappeared / permission / not readable
+  }
+}
+
+/**
+ * Append matching lines from `content` to `matches`, stopping at the global
+ * result cap. Line numbers are 1-based.
+ */
+function collectLineMatches(
+  content: string,
+  regex: RegExp,
+  filepath: string,
+  matches: GrepMatch[],
+): void {
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length && matches.length < MAX_GREP_RESULTS; i++) {
+    if (regex.test(lines[i])) {
+      matches.push({ filepath, line: i + 1, match: lines[i].trim().slice(0, 200) });
+    }
+  }
+}
+
+/**
+ * Read and scan each file for `regex`, accumulating hits up to the result cap.
+ * Bails out once the wall-clock deadline passes; `timedOut` then signals the
+ * results may be incomplete.
+ */
+async function scanForMatches(
+  files: string[],
+  regex: RegExp,
+  rootDir: string,
+  deadline: number,
+): Promise<{ matches: GrepMatch[]; timedOut: boolean }> {
+  const matches: GrepMatch[] = [];
+  for (const absFile of files) {
+    if (matches.length >= MAX_GREP_RESULTS) break;
+    if (Date.now() > deadline) return { matches, timedOut: true };
+    const content = await readGrepCandidate(absFile);
+    if (content !== null) {
+      collectLineMatches(content, regex, path.relative(rootDir, absFile), matches);
+    }
+  }
+  return { matches, timedOut: false };
 }
 
 export async function grepCodebase(
@@ -288,47 +368,25 @@ export async function grepCodebase(
 
     // Search the real working tree (not just parser-chunked source) so refs in
     // config, YAML, CI workflows, etc. are visible. Respect .gitignore +
-    // built-in excludes via the shared parser filter.
+    // built-in excludes via the shared parser filter, pruning ignored paths
+    // during the walk rather than after.
     const isIgnored = await createGitignoreFilter(ctx.repoRootDir);
     const files: string[] = [];
-    await collectGrepFiles(ctx.repoRootDir, files);
+    await collectGrepFiles(ctx.repoRootDir, ctx.repoRootDir, isIgnored, files);
     files.sort(); // deterministic ordering across filesystems
 
-    const matches: Array<{ filepath: string; line: number; match: string }> = [];
-
-    for (const absFile of files) {
-      if (matches.length >= MAX_GREP_RESULTS) break;
-
-      const relPath = path.relative(ctx.repoRootDir, absFile);
-      if (isIgnored(relPath)) continue;
-
-      let content: string;
-      try {
-        const stat = await fs.stat(absFile);
-        if (stat.size > MAX_GREP_FILE_BYTES) continue;
-        content = await fs.readFile(absFile, 'utf-8');
-      } catch {
-        continue; // disappeared / permission / not readable — skip
-      }
-      if (content.includes('\0')) continue; // binary
-
-      const lines = content.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (regex.test(lines[i])) {
-          matches.push({
-            filepath: relPath,
-            line: i + 1,
-            match: lines[i].trim().slice(0, 200),
-          });
-          if (matches.length >= MAX_GREP_RESULTS) break;
-        }
-      }
-    }
+    const { matches, timedOut } = await scanForMatches(
+      files,
+      regex,
+      ctx.repoRootDir,
+      Date.now() + GREP_TIME_BUDGET_MS,
+    );
 
     return JSON.stringify({
       results: matches,
       count: matches.length,
-      truncated: matches.length >= MAX_GREP_RESULTS,
+      // truncated = results may be incomplete: hit the result cap or time budget.
+      truncated: timedOut || matches.length >= MAX_GREP_RESULTS,
     });
   } catch (err) {
     return JSON.stringify({ error: `grep_codebase failed: ${(err as Error).message}` });
