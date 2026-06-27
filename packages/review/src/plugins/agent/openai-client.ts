@@ -217,7 +217,7 @@ export class OpenAIAgentClient {
     while (turn < this.maxTurns) {
       turn++;
 
-      const response = await this.chatCompletion(messages, forceFinish ? [] : tools);
+      const response = await this.chatCompletion(messages, tools, forceFinish);
 
       const turnInputTokens = response.usage?.prompt_tokens ?? 0;
       const turnOutputTokens = response.usage?.completion_tokens ?? 0;
@@ -453,7 +453,11 @@ export class OpenAIAgentClient {
     }
   }
 
-  private async chatCompletion(messages: ChatMessage[], tools: ToolDef[]): Promise<ChatResponse> {
+  private async chatCompletion(
+    messages: ChatMessage[],
+    tools: ToolDef[],
+    forceNoTools = false,
+  ): Promise<ChatResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages,
@@ -463,6 +467,10 @@ export class OpenAIAgentClient {
     };
     if (tools.length > 0) {
       body.tools = tools;
+      // tool_choice:'none' forbids tool calls server-side, forcing a text
+      // (findings) response. An empty tools array is too weak — the model
+      // still emits tool calls it learned from the system prompt.
+      if (forceNoTools) body.tool_choice = 'none';
     }
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {

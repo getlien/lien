@@ -136,7 +136,9 @@ export class AnthropicAgentClient {
           },
         ],
         messages,
-        tools: forceFinish ? [] : tools,
+        tools,
+        // tool_choice:'none' forbids tool calls, forcing a findings response.
+        ...(forceFinish ? { tool_choice: { type: 'none' as const } } : {}),
       });
 
       lastResponse = response;

@@ -154,8 +154,8 @@ describe('OpenAIAgentClient budget handling', () => {
 
     expect(result.stopReason).toBe('completed');
     expect(result.incomplete).toBe(false);
-    expect(bodies[0].tools).toBeDefined(); // turn 1 had tools
-    expect(bodies[1].tools).toBeUndefined(); // turn 2 forced: no tools
+    expect(bodies[0].tool_choice).toBeUndefined(); // turn 1: tools usable
+    expect(bodies[1].tool_choice).toBe('none'); // turn 2 forced: tools forbidden
   });
 
   it('logs the last-turn reasoning when a run is incomplete', async () => {
