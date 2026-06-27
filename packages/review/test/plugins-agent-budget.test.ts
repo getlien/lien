@@ -141,9 +141,9 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(toolMessage!.content).toContain('…[truncated');
   });
 
-  it('forces a verdict by dropping tools once near budget', async () => {
+  it('forces a JSON verdict (response_format, no tools) once near budget', async () => {
     // Turn 1 crosses the 0.6 wrap-up threshold (7k/10k) but not the hard cap;
-    // turn 2 must run without tools so the model produces findings.
+    // turn 2 is forced to emit a JSON verdict with no tools.
     const { bodies } = mockFetch([toolCallTurn(7000), stopTurn(CLEAN_JSON, 1000)]);
     const client = makeClient(10_000);
     const tools = [
@@ -154,9 +154,28 @@ describe('OpenAIAgentClient budget handling', () => {
 
     expect(result.stopReason).toBe('completed');
     expect(result.incomplete).toBe(false);
-    expect(bodies[0].tool_choice).toBeUndefined(); // turn 1: tools usable
-    expect(bodies[1].tool_choice).toBe('none'); // turn 2 forced: tools forbidden
+    expect(bodies[0].tools).toBeDefined(); // turn 1: tools usable
+    expect(bodies[0].response_format).toBeUndefined();
+    expect(bodies[1].tools).toBeUndefined(); // turn 2 forced: no tools
+    expect(bodies[1].response_format).toEqual({ type: 'json_object' });
   });
+
+  it('recovers a verdict via the json-forced summary-retry after a bail', async () => {
+    // Loop bails on budget with no verdict; the retry returns raw JSON (as
+    // response_format:json_object would) and must be parsed into a summary.
+    const rawVerdict = JSON.stringify({
+      findings: [],
+      summary: { riskLevel: 'low', overview: 'recovered', keyChanges: [] },
+    });
+    mockFetch([toolCallTurn(2000), stopTurn(rawVerdict, 100)]);
+    const client = makeClient(1000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.stopReason).toBe('budget');
+    expect(result.incomplete).toBe(false); // retry recovered a verdict
+    expect(result.summary?.overview).toBe('recovered');
+  }, 15000);
 
   it('logs the last-turn reasoning when a run is incomplete', async () => {
     const { logger, lines } = capturingLogger();

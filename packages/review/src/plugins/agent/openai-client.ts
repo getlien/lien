@@ -274,7 +274,7 @@ export class OpenAIAgentClient {
         );
         if (nearBudget || lastTurn) {
           messages.push({ role: 'user', content: WRAP_UP_NUDGE });
-          // Next turn runs without tools so the model must produce findings.
+          // Next turn is forced to emit a JSON verdict (no tools).
           forceFinish = true;
         }
       } else {
@@ -410,7 +410,9 @@ export class OpenAIAgentClient {
     await new Promise(resolve => setTimeout(resolve, 3_000));
     messages.push({ role: 'user', content: RETRY_NUDGE });
     try {
-      const response = await this.chatCompletion(messages, []);
+      // forceVerdict: response_format:json_object guarantees a JSON response,
+      // the reliable safety net when the loop bailed without a verdict.
+      const response = await this.chatCompletion(messages, [], true);
       const inputTokens = response.usage?.prompt_tokens ?? 0;
       const outputTokens = response.usage?.completion_tokens ?? 0;
       const choice = response.choices[0];
@@ -456,7 +458,7 @@ export class OpenAIAgentClient {
   private async chatCompletion(
     messages: ChatMessage[],
     tools: ToolDef[],
-    forceNoTools = false,
+    forceVerdict = false,
   ): Promise<ChatResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
@@ -465,12 +467,15 @@ export class OpenAIAgentClient {
       temperature: 0,
       reasoning: { effort: 'high' },
     };
-    if (tools.length > 0) {
+    if (forceVerdict) {
+      // Force a JSON verdict (no tools). response_format:json_object makes the
+      // output be a JSON object — the model cannot emit tool calls. It's more
+      // reliably honored across OpenRouter providers than tool_choice:'none'
+      // (which a Kimi provider ignored mid-investigation), and an empty tools
+      // array is too weak (the model still emits tool calls from the prompt).
+      body.response_format = { type: 'json_object' };
+    } else if (tools.length > 0) {
       body.tools = tools;
-      // tool_choice:'none' forbids tool calls server-side, forcing a text
-      // (findings) response. An empty tools array is too weak — the model
-      // still emits tool calls it learned from the system prompt.
-      if (forceNoTools) body.tool_choice = 'none';
     }
 
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -524,11 +529,13 @@ function extractResponse(content: string | null): {
 } {
   if (!content) return { findings: [] };
 
+  // Prefer a ```json fence (normal turns); fall back to the raw body, which is
+  // what response_format:json_object returns on a forced-verdict turn.
   const jsonMatch = content.match(/```json\s*\n([\s\S]*?)\n\s*```/);
-  if (!jsonMatch) return { findings: [] };
+  const raw = jsonMatch ? jsonMatch[1] : content.trim();
 
   try {
-    const parsed = JSON.parse(jsonMatch[1]);
+    const parsed = JSON.parse(raw);
     const findings: unknown[] = Array.isArray(parsed) ? parsed : (parsed.findings ?? []);
     const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
     return { findings: findings.filter(isValidFinding), summary };
