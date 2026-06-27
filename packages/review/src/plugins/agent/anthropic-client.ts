@@ -20,6 +20,9 @@ import type {
 /** Cap a single tool's recorded output so traces stay readable. */
 const TRACE_TOOL_OUTPUT_MAX = 4096;
 
+/** Cap per-turn reasoning/output printed to CI logs. */
+const AGENT_LOG_MAX = 4000;
+
 /**
  * Cap a single tool result fed back to the model. A large file read or
  * batched get_files_context can otherwise return tens of thousands of tokens
@@ -67,6 +70,9 @@ export class AnthropicAgentClient {
   private logger: Logger;
   private inputCostPerToken: number;
   private outputCostPerToken: number;
+  // Verbose per-turn reasoning/output logging, gated by env so normal runs
+  // stay readable. The last turn is always logged on an incomplete run.
+  private logAgentTurns: boolean;
 
   constructor(options: AgentClientOptions) {
     this.client = new Anthropic({
@@ -77,6 +83,7 @@ export class AnthropicAgentClient {
     this.maxTurns = options.maxTurns;
     this.maxTokenBudget = options.maxTokenBudget;
     this.logger = options.logger;
+    this.logAgentTurns = !!process.env.LIEN_REVIEW_LOG_AGENT;
     this.inputCostPerToken = (options.inputCostPerMTok ?? DEFAULT_INPUT_COST_PER_MTOK) / 1_000_000;
     this.outputCostPerToken =
       (options.outputCostPerMTok ?? DEFAULT_OUTPUT_COST_PER_MTOK) / 1_000_000;
@@ -162,6 +169,7 @@ export class AnthropicAgentClient {
         outputTokens: turnOutputTokens,
       };
       turnTraces.push(turnTrace);
+      if (this.logAgentTurns) this.logTurn(turnTrace);
 
       // Done: model finished naturally
       if (response.stop_reason === 'end_turn') {
@@ -207,6 +215,10 @@ export class AnthropicAgentClient {
       this.logger.warning(`[agent] Max turns reached (${this.maxTurns}), stopping`);
     }
 
+    // Capture the last *investigation* turn before the summary-retry appends
+    // its own trace — that's what we want to surface on bail.
+    const lastLoopTurn = turnTraces[turnTraces.length - 1];
+
     let parsed = lastResponse ? extractResponse(lastResponse.content) : { findings: [] };
     if (!parsed.summary && lastResponse) {
       const retry = await this.runSummaryRetry(messages, lastResponse, turn);
@@ -231,6 +243,8 @@ export class AnthropicAgentClient {
       this.logger.warning(
         `[agent] Review incomplete (stopReason=${stopReason}, no summary after ${turn} turns)`,
       );
+      // Always surface what the agent was doing when it bailed.
+      this.logTurn(lastLoopTurn, 'last turn before bail');
     }
 
     return {
@@ -260,6 +274,25 @@ export class AnthropicAgentClient {
    * tool_result blocks. Pulled out of `run()` to keep its
    * time-to-understand under the complexity threshold.
    */
+  /**
+   * Print a turn's reasoning + output to the logger so CI logs show what the
+   * agent was actually thinking. Truncated to keep logs readable.
+   */
+  private logTurn(turn: TurnTrace | undefined, label?: string): void {
+    if (!turn) return;
+    const tag = label ? ` (${label})` : '';
+    if (turn.reasoning) {
+      this.logger.info(
+        `[agent] Turn ${turn.turnNumber} reasoning${tag}:\n${truncate(turn.reasoning, AGENT_LOG_MAX)}`,
+      );
+    }
+    if (turn.responseText) {
+      this.logger.info(
+        `[agent] Turn ${turn.turnNumber} output${tag}:\n${truncate(turn.responseText, AGENT_LOG_MAX)}`,
+      );
+    }
+  }
+
   private async dispatchToolUseBlocks(
     toolUseBlocks: Anthropic.Messages.ToolUseBlock[],
     responseContent: Anthropic.Messages.ContentBlock[],

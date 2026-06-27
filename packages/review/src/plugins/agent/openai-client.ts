@@ -18,6 +18,9 @@ import type {
 /** Cap a single tool's recorded output so traces stay readable. */
 const TRACE_TOOL_OUTPUT_MAX = 4096;
 
+/** Cap per-turn reasoning/output printed to CI logs. */
+const AGENT_LOG_MAX = 4000;
+
 /**
  * Cap a single tool result fed back to the model. A large file read or
  * batched get_files_context can otherwise return tens of thousands of tokens
@@ -169,6 +172,10 @@ export class OpenAIAgentClient {
   private logger: Logger;
   private inputCostPerToken: number;
   private outputCostPerToken: number;
+  // Verbose per-turn reasoning/output logging, gated by env so normal runs
+  // stay readable. The last turn's reasoning is always logged on an
+  // incomplete run (see below) regardless of this flag.
+  private logAgentTurns: boolean;
 
   constructor(options: OpenAIClientOptions) {
     this.apiKey = options.apiKey;
@@ -177,6 +184,7 @@ export class OpenAIAgentClient {
     this.maxTurns = options.maxTurns;
     this.maxTokenBudget = options.maxTokenBudget;
     this.logger = options.logger;
+    this.logAgentTurns = !!process.env.LIEN_REVIEW_LOG_AGENT;
     this.inputCostPerToken = (options.inputCostPerMTok ?? DEFAULT_INPUT_COST_PER_MTOK) / 1_000_000;
     this.outputCostPerToken =
       (options.outputCostPerMTok ?? DEFAULT_OUTPUT_COST_PER_MTOK) / 1_000_000;
@@ -228,6 +236,7 @@ export class OpenAIAgentClient {
       lastContent = choice.message.content;
       const turnTrace = buildTurnTrace(turn, choice, turnInputTokens, turnOutputTokens);
       turnTraces.push(turnTrace);
+      if (this.logAgentTurns) this.logTurn(turnTrace);
 
       // Done: model finished naturally
       if (choice.finish_reason === 'stop') {
@@ -273,6 +282,10 @@ export class OpenAIAgentClient {
       this.logger.warning(`[agent] Max turns reached (${this.maxTurns}), stopping`);
     }
 
+    // Capture the last *investigation* turn before the summary-retry appends
+    // its own (reasoning-less) trace — that's what we want to surface on bail.
+    const lastLoopTurn = turnTraces[turnTraces.length - 1];
+
     let parsed = extractResponse(lastContent);
     // Fire the summary-retry whenever we have *any* loop history but no
     // findings JSON. The previous guard `lastContent !== null` skipped
@@ -306,6 +319,9 @@ export class OpenAIAgentClient {
       this.logger.warning(
         `[agent] Review incomplete (stopReason=${stopReason}, no summary after ${turn} turns)`,
       );
+      // Always surface what the agent was doing when it bailed — the single
+      // most useful datum for diagnosing an incomplete run in CI logs.
+      this.logTurn(lastLoopTurn, 'last turn before bail');
     }
 
     return {
@@ -408,6 +424,26 @@ export class OpenAIAgentClient {
         `[agent] Summary retry failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return null;
+    }
+  }
+
+  /**
+   * Print a turn's reasoning + output to the logger so CI logs show what the
+   * agent was actually thinking. Truncated so a verbose reasoning model (Kimi)
+   * doesn't flood the log.
+   */
+  private logTurn(turn: TurnTrace | undefined, label?: string): void {
+    if (!turn) return;
+    const tag = label ? ` (${label})` : '';
+    if (turn.reasoning) {
+      this.logger.info(
+        `[agent] Turn ${turn.turnNumber} reasoning${tag}:\n${truncate(turn.reasoning, AGENT_LOG_MAX)}`,
+      );
+    }
+    if (turn.responseText) {
+      this.logger.info(
+        `[agent] Turn ${turn.turnNumber} output${tag}:\n${truncate(turn.responseText, AGENT_LOG_MAX)}`,
+      );
     }
   }
 

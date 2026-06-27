@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { OpenAIAgentClient } from '../src/plugins/agent/openai-client.js';
 import { AgentReviewPlugin, scaleBudgetForBlastRadius } from '../src/plugins/agent/index.js';
+import { scaleAgentBudget } from '../src/review-pr.js';
+import { DEFAULT_REVIEW_MODEL, MAX_REVIEW_TOKEN_BUDGET } from '../src/defaults.js';
 import { silentLogger } from '../src/test-helpers.js';
+import type { Logger } from '../src/logger.js';
 import type { PresentContext, ReviewFinding } from '../src/plugin-types.js';
 
 // ---------------------------------------------------------------------------
@@ -10,11 +13,21 @@ import type { PresentContext, ReviewFinding } from '../src/plugin-types.js';
 
 type ChatResponse = {
   choices: Array<{
-    message: { role: string; content: string | null; tool_calls?: unknown[] };
+    message: { role: string; content: string | null; reasoning?: string; tool_calls?: unknown[] };
     finish_reason: string;
   }>;
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 };
+
+/** Logger that records every line for assertions. */
+function capturingLogger(): { logger: Logger; lines: string[] } {
+  const lines: string[] = [];
+  const record = (m: string) => lines.push(m);
+  return {
+    logger: { info: record, warning: record, error: record, debug: record },
+    lines,
+  };
+}
 
 /** Install a fetch mock that replays `responses` and records request bodies. */
 function mockFetch(responses: ChatResponse[]): { bodies: Array<Record<string, unknown>> } {
@@ -31,13 +44,18 @@ function mockFetch(responses: ChatResponse[]): { bodies: Array<Record<string, un
   return { bodies };
 }
 
-function toolCallTurn(totalTokens: number, content: string | null = null): ChatResponse {
+function toolCallTurn(
+  totalTokens: number,
+  content: string | null = null,
+  reasoning?: string,
+): ChatResponse {
   return {
     choices: [
       {
         message: {
           role: 'assistant',
           content,
+          ...(reasoning ? { reasoning } : {}),
           tool_calls: [
             { id: 't1', type: 'function', function: { name: 'read_file', arguments: '{}' } },
           ],
@@ -64,14 +82,14 @@ const CLEAN_JSON =
   }) +
   '\n```';
 
-function makeClient(maxTokenBudget: number): OpenAIAgentClient {
+function makeClient(maxTokenBudget: number, logger: Logger = silentLogger): OpenAIAgentClient {
   return new OpenAIAgentClient({
     apiKey: 'test',
     baseUrl: 'http://mock.local',
     model: 'test-model',
     maxTurns: 8,
     maxTokenBudget,
-    logger: silentLogger,
+    logger,
   });
 }
 
@@ -122,6 +140,18 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(toolMessage!.content.length).toBeLessThanOrEqual(24_100);
     expect(toolMessage!.content).toContain('…[truncated');
   });
+
+  it('logs the last-turn reasoning when a run is incomplete', async () => {
+    const { logger, lines } = capturingLogger();
+    const reasoning = 'I am tracing the credit-service lock path for a race condition';
+    mockFetch([toolCallTurn(2000, null, reasoning), stopTurn('no json here')]);
+    const client = makeClient(1000, logger);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.incomplete).toBe(true);
+    expect(lines.some(l => l.includes(reasoning))).toBe(true);
+  }, 15000);
 });
 
 describe('scaleBudgetForBlastRadius', () => {
@@ -136,8 +166,30 @@ describe('scaleBudgetForBlastRadius', () => {
     expect(scaleBudgetForBlastRadius(100_000, undefined)).toBe(100_000);
   });
 
-  it('clamps to the 200k ceiling', () => {
-    expect(scaleBudgetForBlastRadius(180_000, 'critical')).toBe(200_000);
+  it('clamps to the shared ceiling', () => {
+    expect(scaleBudgetForBlastRadius(200_000, 'critical')).toBe(MAX_REVIEW_TOKEN_BUDGET);
+  });
+});
+
+describe('scaleAgentBudget — model-aware multiplier', () => {
+  // ~40K chars ≈ 10K content tokens; with 5 files (maxTurns 10, toolBudget 80K)
+  // base = 4000 + 10000 + 80000 + 2000 = 96000 (within [60K, ceiling], unclamped).
+  const chunks = [{ content: 'x'.repeat(40_000) }];
+
+  it('scales the budget up ~1.5x for Kimi vs a lean model', () => {
+    const lean = scaleAgentBudget(5, chunks, 'some/lean-model').maxTokenBudget;
+    const kimi = scaleAgentBudget(5, chunks, DEFAULT_REVIEW_MODEL).maxTokenBudget;
+    expect(lean).toBe(96_000);
+    expect(kimi).toBe(144_000);
+    expect(kimi).toBe(lean * 1.5);
+  });
+
+  it('clamps the scaled budget to the shared ceiling', () => {
+    // 15 files → big toolBudget; large content pushes base*1.5 past the ceiling.
+    const big = [{ content: 'x'.repeat(400_000) }];
+    expect(scaleAgentBudget(15, big, DEFAULT_REVIEW_MODEL).maxTokenBudget).toBe(
+      MAX_REVIEW_TOKEN_BUDGET,
+    );
   });
 });
 
