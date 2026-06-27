@@ -250,14 +250,6 @@ const MAX_GREP_FILE_BYTES = 1_000_000;
  */
 const GREP_TIME_BUDGET_MS = 5_000;
 /**
- * Cap each line at this length before regex matching. Bounds the input handed to
- * a potentially backtracking pattern on very long (usually minified or data)
- * lines. Not a full ReDoS defense — a crafted catastrophic pattern on a short
- * line is still uninterruptible in JS — but it removes the easy long-line vector
- * and pairs with the wall-clock budget below.
- */
-const MAX_GREP_LINE_LENGTH = 2_000;
-/**
  * Directories never worth walking. Mirrors the heavy entries in
  * ALWAYS_IGNORE_PATTERNS so we prune them up front instead of reading every
  * entry and discarding it. `.github` is deliberately NOT skipped — CI
@@ -275,17 +267,23 @@ interface GrepMatch {
 /**
  * Decide whether a symlink entry should be grepped. Follows the link with
  * realpath and includes it only when it resolves to a regular file whose real
- * location stays inside `rootDir`. Directory symlinks (traversal cycle / escape
- * risk), out-of-tree targets, and broken links are excluded. This lets grep see
- * references behind symlinked config/source while never reading outside the
- * repo. `rootDir` must already be canonical (see grepCodebase) so the
- * containment comparison is like-for-like.
+ * location stays inside `rootDir` and is not itself gitignored (a non-ignored
+ * link must not become a back door to ignored content). Directory symlinks
+ * (traversal cycle / escape risk), out-of-tree targets, and broken links are
+ * excluded. This lets grep see references behind symlinked config/source while
+ * never reading outside the repo or past .gitignore. `rootDir` must already be
+ * canonical (see grepCodebase) so the containment comparison is like-for-like.
  */
-async function symlinkPointsToFileInRepo(rootDir: string, linkPath: string): Promise<boolean> {
+async function symlinkPointsToFileInRepo(
+  rootDir: string,
+  linkPath: string,
+  isIgnored: (relPath: string) => boolean,
+): Promise<boolean> {
   try {
     const real = await fs.realpath(linkPath);
     const rel = path.relative(rootDir, real);
-    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return false; // escapes repo
+    if (isIgnored(rel)) return false; // target is gitignored — don't scan it via the link
     return (await fs.stat(real)).isFile();
   } catch {
     return false; // broken link / permission
@@ -295,17 +293,19 @@ async function symlinkPointsToFileInRepo(rootDir: string, linkPath: string): Pro
 /**
  * Classify a directory entry for the grep walk: 'file' to scan, 'dir' to
  * descend into, or 'skip'. Regular files scan; non-skip directories descend;
- * symlinks scan only when they point to a regular file inside the repo
- * (directory symlinks are skipped to avoid cycles/escapes).
+ * symlinks scan only when they point to a non-ignored regular file inside the
+ * repo (directory symlinks are skipped to avoid cycles/escapes).
  */
 async function classifyGrepEntry(
   rootDir: string,
   entry: Dirent,
   full: string,
+  isIgnored: (relPath: string) => boolean,
 ): Promise<'file' | 'dir' | 'skip'> {
   if (entry.isFile()) return 'file';
   if (entry.isDirectory()) return GREP_SKIP_DIRS.has(entry.name) ? 'skip' : 'dir';
-  if (entry.isSymbolicLink() && (await symlinkPointsToFileInRepo(rootDir, full))) return 'file';
+  if (entry.isSymbolicLink() && (await symlinkPointsToFileInRepo(rootDir, full, isIgnored)))
+    return 'file';
   return 'skip';
 }
 
@@ -331,7 +331,7 @@ async function collectGrepFiles(
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (isIgnored(path.relative(rootDir, full))) continue;
-    const kind = await classifyGrepEntry(rootDir, entry, full);
+    const kind = await classifyGrepEntry(rootDir, entry, full, isIgnored);
     if (kind === 'file') acc.push(full);
     else if (kind === 'dir') await collectGrepFiles(rootDir, full, isIgnored, acc);
   }
@@ -358,8 +358,9 @@ async function readGrepCandidate(absFile: string): Promise<string | null> {
  * wall-clock deadline was hit mid-file (checked per line, so a many-line file
  * can't blow the budget). Collects one past the result cap (a sentinel) so the
  * caller can tell "exactly cap matches" from "more than cap"; the extra is
- * trimmed before returning. Each line is capped at MAX_GREP_LINE_LENGTH before
- * testing to bound the regex input. Line numbers are 1-based.
+ * trimmed before returning. Lines are tested in full — no length clipping —
+ * to avoid dropping matches or skewing anchored patterns. Line numbers are
+ * 1-based.
  */
 function collectLineMatches(
   content: string,
@@ -371,10 +372,8 @@ function collectLineMatches(
   const lines = content.split('\n');
   for (let i = 0; i < lines.length && matches.length <= MAX_GREP_RESULTS; i++) {
     if (Date.now() > deadline) return true;
-    const line = lines[i];
-    const probe = line.length > MAX_GREP_LINE_LENGTH ? line.slice(0, MAX_GREP_LINE_LENGTH) : line;
-    if (regex.test(probe)) {
-      matches.push({ filepath, line: i + 1, match: line.trim().slice(0, 200) });
+    if (regex.test(lines[i])) {
+      matches.push({ filepath, line: i + 1, match: lines[i].trim().slice(0, 200) });
     }
   }
   return false;

@@ -115,12 +115,25 @@ describe('grepCodebase — real working-tree search', () => {
     }
   });
 
-  it('still matches on very long lines (past the per-line cap) when the hit is near the start', async () => {
-    // A single line far longer than MAX_GREP_LINE_LENGTH with the needle early.
-    await write(root, 'long.ts', `const NEEDLE = '${'x'.repeat(5000)}';\n`);
+  it('matches anywhere on very long lines (no length clipping)', async () => {
+    // Needle sits well past 2000 chars — full-line matching must still find it.
+    await write(root, 'long.ts', `const x = '${'a'.repeat(4000)}NEEDLE';\n`);
     const res = await runGrep(root, 'NEEDLE');
     const files = new Set((res.results ?? []).map(r => r.filepath));
     expect(files).toContain('long.ts');
+  });
+
+  it('does not scan a gitignored target reached via a non-ignored symlink', async () => {
+    const SYM = 'OpenRouterClient';
+    await write(root, '.gitignore', 'private/\n');
+    await write(root, 'private/secret.ts', `const s = '${SYM}';\n`); // gitignored target
+    await fs.symlink(path.join(root, 'private', 'secret.ts'), path.join(root, 'link.ts')); // link not ignored
+    await write(root, 'ok.ts', `const k = '${SYM}';\n`); // control match
+
+    const res = await runGrep(root, SYM);
+    const files = new Set((res.results ?? []).map(r => r.filepath));
+    expect(files).toContain('ok.ts');
+    expect(files).not.toContain('link.ts'); // .gitignore not bypassed via the symlink
   });
 
   it('reports true 1-based file line numbers', async () => {

@@ -124,7 +124,8 @@ export const AGENT_TOOLS = [
       'files (config, JSON/YAML, CI workflows under .github, SQL, shell scripts) — not just ' +
       'source code. Use this to find all files that reference a specific symbol, import, or ' +
       'string. Critical for checking if deleted exports are still referenced elsewhere. ' +
-      'Respects .gitignore; skips binaries and very large files.',
+      'Respects .gitignore; skips binaries and very large files. Matching is time-budgeted, ' +
+      'so on very large repos or pathological patterns results may be partial (truncated=true).',
     input_schema: {
       type: 'object' as const,
       properties: {
