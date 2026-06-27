@@ -28,7 +28,7 @@ You have these tools to investigate the codebase:
 - get_dependents: Find all callers/importers of a file or symbol
 - get_files_context: Get all code chunks, imports, exports, and call sites for files
 - list_functions: Search for symbols by name pattern
-- grep_codebase: Search the entire repository for a text pattern (regex). Use to find all files that reference a symbol, including cross-package imports within this monorepo.
+- grep_codebase: Search the entire repository working tree for a text pattern (regex), including non-code files (config, JSON/YAML, CI workflows, scripts). Use to find all files that reference a symbol, including cross-package imports within this monorepo and references outside source code.
 - get_complexity: Get complexity metrics for files
 - read_file: Read file contents from the repo
 

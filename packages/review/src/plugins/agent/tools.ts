@@ -1,12 +1,16 @@
 /**
  * Anthropic tool definitions and dispatch for the agent review plugin.
  *
- * Defines 5 chunk-based tools (no embeddings required):
+ * Defines 6 tools (no embeddings required):
  * - get_files_context: retrieve all chunks for specific files
  * - get_dependents: find callers/importers of a symbol
  * - list_functions: search symbols by pattern
  * - get_complexity: complexity metrics for files
+ * - grep_codebase: regex search across the cloned repo's working tree
  * - read_file: read file contents from the cloned repo
+ *
+ * The first four are backed by in-memory chunks; grep_codebase and read_file
+ * read the cloned repo from disk (so they cover non-chunked files too).
  */
 
 import type { AgentToolContext } from './types.js';
@@ -116,9 +120,12 @@ export const AGENT_TOOLS = [
   {
     name: 'grep_codebase',
     description:
-      'Search the entire codebase for a text pattern (regex). Use this to find all files that ' +
-      'reference a specific symbol, import, or string. Critical for checking if deleted exports ' +
-      'are still imported elsewhere.',
+      'Search the entire repository working tree for a text pattern (regex), including non-code ' +
+      'files (config, JSON/YAML, CI workflows under .github, SQL, shell scripts) — not just ' +
+      'source code. Use this to find all files that reference a specific symbol, import, or ' +
+      'string. Critical for checking if deleted exports are still referenced elsewhere. ' +
+      'Respects .gitignore; skips binaries and very large files. Matching is time-budgeted, ' +
+      'so on very large repos or pathological patterns results may be partial (truncated=true).',
     input_schema: {
       type: 'object' as const,
       properties: {

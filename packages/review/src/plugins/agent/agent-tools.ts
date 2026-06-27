@@ -1,14 +1,18 @@
 /**
  * Agent tool implementations backed by in-memory CodeChunk[] arrays.
  *
- * No VectorDB or embeddings required — all tools work from the repoChunks
- * that the engine already produces via performChunkOnlyIndex().
+ * No VectorDB or embeddings required. Most tools work from the repoChunks
+ * that the engine already produces via performChunkOnlyIndex(); the
+ * exceptions are read_file and grep_codebase, which read the cloned repo
+ * from disk so they can see files the parser never chunks (config, YAML,
+ * CI workflows, etc.).
  */
 
 import fs from 'fs/promises';
+import type { Dirent } from 'fs';
 import path from 'path';
 
-import { analyzeComplexityFromChunks } from '@liendev/parser';
+import { analyzeComplexityFromChunks, createGitignoreFilter } from '@liendev/parser';
 
 import type { AgentToolContext } from './types.js';
 
@@ -234,35 +238,212 @@ export function getComplexity(input: Record<string, unknown>, ctx: AgentToolCont
 // ---------------------------------------------------------------------------
 
 const MAX_GREP_RESULTS = 30;
+/** Skip files larger than this — lockfiles, bundles, and binaries are noise. */
+const MAX_GREP_FILE_BYTES = 1_000_000;
+/**
+ * Wall-clock backstop for a single grep call. The agent-supplied pattern is
+ * compiled with `new RegExp` and could backtrack pathologically (ReDoS) or the
+ * repo could simply be huge; this bounds total scan time and returns partial
+ * results rather than hanging the worker. It does not interrupt a single
+ * `regex.test` already in flight — a non-backtracking engine (e.g. RE2) would,
+ * but that is a native dependency we avoid to keep the Action portable.
+ */
+const GREP_TIME_BUDGET_MS = 5_000;
+/**
+ * Directories never worth walking. Mirrors the heavy entries in
+ * ALWAYS_IGNORE_PATTERNS so we prune them up front instead of reading every
+ * entry and discarding it. `.github` is deliberately NOT skipped — CI
+ * workflows are exactly the kind of non-code reference we now want to find.
+ */
+const GREP_SKIP_DIRS = new Set(['node_modules', '.git', 'vendor', 'dist', 'build', '.lien']);
 
-export function grepCodebase(input: Record<string, unknown>, ctx: AgentToolContext): string {
+/** A single grep hit: file path, 1-based line number, and trimmed matching text. */
+interface GrepMatch {
+  filepath: string;
+  line: number;
+  match: string;
+}
+
+/**
+ * Decide whether a symlink entry should be grepped. Follows the link with
+ * realpath and includes it only when it resolves to a regular file whose real
+ * location stays inside `rootDir` and is not itself gitignored (a non-ignored
+ * link must not become a back door to ignored content). Directory symlinks
+ * (traversal cycle / escape risk), out-of-tree targets, and broken links are
+ * excluded. This lets grep see references behind symlinked config/source while
+ * never reading outside the repo or past .gitignore. `rootDir` must already be
+ * canonical (see grepCodebase) so the containment comparison is like-for-like.
+ */
+async function symlinkPointsToFileInRepo(
+  rootDir: string,
+  linkPath: string,
+  isIgnored: (relPath: string) => boolean,
+): Promise<boolean> {
+  try {
+    const real = await fs.realpath(linkPath);
+    const rel = path.relative(rootDir, real);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return false; // escapes repo
+    if (isIgnored(rel)) return false; // target is gitignored — don't scan it via the link
+    return (await fs.stat(real)).isFile();
+  } catch {
+    return false; // broken link / permission
+  }
+}
+
+/**
+ * Classify a directory entry for the grep walk: 'file' to scan, 'dir' to
+ * descend into, or 'skip'. Regular files scan; non-skip directories descend;
+ * symlinks scan only when they point to a non-ignored regular file inside the
+ * repo (directory symlinks are skipped to avoid cycles/escapes).
+ */
+async function classifyGrepEntry(
+  rootDir: string,
+  entry: Dirent,
+  full: string,
+  isIgnored: (relPath: string) => boolean,
+): Promise<'file' | 'dir' | 'skip'> {
+  if (entry.isFile()) return 'file';
+  if (entry.isDirectory()) return GREP_SKIP_DIRS.has(entry.name) ? 'skip' : 'dir';
+  if (entry.isSymbolicLink() && (await symlinkPointsToFileInRepo(rootDir, full, isIgnored)))
+    return 'file';
+  return 'skip';
+}
+
+/**
+ * Recursively collect file paths under `dir`, pruning GREP_SKIP_DIRS and
+ * gitignored paths. Applying `isIgnored` during traversal means ignored
+ * directories (e.g. coverage/, .next/) are never descended into, rather than
+ * walked and discarded afterward. Dotfiles and dot-directories other than the
+ * skip set ARE included.
+ */
+async function collectGrepFiles(
+  rootDir: string,
+  dir: string,
+  isIgnored: (relPath: string) => boolean,
+  acc: string[],
+): Promise<void> {
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return; // unreadable directory — skip rather than abort the whole grep
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (isIgnored(path.relative(rootDir, full))) continue;
+    const kind = await classifyGrepEntry(rootDir, entry, full, isIgnored);
+    if (kind === 'file') acc.push(full);
+    else if (kind === 'dir') await collectGrepFiles(rootDir, full, isIgnored, acc);
+  }
+}
+
+/**
+ * Read a file's text for grepping, or null if it should be skipped: too large,
+ * binary (contains a NUL byte), or unreadable. Keeps those guards out of the
+ * main loop.
+ */
+async function readGrepCandidate(absFile: string): Promise<string | null> {
+  try {
+    const { size } = await fs.stat(absFile);
+    if (size > MAX_GREP_FILE_BYTES) return null;
+    const content = await fs.readFile(absFile, 'utf-8');
+    return content.includes('\0') ? null : content;
+  } catch {
+    return null; // disappeared / permission / not readable
+  }
+}
+
+/**
+ * Append matching lines from `content` to `matches`; returns true if the
+ * wall-clock deadline was hit mid-file (checked per line, so a many-line file
+ * can't blow the budget). Collects one past the result cap (a sentinel) so the
+ * caller can tell "exactly cap matches" from "more than cap"; the extra is
+ * trimmed before returning. Lines are tested in full — no length clipping —
+ * to avoid dropping matches or skewing anchored patterns. Line numbers are
+ * 1-based.
+ */
+function collectLineMatches(
+  content: string,
+  regex: RegExp,
+  filepath: string,
+  matches: GrepMatch[],
+  deadline: number,
+): boolean {
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length && matches.length <= MAX_GREP_RESULTS; i++) {
+    if (Date.now() > deadline) return true;
+    if (regex.test(lines[i])) {
+      matches.push({ filepath, line: i + 1, match: lines[i].trim().slice(0, 200) });
+    }
+  }
+  return false;
+}
+
+/**
+ * Read and scan each file for `regex`, accumulating hits up to one past the
+ * result cap. `truncated` is true when results are incomplete — either a
+ * genuine (cap+1)th match was found, or the wall-clock deadline passed. The
+ * sentinel overflow is trimmed off the returned matches.
+ */
+async function scanForMatches(
+  files: string[],
+  regex: RegExp,
+  rootDir: string,
+  deadline: number,
+): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
+  const matches: GrepMatch[] = [];
+  let timedOut = false;
+  for (const absFile of files) {
+    if (matches.length > MAX_GREP_RESULTS) break; // found the sentinel — there are more
+    if (Date.now() > deadline) {
+      timedOut = true;
+      break;
+    }
+    const content = await readGrepCandidate(absFile);
+    if (content === null) continue;
+    if (collectLineMatches(content, regex, path.relative(rootDir, absFile), matches, deadline)) {
+      timedOut = true;
+      break;
+    }
+  }
+  const truncated = timedOut || matches.length > MAX_GREP_RESULTS;
+  return { matches: matches.slice(0, MAX_GREP_RESULTS), truncated };
+}
+
+export async function grepCodebase(
+  input: Record<string, unknown>,
+  ctx: AgentToolContext,
+): Promise<string> {
   try {
     const pattern = input.pattern as string;
     if (!pattern) return JSON.stringify({ error: 'pattern is required' });
 
-    const regex = new RegExp(pattern, 'i');
-    const matches: Array<{ filepath: string; line: number; match: string }> = [];
-
-    for (const chunk of ctx.repoChunks) {
-      const lines = chunk.content.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (regex.test(lines[i])) {
-          matches.push({
-            filepath: chunk.metadata.file,
-            line: chunk.metadata.startLine + i,
-            match: lines[i].trim().slice(0, 200),
-          });
-          if (matches.length >= MAX_GREP_RESULTS) break;
-        }
-      }
-      if (matches.length >= MAX_GREP_RESULTS) break;
+    let regex: RegExp;
+    try {
+      regex = new RegExp(pattern, 'i');
+    } catch (err) {
+      return JSON.stringify({ error: `Invalid regex pattern: ${(err as Error).message}` });
     }
 
-    return JSON.stringify({
-      results: matches,
-      count: matches.length,
-      truncated: matches.length >= MAX_GREP_RESULTS,
-    });
+    // Search the real working tree (not just parser-chunked source) so refs in
+    // config, YAML, CI workflows, etc. are visible. Respect .gitignore +
+    // built-in excludes via the shared parser filter, pruning ignored paths
+    // during the walk rather than after. Canonicalize the root first so symlink
+    // containment checks compare like-for-like (e.g. macOS /var vs /private/var).
+    const rootDir = await fs.realpath(ctx.repoRootDir);
+    const isIgnored = await createGitignoreFilter(rootDir);
+    const files: string[] = [];
+    await collectGrepFiles(rootDir, rootDir, isIgnored, files);
+    files.sort(); // deterministic ordering across filesystems
+
+    const { matches, truncated } = await scanForMatches(
+      files,
+      regex,
+      rootDir,
+      Date.now() + GREP_TIME_BUDGET_MS,
+    );
+
+    return JSON.stringify({ results: matches, count: matches.length, truncated });
   } catch (err) {
     return JSON.stringify({ error: `grep_codebase failed: ${(err as Error).message}` });
   }
