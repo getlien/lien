@@ -1,7 +1,8 @@
 name: 'Lien Review'
 description: >-
   Self-contained PR review — complexity analysis, agent bug review, and a summary,
-  posted as a check run and inline comments. No server, no database.
+  surfaced as inline PR comments + workflow annotations + a step summary. The
+  workflow job is the single status check. No server, no database.
 author: 'Lien'
 branding:
   icon: 'git-pull-request'
@@ -10,9 +11,9 @@ branding:
 inputs:
   github-token:
     description: >-
-      Token used to clone the PR and post the check run + comments. Defaults to
-      the workflow's built-in GITHUB_TOKEN. Needs contents:read,
-      pull-requests:write, checks:write.
+      Token used to clone the PR and post inline comments. Defaults to the
+      workflow's built-in GITHUB_TOKEN. Needs contents:read and
+      pull-requests:write.
     required: false
     default: ${{ github.token }}
   openrouter-api-key:
@@ -53,14 +54,6 @@ inputs:
       warning finding), or 'never'.
     required: false
     default: 'error'
-  check-run:
-    description: >-
-      Post the verdict as a separate "Lien Review" check run (default true) so it
-      can be marked Required. Set 'false' to skip it and instead surface findings
-      as workflow annotations on the job — leaving the workflow job as the single
-      status check (findings still post as inline PR comments + a step summary).
-    required: false
-    default: 'true'
 
 outputs:
   conclusion:

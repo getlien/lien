@@ -1,8 +1,9 @@
 # Lien Review — GitHub Action
 
 Self-contained PR review as a GitHub Action: complexity analysis, agent bug
-review, and a summary, posted back to the PR as a **check run** and **inline
-comments**. No server, no database, no recurring bill — the action clones the PR
+review, and a summary, posted back to the PR as **inline comments** and
+**workflow annotations**, with the workflow job as the single status check. No
+server, no database, no recurring bill — the action clones the PR
 by SHA, reviews it, and writes the results straight to GitHub using the
 workflow's built-in `GITHUB_TOKEN`.
 
@@ -19,7 +20,6 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  checks: write
 
 jobs:
   review:
@@ -40,14 +40,12 @@ A copy-paste workflow (including the fork variant) lives in
 
 ## Required permissions
 
-The consumer workflow MUST grant these permissions or the check run and comment
-writes will 403:
+The consumer workflow MUST grant these permissions or the comment writes will 403:
 
 ```yaml
 permissions:
   contents: read # clone the PR head/base by SHA
   pull-requests: write # post inline review comments
-  checks: write # create/update the Lien check run
 ```
 
 Put the `permissions:` block at the workflow top level (as above) or on the
@@ -83,23 +81,18 @@ OpenRouter wins.
 
 | Input                 | Required | Default                         | Description                                                                                                                                |
 | --------------------- | -------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `github-token`        | no       | `${{ github.token }}`           | Token used to clone the PR and post the check run + comments. Needs `contents:read`, `pull-requests:write`, `checks:write`.              |
+| `github-token`        | no       | `${{ github.token }}`           | Token used to clone the PR and post inline comments. Needs `contents:read` and `pull-requests:write`.                                    |
 | `openrouter-api-key`  | no       | `''`                            | OpenRouter API key for agent review (preferred provider — runs Gemini). If omitted, falls back to `anthropic-api-key`, then complexity-only. |
 | `anthropic-api-key`   | no       | `''`                            | Anthropic API key for agent review (fallback when `openrouter-api-key` is not set). If both are omitted, review is complexity-only.       |
 | `threshold`           | no       | `15`                            | Complexity threshold above which violations are reported.                                                                                 |
 | `review-types`        | no       | `complexity,bugs,summary`       | Comma-separated review types to enable. `complexity` toggles the complexity check. `bugs`, `architectural`, and `summary` all come from the single agent reviewer, so they switch it on/off as a group (and only when an API key is set) — they can't be toggled independently. |
 | `block-on-new-errors` | no       | `false`                         | Post `REQUEST_CHANGES` (instead of `COMMENT`) when the PR introduces new error-level complexity violations.                               |
 | `fail-on`             | no       | `error`                         | Controls the action's exit code so a Required check can block the PR: `error` (only on a failure conclusion), `any` (any error or warning finding), or `never`. |
-| `check-run`           | no       | `true`                          | Post the verdict as a separate `Lien Review` check run (so it can be marked Required). Set `false` for **single-check mode**: skip the posted check and surface findings as workflow annotations on the job instead — leaving the workflow job as the only status check (inline PR comments + step summary still post). |
 
-### Single-check mode (`check-run: false`)
-
-By default you get two checks: your workflow's job (mechanics) **and** a posted
-`Lien Review` check run (the verdict, with inline annotations). If you'd rather
-have just one, set `check-run: false`. The action then skips its own check run
-and emits findings as GitHub Actions annotations on the job (still inline on the
-diff), plus the usual PR comments and step summary — so the job itself is the
-single status check. Pair with `fail-on` to decide whether that one check gates.
+> The action posts **no check run of its own** — the workflow job is the single
+> status check. Findings surface as workflow annotations (inline on the diff),
+> inline PR comments, and a step summary. Use `fail-on` to decide whether the job
+> check gates the PR.
 
 ## Outputs
 
@@ -130,12 +123,12 @@ error- or warning-level finding fails the check); `fail-on: never` never blocks.
 ## Fork PRs
 
 On a `pull_request` event triggered from a **fork**, GitHub forces the built-in
-`GITHUB_TOKEN` to **read-only** — so Lien can clone and review the code but
-cannot post the check run or inline comments (the writes 403). When Lien detects
-this it emits a clear `::warning::` rather than failing your CI, and the review
-output still appears in the job's step summary.
+`GITHUB_TOKEN` to **read-only** — so Lien can clone and review the code, and its
+findings still appear as **workflow annotations** and in the **step summary**,
+but it cannot post **inline PR comments** (those writes 403). When Lien detects a
+fork it emits a clear `::warning::` rather than failing your CI.
 
-To review fork PRs with full check-run + comment output, opt in via the
+To get inline comments on fork PRs too, opt in via the
 `pull_request_target` event, which runs in the **base** repo's context and
 therefore gets a writable token:
 
@@ -146,7 +139,6 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  checks: write
 
 jobs:
   review:
@@ -188,9 +180,10 @@ do not execute them.
    `github-token`. A base-clone failure degrades gracefully to a no-delta review.
 3. Runs the enabled review passes (`@liendev/review`): complexity analysis and
    the agent bug/summary/architectural review.
-4. Posts a check run with the conclusion and inline PR comments for each
-   finding, writes a run summary to `$GITHUB_STEP_SUMMARY`, sets the action
-   outputs, and exits per `fail-on`.
+4. Posts inline PR comments for each finding and emits the findings as workflow
+   annotations (inline on the diff), writes a run summary to
+   `$GITHUB_STEP_SUMMARY`, sets the action outputs, and exits per `fail-on`. It
+   creates no check run of its own — the workflow job is the status check.
 
 The action ships as a Docker container action pulling a prebuilt image from
 `ghcr.io/getlien/lien-review` (tree-sitter's native bindings rule out a

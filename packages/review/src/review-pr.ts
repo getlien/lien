@@ -2,10 +2,15 @@
  * Transport-agnostic PR review core.
  *
  * `reviewPullRequest` clones the head (and optionally base) of a pull request,
- * runs complexity + agent review via {@link ReviewEngine}, posts a check run and
- * inline comments to GitHub, and returns a structured result. It carries no
- * platform/Laravel/NATS concerns — provider selection comes from `ctx.llm` and
- * all output goes straight to GitHub via octokit.
+ * runs complexity + agent review via {@link ReviewEngine}, posts inline comments
+ * to GitHub, and returns a structured result (findings + conclusion + summary)
+ * for the caller to surface. It carries no platform/Laravel/NATS concerns —
+ * provider selection comes from `ctx.llm` and output goes straight to GitHub via
+ * octokit.
+ *
+ * It does NOT create a Checks API check run: the GitHub Action job is the single
+ * status check, and the caller renders findings as workflow annotations + a step
+ * summary. Inline PR comments are still posted by the engine.
  *
  * Flow: clone head → analyze → clone base → deltas → engine.run → engine.present.
  */
@@ -20,8 +25,6 @@ import type {
   AdapterContext,
 } from './index.js';
 import {
-  createCheckRun,
-  updateCheckRun,
   runComplexityAnalysis,
   filterAnalyzableFiles,
   enrichWithTestAssociations,
@@ -81,16 +84,6 @@ export interface ReviewCoreContext {
     };
   };
   llm: ReviewLLMConfig;
-  /** Pre-created check run ID. If omitted, the core creates its own. */
-  checkRunId?: number;
-  /**
-   * Post the verdict as a Checks API check run (default true). When false, the
-   * core skips creating/finalizing a check run — findings still post as inline
-   * PR comments and are returned in the result, so a caller (e.g. a GitHub
-   * Action) can surface them as workflow annotations and let the workflow job
-   * itself be the single status check.
-   */
-  postCheckRun?: boolean;
   logger: Logger;
 }
 
@@ -100,20 +93,6 @@ export interface ReviewCoreResult {
   summaryMarkdown: string;
   filesAnalyzed: number;
   usage: { totalTokens: number; cost: number };
-  /**
-   * True when a GitHub write (check run or PR comment) was rejected with a 403.
-   * On a fork `pull_request`, the built-in token is read-only, so every write
-   * 403s and the findings never reach the PR. The core swallows these errors
-   * internally (so a partial-permission failure never crashes the review), but
-   * surfaces this flag so the caller can emit a single clear fork warning.
-   */
-  writeForbidden: boolean;
-}
-
-/** A GitHub write rejected because the token is read-only (HTTP 403). */
-function isWriteForbidden(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  return (error as { status?: number }).status === 403;
 }
 
 export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewCoreResult> {
@@ -121,49 +100,27 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
 
   logger.info(`Processing PR #${pr.pullNumber} on ${ctx.baseRepoFullName}`);
 
-  const postCheckRun = ctx.postCheckRun !== false;
-  const { checkRunId, writeForbidden } = postCheckRun
-    ? await resolveCheckRun(ctx)
-    : { checkRunId: undefined, writeForbidden: false };
-
   let headClone: CloneResult | null = null;
   let baseClone: CloneResult | null = null;
-  let findings: ReviewFinding[] = [];
-  let filesAnalyzed = 0;
-  let tokenUsage = 0;
-  let cost = 0;
 
   try {
-    // Clone head by SHA
     headClone = await cloneBySha(ctx.headRepoFullName, pr.headSha, token, logger);
 
-    // Get changed files from GitHub API
     const allChangedFiles = await getPRChangedFiles(octokit, pr);
     logger.info(`Found ${allChangedFiles.length} changed files in PR`);
 
     const filesToAnalyze = filterAnalyzableFiles(allChangedFiles);
     logger.info(`${filesToAnalyze.length} files eligible for complexity analysis`);
-    filesAnalyzed = filesToAnalyze.length;
+    const filesAnalyzed = filesToAnalyze.length;
 
     const summaryEnabled = !!ctx.config.reviewTypes.summary;
     if (summaryEnabled) await tryFetchPRPatches(octokit, pr, logger);
 
     if (filesToAnalyze.length === 0 && !summaryEnabled) {
-      // Nothing analyzable and no summary requested — finalize without the
-      // (previously wasted) full-repo complexity scan, whose result was discarded.
       logger.info('No analyzable files changed — skipping complexity/agent review');
-      const noFiles = await finalizeCheckRunNoFiles(checkRunId, octokit, pr, logger);
-      return {
-        findings: [],
-        conclusion: 'success',
-        summaryMarkdown: noFiles.summary,
-        filesAnalyzed,
-        usage: { totalTokens: 0, cost: 0 },
-        writeForbidden: writeForbidden || noFiles.writeForbidden,
-      };
+      return emptyResult('success', 'No files eligible for complexity analysis.', filesAnalyzed);
     }
 
-    // Run complexity analysis (head+base when files analyzable, full-repo scan otherwise)
     const analysis = await runAnalysisPhase(
       filesToAnalyze,
       ctx.config.threshold,
@@ -174,117 +131,22 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
       logger,
     );
     if (!analysis) {
-      const summaryMarkdown = 'Review failed — could not produce a complexity report.';
-      const failedForbidden = await finalizeCheckRunFailed(
-        checkRunId,
-        octokit,
-        pr,
-        summaryMarkdown,
-        logger,
-      );
-      return {
-        findings: [],
-        conclusion: 'failure',
-        summaryMarkdown,
+      return emptyResult(
+        'failure',
+        'Review failed — could not produce a complexity report.',
         filesAnalyzed,
-        usage: { totalTokens: 0, cost: 0 },
-        writeForbidden: writeForbidden || failedForbidden,
-      };
+      );
     }
-    const { currentReport, chunks, baselineReport, deltas } = analysis;
     baseClone = analysis.baseClone;
 
-    // Setup engine with enabled plugins. The agent plugin produces bug,
-    // architectural, and summary findings from a single run, so it's gated on
-    // both an LLM being configured and at least one of those review types being
-    // enabled (the three can be turned on/off as a group, not independently).
-    const agentEnabled =
-      !!ctx.llm &&
-      (!!ctx.config.reviewTypes.bugs ||
-        !!ctx.config.reviewTypes.architectural ||
-        !!ctx.config.reviewTypes.summary);
-    const engine = new ReviewEngine();
-    if (ctx.config.reviewTypes.complexity) engine.register(new ComplexityPlugin());
-    if (agentEnabled) engine.register(new AgentReviewPlugin());
-
-    // Track agent usage separately (reported via callback since it bypasses LLMClient)
-    let agentUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 };
-
-    // Selected model — used for both the agent-review plugin config and the
-    // adapterContext below so cost/metadata reporting stays consistent.
-    const selectedModel = ctx.llm?.model;
-
-    // Run engine
-    findings = await engine.run({
-      chunks,
-      changedFiles: filesToAnalyze,
+    const review = await analyzeAndPresent(
+      ctx,
+      analysis,
+      filesToAnalyze,
       allChangedFiles,
-      complexityReport: currentReport,
-      baselineReport,
-      deltas,
-      pluginConfigs: {
-        complexity: {
-          threshold: parseInt(ctx.config.threshold, 10),
-          blockOnNewErrors: ctx.config.blockOnNewErrors,
-        },
-        'agent-review': ctx.llm
-          ? {
-              apiKey: ctx.llm.apiKey,
-              provider: ctx.llm.provider,
-              model: ctx.llm.model,
-              baseUrl: ctx.llm.provider === 'openai' ? ctx.llm.baseUrl : undefined,
-              inputCostPerMTok: ctx.llm.inputCostPerMTok,
-              outputCostPerMTok: ctx.llm.outputCostPerMTok,
-              ...scaleAgentBudget(filesToAnalyze.length, chunks),
-            }
-          : {},
-      },
-      config: {},
-      pr,
-      logger,
-      repoRootDir: headClone.dir,
-      reportUsage: usage => {
-        agentUsage = usage;
-      },
-    });
-    logger.info(`Engine produced ${findings.length} total findings`);
-
-    // Present via engine (posts check run + comments)
-    const adapterContext: AdapterContext = {
-      complexityReport: currentReport,
-      baselineReport,
-      deltas,
-      deltaSummary: deltas ? calculateDeltaSummary(deltas) : null,
-      pr,
-      octokit,
-      logger,
-      llmUsage: agentUsage.totalTokens > 0 ? agentUsage : undefined,
-      model: selectedModel,
-      blockOnNewErrors: ctx.config.blockOnNewErrors,
-    };
-
-    const presentation = await tryPresentFindings(
-      engine,
-      findings,
-      adapterContext,
-      checkRunId,
-      !postCheckRun,
-      octokit,
-      pr,
-      logger,
+      headClone.dir,
     );
-
-    tokenUsage = agentUsage.totalTokens;
-    cost = agentUsage.cost;
-
-    return {
-      findings,
-      conclusion: presentation.conclusion,
-      summaryMarkdown: presentation.summary,
-      filesAnalyzed,
-      usage: { totalTokens: tokenUsage, cost },
-      writeForbidden: writeForbidden || presentation.writeForbidden,
-    };
+    return { ...review, filesAnalyzed };
   } finally {
     if (headClone) await headClone.cleanup().catch(() => {});
     if (baseClone) await baseClone.cleanup().catch(() => {});
@@ -293,6 +155,142 @@ export async function reviewPullRequest(ctx: ReviewCoreContext): Promise<ReviewC
 
 // ---------------------------------------------------------------------------
 // Helpers
+
+/** Build a no-findings result for the no-files / analysis-failed early returns. */
+function emptyResult(
+  conclusion: 'success' | 'failure',
+  summaryMarkdown: string,
+  filesAnalyzed: number,
+): ReviewCoreResult {
+  return {
+    findings: [],
+    conclusion,
+    summaryMarkdown,
+    filesAnalyzed,
+    usage: { totalTokens: 0, cost: 0 },
+  };
+}
+
+/** The agent reviewer runs when an LLM is configured and a relevant review type is on. */
+function isAgentEnabled(ctx: ReviewCoreContext): boolean {
+  return (
+    !!ctx.llm &&
+    (!!ctx.config.reviewTypes.bugs ||
+      !!ctx.config.reviewTypes.architectural ||
+      !!ctx.config.reviewTypes.summary)
+  );
+}
+
+/** Assemble the per-plugin engine config (complexity threshold + agent LLM settings). */
+function buildPluginConfigs(
+  ctx: ReviewCoreContext,
+  filesToAnalyze: string[],
+  chunks: CodeChunk[],
+): Record<string, Record<string, unknown>> {
+  return {
+    complexity: {
+      threshold: parseInt(ctx.config.threshold, 10),
+      blockOnNewErrors: ctx.config.blockOnNewErrors,
+    },
+    'agent-review': ctx.llm
+      ? {
+          apiKey: ctx.llm.apiKey,
+          provider: ctx.llm.provider,
+          model: ctx.llm.model,
+          baseUrl: ctx.llm.provider === 'openai' ? ctx.llm.baseUrl : undefined,
+          inputCostPerMTok: ctx.llm.inputCostPerMTok,
+          outputCostPerMTok: ctx.llm.outputCostPerMTok,
+          ...scaleAgentBudget(filesToAnalyze.length, chunks),
+        }
+      : {},
+  };
+}
+
+interface PresentedReview {
+  findings: ReviewFinding[];
+  conclusion: 'success' | 'failure' | 'neutral';
+  summaryMarkdown: string;
+  usage: { totalTokens: number; cost: number };
+}
+
+/** Run the review engine over an analyzed PR and present the findings to GitHub. */
+async function analyzeAndPresent(
+  ctx: ReviewCoreContext,
+  analysis: AnalysisPhaseResult,
+  filesToAnalyze: string[],
+  allChangedFiles: string[],
+  headCloneDir: string,
+): Promise<PresentedReview> {
+  const { octokit, pr, logger } = ctx;
+  const { currentReport, chunks, baselineReport, deltas } = analysis;
+
+  const engine = new ReviewEngine();
+  if (ctx.config.reviewTypes.complexity) engine.register(new ComplexityPlugin());
+  if (isAgentEnabled(ctx)) engine.register(new AgentReviewPlugin());
+
+  // Agent usage is reported via callback since it bypasses the LLMClient meter.
+  let agentUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 };
+
+  const findings = await engine.run({
+    chunks,
+    changedFiles: filesToAnalyze,
+    allChangedFiles,
+    complexityReport: currentReport,
+    baselineReport,
+    deltas,
+    pluginConfigs: buildPluginConfigs(ctx, filesToAnalyze, chunks),
+    config: {},
+    pr,
+    logger,
+    repoRootDir: headCloneDir,
+    reportUsage: usage => {
+      agentUsage = usage;
+    },
+  });
+  logger.info(`Engine produced ${findings.length} total findings`);
+
+  const adapterContext: AdapterContext = {
+    complexityReport: currentReport,
+    baselineReport,
+    deltas,
+    deltaSummary: deltas ? calculateDeltaSummary(deltas) : null,
+    pr,
+    octokit,
+    logger,
+    llmUsage: agentUsage.totalTokens > 0 ? agentUsage : undefined,
+    model: ctx.llm?.model,
+    blockOnNewErrors: ctx.config.blockOnNewErrors,
+  };
+
+  const presentation = await presentFindings(engine, findings, adapterContext, logger);
+
+  return {
+    findings,
+    conclusion: presentation.conclusion,
+    summaryMarkdown: presentation.summary,
+    usage: { totalTokens: agentUsage.totalTokens, cost: agentUsage.cost },
+  };
+}
+
+/**
+ * Present findings to GitHub (inline comments + PR description) without a check
+ * run, returning the conclusion + composed summary. Errors degrade to a neutral
+ * conclusion rather than throwing, so a presentation failure never aborts the run.
+ */
+async function presentFindings(
+  engine: ReviewEngine,
+  findings: ReviewFinding[],
+  adapterContext: AdapterContext,
+  logger: Logger,
+): Promise<{ conclusion: 'success' | 'failure' | 'neutral'; summary: string }> {
+  try {
+    return await engine.present(findings, adapterContext, { skipCheckRun: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`engine.present() failed: ${message}`);
+    return { conclusion: 'neutral', summary: `An error occurred: ${message}` };
+  }
+}
 
 /**
  * Scale agent turn count and token budget dynamically.
@@ -355,66 +353,6 @@ async function tryEnrichTestAssociations(
       `Test association enrichment failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-}
-
-async function finalizeCheckRunNoFiles(
-  checkRunId: number | undefined,
-  octokit: Octokit,
-  prContext: PRContext,
-  logger: Logger,
-): Promise<{ summary: string; writeForbidden: boolean }> {
-  const summary = 'No files eligible for complexity analysis.';
-  if (!checkRunId) return { summary, writeForbidden: false };
-  let writeForbidden = false;
-  await updateCheckRun(
-    octokit,
-    {
-      owner: prContext.owner,
-      repo: prContext.repo,
-      checkRunId,
-      status: 'completed',
-      conclusion: 'success',
-      output: {
-        title: 'No code files changed',
-        summary,
-      },
-    },
-    logger,
-  ).catch(err => {
-    writeForbidden = isWriteForbidden(err);
-    logger.warning(`Failed to finalize check run: ${err}`);
-  });
-  return { summary, writeForbidden };
-}
-
-async function finalizeCheckRunFailed(
-  checkRunId: number | undefined,
-  octokit: Octokit,
-  prContext: PRContext,
-  summary: string,
-  logger: Logger,
-): Promise<boolean> {
-  if (!checkRunId) return false;
-  let writeForbidden = false;
-  await updateCheckRun(
-    octokit,
-    {
-      owner: prContext.owner,
-      repo: prContext.repo,
-      checkRunId,
-      status: 'completed',
-      conclusion: 'failure',
-      output: {
-        title: 'Review failed',
-        summary,
-      },
-    },
-    logger,
-  ).catch(err => {
-    writeForbidden = isWriteForbidden(err);
-    logger.warning(`Failed to finalize check run: ${err}`);
-  });
-  return writeForbidden;
 }
 
 interface AnalysisPhaseResult {
@@ -515,56 +453,6 @@ async function runAnalysisPhase(
   };
 }
 
-async function tryPresentFindings(
-  engine: ReviewEngine,
-  findings: ReviewFinding[],
-  adapterContext: AdapterContext,
-  checkRunId: number | undefined,
-  skipCheckRun: boolean,
-  octokit: Octokit,
-  prContext: PRContext,
-  logger: Logger,
-): Promise<{
-  conclusion: 'success' | 'failure' | 'neutral';
-  summary: string;
-  writeForbidden: boolean;
-}> {
-  // Note: engine.present() swallows individual comment-post failures internally,
-  // so a 403 on an inline comment won't surface here — we can only observe a 403
-  // that propagates out of present() or hits the fallback finalizer below. The
-  // primary read-only-token (fork) signal remains the first write in
-  // resolveCheckRun(), which 403s before any analysis on a read-only token.
-  try {
-    const result = await engine.present(findings, adapterContext, { checkRunId, skipCheckRun });
-    return { ...result, writeForbidden: false };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.error(`engine.present() failed: ${message}`);
-    let writeForbidden = isWriteForbidden(error);
-    if (checkRunId) {
-      await updateCheckRun(
-        octokit,
-        {
-          owner: prContext.owner,
-          repo: prContext.repo,
-          checkRunId,
-          status: 'completed',
-          conclusion: 'action_required',
-          output: {
-            title: 'Review failed',
-            summary: `An error occurred: ${message}`,
-          },
-        },
-        logger,
-      ).catch(err => {
-        writeForbidden = writeForbidden || isWriteForbidden(err);
-        logger.warning(`Failed to finalize check run after error: ${err}`);
-      });
-    }
-    return { conclusion: 'neutral', summary: `An error occurred: ${message}`, writeForbidden };
-  }
-}
-
 /**
  * Full-repo complexity scan on an already-cloned directory.
  * Used when a PR touches no analyzable files so we still report real scores.
@@ -591,62 +479,4 @@ async function computeRepoComplexity(
     avgComplexity: report.summary.avgComplexity,
     maxComplexity: report.summary.maxComplexity,
   };
-}
-
-/**
- * Resolve the check run for this review. Reuses a pre-created check run when
- * `ctx.checkRunId` is provided (transitioning it to in_progress), otherwise
- * creates a fresh one.
- *
- * Returns `writeForbidden: true` when the create/update is rejected with a 403
- * (read-only token, e.g. a fork `pull_request`) so the caller can surface a
- * single fork warning instead of silently producing no PR output.
- */
-async function resolveCheckRun(
-  ctx: ReviewCoreContext,
-): Promise<{ checkRunId: number | undefined; writeForbidden: boolean }> {
-  const { octokit, pr, logger } = ctx;
-
-  if (ctx.checkRunId) {
-    try {
-      await updateCheckRun(
-        octokit,
-        {
-          owner: pr.owner,
-          repo: pr.repo,
-          checkRunId: ctx.checkRunId,
-          status: 'in_progress',
-          output: { title: 'Running...', summary: 'Analysis in progress' },
-        },
-        logger,
-      );
-    } catch (error) {
-      logger.warning(
-        `Failed to update check run to in_progress: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return { checkRunId: ctx.checkRunId, writeForbidden: isWriteForbidden(error) };
-    }
-    return { checkRunId: ctx.checkRunId, writeForbidden: false };
-  }
-
-  try {
-    const checkRunId = await createCheckRun(
-      octokit,
-      {
-        owner: pr.owner,
-        repo: pr.repo,
-        name: 'Lien Review',
-        headSha: pr.headSha,
-        status: 'in_progress',
-        output: { title: 'Running...', summary: 'Analysis in progress' },
-      },
-      logger,
-    );
-    return { checkRunId, writeForbidden: false };
-  } catch (error) {
-    logger.warning(
-      `Failed to create check run: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return { checkRunId: undefined, writeForbidden: isWriteForbidden(error) };
-  }
 }

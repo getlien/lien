@@ -1,13 +1,13 @@
 /**
  * Lien Review GitHub Action entrypoint.
  *
- * Flow: inputs → context → octokit → reviewPullRequest → step summary +
- * outputs → exit code per `fail-on`. Reviews same-repo PRs out of the box; on
- * fork PRs the built-in `GITHUB_TOKEN` is read-only, so the review core can't
- * post its check run or comments. It reports that via `writeForbidden`, and we
- * surface a single `::warning::` with the `pull_request_target` remedy (still
- * writing outputs and exiting 0) rather than failing the consumer's CI on a
- * config limitation.
+ * Flow: inputs → context → octokit → reviewPullRequest → workflow annotations +
+ * step summary + outputs → exit code per `fail-on`. The action posts no Checks
+ * API check run of its own — the workflow job is the single status check, and
+ * findings render as annotations (inline on the diff), the step summary, and
+ * inline PR comments. On fork PRs the built-in `GITHUB_TOKEN` is read-only, so
+ * inline comments can't post (annotations + summary still do); we note that once
+ * with the `pull_request_target` remedy.
  */
 
 import { argv } from 'node:process';
@@ -43,11 +43,11 @@ export function emitFindingAnnotations(findings: ReviewFinding[]): void {
 
 function emitForkWarning(): void {
   actionLogger.warning(
-    'This PR comes from a fork, so the built-in GITHUB_TOKEN is read-only and Lien ' +
-      'could not post the check run or comments. To review fork PRs, run Lien on the ' +
-      'pull_request_target event instead (it is safe — Lien only clones and parses ' +
-      'code, never executes it). See the action README for the pull_request_target ' +
-      'workflow example.',
+    'This PR is from a fork, so the built-in GITHUB_TOKEN is read-only — Lien could ' +
+      'not post inline PR comments (findings still appear as annotations and in the ' +
+      'job summary). For inline comments on fork PRs, run Lien on the ' +
+      'pull_request_target event instead (safe — Lien only clones and parses code, ' +
+      'never executes it). See the action README for the workflow example.',
   );
 }
 
@@ -65,11 +65,9 @@ function exitCodeFor(
 }
 
 /**
- * Finalize a completed review: write the step summary + outputs, and decide the
- * process exit code. On a fork PR where the read-only token blocked all writes
- * (`writeForbidden`), emit exactly one fork warning and force a clean exit
- * (the missing PR output is a token limitation, not a CI failure). Returns the
- * exit code so the entrypoint and tests can assert it without reading
+ * Finalize a completed review: write the step summary + outputs, note the fork
+ * read-only-token limitation if applicable, and return the process exit code
+ * (per `fail-on`) so the entrypoint and tests can assert it without reading
  * `process.exitCode`.
  */
 export async function finishRun(
@@ -86,10 +84,9 @@ export async function finishRun(
     errorCount,
   });
 
-  if (isFork && result.writeForbidden) {
-    emitForkWarning();
-    return 0;
-  }
+  // On a fork PR the built-in GITHUB_TOKEN is read-only, so inline comments can't
+  // post (annotations + the step summary still do). Note it once.
+  if (isFork) emitForkWarning();
 
   const warningCount = result.findings.filter(f => f.severity === 'warning').length;
   actionLogger.info(
@@ -122,7 +119,6 @@ async function main(): Promise<void> {
       },
     },
     llm: inputs.llm,
-    postCheckRun: inputs.checkRun,
     logger: actionLogger,
   };
 
@@ -134,8 +130,8 @@ async function main(): Promise<void> {
     endGroup();
   }
 
-  // Single-check mode: no separate check run, so put findings inline as annotations.
-  if (!inputs.checkRun) emitFindingAnnotations(result.findings);
+  // The job is the only check, so surface findings inline as workflow annotations.
+  emitFindingAnnotations(result.findings);
 
   process.exitCode = await finishRun(result, context.isFork, inputs.failOn);
 }

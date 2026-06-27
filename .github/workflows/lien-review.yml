@@ -2,10 +2,9 @@ name: Lien Review
 
 # Dogfoods the Lien Review action on this monorepo's own PRs.
 #
-# Single-check mode (check-run: false): the action does NOT post its own
-# "Lien Review" check run. Findings surface as workflow annotations on this job
-# (inline on the diff) plus inline PR comments + a step summary, so there's just
-# ONE status check — this workflow job — instead of a job check + a posted check.
+# The action posts no Checks API check run of its own — this workflow job is the
+# single status check. Findings surface as workflow annotations (inline on the
+# diff), inline PR comments, and a step summary.
 #
 # The public, external-consumer path is `uses: getlien/lien-review@v1` (a Docker
 # action backed by a prebuilt GHCR image — see packages/action/README.md). That
@@ -14,7 +13,7 @@ name: Lien Review
 #
 # fail-on: never — the check stays green whenever the action *runs*; findings are
 # advisory (annotations + comments). External consumers can set fail-on: error
-# to make a Required check gate on the verdict.
+# to make this job gate the PR.
 
 on:
   pull_request:
@@ -22,7 +21,6 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  checks: write
 
 concurrency:
   group: lien-review-${{ github.event.pull_request.number }}
@@ -50,5 +48,4 @@ jobs:
         env:
           INPUT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          INPUT_CHECK-RUN: 'false'
           INPUT_FAIL-ON: never
