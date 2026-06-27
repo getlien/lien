@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { OpenAIAgentClient } from '../src/plugins/agent/openai-client.js';
+import { OpenAIAgentClient, envEnabled } from '../src/plugins/agent/openai-client.js';
 import { AgentReviewPlugin, scaleBudgetForBlastRadius } from '../src/plugins/agent/index.js';
 import { scaleAgentBudget } from '../src/review-pr.js';
 import { DEFAULT_REVIEW_MODEL, MAX_REVIEW_TOKEN_BUDGET } from '../src/defaults.js';
@@ -188,6 +188,21 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(result.incomplete).toBe(true);
     expect(lines.some(l => l.includes(reasoning))).toBe(true);
   }, 15000);
+});
+
+describe('envEnabled (LIEN_REVIEW_LOG_AGENT parsing)', () => {
+  it('enables only for 1/true (case-insensitive)', () => {
+    expect(envEnabled('1')).toBe(true);
+    expect(envEnabled('true')).toBe(true);
+    expect(envEnabled('TRUE')).toBe(true);
+  });
+
+  it('does not enable for falsey strings (the !! bug)', () => {
+    expect(envEnabled('false')).toBe(false);
+    expect(envEnabled('0')).toBe(false);
+    expect(envEnabled('')).toBe(false);
+    expect(envEnabled(undefined)).toBe(false);
+  });
 });
 
 describe('scaleBudgetForBlastRadius', () => {

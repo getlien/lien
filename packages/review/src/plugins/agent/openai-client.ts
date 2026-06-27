@@ -40,6 +40,15 @@ function truncate(s: string, max: number): string {
 }
 
 /**
+ * Parse a boolean-ish env flag. Only '1'/'true' (case-insensitive) enable —
+ * `!!process.env.X` would treat 'false'/'0' as truthy and leak logs.
+ */
+export function envEnabled(value: string | undefined): boolean {
+  const v = value?.trim().toLowerCase();
+  return v === '1' || v === 'true';
+}
+
+/**
  * Parse + validate a tool call's JSON arguments. Returns the parsed
  * input on success, throws on parse failure or non-object payload (a
  * cleaner surface than letting the executor crash on a primitive cast).
@@ -184,7 +193,7 @@ export class OpenAIAgentClient {
     this.maxTurns = options.maxTurns;
     this.maxTokenBudget = options.maxTokenBudget;
     this.logger = options.logger;
-    this.logAgentTurns = !!process.env.LIEN_REVIEW_LOG_AGENT;
+    this.logAgentTurns = envEnabled(process.env.LIEN_REVIEW_LOG_AGENT);
     this.inputCostPerToken = (options.inputCostPerMTok ?? DEFAULT_INPUT_COST_PER_MTOK) / 1_000_000;
     this.outputCostPerToken =
       (options.outputCostPerMTok ?? DEFAULT_OUTPUT_COST_PER_MTOK) / 1_000_000;

@@ -35,6 +35,15 @@ function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
 }
 
+/**
+ * Parse a boolean-ish env flag. Only '1'/'true' (case-insensitive) enable —
+ * `!!process.env.X` would treat 'false'/'0' as truthy and leak logs.
+ */
+function envEnabled(value: string | undefined): boolean {
+  const v = value?.trim().toLowerCase();
+  return v === '1' || v === 'true';
+}
+
 /** Extract the assistant's text content from an Anthropic response for trace. */
 function joinTextBlocks(content: Anthropic.Messages.ContentBlock[]): string {
   return content
@@ -83,7 +92,7 @@ export class AnthropicAgentClient {
     this.maxTurns = options.maxTurns;
     this.maxTokenBudget = options.maxTokenBudget;
     this.logger = options.logger;
-    this.logAgentTurns = !!process.env.LIEN_REVIEW_LOG_AGENT;
+    this.logAgentTurns = envEnabled(process.env.LIEN_REVIEW_LOG_AGENT);
     this.inputCostPerToken = (options.inputCostPerMTok ?? DEFAULT_INPUT_COST_PER_MTOK) / 1_000_000;
     this.outputCostPerToken =
       (options.outputCostPerMTok ?? DEFAULT_OUTPUT_COST_PER_MTOK) / 1_000_000;
