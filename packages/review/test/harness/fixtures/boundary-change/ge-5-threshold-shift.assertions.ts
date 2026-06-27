@@ -17,13 +17,19 @@
  * 10/10 only because it says "divergence" every run; kimi says it in ~40% of
  * runs, so it failed the brittle check despite an equivalent finding.
  *
- * The check now asserts the real shared substance as a conjunction: the finding
- * must name the boundary value (=== 5) AND state the low->medium flip. Two
- * separate expectFindingMentions calls => AND; each is any-of for phrasing
- * robustness. The aspirational "both sides" terms are deliberately NOT in the
- * gating lists — expectFindingMentions is an any-substring matcher, so mixing
- * them in would let a finding pass on vocabulary alone (the very brittleness
- * this recalibration removes). See PR #591 review (CodeRabbit + Lien self-review).
+ * The check asserts the real shared substance as a conjunction (separate
+ * expectFindingMentions calls => AND; each any-of for phrasing robustness):
+ * (1) names the boundary value (=== 5), (2) states the low->medium flip, and
+ * (3) recommends a TEST PAIR pinning both sides of the boundary.
+ *
+ * On gate (3): #591 had REMOVED a "both sides" check because it only ever
+ * matched the word "divergence" — neither model actually recommended both
+ * sides (gemini passed 10/10 on vocabulary; kimi failed ~60% despite an
+ * equivalent single-sided finding). The boundary-change rule was then updated
+ * to explicitly ask for a test pair; after that, gemini-3-flash and
+ * kimi-k2.7-code both emit "test pair" in 12/12 traced runs, so gate (3) is a
+ * real, achievable substance check that locks the improvement in. See PR #591
+ * (recalibration) plus the boundary-rule improvement that added gate (3).
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -40,6 +46,11 @@ const assertions: FixtureAssertions = {
     // gemini-3-flash and kimi-k2.7-code runs (calibrate-10 + per-vote traces).
     h.expectFindingMentions(['dependentCount === 5', 'dependentCount: 5', 'exactly 5'], result);
     h.expectFindingMentions(["low' to 'medium'", '"low" to "medium"', 'low to medium'], result);
+    // (3) recommends a TEST PAIR — pin BOTH sides of the boundary, not just the
+    // value that crosses. Now achievable: after the boundary-change rule was
+    // updated to ask for it, "test pair" appears in 12/12 traced runs across
+    // gemini-3-flash + kimi-k2.7-code (was 0 before the rule change).
+    h.expectFindingMentions(['test pair', 'both sides', 'either side', 'adjacent', 'pin'], result);
   },
   votes: 3,
   passThreshold: 9,
