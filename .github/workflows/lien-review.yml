@@ -1,0 +1,48 @@
+name: Lien Review
+
+# Dogfoods the Lien Review action on this monorepo's own PRs.
+#
+# The public, external-consumer path is `uses: getlien/lien-review@v1` (a Docker
+# action backed by a prebuilt GHCR image — see packages/action/README.md). That
+# image + the public dist repo aren't published yet, so here we build the action
+# from source and run its entrypoint directly. Same code path, no publish needed.
+#
+# fail-on: never — the workflow job stays green whenever the action *runs*; the
+# findings themselves surface as the "Lien Review" check run + inline PR comments.
+# (External consumers use the default fail-on: error so a Required check can gate.)
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: lien-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build review engine + action
+        run: npm run build -w @liendev/parser -w @liendev/core -w @liendev/review -w @liendev/action
+
+      - name: Run Lien Review
+        run: node packages/action/dist/index.js
+        env:
+          INPUT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          INPUT_FAIL-ON: never

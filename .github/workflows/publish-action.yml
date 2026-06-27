@@ -1,0 +1,116 @@
+name: Publish Action
+
+# Builds and pushes the Lien Review GitHub Action image to GHCR on a version tag
+# (v*), then (manually, see the documented stub below) syncs action.yml + README
+# to the public getlien/lien-review dist repo and moves the floating v1 tag so
+# `uses: getlien/lien-review@v1` resolves to the new release.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # Actions pinned to commit SHAs (supply-chain hardening for a job that
+      # publishes artifacts). persist-credentials:false — this job never needs
+      # the checkout token for a push, so don't leave it in local git config.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve tags
+        id: tags
+        run: |
+          IMAGE=ghcr.io/getlien/lien-review
+          SHA_TAG="${IMAGE}:sha-${GITHUB_SHA::7}"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Tagged release: publish the version, the floating :latest, and the sha tag.
+            VERSION="${GITHUB_REF#refs/tags/}"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            {
+              echo "tags<<EOF"
+              echo "${IMAGE}:${VERSION}"
+              echo "${IMAGE}:latest"
+              echo "${SHA_TAG}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            # Manual dispatch: publish ONLY the immutable sha tag, so a non-release
+            # run can never overwrite :latest or a version with an arbitrary commit.
+            echo "version=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            {
+              echo "tags<<EOF"
+              echo "${SHA_TAG}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push action image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: packages/action/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=action
+          cache-to: type=gha,mode=max,scope=action
+
+      # ─── Sync to the public dist repo (requires org access — NOT run here) ──────
+      #
+      # The action.yml consumers reference via `uses: getlien/lien-review@v1` lives
+      # in the public getlien/lien-review dist repo, NOT this monorepo. After the
+      # image is pushed above, that repo's action.yml + README must be synced and
+      # the floating `v1` tag moved to the new release commit.
+      #
+      # This step is intentionally left as a documented stub: it needs a
+      # GH_DIST_TOKEN secret (a PAT/fine-grained token with contents:write on
+      # getlien/lien-review) plus org access to create/own that repo and push the
+      # tag. We cannot run those mutations from this CI without that token, so the
+      # commands are commented out. To enable: add GH_DIST_TOKEN to repo secrets
+      # and uncomment.
+      #
+      # - name: Sync action.yml + README to dist repo and move v1 tag
+      #   if: github.event_name == 'push'
+      #   env:
+      #     GH_DIST_TOKEN: ${{ secrets.GH_DIST_TOKEN }}
+      #     VERSION: ${{ steps.tags.outputs.version }}
+      #   run: |
+      #     set -euo pipefail
+      #     # Compute the major-version float (v1.4.2 -> v1).
+      #     MAJOR="$(echo "$VERSION" | sed -E 's/^(v[0-9]+).*/\1/')"
+      #
+      #     git clone "https://x-access-token:${GH_DIST_TOKEN}@github.com/getlien/lien-review.git" dist
+      #     # Copy the published action definition + docs (the image holds the code).
+      #     cp packages/action/action.yml dist/action.yml
+      #     cp packages/action/README.md  dist/README.md
+      #
+      #     cd dist
+      #     git config user.name  "lien-bot"
+      #     git config user.email "bot@lien.dev"
+      #     git add action.yml README.md
+      #     git commit -m "release: ${VERSION}" || echo "no changes to commit"
+      #     git push origin HEAD:main
+      #
+      #     # Pin the exact version tag and move the floating major tag.
+      #     git tag -f "$VERSION"
+      #     git tag -f "$MAJOR"
+      #     git push -f origin "$VERSION"
+      #     git push -f origin "$MAJOR"

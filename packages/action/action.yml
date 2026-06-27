@@ -1,0 +1,67 @@
+name: 'Lien Review'
+description: >-
+  Self-contained PR review — complexity analysis, agent bug review, and a summary,
+  posted as a check run and inline comments. No server, no database.
+author: 'Lien'
+branding:
+  icon: 'git-pull-request'
+  color: 'purple'
+
+inputs:
+  github-token:
+    description: >-
+      Token used to clone the PR and post the check run + comments. Defaults to
+      the workflow's built-in GITHUB_TOKEN. Needs contents:read,
+      pull-requests:write, checks:write.
+    required: false
+    default: ${{ github.token }}
+  openrouter-api-key:
+    description: >-
+      OpenRouter API key for agent review (preferred provider — runs Gemini).
+      If omitted, falls back to anthropic-api-key, then to complexity-only.
+    required: false
+    default: ''
+  anthropic-api-key:
+    description: >-
+      Anthropic API key for agent review (fallback when openrouter-api-key is
+      not set). If both are omitted, review is complexity-only.
+    required: false
+    default: ''
+  threshold:
+    description: 'Complexity threshold above which violations are reported.'
+    required: false
+    default: '15'
+  review-types:
+    description: >-
+      Comma-separated review types to enable. `complexity` toggles the
+      complexity check. `bugs`, `architectural`, and `summary` are all produced
+      by the single agent reviewer, so they switch it on/off as a group (and the
+      agent only runs when an API key is provided) — they cannot be toggled
+      independently of one another. Default: complexity,bugs,summary.
+    required: false
+    default: 'complexity,bugs,summary'
+  block-on-new-errors:
+    description: >-
+      Post REQUEST_CHANGES (instead of COMMENT) when the PR introduces new
+      error-level complexity violations.
+    required: false
+    default: 'false'
+  fail-on:
+    description: >-
+      When the action's exit code is non-zero (so a Required check blocks the
+      PR): 'error' (default — only on a failure conclusion), 'any' (any error or
+      warning finding), or 'never'.
+    required: false
+    default: 'error'
+
+outputs:
+  conclusion:
+    description: 'The review conclusion: success, failure, or neutral.'
+  findings-count:
+    description: 'Total number of findings produced.'
+  error-count:
+    description: 'Number of error-severity findings.'
+
+runs:
+  using: 'docker'
+  image: 'docker://ghcr.io/getlien/lien-review:v1'

@@ -1,0 +1,21 @@
+{
+  "action": "synchronize",
+  "number": 42,
+  "pull_request": {
+    "number": 42,
+    "title": "Add caching layer to the indexer",
+    "body": "This PR introduces an LRU cache.\n\nFixes #10.",
+    "head": {
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ref": "feature/cache",
+      "repo": {
+        "full_name": "octocat/lien-fork",
+        "fork": true
+      }
+    },
+    "base": {
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "ref": "main"
+    }
+  }
+}
