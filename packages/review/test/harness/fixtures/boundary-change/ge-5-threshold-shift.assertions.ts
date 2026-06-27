@@ -39,7 +39,7 @@ const assertions: FixtureAssertions = {
     // omits or changes quotes still matches. Verified present in 100% of
     // gemini-3-flash and kimi-k2.7-code runs (calibrate-10 + per-vote traces).
     h.expectFindingMentions(['dependentCount === 5', 'dependentCount: 5', 'exactly 5'], result);
-    h.expectFindingMentions(["low' to 'medium'", 'low to medium'], result);
+    h.expectFindingMentions(["low' to 'medium'", '"low" to "medium"', 'low to medium'], result);
   },
   votes: 3,
   passThreshold: 9,
