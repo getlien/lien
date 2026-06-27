@@ -15,7 +15,6 @@ COPY packages/parser/package.json packages/parser/
 COPY packages/core/package.json packages/core/
 COPY packages/review/package.json packages/review/
 COPY packages/action/package.json packages/action/
-COPY packages/runner/package.json packages/runner/
 COPY packages/cli/package.json packages/cli/
 COPY packages/site/package.json packages/site/
 
