@@ -90,8 +90,8 @@ describe('grepCodebase — real working-tree search', () => {
     expect(res.results![0]).toMatchObject({ filepath: 'multi.ts', line: 2 });
   });
 
-  it('caps results and flags truncation', async () => {
-    // 50 matching lines in a single file — more than the internal cap (30).
+  it('caps results and flags truncation only when matches exceed the cap', async () => {
+    // 50 matching lines — well over the internal cap (30) → truncated.
     const lines = Array.from({ length: 50 }, (_, i) => `match ${i} HIT`).join('\n');
     await write(root, 'many.ts', lines);
 
@@ -99,6 +99,16 @@ describe('grepCodebase — real working-tree search', () => {
     expect(res.truncated).toBe(true);
     expect(res.count).toBe(30);
     expect(res.results).toHaveLength(30);
+  });
+
+  it('does not flag truncation when matches exactly equal the cap', async () => {
+    // Exactly 30 matches and nothing dropped → truncated must be false.
+    const lines = Array.from({ length: 30 }, (_, i) => `match ${i} HIT`).join('\n');
+    await write(root, 'exact.ts', lines);
+
+    const res = await runGrep(root, 'HIT');
+    expect(res.count).toBe(30);
+    expect(res.truncated).toBe(false);
   });
 
   it('returns a clean error for an invalid regex instead of throwing', async () => {

@@ -264,8 +264,11 @@ interface GrepMatch {
 }
 
 /**
- * Recursively collect file paths under `dir`, pruning GREP_SKIP_DIRS, gitignored
- * paths, and symlinked directories (cycle/escape guard). Applying `isIgnored`
+ * Recursively collect file paths under `dir`, pruning GREP_SKIP_DIRS and
+ * gitignored paths. ALL symlinks (files and directories) are skipped — this
+ * guards against traversal cycles and reading targets outside repoRootDir, at
+ * the cost of missing references that live only behind a symlink (rare in a
+ * reviewed repo; read_file can still reach them by path). Applying `isIgnored`
  * during traversal means ignored directories (e.g. coverage/, .next/) are never
  * descended into, rather than walked and discarded afterward. Dotfiles and
  * dot-directories other than the skip set ARE included.
@@ -311,8 +314,10 @@ async function readGrepCandidate(absFile: string): Promise<string | null> {
 }
 
 /**
- * Append matching lines from `content` to `matches`, stopping at the global
- * result cap. Line numbers are 1-based.
+ * Append matching lines from `content` to `matches`. Collects one past the
+ * result cap (a sentinel) so the caller can tell "exactly cap matches" from
+ * "more than cap"; the extra is trimmed before returning. Line numbers are
+ * 1-based.
  */
 function collectLineMatches(
   content: string,
@@ -321,7 +326,7 @@ function collectLineMatches(
   matches: GrepMatch[],
 ): void {
   const lines = content.split('\n');
-  for (let i = 0; i < lines.length && matches.length < MAX_GREP_RESULTS; i++) {
+  for (let i = 0; i < lines.length && matches.length <= MAX_GREP_RESULTS; i++) {
     if (regex.test(lines[i])) {
       matches.push({ filepath, line: i + 1, match: lines[i].trim().slice(0, 200) });
     }
@@ -329,26 +334,32 @@ function collectLineMatches(
 }
 
 /**
- * Read and scan each file for `regex`, accumulating hits up to the result cap.
- * Bails out once the wall-clock deadline passes; `timedOut` then signals the
- * results may be incomplete.
+ * Read and scan each file for `regex`, accumulating hits up to one past the
+ * result cap. `truncated` is true when results are incomplete — either a
+ * genuine (cap+1)th match was found, or the wall-clock deadline passed. The
+ * sentinel overflow is trimmed off the returned matches.
  */
 async function scanForMatches(
   files: string[],
   regex: RegExp,
   rootDir: string,
   deadline: number,
-): Promise<{ matches: GrepMatch[]; timedOut: boolean }> {
+): Promise<{ matches: GrepMatch[]; truncated: boolean }> {
   const matches: GrepMatch[] = [];
+  let timedOut = false;
   for (const absFile of files) {
-    if (matches.length >= MAX_GREP_RESULTS) break;
-    if (Date.now() > deadline) return { matches, timedOut: true };
+    if (matches.length > MAX_GREP_RESULTS) break; // found the sentinel — there are more
+    if (Date.now() > deadline) {
+      timedOut = true;
+      break;
+    }
     const content = await readGrepCandidate(absFile);
     if (content !== null) {
       collectLineMatches(content, regex, path.relative(rootDir, absFile), matches);
     }
   }
-  return { matches, timedOut: false };
+  const truncated = timedOut || matches.length > MAX_GREP_RESULTS;
+  return { matches: matches.slice(0, MAX_GREP_RESULTS), truncated };
 }
 
 export async function grepCodebase(
@@ -375,19 +386,14 @@ export async function grepCodebase(
     await collectGrepFiles(ctx.repoRootDir, ctx.repoRootDir, isIgnored, files);
     files.sort(); // deterministic ordering across filesystems
 
-    const { matches, timedOut } = await scanForMatches(
+    const { matches, truncated } = await scanForMatches(
       files,
       regex,
       ctx.repoRootDir,
       Date.now() + GREP_TIME_BUDGET_MS,
     );
 
-    return JSON.stringify({
-      results: matches,
-      count: matches.length,
-      // truncated = results may be incomplete: hit the result cap or time budget.
-      truncated: timedOut || matches.length >= MAX_GREP_RESULTS,
-    });
+    return JSON.stringify({ results: matches, count: matches.length, truncated });
   } catch (err) {
     return JSON.stringify({ error: `grep_codebase failed: ${(err as Error).message}` });
   }
