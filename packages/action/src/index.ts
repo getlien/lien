@@ -74,7 +74,7 @@ function exitCodeFor(
  */
 export async function finishRun(
   result: ReviewCoreResult,
-  isFork: boolean,
+  forkReadOnly: boolean,
   failOn: FailOn,
 ): Promise<number> {
   const errorCount = countErrors(result.findings);
@@ -86,9 +86,10 @@ export async function finishRun(
     errorCount,
   });
 
-  // On a fork PR the built-in GITHUB_TOKEN is read-only, so inline comments can't
-  // post (annotations + the step summary still do). Note it once.
-  if (isFork) emitForkWarning();
+  // Read-only fork token (a `pull_request` from a fork): inline comments can't
+  // post (annotations + the step summary still do). Note it once. Skipped under
+  // pull_request_target, which grants forks a writable token.
+  if (forkReadOnly) emitForkWarning();
 
   const warningCount = result.findings.filter(f => f.severity === 'warning').length;
   actionLogger.info(
@@ -135,7 +136,10 @@ async function main(): Promise<void> {
   // The job is the only check, so surface findings inline as workflow annotations.
   emitFindingAnnotations(result.findings);
 
-  process.exitCode = await finishRun(result, context.isFork, inputs.failOn);
+  // A fork's GITHUB_TOKEN is read-only on `pull_request` (inline comments can't
+  // post), but pull_request_target grants a writable token — only warn in the former.
+  const forkReadOnly = context.isFork && process.env.GITHUB_EVENT_NAME !== 'pull_request_target';
+  process.exitCode = await finishRun(result, forkReadOnly, inputs.failOn);
 }
 
 /** True when this module is the process entrypoint (not imported by a test). */

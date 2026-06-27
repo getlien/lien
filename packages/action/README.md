@@ -125,8 +125,10 @@ error- or warning-level finding fails the check); `fail-on: never` never blocks.
 On a `pull_request` event triggered from a **fork**, GitHub forces the built-in
 `GITHUB_TOKEN` to **read-only** — so Lien can clone and review the code, and its
 findings still appear as **workflow annotations** and in the **step summary**,
-but it cannot post **inline PR comments** (those writes 403). When Lien detects a
-fork it emits a clear `::warning::` rather than failing your CI.
+but it cannot post **inline PR comments** (those writes 403). Lien emits a clear
+`::warning::` about this. The check still reflects the findings per `fail-on`
+(the review ran and its results are delivered via annotations) — set
+`fail-on: never` if you'd rather fork reviews never block CI.
 
 To get inline comments on fork PRs too, opt in via the
 `pull_request_target` event, which runs in the **base** repo's context and

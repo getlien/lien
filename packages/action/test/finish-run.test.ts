@@ -30,7 +30,7 @@ describe('finishRun', () => {
   it('warns once about the read-only token on a fork PR', async () => {
     const warning = vi.spyOn(actionLogger, 'warning').mockImplementation(() => {});
 
-    await finishRun(makeResult(), /* isFork */ true, 'error');
+    await finishRun(makeResult(), /* forkReadOnly */ true, 'error');
 
     expect(warning).toHaveBeenCalledTimes(1);
     expect(warning.mock.calls[0][0]).toContain('pull_request_target');
@@ -39,7 +39,7 @@ describe('finishRun', () => {
   it('does not warn on a same-repo PR', async () => {
     const warning = vi.spyOn(actionLogger, 'warning').mockImplementation(() => {});
 
-    await finishRun(makeResult(), /* isFork */ false, 'error');
+    await finishRun(makeResult(), /* forkReadOnly */ false, 'error');
 
     expect(warning).not.toHaveBeenCalled();
   });
@@ -68,7 +68,7 @@ describe('finishRun', () => {
       findings: [{ severity: 'error' } as ReviewCoreResult['findings'][number]],
     });
 
-    const exitCode = await finishRun(result, /* isFork */ true, 'never');
+    const exitCode = await finishRun(result, /* forkReadOnly */ true, 'never');
 
     expect(exitCode).toBe(0);
   });
@@ -77,7 +77,7 @@ describe('finishRun', () => {
     vi.spyOn(actionLogger, 'info').mockImplementation(() => {});
     const result = makeResult({ conclusion: 'failure', findings: [] });
 
-    const exitCode = await finishRun(result, /* isFork */ false, 'any');
+    const exitCode = await finishRun(result, /* forkReadOnly */ false, 'any');
 
     expect(exitCode).toBe(1);
   });
