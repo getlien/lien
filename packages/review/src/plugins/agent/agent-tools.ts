@@ -1,14 +1,17 @@
 /**
  * Agent tool implementations backed by in-memory CodeChunk[] arrays.
  *
- * No VectorDB or embeddings required — all tools work from the repoChunks
- * that the engine already produces via performChunkOnlyIndex().
+ * No VectorDB or embeddings required. Most tools work from the repoChunks
+ * that the engine already produces via performChunkOnlyIndex(); the
+ * exceptions are read_file and grep_codebase, which read the cloned repo
+ * from disk so they can see files the parser never chunks (config, YAML,
+ * CI workflows, etc.).
  */
 
 import fs from 'fs/promises';
 import path from 'path';
 
-import { analyzeComplexityFromChunks } from '@liendev/parser';
+import { analyzeComplexityFromChunks, createGitignoreFilter } from '@liendev/parser';
 
 import type { AgentToolContext } from './types.js';
 
@@ -234,28 +237,92 @@ export function getComplexity(input: Record<string, unknown>, ctx: AgentToolCont
 // ---------------------------------------------------------------------------
 
 const MAX_GREP_RESULTS = 30;
+/** Skip files larger than this — lockfiles, bundles, and binaries are noise. */
+const MAX_GREP_FILE_BYTES = 1_000_000;
+/**
+ * Directories never worth walking. Mirrors the heavy entries in
+ * ALWAYS_IGNORE_PATTERNS so we prune them up front instead of reading every
+ * entry and discarding it. `.github` is deliberately NOT skipped — CI
+ * workflows are exactly the kind of non-code reference we now want to find.
+ */
+const GREP_SKIP_DIRS = new Set(['node_modules', '.git', 'vendor', 'dist', 'build', '.lien']);
 
-export function grepCodebase(input: Record<string, unknown>, ctx: AgentToolContext): string {
+/**
+ * Recursively collect file paths under `dir`, pruning GREP_SKIP_DIRS and
+ * symlinked directories (cycle/escape guard). Dotfiles and dot-directories
+ * other than the skip set ARE included.
+ */
+async function collectGrepFiles(dir: string, acc: string[]): Promise<void> {
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return; // unreadable directory — skip rather than abort the whole grep
+  }
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (GREP_SKIP_DIRS.has(entry.name)) continue;
+      await collectGrepFiles(full, acc);
+    } else if (entry.isFile()) {
+      acc.push(full);
+    }
+  }
+}
+
+export async function grepCodebase(
+  input: Record<string, unknown>,
+  ctx: AgentToolContext,
+): Promise<string> {
   try {
     const pattern = input.pattern as string;
     if (!pattern) return JSON.stringify({ error: 'pattern is required' });
 
-    const regex = new RegExp(pattern, 'i');
+    let regex: RegExp;
+    try {
+      regex = new RegExp(pattern, 'i');
+    } catch (err) {
+      return JSON.stringify({ error: `Invalid regex pattern: ${(err as Error).message}` });
+    }
+
+    // Search the real working tree (not just parser-chunked source) so refs in
+    // config, YAML, CI workflows, etc. are visible. Respect .gitignore +
+    // built-in excludes via the shared parser filter.
+    const isIgnored = await createGitignoreFilter(ctx.repoRootDir);
+    const files: string[] = [];
+    await collectGrepFiles(ctx.repoRootDir, files);
+    files.sort(); // deterministic ordering across filesystems
+
     const matches: Array<{ filepath: string; line: number; match: string }> = [];
 
-    for (const chunk of ctx.repoChunks) {
-      const lines = chunk.content.split('\n');
+    for (const absFile of files) {
+      if (matches.length >= MAX_GREP_RESULTS) break;
+
+      const relPath = path.relative(ctx.repoRootDir, absFile);
+      if (isIgnored(relPath)) continue;
+
+      let content: string;
+      try {
+        const stat = await fs.stat(absFile);
+        if (stat.size > MAX_GREP_FILE_BYTES) continue;
+        content = await fs.readFile(absFile, 'utf-8');
+      } catch {
+        continue; // disappeared / permission / not readable — skip
+      }
+      if (content.includes('\0')) continue; // binary
+
+      const lines = content.split('\n');
       for (let i = 0; i < lines.length; i++) {
         if (regex.test(lines[i])) {
           matches.push({
-            filepath: chunk.metadata.file,
-            line: chunk.metadata.startLine + i,
+            filepath: relPath,
+            line: i + 1,
             match: lines[i].trim().slice(0, 200),
           });
           if (matches.length >= MAX_GREP_RESULTS) break;
         }
       }
-      if (matches.length >= MAX_GREP_RESULTS) break;
     }
 
     return JSON.stringify({
