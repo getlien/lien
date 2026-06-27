@@ -6,11 +6,18 @@
  * into every review's global risk score per the retro doc §2.3 / §3.
  *
  * Tier 1: rule fires, mandatory get_files_context call happens.
- * Tier 2: §4.3 test-pair vocabulary check — the suggestion mentions
- * tests for both sides of the divergence, not just the new boundary.
- * Production model (google/gemini-3-flash-preview, bumped in #539) hits
- * this 10/10; the previous gemini-2.5-flash hit 0/10. See
- * .wip/multi-model-eval.md.
+ * Tier 2: the finding must articulate the boundary-value reclassification —
+ * that dependentCount === 5 flips from 'low' to 'medium' and is untested.
+ *
+ * Recalibrated 2026-06-27 (model A/B eval): the prior "test pair / both sides"
+ * vocabulary only ever matched on the word "divergence". Tracing both
+ * google/gemini-3-flash-preview and moonshotai/kimi-k2.7-code showed neither
+ * actually recommends testing *both* sides — both emit the same correct
+ * single-sided rec (add a test for dependentCount: 5 -> 'medium'). gemini hit
+ * 10/10 only because it says "divergence" every run; kimi says it in ~40% of
+ * runs, so it failed the brittle check despite an equivalent finding. The
+ * check now asserts the real shared substance; the deeper "both sides" terms
+ * are kept as bonus matches for a future model that does reason that way.
  */
 
 import type { FixtureAssertions } from '../../assertions.js';
@@ -23,14 +30,19 @@ const assertions: FixtureAssertions = {
     h.expectToolCalled('get_files_context', result);
     h.expectFindingMentions(
       [
+        // Core: the finding must state the boundary-value reclassification
+        // (low -> medium at exactly 5). Each of these is present in 100% of
+        // gemini-3-flash and kimi-k2.7-code runs (calibrate-10 + traces).
+        'reclassif',
+        "'low' to 'medium'",
+        'dependentCount === 5',
+        // Bonus: deeper "test both sides of the boundary" framing. No current
+        // model reliably produces it; kept so a stronger one still matches.
         'test pair',
         'both sides',
         'divergence',
-        'both inputs',
-        'input 4',
-        'adjacent',
-        'pins',
         'either side',
+        'adjacent',
       ],
       result,
     );
