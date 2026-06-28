@@ -52,6 +52,30 @@ function joinTextBlocks(content: Anthropic.Messages.ContentBlock[]): string {
     .join('\n');
 }
 
+/**
+ * Extract Claude's extended-thinking prose from a response, if present.
+ * Populates TurnTrace.reasoning so logTurn can surface it on incomplete runs
+ * (parity with the OpenAI path's `reasoning` field).
+ */
+export function extractThinking(content: Anthropic.Messages.ContentBlock[]): string | undefined {
+  const thinking = content
+    .filter((b): b is Anthropic.Messages.ThinkingBlock => b.type === 'thinking')
+    .map(b => b.thinking)
+    .join('\n')
+    .trim();
+  return thinking || undefined;
+}
+
+/**
+ * Extended-thinking config. Enabled for parity with the OpenAI path's
+ * `reasoning: { effort: 'high' }` — it also improves review quality and is
+ * what makes Claude emit the thinking blocks logTurn surfaces. Compatible with
+ * tool_choice:'none' (the forced-verdict turn); only 'any'/'tool' are not.
+ * budget_tokens must be < max_tokens.
+ */
+const THINKING_BUDGET_TOKENS = 4096;
+const MAX_TOKENS = 16_000;
+
 /** Default Sonnet pricing: $3/MTok input, $15/MTok output. */
 const DEFAULT_INPUT_COST_PER_MTOK = 3;
 const DEFAULT_OUTPUT_COST_PER_MTOK = 15;
@@ -136,7 +160,8 @@ export class AnthropicAgentClient {
 
       const response = await this.client.messages.create({
         model: this.model,
-        max_tokens: 8192,
+        max_tokens: MAX_TOKENS,
+        thinking: { type: 'enabled', budget_tokens: THINKING_BUDGET_TOKENS },
         system: [
           {
             type: 'text',
@@ -147,6 +172,7 @@ export class AnthropicAgentClient {
         messages,
         tools,
         // tool_choice:'none' forbids tool calls, forcing a findings response.
+        // Compatible with extended thinking (unlike 'any'/'tool').
         ...(forceFinish ? { tool_choice: { type: 'none' as const } } : {}),
       });
 
@@ -177,6 +203,7 @@ export class AnthropicAgentClient {
       const turnTrace: TurnTrace = {
         turnNumber: turn,
         responseText: joinTextBlocks(response.content),
+        reasoning: extractThinking(response.content),
         toolCalls: [],
         finishReason: response.stop_reason ?? undefined,
         inputTokens: turnInputTokens,
@@ -237,7 +264,7 @@ export class AnthropicAgentClient {
 
     let parsed = lastResponse ? extractResponse(lastResponse.content) : { findings: [] };
     if (!parsed.summary && lastResponse) {
-      const retry = await this.runSummaryRetry(messages, lastResponse, turn);
+      const retry = await this.runSummaryRetry(messages, lastResponse, turn, tools);
       if (retry) {
         totalInputTokens += retry.inputTokens;
         totalOutputTokens += retry.outputTokens;
@@ -349,6 +376,7 @@ export class AnthropicAgentClient {
     messages: Anthropic.Messages.MessageParam[],
     lastResponse: Anthropic.Messages.Message,
     turn: number,
+    tools: Anthropic.Messages.Tool[],
   ): Promise<{
     parsed: { findings: AgentFinding[]; summary?: AgentSummary };
     traceTurn: TurnTrace;
@@ -361,15 +389,21 @@ export class AnthropicAgentClient {
     try {
       const response = await this.client.messages.create({
         model: this.model,
-        max_tokens: 4096,
+        max_tokens: MAX_TOKENS,
+        thinking: { type: 'enabled', budget_tokens: THINKING_BUDGET_TOKENS },
         system: [{ type: 'text', text: RETRY_SYSTEM_PROMPT }],
         messages,
+        tools,
+        // Same forcing as the loop's wrap-up turn: tools present but forbidden,
+        // so the model must emit a findings verdict instead of tool-calling.
+        tool_choice: { type: 'none' as const },
       });
       const inputTokens = response.usage.input_tokens;
       const outputTokens = response.usage.output_tokens;
       const traceTurn: TurnTrace = {
         turnNumber: turn + 1,
         responseText: joinTextBlocks(response.content),
+        reasoning: extractThinking(response.content),
         toolCalls: [],
         finishReason: response.stop_reason ?? undefined,
         inputTokens,
