@@ -9,7 +9,11 @@ vi.mock('@anthropic-ai/sdk', () => ({
   },
 }));
 
-import { AnthropicAgentClient, extractThinking } from '../src/plugins/agent/anthropic-client.js';
+import {
+  AnthropicAgentClient,
+  extractThinking,
+  requestMaxTokens,
+} from '../src/plugins/agent/anthropic-client.js';
 
 function capturingLogger(): { logger: Logger; lines: string[] } {
   const lines: string[] = [];
@@ -55,6 +59,20 @@ describe('extractThinking', () => {
   });
 });
 
+describe('requestMaxTokens (budget clamp)', () => {
+  it('caps to the remaining budget', () => {
+    expect(requestMaxTokens(8000)).toBe(8000);
+  });
+  it('never exceeds the 16k ceiling', () => {
+    expect(requestMaxTokens(50_000)).toBe(16_000);
+  });
+  it('floors above the thinking budget even after a bail (remaining <= 0)', () => {
+    expect(requestMaxTokens(0)).toBe(6144);
+    expect(requestMaxTokens(-5000)).toBe(6144);
+    expect(requestMaxTokens(6144)).toBeGreaterThan(4096); // budget_tokens stays valid
+  });
+});
+
 describe('AnthropicAgentClient extended thinking + retry forcing', () => {
   it('enables thinking on every request', async () => {
     createMock.mockResolvedValueOnce(
@@ -93,6 +111,45 @@ describe('AnthropicAgentClient extended thinking + retry forcing', () => {
 
     expect(result.incomplete).toBe(true);
     expect(lines.some(l => l.includes('tracing the lock path'))).toBe(true);
+  }, 15000);
+
+  it('injects the wrap-up nudge as a valid text block and completes on the forced turn', async () => {
+    const verdict =
+      '```json\n{"findings":[],"summary":{"riskLevel":"low","overview":"ok","keyChanges":[]}}\n```';
+    // Turn 1 crosses the 0.6 wrap-up threshold (70k/100k) but not the hard cap;
+    // turn 2 is the forced wrap-up turn.
+    createMock
+      .mockResolvedValueOnce(
+        msg([thinkingBlock('investigating'), toolUseBlock], 70_000, 0, 'tool_use'),
+      )
+      .mockResolvedValueOnce(msg([textBlock(verdict)], 100, 50, 'end_turn'));
+    const { logger } = capturingLogger();
+
+    const result = await makeClient(100_000, logger).run(
+      'sys',
+      'init',
+      TOOLS as never,
+      async () => 'ok',
+    );
+
+    expect(result.stopReason).toBe('completed');
+    expect(result.incomplete).toBe(false);
+    // Forced turn forbids tools.
+    expect(createMock.mock.calls[1][0].tool_choice).toEqual({ type: 'none' });
+    // The wrap-up user turn mixes tool_result + a text nudge (no unsafe cast,
+    // a valid Anthropic content array — this path was previously untested).
+    const forced = createMock.mock.calls[1][0].messages as Array<{
+      role: string;
+      content: unknown;
+    }>;
+    const mixed = forced.find(
+      m =>
+        m.role === 'user' &&
+        Array.isArray(m.content) &&
+        m.content.some((b: { type: string }) => b.type === 'tool_result') &&
+        m.content.some((b: { type: string }) => b.type === 'text'),
+    );
+    expect(mixed).toBeDefined();
   }, 15000);
 
   it('forces the retry with tool_choice:none + thinking (parity with the loop)', async () => {

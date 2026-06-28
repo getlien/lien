@@ -76,6 +76,18 @@ export function extractThinking(content: Anthropic.Messages.ContentBlock[]): str
 const THINKING_BUDGET_TOKENS = 4096;
 const MAX_TOKENS = 16_000;
 
+/**
+ * Bound a single request's output to the budget remaining, so one turn can't
+ * blow far past maxTokenBudget before the post-response check (and the retry
+ * can't pile on after the loop already stopped for budget). Floored above the
+ * thinking budget so thinking stays valid (budget_tokens < max_tokens) and a
+ * final verdict still fits.
+ */
+const MIN_REQUEST_MAX_TOKENS = THINKING_BUDGET_TOKENS + 2_048;
+export function requestMaxTokens(remainingBudget: number): number {
+  return Math.min(MAX_TOKENS, Math.max(remainingBudget, MIN_REQUEST_MAX_TOKENS));
+}
+
 /** Default Sonnet pricing: $3/MTok input, $15/MTok output. */
 const DEFAULT_INPUT_COST_PER_MTOK = 3;
 const DEFAULT_OUTPUT_COST_PER_MTOK = 15;
@@ -158,9 +170,10 @@ export class AnthropicAgentClient {
     while (turn < this.maxTurns) {
       turn++;
 
+      const used = totalInputTokens + totalOutputTokens;
       const response = await this.client.messages.create({
         model: this.model,
-        max_tokens: MAX_TOKENS,
+        max_tokens: requestMaxTokens(this.maxTokenBudget - used),
         thinking: { type: 'enabled', budget_tokens: THINKING_BUDGET_TOKENS },
         system: [
           {
@@ -264,7 +277,14 @@ export class AnthropicAgentClient {
 
     let parsed = lastResponse ? extractResponse(lastResponse.content) : { findings: [] };
     if (!parsed.summary && lastResponse) {
-      const retry = await this.runSummaryRetry(messages, lastResponse, turn, tools);
+      const remainingBudget = this.maxTokenBudget - (totalInputTokens + totalOutputTokens);
+      const retry = await this.runSummaryRetry(
+        messages,
+        lastResponse,
+        turn,
+        tools,
+        remainingBudget,
+      );
       if (retry) {
         totalInputTokens += retry.inputTokens;
         totalOutputTokens += retry.outputTokens;
@@ -353,16 +373,17 @@ export class AnthropicAgentClient {
       toolUseBlocks.map(async block => executeOneToolUse(block, toolExecutor)),
     );
     turnTrace.toolCalls = executed.map(e => e.invocation);
-    const toolResults: Anthropic.Messages.ToolResultBlockParam[] = executed.map(e => e.toolResult);
+    // Content is a mix of tool_result blocks plus (optionally) the wrap-up text
+    // nudge. A user turn may carry both, so type it as ContentBlockParam[] —
+    // the previous `as unknown as ToolResultBlockParam` cast lied about the
+    // element type for the text block.
+    const content: Anthropic.Messages.ContentBlockParam[] = executed.map(e => e.toolResult);
 
     if (shouldWrapUp) {
-      toolResults.push({
-        type: 'text',
-        text: WRAP_UP_NUDGE,
-      } as unknown as Anthropic.Messages.ToolResultBlockParam);
+      content.push({ type: 'text', text: WRAP_UP_NUDGE });
     }
 
-    messages.push({ role: 'user', content: toolResults });
+    messages.push({ role: 'user', content });
   }
 
   /**
@@ -377,6 +398,7 @@ export class AnthropicAgentClient {
     lastResponse: Anthropic.Messages.Message,
     turn: number,
     tools: Anthropic.Messages.Tool[],
+    remainingBudget: number,
   ): Promise<{
     parsed: { findings: AgentFinding[]; summary?: AgentSummary };
     traceTurn: TurnTrace;
@@ -389,7 +411,7 @@ export class AnthropicAgentClient {
     try {
       const response = await this.client.messages.create({
         model: this.model,
-        max_tokens: MAX_TOKENS,
+        max_tokens: requestMaxTokens(remainingBudget),
         thinking: { type: 'enabled', budget_tokens: THINKING_BUDGET_TOKENS },
         system: [{ type: 'text', text: RETRY_SYSTEM_PROMPT }],
         messages,
