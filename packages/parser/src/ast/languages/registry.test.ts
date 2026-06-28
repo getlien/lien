@@ -104,9 +104,9 @@ describe('Language Registry', () => {
   });
 
   describe('getAllLanguages', () => {
-    it('should return all 9 registered languages', () => {
+    it('should return all 10 registered languages', () => {
       const all = getAllLanguages();
-      expect(all).toHaveLength(9);
+      expect(all).toHaveLength(10);
       const ids = all.map(d => d.id);
       expect(ids).toContain('typescript');
       expect(ids).toContain('javascript');
@@ -117,6 +117,7 @@ describe('Language Registry', () => {
       expect(ids).toContain('java');
       expect(ids).toContain('csharp');
       expect(ids).toContain('ruby');
+      expect(ids).toContain('kotlin');
     });
 
     it('should return a defensive copy', () => {

@@ -9,6 +9,7 @@ import { goDefinition } from './go.js';
 import { javaDefinition } from './java.js';
 import { csharpDefinition } from './csharp.js';
 import { rubyDefinition } from './ruby.js';
+import { kotlinDefinition } from './kotlin.js';
 
 /**
  * All registered language definitions.
@@ -24,6 +25,7 @@ const definitions: LanguageDefinition[] = [
   javaDefinition,
   csharpDefinition,
   rubyDefinition,
+  kotlinDefinition,
 ];
 
 /**
@@ -41,6 +43,7 @@ export const LANGUAGE_IDS = [
   'java',
   'csharp',
   'ruby',
+  'kotlin',
 ] as const;
 export type SupportedLanguage = (typeof LANGUAGE_IDS)[number];
 

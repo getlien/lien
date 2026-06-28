@@ -54,6 +54,16 @@ const LANGUAGE_EXTRACTORS: Record<string, LanguageExtractors> = {
   },
   ruby: { functions: extractRubyFunctions, classes: extractRubyClasses },
   rb: { functions: extractRubyFunctions, classes: extractRubyClasses },
+  kotlin: {
+    functions: extractKotlinFunctions,
+    classes: extractKotlinClasses,
+    interfaces: extractKotlinInterfaces,
+  },
+  kt: {
+    functions: extractKotlinFunctions,
+    classes: extractKotlinClasses,
+    interfaces: extractKotlinInterfaces,
+  },
   rust: { functions: extractRustFunctions },
   rs: { functions: extractRustFunctions },
 };
@@ -361,6 +371,51 @@ function extractRubyClasses(content: string): string[] {
   // Module definitions: module Name
   const moduleMatches = content.matchAll(/module\s+(\w+)/g);
   for (const match of moduleMatches) {
+    names.add(match[1]);
+  }
+
+  return Array.from(names);
+}
+
+// Kotlin Functions
+function extractKotlinFunctions(content: string): string[] {
+  const names = new Set<string>();
+
+  // Function definitions, capturing the name immediately before the parameter
+  // list. The lazy `[^(\n]*?` skips optional generic params (incl. bounds like
+  // `<T : Comparable<T>>`) and extension receivers (`fun String.slugify()`).
+  const functionMatches = content.matchAll(/\bfun\s+[^(\n]*?(\w+)\s*\(/g);
+  for (const match of functionMatches) {
+    names.add(match[1]);
+  }
+
+  return Array.from(names);
+}
+
+function extractKotlinClasses(content: string): string[] {
+  const names = new Set<string>();
+
+  // Class definitions: class Name, data/sealed/enum/abstract/open class Name
+  const classMatches = content.matchAll(/\b(?:data|sealed|enum|abstract|open)?\s*class\s+(\w+)/g);
+  for (const match of classMatches) {
+    names.add(match[1]);
+  }
+
+  // Object declarations (singletons): object Name
+  const objectMatches = content.matchAll(/\bobject\s+(\w+)/g);
+  for (const match of objectMatches) {
+    names.add(match[1]);
+  }
+
+  return Array.from(names);
+}
+
+function extractKotlinInterfaces(content: string): string[] {
+  const names = new Set<string>();
+
+  // Interface definitions: interface Name
+  const interfaceMatches = content.matchAll(/\binterface\s+(\w+)/g);
+  for (const match of interfaceMatches) {
     names.add(match[1]);
   }
 

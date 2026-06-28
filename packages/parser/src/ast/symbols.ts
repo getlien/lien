@@ -31,6 +31,33 @@ export function extractSymbolInfo(
 }
 
 /**
+ * Collect the import nodes to process from the root.
+ *
+ * Most grammars place import statements as direct children of the root node, but
+ * some wrap them in a container — e.g. Kotlin's `import_list` holds the
+ * `import_header` children. We therefore also descend one level into a
+ * non-matching direct child to find imports nested inside such a container. This
+ * is backward compatible: languages whose import nodes are already direct
+ * children match in the first branch and are never descended into.
+ */
+function collectImportNodes(
+  rootNode: Parser.SyntaxNode,
+  nodeTypeSet: Set<string>,
+): Parser.SyntaxNode[] {
+  const nodes: Parser.SyntaxNode[] = [];
+  for (const child of rootNode.namedChildren) {
+    if (nodeTypeSet.has(child.type)) {
+      nodes.push(child);
+    } else {
+      for (const grandchild of child.namedChildren) {
+        if (nodeTypeSet.has(grandchild.type)) nodes.push(grandchild);
+      }
+    }
+  }
+  return nodes;
+}
+
+/**
  * Extract import paths using the language-specific extractor.
  *
  * When `filepath` is provided, relative specifiers (`./foo`, `../bar`) are
@@ -48,10 +75,8 @@ function extractImportPaths(
   const imports: string[] = [];
   const nodeTypeSet = new Set(importExtractor.importNodeTypes);
 
-  for (const child of rootNode.namedChildren) {
-    if (!nodeTypeSet.has(child.type)) continue;
-
-    const result = importExtractor.extractImportPath(child);
+  for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
+    const result = importExtractor.extractImportPath(node);
     if (result) imports.push(filepath ? resolveRelativeImport(filepath, result) : result);
   }
 
@@ -109,9 +134,7 @@ function extractSymbolsWithExtractor(
   const importedSymbols: Record<string, string[]> = {};
   const nodeTypeSet = new Set(importExtractor.importNodeTypes);
 
-  for (const node of rootNode.namedChildren) {
-    if (!nodeTypeSet.has(node.type)) continue;
-
+  for (const node of collectImportNodes(rootNode, nodeTypeSet)) {
     const result = importExtractor.processImportSymbols(node);
     if (result) {
       const key = filepath ? resolveRelativeImport(filepath, result.importPath) : result.importPath;
