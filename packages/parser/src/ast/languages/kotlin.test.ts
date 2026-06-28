@@ -63,6 +63,12 @@ describe('Kotlin Language', () => {
       expect(traverser.isDeclarationWithFunction(prop)).toBe(true);
       expect(traverser.findFunctionInDeclaration(prop).hasFunction).toBe(true);
     });
+
+    it('does not treat a property with a call-argument lambda as function-valued', () => {
+      const root = parse('val count = xs.count { it > 0 }\n');
+      const prop = findNode(root, 'property_declaration')!;
+      expect(traverser.isDeclarationWithFunction(prop)).toBe(false);
+    });
   });
 
   // ===========================================================================
@@ -101,6 +107,13 @@ describe('Kotlin Language', () => {
       expect(exports).toContain('Repo');
       expect(exports).toContain('find');
     });
+
+    it('does not export members of a private container', () => {
+      const root = parse('private class Secret {\n  fun internalApi() {}\n}\n');
+      const exports = exportExtractor.extractExports(root);
+      expect(exports).not.toContain('Secret');
+      expect(exports).not.toContain('internalApi');
+    });
   });
 
   // ===========================================================================
@@ -134,6 +147,11 @@ describe('Kotlin Language', () => {
       expect(importExtractor.extractImportPath(stdlib)).toBeNull();
       const [javaStd] = importHeaders('import java.util.ArrayList\n');
       expect(importExtractor.extractImportPath(javaStd)).toBeNull();
+    });
+
+    it('keeps kotlinx.* imports (external libraries, not stdlib)', () => {
+      const [kx] = importHeaders('import kotlinx.coroutines.flow.Flow\n');
+      expect(importExtractor.extractImportPath(kx)).toBe('kotlinx.coroutines.flow.Flow');
     });
 
     it('maps a non-wildcard import to its last segment as the symbol', () => {

@@ -28,14 +28,19 @@ function hasTokenChild(node: Parser.SyntaxNode, type: string): boolean {
   return node.children.some(child => child.type === type);
 }
 
-/** First descendant of a given type (depth-first). */
-function findDescendant(node: Parser.SyntaxNode, type: string): Parser.SyntaxNode | null {
-  for (const child of node.namedChildren) {
-    if (child.type === type) return child;
-    const found = findDescendant(child, type);
-    if (found) return found;
-  }
-  return null;
+/**
+ * The function-valued initializer of a property, if the property's initializer
+ * is *directly* a lambda or anonymous function (`val f = { … }`). Checks the
+ * initializer (the last named child) rather than any descendant, so a lambda
+ * passed as a call argument (`val n = xs.count { it > 0 }`) is NOT treated as a
+ * function-valued property.
+ */
+function propertyInitializerFunction(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  const initializer = node.namedChildren.at(-1);
+  if (!initializer) return null;
+  return initializer.type === 'lambda_literal' || initializer.type === 'anonymous_function'
+    ? initializer
+    : null;
 }
 
 /** The `function_body` child of a function_declaration ({ … } block OR `= expr`). */
@@ -152,11 +157,7 @@ export class KotlinTraverser implements LanguageTraverser {
   }
 
   isDeclarationWithFunction(node: Parser.SyntaxNode): boolean {
-    if (node.type !== 'property_declaration') return false;
-    return (
-      findDescendant(node, 'lambda_literal') !== null ||
-      findDescendant(node, 'anonymous_function') !== null
-    );
+    return node.type === 'property_declaration' && propertyInitializerFunction(node) !== null;
   }
 
   getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
@@ -188,7 +189,7 @@ export class KotlinTraverser implements LanguageTraverser {
     if (node.type !== 'property_declaration') {
       return { hasFunction: false, functionNode: null };
     }
-    const fn = findDescendant(node, 'lambda_literal') ?? findDescendant(node, 'anonymous_function');
+    const fn = propertyInitializerFunction(node);
     return fn
       ? { hasFunction: true, functionNode: fn }
       : { hasFunction: false, functionNode: null };
@@ -233,8 +234,11 @@ export class KotlinExportExtractor implements LanguageExportExtractor {
         break;
       case 'class_declaration':
       case 'object_declaration':
-        if (isExported(node)) addExport(declarationName(node));
-        this.extractMembers(node, addExport);
+        // A private/internal container exposes nothing — skip it and its members.
+        if (isExported(node)) {
+          addExport(declarationName(node));
+          this.extractMembers(node, addExport);
+        }
         break;
     }
   }
@@ -274,11 +278,14 @@ export class KotlinExportExtractor implements LanguageExportExtractor {
 // IMPORT EXTRACTOR
 // =============================================================================
 
-/** Kotlin/JVM standard-library prefixes that aren't useful as dependency edges. */
+/**
+ * Kotlin/JVM standard-library prefixes that aren't useful as dependency edges.
+ * Note: `kotlinx.*` (coroutines, serialization, …) are separate external
+ * libraries, not the stdlib, so they are kept as real import edges.
+ */
 function isKotlinStdLib(importPath: string): boolean {
   return (
     importPath.startsWith('kotlin.') ||
-    importPath.startsWith('kotlinx.') ||
     importPath.startsWith('java.') ||
     importPath.startsWith('javax.')
   );

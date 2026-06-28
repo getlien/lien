@@ -381,8 +381,10 @@ function extractRubyClasses(content: string): string[] {
 function extractKotlinFunctions(content: string): string[] {
   const names = new Set<string>();
 
-  // Function definitions: fun name(...), suspend fun name(...), fun <T> name(...)
-  const functionMatches = content.matchAll(/\bfun\s+(?:<[^>]+>\s*)?(\w+)\s*\(/g);
+  // Function definitions, capturing the name immediately before the parameter
+  // list. The lazy `[^(\n]*?` skips optional generic params (incl. bounds like
+  // `<T : Comparable<T>>`) and extension receivers (`fun String.slugify()`).
+  const functionMatches = content.matchAll(/\bfun\s+[^(\n]*?(\w+)\s*\(/g);
   for (const match of functionMatches) {
     names.add(match[1]);
   }
