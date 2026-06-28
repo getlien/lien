@@ -78,6 +78,9 @@ jobs:
           - project: MediatR
             language: CSharp
             script: test:e2e:csharp
+          - project: Sinatra
+            language: Ruby
+            script: test:e2e:ruby
 
     steps:
       - name: Checkout code
