@@ -47,6 +47,7 @@
     "test:e2e:java": "vitest run test/e2e/real-projects.test.ts -t 'JavaPoet'",
     "test:e2e:csharp": "vitest run test/e2e/real-projects.test.ts -t 'MediatR'",
     "test:e2e:ruby": "vitest run test/e2e/real-projects.test.ts -t 'Sinatra'",
+    "test:e2e:kotlin": "vitest run test/e2e/real-projects.test.ts -t 'Klaxon'",
     "docs": "typedoc"
   },
   "keywords": [

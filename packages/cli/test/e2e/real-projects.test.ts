@@ -140,6 +140,15 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 300, // AST chunking yields ~1300 (def/class/module per chunk)
     sampleSearchQuery: 'route handler matching http request',
   },
+  {
+    name: 'Klaxon',
+    repo: 'https://github.com/cbeust/klaxon.git',
+    branch: 'master',
+    language: 'kotlin',
+    expectedMinFiles: 40, // ~101 indexed (src/main + tests)
+    expectedMinChunks: 250, // AST chunking yields ~960 (fun/class/object per chunk)
+    sampleSearchQuery: 'parse json string into an object',
+  },
 ];
 
 /**

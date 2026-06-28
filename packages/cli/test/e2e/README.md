@@ -23,6 +23,7 @@ These tests:
 | Java       | JavaPoet | https://github.com/square/javapoet        | Source-gen library, standard Java patterns |
 | C#         | MediatR  | https://github.com/jbogard/MediatR        | Mediator library, clean C# patterns        |
 | Ruby       | Sinatra  | https://github.com/sinatra/sinatra        | Web framework, classes/modules + require   |
+| Kotlin     | Klaxon   | https://github.com/cbeust/klaxon          | JSON library, classes/objects + imports    |
 
 ## Running Tests
 
