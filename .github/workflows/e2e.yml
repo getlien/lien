@@ -81,6 +81,9 @@ jobs:
           - project: Sinatra
             language: Ruby
             script: test:e2e:ruby
+          - project: Klaxon
+            language: Kotlin
+            script: test:e2e:kotlin
 
     steps:
       - name: Checkout code
