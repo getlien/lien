@@ -439,6 +439,13 @@ function extractSwiftFunctions(content: string): string[] {
     names.add(match[1]);
   }
 
+  // init / deinit / subscript are function-like members (matches the AST symbol
+  // extractor). The negative lookbehind avoids `.init(...)` call sites.
+  const memberMatches = content.matchAll(/(?<![.\w])(init|deinit|subscript)\b/g);
+  for (const match of memberMatches) {
+    names.add(match[1]);
+  }
+
   return Array.from(names);
 }
 

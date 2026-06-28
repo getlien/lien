@@ -225,6 +225,15 @@ describe('Swift Language', () => {
       });
     });
 
+    it('extracts protocol method requirements as methods', () => {
+      const src = 'protocol Repo {\n  func find() -> String\n}\n';
+      const pfd = findNode(parse(src), 'protocol_function_declaration')!;
+      const sym = symbolExtractor.extractSymbol(pfd, src, 'Repo')!;
+      expect(sym.name).toBe('find');
+      expect(sym.type).toBe('method');
+      expect(sym.parentClass).toBe('Repo');
+    });
+
     it('extracts call sites for direct and navigation calls', () => {
       const src = 'func run() {\n  foo()\n  obj.bar.baz()\n}\n';
       const calls = findAllNodes(parse(src), 'call_expression');
@@ -288,6 +297,8 @@ func topLevelHelper(_ x: Int) -> Int { return x + 1 }
       expect(bySymbol('place', 'method')?.metadata.parentClass).toBe('OrderService');
       expect(bySymbol('summary', 'method')).toBeDefined();
       expect(bySymbol('topLevelHelper', 'function')).toBeDefined();
+      // protocol method requirement is chunked as a method of the protocol
+      expect(bySymbol('save', 'method')?.metadata.parentClass).toBe('Repository');
     });
 
     it('captures real framework imports and filters the Swift stdlib module', () => {

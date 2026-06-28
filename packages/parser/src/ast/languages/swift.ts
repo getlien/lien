@@ -126,6 +126,7 @@ function propertyName(node: Parser.SyntaxNode): string | undefined {
 export class SwiftTraverser implements LanguageTraverser {
   targetNodeTypes = [
     'function_declaration',
+    'protocol_function_declaration', // abstract method requirements inside a protocol
     'init_declaration',
     'deinit_declaration',
     'subscript_declaration',
@@ -325,6 +326,7 @@ export class SwiftImportExtractor implements LanguageImportExtractor {
 export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
   readonly symbolNodeTypes = [
     'function_declaration',
+    'protocol_function_declaration',
     'init_declaration',
     'deinit_declaration',
     'subscript_declaration',
@@ -335,6 +337,7 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
   extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
     switch (node.type) {
       case 'function_declaration':
+      case 'protocol_function_declaration':
       case 'init_declaration':
       case 'deinit_declaration':
       case 'subscript_declaration':
