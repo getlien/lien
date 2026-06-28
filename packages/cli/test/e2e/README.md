@@ -20,6 +20,9 @@ These tests:
 | PHP        | Monolog  | https://github.com/Seldaek/monolog        | Standard PHP logging, clear patterns       |
 | Rust       | Anyhow   | https://github.com/dtolnay/anyhow         | Error handling library, clean Rust patterns|
 | Go         | Chi      | https://github.com/go-chi/chi             | Lightweight HTTP router, clean Go patterns |
+| Java       | JavaPoet | https://github.com/square/javapoet        | Source-gen library, standard Java patterns |
+| C#         | MediatR  | https://github.com/jbogard/MediatR        | Mediator library, clean C# patterns        |
+| Ruby       | Sinatra  | https://github.com/sinatra/sinatra        | Web framework, classes/modules + require   |
 
 ## Running Tests
 

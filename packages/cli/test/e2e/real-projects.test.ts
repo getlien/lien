@@ -131,6 +131,15 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 30,
     sampleSearchQuery: 'mediator request handler',
   },
+  {
+    name: 'Sinatra',
+    repo: 'https://github.com/sinatra/sinatra.git',
+    branch: 'main',
+    language: 'ruby',
+    expectedMinFiles: 50, // sinatra + rack-protection + sinatra-contrib lib/ (~155 indexed)
+    expectedMinChunks: 300, // AST chunking yields ~1300 (def/class/module per chunk)
+    sampleSearchQuery: 'route handler matching http request',
+  },
 ];
 
 /**
