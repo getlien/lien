@@ -314,6 +314,10 @@ export function getCanonicalPath(filepath: string, workspaceRoot: string): strin
  * - latest/config.ts (contains "/test/" but isn't a test)
  * - mytest.ts (no `_` boundary before "test")
  *
+ * Swift uses different conventions (XCTest `FooTests.swift` files and a
+ * Swift Package Manager `Tests/` directory). Those checks are scoped to
+ * `.swift` paths so behavior for other languages is unchanged.
+ *
  * @param filepath - The file path to check
  * @returns True if the file is a test file
  */
@@ -321,6 +325,8 @@ export function isTestFile(filepath: string): boolean {
   return (
     /\.(test|spec)\.[^/]+$/.test(filepath) ||
     /_(test|spec)\.[^/]+$/.test(filepath) ||
-    /(^|[/\\])(test|tests|spec|specs|__tests__)[/\\]/.test(filepath)
+    /(^|[/\\])(test|tests|spec|specs|__tests__)[/\\]/.test(filepath) ||
+    (/\.swift$/.test(filepath) &&
+      (/Tests?\.swift$/.test(filepath) || /(^|[/\\])Tests?[/\\]/.test(filepath)))
   );
 }

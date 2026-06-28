@@ -46,6 +46,11 @@ function isTestFile(filepath: string): boolean {
     return true;
   }
 
+  // Swift: XCTest `FooTests.swift` files and Swift Package Manager `Tests/` dirs
+  if (lower.endsWith('.swift') && (/tests?\.swift$/.test(lower) || /(^|\/)tests?\//.test(lower))) {
+    return true;
+  }
+
   return false;
 }
 

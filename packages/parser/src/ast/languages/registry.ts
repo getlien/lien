@@ -10,6 +10,7 @@ import { javaDefinition } from './java.js';
 import { csharpDefinition } from './csharp.js';
 import { rubyDefinition } from './ruby.js';
 import { kotlinDefinition } from './kotlin.js';
+import { swiftDefinition } from './swift.js';
 
 /**
  * All registered language definitions.
@@ -26,6 +27,7 @@ const definitions: LanguageDefinition[] = [
   csharpDefinition,
   rubyDefinition,
   kotlinDefinition,
+  swiftDefinition,
 ];
 
 /**
@@ -44,6 +46,7 @@ export const LANGUAGE_IDS = [
   'csharp',
   'ruby',
   'kotlin',
+  'swift',
 ] as const;
 export type SupportedLanguage = (typeof LANGUAGE_IDS)[number];
 

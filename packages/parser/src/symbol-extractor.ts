@@ -64,6 +64,11 @@ const LANGUAGE_EXTRACTORS: Record<string, LanguageExtractors> = {
     classes: extractKotlinClasses,
     interfaces: extractKotlinInterfaces,
   },
+  swift: {
+    functions: extractSwiftFunctions,
+    classes: extractSwiftClasses,
+    interfaces: extractSwiftInterfaces,
+  },
   rust: { functions: extractRustFunctions },
   rs: { functions: extractRustFunctions },
 };
@@ -416,6 +421,48 @@ function extractKotlinInterfaces(content: string): string[] {
   // Interface definitions: interface Name
   const interfaceMatches = content.matchAll(/\binterface\s+(\w+)/g);
   for (const match of interfaceMatches) {
+    names.add(match[1]);
+  }
+
+  return Array.from(names);
+}
+
+// Swift Functions
+function extractSwiftFunctions(content: string): string[] {
+  const names = new Set<string>();
+
+  // Function definitions: func name(...), public func name(...), func name<T>(...).
+  // Swift places generic parameters AFTER the name, so allow an optional `<…>`
+  // between the name and the parameter list.
+  const functionMatches = content.matchAll(/\bfunc\s+(\w+)\s*(?:<[^>]*>)?\s*\(/g);
+  for (const match of functionMatches) {
+    names.add(match[1]);
+  }
+
+  return Array.from(names);
+}
+
+function extractSwiftClasses(content: string): string[] {
+  const names = new Set<string>();
+
+  // Type definitions: class/struct/actor/enum/extension Name. The negative
+  // lookahead avoids capturing `func` from `class func` (a static method).
+  const typeMatches = content.matchAll(
+    /\b(?:class|struct|actor|enum|extension)\s+(?!func\b)(\w+)/g,
+  );
+  for (const match of typeMatches) {
+    names.add(match[1]);
+  }
+
+  return Array.from(names);
+}
+
+function extractSwiftInterfaces(content: string): string[] {
+  const names = new Set<string>();
+
+  // Protocol definitions: protocol Name
+  const protocolMatches = content.matchAll(/\bprotocol\s+(\w+)/g);
+  for (const match of protocolMatches) {
     names.add(match[1]);
   }
 
