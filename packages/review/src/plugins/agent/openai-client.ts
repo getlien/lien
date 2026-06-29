@@ -328,13 +328,16 @@ export class OpenAIAgentClient {
     const cost =
       totalInputTokens * this.inputCostPerToken + totalOutputTokens * this.outputCostPerToken;
 
-    // Incomplete = the loop bailed on a limit (or error) AND never produced a
-    // verdict (no summary, even after the retry). Such a run must not be shown
-    // as a clean review.
-    const incomplete = stopReason !== 'completed' && !parsed.summary;
+    // Incomplete = the agent never produced a structured verdict (no summary,
+    // even after the retry). A genuine clean review always carries a summary, so
+    // the ABSENCE of one — not the stop reason — is what marks a run incomplete.
+    // Critically this also catches a `finish_reason: 'stop'` turn that emitted
+    // prose instead of the findings JSON (the model "completed" but delivered no
+    // verdict): that must NOT be reported as a clean 0-findings review.
+    const incomplete = !parsed.summary;
     if (incomplete) {
       this.logger.warning(
-        `[agent] Review incomplete (stopReason=${stopReason}, no summary after ${turn} turns)`,
+        `[agent] Review incomplete (stopReason=${stopReason}, no verdict/summary after ${turn} turns)`,
       );
       // Always surface what the agent was doing when it bailed — the single
       // most useful datum for diagnosing an incomplete run in CI logs.
@@ -540,19 +543,37 @@ function extractResponse(content: string | null): {
 } {
   if (!content) return { findings: [] };
 
-  // Prefer a ```json fence (normal turns); fall back to the raw body, which is
-  // what response_format:json_object returns on a forced-verdict turn.
-  const jsonMatch = content.match(/```json\s*\n([\s\S]*?)\n\s*```/);
-  const raw = jsonMatch ? jsonMatch[1] : content.trim();
+  // Try, in order: a ```json fence (normal turns); the raw body
+  // (response_format:json_object on a forced-verdict turn); and finally a JSON
+  // object embedded in surrounding prose. The last guards against a model that
+  // ignored json_object and prefixed reasoning — without it that turn parses to
+  // an empty result and the run is silently treated as a clean 0-findings review.
+  const fenced = content.match(/```json\s*\n([\s\S]*?)\n\s*```/)?.[1];
+  const candidates = [fenced, content.trim(), embeddedJsonObject(content)];
 
-  try {
-    const parsed = JSON.parse(raw);
-    const findings: unknown[] = Array.isArray(parsed) ? parsed : (parsed.findings ?? []);
-    const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
-    return { findings: findings.filter(isValidFinding), summary };
-  } catch {
-    return { findings: [] };
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const parsed = JSON.parse(candidate);
+      const findings: unknown[] = Array.isArray(parsed) ? parsed : (parsed.findings ?? []);
+      const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
+      // Accept only a candidate that yields a real verdict or findings, so an
+      // empty `{}` earlier in the prose doesn't mask the actual JSON later.
+      if (summary || findings.length > 0) {
+        return { findings: findings.filter(isValidFinding), summary };
+      }
+    } catch {
+      // not parseable — try the next candidate
+    }
   }
+  return { findings: [] };
+}
+
+/** First `{`…last `}` slice — recovers a JSON object wrapped in prose. */
+function embeddedJsonObject(content: string): string | undefined {
+  const start = content.indexOf('{');
+  const end = content.lastIndexOf('}');
+  return start !== -1 && end > start ? content.slice(start, end + 1) : undefined;
 }
 
 function isValidSummary(value: unknown): value is AgentSummary {

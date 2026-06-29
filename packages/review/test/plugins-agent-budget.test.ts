@@ -188,6 +188,37 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(result.incomplete).toBe(true);
     expect(lines.some(l => l.includes(reasoning))).toBe(true);
   }, 15000);
+
+  it('flags a stop turn with no parseable verdict incomplete (no silent clean)', async () => {
+    // The model ends with finish_reason:'stop' (stopReason 'completed') but emits
+    // prose, not findings JSON; the summary-retry also yields prose. A verdict was
+    // never produced, so the run must be incomplete — NOT a clean 0-findings review
+    // (the old `stopReason !== 'completed'` guard let this through silently).
+    mockFetch([stopTurn('I reviewed the changes; looks fine.'), stopTurn('Still no JSON, sorry.')]);
+    const client = makeClient(1_000_000); // generous budget — the model just stops early
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.stopReason).toBe('completed');
+    expect(result.summary).toBeUndefined();
+    expect(result.incomplete).toBe(true);
+  }, 15000); // the summary-retry sleeps 3s
+
+  it('recovers a JSON verdict embedded in surrounding prose', async () => {
+    // The model ignored json_object and wrapped the verdict in reasoning prose.
+    // Lenient extraction must recover it on the same turn (no retry needed).
+    const verdict = JSON.stringify({
+      findings: [],
+      summary: { riskLevel: 'low', overview: 'wrapped', keyChanges: [] },
+    });
+    mockFetch([stopTurn(`Here is my analysis.\n${verdict}\nThat's everything.`)]);
+    const client = makeClient(1_000_000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.incomplete).toBe(false);
+    expect(result.summary?.overview).toBe('wrapped');
+  });
 });
 
 describe('envDisabled (LIEN_REVIEW_LOG_AGENT parsing — logging on by default)', () => {
@@ -271,8 +302,8 @@ describe('scaleAgentBudget — model-aware multiplier', () => {
 describe('AgentReviewPlugin.present — incomplete review', () => {
   function incompleteSummaryFinding(): ReviewFinding {
     const message =
-      'Lien Review did not finish — it hit the token budget limit while investigating and ' +
-      'stopped before producing a verdict. Any findings shown are partial; re-run the review to retry.';
+      'Lien Review did not finish — it hit the token budget limit while investigating. ' +
+      'Any findings shown are partial; re-run the review to retry.';
     return {
       pluginId: 'agent-review',
       filepath: '',
