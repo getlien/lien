@@ -241,6 +241,23 @@ describe('Swift Language', () => {
       expect(names).toContain('foo');
       expect(names).toContain('baz');
     });
+
+    it('links constructor calls to the type symbol, explicit .init() to init', () => {
+      // Swift initialization is `Foo(...)` (no `new`): the callee is the type
+      // name, so the call links to the type's class symbol (as JS does for
+      // `new Foo()`). An explicit `T.init()` links the initializer directly.
+      const src =
+        'func run() {\n' +
+        '  let a = Foo()\n' + // bare constructor -> type symbol
+        '  let b = Namespace.Widget(x: 1)\n' + // qualified constructor -> type symbol
+        '  let c = T.init()\n' + // explicit initializer -> init symbol
+        '}\n';
+      const calls = findAllNodes(parse(src), 'call_expression');
+      const names = calls.map(c => symbolExtractor.extractCallSite(c)?.symbol).filter(Boolean);
+      expect(names).toContain('Foo');
+      expect(names).toContain('Widget');
+      expect(names).toContain('init');
+    });
   });
 
   // ===========================================================================
