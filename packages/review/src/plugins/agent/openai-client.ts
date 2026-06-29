@@ -37,31 +37,20 @@ const RETRY_NUDGE =
 
 /**
  * Transient-failure retry for the chat endpoint. OpenRouter/Kimi intermittently
- * returns a 200 with an empty/truncated body (which makes JSON parsing throw
- * "Unexpected end of JSON input"), or a 429/5xx — both recover on a retry.
+ * returns a 200 with an empty/truncated body, a 429/5xx, or hangs the
+ * connection — all recover on a retry. 2 attempts (one retry) absorbs flakes
+ * while keeping worst-case latency bounded on a genuine outage.
  */
-const CHAT_MAX_ATTEMPTS = 3;
+const CHAT_MAX_ATTEMPTS = 2;
 const CHAT_RETRY_BASE_DELAY_MS = 500;
-/** Per-request abort timeout. A hung connection otherwise stalls a turn for
- * minutes before fetch eventually rejects; abort + retry recovers faster. */
+/**
+ * Per-request abort timeout, covering BOTH the response headers and the body
+ * read — a hang in either rejects (and is retried) instead of stalling a turn
+ * forever. Generous so a slow large-context reasoning turn isn't aborted.
+ */
 const CHAT_REQUEST_TIMEOUT_MS = 120_000;
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
-
-/** fetch with an abort timeout so a hung connection rejects (and is retried). */
-async function fetchWithTimeout(
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
@@ -536,25 +525,12 @@ export class OpenAIAgentClient {
     for (let attempt = 1; attempt <= CHAT_MAX_ATTEMPTS; attempt++) {
       if (attempt > 1) await sleep(CHAT_RETRY_BASE_DELAY_MS * (attempt - 1));
 
-      let response: Response;
+      let res: { ok: boolean; status: number; text: string };
       try {
-        response = await fetchWithTimeout(
-          `${this.baseUrl}/chat/completions`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${this.apiKey}`,
-              'HTTP-Referer': 'https://lien.dev',
-              'X-Title': 'Lien Review',
-            },
-            body: JSON.stringify(body),
-          },
-          CHAT_REQUEST_TIMEOUT_MS,
-        );
+        res = await this.postChat(body);
       } catch (err) {
-        // fetch() rejected: a network error, or our abort timeout firing on a
-        // hung connection. Both are transient — retry.
+        // Network error, or the abort timeout firing on a hung connection
+        // (header OR body stream). Transient — retry.
         lastError = new Error(
           `Request to ${this.model} failed: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -562,39 +538,66 @@ export class OpenAIAgentClient {
         continue;
       }
 
-      if (!response.ok) {
-        const err = await response.text();
+      if (!res.ok) {
         // 429/5xx are transient — retry; other 4xx are fatal (bad request/auth).
-        if (response.status === 429 || response.status >= 500) {
-          lastError = new Error(`API error (${response.status}): ${truncate(err, 200)}`);
+        if (res.status === 429 || res.status >= 500) {
+          lastError = new Error(`API error (${res.status}): ${truncate(res.text, 200)}`);
           this.logger.warning(
             `[agent] ${lastError.message} — retry ${attempt}/${CHAT_MAX_ATTEMPTS}`,
           );
           continue;
         }
-        throw new Error(`API error (${response.status}): ${err}`);
+        throw new Error(`API error (${res.status}): ${res.text}`);
       }
 
-      // Read as text and parse defensively: an empty/truncated 200 body makes
-      // response.json() throw a bare "Unexpected end of JSON input" that would
-      // otherwise crash the whole review. Treat it as transient and retry.
-      const text = await response.text();
-      if (!text.trim()) {
-        lastError = new Error(`Empty response body from ${this.model} (status ${response.status})`);
+      // Parse defensively: an empty/truncated 200 body would otherwise throw a
+      // bare "Unexpected end of JSON input" and crash the review. Retry it.
+      if (!res.text.trim()) {
+        lastError = new Error(`Empty response body from ${this.model} (status ${res.status})`);
         this.logger.warning(`[agent] ${lastError.message} — retry ${attempt}/${CHAT_MAX_ATTEMPTS}`);
         continue;
       }
       try {
-        return JSON.parse(text) as ChatResponse;
+        return JSON.parse(res.text) as ChatResponse;
       } catch {
         lastError = new Error(
-          `Unparseable response body from ${this.model} (status ${response.status}): ${truncate(text, 200)}`,
+          `Unparseable response body from ${this.model} (status ${res.status}): ${truncate(res.text, 200)}`,
         );
         this.logger.warning(`[agent] ${lastError.message} — retry ${attempt}/${CHAT_MAX_ATTEMPTS}`);
       }
     }
 
     throw lastError ?? new Error(`chatCompletion failed for ${this.model}`);
+  }
+
+  /**
+   * POST the chat request and read the FULL body under a single abort timeout,
+   * so a hang in either the headers or the body stream rejects (and is retried)
+   * rather than stalling the turn indefinitely (the body read was previously
+   * outside the timeout, which let a hung stream hang the whole review).
+   */
+  private async postChat(
+    body: Record<string, unknown>,
+  ): Promise<{ ok: boolean; status: number; text: string }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CHAT_REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+          'HTTP-Referer': 'https://lien.dev',
+          'X-Title': 'Lien Review',
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      return { ok: response.ok, status: response.status, text };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 
