@@ -351,6 +351,21 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
     }
   }
 
+  /**
+   * Resolve a call site to the called symbol name. Dependency matching is by
+   * bare name (call.symbol === symbol.name), so the name we record determines
+   * which definition the call links to.
+   *
+   * Constructor calls are worth a note: Swift spells initialization `Foo(...)`
+   * (no `new`), so the callee is the type name and we record `Foo` — linking the
+   * call to the type's `class_declaration` symbol, exactly as JS records
+   * `new Foo()` against the class and Python records `Foo()`. So blast-radius for
+   * "who constructs Foo" is found via the TYPE symbol (a safe over-approximation),
+   * not the `init` method symbol. An explicit `Foo.init()` records `init` and
+   * links the initializer directly. The standalone `init`/`deinit`/`subscript`
+   * symbols are definitions for search/listing (as Java emits constructor
+   * symbols); they intentionally carry no implicit-`Foo()` caller edges.
+   */
   extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {
     if (node.type !== 'call_expression') return null;
     const line = node.startPosition.row + 1;
@@ -360,9 +375,10 @@ export class SwiftSymbolExtractor implements LanguageSymbolExtractor {
 
     let name: string | undefined;
     if (callee.type === 'simple_identifier') {
-      name = callee.text; // foo()
+      name = callee.text; // foo() / Foo() constructor — links to the fn or type symbol
     } else if (callee.type === 'navigation_expression') {
-      // a.b.c() — the called member is the simple_identifier in the last navigation_suffix
+      // a.b.c() / Mod.Type() / Type.init() — the called member is the
+      // simple_identifier in the last navigation_suffix
       const suffix = callee.namedChildren.filter(c => c.type === 'navigation_suffix').at(-1);
       name = suffix ? (findFirst(suffix, 'simple_identifier')?.text ?? undefined) : undefined;
     }
