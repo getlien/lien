@@ -459,4 +459,13 @@ describe('clampText (finding free-text cap)', () => {
     expect(out.length).toBeLessThanOrEqual(1200);
     expect(out.endsWith('…')).toBe(true);
   });
+
+  it('keeps text exactly at the cap and truncates one over', () => {
+    // Boundary: 1200 chars passes through unchanged; 1201 is truncated. Guards
+    // against a `<= 1200` → `< 1200` regression silently clipping at-cap text.
+    expect(clampText('y'.repeat(1200))).toBe('y'.repeat(1200));
+    const over = clampText('y'.repeat(1201))!;
+    expect(over.length).toBeLessThanOrEqual(1200);
+    expect(over.endsWith('…')).toBe(true);
+  });
 });
