@@ -35,6 +35,16 @@ const WRAP_UP_NUDGE =
 const RETRY_NUDGE =
   'You ran out of budget. Output ONLY the JSON block now with your findings and summary. No tool calls.';
 
+/**
+ * Transient-failure retry for the chat endpoint. OpenRouter/Kimi intermittently
+ * returns a 200 with an empty/truncated body (which makes JSON parsing throw
+ * "Unexpected end of JSON input"), or a 429/5xx — both recover on a retry.
+ */
+const CHAT_MAX_ATTEMPTS = 3;
+const CHAT_RETRY_BASE_DELAY_MS = 500;
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
 }
@@ -492,23 +502,54 @@ export class OpenAIAgentClient {
       body.tools = tools;
     }
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-        'HTTP-Referer': 'https://lien.dev',
-        'X-Title': 'Lien Review',
-      },
-      body: JSON.stringify(body),
-    });
+    let lastError: Error | undefined;
+    for (let attempt = 1; attempt <= CHAT_MAX_ATTEMPTS; attempt++) {
+      if (attempt > 1) await sleep(CHAT_RETRY_BASE_DELAY_MS * (attempt - 1));
 
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`API error (${response.status}): ${err}`);
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+          'HTTP-Referer': 'https://lien.dev',
+          'X-Title': 'Lien Review',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const err = await response.text();
+        // 429/5xx are transient — retry; other 4xx are fatal (bad request/auth).
+        if (response.status === 429 || response.status >= 500) {
+          lastError = new Error(`API error (${response.status}): ${truncate(err, 200)}`);
+          this.logger.warning(
+            `[agent] ${lastError.message} — retry ${attempt}/${CHAT_MAX_ATTEMPTS}`,
+          );
+          continue;
+        }
+        throw new Error(`API error (${response.status}): ${err}`);
+      }
+
+      // Read as text and parse defensively: an empty/truncated 200 body makes
+      // response.json() throw a bare "Unexpected end of JSON input" that would
+      // otherwise crash the whole review. Treat it as transient and retry.
+      const text = await response.text();
+      if (!text.trim()) {
+        lastError = new Error(`Empty response body from ${this.model} (status ${response.status})`);
+        this.logger.warning(`[agent] ${lastError.message} — retry ${attempt}/${CHAT_MAX_ATTEMPTS}`);
+        continue;
+      }
+      try {
+        return JSON.parse(text) as ChatResponse;
+      } catch {
+        lastError = new Error(
+          `Unparseable response body from ${this.model} (status ${response.status}): ${truncate(text, 200)}`,
+        );
+        this.logger.warning(`[agent] ${lastError.message} — retry ${attempt}/${CHAT_MAX_ATTEMPTS}`);
+      }
     }
 
-    return (await response.json()) as ChatResponse;
+    throw lastError ?? new Error(`chatCompletion failed for ${this.model}`);
   }
 }
 
