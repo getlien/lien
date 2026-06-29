@@ -48,6 +48,7 @@
     "test:e2e:csharp": "vitest run test/e2e/real-projects.test.ts -t 'MediatR'",
     "test:e2e:ruby": "vitest run test/e2e/real-projects.test.ts -t 'Sinatra'",
     "test:e2e:kotlin": "vitest run test/e2e/real-projects.test.ts -t 'Klaxon'",
+    "test:e2e:swift": "vitest run test/e2e/real-projects.test.ts -t 'SwiftyJSON'",
     "docs": "typedoc"
   },
   "keywords": [

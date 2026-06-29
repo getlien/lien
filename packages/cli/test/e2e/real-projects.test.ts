@@ -149,6 +149,15 @@ const TEST_PROJECTS: ProjectConfig[] = [
     expectedMinChunks: 250, // AST chunking yields ~960 (fun/class/object per chunk)
     sampleSearchQuery: 'parse json string into an object',
   },
+  {
+    name: 'SwiftyJSON',
+    repo: 'https://github.com/SwiftyJSON/SwiftyJSON.git',
+    branch: 'master',
+    language: 'swift',
+    expectedMinFiles: 15, // ~26 indexed (Source + Tests)
+    expectedMinChunks: 150, // AST chunking yields ~356 (func/struct/extension per chunk)
+    sampleSearchQuery: 'parse json data into typed values',
+  },
 ];
 
 /**

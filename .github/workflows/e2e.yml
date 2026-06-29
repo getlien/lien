@@ -84,6 +84,9 @@ jobs:
           - project: Klaxon
             language: Kotlin
             script: test:e2e:kotlin
+          - project: SwiftyJSON
+            language: Swift
+            script: test:e2e:swift
 
     steps:
       - name: Checkout code
