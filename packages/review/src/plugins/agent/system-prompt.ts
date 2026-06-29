@@ -15,6 +15,10 @@
 import type { ReviewContext } from '../../plugin-types.js';
 import type { BlastRadiusReport } from '../../blast-radius.js';
 import { renderBlastRadiusMarkdown } from '../../blast-radius-render.js';
+import {
+  computeStaleLiteralCandidates,
+  renderStaleLiteralCandidates,
+} from '../../stale-literal-signals.js';
 import type { ResolvedRules } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -174,6 +178,7 @@ export function buildInitialMessage(
   appendIfPresent(sections, renderChangedFunctions(context));
   appendIfPresent(sections, renderBlastRadius(opts));
   appendIfPresent(sections, renderDeletedExports(context));
+  appendIfPresent(sections, renderStaleLiteralCandidates(computeStaleLiteralCandidates(context)));
   sections.push(
     'Investigate this PR. Use the investigation strategy described in your instructions, then output findings as JSON.',
   );

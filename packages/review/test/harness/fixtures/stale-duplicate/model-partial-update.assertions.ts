@@ -10,8 +10,12 @@
  *     packages/review/test/harness/fixtures/stale-duplicate/model-partial-update.fixture.json \
  *     --sha f780541
  *
- * Tier 1: rule fires + grep_codebase is called (the rule's prompt mandates
- * a grep for each removed/replaced literal).
+ * Tier 1: rule fires. (We no longer assert grep_codebase: the deterministic
+ * <stale_literal_candidates> signal now pre-computes the surviving copy and
+ * injects it, so a correct agent confirms the candidate instead of grepping —
+ * and in fixture replay grep_codebase is blind against the dead repoRootDir
+ * anyway. See packages/review/src/stale-literal-signals.ts and memory
+ * project_harness_grep_read_replay_blindness.)
  * Tier 2: the finding cites adapterContext / line 300 / claude-sonnet-4-6
  * or proposes a hoist to a shared const. Keyword set is deliberately wide
  * to cover the phrasings any correct rendering will use.
@@ -24,7 +28,6 @@ const assertions: FixtureAssertions = {
   rule: 'stale-duplicate',
   expect: (result, h) => {
     h.expectRuleFired('stale-duplicate', result);
-    h.expectToolCalled('grep_codebase', result);
     h.expectFindingMentions(
       [
         'adaptercontext',
