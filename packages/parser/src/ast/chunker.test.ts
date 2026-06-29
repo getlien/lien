@@ -31,7 +31,7 @@ describe('AST Chunker', () => {
     });
 
     it('should return false for unsupported files', () => {
-      expect(shouldUseAST('test.swift')).toBe(false);
+      expect(shouldUseAST('test.scala')).toBe(false);
       expect(shouldUseAST('test.txt')).toBe(false);
     });
   });
@@ -527,8 +527,8 @@ export { default as qux } from './qux';`;
     it('should throw error for unsupported language', () => {
       const content = 'print("Hello")';
 
-      // Swift is not AST-supported
-      expect(() => chunkByAST('test.swift', content)).toThrow();
+      // Scala is not AST-supported
+      expect(() => chunkByAST('test.scala', content)).toThrow();
     });
 
     it('should handle invalid syntax gracefully', () => {

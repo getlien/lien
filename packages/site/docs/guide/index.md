@@ -87,9 +87,10 @@ Lien is built with modern, performant tools:
 - C#
 - Ruby
 - Kotlin
+- Swift
 
 **Semantic Search** (chunking and embeddings):
-- All of the above, plus Vue, Liquid, C/C++, Swift, Scala, Markdown
+- All of the above, plus Vue, Liquid, C/C++, Scala, Markdown
 
 ## Next Steps
 

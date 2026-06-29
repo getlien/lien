@@ -82,9 +82,10 @@ Lien indexes and understands code in:
 - C#
 - Ruby
 - Kotlin
+- Swift
 
 **Semantic Search** (chunking and embeddings):
-- All of the above, plus C/C++, Vue, Swift, Scala, and more!
+- All of the above, plus C/C++, Vue, Scala, and more!
 
 ## Complexity Analysis
 

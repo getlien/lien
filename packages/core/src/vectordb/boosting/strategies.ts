@@ -46,6 +46,17 @@ function isTestFile(filepath: string): boolean {
     return true;
   }
 
+  // Swift: XCTest `FooTests.swift` files and Swift Package Manager `Tests/` dirs.
+  // Matches the parser helper (packages/parser/src/utils/path-matching.ts): use
+  // the original-case path with capital `Tests` and both path separators, so
+  // `Contest.swift` is not a false positive and `\Tests\` paths are caught.
+  if (
+    lower.endsWith('.swift') &&
+    (/Tests?\.swift$/.test(filepath) || /(^|[/\\])Tests?[/\\]/.test(filepath))
+  ) {
+    return true;
+  }
+
   return false;
 }
 

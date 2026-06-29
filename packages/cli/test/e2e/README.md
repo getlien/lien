@@ -24,6 +24,7 @@ These tests:
 | C#         | MediatR  | https://github.com/jbogard/MediatR        | Mediator library, clean C# patterns        |
 | Ruby       | Sinatra  | https://github.com/sinatra/sinatra        | Web framework, classes/modules + require   |
 | Kotlin     | Klaxon   | https://github.com/cbeust/klaxon          | JSON library, classes/objects + imports    |
+| Swift      | SwiftyJSON | https://github.com/SwiftyJSON/SwiftyJSON | JSON library, structs/extensions + imports |
 
 ## Running Tests
 

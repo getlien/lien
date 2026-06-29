@@ -42,11 +42,15 @@ describe('Language Registry', () => {
       expect(detectLanguage('app/models/user.rb')).toBe('ruby');
     });
 
+    it('should detect Swift files', () => {
+      expect(detectLanguage('Sources/App/Order.swift')).toBe('swift');
+    });
+
     it('should return null for unsupported extensions', () => {
       expect(detectLanguage('style.css')).toBeNull();
       expect(detectLanguage('data.json')).toBeNull();
       expect(detectLanguage('README.md')).toBeNull();
-      expect(detectLanguage('main.swift')).toBeNull();
+      expect(detectLanguage('main.scala')).toBeNull();
     });
 
     it('should handle paths with directories', () => {
@@ -72,6 +76,8 @@ describe('Language Registry', () => {
         'java',
         'csharp',
         'ruby',
+        'kotlin',
+        'swift',
       ];
       for (const lang of languages) {
         const def = getLanguage(lang);
@@ -85,8 +91,8 @@ describe('Language Registry', () => {
     });
 
     it('should throw for unregistered languages', () => {
-      expect(() => getLanguage('swift' as SupportedLanguage)).toThrow(
-        'No language definition registered for: swift',
+      expect(() => getLanguage('scala' as SupportedLanguage)).toThrow(
+        'No language definition registered for: scala',
       );
     });
   });
@@ -98,15 +104,15 @@ describe('Language Registry', () => {
     });
 
     it('should return false for unregistered languages', () => {
-      expect(languageExists('swift')).toBe(false);
+      expect(languageExists('scala')).toBe(false);
       expect(languageExists('')).toBe(false);
     });
   });
 
   describe('getAllLanguages', () => {
-    it('should return all 10 registered languages', () => {
+    it('should return all 11 registered languages', () => {
       const all = getAllLanguages();
-      expect(all).toHaveLength(10);
+      expect(all).toHaveLength(11);
       const ids = all.map(d => d.id);
       expect(ids).toContain('typescript');
       expect(ids).toContain('javascript');
@@ -118,6 +124,7 @@ describe('Language Registry', () => {
       expect(ids).toContain('csharp');
       expect(ids).toContain('ruby');
       expect(ids).toContain('kotlin');
+      expect(ids).toContain('swift');
     });
 
     it('should return a defensive copy', () => {

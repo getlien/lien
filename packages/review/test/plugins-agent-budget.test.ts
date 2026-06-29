@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { OpenAIAgentClient, envEnabled } from '../src/plugins/agent/openai-client.js';
+import { OpenAIAgentClient, envDisabled } from '../src/plugins/agent/openai-client.js';
 import { AgentReviewPlugin, scaleBudgetForBlastRadius } from '../src/plugins/agent/index.js';
 import { scaleAgentBudget } from '../src/review-pr.js';
 import { DEFAULT_REVIEW_MODEL, MAX_REVIEW_TOKEN_BUDGET } from '../src/defaults.js';
@@ -190,18 +190,18 @@ describe('OpenAIAgentClient budget handling', () => {
   }, 15000);
 });
 
-describe('envEnabled (LIEN_REVIEW_LOG_AGENT parsing)', () => {
-  it('enables only for 1/true (case-insensitive)', () => {
-    expect(envEnabled('1')).toBe(true);
-    expect(envEnabled('true')).toBe(true);
-    expect(envEnabled('TRUE')).toBe(true);
+describe('envDisabled (LIEN_REVIEW_LOG_AGENT parsing — logging on by default)', () => {
+  it('disables only for 0/false (case-insensitive)', () => {
+    expect(envDisabled('0')).toBe(true);
+    expect(envDisabled('false')).toBe(true);
+    expect(envDisabled('FALSE')).toBe(true);
   });
 
-  it('does not enable for falsey strings (the !! bug)', () => {
-    expect(envEnabled('false')).toBe(false);
-    expect(envEnabled('0')).toBe(false);
-    expect(envEnabled('')).toBe(false);
-    expect(envEnabled(undefined)).toBe(false);
+  it('stays enabled (not disabled) for everything else, incl. unset', () => {
+    expect(envDisabled('1')).toBe(false);
+    expect(envDisabled('true')).toBe(false);
+    expect(envDisabled('')).toBe(false);
+    expect(envDisabled(undefined)).toBe(false);
   });
 });
 
