@@ -629,37 +629,46 @@ export function toOpenAITools(
 // Response parsing (same as anthropic-client.ts)
 // ---------------------------------------------------------------------------
 
+/** Pull validated findings + summary out of one parsed JSON verdict (array or object). */
+function readVerdict(parsed: unknown): { findings: AgentFinding[]; summary?: AgentSummary } {
+  const obj = (parsed ?? {}) as { findings?: unknown; summary?: unknown };
+  const rawFindings = Array.isArray(parsed) ? parsed : obj.findings;
+  const findings = (Array.isArray(rawFindings) ? rawFindings : []).filter(isValidFinding);
+  const summary = isValidSummary(obj.summary) ? obj.summary : undefined;
+  return { findings, summary };
+}
+
 function extractResponse(content: string | null): {
   findings: AgentFinding[];
   summary?: AgentSummary;
 } {
   if (!content) return { findings: [] };
 
-  // Try, in order: a ```json fence (normal turns); the raw body
-  // (response_format:json_object on a forced-verdict turn); and finally a JSON
-  // object embedded in surrounding prose. The last guards against a model that
-  // ignored json_object and prefixed reasoning — without it that turn parses to
-  // an empty result and the run is silently treated as a clean 0-findings review.
-  const fenced = content.match(/```json\s*\n([\s\S]*?)\n\s*```/)?.[1];
-  const candidates = [fenced, content.trim(), embeddedJsonObject(content)];
+  // Candidate JSON strings, in priority order:
+  //  1. each ```json fence, LAST first — the model emits its verdict last, so a
+  //     few-shot/example fence earlier in the prose must not win;
+  //  2. the raw body (response_format:json_object forced-verdict turn);
+  //  3. a JSON object embedded in surrounding prose (model ignored json_object).
+  const fences = [...content.matchAll(/```json\s*\n([\s\S]*?)\n\s*```/g)].map(m => m[1]).reverse();
+  const candidates = [...fences, content.trim(), embeddedJsonObject(content)];
 
+  // Prefer a candidate carrying a `summary` (the verdict marker) so an
+  // `{"findings": [...]}`-only example can't beat the real verdict; fall back to
+  // the first findings-only candidate if nothing carries a summary.
+  let fallback: { findings: AgentFinding[] } | undefined;
   for (const candidate of candidates) {
     if (!candidate) continue;
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(candidate);
-      const rawFindings = Array.isArray(parsed) ? parsed : parsed.findings;
-      const findings: unknown[] = Array.isArray(rawFindings) ? rawFindings : [];
-      const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
-      // Accept only a candidate that yields a real verdict or findings, so an
-      // empty `{}` earlier in the prose doesn't mask the actual JSON later.
-      if (summary || findings.length > 0) {
-        return { findings: findings.filter(isValidFinding), summary };
-      }
+      parsed = JSON.parse(candidate);
     } catch {
-      // not parseable — try the next candidate
+      continue; // not parseable — try the next candidate
     }
+    const { findings, summary } = readVerdict(parsed);
+    if (summary) return { findings, summary };
+    if (findings.length > 0 && !fallback) fallback = { findings };
   }
-  return { findings: [] };
+  return fallback ?? { findings: [] };
 }
 
 /** First `{`…last `}` slice — recovers a JSON object wrapped in prose. */

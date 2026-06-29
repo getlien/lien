@@ -535,28 +535,37 @@ function extractResponse(content: Anthropic.Messages.ContentBlock[]): {
   // so the verdict may not live in the last one.
   const text = textBlocks.map(b => b.text).join('\n');
 
-  // Try, in order: a ```json fence (normal turns); the raw body (a forced
-  // verdict turn may emit bare JSON); and a JSON object embedded in prose. The
-  // last guards against a model that prefixed reasoning — without it that turn
-  // parses to an empty result and the run is silently treated as clean.
-  const fenced = text.match(/```json\s*\n([\s\S]*?)\n\s*```/)?.[1];
-  const candidates = [fenced, text.trim(), embeddedJsonObject(text)];
+  // Candidate JSON strings, in priority order: each ```json fence LAST first (a
+  // few-shot/example fence precedes the real verdict), then the raw body, then a
+  // JSON object embedded in prose. Prefer a candidate carrying a `summary` (the
+  // verdict marker) so an example can't beat the real verdict; fall back to the
+  // first findings-only candidate if nothing carries a summary.
+  const fences = [...text.matchAll(/```json\s*\n([\s\S]*?)\n\s*```/g)].map(m => m[1]).reverse();
+  const candidates = [...fences, text.trim(), embeddedJsonObject(text)];
 
+  let fallback: { findings: AgentFinding[] } | undefined;
   for (const candidate of candidates) {
     if (!candidate) continue;
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(candidate);
-      const rawFindings = Array.isArray(parsed) ? parsed : parsed.findings;
-      const findings: unknown[] = Array.isArray(rawFindings) ? rawFindings : [];
-      const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
-      if (summary || findings.length > 0) {
-        return { findings: findings.filter(isValidFinding), summary };
-      }
+      parsed = JSON.parse(candidate);
     } catch {
-      // not parseable — try the next candidate
+      continue; // not parseable — try the next candidate
     }
+    const { findings, summary } = readVerdict(parsed);
+    if (summary) return { findings, summary };
+    if (findings.length > 0 && !fallback) fallback = { findings };
   }
-  return { findings: [] };
+  return fallback ?? { findings: [] };
+}
+
+/** Pull validated findings + summary out of one parsed JSON verdict (array or object). */
+function readVerdict(parsed: unknown): { findings: AgentFinding[]; summary?: AgentSummary } {
+  const obj = (parsed ?? {}) as { findings?: unknown; summary?: unknown };
+  const rawFindings = Array.isArray(parsed) ? parsed : obj.findings;
+  const findings = (Array.isArray(rawFindings) ? rawFindings : []).filter(isValidFinding);
+  const summary = isValidSummary(obj.summary) ? obj.summary : undefined;
+  return { findings, summary };
 }
 
 /** First `{`…last `}` slice — recovers a JSON object wrapped in prose. */
