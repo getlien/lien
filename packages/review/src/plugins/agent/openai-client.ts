@@ -486,14 +486,17 @@ export class OpenAIAgentClient {
   private logTurn(turn: TurnTrace | undefined, label?: string): void {
     if (!turn) return;
     const tag = label ? ` (${label})` : '';
-    if (turn.reasoning) {
+    // Guard on trimmed content: on tool-call turns the model emits tool calls
+    // (logged separately) and often a whitespace-only `content`, which would
+    // otherwise print a blank, confusing "output:" line.
+    if (turn.reasoning?.trim()) {
       this.logger.info(
-        `[agent] Turn ${turn.turnNumber} reasoning${tag}:\n${truncate(turn.reasoning, AGENT_LOG_MAX)}`,
+        `[agent] Turn ${turn.turnNumber} reasoning${tag}:\n${truncate(turn.reasoning.trim(), AGENT_LOG_MAX)}`,
       );
     }
-    if (turn.responseText) {
+    if (turn.responseText?.trim()) {
       this.logger.info(
-        `[agent] Turn ${turn.turnNumber} output${tag}:\n${truncate(turn.responseText, AGENT_LOG_MAX)}`,
+        `[agent] Turn ${turn.turnNumber} output${tag}:\n${truncate(turn.responseText.trim(), AGENT_LOG_MAX)}`,
       );
     }
   }
