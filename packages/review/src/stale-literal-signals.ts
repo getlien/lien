@@ -163,36 +163,56 @@ function recordLiterals(
   }
 }
 
+interface PatchScan {
+  literals: ChangedLiteral[];
+  /** New-file line numbers the diff added/changed, per file (the `+` lines). */
+  touchedLinesByFile: Map<string, Set<number>>;
+}
+
 /**
- * Walk one file's unified-diff patch, tracking the new-file line number, and
- * collect every distinctive literal that appears on a `+` or `-` line (the
+ * Walk every file's unified-diff patch, tracking the new-file line number, and
+ * collect (a) every distinctive literal that appears on a `+` or `-` line (the
  * literals the diff touches — whether removed outright or conditionalized in
- * place). Keyed so each literal is recorded once, at its first touched line.
+ * place) and (b) the set of new-file lines the diff changed. The latter lets
+ * the survivor scan exclude the touched site itself even when `pr.diffLines`
+ * isn't provided — without it a literal conditionalized in place would report
+ * its own `+` line as a stale survivor.
  */
-function scanPatch(file: string, patch: string): Map<string, ChangedLiteral> {
-  const touched = new Map<string, ChangedLiteral>();
-  let newLine = 0;
+function scanPatches(patches: Map<string, string>): PatchScan {
+  const literals: ChangedLiteral[] = [];
+  const touchedLinesByFile = new Map<string, Set<number>>();
 
-  for (const raw of patch.split('\n')) {
-    const header = raw.match(HUNK_HEADER_RE);
-    if (header) {
-      newLine = parseInt(header[1], 10);
-      continue;
-    }
-    if (raw.startsWith('+++') || raw.startsWith('---')) continue;
+  for (const [file, patch] of patches) {
+    const touched = new Map<string, ChangedLiteral>();
+    const touchedLines = new Set<number>();
+    let newLine = 0;
 
-    if (raw.startsWith('+')) {
-      recordLiterals(touched, raw.slice(1), file, newLine);
-      newLine++;
-    } else if (raw.startsWith('-')) {
-      recordLiterals(touched, raw.slice(1), file, newLine);
-      // a removed line does not advance the new-file counter
-    } else {
-      newLine++; // context line
+    for (const raw of patch.split('\n')) {
+      const header = raw.match(HUNK_HEADER_RE);
+      if (header) {
+        newLine = parseInt(header[1], 10);
+        continue;
+      }
+      if (raw.startsWith('+++') || raw.startsWith('---')) continue;
+      if (raw.startsWith('\\')) continue; // "\ No newline at end of file" — not a content line
+
+      if (raw.startsWith('+')) {
+        touchedLines.add(newLine);
+        recordLiterals(touched, raw.slice(1), file, newLine);
+        newLine++;
+      } else if (raw.startsWith('-')) {
+        recordLiterals(touched, raw.slice(1), file, newLine);
+        // a removed line does not advance the new-file counter
+      } else {
+        newLine++; // context line
+      }
     }
+
+    literals.push(...touched.values());
+    touchedLinesByFile.set(file, touchedLines);
   }
 
-  return touched;
+  return { literals, touchedLinesByFile };
 }
 
 /**
@@ -200,11 +220,7 @@ function scanPatch(file: string, patch: string): Map<string, ChangedLiteral> {
  * Exposed for testing.
  */
 export function extractChangedLiterals(patches: Map<string, string>): ChangedLiteral[] {
-  const result: ChangedLiteral[] = [];
-  for (const [file, patch] of patches) {
-    result.push(...scanPatch(file, patch).values());
-  }
-  return result;
+  return scanPatches(patches).literals;
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +313,23 @@ const CONFIDENCE_RANK: Record<StaleLiteralCandidate['confidence'], number> = {
   low: 0,
 };
 
+/** Merge the patch-derived touched lines with any caller-provided diffLines. */
+function mergeChangedLines(
+  touchedLinesByFile: Map<string, Set<number>>,
+  provided: Map<string, Set<number>> | undefined,
+): Map<string, Set<number>> {
+  const merged = new Map<string, Set<number>>();
+  for (const [file, set] of touchedLinesByFile) merged.set(file, new Set(set));
+  if (provided) {
+    for (const [file, set] of provided) {
+      const existing = merged.get(file) ?? new Set<number>();
+      for (const n of set) existing.add(n);
+      merged.set(file, existing);
+    }
+  }
+  return merged;
+}
+
 /**
  * Pre-compute stale-duplicate literal candidates from the review context.
  * Returns [] when there is no diff or no full-repo index to scan against.
@@ -307,10 +340,14 @@ export function computeStaleLiteralCandidates(context: ReviewContext): StaleLite
   if (!patches || patches.size === 0) return [];
   if (!repoChunks || repoChunks.length === 0) return [];
 
-  const changedLines = context.pr?.diffLines ?? new Map<string, Set<number>>();
+  const { literals, touchedLinesByFile } = scanPatches(patches);
+  // Exclude the diff's own touched lines so a literal conditionalized in place
+  // doesn't report its own `+` line as a survivor. Derived from the patch, so
+  // this holds even when pr.diffLines is absent; union the two when both exist.
+  const changedLines = mergeChangedLines(touchedLinesByFile, context.pr?.diffLines);
   const candidates: StaleLiteralCandidate[] = [];
 
-  for (const lit of extractChangedLiterals(patches)) {
+  for (const lit of literals) {
     const staleSites = findStaleSites(lit, repoChunks, changedLines);
     if (staleSites.length === 0) continue;
     candidates.push({
@@ -370,4 +407,32 @@ export function renderStaleLiteralCandidates(candidates: StaleLiteralCandidate[]
 
   lines.push('</stale_literal_candidates>');
   return lines.join('\n');
+}
+
+/**
+ * Emitted when the deterministic scan ran but found nothing. Distinguishes
+ * "scan completed, clean" from "scan never ran" — without it, an omitted block
+ * is ambiguous and the rule would force a redundant grep fallback even after a
+ * clean scan.
+ */
+const STALE_LITERAL_NONE_BLOCK = `<stale_literal_candidates>
+None — the deterministic scan found no changed literal surviving unchanged elsewhere. The stale-duplicate discovery step is complete; you do not need to grep for the diff's literals.
+</stale_literal_candidates>`;
+
+/**
+ * Build the `<stale_literal_candidates>` section for the agent's initial
+ * message. Returns the candidate block when there are candidates, an explicit
+ * "None" block when the scan ran but was clean, or '' when no scan was possible
+ * (no diff or no repo index — e.g. CLI mode). Callers append unconditionally.
+ */
+export function renderStaleLiteralSection(context: ReviewContext): string {
+  const patches = context.pr?.patches;
+  const repoChunks = context.repoChunks;
+  const scanPossible = !!patches && patches.size > 0 && !!repoChunks && repoChunks.length > 0;
+  if (!scanPossible) return '';
+
+  const candidates = computeStaleLiteralCandidates(context);
+  return candidates.length > 0
+    ? renderStaleLiteralCandidates(candidates)
+    : STALE_LITERAL_NONE_BLOCK;
 }

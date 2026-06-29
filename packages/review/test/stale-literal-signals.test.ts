@@ -5,6 +5,7 @@ import {
   extractChangedLiterals,
   computeStaleLiteralCandidates,
   renderStaleLiteralCandidates,
+  renderStaleLiteralSection,
 } from '../src/stale-literal-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 
@@ -156,6 +157,19 @@ describe('computeStaleLiteralCandidates', () => {
     expect(sonnet!.confidence).toBe('high'); // survivor is value-emitting code
   });
 
+  it('excludes the conditionalized-in-place site even when diffLines is absent', () => {
+    // No diffLines provided — touched lines must be derived from the patch so
+    // the literal's own `+` else-branch (line 13) is not reported as a survivor.
+    const patches = new Map([['src/pr-review.ts', CONDITIONALIZE_PATCH]]);
+    const repoChunks = [makeChunk('src/pr-review.ts', 10, PR_REVIEW_CONTENT)];
+
+    const candidates = computeStaleLiteralCandidates(makeContext({ patches, repoChunks }));
+    const sonnet = candidates.find(c => c.literal === "'claude-sonnet-4-6'");
+    expect(sonnet).toBeDefined();
+    expect(sonnet!.staleSites.map(s => s.line)).toContain(20); // the real sibling
+    expect(sonnet!.staleSites.map(s => s.line)).not.toContain(13); // its own changed `+` line
+  });
+
   it('does not flag the PR-introduced value that has no stale copy', () => {
     const patches = new Map([['src/pr-review.ts', CONDITIONALIZE_PATCH]]);
     const diffLines = new Map([['src/pr-review.ts', new Set([11, 12, 13])]]);
@@ -260,7 +274,7 @@ describe('buildInitialMessage injection', () => {
     expect(message).toContain('src/pr-review.ts:20');
   });
 
-  it('omits the block entirely when there are no candidates', () => {
+  it('omits the block entirely when no scan was possible (no diff / no index)', () => {
     const context = {
       ...makeContext({ repoChunks: [] }),
       changedFiles: ['src/a.ts'],
@@ -268,5 +282,50 @@ describe('buildInitialMessage injection', () => {
     } as unknown as ReviewContext;
     const message = buildInitialMessage(context, { blastRadius: null });
     expect(message).not.toContain('<stale_literal_candidates>');
+  });
+
+  it('emits an explicit "None" block when the scan ran but found nothing', () => {
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'lonely-literal-xyz';\n+const x = compute();"],
+    ]);
+    const repoChunks = [makeChunk('src/a.ts', 1, 'const x = compute();')];
+    const context = {
+      ...makeContext({ patches, repoChunks }),
+      changedFiles: ['src/a.ts'],
+      chunks: [],
+    } as unknown as ReviewContext;
+    const message = buildInitialMessage(context, { blastRadius: null });
+    expect(message).toContain('<stale_literal_candidates>');
+    expect(message).toContain('None');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderStaleLiteralSection — distinguishes "clean scan" from "no scan"
+// ---------------------------------------------------------------------------
+
+describe('renderStaleLiteralSection', () => {
+  it('returns "" when no scan was possible (no diff or no index)', () => {
+    expect(renderStaleLiteralSection(makeContext({ repoChunks: [] }))).toBe('');
+    const patches = new Map([['src/a.ts', CONDITIONALIZE_PATCH]]);
+    expect(renderStaleLiteralSection(makeContext({ patches }))).toBe(''); // no repoChunks
+  });
+
+  it('returns a "None" block when the scan ran but found nothing', () => {
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'lonely-literal-xyz';\n+const x = compute();"],
+    ]);
+    const repoChunks = [makeChunk('src/a.ts', 1, 'const x = compute();')];
+    const section = renderStaleLiteralSection(makeContext({ patches, repoChunks }));
+    expect(section).toContain('<stale_literal_candidates>');
+    expect(section).toContain('None');
+  });
+
+  it('returns the candidate block when there are candidates', () => {
+    const patches = new Map([['src/pr-review.ts', CONDITIONALIZE_PATCH]]);
+    const repoChunks = [makeChunk('src/pr-review.ts', 10, PR_REVIEW_CONTENT)];
+    const section = renderStaleLiteralSection(makeContext({ patches, repoChunks }));
+    expect(section).toContain("'claude-sonnet-4-6'");
+    expect(section).not.toContain('None —');
   });
 });

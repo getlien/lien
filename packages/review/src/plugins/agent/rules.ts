@@ -480,7 +480,9 @@ MANDATORY protocol when this rule is active:
    still appear unchanged elsewhere — the discovery work (which would
    otherwise require \`grep_codebase\`) is already done for you. When
    the block is present it is your primary worklist: do NOT re-grep for
-   the literals it already lists.
+   the literals it already lists. If the block reads "None", the scan
+   ran and was clean — the discovery step is complete, so do not grep
+   for the diff's literals.
 2. The block covers literals the diff *moved away from*. If the diff
    also *introduces* a literal, or leaves one *unchanged* on a \`+\`
    line whose surrounding structure was edited (e.g. a conditional
@@ -509,9 +511,11 @@ MANDATORY protocol when this rule is active:
 
 Do not finalize a response for this rule with zero findings unless
 you have reviewed every entry in the \`<stale_literal_candidates>\`
-block (or, when no block is present, called \`grep_codebase\` for at
-least one literal from the diff) AND can confirm no semantically
-related copies survive elsewhere in the post-image.`,
+block (a "None" block, or a block whose entries you all judged
+unrelated, satisfies this) — or, when NO block is present at all (the
+scan could not run), called \`grep_codebase\` for at least one literal
+from the diff — AND can confirm no semantically related copies survive
+elsewhere in the post-image.`,
   example: `### Good finding — partial model bump leaves stale hardcoded copy:
 {
   "filepath": "packages/runner/src/handlers/pr-review.ts",

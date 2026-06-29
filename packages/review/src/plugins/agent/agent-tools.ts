@@ -425,13 +425,20 @@ const REPLAY_UNAVAILABLE_REASON =
   '(<stale_literal_candidates>, <blast_radius>, <deleted_exports>) and the ' +
   'chunk-backed tools (get_files_context, get_dependents, list_functions) instead.';
 
-/** True when the repo working tree is not on disk (e.g. harness fixture replay). */
+/**
+ * True when the repo working tree is not on disk (e.g. harness fixture replay).
+ * Only a genuinely missing root (ENOENT / ENOTDIR) counts — a root that exists
+ * but is unreadable (EACCES, EMFILE, transient I/O) must surface as a real
+ * error, not be masked as replay blindness, so return false and let the caller
+ * fail normally.
+ */
 async function repoTreeUnavailable(repoRootDir: string): Promise<boolean> {
   try {
     await fs.access(repoRootDir);
     return false;
-  } catch {
-    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR';
   }
 }
 
