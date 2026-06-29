@@ -40,12 +40,14 @@ function truncate(s: string, max: number): string {
 }
 
 /**
- * Parse a boolean-ish env flag. Only '1'/'true' (case-insensitive) enable —
- * `!!process.env.X` would treat 'false'/'0' as truthy and leak logs.
+ * Parse a boolean-ish env *disable* flag. Per-turn agent logging is ON by
+ * default (so every review is diagnosable); only an explicit '0'/'false'
+ * (case-insensitive) disables it. Parsed precisely so an unrelated value
+ * doesn't accidentally silence the trace.
  */
-export function envEnabled(value: string | undefined): boolean {
+export function envDisabled(value: string | undefined): boolean {
   const v = value?.trim().toLowerCase();
-  return v === '1' || v === 'true';
+  return v === '0' || v === 'false';
 }
 
 /**
@@ -181,9 +183,9 @@ export class OpenAIAgentClient {
   private logger: Logger;
   private inputCostPerToken: number;
   private outputCostPerToken: number;
-  // Verbose per-turn reasoning/output logging, gated by env so normal runs
-  // stay readable. The last turn's reasoning is always logged on an
-  // incomplete run (see below) regardless of this flag.
+  // Verbose per-turn reasoning/output logging — ON by default so every review
+  // is diagnosable; set LIEN_REVIEW_LOG_AGENT=0 (or false) to silence it. The
+  // last turn's reasoning is always logged on an incomplete run regardless.
   private logAgentTurns: boolean;
 
   constructor(options: OpenAIClientOptions) {
@@ -193,7 +195,7 @@ export class OpenAIAgentClient {
     this.maxTurns = options.maxTurns;
     this.maxTokenBudget = options.maxTokenBudget;
     this.logger = options.logger;
-    this.logAgentTurns = envEnabled(process.env.LIEN_REVIEW_LOG_AGENT);
+    this.logAgentTurns = !envDisabled(process.env.LIEN_REVIEW_LOG_AGENT);
     this.inputCostPerToken = (options.inputCostPerMTok ?? DEFAULT_INPUT_COST_PER_MTOK) / 1_000_000;
     this.outputCostPerToken =
       (options.outputCostPerMTok ?? DEFAULT_OUTPUT_COST_PER_MTOK) / 1_000_000;

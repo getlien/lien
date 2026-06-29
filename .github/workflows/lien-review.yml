@@ -48,6 +48,3 @@ jobs:
         env:
           INPUT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          # TEMP DEBUG (revert before merge): log per-turn agent reasoning/output
-          # to diagnose the "No JSON output — 0 findings" silent failure on this PR.
-          LIEN_REVIEW_LOG_AGENT: '1'
