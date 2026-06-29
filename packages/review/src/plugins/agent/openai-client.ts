@@ -509,9 +509,15 @@ export class OpenAIAgentClient {
     const body: Record<string, unknown> = {
       model: this.model,
       messages,
-      max_tokens: 16384,
+      // Headroom so a multi-finding verdict completes instead of truncating
+      // mid-JSON (a truncated verdict is unparseable and wastes the whole run).
+      max_tokens: 24_576,
       temperature: 0,
-      reasoning: { effort: 'high' },
+      // High reasoning drives investigation quality, but on the forced-verdict
+      // turn the findings are already decided — high effort there just makes the
+      // model re-reason and ramble into the JSON (blowing the output cap). Use
+      // low effort to emit the verdict concisely.
+      reasoning: { effort: forceVerdict ? 'low' : 'high' },
     };
     if (forceVerdict) {
       // Force a JSON verdict (no tools). response_format:json_object makes the
