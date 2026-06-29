@@ -45,7 +45,8 @@ const BAD_EXAMPLES = `### Bad finding — DO NOT report things like this:
 - "Consider adding JSDoc to this function" (style)
 - "This function could be more efficient" (preference)
 - "Missing test coverage" (unless critical path)
-- "Variable name could be clearer" (naming)`;
+- "Variable name could be clearer" (naming)
+- A multi-paragraph "message" that narrates your investigation step by step (state the bug in 1–2 sentences, not your process)`;
 
 const RULES_SECTION = `<rules>
 ## Rules
@@ -79,9 +80,9 @@ After investigation, output a JSON block in a \`\`\`json code fence:
       "symbolName": "functionName",
       "severity": "error | warning",
       "category": "bug | breaking_change | logic_error | error_handling | type_mismatch | risk",
-      "message": "Specific: input X → returns Y → should return Z",
-      "suggestion": "Fix with code snippet",
-      "evidence": "What check found this",
+      "message": "1–2 sentences with the concrete trigger and wrong behavior: input X → returns Y → should return Z. Keep exact values/conditions; cut the investigation story.",
+      "suggestion": "The fix, ideally a short code snippet. No prose walkthrough.",
+      "evidence": "One line: the specific check that found this",
       "ruleId": "optional — which rule triggered this (e.g., 'edge-case-sweep', 'concurrency-race')"
     }
   ],
@@ -93,6 +94,8 @@ After investigation, output a JSON block in a \`\`\`json code fence:
 }
 
 If you find no issues, return empty findings with a low-risk summary. Do not fabricate findings.
+
+Keep \`message\`, \`suggestion\`, and \`evidence\` tight — a few sentences at most each. Cut the investigation narrative and your reasoning, but ALWAYS keep the concrete specifics (exact inputs, values, boundary conditions, before→after states) that make the finding actionable.
 </output_format>`;
 
 // ---------------------------------------------------------------------------
