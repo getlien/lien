@@ -457,23 +457,15 @@ export async function grepCodebase(
       return JSON.stringify({ error: `Invalid regex pattern: ${(err as Error).message}` });
     }
 
-    // The working tree may be absent (offline fixture replay against a captured
-    // ReviewContext whose repoRootDir is a long-gone temp dir). Say so loudly
-    // rather than returning a silent empty result.
-    if (await repoTreeUnavailable(ctx.repoRootDir)) {
-      return JSON.stringify({
-        results: [],
-        count: 0,
-        unavailable: true,
-        reason: REPLAY_UNAVAILABLE_REASON,
-      });
-    }
-
     // Search the real working tree (not just parser-chunked source) so refs in
     // config, YAML, CI workflows, etc. are visible. Respect .gitignore +
     // built-in excludes via the shared parser filter, pruning ignored paths
     // during the walk rather than after. Canonicalize the root first so symlink
     // containment checks compare like-for-like (e.g. macOS /var vs /private/var).
+    // A missing root (offline fixture replay against a long-gone temp dir)
+    // surfaces here as ENOENT/ENOTDIR and is translated in the catch below —
+    // handled on the real operation rather than a pre-check, to avoid a TOCTOU
+    // window and a redundant stat.
     const rootDir = await fs.realpath(ctx.repoRootDir);
     const isIgnored = await createGitignoreFilter(rootDir);
     const files: string[] = [];
@@ -489,6 +481,15 @@ export async function grepCodebase(
 
     return JSON.stringify({ results: matches, count: matches.length, truncated });
   } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return JSON.stringify({
+        results: [],
+        count: 0,
+        unavailable: true,
+        reason: REPLAY_UNAVAILABLE_REASON,
+      });
+    }
     return JSON.stringify({ error: `grep_codebase failed: ${(err as Error).message}` });
   }
 }

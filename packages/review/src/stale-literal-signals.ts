@@ -277,7 +277,6 @@ function findStaleSites(
       const dedupKey = `${file}:${absLine}`;
       if (seen.has(dedupKey)) continue;
       if (fileChanged?.has(absLine)) continue; // a line this PR touched — not a survivor
-      if (file === lit.file && absLine === lit.changedLine) continue; // the touched site itself
       if (!lineContainsLiteral(lines[i], lit)) continue;
 
       seen.add(dedupKey);

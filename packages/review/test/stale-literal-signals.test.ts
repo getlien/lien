@@ -181,6 +181,28 @@ describe('computeStaleLiteralCandidates', () => {
     expect(candidates.find(c => c.literal === "'gemini-3-flash'")).toBeUndefined();
   });
 
+  it('reports a survivor on a context line adjacent to a pure removal', () => {
+    // Regression: a removed-outright literal records changedLine as the *next*
+    // new-file line (a `-` line does not advance the counter). An earlier guard
+    // that skipped `absLine === changedLine` wrongly suppressed a real survivor
+    // sitting on that adjacent context line. Touched-line exclusion is now
+    // derived only from `+` lines (none here), so the survivor must surface.
+    const patch =
+      '@@ -5,3 +5,2 @@\n' +
+      '   const a = 1;\n' +
+      "-  const old = 'shared-token-abc';\n" +
+      "   const other = 'shared-token-abc';";
+    const patches = new Map([['src/a.ts', patch]]);
+    const repoChunks = [
+      makeChunk('src/a.ts', 5, "const a = 1;\nconst other = 'shared-token-abc';"),
+    ];
+
+    const candidates = computeStaleLiteralCandidates(makeContext({ patches, repoChunks }));
+    const cand = candidates.find(c => c.literal === "'shared-token-abc'");
+    expect(cand).toBeDefined();
+    expect(cand!.staleSites.map(s => s.line)).toContain(6); // the surviving context line
+  });
+
   it('returns no candidate when the literal does not survive elsewhere', () => {
     const patches = new Map([
       ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'lonely-literal-xyz';\n+const x = compute();"],
