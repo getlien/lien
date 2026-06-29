@@ -528,7 +528,9 @@ function extractResponse(content: Anthropic.Messages.ContentBlock[]): {
     return { findings: [] };
   }
 
-  const text = textBlocks[textBlocks.length - 1].text;
+  // Concatenate ALL text blocks — Anthropic can split a response across blocks,
+  // so the verdict may not live in the last one.
+  const text = textBlocks.map(b => b.text).join('\n');
 
   // Try, in order: a ```json fence (normal turns); the raw body (a forced
   // verdict turn may emit bare JSON); and a JSON object embedded in prose. The
@@ -541,7 +543,8 @@ function extractResponse(content: Anthropic.Messages.ContentBlock[]): {
     if (!candidate) continue;
     try {
       const parsed = JSON.parse(candidate);
-      const findings: unknown[] = Array.isArray(parsed) ? parsed : (parsed.findings ?? []);
+      const rawFindings = Array.isArray(parsed) ? parsed : parsed.findings;
+      const findings: unknown[] = Array.isArray(rawFindings) ? rawFindings : [];
       const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
       if (summary || findings.length > 0) {
         return { findings: findings.filter(isValidFinding), summary };
