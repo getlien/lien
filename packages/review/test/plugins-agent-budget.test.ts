@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { OpenAIAgentClient, envDisabled } from '../src/plugins/agent/openai-client.js';
-import { AgentReviewPlugin, scaleBudgetForBlastRadius } from '../src/plugins/agent/index.js';
+import {
+  AgentReviewPlugin,
+  scaleBudgetForBlastRadius,
+  clampText,
+} from '../src/plugins/agent/index.js';
 import { scaleAgentBudget } from '../src/review-pr.js';
 import { DEFAULT_REVIEW_MODEL, MAX_REVIEW_TOKEN_BUDGET } from '../src/defaults.js';
 import { silentLogger } from '../src/test-helpers.js';
@@ -165,6 +169,11 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(bodies[0].response_format).toBeUndefined();
     expect(bodies[1].tools).toBeUndefined(); // turn 2 forced: no tools
     expect(bodies[1].response_format).toEqual({ type: 'json_object' });
+    // Investigation turn reasons hard; the forced-verdict turn drops to low
+    // effort (findings already decided) so it emits the JSON without rambling.
+    expect(bodies[0].reasoning).toEqual({ effort: 'high' });
+    expect(bodies[1].reasoning).toEqual({ effort: 'low' });
+    expect(bodies[0].max_tokens).toBe(24_576);
   });
 
   it('recovers a verdict via the json-forced summary-retry after a bail', async () => {
@@ -435,5 +444,28 @@ describe('AgentReviewPlugin.present — incomplete review', () => {
     const summary = appendSummary.mock.calls[0][0] as string;
     expect(summary).toContain('Review incomplete');
     expect(summary).not.toContain('No issues found');
+  });
+});
+
+describe('clampText (finding free-text cap)', () => {
+  it('leaves short text unchanged', () => {
+    expect(clampText('short message')).toBe('short message');
+    expect(clampText(undefined)).toBeUndefined();
+  });
+
+  it('truncates an over-long message with an ellipsis', () => {
+    const long = 'x'.repeat(5000);
+    const out = clampText(long)!;
+    expect(out.length).toBeLessThanOrEqual(1200);
+    expect(out.endsWith('…')).toBe(true);
+  });
+
+  it('keeps text exactly at the cap and truncates one over', () => {
+    // Boundary: 1200 chars passes through unchanged; 1201 is truncated. Guards
+    // against a `<= 1200` → `< 1200` regression silently clipping at-cap text.
+    expect(clampText('y'.repeat(1200))).toBe('y'.repeat(1200));
+    const over = clampText('y'.repeat(1201))!;
+    expect(over.length).toBeLessThanOrEqual(1200);
+    expect(over.endsWith('…')).toBe(true);
   });
 });

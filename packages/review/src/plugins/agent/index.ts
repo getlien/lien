@@ -339,6 +339,19 @@ function appendIncompleteNotice(
 // Finding mapping
 // ---------------------------------------------------------------------------
 
+/**
+ * Cap free-text finding fields. A verbose model (Kimi) can dump a multi-thousand
+ * character stream-of-consciousness into a single `message`/`evidence`, which
+ * both bloats the PR comment and risks truncating the whole verdict JSON. Trim
+ * to a readable length at the display boundary.
+ */
+const MAX_FINDING_TEXT_CHARS = 1200;
+
+export function clampText(text: string | undefined): string | undefined {
+  if (!text || text.length <= MAX_FINDING_TEXT_CHARS) return text;
+  return `${text.slice(0, MAX_FINDING_TEXT_CHARS - 1).trimEnd()}…`;
+}
+
 function mapToReviewFinding(f: AgentFinding, pluginId: string): ReviewFinding {
   return {
     pluginId,
@@ -348,9 +361,9 @@ function mapToReviewFinding(f: AgentFinding, pluginId: string): ReviewFinding {
     symbolName: f.symbolName,
     severity: f.severity,
     category: f.category,
-    message: f.message,
-    suggestion: f.suggestion,
-    evidence: f.evidence,
+    message: clampText(f.message) ?? f.message,
+    suggestion: clampText(f.suggestion),
+    evidence: clampText(f.evidence),
     ...(f.ruleId ? { metadata: { ruleId: f.ruleId } } : {}),
   };
 }
