@@ -227,6 +227,40 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(result.summary?.overview).toBe('wrapped');
   });
 
+  it('prefers the real verdict over an earlier example JSON block', async () => {
+    // The model echoes a few-shot example ```json block, then its real verdict.
+    // The OLD first-fence logic would return the example; we must pick the last.
+    const example =
+      '```json\n' +
+      JSON.stringify({
+        findings: [
+          {
+            filepath: 'x.ts',
+            line: 1,
+            severity: 'warning',
+            category: 'logic_error',
+            message: 'eg',
+          },
+        ],
+        summary: { riskLevel: 'high', overview: 'EXAMPLE', keyChanges: [] },
+      }) +
+      '\n```';
+    const real =
+      '```json\n' +
+      JSON.stringify({
+        findings: [],
+        summary: { riskLevel: 'low', overview: 'REAL', keyChanges: [] },
+      }) +
+      '\n```';
+    mockFetch([stopTurn(`Here is the format:\n${example}\n\nMy actual review:\n${real}`)]);
+    const client = makeClient(1_000_000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.summary?.overview).toBe('REAL');
+    expect(result.findings).toHaveLength(0);
+  });
+
   it('retries a transient empty response body instead of crashing', async () => {
     // A 200 with an empty body makes response.json() throw "Unexpected end of
     // JSON input" — previously that crashed the whole agent-review. The client
