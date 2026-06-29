@@ -35,6 +35,23 @@ const WRAP_UP_NUDGE =
 const RETRY_NUDGE =
   'You ran out of budget. Output ONLY the JSON block now with your findings and summary. No tool calls.';
 
+/**
+ * Transient-failure retry for the chat endpoint. OpenRouter/Kimi intermittently
+ * returns a 200 with an empty/truncated body, a 429/5xx, or hangs the
+ * connection — all recover on a retry. 2 attempts (one retry) absorbs flakes
+ * while keeping worst-case latency bounded on a genuine outage.
+ */
+const CHAT_MAX_ATTEMPTS = 2;
+const CHAT_RETRY_BASE_DELAY_MS = 500;
+/**
+ * Per-request abort timeout, covering BOTH the response headers and the body
+ * read — a hang in either rejects (and is retried) instead of stalling a turn
+ * forever. Generous so a slow large-context reasoning turn isn't aborted.
+ */
+const CHAT_REQUEST_TIMEOUT_MS = 120_000;
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
 }
@@ -228,7 +245,19 @@ export class OpenAIAgentClient {
     while (turn < this.maxTurns) {
       turn++;
 
-      const response = await this.chatCompletion(messages, tools, forceFinish);
+      let response: ChatResponse;
+      try {
+        response = await this.chatCompletion(messages, tools, forceFinish);
+      } catch (err) {
+        // Transient failures are already retried inside chatCompletion; a throw
+        // here means it gave up. End the run gracefully (stopReason 'error' → no
+        // summary → incomplete notice) rather than crashing the whole plugin.
+        this.logger.warning(
+          `[agent] chat request failed after retries (${err instanceof Error ? err.message : String(err)}); ending run`,
+        );
+        stopReason = 'error';
+        break;
+      }
 
       const turnInputTokens = response.usage?.prompt_tokens ?? 0;
       const turnOutputTokens = response.usage?.completion_tokens ?? 0;
@@ -328,13 +357,16 @@ export class OpenAIAgentClient {
     const cost =
       totalInputTokens * this.inputCostPerToken + totalOutputTokens * this.outputCostPerToken;
 
-    // Incomplete = the loop bailed on a limit (or error) AND never produced a
-    // verdict (no summary, even after the retry). Such a run must not be shown
-    // as a clean review.
-    const incomplete = stopReason !== 'completed' && !parsed.summary;
+    // Incomplete = the agent never produced a structured verdict (no summary,
+    // even after the retry). A genuine clean review always carries a summary, so
+    // the ABSENCE of one — not the stop reason — is what marks a run incomplete.
+    // Critically this also catches a `finish_reason: 'stop'` turn that emitted
+    // prose instead of the findings JSON (the model "completed" but delivered no
+    // verdict): that must NOT be reported as a clean 0-findings review.
+    const incomplete = !parsed.summary;
     if (incomplete) {
       this.logger.warning(
-        `[agent] Review incomplete (stopReason=${stopReason}, no summary after ${turn} turns)`,
+        `[agent] Review incomplete (stopReason=${stopReason}, no verdict/summary after ${turn} turns)`,
       );
       // Always surface what the agent was doing when it bailed — the single
       // most useful datum for diagnosing an incomplete run in CI logs.
@@ -454,14 +486,17 @@ export class OpenAIAgentClient {
   private logTurn(turn: TurnTrace | undefined, label?: string): void {
     if (!turn) return;
     const tag = label ? ` (${label})` : '';
-    if (turn.reasoning) {
+    // Guard on trimmed content: on tool-call turns the model emits tool calls
+    // (logged separately) and often a whitespace-only `content`, which would
+    // otherwise print a blank, confusing "output:" line.
+    if (turn.reasoning?.trim()) {
       this.logger.info(
-        `[agent] Turn ${turn.turnNumber} reasoning${tag}:\n${truncate(turn.reasoning, AGENT_LOG_MAX)}`,
+        `[agent] Turn ${turn.turnNumber} reasoning${tag}:\n${truncate(turn.reasoning.trim(), AGENT_LOG_MAX)}`,
       );
     }
-    if (turn.responseText) {
+    if (turn.responseText?.trim()) {
       this.logger.info(
-        `[agent] Turn ${turn.turnNumber} output${tag}:\n${truncate(turn.responseText, AGENT_LOG_MAX)}`,
+        `[agent] Turn ${turn.turnNumber} output${tag}:\n${truncate(turn.responseText.trim(), AGENT_LOG_MAX)}`,
       );
     }
   }
@@ -489,23 +524,83 @@ export class OpenAIAgentClient {
       body.tools = tools;
     }
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-        'HTTP-Referer': 'https://lien.dev',
-        'X-Title': 'Lien Review',
-      },
-      body: JSON.stringify(body),
-    });
+    let lastError: Error | undefined;
+    for (let attempt = 1; attempt <= CHAT_MAX_ATTEMPTS; attempt++) {
+      if (attempt > 1) await sleep(CHAT_RETRY_BASE_DELAY_MS * (attempt - 1));
 
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`API error (${response.status}): ${err}`);
+      let res: { ok: boolean; status: number; text: string };
+      try {
+        res = await this.postChat(body);
+      } catch (err) {
+        // Network error, or the abort timeout firing on a hung connection
+        // (header OR body stream). Transient — retry.
+        lastError = new Error(
+          `Request to ${this.model} failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        this.logger.warning(`[agent] ${lastError.message} — retry ${attempt}/${CHAT_MAX_ATTEMPTS}`);
+        continue;
+      }
+
+      if (!res.ok) {
+        // 429/5xx are transient — retry; other 4xx are fatal (bad request/auth).
+        if (res.status === 429 || res.status >= 500) {
+          lastError = new Error(`API error (${res.status}): ${truncate(res.text, 200)}`);
+          this.logger.warning(
+            `[agent] ${lastError.message} — retry ${attempt}/${CHAT_MAX_ATTEMPTS}`,
+          );
+          continue;
+        }
+        throw new Error(`API error (${res.status}): ${res.text}`);
+      }
+
+      // Parse defensively: an empty/truncated 200 body would otherwise throw a
+      // bare "Unexpected end of JSON input" and crash the review. Retry it.
+      if (!res.text.trim()) {
+        lastError = new Error(`Empty response body from ${this.model} (status ${res.status})`);
+        this.logger.warning(`[agent] ${lastError.message} — retry ${attempt}/${CHAT_MAX_ATTEMPTS}`);
+        continue;
+      }
+      try {
+        return JSON.parse(res.text) as ChatResponse;
+      } catch {
+        lastError = new Error(
+          `Unparseable response body from ${this.model} (status ${res.status}): ${truncate(res.text, 200)}`,
+        );
+        this.logger.warning(`[agent] ${lastError.message} — retry ${attempt}/${CHAT_MAX_ATTEMPTS}`);
+      }
     }
 
-    return (await response.json()) as ChatResponse;
+    throw lastError ?? new Error(`chatCompletion failed for ${this.model}`);
+  }
+
+  /**
+   * POST the chat request and read the FULL body under a single abort timeout,
+   * so a hang in either the headers or the body stream rejects (and is retried)
+   * rather than stalling the turn indefinitely (the body read was previously
+   * outside the timeout, which let a hung stream hang the whole review).
+   */
+  private async postChat(
+    body: Record<string, unknown>,
+  ): Promise<{ ok: boolean; status: number; text: string }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CHAT_REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+          'HTTP-Referer': 'https://lien.dev',
+          'X-Title': 'Lien Review',
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      return { ok: response.ok, status: response.status, text };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 
@@ -534,25 +629,53 @@ export function toOpenAITools(
 // Response parsing (same as anthropic-client.ts)
 // ---------------------------------------------------------------------------
 
+/** Pull validated findings + summary out of one parsed JSON verdict (array or object). */
+function readVerdict(parsed: unknown): { findings: AgentFinding[]; summary?: AgentSummary } {
+  const obj = (parsed ?? {}) as { findings?: unknown; summary?: unknown };
+  const rawFindings = Array.isArray(parsed) ? parsed : obj.findings;
+  const findings = (Array.isArray(rawFindings) ? rawFindings : []).filter(isValidFinding);
+  const summary = isValidSummary(obj.summary) ? obj.summary : undefined;
+  return { findings, summary };
+}
+
 function extractResponse(content: string | null): {
   findings: AgentFinding[];
   summary?: AgentSummary;
 } {
   if (!content) return { findings: [] };
 
-  // Prefer a ```json fence (normal turns); fall back to the raw body, which is
-  // what response_format:json_object returns on a forced-verdict turn.
-  const jsonMatch = content.match(/```json\s*\n([\s\S]*?)\n\s*```/);
-  const raw = jsonMatch ? jsonMatch[1] : content.trim();
+  // Candidate JSON strings, in priority order:
+  //  1. each ```json fence, LAST first — the model emits its verdict last, so a
+  //     few-shot/example fence earlier in the prose must not win;
+  //  2. the raw body (response_format:json_object forced-verdict turn);
+  //  3. a JSON object embedded in surrounding prose (model ignored json_object).
+  const fences = [...content.matchAll(/```json\s*\n([\s\S]*?)\n\s*```/g)].map(m => m[1]).reverse();
+  const candidates = [...fences, content.trim(), embeddedJsonObject(content)];
 
-  try {
-    const parsed = JSON.parse(raw);
-    const findings: unknown[] = Array.isArray(parsed) ? parsed : (parsed.findings ?? []);
-    const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
-    return { findings: findings.filter(isValidFinding), summary };
-  } catch {
-    return { findings: [] };
+  // Prefer a candidate carrying a `summary` (the verdict marker) so an
+  // `{"findings": [...]}`-only example can't beat the real verdict; fall back to
+  // the first findings-only candidate if nothing carries a summary.
+  let fallback: { findings: AgentFinding[] } | undefined;
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch {
+      continue; // not parseable — try the next candidate
+    }
+    const { findings, summary } = readVerdict(parsed);
+    if (summary) return { findings, summary };
+    if (findings.length > 0 && !fallback) fallback = { findings };
   }
+  return fallback ?? { findings: [] };
+}
+
+/** First `{`…last `}` slice — recovers a JSON object wrapped in prose. */
+function embeddedJsonObject(content: string): string | undefined {
+  const start = content.indexOf('{');
+  const end = content.lastIndexOf('}');
+  return start !== -1 && end > start ? content.slice(start, end + 1) : undefined;
 }
 
 function isValidSummary(value: unknown): value is AgentSummary {
