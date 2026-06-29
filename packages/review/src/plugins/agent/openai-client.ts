@@ -42,8 +42,26 @@ const RETRY_NUDGE =
  */
 const CHAT_MAX_ATTEMPTS = 3;
 const CHAT_RETRY_BASE_DELAY_MS = 500;
+/** Per-request abort timeout. A hung connection otherwise stalls a turn for
+ * minutes before fetch eventually rejects; abort + retry recovers faster. */
+const CHAT_REQUEST_TIMEOUT_MS = 120_000;
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+/** fetch with an abort timeout so a hung connection rejects (and is retried). */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
@@ -238,7 +256,19 @@ export class OpenAIAgentClient {
     while (turn < this.maxTurns) {
       turn++;
 
-      const response = await this.chatCompletion(messages, tools, forceFinish);
+      let response: ChatResponse;
+      try {
+        response = await this.chatCompletion(messages, tools, forceFinish);
+      } catch (err) {
+        // Transient failures are already retried inside chatCompletion; a throw
+        // here means it gave up. End the run gracefully (stopReason 'error' → no
+        // summary → incomplete notice) rather than crashing the whole plugin.
+        this.logger.warning(
+          `[agent] chat request failed after retries (${err instanceof Error ? err.message : String(err)}); ending run`,
+        );
+        stopReason = 'error';
+        break;
+      }
 
       const turnInputTokens = response.usage?.prompt_tokens ?? 0;
       const turnOutputTokens = response.usage?.completion_tokens ?? 0;
@@ -506,16 +536,31 @@ export class OpenAIAgentClient {
     for (let attempt = 1; attempt <= CHAT_MAX_ATTEMPTS; attempt++) {
       if (attempt > 1) await sleep(CHAT_RETRY_BASE_DELAY_MS * (attempt - 1));
 
-      const response = await fetch(`${this.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`,
-          'HTTP-Referer': 'https://lien.dev',
-          'X-Title': 'Lien Review',
-        },
-        body: JSON.stringify(body),
-      });
+      let response: Response;
+      try {
+        response = await fetchWithTimeout(
+          `${this.baseUrl}/chat/completions`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${this.apiKey}`,
+              'HTTP-Referer': 'https://lien.dev',
+              'X-Title': 'Lien Review',
+            },
+            body: JSON.stringify(body),
+          },
+          CHAT_REQUEST_TIMEOUT_MS,
+        );
+      } catch (err) {
+        // fetch() rejected: a network error, or our abort timeout firing on a
+        // hung connection. Both are transient — retry.
+        lastError = new Error(
+          `Request to ${this.model} failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        this.logger.warning(`[agent] ${lastError.message} — retry ${attempt}/${CHAT_MAX_ATTEMPTS}`);
+        continue;
+      }
 
       if (!response.ok) {
         const err = await response.text();
@@ -596,7 +641,8 @@ function extractResponse(content: string | null): {
     if (!candidate) continue;
     try {
       const parsed = JSON.parse(candidate);
-      const findings: unknown[] = Array.isArray(parsed) ? parsed : (parsed.findings ?? []);
+      const rawFindings = Array.isArray(parsed) ? parsed : parsed.findings;
+      const findings: unknown[] = Array.isArray(rawFindings) ? rawFindings : [];
       const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
       // Accept only a candidate that yields a real verdict or findings, so an
       // empty `{}` earlier in the prose doesn't mask the actual JSON later.

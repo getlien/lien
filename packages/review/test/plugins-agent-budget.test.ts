@@ -240,6 +240,50 @@ describe('OpenAIAgentClient budget handling', () => {
     expect(result.summary).toBeDefined();
     expect(result.incomplete).toBe(false);
   });
+
+  it('retries when fetch itself rejects (network error / timeout)', async () => {
+    // `fetch failed` (a network error or an aborted hung connection) rejects
+    // before any response — previously this crashed the review. Retry & recover.
+    let calls = 0;
+    const ok = stopTurn(CLEAN_JSON);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls++;
+        if (calls === 1) throw new TypeError('fetch failed');
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ok,
+          text: async () => JSON.stringify(ok),
+        };
+      }),
+    );
+    const client = makeClient(1_000_000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(calls).toBeGreaterThanOrEqual(2); // retried after the rejection
+    expect(result.stopReason).toBe('completed');
+    expect(result.summary).toBeDefined();
+  });
+
+  it('degrades to an incomplete review when chat requests keep failing', async () => {
+    // Persistent network failure: after retries exhaust, the run ends gracefully
+    // as incomplete (surfacing a "did not finish" notice), not a plugin crash.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('fetch failed');
+      }),
+    );
+    const client = makeClient(1_000_000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.incomplete).toBe(true);
+    expect(result.summary).toBeUndefined();
+  }, 20000); // retries + the summary-retry's own attempts/sleep
 });
 
 describe('envDisabled (LIEN_REVIEW_LOG_AGENT parsing — logging on by default)', () => {
