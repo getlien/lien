@@ -148,7 +148,7 @@ describe('OpenAIAgentClient budget handling', () => {
     const toolMessage = secondRequestMessages.find(m => m.role === 'tool');
     expect(toolMessage).toBeDefined();
     expect(toolMessage!.content.length).toBeLessThan(hugeOutput.length);
-    expect(toolMessage!.content.length).toBeLessThanOrEqual(24_100);
+    expect(toolMessage!.content.length).toBeLessThanOrEqual(16_100);
     expect(toolMessage!.content).toContain('…[truncated');
   });
 
@@ -362,20 +362,20 @@ describe('scaleBudgetForBlastRadius', () => {
 });
 
 describe('scaleAgentBudget — model-aware multiplier', () => {
-  // ~40K chars ≈ 10K content tokens; with 5 files (maxTurns 10, toolBudget 80K)
-  // base = 4000 + 10000 + 80000 + 2000 = 96000 (within [60K, ceiling], unclamped).
+  // ~40K chars ≈ 10K content tokens; with 5 files (maxTurns 10, toolBudget 60K)
+  // base = 4000 + 10000 + 60000 + 2000 = 76000 (within [60K, ceiling], unclamped).
   const chunks = [{ content: 'x'.repeat(40_000) }];
 
   it('scales the budget up ~1.5x for Kimi vs a lean model', () => {
     const lean = scaleAgentBudget(5, chunks, 'some/lean-model').maxTokenBudget;
     const kimi = scaleAgentBudget(5, chunks, DEFAULT_REVIEW_MODEL).maxTokenBudget;
-    expect(lean).toBe(96_000);
-    expect(kimi).toBe(144_000);
+    expect(lean).toBe(76_000);
+    expect(kimi).toBe(114_000);
     expect(kimi).toBe(lean * 1.5);
   });
 
   it('clamps the scaled budget to the shared ceiling', () => {
-    // 15 files → big toolBudget; large content pushes base*1.5 past the ceiling.
+    // 15 files (maxTurns 12) + large content pushes base*1.5 past the ceiling.
     const big = [{ content: 'x'.repeat(400_000) }];
     expect(scaleAgentBudget(15, big, DEFAULT_REVIEW_MODEL).maxTokenBudget).toBe(
       MAX_REVIEW_TOKEN_BUDGET,
@@ -383,11 +383,11 @@ describe('scaleAgentBudget — model-aware multiplier', () => {
   });
 
   it('always returns an integer budget (the config schema requires int)', () => {
-    // 40002 chars → ceil(/4)=10001 → base 96001 (odd); ×1.5 = 144001.5 must round.
+    // 40002 chars → ceil(/4)=10001 → base 76001 (odd); ×1.5 = 114001.5 must round.
     const odd = [{ content: 'x'.repeat(40_002) }];
     const { maxTokenBudget } = scaleAgentBudget(5, odd, DEFAULT_REVIEW_MODEL);
     expect(Number.isInteger(maxTokenBudget)).toBe(true);
-    expect(maxTokenBudget).toBe(144_002);
+    expect(maxTokenBudget).toBe(114_002);
   });
 
   it('produces a config the agent-review schema accepts', () => {

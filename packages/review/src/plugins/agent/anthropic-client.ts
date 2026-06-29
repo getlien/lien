@@ -27,9 +27,9 @@ const AGENT_LOG_MAX = 4000;
  * Cap a single tool result fed back to the model. A large file read or
  * batched get_files_context can otherwise return tens of thousands of tokens
  * in one turn, blowing the whole budget before the wrap-up nudge can fire.
- * ~24K chars ≈ 6K tokens — enough context for a review, bounded per call.
+ * ~16K chars ≈ 4K tokens — enough context for a review, bounded per call.
  */
-const TOOL_RESULT_MAX_CHARS = 24_000;
+const TOOL_RESULT_MAX_CHARS = 16_000;
 
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;

@@ -313,11 +313,11 @@ export function scaleAgentBudget(
   // Budget breakdown:
   // - System prompt: ~3K tokens (XML tags, examples, three-phase instructions)
   // - Initial message: ~1K overhead + content tokens (diff, signatures, etc.)
-  // - Tool results: ~8K per call (get_files_context returns full chunks)
+  // - Tool results: ~6K per call (capped by TOOL_RESULT_MAX_CHARS in the clients)
   // - Final JSON output: ~2K
-  // - Conversation growth: each turn re-sends everything
-  const maxTurns = fileCount <= 3 ? 8 : fileCount <= 10 ? 10 : 15;
-  const toolBudget = maxTurns * 8_000;
+  // - Conversation growth: each turn re-sends everything, so cap turns on big PRs
+  const maxTurns = fileCount <= 3 ? 8 : fileCount <= 10 ? 10 : 12;
+  const toolBudget = maxTurns * 6_000;
   const baseBudget = 4_000 + estimatedContentTokens + toolBudget + 2_000;
 
   // Scale by the model's token appetite — the breakdown above is per the
