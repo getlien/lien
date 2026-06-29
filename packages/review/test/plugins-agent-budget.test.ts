@@ -29,8 +29,14 @@ function capturingLogger(): { logger: Logger; lines: string[] } {
   };
 }
 
-/** Install a fetch mock that replays `responses` and records request bodies. */
-function mockFetch(responses: ChatResponse[]): { bodies: Array<Record<string, unknown>> } {
+/**
+ * Install a fetch mock that replays `responses` and records request bodies.
+ * A `null` queue entry simulates a transient empty 200 body (provider hiccup) —
+ * the client reads `response.text()`, so it serializes each response there.
+ */
+function mockFetch(responses: Array<ChatResponse | null>): {
+  bodies: Array<Record<string, unknown>>;
+} {
   const bodies: Array<Record<string, unknown>> = [];
   const queue = [...responses];
   vi.stubGlobal(
@@ -38,7 +44,8 @@ function mockFetch(responses: ChatResponse[]): { bodies: Array<Record<string, un
     vi.fn(async (_url: string, init: { body: string }) => {
       bodies.push(JSON.parse(init.body));
       const next = queue.shift();
-      return { ok: true, status: 200, json: async () => next, text: async () => '' };
+      const text = next == null ? '' : JSON.stringify(next);
+      return { ok: true, status: 200, json: async () => next, text: async () => text };
     }),
   );
   return { bodies };
@@ -218,6 +225,20 @@ describe('OpenAIAgentClient budget handling', () => {
 
     expect(result.incomplete).toBe(false);
     expect(result.summary?.overview).toBe('wrapped');
+  });
+
+  it('retries a transient empty response body instead of crashing', async () => {
+    // A 200 with an empty body makes response.json() throw "Unexpected end of
+    // JSON input" — previously that crashed the whole agent-review. The client
+    // must retry and recover, not throw.
+    mockFetch([null, stopTurn(CLEAN_JSON)]); // turn 1: empty body, then a valid verdict
+    const client = makeClient(1_000_000);
+
+    const result = await client.run('sys', 'init', [], noopTool);
+
+    expect(result.stopReason).toBe('completed');
+    expect(result.summary).toBeDefined();
+    expect(result.incomplete).toBe(false);
   });
 });
 
