@@ -410,6 +410,38 @@ async function scanForMatches(
   return { matches: matches.slice(0, MAX_GREP_RESULTS), truncated };
 }
 
+/**
+ * Message returned by the disk-backed tools when the working tree is absent.
+ * Spelled out so the agent does NOT read an empty/missing result as "no match
+ * exists" — in offline fixture replay the captured repoRootDir is long gone, so
+ * grep/read are blind and a silent empty result has caused grep-dependent rules
+ * to be misdiagnosed as model failures. Points the agent at the deterministic
+ * signals and in-memory chunk tools, which work regardless of the working tree.
+ */
+const REPLAY_UNAVAILABLE_REASON =
+  'The repository working tree is not available in this run (e.g. offline fixture ' +
+  'replay), so disk-backed search is blind here — a zero/empty result does NOT mean ' +
+  '"no match exists". Rely on the pre-computed signals in your initial message ' +
+  '(<stale_literal_candidates>, <blast_radius>, <deleted_exports>) and the ' +
+  'chunk-backed tools (get_files_context, get_dependents, list_functions) instead.';
+
+/**
+ * True when the repo working tree is not on disk (e.g. harness fixture replay).
+ * Only a genuinely missing root (ENOENT / ENOTDIR) counts — a root that exists
+ * but is unreadable (EACCES, EMFILE, transient I/O) must surface as a real
+ * error, not be masked as replay blindness, so return false and let the caller
+ * fail normally.
+ */
+async function repoTreeUnavailable(repoRootDir: string): Promise<boolean> {
+  try {
+    await fs.access(repoRootDir);
+    return false;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR';
+  }
+}
+
 export async function grepCodebase(
   input: Record<string, unknown>,
   ctx: AgentToolContext,
@@ -430,6 +462,10 @@ export async function grepCodebase(
     // built-in excludes via the shared parser filter, pruning ignored paths
     // during the walk rather than after. Canonicalize the root first so symlink
     // containment checks compare like-for-like (e.g. macOS /var vs /private/var).
+    // A missing root (offline fixture replay against a long-gone temp dir)
+    // surfaces here as ENOENT/ENOTDIR and is translated in the catch below —
+    // handled on the real operation rather than a pre-check, to avoid a TOCTOU
+    // window and a redundant stat.
     const rootDir = await fs.realpath(ctx.repoRootDir);
     const isIgnored = await createGitignoreFilter(rootDir);
     const files: string[] = [];
@@ -445,6 +481,15 @@ export async function grepCodebase(
 
     return JSON.stringify({ results: matches, count: matches.length, truncated });
   } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return JSON.stringify({
+        results: [],
+        count: 0,
+        unavailable: true,
+        reason: REPLAY_UNAVAILABLE_REASON,
+      });
+    }
     return JSON.stringify({ error: `grep_codebase failed: ${(err as Error).message}` });
   }
 }
@@ -496,10 +541,14 @@ export async function readFile(
       content: numbered,
     });
   } catch (err) {
-    const message =
-      (err as NodeJS.ErrnoException).code === 'ENOENT'
-        ? `File not found: ${input.filepath}`
-        : `read_file failed: ${(err as Error).message}`;
-    return JSON.stringify({ error: message });
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      // Distinguish "this one file is missing" from "the whole working tree is
+      // gone" (offline replay) — the latter is blind, not a real 404.
+      if (await repoTreeUnavailable(ctx.repoRootDir)) {
+        return JSON.stringify({ unavailable: true, reason: REPLAY_UNAVAILABLE_REASON });
+      }
+      return JSON.stringify({ error: `File not found: ${input.filepath}` });
+    }
+    return JSON.stringify({ error: `read_file failed: ${(err as Error).message}` });
   }
 }

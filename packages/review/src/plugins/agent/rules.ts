@@ -474,17 +474,22 @@ edited (e.g., a conditional was added or modified above it).
 
 MANDATORY protocol when this rule is active:
 
-1. Walk the diff. Collect every quoted string literal and every
-   distinctive numeric/identifier constant that appears in either
-   the \`-\` lines, the \`+\` lines, or as part of a value-emitting
-   expression on a touched line (e.g., the branch values of a
-   conditional that the diff modified).
-2. **For each such literal, you MUST call \`grep_codebase\`** with
-   the literal's exact text (including quotes for strings; for
-   numbers and identifiers, prefer a pattern that anchors on the
-   surrounding syntax to reduce false matches). Look at the hits
-   that fall *outside* the diff hunks.
-3. For each outside-the-diff hit, decide whether that site should
+1. **Check for a \`<stale_literal_candidates>\` block in your initial
+   message FIRST.** Lien pre-computes it by deterministically scanning
+   the indexed repo for literals this PR changed in one place that
+   still appear unchanged elsewhere — the discovery work (which would
+   otherwise require \`grep_codebase\`) is already done for you. When
+   the block is present it is your primary worklist: do NOT re-grep for
+   the literals it already lists. If the block reads "None", the scan
+   ran and was clean — the discovery step is complete, so do not grep
+   for the diff's literals.
+2. The block covers literals the diff *moved away from*. If the diff
+   also *introduces* a literal, or leaves one *unchanged* on a \`+\`
+   line whose surrounding structure was edited (e.g. a conditional
+   added above it), you MAY call \`grep_codebase\` to check those shapes
+   — but the pre-computed block is authoritative for the literals it
+   lists, so do not duplicate its work.
+3. For each candidate or outside-the-diff hit, decide whether that site should
    logically track the changed site. Strong signals: same field
    name on adjacent objects (e.g., \`model\`, \`version\`,
    \`apiKey\`, \`baseUrl\`), same function body, parallel struct
@@ -495,8 +500,9 @@ MANDATORY protocol when this rule is active:
 4. **Emit a finding** for each stale site that should track the
    changed site. The \`message\` must name the literal and BOTH
    locations explicitly (the changed site's line number and the
-   stale site's line number). The \`evidence\` must cite the
-   \`grep_codebase\` invocation that found the stale site.
+   stale site's line number). The \`evidence\` must cite where the
+   stale site was found — the matching \`<stale_literal_candidates>\`
+   entry, or a \`grep_codebase\` invocation if you searched yourself.
 5. The \`suggestion\` should propose either: (a) apply the same
    replacement/parameterization to the stale copy, or (b) hoist the
    literal to a shared \`const\` near the top of the function/file
@@ -504,8 +510,11 @@ MANDATORY protocol when this rule is active:
    change's apparent intent.
 
 Do not finalize a response for this rule with zero findings unless
-you have called \`grep_codebase\` for at least one literal from the
-diff AND can confirm no semantically related copies survive
+you have reviewed every entry in the \`<stale_literal_candidates>\`
+block (a "None" block, or a block whose entries you all judged
+unrelated, satisfies this) — or, when NO block is present at all (the
+scan could not run), called \`grep_codebase\` for at least one literal
+from the diff — AND can confirm no semantically related copies survive
 elsewhere in the post-image.`,
   example: `### Good finding — partial model bump leaves stale hardcoded copy:
 {
