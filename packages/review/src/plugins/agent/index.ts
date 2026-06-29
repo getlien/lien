@@ -318,10 +318,12 @@ function appendIncompleteNotice(
       ? 'hit the token budget limit'
       : result.stopReason === 'max_turns'
         ? 'hit the turn limit'
-        : 'stopped unexpectedly';
+        : result.stopReason === 'completed'
+          ? 'ended without emitting a parseable JSON verdict'
+          : 'stopped unexpectedly';
   const message =
-    `Lien Review did not finish — it ${reason} while investigating and stopped before ` +
-    `producing a verdict. Any findings shown are partial; re-run the review to retry.`;
+    `Lien Review did not finish — it ${reason} while investigating. ` +
+    `Any findings shown are partial; re-run the review to retry.`;
   findings.push({
     pluginId,
     filepath: '',

@@ -300,13 +300,15 @@ export class AnthropicAgentClient {
     const cost =
       totalInputTokens * this.inputCostPerToken + totalOutputTokens * this.outputCostPerToken;
 
-    // Incomplete = the loop bailed on a limit (or error) AND never produced a
-    // verdict (no summary, even after the retry). Such a run must not be shown
-    // as a clean review.
-    const incomplete = stopReason !== 'completed' && !parsed.summary;
+    // Incomplete = the agent never produced a structured verdict (no summary,
+    // even after the retry). A genuine clean review always carries a summary, so
+    // the ABSENCE of one — not the stop reason — is what marks a run incomplete.
+    // This also catches an `end_turn` that emitted prose instead of the findings
+    // JSON: that must NOT be reported as a clean 0-findings review.
+    const incomplete = !parsed.summary;
     if (incomplete) {
       this.logger.warning(
-        `[agent] Review incomplete (stopReason=${stopReason}, no summary after ${turn} turns)`,
+        `[agent] Review incomplete (stopReason=${stopReason}, no verdict/summary after ${turn} turns)`,
       );
       // Always surface what the agent was doing when it bailed.
       this.logTurn(lastLoopTurn, 'last turn before bail');
@@ -528,21 +530,34 @@ function extractResponse(content: Anthropic.Messages.ContentBlock[]): {
 
   const text = textBlocks[textBlocks.length - 1].text;
 
-  const jsonMatch = text.match(/```json\s*\n([\s\S]*?)\n\s*```/);
-  if (!jsonMatch) {
-    return { findings: [] };
+  // Try, in order: a ```json fence (normal turns); the raw body (a forced
+  // verdict turn may emit bare JSON); and a JSON object embedded in prose. The
+  // last guards against a model that prefixed reasoning — without it that turn
+  // parses to an empty result and the run is silently treated as clean.
+  const fenced = text.match(/```json\s*\n([\s\S]*?)\n\s*```/)?.[1];
+  const candidates = [fenced, text.trim(), embeddedJsonObject(text)];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const parsed = JSON.parse(candidate);
+      const findings: unknown[] = Array.isArray(parsed) ? parsed : (parsed.findings ?? []);
+      const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
+      if (summary || findings.length > 0) {
+        return { findings: findings.filter(isValidFinding), summary };
+      }
+    } catch {
+      // not parseable — try the next candidate
+    }
   }
+  return { findings: [] };
+}
 
-  try {
-    const parsed = JSON.parse(jsonMatch[1]);
-
-    const findings: unknown[] = Array.isArray(parsed) ? parsed : (parsed.findings ?? []);
-    const summary = isValidSummary(parsed.summary) ? parsed.summary : undefined;
-
-    return { findings: findings.filter(isValidFinding), summary };
-  } catch {
-    return { findings: [] };
-  }
+/** First `{`…last `}` slice — recovers a JSON object wrapped in prose. */
+function embeddedJsonObject(content: string): string | undefined {
+  const start = content.indexOf('{');
+  const end = content.lastIndexOf('}');
+  return start !== -1 && end > start ? content.slice(start, end + 1) : undefined;
 }
 
 /** Type guard to validate a summary object. */
