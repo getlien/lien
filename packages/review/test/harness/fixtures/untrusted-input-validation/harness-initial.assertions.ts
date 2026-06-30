@@ -13,8 +13,12 @@
  *     packages/review/test/harness/fixtures/untrusted-input-validation/harness-initial.fixture.json \
  *     --sha 7cb0149
  *
- * Tier 1: rule fires + get_files_context is called (the rule's prompt
- * mandates inspecting consumers of the parsed value).
+ * Tier 1: rule fires + get_files_context is called (the rule still mandates
+ * inspecting consumers of the parsed value — get_files_context reads in-memory
+ * repoChunks, so unlike grep/read it is NOT blind in replay). The *discovery*
+ * half is now deterministic: a pre-computed <untrusted_input_sites> worklist is
+ * injected (see packages/review/src/untrusted-input-signals.ts), which hands the
+ * agent the parse sites and counters the silence-bias 0-findings failure mode.
  * Tier 2: the finding mentions one of the four sub-pattern vocabulary
  * families. Set is wide because four sub-patterns can each render with
  * different language; any correct rendering of any one pattern will land.

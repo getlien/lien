@@ -559,9 +559,12 @@ defensive defaults, and TypeScript narrowing alone are NOT validation.
 
 MANDATORY protocol when this rule is active:
 
-1. Walk the diff. Identify every site that produces a value from
-   untrusted bytes (the keyword set above is a hint — if the diff
-   contains one, there's at least one site to inspect).
+1. **Check for a \`<untrusted_input_sites>\` block in your initial
+   message FIRST.** Lien pre-computes the parse sites this PR
+   introduced/modified (the discovery step is done for you), so it is
+   your worklist — inspect every site it lists, skip none. If no block
+   is present, walk the diff yourself, using the keyword set above as a
+   hint (if the diff contains one, there's at least one site to inspect).
 2. **For each site, you MUST call \`get_files_context\` (or
    \`read_file\`)** on the function and on each consumer of the parsed
    value. Trace the parsed value to its uses. Look for one of these
@@ -597,8 +600,10 @@ MANDATORY protocol when this rule is active:
    typed check.
 
 Do not finalize a response for this rule with zero findings unless
-you have called \`get_files_context\` on the parse-site function AND
-on each downstream consumer AND none of the four unguarded shapes
+you have inspected every site in the \`<untrusted_input_sites>\` block
+(or, when no block is present, every parse site you found in the diff),
+called \`get_files_context\` on each parse-site function AND its
+downstream consumers, AND confirmed none of the four unguarded shapes
 matches.`,
   example: `### Good finding — cast-without-validate (CodeRabbit on PR #541):
 {
