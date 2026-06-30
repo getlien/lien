@@ -89,6 +89,21 @@ const PARSE_PATTERNS: ReadonlyArray<{ label: string; re: RegExp }> = [
 // ---------------------------------------------------------------------------
 
 /**
+ * Blank out the *contents* of quoted string literals so a construct NAME that
+ * lives inside a string (a label in this module's own pattern table, a keyword
+ * in rules.ts, a fixture asserting on the text) isn't matched as a real call or
+ * access. Quote delimiters are kept so the line still tokenizes sanely. Regex
+ * literals aren't stripped, but the call-style `(` requirement and the bare
+ * env-accessor shapes already keep those from matching.
+ */
+function stripStringContents(line: string): string {
+  return line
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/`(?:\\.|[^`\\])*`/g, '``');
+}
+
+/**
  * Collect the untrusted-read sites the diff introduces or modifies — matches on
  * `+` lines only (added/changed code), tracking the new-file line number. One
  * site per line, labelled by its most specific construct. Returns all sites
@@ -112,11 +127,14 @@ export function extractUntrustedInputSites(patches: Map<string, string>): Untrus
       if (raw.startsWith('+')) {
         const text = raw.slice(1);
         const key = `${file}:${newLine}`;
-        // A parse keyword inside a comment / JSDoc line (incl. this module's own
-        // docstring) is prose, not a real parse site — skip it.
+        // A parse keyword in a comment/JSDoc line, or inside a string literal,
+        // is prose/data — not a real parse site. Skip comments outright and
+        // match against the string-stripped line so a construct name in a label
+        // (incl. this module's own pattern table) isn't flagged.
+        const probe = stripStringContents(text);
         const match = COMMENT_RE.test(text.trim())
           ? undefined
-          : PARSE_PATTERNS.find(p => p.re.test(text));
+          : PARSE_PATTERNS.find(p => p.re.test(probe));
         if (match && !seen.has(key)) {
           seen.add(key);
           sites.push({

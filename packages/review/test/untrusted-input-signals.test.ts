@@ -100,6 +100,21 @@ describe('extractUntrustedInputSites', () => {
     expect(extractUntrustedInputSites(new Map([['a.ts', patch]]))).toHaveLength(0);
   });
 
+  it('strips string contents: a construct name in a label is not a site, but a real access on the same line is', () => {
+    // Mirrors this module's own PARSE_PATTERNS table: a quoted label must not be
+    // flagged, while a genuine access elsewhere on the line must be.
+    const patch =
+      "@@ -1,1 +1,2 @@\n x=1\n+const t = { label: 'process.env', call: process.env.HOME };";
+    const sites = extractUntrustedInputSites(new Map([['a.ts', patch]]));
+    expect(sites).toHaveLength(1);
+    expect(sites[0].pattern).toBe('process.env');
+  });
+
+  it('does not flag a bare env construct that only appears inside a string label', () => {
+    const patch = "@@ -1,1 +1,2 @@\n x=1\n+const patterns = ['process.env', 'ENV[', 'os.environ'];";
+    expect(extractUntrustedInputSites(new Map([['a.ts', patch]]))).toHaveLength(0);
+  });
+
   it('labels Integer.parseInt as the qualified Java construct, not bare parseInt', () => {
     const sites = extractUntrustedInputSites(
       new Map([['A.java', '@@ -1,1 +1,2 @@\n int x = 1;\n+int n = Integer.parseInt(s);']]),
