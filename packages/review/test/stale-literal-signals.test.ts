@@ -116,13 +116,15 @@ describe('extractChangedLiterals', () => {
     expect(values).toContain('v2.1.0'); // has digits + '.'
   });
 
-  it('extracts distinctive numbers but skips small ones', () => {
+  it('does not extract numeric literals (numbers lack cross-file identity)', () => {
+    // A bare number like 4096 or 2.5 matches CSS classes, test values, and
+    // unrelated ratios with no shared meaning, so the signal is strings-only.
     const patches = new Map([
-      ['src/a.ts', '@@ -1,2 +1,2 @@\n-const max = 4096;\n-const n = 42;\n+const max = 8192;'],
+      ['src/a.ts', '@@ -1,2 +1,2 @@\n-const max = 4096;\n-const ratio = 2.5;\n+const max = 8192;'],
     ]);
     const values = extractChangedLiterals(patches).map(l => l.value);
-    expect(values).toContain('4096'); // >= 3 digits
-    expect(values).not.toContain('42'); // < 3 digits
+    expect(values).not.toContain('4096');
+    expect(values).not.toContain('2.5');
   });
 });
 

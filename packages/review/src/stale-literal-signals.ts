@@ -27,14 +27,17 @@ import type { ReviewContext } from './plugin-types.js';
 // Types
 // ---------------------------------------------------------------------------
 
-export type LiteralKind = 'string' | 'number';
+// Only string literals carry cross-file identity (a model name, flag key, schema
+// field, copied message). Numbers were tried and dropped — a bare `0.5` or `2.5`
+// matches CSS classes, test values, and unrelated ratios with no shared meaning.
+export type LiteralKind = 'string';
 
-/** A literal the diff moved away from (net-removed within a file's patch). */
+/** A distinctive string literal the diff touches (on a `+` or `-` line). */
 export interface ChangedLiteral {
-  /** Inner text for strings (no quotes); the numeric token for numbers. */
+  /** Inner text of the string literal, without surrounding quotes. */
   value: string;
   kind: LiteralKind;
-  /** Display form: quoted for strings, raw for numbers. */
+  /** Display form: the literal re-quoted, e.g. `'claude-sonnet-4-6'`. */
   display: string;
   /** File whose diff removed/changed this literal. */
   file: string;
@@ -88,8 +91,6 @@ const LOW_SIGNAL_STRINGS = new Set([
 ]);
 
 const STRING_RE = /(['"`])((?:\\.|(?!\1).)*?)\1/g;
-/** Decimals (0.74, 3.5) or integers with >= 3 digits (100, 4096). Skips small ints / indices. */
-const NUMBER_RE = /(?<![\w.])(\d[\d_]*\.\d+|\d{3,})(?![\w.])/g;
 const COMMENT_RE = /^(\/\/|\/\*|\*|#|--|<!--)/;
 const TEST_PATH_RE = /(\.test\.|\.spec\.|\/tests?\/|__tests__|\/spec\/)/;
 const VALUE_EMITTING_RE = /[=:]|=>|\breturn\b/;
@@ -116,7 +117,7 @@ function isDistinctiveString(inner: string): boolean {
   return /[-_./:]/.test(t) || /\d/.test(t) || t.length >= 6;
 }
 
-/** Extract distinctive string + numeric literals from one line of code. */
+/** Extract distinctive string literals from one line of code. */
 function extractLiteralsFromText(text: string): RawLiteral[] {
   const out: RawLiteral[] = [];
 
@@ -132,11 +133,6 @@ function extractLiteralsFromText(text: string): RawLiteral[] {
       kind: 'string',
       display: `${quote}${inner}${quote}`,
     });
-  }
-
-  for (const m of text.matchAll(NUMBER_RE)) {
-    const value = m[1];
-    out.push({ key: `n:${value}`, value, kind: 'number', display: value });
   }
 
   return out;
@@ -227,22 +223,13 @@ export function extractChangedLiterals(patches: Map<string, string>): ChangedLit
 // Surviving-occurrence scan
 // ---------------------------------------------------------------------------
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/** Does `line` contain the literal `lit` as a real token (not a substring of a larger word)? */
+/** Does `line` contain the string literal `lit` in any quote style? */
 function lineContainsLiteral(line: string, lit: ChangedLiteral): boolean {
-  if (lit.kind === 'string') {
-    // Match the exact string literal in any quote style.
-    return (
-      line.includes(`'${lit.value}'`) ||
-      line.includes(`"${lit.value}"`) ||
-      line.includes(`\`${lit.value}\``)
-    );
-  }
-  // number: bounded so 100 doesn't match 1000 or foo100
-  return new RegExp(`(?<![\\w.])${escapeRegExp(lit.value)}(?![\\w.])`).test(line);
+  return (
+    line.includes(`'${lit.value}'`) ||
+    line.includes(`"${lit.value}"`) ||
+    line.includes(`\`${lit.value}\``)
+  );
 }
 
 function classifySnippet(line: string): { snippet: string; isComment: boolean } {
@@ -295,15 +282,10 @@ function findStaleSites(
   return sites;
 }
 
-function scoreConfidence(
-  kind: LiteralKind,
-  sites: StaleSite[],
-): StaleLiteralCandidate['confidence'] {
+function scoreConfidence(sites: StaleSite[]): StaleLiteralCandidate['confidence'] {
   const realCode = sites.filter(s => !s.isComment && !s.isTest);
-  if (realCode.length === 0) return 'low';
-  const valueEmitting = realCode.some(s => VALUE_EMITTING_RE.test(s.snippet));
-  if (kind === 'number') return valueEmitting ? 'medium' : 'low';
-  return valueEmitting ? 'high' : 'medium';
+  if (realCode.length === 0) return 'low'; // only comments/tests survive — weak signal
+  return realCode.some(s => VALUE_EMITTING_RE.test(s.snippet)) ? 'high' : 'medium';
 }
 
 const CONFIDENCE_RANK: Record<StaleLiteralCandidate['confidence'], number> = {
@@ -354,7 +336,7 @@ export function computeStaleLiteralCandidates(context: ReviewContext): StaleLite
       kind: lit.kind,
       changedSite: { file: lit.file, line: lit.changedLine },
       staleSites,
-      confidence: scoreConfidence(lit.kind, staleSites),
+      confidence: scoreConfidence(staleSites),
     });
   }
 
@@ -392,7 +374,7 @@ export function renderStaleLiteralCandidates(candidates: StaleLiteralCandidate[]
   for (const c of candidates) {
     lines.push('');
     lines.push(
-      `- ${c.literal} (${c.kind}) — changed at ${c.changedSite.file}:${c.changedSite.line}; ` +
+      `- ${c.literal} — changed at ${c.changedSite.file}:${c.changedSite.line}; ` +
         `still present at [confidence: ${c.confidence}]:`,
     );
     for (const s of c.staleSites) {
