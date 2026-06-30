@@ -29,4 +29,15 @@ describe('formatChatTimeout', () => {
     expect(msg).toContain('during connection/headers');
     expect(msg).toContain('~100 input tokens'); // 400 / 4
   });
+
+  it('does not emit NaN/Infinity token counts for a non-finite body size', () => {
+    const msg = formatChatTimeout({
+      elapsedMs: 1,
+      limitMs: 2,
+      phase: 'body read',
+      bodyBytes: Number.NaN,
+      messageCount: 1,
+    });
+    expect(msg).toContain('~0 input tokens');
+  });
 });

@@ -53,7 +53,8 @@ const CHAT_REQUEST_TIMEOUT_MS = 120_000;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 /** Rough token estimate from a serialized request body (~4 chars/token). */
-const approxTokens = (bytes: number): number => Math.round(bytes / 4);
+const approxTokens = (bytes: number): number =>
+  Number.isFinite(bytes) ? Math.round(bytes / 4) : 0;
 
 /**
  * Build the diagnostic message for a request that hit the abort timeout. The
@@ -613,16 +614,19 @@ export class OpenAIAgentClient {
   private async postChat(
     body: Record<string, unknown>,
   ): Promise<{ ok: boolean; status: number; text: string }> {
+    const payload = JSON.stringify(body);
+    const messageCount = Array.isArray(body.messages) ? body.messages.length : 0;
+    const bodyBytes = Buffer.byteLength(payload, 'utf8'); // true UTF-8 size, not UTF-16 units
+
     const controller = new AbortController();
     let timedOut = false;
+    // Stamp the start instant right as the timeout window opens (before the timer
+    // is armed and the request begins) so reported elapsed lines up with the limit.
+    const startedAt = Date.now();
     const timer = setTimeout(() => {
       timedOut = true;
       controller.abort();
     }, CHAT_REQUEST_TIMEOUT_MS);
-
-    const payload = JSON.stringify(body);
-    const messageCount = Array.isArray(body.messages) ? body.messages.length : 0;
-    const startedAt = Date.now();
     // Track which phase is in flight so a timeout can report whether the hang was
     // before the response headers arrived or during the body stream.
     let phase: 'connection/headers' | 'body read' = 'connection/headers';
@@ -651,7 +655,7 @@ export class OpenAIAgentClient {
             elapsedMs: Date.now() - startedAt,
             limitMs: CHAT_REQUEST_TIMEOUT_MS,
             phase,
-            bodyBytes: payload.length,
+            bodyBytes,
             messageCount,
           }),
         );
