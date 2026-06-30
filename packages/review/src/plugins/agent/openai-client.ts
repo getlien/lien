@@ -52,6 +52,32 @@ const CHAT_REQUEST_TIMEOUT_MS = 120_000;
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
+/** Rough token estimate from a serialized request body (~4 chars/token). */
+const approxTokens = (bytes: number): number =>
+  Number.isFinite(bytes) ? Math.round(bytes / 4) : 0;
+
+/**
+ * Build the diagnostic message for a request that hit the abort timeout. The
+ * bare AbortError ("This operation was aborted") says nothing about why — this
+ * surfaces how long we waited vs the limit, which phase hung (connection/headers
+ * vs body read), and how big the request was, so a reader can tell a genuinely
+ * slow/hung Kimi turn from an early provider reset or a ballooned context.
+ * Exported for unit testing.
+ */
+export function formatChatTimeout(opts: {
+  elapsedMs: number;
+  limitMs: number;
+  phase: 'connection/headers' | 'body read';
+  bodyBytes: number;
+  messageCount: number;
+}): string {
+  return (
+    `timed out after ${opts.elapsedMs}ms (limit ${opts.limitMs}ms) during ${opts.phase} — ` +
+    `request was ${opts.bodyBytes} bytes (~${approxTokens(opts.bodyBytes)} input tokens) ` +
+    `across ${opts.messageCount} message(s)`
+  );
+}
+
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
 }
@@ -588,8 +614,23 @@ export class OpenAIAgentClient {
   private async postChat(
     body: Record<string, unknown>,
   ): Promise<{ ok: boolean; status: number; text: string }> {
+    const payload = JSON.stringify(body);
+    const messageCount = Array.isArray(body.messages) ? body.messages.length : 0;
+    const bodyBytes = Buffer.byteLength(payload, 'utf8'); // true UTF-8 size, not UTF-16 units
+
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), CHAT_REQUEST_TIMEOUT_MS);
+    let timedOut = false;
+    // Stamp the start instant right as the timeout window opens (before the timer
+    // is armed and the request begins) so reported elapsed lines up with the limit.
+    const startedAt = Date.now();
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, CHAT_REQUEST_TIMEOUT_MS);
+    // Track which phase is in flight so a timeout can report whether the hang was
+    // before the response headers arrived or during the body stream.
+    let phase: 'connection/headers' | 'body read' = 'connection/headers';
+
     try {
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
@@ -599,11 +640,27 @@ export class OpenAIAgentClient {
           'HTTP-Referer': 'https://lien.dev',
           'X-Title': 'Lien Review',
         },
-        body: JSON.stringify(body),
+        body: payload,
         signal: controller.signal,
       });
+      phase = 'body read';
       const text = await response.text();
       return { ok: response.ok, status: response.status, text };
+    } catch (err) {
+      // The controller is aborted only by our own timer, so any abort here is a
+      // timeout — replace the opaque AbortError with actionable diagnostics.
+      if (timedOut) {
+        throw new Error(
+          formatChatTimeout({
+            elapsedMs: Date.now() - startedAt,
+            limitMs: CHAT_REQUEST_TIMEOUT_MS,
+            phase,
+            bodyBytes,
+            messageCount,
+          }),
+        );
+      }
+      throw err;
     } finally {
       clearTimeout(timer);
     }
