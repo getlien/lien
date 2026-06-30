@@ -39,17 +39,22 @@ export interface UntrustedInputSite {
 const MAX_SITES = 12;
 const MAX_SNIPPET_CHARS = 160;
 const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+/** Full-line comment / JSDoc markers — a parse keyword in prose is not a real site. */
+const COMMENT_RE = /^(\/\/|\/\*|\*|#|--|<!--)/;
 
 /**
  * Untrusted-read constructs, mirroring UNTRUSTED_INPUT_VALIDATION's trigger
- * keywords. Ordered most-specific first so a line is labelled by its most
- * precise match (e.g. `os.getenv` before the bare `getenv`); one site per line.
+ * keywords. Ordered most-specific first: `find()` returns the first match and
+ * some bare constructs are substrings of qualified ones (`parseInt` ⊂
+ * `Integer.parseInt`, `getenv` ⊂ `os.getenv`/`System.getenv`), so the qualified
+ * form must be listed first to win the label. One site per line.
  */
 const PARSE_PATTERNS: ReadonlyArray<{ label: string; re: RegExp }> = [
   // JS / TS
   { label: 'JSON.parse', re: /\bJSON\.parse\b/ },
   { label: 'process.env', re: /\bprocess\.env\b/ },
   { label: 'process.argv', re: /\bprocess\.argv\b/ },
+  { label: 'Integer.parseInt', re: /\bInteger\.parseInt\b/ }, // before bare parseInt (Java)
   { label: 'parseInt', re: /\bparseInt\b/ },
   // Python
   { label: 'json.loads', re: /\bjson\.loads\b/ },
@@ -60,7 +65,6 @@ const PARSE_PATTERNS: ReadonlyArray<{ label: string; re: RegExp }> = [
   { label: 'os.Getenv', re: /\bos\.Getenv\b/ },
   { label: 'strconv.Atoi', re: /\bstrconv\.Atoi\b/ },
   // Java
-  { label: 'Integer.parseInt', re: /\bInteger\.parseInt\b/ },
   { label: 'System.getenv', re: /\bSystem\.getenv\b/ },
   { label: 'readValue', re: /\breadValue\b/ },
   // PHP
@@ -101,8 +105,12 @@ export function extractUntrustedInputSites(patches: Map<string, string>): Untrus
 
       if (raw.startsWith('+')) {
         const text = raw.slice(1);
-        const match = PARSE_PATTERNS.find(p => p.re.test(text));
         const key = `${file}:${newLine}`;
+        // A parse keyword inside a comment / JSDoc line (incl. this module's own
+        // docstring) is prose, not a real parse site — skip it.
+        const match = COMMENT_RE.test(text.trim())
+          ? undefined
+          : PARSE_PATTERNS.find(p => p.re.test(text));
         if (match && !seen.has(key)) {
           seen.add(key);
           sites.push({

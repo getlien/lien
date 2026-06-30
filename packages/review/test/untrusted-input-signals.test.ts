@@ -80,6 +80,23 @@ describe('extractUntrustedInputSites', () => {
     const patch = '@@ -1,1 +1,2 @@\n x=1\n+const a = JSON.parse(x); const b = JSON.parse(y);';
     expect(extractUntrustedInputSites(new Map([['a.ts', patch]]))).toHaveLength(1);
   });
+
+  it('ignores parse keywords inside comment / JSDoc lines', () => {
+    const patch =
+      '@@ -1,1 +1,3 @@\n' +
+      ' const x = 1;\n' +
+      '+// parsed via JSON.parse below, then validated\n' +
+      '+ * reads untrusted bytes — JSON.parse, parseInt, json.loads';
+    expect(extractUntrustedInputSites(new Map([['a.ts', patch]]))).toHaveLength(0);
+  });
+
+  it('labels Integer.parseInt as the qualified Java construct, not bare parseInt', () => {
+    const sites = extractUntrustedInputSites(
+      new Map([['A.java', '@@ -1,1 +1,2 @@\n int x = 1;\n+int n = Integer.parseInt(s);']]),
+    );
+    expect(sites).toHaveLength(1);
+    expect(sites[0].pattern).toBe('Integer.parseInt');
+  });
 });
 
 // ---------------------------------------------------------------------------
