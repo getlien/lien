@@ -90,6 +90,16 @@ describe('extractUntrustedInputSites', () => {
     expect(extractUntrustedInputSites(new Map([['a.ts', patch]]))).toHaveLength(0);
   });
 
+  it('does not flag construct names that appear as strings or regexes (not calls)', () => {
+    // The signal must not flag its own pattern table or any mention-in-prose.
+    const patch =
+      '@@ -1,1 +1,3 @@\n' +
+      ' const x = 1;\n' +
+      "+const label = 'JSON.parse';\n" +
+      '+const re = /\\bparseInt\\b/;';
+    expect(extractUntrustedInputSites(new Map([['a.ts', patch]]))).toHaveLength(0);
+  });
+
   it('labels Integer.parseInt as the qualified Java construct, not bare parseInt', () => {
     const sites = extractUntrustedInputSites(
       new Map([['A.java', '@@ -1,1 +1,2 @@\n int x = 1;\n+int n = Integer.parseInt(s);']]),

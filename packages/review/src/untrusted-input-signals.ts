@@ -44,38 +44,44 @@ const COMMENT_RE = /^(\/\/|\/\*|\*|#|--|<!--)/;
 
 /**
  * Untrusted-read constructs, mirroring UNTRUSTED_INPUT_VALIDATION's trigger
- * keywords. Ordered most-specific first: `find()` returns the first match and
- * some bare constructs are substrings of qualified ones (`parseInt` ⊂
- * `Integer.parseInt`, `getenv` ⊂ `os.getenv`/`System.getenv`), so the qualified
- * form must be listed first to win the label. One site per line.
+ * keywords. Two ordering/shape rules keep this precise:
+ *  - Call-style constructs require a following `(`, so a construct NAME that
+ *    appears in a string, regex, or identifier (e.g. this module's own pattern
+ *    table, `'JSON.parse'` / `/\bparseInt\b/`) is not flagged as a real site.
+ *    Env-style accessors are matched bare — they're often used without a call
+ *    (`process.env.X`, `os.environ[...]`, `ENV[...]`).
+ *  - Most-specific first: `find()` returns the first match and some bare
+ *    constructs are substrings of qualified ones (`parseInt(` ⊂
+ *    `Integer.parseInt(`, `getenv(` ⊂ `os.getenv(`), so the qualified form is
+ *    listed first to win the label. One site per line.
  */
 const PARSE_PATTERNS: ReadonlyArray<{ label: string; re: RegExp }> = [
   // JS / TS
-  { label: 'JSON.parse', re: /\bJSON\.parse\b/ },
+  { label: 'JSON.parse', re: /\bJSON\.parse\s*\(/ },
   { label: 'process.env', re: /\bprocess\.env\b/ },
   { label: 'process.argv', re: /\bprocess\.argv\b/ },
-  { label: 'Integer.parseInt', re: /\bInteger\.parseInt\b/ }, // before bare parseInt (Java)
-  { label: 'parseInt', re: /\bparseInt\b/ },
+  { label: 'Integer.parseInt', re: /\bInteger\.parseInt\s*\(/ }, // before bare parseInt (Java)
+  { label: 'parseInt', re: /\bparseInt\s*\(/ },
   // Python
-  { label: 'json.loads', re: /\bjson\.loads\b/ },
+  { label: 'json.loads', re: /\bjson\.loads\s*\(/ },
   { label: 'os.environ', re: /\bos\.environ\b/ },
-  { label: 'os.getenv', re: /\bos\.getenv\b/ },
+  { label: 'os.getenv', re: /\bos\.getenv\s*\(/ },
   // Go
-  { label: 'json.Unmarshal', re: /\bjson\.Unmarshal\b/ },
-  { label: 'os.Getenv', re: /\bos\.Getenv\b/ },
-  { label: 'strconv.Atoi', re: /\bstrconv\.Atoi\b/ },
+  { label: 'json.Unmarshal', re: /\bjson\.Unmarshal\s*\(/ },
+  { label: 'os.Getenv', re: /\bos\.Getenv\s*\(/ },
+  { label: 'strconv.Atoi', re: /\bstrconv\.Atoi\s*\(/ },
   // Java
-  { label: 'System.getenv', re: /\bSystem\.getenv\b/ },
-  { label: 'readValue', re: /\breadValue\b/ },
+  { label: 'System.getenv', re: /\bSystem\.getenv\s*\(/ },
+  { label: 'readValue', re: /\breadValue\s*\(/ },
   // PHP
-  { label: 'json_decode', re: /\bjson_decode\b/ },
+  { label: 'json_decode', re: /\bjson_decode\s*\(/ },
   // Rust
-  { label: 'serde_json::from', re: /\bserde_json::from/ },
-  { label: 'env::var', re: /\benv::var\b/ },
+  { label: 'serde_json::from', re: /\bserde_json::from\w*\s*\(/ },
+  { label: 'env::var', re: /\benv::var\s*\(/ },
   // Ruby
   { label: 'ENV[', re: /\bENV\[/ },
   // PHP / generic env (kept last — broadest)
-  { label: 'getenv', re: /\bgetenv\b/ },
+  { label: 'getenv', re: /\bgetenv\s*\(/ },
 ];
 
 // ---------------------------------------------------------------------------
