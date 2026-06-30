@@ -127,11 +127,14 @@ export function extractUntrustedInputSites(patches: Map<string, string>): Untrus
       if (raw.startsWith('+')) {
         const text = raw.slice(1);
         const key = `${file}:${newLine}`;
-        // A parse keyword in a comment/JSDoc line, or inside a string literal,
-        // is prose/data — not a real parse site. Skip comments outright and
-        // match against the string-stripped line so a construct name in a label
-        // (incl. this module's own pattern table) isn't flagged.
-        const probe = stripStringContents(text);
+        // A parse keyword in a comment, or inside a string literal, is
+        // prose/data — not a real parse site. Match against the line with string
+        // contents and comments stripped (strings first, so `//` inside a string
+        // is already gone) so a construct name in a label or comment — incl. this
+        // module's own pattern table — isn't flagged.
+        const probe = stripStringContents(text)
+          .replace(/\/\*.*?\*\//g, ' ') // inline block comments
+          .replace(/\/\/.*$/, ''); // trailing line comment
         const match = COMMENT_RE.test(text.trim())
           ? undefined
           : PARSE_PATTERNS.find(p => p.re.test(probe));

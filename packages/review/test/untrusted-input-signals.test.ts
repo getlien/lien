@@ -115,6 +115,15 @@ describe('extractUntrustedInputSites', () => {
     expect(extractUntrustedInputSites(new Map([['a.ts', patch]]))).toHaveLength(0);
   });
 
+  it('ignores parse keywords in a trailing comment but keeps a real call on the line', () => {
+    const noSite =
+      '@@ -1,1 +1,2 @@\n x=1\n+const n = compute(); // formerly parseInt(raw), JSON.parse(s)';
+    expect(extractUntrustedInputSites(new Map([['a.ts', noSite]]))).toHaveLength(0);
+
+    const withCall = '@@ -1,1 +1,2 @@\n x=1\n+const v = JSON.parse(raw); // load the config file';
+    expect(extractUntrustedInputSites(new Map([['a.ts', withCall]]))).toHaveLength(1);
+  });
+
   it('labels Integer.parseInt as the qualified Java construct, not bare parseInt', () => {
     const sites = extractUntrustedInputSites(
       new Map([['A.java', '@@ -1,1 +1,2 @@\n int x = 1;\n+int n = Integer.parseInt(s);']]),
