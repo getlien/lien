@@ -282,9 +282,16 @@ export class OpenAIAgentClient {
     this.inputCostPerToken = (options.inputCostPerMTok ?? DEFAULT_INPUT_COST_PER_MTOK) / 1_000_000;
     this.outputCostPerToken =
       (options.outputCostPerMTok ?? DEFAULT_OUTPUT_COST_PER_MTOK) / 1_000_000;
-    // `undefined` → default routing; explicit `null` → omit the provider block.
+    // Explicit config wins on any endpoint (opt-in). When unset, the default
+    // routing applies ONLY to OpenRouter — other OpenAI-compatible endpoints
+    // (Gemini/DeepSeek direct) reject an unknown top-level `provider` field, so
+    // omit it there. `null` explicitly omits it anywhere.
     this.providerRouting =
-      options.providerRouting === undefined ? DEFAULT_PROVIDER_ROUTING : options.providerRouting;
+      options.providerRouting !== undefined
+        ? options.providerRouting
+        : options.baseUrl.includes('openrouter.ai')
+          ? DEFAULT_PROVIDER_ROUTING
+          : null;
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_CHAT_REQUEST_TIMEOUT_MS;
   }
 

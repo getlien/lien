@@ -47,12 +47,16 @@ function stopTurn(extra: Record<string, unknown> = {}): Record<string, unknown> 
 }
 
 function makeClient(
-  opts: Partial<{ providerRouting: Record<string, unknown> | null; requestTimeoutMs: number }> = {},
+  opts: Partial<{
+    providerRouting: Record<string, unknown> | null;
+    requestTimeoutMs: number;
+    baseUrl: string;
+  }> = {},
   logger: Logger = silentLogger,
 ): OpenAIAgentClient {
   return new OpenAIAgentClient({
     apiKey: 'test',
-    baseUrl: 'http://mock.local',
+    baseUrl: 'https://openrouter.ai/api/v1', // prod endpoint — default routing applies
     model: 'test-model',
     maxTurns: 8,
     maxTokenBudget: 1_000_000,
@@ -114,11 +118,26 @@ describe('describeServingProvider', () => {
 // ---------------------------------------------------------------------------
 
 describe('OpenAIAgentClient provider routing', () => {
-  it('sends the default provider routing block when unconfigured', async () => {
+  it('sends the default provider routing block on OpenRouter when unconfigured', async () => {
     const { bodies } = mockFetch([stopTurn()]);
     await makeClient().run('sys', 'init', [], noopTool);
     expect(bodies[0].provider).toEqual(DEFAULT_PROVIDER_ROUTING);
     expect(bodies[0].provider).toEqual({ sort: 'throughput', allow_fallbacks: true });
+  });
+
+  it('omits the default block for a non-OpenRouter endpoint (Gemini/DeepSeek reject unknown fields)', async () => {
+    const { bodies } = mockFetch([stopTurn()]);
+    await makeClient({ baseUrl: 'https://api.deepseek.com/v1' }).run('sys', 'init', [], noopTool);
+    expect(bodies[0].provider).toBeUndefined();
+  });
+
+  it('still honors an explicit routing block on a non-OpenRouter endpoint (opt-in)', async () => {
+    const { bodies } = mockFetch([stopTurn()]);
+    await makeClient({
+      baseUrl: 'https://api.deepseek.com/v1',
+      providerRouting: { order: ['x'] },
+    }).run('sys', 'init', [], noopTool);
+    expect(bodies[0].provider).toEqual({ order: ['x'] });
   });
 
   it('sends a caller-supplied routing block verbatim', async () => {
