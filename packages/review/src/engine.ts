@@ -331,8 +331,14 @@ async function runActivePlugins(
       if (verbose) logger.debug(`[engine] Running "${plugin.id}"...`);
 
       const pluginFindings = await plugin.analyze(pluginContext);
+      // Count real (postable) findings separately from the summary entry some
+      // plugins append (category 'summary' → the PR callout, not an inline
+      // comment). Counting the summary as a finding read as "a finding went
+      // missing" when a review was actually clean (0 real + 1 summary).
+      const real = pluginFindings.filter(f => f.category !== 'summary').length;
+      const hasSummary = pluginFindings.length > real;
       logger.info(
-        `Plugin "${plugin.id}": ${pluginFindings.length} findings (${Date.now() - start}ms)`,
+        `Plugin "${plugin.id}": ${real} findings${hasSummary ? ' (+summary)' : ''} (${Date.now() - start}ms)`,
       );
       return pluginFindings;
     }),
