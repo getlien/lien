@@ -6,6 +6,7 @@
  */
 
 import type { Logger } from '../../logger.js';
+import { DEFAULT_PROVIDER_ROUTING, DEFAULT_CHAT_REQUEST_TIMEOUT_MS } from '../../defaults.js';
 import type {
   AgentFinding,
   AgentSummary,
@@ -43,12 +44,8 @@ const RETRY_NUDGE =
  */
 const CHAT_MAX_ATTEMPTS = 2;
 const CHAT_RETRY_BASE_DELAY_MS = 500;
-/**
- * Per-request abort timeout, covering BOTH the response headers and the body
- * read — a hang in either rejects (and is retried) instead of stalling a turn
- * forever. Generous so a slow large-context reasoning turn isn't aborted.
- */
-const CHAT_REQUEST_TIMEOUT_MS = 120_000;
+// Per-request abort timeout (headers + body) is per-instance and configurable —
+// see `requestTimeoutMs` / DEFAULT_CHAT_REQUEST_TIMEOUT_MS.
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -171,6 +168,13 @@ interface OpenAIClientOptions {
   maxTurns: number;
   maxTokenBudget: number;
   logger: Logger;
+  /**
+   * OpenRouter `provider` routing block, sent verbatim on each request. Defaults
+   * to DEFAULT_PROVIDER_ROUTING; pass `null` to send no routing preferences.
+   */
+  providerRouting?: Record<string, unknown> | null;
+  /** Per-request abort timeout in ms. Defaults to DEFAULT_CHAT_REQUEST_TIMEOUT_MS. */
+  requestTimeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +216,38 @@ interface ChatResponse {
     finish_reason: string;
   }>;
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  /**
+   * OpenRouter routing metadata — names the upstream provider that actually
+   * served the request. `endpoints.available[]` marks the selected one;
+   * `attempt` > 1 means earlier providers failed and it fell back. Used only
+   * for diagnostic logging (see describeServingProvider).
+   */
+  openrouter_metadata?: {
+    summary?: string;
+    attempt?: number;
+    endpoints?: { available?: Array<{ provider?: string; selected?: boolean }> };
+    attempts?: Array<{ provider?: string; status?: number }>;
+  };
+  /** Older/simpler top-level provider name some responses carry. */
+  provider?: string;
+}
+
+/**
+ * Extract a short "who served this" label from an OpenRouter response for
+ * per-request logging. Prefers the selected endpoint's provider, then the last
+ * attempt, then the top-level `provider`, then the human `summary`. Appends the
+ * attempt number when it fell back (attempt > 1). Returns 'unknown' if the
+ * response carried no routing metadata.
+ */
+export function describeServingProvider(
+  resp: Pick<ChatResponse, 'openrouter_metadata' | 'provider'>,
+): string {
+  const meta = resp.openrouter_metadata;
+  const selected = meta?.endpoints?.available?.find(e => e.selected)?.provider;
+  const lastAttempt = meta?.attempts?.[meta.attempts.length - 1]?.provider;
+  const name = selected ?? lastAttempt ?? resp.provider ?? meta?.summary ?? 'unknown';
+  const attempt = meta?.attempt ?? 0;
+  return attempt > 1 ? `${name} (attempt ${attempt}, fell back)` : name;
 }
 
 /**
@@ -226,6 +262,10 @@ export class OpenAIAgentClient {
   private logger: Logger;
   private inputCostPerToken: number;
   private outputCostPerToken: number;
+  /** OpenRouter `provider` routing block sent on each request (null = omit). */
+  private providerRouting: Record<string, unknown> | null;
+  /** Per-request abort timeout (ms). */
+  private requestTimeoutMs: number;
   // Verbose per-turn reasoning/output logging — ON by default so every review
   // is diagnosable; set LIEN_REVIEW_LOG_AGENT=0 (or false) to silence it. The
   // last turn's reasoning is always logged on an incomplete run regardless.
@@ -242,6 +282,17 @@ export class OpenAIAgentClient {
     this.inputCostPerToken = (options.inputCostPerMTok ?? DEFAULT_INPUT_COST_PER_MTOK) / 1_000_000;
     this.outputCostPerToken =
       (options.outputCostPerMTok ?? DEFAULT_OUTPUT_COST_PER_MTOK) / 1_000_000;
+    // Explicit config wins on any endpoint (opt-in). When unset, the default
+    // routing applies ONLY to OpenRouter — other OpenAI-compatible endpoints
+    // (Gemini/DeepSeek direct) reject an unknown top-level `provider` field, so
+    // omit it there. `null` explicitly omits it anywhere.
+    this.providerRouting =
+      options.providerRouting !== undefined
+        ? options.providerRouting
+        : options.baseUrl.includes('openrouter.ai')
+          ? DEFAULT_PROVIDER_ROUTING
+          : null;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_CHAT_REQUEST_TIMEOUT_MS;
   }
 
   async run(
@@ -555,12 +606,15 @@ export class OpenAIAgentClient {
     } else if (tools.length > 0) {
       body.tools = tools;
     }
+    // Steer OpenRouter routing (e.g. prefer fastest providers) to cut the
+    // intermittent upstream timeouts. Omitted when providerRouting is null.
+    if (this.providerRouting) body.provider = this.providerRouting;
 
     let lastError: Error | undefined;
     for (let attempt = 1; attempt <= CHAT_MAX_ATTEMPTS; attempt++) {
       if (attempt > 1) await sleep(CHAT_RETRY_BASE_DELAY_MS * (attempt - 1));
 
-      let res: { ok: boolean; status: number; text: string };
+      let res: { ok: boolean; status: number; text: string; elapsedMs: number };
       try {
         res = await this.postChat(body);
       } catch (err) {
@@ -593,7 +647,15 @@ export class OpenAIAgentClient {
         continue;
       }
       try {
-        return JSON.parse(res.text) as ChatResponse;
+        const parsed = JSON.parse(res.text) as ChatResponse;
+        // Per-request diagnostics: which upstream provider served this, and how
+        // long it took — so slow/aborted turns can be traced to a provider.
+        if (this.logAgentTurns) {
+          this.logger.info(
+            `[agent] served by ${describeServingProvider(parsed)} in ${res.elapsedMs}ms`,
+          );
+        }
+        return parsed;
       } catch {
         lastError = new Error(
           `Unparseable response body from ${this.model} (status ${res.status}): ${truncate(res.text, 200)}`,
@@ -613,7 +675,7 @@ export class OpenAIAgentClient {
    */
   private async postChat(
     body: Record<string, unknown>,
-  ): Promise<{ ok: boolean; status: number; text: string }> {
+  ): Promise<{ ok: boolean; status: number; text: string; elapsedMs: number }> {
     const payload = JSON.stringify(body);
     const messageCount = Array.isArray(body.messages) ? body.messages.length : 0;
     const bodyBytes = Buffer.byteLength(payload, 'utf8'); // true UTF-8 size, not UTF-16 units
@@ -626,7 +688,7 @@ export class OpenAIAgentClient {
     const timer = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, CHAT_REQUEST_TIMEOUT_MS);
+    }, this.requestTimeoutMs);
     // Track which phase is in flight so a timeout can report whether the hang was
     // before the response headers arrived or during the body stream.
     let phase: 'connection/headers' | 'body read' = 'connection/headers';
@@ -645,7 +707,7 @@ export class OpenAIAgentClient {
       });
       phase = 'body read';
       const text = await response.text();
-      return { ok: response.ok, status: response.status, text };
+      return { ok: response.ok, status: response.status, text, elapsedMs: Date.now() - startedAt };
     } catch (err) {
       // The controller is aborted only by our own timer, so any abort here is a
       // timeout — replace the opaque AbortError with actionable diagnostics.
@@ -653,7 +715,7 @@ export class OpenAIAgentClient {
         throw new Error(
           formatChatTimeout({
             elapsedMs: Date.now() - startedAt,
-            limitMs: CHAT_REQUEST_TIMEOUT_MS,
+            limitMs: this.requestTimeoutMs,
             phase,
             bodyBytes,
             messageCount,
