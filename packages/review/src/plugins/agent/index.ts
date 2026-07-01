@@ -40,6 +40,14 @@ const configSchema = z.object({
   outputCostPerMTok: z.number().optional(),
   maxTurns: z.number().int().min(1).max(30).default(15),
   maxTokenBudget: z.number().int().default(100_000),
+  /**
+   * OpenRouter `provider` routing block (openai path only), sent verbatim on
+   * each request. Omit to use DEFAULT_PROVIDER_ROUTING; set `null` to send no
+   * routing preferences; set e.g. `{ ignore: ['slow-provider'] }` to steer.
+   */
+  providerRouting: z.record(z.unknown()).nullable().optional(),
+  /** Per-request abort timeout in ms (openai path). Omit for the default 120s. */
+  requestTimeoutMs: z.number().int().positive().optional(),
   // Legacy — maps to apiKey
   anthropicApiKey: z.string().optional(),
   blastRadius: z
@@ -234,6 +242,8 @@ function runAgentClient(
     outputCostPerMTok: config.outputCostPerMTok,
     maxTurns: config.maxTurns,
     maxTokenBudget,
+    providerRouting: config.providerRouting,
+    requestTimeoutMs: config.requestTimeoutMs,
     logger,
   });
   return client.run(systemPrompt, initialMessage, toOpenAITools(AGENT_TOOLS), toolExecutor);

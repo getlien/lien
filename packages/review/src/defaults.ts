@@ -18,6 +18,28 @@ export const DEFAULT_OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 export const DEFAULT_OPENROUTER_INPUT_COST_PER_MTOK = 0.74;
 export const DEFAULT_OPENROUTER_OUTPUT_COST_PER_MTOK = 3.5;
 
+/**
+ * Default OpenRouter provider-routing preferences, sent as the request's
+ * `provider` block. `moonshotai/kimi-k2.7-code` is multiplexed across several
+ * upstream providers of varying speed, and slow ones drive the intermittent
+ * 120s request timeouts. `sort: 'throughput'` steers to the fastest endpoint
+ * (the direct lever against those timeouts); `allow_fallbacks` keeps the run
+ * resilient if that endpoint fails. Overridable via the `providerRouting`
+ * config (e.g. add `ignore`/`order` once logs name a flaky provider).
+ */
+export const DEFAULT_PROVIDER_ROUTING: Record<string, unknown> = {
+  sort: 'throughput',
+  allow_fallbacks: true,
+};
+
+/**
+ * Per-request abort timeout (ms) for OpenRouter chat calls — covers response
+ * headers AND body read. Generous so a slow large-context reasoning turn isn't
+ * cut off. Overridable via the `requestTimeoutMs` config; don't lower/raise the
+ * default without evidence from the per-request latency logs.
+ */
+export const DEFAULT_CHAT_REQUEST_TIMEOUT_MS = 120_000;
+
 /** Hard ceiling for the scaled agent token budget — bounds worst-case cost. */
 export const MAX_REVIEW_TOKEN_BUDGET = 250_000;
 

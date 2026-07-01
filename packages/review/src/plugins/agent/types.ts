@@ -36,6 +36,13 @@ export interface AgentConfig {
   outputCostPerMTok?: number;
   maxTurns: number;
   maxTokenBudget: number;
+  /**
+   * OpenRouter `provider` routing block (openai path), sent verbatim on each
+   * request. Omit for DEFAULT_PROVIDER_ROUTING; `null` to send no preferences.
+   */
+  providerRouting?: Record<string, unknown> | null;
+  /** Per-request abort timeout in ms (openai path). Omit for the 120s default. */
+  requestTimeoutMs?: number;
   /** Inject transitive blast radius into the agent's initial message. */
   blastRadius?: BlastRadiusConfig;
 }
