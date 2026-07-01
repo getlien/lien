@@ -38,6 +38,54 @@ describe('ReviewEngine', () => {
     expect(results[0]).toEqual(finding);
   });
 
+  it('logs the real finding count separately from an appended summary', async () => {
+    const engine = new ReviewEngine();
+    const infos: string[] = [];
+    const logger = { ...silentLogger, info: (msg: string) => infos.push(msg) };
+    const real: ReviewFinding = {
+      pluginId: 'agent-review',
+      filepath: 'a.ts',
+      line: 5,
+      severity: 'warning',
+      category: 'bug',
+      message: 'real issue',
+    };
+    const summary: ReviewFinding = {
+      pluginId: 'agent-review',
+      filepath: '',
+      line: 0,
+      severity: 'warning',
+      category: 'summary',
+      message: 'overview',
+    };
+    engine.register(createTestPlugin({ id: 'agent-review', analyze: () => [real, summary] }));
+
+    await engine.run(createTestContext({ logger }));
+
+    // 1 real finding + 1 summary → "1 findings (+summary)", not "2 findings".
+    expect(infos.some(m => /Plugin "agent-review": 1 findings \(\+summary\)/.test(m))).toBe(true);
+  });
+
+  it('omits the (+summary) annotation when a plugin returns only real findings', async () => {
+    const engine = new ReviewEngine();
+    const infos: string[] = [];
+    const logger = { ...silentLogger, info: (msg: string) => infos.push(msg) };
+    const finding: ReviewFinding = {
+      pluginId: 'complexity',
+      filepath: 'a.ts',
+      line: 3,
+      severity: 'warning',
+      category: 'complexity',
+      message: 'x',
+    };
+    engine.register(createTestPlugin({ id: 'complexity', analyze: () => [finding] }));
+
+    await engine.run(createTestContext({ logger }));
+
+    expect(infos.some(m => /Plugin "complexity": 1 findings \(\d+ms\)/.test(m))).toBe(true);
+    expect(infos.some(m => m.includes('+summary'))).toBe(false);
+  });
+
   it('rejects duplicate plugin IDs', () => {
     const engine = new ReviewEngine();
     engine.register(createTestPlugin({ id: 'a' }));
