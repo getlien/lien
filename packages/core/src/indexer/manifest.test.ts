@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ManifestManager } from './manifest.js';
 import { createTestDir, cleanupTestDir } from '../test/helpers/test-db.js';
 
@@ -112,6 +112,60 @@ describe('ManifestManager', () => {
     });
   });
 
+  describe('removeFiles', () => {
+    it('should not error when removing from non-existent manifest', async () => {
+      // Should not throw
+      await expect(manifestManager.removeFiles(['test.ts'])).resolves.toBeUndefined();
+    });
+
+    it('should remove all files and persist with a single save', async () => {
+      await manifestManager.updateFiles([
+        { filepath: 'test1.ts', lastModified: Date.now(), chunkCount: 3 },
+        { filepath: 'test2.ts', lastModified: Date.now(), chunkCount: 5 },
+        { filepath: 'test3.ts', lastModified: Date.now(), chunkCount: 7 },
+      ]);
+
+      const saveSpy = vi.spyOn(manifestManager, 'save');
+
+      await manifestManager.removeFiles(['test1.ts', 'test2.ts']);
+
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+
+      const manifest = await manifestManager.load();
+      expect(manifest?.files['test1.ts']).toBeUndefined();
+      expect(manifest?.files['test2.ts']).toBeUndefined();
+      expect(manifest?.files['test3.ts']).toBeTruthy();
+    });
+
+    it('should be a no-op for an empty array', async () => {
+      await manifestManager.updateFiles([
+        { filepath: 'test.ts', lastModified: Date.now(), chunkCount: 5 },
+      ]);
+
+      const saveSpy = vi.spyOn(manifestManager, 'save');
+
+      await manifestManager.removeFiles([]);
+
+      expect(saveSpy).not.toHaveBeenCalled();
+
+      const manifest = await manifestManager.load();
+      expect(manifest?.files['test.ts']).toBeTruthy();
+    });
+
+    it('should tolerate paths that are not in the manifest', async () => {
+      await manifestManager.updateFiles([
+        { filepath: 'test1.ts', lastModified: Date.now(), chunkCount: 3 },
+        { filepath: 'test2.ts', lastModified: Date.now(), chunkCount: 5 },
+      ]);
+
+      await manifestManager.removeFiles(['test1.ts', 'missing.ts']);
+
+      const manifest = await manifestManager.load();
+      expect(manifest?.files['test1.ts']).toBeUndefined();
+      expect(manifest?.files['test2.ts']).toBeTruthy();
+    });
+  });
+
   describe('updateFiles', () => {
     it('should create manifest if it does not exist', async () => {
       const entries = [
@@ -170,6 +224,31 @@ describe('ManifestManager', () => {
       expect(manifest?.files['file1.ts']?.chunkCount).toBe(1);
       expect(manifest?.files['file2.ts']?.chunkCount).toBe(2);
       expect(manifest?.files['file3.ts']?.chunkCount).toBe(3);
+    });
+
+    it('should serialize concurrent removeFiles and updateFiles without race conditions', async () => {
+      await manifestManager.updateFiles([
+        { filepath: 'file1.ts', lastModified: 100, chunkCount: 1 },
+        { filepath: 'file2.ts', lastModified: 200, chunkCount: 2 },
+        { filepath: 'file3.ts', lastModified: 300, chunkCount: 3 },
+      ]);
+
+      // Start mixed concurrent operations without awaiting in between
+      const operations = [
+        manifestManager.removeFiles(['file1.ts', 'file2.ts']),
+        manifestManager.updateFiles([
+          { filepath: 'file4.ts', lastModified: 400, chunkCount: 4 },
+          { filepath: 'file5.ts', lastModified: 500, chunkCount: 5 },
+        ]),
+        manifestManager.removeFiles(['file4.ts']),
+      ];
+
+      await Promise.all(operations);
+
+      const manifest = await manifestManager.load();
+      expect(Object.keys(manifest?.files || {}).sort()).toEqual(['file3.ts', 'file5.ts']);
+      expect(manifest?.files['file3.ts']?.chunkCount).toBe(3);
+      expect(manifest?.files['file5.ts']?.chunkCount).toBe(5);
     });
   });
 

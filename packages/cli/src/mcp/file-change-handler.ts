@@ -43,18 +43,22 @@ async function handleBatchDeletions(
   log: LogFn,
 ): Promise<void> {
   const failures: string[] = [];
+  const removedFiles: string[] = [];
 
   for (const filepath of deletedFiles) {
     log(`🗑️  File deleted: ${filepath}`);
     try {
       await vectorDB.deleteByFile(filepath);
-      await manifest.removeFile(filepath);
+      removedFiles.push(filepath);
       log(`✓ Removed ${filepath} from index`);
     } catch (error) {
       log(`Failed to remove ${filepath}: ${error}`, 'warning');
       failures.push(filepath);
     }
   }
+
+  // Batch manifest removal: one read+write instead of one per file
+  await manifest.removeFiles(removedFiles);
 
   if (failures.length > 0) {
     throw new Error(`Failed to delete ${failures.length} file(s): ${failures.join(', ')}`);

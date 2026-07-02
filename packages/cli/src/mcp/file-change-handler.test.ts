@@ -21,6 +21,7 @@ vi.mock('@liendev/core', async () => {
       return {
         load: vi.fn().mockResolvedValue({ files: {} }),
         removeFile: vi.fn().mockResolvedValue(undefined),
+        removeFiles: vi.fn().mockResolvedValue(undefined),
         transaction: vi.fn().mockResolvedValue(null),
       };
     }),
@@ -48,6 +49,7 @@ vi.mock('fs/promises', () => ({
 }));
 
 import { isFileIgnored, isGitignoreFile, createFileChangeHandler } from './file-change-handler.js';
+import { ManifestManager } from '@liendev/core';
 import { createGitignoreFilter } from '@liendev/parser';
 
 function createMockVectorDB(dbPath = '/project/.lien/indices/abc') {
@@ -203,6 +205,39 @@ describe('createFileChangeHandler', () => {
 
     // Deletion should always be processed regardless of gitignore
     expect(checkAndReconnect).toHaveBeenCalledOnce();
+  });
+
+  it('should batch manifest removals for batch deletion events', async () => {
+    // Make the gitignore filter allow everything
+    vi.mocked(createGitignoreFilter).mockResolvedValue(() => false);
+
+    const vectorDB = createMockVectorDB();
+    const handler = createFileChangeHandler(
+      '/project',
+      vectorDB,
+      createMockEmbeddings(),
+      log,
+      reindexStateManager,
+      checkAndReconnect,
+    );
+    const manifest = vi.mocked(ManifestManager).mock.results.at(-1)!.value;
+
+    await handler({
+      type: 'batch',
+      filepath: '/project/src/deleted1.ts',
+      added: [],
+      modified: [],
+      deleted: ['/project/src/deleted1.ts', '/project/src/deleted2.ts'],
+    });
+
+    expect(vectorDB.deleteByFile).toHaveBeenCalledTimes(2);
+    // Manifest removal happens once for the whole batch, not per file
+    expect(manifest.removeFiles).toHaveBeenCalledOnce();
+    expect(manifest.removeFiles).toHaveBeenCalledWith([
+      '/project/src/deleted1.ts',
+      '/project/src/deleted2.ts',
+    ]);
+    expect(manifest.removeFile).not.toHaveBeenCalled();
   });
 
   it('should call checkAndReconnect before processing batch events with files to process', async () => {
