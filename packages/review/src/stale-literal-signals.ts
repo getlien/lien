@@ -270,6 +270,37 @@ interface RepoScanResult {
 }
 
 /**
+ * Record every touched-literal survivor found on one repo line into
+ * `sitesByLiteral`, respecting each literal's own MAX_SITES_PER_LITERAL cap.
+ * Split out of {@link scanRepoForStaleSites} so the triple-nested scan (chunks
+ * x lines x values-on-a-line) reads as two single-purpose passes instead of
+ * one deeply nested one.
+ */
+function recordSurvivorsForLine(
+  line: string,
+  absLine: number,
+  file: string,
+  isTest: boolean,
+  touchedValues: Set<string>,
+  sitesByLiteral: Map<string, StaleSite[]>,
+): void {
+  const values = extractQuotedValues(line);
+  if (!values) return;
+
+  let classified: { snippet: string; isComment: boolean } | undefined;
+  for (const value of values) {
+    if (!touchedValues.has(value)) continue;
+    const sites = sitesByLiteral.get(value);
+    if (sites && sites.length >= MAX_SITES_PER_LITERAL) continue; // this literal is already capped
+
+    classified ??= classifySnippet(line);
+    const site: StaleSite = { file, line: absLine, ...classified, isTest };
+    if (sites) sites.push(site);
+    else sitesByLiteral.set(value, [site]);
+  }
+}
+
+/**
  * Scan the indexed repo (post-image chunk content) ONCE for every touched
  * literal at once, building `literal value -> surviving sites` directly.
  * Because chunks are the head state, the changed site no longer contains the
@@ -308,20 +339,7 @@ function scanRepoForStaleSites(
       const absLine = chunk.metadata.startLine + i;
       if (fileChanged?.has(absLine)) continue; // a line this PR touched — not a survivor
 
-      const values = extractQuotedValues(lines[i]);
-      if (!values) continue;
-
-      let classified: { snippet: string; isComment: boolean } | undefined;
-      for (const value of values) {
-        if (!touchedValues.has(value)) continue;
-        const sites = sitesByLiteral.get(value);
-        if (sites && sites.length >= MAX_SITES_PER_LITERAL) continue; // this literal is already capped
-
-        classified ??= classifySnippet(lines[i]);
-        const site: StaleSite = { file, line: absLine, ...classified, isTest };
-        if (sites) sites.push(site);
-        else sitesByLiteral.set(value, [site]);
-      }
+      recordSurvivorsForLine(lines[i], absLine, file, isTest, touchedValues, sitesByLiteral);
     }
   }
 
@@ -369,6 +387,52 @@ export function computeStaleLiteralCandidates(context: ReviewContext): StaleLite
 }
 
 /**
+ * Turn scan results into the final ranked, capped candidate list: attach each
+ * touched literal to its surviving sites (dropping literals with none), score
+ * confidence, then sort highest-confidence-and-most-sites first.
+ */
+function buildRankedCandidates(
+  literals: ChangedLiteral[],
+  sitesByLiteral: Map<string, StaleSite[]>,
+): StaleLiteralCandidate[] {
+  const candidates: StaleLiteralCandidate[] = [];
+  for (const lit of literals) {
+    const staleSites = sitesByLiteral.get(lit.value);
+    if (!staleSites || staleSites.length === 0) continue;
+    candidates.push({
+      literal: lit.display,
+      kind: lit.kind,
+      changedSite: { file: lit.file, line: lit.changedLine },
+      staleSites,
+      confidence: scoreConfidence(staleSites),
+    });
+  }
+
+  candidates.sort((a, b) => {
+    const byConf = CONFIDENCE_RANK[b.confidence] - CONFIDENCE_RANK[a.confidence];
+    if (byConf !== 0) return byConf;
+    return b.staleSites.length - a.staleSites.length;
+  });
+
+  return candidates.slice(0, MAX_CANDIDATES);
+}
+
+/** Log the budget-exceeded diagnostic: elapsed time, scan coverage, and touched-literal count. */
+function logScanTimeout(
+  context: ReviewContext,
+  elapsedMs: number,
+  chunksScanned: number,
+  totalChunks: number,
+  touchedCount: number,
+): void {
+  context.logger?.warning(
+    `stale-literal-signals: repo scan exceeded its budget (${elapsedMs}ms elapsed) ` +
+      `after ${chunksScanned}/${totalChunks} chunks for ${touchedCount} touched ` +
+      'literal(s); returning partial results.',
+  );
+}
+
+/**
  * Same as {@link computeStaleLiteralCandidates}, but with an explicit
  * absolute deadline (a value comparable to `Date.now()`) instead of the
  * default budget. Exposed for testing the budget-exceeded path
@@ -402,33 +466,16 @@ export function computeStaleLiteralCandidatesWithDeadline(
   );
 
   if (timedOut) {
-    context.logger?.warning(
-      `stale-literal-signals: repo scan exceeded its budget (${Date.now() - startedAt}ms elapsed) ` +
-        `after ${chunksScanned}/${repoChunks.length} chunks for ${touchedValues.size} touched ` +
-        'literal(s); returning partial results.',
+    logScanTimeout(
+      context,
+      Date.now() - startedAt,
+      chunksScanned,
+      repoChunks.length,
+      touchedValues.size,
     );
   }
 
-  const candidates: StaleLiteralCandidate[] = [];
-  for (const lit of literals) {
-    const staleSites = sitesByLiteral.get(lit.value);
-    if (!staleSites || staleSites.length === 0) continue;
-    candidates.push({
-      literal: lit.display,
-      kind: lit.kind,
-      changedSite: { file: lit.file, line: lit.changedLine },
-      staleSites,
-      confidence: scoreConfidence(staleSites),
-    });
-  }
-
-  candidates.sort((a, b) => {
-    const byConf = CONFIDENCE_RANK[b.confidence] - CONFIDENCE_RANK[a.confidence];
-    if (byConf !== 0) return byConf;
-    return b.staleSites.length - a.staleSites.length;
-  });
-
-  return candidates.slice(0, MAX_CANDIDATES);
+  return buildRankedCandidates(literals, sitesByLiteral);
 }
 
 // ---------------------------------------------------------------------------
