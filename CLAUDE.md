@@ -99,11 +99,16 @@ exists specifically to make that cycle ~30 minutes instead of hours.
 - Inner loop: invoke `/test-harness <rule-id>` from CC for free
   Claude-subagent iteration on existing fixtures.
 - Shipping gate: `npm run test:harness -- --rule <rule-id> --calibrate 10`
-  must hit ≥ 9/10 against OpenRouter (Gemini) before merging the change.
-  The harness auto-loads `OPENROUTER_API_KEY` from `.env` at the repo root.
+  must hit ≥ 9/10 against OpenRouter, on the prod default model
+  (`moonshotai/kimi-k2.7-code` — omit `--model` to use it) before merging
+  the change. The harness auto-loads `OPENROUTER_API_KEY` from `.env` at
+  the repo root.
 - Workflow + failure modes: see `packages/review/test/harness/README.md`.
   Includes the end-to-end recipe for capturing a real-PR fixture, authoring
-  Tier 1/2 assertions, iterating, and calibrating.
+  Tier 1/2 assertions, iterating, and calibrating. A couple of existing
+  canaries were calibrated on Gemini and are currently known-red on Kimi —
+  see the README's "Known-red reconciliation" note; that's tracked
+  separately, not a blocker for new rule work.
 
 A rule is not shippable until its calibration meets the bar. CC mode is
 necessary but not sufficient.
