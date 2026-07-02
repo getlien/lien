@@ -159,6 +159,23 @@ export class ManifestManager {
    * @param filepath - Path to the file to remove
    */
   async removeFile(filepath: string): Promise<void> {
+    await this.removeFiles([filepath]);
+  }
+
+  /**
+   * Removes multiple file entries at once (more efficient than individual removals).
+   * Protected by lock to prevent race conditions during concurrent updates.
+   *
+   * Note: If the manifest doesn't exist, this is a no-op (not an error).
+   * This can happen legitimately after clearing the index or on fresh installs.
+   *
+   * @param filepaths - Paths of the files to remove
+   */
+  async removeFiles(filepaths: string[]): Promise<void> {
+    if (filepaths.length === 0) {
+      return;
+    }
+
     // Chain this operation to the lock to ensure atomicity
     this.updateLock = this.updateLock
       .then(async () => {
@@ -168,11 +185,16 @@ export class ManifestManager {
           return;
         }
 
-        delete manifest.files[filepath];
+        for (const filepath of filepaths) {
+          delete manifest.files[filepath];
+        }
+
         await this.save(manifest);
       })
       .catch(error => {
-        console.error(`[Lien] Failed to remove manifest entry for ${filepath}: ${error}`);
+        console.error(
+          `[Lien] Failed to remove manifest entries for ${filepaths.length} files: ${error}`,
+        );
         // Return to reset lock - don't let errors block future operations
         return undefined;
       });

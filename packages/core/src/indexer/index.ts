@@ -173,19 +173,21 @@ async function handleDeletions(
     return 0;
   }
 
-  let removedCount = 0;
+  const removedFiles: string[] = [];
 
   for (const filepath of deletedFiles) {
     try {
       await vectorDB.deleteByFile(filepath);
-      await manifest.removeFile(filepath);
-      removedCount++;
+      removedFiles.push(filepath);
     } catch {
       // Continue on error, just count failures
     }
   }
 
-  return removedCount;
+  // Batch manifest removal: one read+write instead of one per file
+  await manifest.removeFiles(removedFiles);
+
+  return removedFiles.length;
 }
 
 /**
