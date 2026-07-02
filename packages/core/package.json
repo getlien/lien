@@ -27,7 +27,6 @@
     "@huggingface/transformers": "^3.8.1",
     "@liendev/parser": "*",
     "@lancedb/lancedb": "^0.23.0",
-    "@qdrant/js-client-rest": "^1.16.2",
     "chalk": "^5.6.2",
     "collect.js": "^4.36.1",
     "p-limit": "5.0.0",

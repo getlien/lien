@@ -1,10 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Error thrown when config file exists but has invalid syntax or structure.
@@ -23,14 +19,55 @@ export class ConfigValidationError extends Error {
 /**
  * Global configuration for Lien.
  * Only contains what truly needs configuration: storage backend choice.
+ *
+ * LanceDB is the only supported backend. The field is kept so an
+ * alternative backend can be reintroduced later without a config migration.
  */
 export interface GlobalConfig {
-  backend?: 'lancedb' | 'qdrant';
-  qdrant?: {
-    url: string;
-    apiKey?: string;
-    // orgId is auto-detected from git remote - not in config!
-  };
+  backend?: 'lancedb';
+}
+
+/**
+ * Raw shape of a parsed config file before sanitization.
+ * May still contain retired keys (e.g. qdrant) from older versions.
+ */
+interface RawGlobalConfig {
+  backend?: string;
+  qdrant?: unknown;
+}
+
+const QDRANT_REMOVED_WARNING =
+  'Warning: Qdrant support was removed in Lien v0.49; falling back to local LanceDB. ' +
+  'You can delete the "qdrant" settings from your config.';
+
+let qdrantWarningShown = false;
+
+/**
+ * Warn (once per process) that Qdrant settings were found but are no longer supported.
+ */
+function warnQdrantRemoved(): void {
+  if (qdrantWarningShown) return;
+  qdrantWarningShown = true;
+  console.warn(QDRANT_REMOVED_WARNING);
+}
+
+/**
+ * Strip retired Qdrant settings from a parsed config.
+ *
+ * Graceful degradation: an existing config with backend: "qdrant" or
+ * qdrant.* keys must not crash — warn once and proceed with LanceDB.
+ */
+function stripRemovedQdrantConfig(raw: RawGlobalConfig): RawGlobalConfig {
+  if (raw.backend !== 'qdrant' && raw.qdrant === undefined) {
+    return raw;
+  }
+
+  warnQdrantRemoved();
+  const { qdrant: _qdrant, ...rest } = raw;
+  if (rest.backend === 'qdrant') {
+    rest.backend = 'lancedb';
+  }
+  return rest;
 }
 
 /**
@@ -43,80 +80,44 @@ function loadConfigFromEnv(): GlobalConfig | null {
     return null;
   }
 
-  const config: GlobalConfig = {};
+  if (backendEnv === 'qdrant') {
+    warnQdrantRemoved();
+    return { backend: 'lancedb' };
+  }
 
-  const validBackends = ['lancedb', 'qdrant'] as const;
-  if (!validBackends.includes(backendEnv as any)) {
+  if (backendEnv !== 'lancedb') {
     throw new ConfigValidationError(
-      `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` +
-        `Valid values: 'lancedb' or 'qdrant'`,
+      `Invalid LIEN_BACKEND environment variable: "${backendEnv}"\n` + `Valid value: 'lancedb'`,
       '<environment>',
     );
   }
 
-  config.backend = backendEnv as 'lancedb' | 'qdrant';
-
-  if (config.backend === 'qdrant') {
-    const url = process.env.LIEN_QDRANT_URL;
-    if (!url) {
-      throw new ConfigValidationError(
-        'Qdrant backend requires LIEN_QDRANT_URL environment variable.\n' +
-          'Set it with: export LIEN_QDRANT_URL=http://localhost:6333',
-        '<environment>',
-      );
-    }
-
-    config.qdrant = {
-      url,
-      apiKey: process.env.LIEN_QDRANT_API_KEY,
-    };
-  }
-
-  return config;
+  return { backend: 'lancedb' };
 }
 
 /**
- * Parse and validate a config object.
+ * Validate a sanitized config object.
  */
-function validateConfig(config: GlobalConfig, configPath: string): void {
-  // Validate backend value
-  if (config.backend && !['lancedb', 'qdrant'].includes(config.backend)) {
+function validateConfig(
+  config: RawGlobalConfig,
+  configPath: string,
+): asserts config is GlobalConfig {
+  if (config.backend && config.backend !== 'lancedb') {
     throw new ConfigValidationError(
       `Invalid backend in global config: "${config.backend}"\n` +
         `Config file: ${configPath}\n` +
-        `Valid values: 'lancedb' or 'qdrant'`,
+        `Valid value: 'lancedb'`,
       configPath,
     );
-  }
-
-  // Validate Qdrant configuration
-  if (config.backend === 'qdrant') {
-    if (!config.qdrant) {
-      throw new ConfigValidationError(
-        `Qdrant backend requires a "qdrant" configuration section\n` +
-          `Config file: ${configPath}\n` +
-          `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
-        configPath,
-      );
-    }
-
-    if (!config.qdrant.url) {
-      throw new ConfigValidationError(
-        `Qdrant backend requires qdrant.url in config\n` +
-          `Config file: ${configPath}\n` +
-          `Add: { "qdrant": { "url": "http://localhost:6333" } }`,
-        configPath,
-      );
-    }
   }
 }
 
 /**
  * Parse JSON config file with helpful error messages.
  */
-function parseConfigFile(content: string, configPath: string): GlobalConfig {
+function parseConfigFile(content: string, configPath: string): RawGlobalConfig {
   try {
-    return JSON.parse(content) as GlobalConfig;
+    return JSON.parse(content) as RawGlobalConfig;
   } catch (parseError) {
     const errorMsg = parseError instanceof Error ? parseError.message : String(parseError);
     throw new ConfigValidationError(
@@ -145,8 +146,9 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
   const configPath = path.join(os.homedir(), '.lien', 'config.json');
   try {
     const content = await fs.readFile(configPath, 'utf-8');
-    fileConfig = parseConfigFile(content, configPath);
-    validateConfig(fileConfig, configPath);
+    const sanitized = stripRemovedQdrantConfig(parseConfigFile(content, configPath));
+    validateConfig(sanitized, configPath);
+    fileConfig = sanitized;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw error;
@@ -156,11 +158,7 @@ export async function loadGlobalConfig(): Promise<GlobalConfig> {
   // 2. Overlay environment variables (highest precedence)
   const envConfig = loadConfigFromEnv();
   if (envConfig) {
-    const merged: GlobalConfig = { ...fileConfig, ...envConfig };
-    if (fileConfig.qdrant || envConfig.qdrant) {
-      merged.qdrant = { ...fileConfig.qdrant, ...envConfig.qdrant } as GlobalConfig['qdrant'];
-    }
-    return merged;
+    return { ...fileConfig, ...envConfig };
   }
 
   // 3. Apply defaults if no config found at all
@@ -183,131 +181,24 @@ export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
 }
 
 /**
- * Load existing global config, deep-merge a partial update, and save.
+ * Load existing global config, merge a partial update, and save.
+ * Retired Qdrant settings in the existing file are dropped on save.
  */
 export async function mergeGlobalConfig(partial: Partial<GlobalConfig>): Promise<GlobalConfig> {
   const configPath = path.join(os.homedir(), '.lien', 'config.json');
 
-  let existing: GlobalConfig = {};
+  let existing: RawGlobalConfig = {};
   try {
     const content = await fs.readFile(configPath, 'utf-8');
-    existing = parseConfigFile(content, configPath);
+    existing = stripRemovedQdrantConfig(parseConfigFile(content, configPath));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw error;
     }
   }
 
-  // Deep merge: spread nested objects
-  const merged: GlobalConfig = { ...existing, ...partial };
-  if (existing.qdrant || partial.qdrant) {
-    merged.qdrant = { ...existing.qdrant, ...partial.qdrant } as GlobalConfig['qdrant'];
-  }
+  const merged = { ...existing, ...partial } as GlobalConfig;
 
   await saveGlobalConfig(merged);
   return merged;
-}
-
-/**
- * Parse HTTPS/HTTP git URLs (e.g., https://github.com/org/repo.git).
- */
-function parseHttpsGitUrl(url: string): string | null {
-  const match = url.match(/https?:\/\/(?:[\w\.-]+@)?[\w\.-]+\/([\w\.-]+)\/([\w\.-]+)(?:\.git)?/);
-  return match ? match[1] : null;
-}
-
-/**
- * Parse SSH git URLs (e.g., git@github.com:org/repo.git).
- */
-function parseSshGitUrl(url: string): string | null {
-  const match = url.match(/git@[\w\.-]+:([\w\.-]+)\/([\w\.-]+)(?:\.git)?/);
-  return match ? match[1] : null;
-}
-
-/**
- * Parse SSH protocol URLs (e.g., ssh://git@host.com/org/repo.git).
- */
-function parseSshProtocolUrl(url: string): string | null {
-  const match = url.match(/ssh:\/\/(?:[\w\.-]+@)?[\w\.-]+\/([\w\.-]+)\/([\w\.-]+)(?:\.git)?/);
-  return match ? match[1] : null;
-}
-
-/**
- * Parse generic git URLs (fallback: org/repo at the end).
- */
-function parseGenericGitUrl(url: string): string | null {
-  const match = url.match(/([\w\.-]+)\/([\w\.-]+)(?:\.git)?$/);
-  return match ? match[1] : null;
-}
-
-/**
- * Get git remote URL from repository.
- */
-async function getGitRemoteUrl(rootDir: string): Promise<string | null> {
-  // Check if it's a git repo first
-  const gitDir = path.join(rootDir, '.git');
-  try {
-    await fs.access(gitDir);
-  } catch {
-    return null; // Not a git repo
-  }
-
-  // Get remote URL (prefer 'origin', fallback to first remote)
-  try {
-    const { stdout } = await execFileAsync('git', ['remote', 'get-url', 'origin'], {
-      cwd: rootDir,
-      timeout: 5000,
-    });
-    return stdout.trim();
-  } catch {
-    // If origin doesn't exist, get first remote
-    try {
-      const { stdout: remoteList } = await execFileAsync('git', ['remote'], {
-        cwd: rootDir,
-        timeout: 5000,
-      });
-      const remoteName = remoteList.trim().split('\n')[0];
-      if (!remoteName) return null;
-
-      const { stdout } = await execFileAsync('git', ['remote', 'get-url', '--', remoteName], {
-        cwd: rootDir,
-        timeout: 5000,
-      });
-      return stdout.trim();
-    } catch {
-      return null; // No remotes configured
-    }
-  }
-}
-
-/**
- * Extract organization ID from git remote URL.
- * Supports GitHub, GitLab, Bitbucket, and other common formats.
- *
- * Examples:
- * - https://github.com/org/repo.git → "org"
- * - git@github.com:org/repo.git → "org"
- * - https://gitlab.com/org/repo.git → "org"
- * - https://bitbucket.org/org/repo.git → "org"
- *
- * @param rootDir - Root directory of the project (must be a git repo)
- * @returns Organization ID, or null if not a git repo or can't extract
- */
-export async function extractOrgIdFromGit(rootDir: string): Promise<string | null> {
-  try {
-    const remoteUrl = await getGitRemoteUrl(rootDir);
-    if (!remoteUrl) return null;
-
-    // Try parsers in order of specificity
-    const parsers = [parseHttpsGitUrl, parseSshGitUrl, parseSshProtocolUrl, parseGenericGitUrl];
-
-    for (const parser of parsers) {
-      const orgId = parser(remoteUrl);
-      if (orgId) return orgId;
-    }
-
-    return null;
-  } catch {
-    return null; // Git not available or other error
-  }
 }

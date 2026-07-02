@@ -314,18 +314,18 @@ describe('handleGetDependents', () => {
     });
   });
 
-  describe('cross-repo search with Qdrant', () => {
-    let mockQdrantDB: any;
+  describe('cross-repo search with a cross-repo-capable backend', () => {
+    let mockCrossRepoDB: any;
 
     beforeEach(() => {
-      mockQdrantDB = {
+      mockCrossRepoDB = {
         scanWithFilter: vi.fn(),
         scanCrossRepo: vi.fn(),
         supportsCrossRepo: true,
       };
 
       mockCtx = {
-        vectorDB: mockQdrantDB,
+        vectorDB: mockCrossRepoDB,
         embeddings: mockEmbeddings as any,
         log: mockLog,
         checkAndReconnect: mockCheckAndReconnect,
@@ -346,7 +346,7 @@ describe('handleGetDependents', () => {
       await handleGetDependents({ filepath: 'src/shared/utils.ts', crossRepo: true }, mockCtx);
 
       expect(findDependents).toHaveBeenCalledWith(
-        mockQdrantDB,
+        mockCrossRepoDB,
         'src/shared/utils.ts',
         true,
         mockLog,
@@ -357,7 +357,7 @@ describe('handleGetDependents', () => {
       );
     });
 
-    it('should include groupedByRepo when crossRepo=true with Qdrant', async () => {
+    it('should include groupedByRepo when crossRepo=true with a cross-repo-capable backend', async () => {
       const mockChunks: SearchResult[] = [
         {
           content: 'import { util } from "./utils"',
@@ -407,8 +407,8 @@ describe('handleGetDependents', () => {
     });
   });
 
-  describe('cross-repo fallback (non-Qdrant)', () => {
-    it('should not include groupedByRepo when not using Qdrant', async () => {
+  describe('cross-repo fallback (unsupported backend)', () => {
+    it('should not include groupedByRepo when the backend lacks cross-repo support', async () => {
       vi.mocked(findDependents).mockResolvedValue(createMockAnalysis());
 
       const result = await handleGetDependents(

@@ -30,39 +30,35 @@ describe('config command', () => {
 
   describe('configSetCommand', () => {
     it('should set a valid backend value', async () => {
-      await configSetCommand('backend', 'qdrant');
-      expect(mockMergeGlobalConfig).toHaveBeenCalledWith({ backend: 'qdrant' });
+      await configSetCommand('backend', 'lancedb');
+      expect(mockMergeGlobalConfig).toHaveBeenCalledWith({ backend: 'lancedb' });
     });
 
     it('should reject unknown keys', async () => {
       await expect(configSetCommand('unknown.key', 'value')).rejects.toThrow('process.exit');
     });
 
-    it('should reject invalid values for constrained keys', async () => {
-      await expect(configSetCommand('backend', 'invalid')).rejects.toThrow('process.exit');
+    it('should reject retired qdrant keys', async () => {
+      await expect(configSetCommand('qdrant.url', 'http://localhost:6333')).rejects.toThrow(
+        'process.exit',
+      );
     });
 
-    it('should allow free-form values for qdrant.url', async () => {
-      await configSetCommand('qdrant.url', 'http://localhost:6333');
-      expect(mockMergeGlobalConfig).toHaveBeenCalledWith({
-        qdrant: { url: 'http://localhost:6333' },
-      });
+    it('should reject invalid values for constrained keys', async () => {
+      await expect(configSetCommand('backend', 'qdrant')).rejects.toThrow('process.exit');
     });
   });
 
   describe('configGetCommand', () => {
     it('should display a set value', async () => {
-      mockLoadGlobalConfig.mockResolvedValue({
-        backend: 'qdrant',
-        qdrant: { url: 'http://localhost:6333' },
-      });
+      mockLoadGlobalConfig.mockResolvedValue({ backend: 'lancedb' });
       await configGetCommand('backend');
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('qdrant'));
+      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('lancedb'));
     });
 
     it('should display (not set) for missing values', async () => {
-      mockLoadGlobalConfig.mockResolvedValue({ backend: 'lancedb' });
-      await configGetCommand('qdrant.url');
+      mockLoadGlobalConfig.mockResolvedValue({});
+      await configGetCommand('backend');
       expect(console.log).toHaveBeenCalledWith(expect.stringContaining('not set'));
     });
 

@@ -21,9 +21,9 @@
  * `_distance` is synthesized by LanceDB on `.search()` results and is
  * auto-injected by the search wrappers — callers don't include it.
  *
- * `repoId` is NOT a LanceDB column (Qdrant-only); callers that group by
- * repo on LanceDB get `undefined` and fall back to `'unknown'` — same
- * behavior as today.
+ * `repoId` is NOT a LanceDB column (cross-repo backends only); callers
+ * that group by repo on LanceDB get `undefined` and fall back to
+ * `'unknown'` — same behavior as today.
  */
 export type ColumnName =
   | 'vector'
@@ -55,10 +55,10 @@ export type ColumnName =
   | 'callSiteLines'
   | 'callSiteCaptured'
   | '_distance'
-  // `repoId` lives in the Qdrant payload (not the LanceDB Arrow schema).
-  // Callers include it so cross-repo grouping survives once Qdrant honors
-  // `columns` (#576). The LanceDB wrapper silently filters unknown columns
-  // before invoking `.select()`, so this is safe on both backends.
+  // `repoId` is not in the LanceDB Arrow schema; callers include it so
+  // cross-repo grouping keeps working if a cross-repo-capable backend is
+  // reintroduced. The LanceDB wrapper silently filters unknown columns
+  // before invoking `.select()`, so including it is safe.
   | 'repoId';
 
 /**
@@ -105,8 +105,8 @@ export const DEPENDENCY_GRAPH_COLUMNS: ColumnName[] = [
   'callSiteLines',
   'callSiteCaptured',
   'content',
-  // Required by `groupDependentsByRepo` on Qdrant. Filtered out by the
-  // LanceDB wrapper since it's not in the Arrow schema.
+  // Required by `groupDependentsByRepo` on cross-repo-capable backends.
+  // Filtered out by the LanceDB wrapper since it's not in the Arrow schema.
   'repoId',
 ];
 

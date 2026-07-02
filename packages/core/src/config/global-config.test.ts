@@ -12,12 +12,11 @@ describe('loadGlobalConfig', () => {
     vi.resetModules();
     process.env = { ...originalEnv };
     delete process.env.LIEN_BACKEND;
-    delete process.env.LIEN_QDRANT_URL;
-    delete process.env.LIEN_QDRANT_API_KEY;
   });
 
   afterEach(() => {
     process.env = originalEnv;
+    vi.restoreAllMocks();
   });
 
   describe('Environment variable handling (loadConfigFromEnv)', () => {
@@ -33,53 +32,16 @@ describe('loadGlobalConfig', () => {
 
     it('should return config with backend only when LIEN_BACKEND is set to lancedb', async () => {
       process.env.LIEN_BACKEND = 'lancedb';
+      vi.spyOn(fs, 'readFile').mockRejectedValue({ code: 'ENOENT' } as NodeJS.ErrnoException);
 
       const config = await loadGlobalConfig();
 
       expect(config).toEqual({ backend: 'lancedb' });
     });
 
-    it('should return complete qdrant config when all environment variables are set', async () => {
-      process.env.LIEN_BACKEND = 'qdrant';
-      process.env.LIEN_QDRANT_URL = 'http://localhost:6333';
-      process.env.LIEN_QDRANT_API_KEY = 'test-api-key';
-
-      const config = await loadGlobalConfig();
-
-      expect(config).toEqual({
-        backend: 'qdrant',
-        qdrant: {
-          url: 'http://localhost:6333',
-          apiKey: 'test-api-key',
-        },
-      });
-    });
-
-    it('should return qdrant config without apiKey when only URL is set', async () => {
-      process.env.LIEN_BACKEND = 'qdrant';
-      process.env.LIEN_QDRANT_URL = 'http://localhost:6333';
-
-      const config = await loadGlobalConfig();
-
-      expect(config).toEqual({
-        backend: 'qdrant',
-        qdrant: {
-          url: 'http://localhost:6333',
-          apiKey: undefined,
-        },
-      });
-    });
-
-    it('should throw ConfigValidationError when LIEN_BACKEND is qdrant but LIEN_QDRANT_URL is missing', async () => {
-      process.env.LIEN_BACKEND = 'qdrant';
-      // LIEN_QDRANT_URL is not set
-
-      await expect(loadGlobalConfig()).rejects.toThrow(ConfigValidationError);
-      await expect(loadGlobalConfig()).rejects.toThrow('requires LIEN_QDRANT_URL');
-    });
-
     it('should throw ConfigValidationError when LIEN_BACKEND has an invalid value', async () => {
       process.env.LIEN_BACKEND = 'invalid';
+      vi.spyOn(fs, 'readFile').mockRejectedValue({ code: 'ENOENT' } as NodeJS.ErrnoException);
 
       await expect(loadGlobalConfig()).rejects.toThrow(ConfigValidationError);
       await expect(loadGlobalConfig()).rejects.toThrow('Invalid LIEN_BACKEND');
@@ -138,30 +100,6 @@ describe('loadGlobalConfig', () => {
       await expect(loadGlobalConfig()).rejects.toThrow('invalid');
     });
 
-    it('should throw ConfigValidationError when backend is qdrant but qdrant config object is missing', async () => {
-      vi.spyOn(fs, 'readFile').mockResolvedValue(
-        JSON.stringify({
-          backend: 'qdrant',
-          // qdrant config object is completely missing
-        }),
-      );
-
-      await expect(loadGlobalConfig()).rejects.toThrow(ConfigValidationError);
-      await expect(loadGlobalConfig()).rejects.toThrow('requires a "qdrant" configuration section');
-    });
-
-    it('should throw ConfigValidationError when backend is qdrant but qdrant.url is missing', async () => {
-      vi.spyOn(fs, 'readFile').mockResolvedValue(
-        JSON.stringify({
-          backend: 'qdrant',
-          qdrant: { apiKey: 'test-key' }, // url is missing
-        }),
-      );
-
-      await expect(loadGlobalConfig()).rejects.toThrow(ConfigValidationError);
-      await expect(loadGlobalConfig()).rejects.toThrow('requires qdrant.url');
-    });
-
     it('should pass validation for valid lancedb configuration', async () => {
       vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ backend: 'lancedb' }));
 
@@ -169,20 +107,89 @@ describe('loadGlobalConfig', () => {
 
       expect(config).toEqual({ backend: 'lancedb' });
     });
+  });
 
-    it('should pass validation for valid qdrant configuration', async () => {
-      const validConfig = {
-        backend: 'qdrant' as const,
-        qdrant: {
-          url: 'http://localhost:6333',
-          apiKey: 'test-key',
-        },
-      };
-      vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify(validConfig));
+  describe('Retired Qdrant settings (graceful degradation)', () => {
+    // Import a fresh module instance so the warn-once flag is reset per test
+    async function loadFreshModule() {
+      vi.resetModules();
+      return import('./global-config.js');
+    }
 
-      const config = await loadGlobalConfig();
+    it('should fall back to LanceDB when config file has backend: "qdrant"', async () => {
+      const { loadGlobalConfig: load } = await loadFreshModule();
+      vi.spyOn(fs, 'readFile').mockResolvedValue(
+        JSON.stringify({
+          backend: 'qdrant',
+          qdrant: { url: 'http://localhost:6333', apiKey: 'test-key' },
+        }),
+      );
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      expect(config).toEqual(validConfig);
+      const config = await load();
+
+      expect(config).toEqual({ backend: 'lancedb' });
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Qdrant support was removed'));
+    });
+
+    it('should strip orphaned qdrant.* keys even when backend is lancedb', async () => {
+      const { loadGlobalConfig: load } = await loadFreshModule();
+      vi.spyOn(fs, 'readFile').mockResolvedValue(
+        JSON.stringify({
+          backend: 'lancedb',
+          qdrant: { url: 'http://localhost:6333' },
+        }),
+      );
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const config = await load();
+
+      expect(config).toEqual({ backend: 'lancedb' });
+      expect(warnSpy).toHaveBeenCalledOnce();
+    });
+
+    it('should fall back to LanceDB when LIEN_BACKEND=qdrant', async () => {
+      const { loadGlobalConfig: load } = await loadFreshModule();
+      process.env.LIEN_BACKEND = 'qdrant';
+      vi.spyOn(fs, 'readFile').mockRejectedValue({ code: 'ENOENT' } as NodeJS.ErrnoException);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const config = await load();
+
+      expect(config).toEqual({ backend: 'lancedb' });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('falling back to local LanceDB'),
+      );
+    });
+
+    it('should warn only once per process for repeated loads', async () => {
+      const { loadGlobalConfig: load } = await loadFreshModule();
+      vi.spyOn(fs, 'readFile').mockResolvedValue(
+        JSON.stringify({ backend: 'qdrant', qdrant: { url: 'http://localhost:6333' } }),
+      );
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await load();
+      await load();
+      await load();
+
+      expect(warnSpy).toHaveBeenCalledOnce();
+    });
+
+    it('should drop retired qdrant keys when merging config updates', async () => {
+      const { mergeGlobalConfig: merge } = await loadFreshModule();
+      vi.spyOn(fs, 'readFile').mockResolvedValue(
+        JSON.stringify({ backend: 'qdrant', qdrant: { url: 'http://localhost:6333' } }),
+      );
+      vi.spyOn(fs, 'mkdir').mockResolvedValue(undefined);
+      const writeSpy = vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const merged = await merge({ backend: 'lancedb' });
+
+      expect(merged).toEqual({ backend: 'lancedb' });
+      const written = JSON.parse((writeSpy.mock.calls[0]![1] as string).toString());
+      expect(written).toEqual({ backend: 'lancedb' });
     });
   });
 
@@ -200,17 +207,11 @@ describe('loadGlobalConfig', () => {
     it('should prefer environment variables over config file', async () => {
       process.env.LIEN_BACKEND = 'lancedb';
 
-      // Mock config file with different backend
-      vi.spyOn(fs, 'readFile').mockResolvedValue(
-        JSON.stringify({
-          backend: 'qdrant',
-          qdrant: { url: 'http://localhost:6333' },
-        }),
-      );
+      // Mock config file (env should win regardless of file contents)
+      vi.spyOn(fs, 'readFile').mockResolvedValue(JSON.stringify({ backend: 'lancedb' }));
 
       const config = await loadGlobalConfig();
 
-      // Env var overrides backend, but file config's qdrant section is preserved
       expect(config.backend).toBe('lancedb');
     });
   });

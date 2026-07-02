@@ -669,7 +669,8 @@ Dependency Columns (v0.23.0):
 
 Note: Nested ChunkMetadata fields (symbols, importedSymbols, callSites) are
 flattened into parallel arrays for Arrow/LanceDB storage. Multi-tenant fields
-(repoId, orgId, branch, commitSha) are only stored in the Qdrant backend.
+(repoId, orgId, branch, commitSha) exist in ChunkMetadata but are not stored
+as LanceDB columns.
 ```
 
 ### Version File

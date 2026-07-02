@@ -8,16 +8,8 @@ const CONFIG_PATH = path.join(os.homedir(), '.lien', 'config.json');
 /** Allowed config keys and their valid values */
 const ALLOWED_KEYS: Record<string, { values: readonly string[]; description: string }> = {
   backend: {
-    values: ['lancedb', 'qdrant'],
+    values: ['lancedb'],
     description: 'Vector database backend',
-  },
-  'qdrant.url': {
-    values: [],
-    description: 'Qdrant server URL',
-  },
-  'qdrant.apiKey': {
-    values: [],
-    description: 'Qdrant API key',
   },
 };
 
@@ -37,10 +29,6 @@ function buildPartialConfig(key: string, value: string): Partial<GlobalConfig> {
   switch (key) {
     case 'backend':
       return { backend: value as GlobalConfig['backend'] };
-    case 'qdrant.url':
-      return { qdrant: { url: value } };
-    case 'qdrant.apiKey':
-      return { qdrant: { url: '', apiKey: value } };
     default:
       return {};
   }
@@ -58,15 +46,6 @@ export async function configSetCommand(key: string, value: string) {
     console.error(chalk.red(`Invalid value "${value}" for ${key}`));
     console.log(chalk.dim('Valid values:'), allowed.values.join(', '));
     process.exit(1);
-  }
-
-  // Special handling for qdrant.apiKey — need existing url
-  if (key === 'qdrant.apiKey') {
-    const existing = await loadGlobalConfig();
-    if (!existing.qdrant?.url) {
-      console.error(chalk.red('Set qdrant.url first before setting qdrant.apiKey'));
-      process.exit(1);
-    }
   }
 
   const partial = buildPartialConfig(key, value);

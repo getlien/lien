@@ -79,7 +79,7 @@ function groupViolationsByRepo(
 
 /**
  * Fetch chunks for cross-repo analysis.
- * Returns fallback=true if cross-repo was requested but Qdrant unavailable.
+ * Returns fallback=true if cross-repo was requested but the backend does not support it.
  */
 async function fetchCrossRepoChunks(
   vectorDB: VectorDBInterface,
@@ -95,7 +95,7 @@ async function fetchCrossRepoChunks(
     // Chunks here feed only `groupViolationsByRepo` (file → repoId mapping).
     // The actual analyzer scan that reads complexity/halstead/imports
     // happens inside ComplexityAnalyzer.analyze. `repoId` is required for
-    // grouping on Qdrant — filtered out by the LanceDB wrapper.
+    // grouping on cross-repo backends — filtered out by the LanceDB wrapper.
     const chunks = await vectorDB.scanCrossRepo({
       limit: 100000,
       repoIds,

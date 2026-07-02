@@ -38,7 +38,7 @@ export interface MCPServerOptions {
 
 /**
  * Initialize embeddings and vector database.
- * Uses factory to select backend (LanceDB or Qdrant) based on config.
+ * Uses factory to create the vector database backend.
  */
 async function initializeDatabase(
   rootDir: string,

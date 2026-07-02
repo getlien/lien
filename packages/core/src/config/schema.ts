@@ -64,12 +64,7 @@ export interface LienConfig {
     // Severity multipliers are hardcoded: warning = 1x threshold, error = 2x threshold
   };
   storage?: {
-    backend?: 'lancedb' | 'qdrant';
-    qdrant?: {
-      url: string; // e.g., "http://localhost:6333"
-      apiKey?: string; // Optional, required for Qdrant Cloud
-      orgId: string; // Organization identifier for multi-tenant isolation
-    };
+    backend?: 'lancedb'; // LanceDB is the only supported backend
   };
   /** @deprecated Frameworks are replaced by ecosystem presets. Kept for old config compat. */
   frameworks?: FrameworkInstance[];

@@ -349,11 +349,11 @@ function dbRecordToSearchResult(r: DBRecord, query?: string): SearchResult {
 
 /**
  * The set of column names actually present in the LanceDB Arrow schema.
- * `repoId`, `orgId`, `branch`, `commitSha` live in the Qdrant payload but
- * are NOT LanceDB columns — passing them to LanceDB's `.select()` raises a
- * "no field named X" schema error. Callers don't need to know which
- * columns are backend-specific; `applySelect` filters down to this set
- * before invoking `.select()`.
+ * `repoId`, `orgId`, `branch`, `commitSha` exist in ChunkMetadata for
+ * cross-repo-capable backends but are NOT LanceDB columns — passing them
+ * to LanceDB's `.select()` raises a "no field named X" schema error.
+ * Callers don't need to know which columns are backend-specific;
+ * `applySelect` filters down to this set before invoking `.select()`.
  */
 const LANCEDB_COLUMN_NAMES: ReadonlySet<string> = new Set([
   'vector',
@@ -403,9 +403,9 @@ function ensureDistanceColumn(columns: readonly string[]): string[] {
  * column list down to columns LanceDB actually stores AND always
  * including `file` (required by `isValidRecord` to identify each row).
  *
- * Non-LanceDB columns like `repoId` (Qdrant payload) pass through caller
- * lists for backend symmetry; this is where we drop them so LanceDB
- * doesn't raise a schema error.
+ * Non-LanceDB columns like `repoId` pass through caller lists for
+ * backend symmetry; this is where we drop them so LanceDB doesn't
+ * raise a schema error.
  *
  * `kind` controls `_distance` handling:
  *   - 'search' → `_distance` is kept (the vector-search builder

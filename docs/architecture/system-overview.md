@@ -59,7 +59,6 @@ graph TB
     subgraph "External Dependencies"
         TRANSFORMERS[transformers.js]
         LANCEDB[LanceDB]
-        QDRANT[Qdrant]
         GITCMD[Git CLI]
     end
 
@@ -112,11 +111,8 @@ graph TB
     VECTORDB --> BATCHINS
     VECTORDB --> MAINT
     QUERY --> LANCEDB
-    QUERY --> QDRANT
     BATCHINS --> LANCEDB
-    BATCHINS --> QDRANT
     MAINT --> LANCEDB
-    MAINT --> QDRANT
 
     %% Optional Services
     MCP --> GIT
@@ -137,7 +133,7 @@ graph TB
     class CONFIG,GLOBALCONFIG,INDEXER,SCANNER,CHUNKER,AST,TRAVERSER,SYMBOLS,TESTASSOC,MANIFEST,COMPLEXANALYZER coreClass
     class EMBEDDINGS,VECTORDB,QUERY,BATCHINS,MAINT,CACHE dataClass
     class GIT,WATCHER,ECOSYSTEM optionalClass
-    class TRANSFORMERS,LANCEDB,QDRANT,GITCMD externalClass
+    class TRANSFORMERS,LANCEDB,GITCMD externalClass
 ```
 
 ## Component Descriptions
@@ -163,7 +159,7 @@ graph TB
 
 ### Core Services
 - **ConfigService**: Manages per-project configuration loading, saving, and validation
-- **GlobalConfig**: Manages global settings (`~/.lien/config.json`) — backend choice and Qdrant connection
+- **GlobalConfig**: Manages global settings (`~/.lien/config.json`) — backend choice
 - **Indexer**: Orchestrates the indexing workflow
 - **File Scanner**: Scans codebase respecting .gitignore and ecosystem preset boundaries
 - **Code Chunker**: Splits files using AST-based semantic chunking or line-based fallback
@@ -190,8 +186,7 @@ graph TB
 
 ### External Dependencies
 - **transformers.js**: Local embedding generation (all-MiniLM-L6-v2 model, runs in worker thread — see [ADR-008](decisions/0008-keep-transformers-js-worker-embeddings.md))
-- **LanceDB**: Default vector database for semantic search (local, zero-config)
-- **Qdrant**: Optional vector database backend for cross-repo search and team use
+- **LanceDB**: Vector database for semantic search (local, zero-config)
 - **Git CLI**: For repository state tracking
 
 ## Data Flow
@@ -235,7 +230,7 @@ Non-essential features (git tracking, file watching) are optional and can be dis
 - **Language**: TypeScript (ESM)
 - **CLI**: Commander.js
 - **MCP**: @modelcontextprotocol/sdk
-- **Vector DB**: LanceDB (default, local) or Qdrant (optional, for cross-repo search)
+- **Vector DB**: LanceDB (local)
 - **Embeddings**: @huggingface/transformers v4 (all-MiniLM-L6-v2, worker thread)
 - **Testing**: Vitest
 - **Build**: tsup
@@ -253,11 +248,11 @@ Non-essential features (git tracking, file watching) are optional and can be dis
 ### Current Limits
 - Single machine, single process
 - Embeddings generated locally (no API calls)
-- Vector database stored on local disk (LanceDB) or remote (Qdrant)
+- Vector database stored on local disk (LanceDB)
 
 ### Current Scaling Options
-- **Multi-repo search**: Supported via Qdrant backend with `crossRepo=true` on search tools
-- **VectorDB factory pattern**: Switch between LanceDB (local) and Qdrant (remote) via `lien config set backend qdrant`
+- **Single-repo, local-first**: LanceDB is the only backend (the Qdrant backend was retired — see [ADR-0010](decisions/0010-retire-qdrant-backend.md))
+- **VectorDB factory pattern**: The `createVectorDB` factory and `VectorDBInterface` seam are retained so an alternative backend can be reintroduced without touching call sites
 
 ### Future Scaling Options
 - Multiple embedding models

@@ -14,7 +14,6 @@ Lien connects AI coding assistants like Cursor and Claude Code to your codebase 
 
 - 🔒 **100% Local & Private** - All code analysis happens on your machine
 - 🚀 **Semantic Search** - Natural language queries: "How does authentication work?"
-- 🌐 **Cross-Repo Search** - Search across all repositories in your organization (Qdrant backend)
 - 🎯 **MCP Integration** - Works seamlessly with Cursor, Claude Code, and other MCP-compatible tools
 - ⚡ **Fast** - Sub-500ms queries, minutes to index large codebases
 - 🆓 **Free Forever** - No API costs, no subscriptions, no usage limits
@@ -50,41 +49,13 @@ lien init
 
 **👉 [Full installation guide](https://lien.dev/guide/installation)**
 
-### Qdrant Backend (Cross-Repo Search)
-
-For cross-repository search across your organization, configure Qdrant:
-
-```bash
-# Option 1: Global config file
-mkdir -p ~/.lien
-cat > ~/.lien/config.json <<EOF
-{
-  "backend": "qdrant",
-  "qdrant": {
-    "url": "http://localhost:6333",
-    "apiKey": "your-api-key"
-  }
-}
-EOF
-
-# Option 2: Environment variables
-export LIEN_BACKEND=qdrant
-export LIEN_QDRANT_URL=http://localhost:6333
-export LIEN_QDRANT_API_KEY=your-api-key
-
-# Index your repos (orgId auto-detected from git remote)
-lien index
-```
-
-**Note:** `orgId` is automatically extracted from your git remote URL. Cross-repo search requires all repos to share the same `orgId`.
-
 ## MCP Tools
 
 Lien exposes **6 powerful tools** via Model Context Protocol:
 
 | Tool | Description |
 |------|-------------|
-| `semantic_search` | Natural language code search (supports `crossRepo` with Qdrant) |
+| `semantic_search` | Natural language code search |
 | `find_similar` | Find similar code patterns |
 | `get_files_context` | Get file context with test associations |
 | `list_functions` | List symbols by pattern |

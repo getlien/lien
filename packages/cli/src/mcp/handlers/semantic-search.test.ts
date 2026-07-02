@@ -175,18 +175,18 @@ describe('handleSemanticSearch', () => {
     });
   });
 
-  describe('cross-repo search with Qdrant', () => {
-    let mockQdrantDB: any;
+  describe('cross-repo search with a cross-repo-capable backend', () => {
+    let mockCrossRepoDB: any;
 
     beforeEach(() => {
-      mockQdrantDB = {
+      mockCrossRepoDB = {
         search: vi.fn(),
         searchCrossRepo: vi.fn(),
         supportsCrossRepo: true,
       };
 
       mockCtx = {
-        vectorDB: mockQdrantDB,
+        vectorDB: mockCrossRepoDB,
         embeddings: mockEmbeddings as any,
         log: mockLog,
         checkAndReconnect: mockCheckAndReconnect,
@@ -201,24 +201,24 @@ describe('handleSemanticSearch', () => {
       };
     });
 
-    it('should use searchCrossRepo when crossRepo=true and using Qdrant', async () => {
+    it('should use searchCrossRepo when crossRepo=true and the backend supports it', async () => {
       const mockResults = [
         createMockResult({ metadata: { repoId: 'repo-a', file: 'src/a.ts' } }),
         createMockResult({ metadata: { repoId: 'repo-b', file: 'src/b.ts' } }),
       ];
-      mockQdrantDB.searchCrossRepo.mockResolvedValue(mockResults);
+      mockCrossRepoDB.searchCrossRepo.mockResolvedValue(mockResults);
 
       const result = await handleSemanticSearch(
         { query: 'cross repo search', crossRepo: true },
         mockCtx,
       );
 
-      expect(mockQdrantDB.searchCrossRepo).toHaveBeenCalledWith(
+      expect(mockCrossRepoDB.searchCrossRepo).toHaveBeenCalledWith(
         expect.any(Float32Array),
         5,
         expect.objectContaining({ repoIds: undefined }),
       );
-      expect(mockQdrantDB.search).not.toHaveBeenCalled();
+      expect(mockCrossRepoDB.search).not.toHaveBeenCalled();
 
       const parsed = JSON.parse(result.content![0].text);
       expect(parsed.results).toHaveLength(2);
@@ -240,7 +240,7 @@ describe('handleSemanticSearch', () => {
           metadata: { repoId: 'repo-b', file: 'src/b1.ts' },
         }),
       ];
-      mockQdrantDB.searchCrossRepo.mockResolvedValue(mockResults);
+      mockCrossRepoDB.searchCrossRepo.mockResolvedValue(mockResults);
 
       const result = await handleSemanticSearch(
         { query: 'test cross repo', crossRepo: true },
@@ -254,14 +254,14 @@ describe('handleSemanticSearch', () => {
     });
 
     it('should filter by repoIds when provided', async () => {
-      mockQdrantDB.searchCrossRepo.mockResolvedValue([]);
+      mockCrossRepoDB.searchCrossRepo.mockResolvedValue([]);
 
       await handleSemanticSearch(
         { query: 'filtered search', crossRepo: true, repoIds: ['repo-a', 'repo-c'] },
         mockCtx,
       );
 
-      expect(mockQdrantDB.searchCrossRepo).toHaveBeenCalledWith(
+      expect(mockCrossRepoDB.searchCrossRepo).toHaveBeenCalledWith(
         expect.any(Float32Array),
         5,
         expect.objectContaining({ repoIds: ['repo-a', 'repo-c'] }),
@@ -269,8 +269,8 @@ describe('handleSemanticSearch', () => {
     });
   });
 
-  describe('cross-repo fallback (non-Qdrant)', () => {
-    it('should fall back to single-repo search when crossRepo=true but not using Qdrant', async () => {
+  describe('cross-repo fallback (unsupported backend)', () => {
+    it('should fall back to single-repo search when crossRepo=true but the backend does not support it', async () => {
       const mockResults = [createMockResult()];
       mockVectorDB.search.mockResolvedValue(mockResults);
 

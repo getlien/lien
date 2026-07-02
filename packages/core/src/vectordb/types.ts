@@ -32,7 +32,7 @@ export const SYMBOL_TYPE_MATCHES: Record<string, Set<string>> = {
 };
 
 export interface VectorDBInterface {
-  /** Path to local storage (used for manifest and version files, even with remote backends like Qdrant) */
+  /** Path to local storage (used for manifest and version files, even with remote backends) */
   readonly dbPath: string;
   initialize(): Promise<void>;
   insertBatch(
@@ -88,7 +88,7 @@ export interface VectorDBInterface {
   reconnect(): Promise<void>;
   getCurrentVersion(): number;
   getVersionDate(): string;
-  /** Whether this backend supports cross-repo operations (e.g. Qdrant). */
+  /** Whether this backend supports cross-repo operations. */
   readonly supportsCrossRepo: boolean;
   /** Search across all repos in the organization. Returns [] if unsupported. */
   searchCrossRepo(
