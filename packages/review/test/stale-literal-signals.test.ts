@@ -1,13 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { CodeChunk } from '@liendev/parser';
 import type { ReviewContext } from '../src/plugin-types.js';
 import {
   extractChangedLiterals,
   computeStaleLiteralCandidates,
+  computeStaleLiteralCandidatesWithDeadline,
   renderStaleLiteralCandidates,
   renderStaleLiteralSection,
+  renderStaleLiteralSectionWithDeadline,
 } from '../src/stale-literal-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+import { silentLogger } from '../src/test-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -252,6 +255,161 @@ describe('computeStaleLiteralCandidates', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Single repo-wide pass (perf restructure): equivalence, traversal, budget
+// ---------------------------------------------------------------------------
+
+/** A CodeChunk whose `.content` getter increments a shared counter on every access. */
+function makeCountingChunk(
+  file: string,
+  startLine: number,
+  content: string,
+  accessCounter: { count: number },
+): CodeChunk {
+  return {
+    metadata: {
+      file,
+      startLine,
+      endLine: startLine + content.split('\n').length - 1,
+      type: 'function',
+      language: 'typescript',
+    },
+    get content(): string {
+      accessCounter.count++;
+      return content;
+    },
+  } as unknown as CodeChunk;
+}
+
+describe('scanRepoForStaleSites (single-pass restructure)', () => {
+  it('produces identical candidates to a multi-literal, multi-file fixture, including per-literal caps and first-N-in-traversal-order', () => {
+    // Two touched literals in one diff; the first has more surviving sites
+    // than MAX_SITES_PER_LITERAL (5) spread across multiple repo chunks, the
+    // second has exactly one. Proves the single shared pass still enforces
+    // each literal's own cap independently and keeps first-N traversal order.
+    const patch =
+      "@@ -1,2 +1,2 @@\n-const key = 'shared-config-key';\n-const flag = 'legacy-mode-flag';\n+const key = resolveKey();\n+const flag = resolveFlag();";
+    const patches = new Map([['src/config.ts', patch]]);
+
+    const repoChunks = [
+      makeChunk(
+        'src/other1.ts',
+        1,
+        "const a = 'shared-config-key';\nconst b = 'shared-config-key';",
+      ),
+      makeChunk(
+        'src/other2.ts',
+        1,
+        "const c = 'shared-config-key';\nconst d = 'shared-config-key';\nconst e = 'shared-config-key';",
+      ),
+      makeChunk(
+        'src/other3.ts',
+        1,
+        "const f = 'shared-config-key';\nconst g = 'legacy-mode-flag';",
+      ),
+    ];
+
+    const candidates = computeStaleLiteralCandidates(makeContext({ patches, repoChunks }));
+
+    const key = candidates.find(c => c.literal === "'shared-config-key'");
+    expect(key).toBeDefined();
+    // Capped at MAX_SITES_PER_LITERAL (5): the first five in chunk/line order,
+    // NOT the sixth occurrence in other3.ts.
+    expect(key!.staleSites.map(s => `${s.file}:${s.line}`)).toEqual([
+      'src/other1.ts:1',
+      'src/other1.ts:2',
+      'src/other2.ts:1',
+      'src/other2.ts:2',
+      'src/other2.ts:3',
+    ]);
+
+    const flag = candidates.find(c => c.literal === "'legacy-mode-flag'");
+    expect(flag).toBeDefined();
+    expect(flag!.staleSites.map(s => `${s.file}:${s.line}`)).toEqual(['src/other3.ts:2']);
+  });
+
+  it('reads each repo chunk exactly once, regardless of how many literals are touched', () => {
+    const counter = { count: 0 };
+    const repoChunks = [
+      makeCountingChunk(
+        'src/a.ts',
+        1,
+        "const a = 'alpha-value';\nconst b = 'beta-value';",
+        counter,
+      ),
+      makeCountingChunk('src/b.ts', 1, "const c = 'gamma-value';", counter),
+    ];
+    // Three distinct touched literals — under the old per-literal scan this
+    // would read every chunk's content 3x (once per literal); the single-pass
+    // scan must read each chunk's content exactly once regardless.
+    const patch =
+      "@@ -1,3 +1,3 @@\n-const x = 'alpha-value';\n-const y = 'beta-value';\n-const z = 'gamma-value';\n+const x = f();\n+const y = g();\n+const z = h();";
+    const patches = new Map([['src/other.ts', patch]]);
+
+    computeStaleLiteralCandidates(makeContext({ patches, repoChunks }));
+
+    expect(counter.count).toBe(repoChunks.length);
+  });
+
+  it('returns partial results and logs a diagnostic when the wall-clock budget is exceeded', () => {
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'budget-test-literal';\n+const x = compute();"],
+    ]);
+    const repoChunks = [makeChunk('src/other.ts', 1, "const y = 'budget-test-literal';")];
+    const warnings: string[] = [];
+    const context: ReviewContext = {
+      ...makeContext({ patches, repoChunks }),
+      logger: { ...silentLogger, warning: (msg: string) => warnings.push(msg) },
+    };
+
+    // An already-past deadline trips the very first check deterministically —
+    // no reliance on real elapsed time.
+    const candidates = computeStaleLiteralCandidatesWithDeadline(context, Date.now() - 1);
+
+    expect(candidates).toEqual([]); // scan aborted before finding the survivor
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('budget');
+  });
+
+  it('does not log when the scan completes within budget', () => {
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'on-time-literal';\n+const x = compute();"],
+    ]);
+    const repoChunks = [makeChunk('src/other.ts', 1, "const y = 'on-time-literal';")];
+    const warnings: string[] = [];
+    const context: ReviewContext = {
+      ...makeContext({ patches, repoChunks }),
+      logger: { ...silentLogger, warning: (msg: string) => warnings.push(msg) },
+    };
+
+    const candidates = computeStaleLiteralCandidates(context);
+
+    expect(candidates).toHaveLength(1);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('dedupes survivors when repoChunks contain overlapping ranges for the same file', () => {
+    // Two chunks both cover src/dup.ts:6 (e.g. an enclosing chunk and a
+    // nested one indexed separately). Without dedup, the single-pass scan
+    // would revisit that physical line twice and record the same survivor
+    // twice, filling the per-literal cap with duplicates.
+    const patch =
+      '@@ -1,1 +1,1 @@\n' + "-const old = 'shared-token-abc';\n" + '+const old = compute();';
+    const patches = new Map([['src/a.ts', patch]]);
+    const repoChunks = [
+      makeChunk('src/dup.ts', 5, "const a = 1;\nconst other = 'shared-token-abc';"), // lines 5-6
+      makeChunk('src/dup.ts', 6, "const other = 'shared-token-abc';\nconst b = 2;"), // lines 6-7, overlaps at line 6
+    ];
+
+    const candidates = computeStaleLiteralCandidates(makeContext({ patches, repoChunks }));
+    const cand = candidates.find(c => c.literal === "'shared-token-abc'");
+    expect(cand).toBeDefined();
+    // Exactly one site for src/dup.ts:6, not two.
+    expect(cand!.staleSites).toHaveLength(1);
+    expect(cand!.staleSites[0]).toMatchObject({ file: 'src/dup.ts', line: 6 });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // renderStaleLiteralCandidates
 // ---------------------------------------------------------------------------
 
@@ -351,5 +509,61 @@ describe('renderStaleLiteralSection', () => {
     const section = renderStaleLiteralSection(makeContext({ patches, repoChunks }));
     expect(section).toContain("'claude-sonnet-4-6'");
     expect(section).not.toContain('None —');
+  });
+
+  it('emits an incomplete-scan notice — not the "None" claim — when the budget is exceeded before finding any survivors', () => {
+    // A survivor exists (src/other.ts), but an already-past deadline trips
+    // the very first check deterministically, so the scan never gets to see
+    // it. Rendering must not tell the agent "discovery is complete" here.
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'timeout-none-literal';\n+const x = compute();"],
+    ]);
+    const repoChunks = [makeChunk('src/other.ts', 1, "const y = 'timeout-none-literal';")];
+
+    const section = renderStaleLiteralSectionWithDeadline(
+      makeContext({ patches, repoChunks }),
+      Date.now() - 1,
+    );
+
+    expect(section).toContain('<stale_literal_candidates>');
+    expect(section).toContain('Scan incomplete');
+    expect(section).not.toContain('None —');
+    expect(section).not.toContain('discovery step is complete');
+  });
+
+  it('still renders the normal candidate block (no incomplete-scan notice) when the scan finds survivors before timing out on a later chunk', () => {
+    // Deliberate design choice: the candidate block never claims completeness
+    // ("no grep needed" only covers the listed candidates), so a timeout that
+    // still yields candidates does not need the incomplete-scan notice — only
+    // the zero-candidate "None" claim was ever misleading.
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'timeout-partial-literal';\n+const x = compute();"],
+    ]);
+    const repoChunks = [
+      makeChunk('src/found.ts', 1, "const y = 'timeout-partial-literal';"), // survivor found here
+      makeChunk('src/unreached.ts', 1, "const z = 'timeout-partial-literal';"), // scan never gets here
+    ];
+
+    const deadline = 2_000;
+    let call = 0;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => {
+      call++;
+      if (call === 1) return 1_000; // startedAt
+      if (call === 2) return 1_500; // deadline check for src/found.ts's line — not yet exceeded
+      return 3_000; // deadline check for src/unreached.ts's line, and any later call — exceeded
+    });
+
+    try {
+      const section = renderStaleLiteralSectionWithDeadline(
+        makeContext({ patches, repoChunks }),
+        deadline,
+      );
+      expect(section).toContain("'timeout-partial-literal'");
+      expect(section).toContain('src/found.ts:1');
+      expect(section).not.toContain('src/unreached.ts');
+      expect(section).not.toContain('Scan incomplete');
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });
