@@ -1,5 +1,11 @@
-import { describe, it, expect, vi } from 'vitest';
-import { searchFileChunks } from './get-files-context.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  searchFileChunks,
+  handleGetFilesContext,
+  clearTestAssociationScanCache,
+} from './get-files-context.js';
+import { TEST_ASSOCIATIONS_COLUMNS } from './columns.js';
+import type { ToolContext } from '../types.js';
 import type { SearchResult } from '@liendev/core';
 
 describe('searchFileChunks', () => {
@@ -109,5 +115,137 @@ describe('searchFileChunks', () => {
     const results = await searchFileChunks(['src/foo.ts'], ctx);
 
     expect(results[0]).toHaveLength(3);
+  });
+});
+
+describe('handleGetFilesContext - test-association scan (scanAll fast path + cache)', () => {
+  const mockLog = vi.fn();
+  const mockCheckAndReconnect = vi.fn().mockResolvedValue(undefined);
+
+  function makeChunk(file: string, imports: string[] = []): SearchResult {
+    return {
+      content: '',
+      metadata: {
+        file,
+        startLine: 1,
+        endLine: 5,
+        type: 'block',
+        language: 'typescript',
+        imports,
+      },
+      score: 0,
+      relevance: 'not_relevant',
+    };
+  }
+
+  function makeCtx(options: {
+    scanAll: ReturnType<typeof vi.fn>;
+    indexVersion: number | (() => number);
+  }): ToolContext {
+    const { indexVersion } = options;
+    const getVersion: () => number =
+      typeof indexVersion === 'function' ? indexVersion : () => indexVersion;
+
+    return {
+      vectorDB: {
+        scanAll: options.scanAll,
+        // Per-file lookup (Step 1) — irrelevant to these tests, always empty.
+        scanWithFilter: vi.fn().mockResolvedValue([]),
+      } as any,
+      embeddings: { embed: vi.fn() } as any,
+      rootDir: '/fake/workspace',
+      log: mockLog,
+      checkAndReconnect: mockCheckAndReconnect,
+      getIndexMetadata: vi.fn(() => ({
+        indexVersion: getVersion(),
+        indexDate: '2026-07-01',
+      })),
+      getReindexState: vi.fn(() => ({
+        inProgress: false,
+        pendingFiles: [],
+        lastReindexTimestamp: null,
+        lastReindexDurationMs: null,
+      })),
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearTestAssociationScanCache();
+  });
+
+  it('uses scanAll (not an unfiltered scanWithFilter) for the test-association scan', async () => {
+    const scanAll = vi.fn().mockResolvedValue([]);
+    const ctx = makeCtx({ scanAll, indexVersion: 1 });
+
+    await handleGetFilesContext({ filepaths: 'src/auth.ts', includeRelated: false }, ctx);
+
+    expect(scanAll).toHaveBeenCalledTimes(1);
+    expect(scanAll).toHaveBeenCalledWith({ columns: TEST_ASSOCIATIONS_COLUMNS });
+  });
+
+  it('returns the same test associations via scanAll as scanWithFilter previously produced', async () => {
+    const scanAll = vi.fn().mockResolvedValue([
+      makeChunk('src/__tests__/auth.test.ts', ['../auth']),
+      makeChunk('src/helper.ts', ['./auth']), // imports the target but is not a test file
+    ]);
+    const ctx = makeCtx({ scanAll, indexVersion: 1 });
+
+    const result = await handleGetFilesContext(
+      { filepaths: 'src/auth.ts', includeRelated: false },
+      ctx,
+    );
+
+    const parsed = JSON.parse(result.content![0].text);
+    expect(parsed.testAssociations).toEqual(['src/__tests__/auth.test.ts']);
+  });
+
+  it('caches the scan across calls with the same indexVersion (no re-scan)', async () => {
+    const scanAll = vi.fn().mockResolvedValue([]);
+    const ctx = makeCtx({ scanAll, indexVersion: 42 });
+
+    await handleGetFilesContext({ filepaths: 'src/a.ts', includeRelated: false }, ctx);
+    await handleGetFilesContext({ filepaths: 'src/b.ts', includeRelated: false }, ctx);
+
+    expect(scanAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('busts the cache when indexVersion changes (reindex)', async () => {
+    const scanAll = vi.fn().mockResolvedValue([]);
+    let indexVersion = 1;
+    const ctx = makeCtx({ scanAll, indexVersion: () => indexVersion });
+
+    await handleGetFilesContext({ filepaths: 'src/a.ts', includeRelated: false }, ctx);
+    indexVersion = 2;
+    await handleGetFilesContext({ filepaths: 'src/b.ts', includeRelated: false }, ctx);
+
+    expect(scanAll).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not serve a stale cache entry after clearTestAssociationScanCache()', async () => {
+    const scanAll = vi.fn().mockResolvedValue([]);
+    const ctx = makeCtx({ scanAll, indexVersion: 7 });
+
+    await handleGetFilesContext({ filepaths: 'src/a.ts', includeRelated: false }, ctx);
+    clearTestAssociationScanCache();
+    await handleGetFilesContext({ filepaths: 'src/b.ts', includeRelated: false }, ctx);
+
+    expect(scanAll).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cache when indexVersion is unavailable', async () => {
+    const scanAll = vi.fn().mockResolvedValue([]);
+    const ctx: ToolContext = {
+      ...makeCtx({ scanAll, indexVersion: 1 }),
+      getIndexMetadata: vi.fn(() => ({
+        indexVersion: undefined as unknown as number,
+        indexDate: '2026-07-01',
+      })),
+    };
+
+    await handleGetFilesContext({ filepaths: 'src/a.ts', includeRelated: false }, ctx);
+    await handleGetFilesContext({ filepaths: 'src/b.ts', includeRelated: false }, ctx);
+
+    expect(scanAll).toHaveBeenCalledTimes(2);
   });
 });
