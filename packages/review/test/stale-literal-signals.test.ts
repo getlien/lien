@@ -4,10 +4,12 @@ import type { ReviewContext } from '../src/plugin-types.js';
 import {
   extractChangedLiterals,
   computeStaleLiteralCandidates,
+  computeStaleLiteralCandidatesWithDeadline,
   renderStaleLiteralCandidates,
   renderStaleLiteralSection,
 } from '../src/stale-literal-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
+import { silentLogger } from '../src/test-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -248,6 +250,140 @@ describe('computeStaleLiteralCandidates', () => {
     );
     const cand = candidates.find(c => c.literal === "'model-x-9000'");
     expect(cand!.staleSites[0].isTest).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Single repo-wide pass (perf restructure): equivalence, traversal, budget
+// ---------------------------------------------------------------------------
+
+/** A CodeChunk whose `.content` getter increments a shared counter on every access. */
+function makeCountingChunk(
+  file: string,
+  startLine: number,
+  content: string,
+  accessCounter: { count: number },
+): CodeChunk {
+  return {
+    metadata: {
+      file,
+      startLine,
+      endLine: startLine + content.split('\n').length - 1,
+      type: 'function',
+      language: 'typescript',
+    },
+    get content(): string {
+      accessCounter.count++;
+      return content;
+    },
+  } as unknown as CodeChunk;
+}
+
+describe('scanRepoForStaleSites (single-pass restructure)', () => {
+  it('produces identical candidates to a multi-literal, multi-file fixture, including per-literal caps and first-N-in-traversal-order', () => {
+    // Two touched literals in one diff; the first has more surviving sites
+    // than MAX_SITES_PER_LITERAL (5) spread across multiple repo chunks, the
+    // second has exactly one. Proves the single shared pass still enforces
+    // each literal's own cap independently and keeps first-N traversal order.
+    const patch =
+      "@@ -1,2 +1,2 @@\n-const key = 'shared-config-key';\n-const flag = 'legacy-mode-flag';\n+const key = resolveKey();\n+const flag = resolveFlag();";
+    const patches = new Map([['src/config.ts', patch]]);
+
+    const repoChunks = [
+      makeChunk(
+        'src/other1.ts',
+        1,
+        "const a = 'shared-config-key';\nconst b = 'shared-config-key';",
+      ),
+      makeChunk(
+        'src/other2.ts',
+        1,
+        "const c = 'shared-config-key';\nconst d = 'shared-config-key';\nconst e = 'shared-config-key';",
+      ),
+      makeChunk(
+        'src/other3.ts',
+        1,
+        "const f = 'shared-config-key';\nconst g = 'legacy-mode-flag';",
+      ),
+    ];
+
+    const candidates = computeStaleLiteralCandidates(makeContext({ patches, repoChunks }));
+
+    const key = candidates.find(c => c.literal === "'shared-config-key'");
+    expect(key).toBeDefined();
+    // Capped at MAX_SITES_PER_LITERAL (5): the first five in chunk/line order,
+    // NOT the sixth occurrence in other3.ts.
+    expect(key!.staleSites.map(s => `${s.file}:${s.line}`)).toEqual([
+      'src/other1.ts:1',
+      'src/other1.ts:2',
+      'src/other2.ts:1',
+      'src/other2.ts:2',
+      'src/other2.ts:3',
+    ]);
+
+    const flag = candidates.find(c => c.literal === "'legacy-mode-flag'");
+    expect(flag).toBeDefined();
+    expect(flag!.staleSites.map(s => `${s.file}:${s.line}`)).toEqual(['src/other3.ts:2']);
+  });
+
+  it('reads each repo chunk exactly once, regardless of how many literals are touched', () => {
+    const counter = { count: 0 };
+    const repoChunks = [
+      makeCountingChunk(
+        'src/a.ts',
+        1,
+        "const a = 'alpha-value';\nconst b = 'beta-value';",
+        counter,
+      ),
+      makeCountingChunk('src/b.ts', 1, "const c = 'gamma-value';", counter),
+    ];
+    // Three distinct touched literals — under the old per-literal scan this
+    // would read every chunk's content 3x (once per literal); the single-pass
+    // scan must read each chunk's content exactly once regardless.
+    const patch =
+      "@@ -1,3 +1,3 @@\n-const x = 'alpha-value';\n-const y = 'beta-value';\n-const z = 'gamma-value';\n+const x = f();\n+const y = g();\n+const z = h();";
+    const patches = new Map([['src/other.ts', patch]]);
+
+    computeStaleLiteralCandidates(makeContext({ patches, repoChunks }));
+
+    expect(counter.count).toBe(repoChunks.length);
+  });
+
+  it('returns partial results and logs a diagnostic when the wall-clock budget is exceeded', () => {
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'budget-test-literal';\n+const x = compute();"],
+    ]);
+    const repoChunks = [makeChunk('src/other.ts', 1, "const y = 'budget-test-literal';")];
+    const warnings: string[] = [];
+    const context: ReviewContext = {
+      ...makeContext({ patches, repoChunks }),
+      logger: { ...silentLogger, warning: (msg: string) => warnings.push(msg) },
+    };
+
+    // An already-past deadline trips the very first check deterministically —
+    // no reliance on real elapsed time.
+    const candidates = computeStaleLiteralCandidatesWithDeadline(context, Date.now() - 1);
+
+    expect(candidates).toEqual([]); // scan aborted before finding the survivor
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('budget');
+  });
+
+  it('does not log when the scan completes within budget', () => {
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'on-time-literal';\n+const x = compute();"],
+    ]);
+    const repoChunks = [makeChunk('src/other.ts', 1, "const y = 'on-time-literal';")];
+    const warnings: string[] = [];
+    const context: ReviewContext = {
+      ...makeContext({ patches, repoChunks }),
+      logger: { ...silentLogger, warning: (msg: string) => warnings.push(msg) },
+    };
+
+    const candidates = computeStaleLiteralCandidates(context);
+
+    expect(candidates).toHaveLength(1);
+    expect(warnings).toHaveLength(0);
   });
 });
 

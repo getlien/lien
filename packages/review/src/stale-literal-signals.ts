@@ -223,14 +223,15 @@ export function extractChangedLiterals(patches: Map<string, string>): ChangedLit
 // Surviving-occurrence scan
 // ---------------------------------------------------------------------------
 
-/** Does `line` contain the string literal `lit` in any quote style? */
-function lineContainsLiteral(line: string, lit: ChangedLiteral): boolean {
-  return (
-    line.includes(`'${lit.value}'`) ||
-    line.includes(`"${lit.value}"`) ||
-    line.includes(`\`${lit.value}\``)
-  );
-}
+/**
+ * Wall-clock backstop for the repo-wide survivor scan, mirroring
+ * grep_codebase's GREP_TIME_BUDGET_MS (agent-tools.ts). A pathological input
+ * (a huge indexed repo, or a diff that touches an unusually large number of
+ * distinct literals) could otherwise scan for a long time on every PR — this
+ * rule triggers unconditionally, before the LLM even runs. On budget hit we
+ * return whatever was found so far rather than stalling the review.
+ */
+const STALE_LITERAL_TIME_BUDGET_MS = 5_000;
 
 function classifySnippet(line: string): { snippet: string; isComment: boolean } {
   const trimmed = line.trim();
@@ -241,45 +242,90 @@ function classifySnippet(line: string): { snippet: string; isComment: boolean } 
 }
 
 /**
- * Scan the indexed repo (post-image chunk content) for the literal surviving
- * outside the diff. Because chunks are the head state, the changed site no
- * longer contains the moved-away literal — any hit is by definition a survivor.
- * `changedLines` is consulted defensively to never re-report a touched line.
+ * Extract the distinct quoted-string token values present on one repo line
+ * (any quote style, no distinctiveness filtering — the caller already knows
+ * which values are worth looking for). Returns null when the line has no
+ * quote character at all, so the common case (most lines) skips the regex
+ * entirely.
+ *
+ * Note: this parses proper quote-delimited tokens, so a value nested inside a
+ * *differently*-quoted outer string (e.g. a backtick template that itself
+ * contains a single-quoted copy of the literal) is not found as a separate
+ * token — unlike a raw substring search. That combination hasn't shown up in
+ * practice; if it ever matters, matching would need a substring/automaton
+ * scan instead of tokenization.
  */
-function findStaleSites(
-  lit: ChangedLiteral,
-  repoChunks: CodeChunk[],
-  changedLines: Map<string, Set<number>>,
-): StaleSite[] {
-  const seen = new Set<string>();
-  const sites: StaleSite[] = [];
+function extractQuotedValues(line: string): Set<string> | null {
+  if (!/['"`]/.test(line)) return null;
+  const values = new Set<string>();
+  for (const m of line.matchAll(STRING_RE)) values.add(m[2]);
+  return values.size > 0 ? values : null;
+}
 
-  for (const chunk of repoChunks) {
+interface RepoScanResult {
+  /** literal value -> its surviving sites, capped at MAX_SITES_PER_LITERAL, in traversal order. */
+  sitesByLiteral: Map<string, StaleSite[]>;
+  timedOut: boolean;
+  chunksScanned: number;
+}
+
+/**
+ * Scan the indexed repo (post-image chunk content) ONCE for every touched
+ * literal at once, building `literal value -> surviving sites` directly.
+ * Because chunks are the head state, the changed site no longer contains the
+ * moved-away literal — any hit is by definition a survivor. `changedLines` is
+ * consulted defensively to never re-report a touched line.
+ *
+ * This replaces a previous per-literal scan (call this once per touched
+ * literal, re-walking every repo line each time), which made the cost
+ * O(literals x repo-lines) — unconditional on every PR, with the common
+ * zero-match case paying full cost. A single pass makes it
+ * O(repo-lines + literals).
+ */
+function scanRepoForStaleSites(
+  repoChunks: CodeChunk[],
+  touchedValues: Set<string>,
+  changedLines: Map<string, Set<number>>,
+  deadline: number,
+): RepoScanResult {
+  const sitesByLiteral = new Map<string, StaleSite[]>();
+  let timedOut = false;
+  let chunksScanned = 0;
+
+  chunkLoop: for (const chunk of repoChunks) {
+    chunksScanned++;
     const file = chunk.metadata.file;
     const fileChanged = changedLines.get(file);
+    const isTest = TEST_PATH_RE.test(file);
     const lines = chunk.content.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
-      const absLine = chunk.metadata.startLine + i;
-      const dedupKey = `${file}:${absLine}`;
-      if (seen.has(dedupKey)) continue;
-      if (fileChanged?.has(absLine)) continue; // a line this PR touched — not a survivor
-      if (!lineContainsLiteral(lines[i], lit)) continue;
+      if (Date.now() > deadline) {
+        timedOut = true;
+        break chunkLoop;
+      }
 
-      seen.add(dedupKey);
-      const { snippet, isComment } = classifySnippet(lines[i]);
-      sites.push({
-        file,
-        line: absLine,
-        snippet,
-        isComment,
-        isTest: TEST_PATH_RE.test(file),
-      });
-      if (sites.length >= MAX_SITES_PER_LITERAL) return sites;
+      const absLine = chunk.metadata.startLine + i;
+      if (fileChanged?.has(absLine)) continue; // a line this PR touched — not a survivor
+
+      const values = extractQuotedValues(lines[i]);
+      if (!values) continue;
+
+      let classified: { snippet: string; isComment: boolean } | undefined;
+      for (const value of values) {
+        if (!touchedValues.has(value)) continue;
+        const sites = sitesByLiteral.get(value);
+        if (sites && sites.length >= MAX_SITES_PER_LITERAL) continue; // this literal is already capped
+
+        classified ??= classifySnippet(lines[i]);
+        const site: StaleSite = { file, line: absLine, ...classified, isTest };
+        if (sites) sites.push(site);
+        else sitesByLiteral.set(value, [site]);
+      }
     }
   }
 
-  return sites;
+  return { sitesByLiteral, timedOut, chunksScanned };
 }
 
 function scoreConfidence(sites: StaleSite[]): StaleLiteralCandidate['confidence'] {
@@ -316,21 +362,57 @@ function mergeChangedLines(
  * Returns [] when there is no diff or no full-repo index to scan against.
  */
 export function computeStaleLiteralCandidates(context: ReviewContext): StaleLiteralCandidate[] {
+  return computeStaleLiteralCandidatesWithDeadline(
+    context,
+    Date.now() + STALE_LITERAL_TIME_BUDGET_MS,
+  );
+}
+
+/**
+ * Same as {@link computeStaleLiteralCandidates}, but with an explicit
+ * absolute deadline (a value comparable to `Date.now()`) instead of the
+ * default budget. Exposed for testing the budget-exceeded path
+ * deterministically — pass an already-past deadline — without relying on
+ * real elapsed time.
+ */
+export function computeStaleLiteralCandidatesWithDeadline(
+  context: ReviewContext,
+  deadline: number,
+): StaleLiteralCandidate[] {
+  const startedAt = Date.now();
   const patches = context.pr?.patches;
   const repoChunks = context.repoChunks;
   if (!patches || patches.size === 0) return [];
   if (!repoChunks || repoChunks.length === 0) return [];
 
   const { literals, touchedLinesByFile } = scanPatches(patches);
+  if (literals.length === 0) return [];
+
   // Exclude the diff's own touched lines so a literal conditionalized in place
   // doesn't report its own `+` line as a survivor. Derived from the patch, so
   // this holds even when pr.diffLines is absent; union the two when both exist.
   const changedLines = mergeChangedLines(touchedLinesByFile, context.pr?.diffLines);
-  const candidates: StaleLiteralCandidate[] = [];
+  const touchedValues = new Set(literals.map(lit => lit.value));
 
+  const { sitesByLiteral, timedOut, chunksScanned } = scanRepoForStaleSites(
+    repoChunks,
+    touchedValues,
+    changedLines,
+    deadline,
+  );
+
+  if (timedOut) {
+    context.logger?.warning(
+      `stale-literal-signals: repo scan exceeded its budget (${Date.now() - startedAt}ms elapsed) ` +
+        `after ${chunksScanned}/${repoChunks.length} chunks for ${touchedValues.size} touched ` +
+        'literal(s); returning partial results.',
+    );
+  }
+
+  const candidates: StaleLiteralCandidate[] = [];
   for (const lit of literals) {
-    const staleSites = findStaleSites(lit, repoChunks, changedLines);
-    if (staleSites.length === 0) continue;
+    const staleSites = sitesByLiteral.get(lit.value);
+    if (!staleSites || staleSites.length === 0) continue;
     candidates.push({
       literal: lit.display,
       kind: lit.kind,
