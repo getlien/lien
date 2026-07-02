@@ -20,6 +20,7 @@ import {
   DEFAULT_EMBEDDING_BATCH_SIZE,
 } from '../constants.js';
 import { WorkerEmbeddings } from '../embeddings/worker-embeddings.js';
+import { NullEmbeddings } from '../embeddings/null-embeddings.js';
 import { createVectorDB } from '../vectordb/factory.js';
 import { writeVersionFile } from '../vectordb/version.js';
 import { ManifestManager } from './manifest.js';
@@ -31,6 +32,7 @@ import { indexMultipleFiles, normalizeToRelativePath } from './incremental.js';
 import type { EmbeddingService } from '../embeddings/types.js';
 import { ChunkBatchProcessor } from './chunk-batch-processor.js';
 import type { VectorDBInterface } from '../vectordb/types.js';
+import { resolveEmbeddingsEnabled } from '../config/embeddings-enabled.js';
 import {
   extractRepoId,
   scanCodebase,
@@ -39,7 +41,6 @@ import {
   chunkFile,
   computeContentHash,
 } from '@liendev/parser';
-import type { CodeChunk } from '@liendev/parser';
 
 /**
  * Options for indexing a codebase
@@ -57,10 +58,14 @@ export interface IndexingOptions {
   config?: LienConfig;
   /** Progress callback for external UI */
   onProgress?: (progress: IndexingProgress) => void;
-  /** Skip embedding generation and VectorDB storage — return raw chunks in-memory */
+  /**
+   * Skip real embedding computation. Indexing still proceeds normally
+   * (chunking + full persistence to the vector store) but uses zero-vector
+   * placeholders instead of computed embeddings — structural-only mode.
+   * When omitted, falls back to the project config's `embeddings.enabled`
+   * setting (default: true, i.e. embeddings run as before).
+   */
   skipEmbeddings?: boolean;
-  /** Explicit list of files to index (skips full repo scan when provided) */
-  filesToIndex?: string[];
 }
 
 /**
@@ -84,8 +89,6 @@ export interface IndexingResult {
   durationMs: number;
   incremental: boolean;
   error?: string;
-  /** Raw chunks when skipEmbeddings is true */
-  chunks?: CodeChunk[];
 }
 
 /** Extracted config values with defaults for indexing */
@@ -591,108 +594,21 @@ async function performFullIndex(
 }
 
 /**
- * Process a single file for chunk-only indexing (no embeddings).
- * Reads the file, chunks it, and appends results to the output array.
+ * Resolve whether this indexing run should skip real embedding computation.
+ *
+ * Precedence: an explicit `options.skipEmbeddings` always wins (this is how
+ * `lien index --no-embeddings` forces structural-only mode for a single
+ * run). Otherwise, falls back to the project config's `embeddings.enabled`
+ * (default: true) via {@link resolveEmbeddingsEnabled}, which already
+ * handles a malformed/unreadable config safely.
  */
-async function chunkFileForCollection(
-  file: string,
-  rootDir: string,
-  indexConfig: IndexingConfig,
-  output: CodeChunk[],
-): Promise<boolean> {
-  try {
-    const absolutePath = path.isAbsolute(file) ? file : path.join(rootDir, file);
-    const relativePath = normalizeToRelativePath(file, rootDir);
-    const content = await fs.readFile(absolutePath, 'utf-8');
-
-    const chunks = chunkFile(relativePath, content, {
-      chunkSize: indexConfig.chunkSize,
-      chunkOverlap: indexConfig.chunkOverlap,
-      useAST: indexConfig.useAST,
-      astFallback: indexConfig.astFallback,
-      repoId: indexConfig.repoId,
-      orgId: indexConfig.orgId,
-    });
-
-    if (chunks.length > 0) {
-      output.push(...chunks);
-      return true;
-    }
-    return false;
-  } catch (error) {
-    console.error(
-      `[indexer] Failed to process ${file}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return false;
-  }
-}
-
-/**
- * Perform chunk-only indexing (no embeddings or VectorDB).
- * Returns raw chunks in-memory for direct analysis.
- */
-async function performChunkOnlyIndex(
-  rootDir: string,
-  options: IndexingOptions,
-  startTime: number,
-): Promise<IndexingResult> {
-  options.onProgress?.({ phase: 'scanning', message: 'Scanning codebase...' });
-  const files = options.filesToIndex ?? (await scanFilesToIndex(rootDir));
-
-  if (files.length === 0) {
-    return {
-      success: false,
-      filesIndexed: 0,
-      chunksCreated: 0,
-      durationMs: Date.now() - startTime,
-      incremental: false,
-      error: 'No files found to index',
-    };
+async function resolveSkipEmbeddings(options: IndexingOptions, rootDir: string): Promise<boolean> {
+  if (typeof options.skipEmbeddings === 'boolean') {
+    return options.skipEmbeddings;
   }
 
-  const indexConfig = getIndexingConfig(rootDir);
-  const allChunks: CodeChunk[] = [];
-  let filesProcessed = 0;
-
-  options.onProgress?.({
-    phase: 'indexing',
-    message: `Processing ${files.length} files (chunk-only)...`,
-    filesTotal: files.length,
-    filesProcessed: 0,
-  });
-
-  const limit = pLimit(indexConfig.concurrency);
-  await Promise.all(
-    files.map(file =>
-      limit(async () => {
-        await chunkFileForCollection(file, rootDir, indexConfig, allChunks);
-        filesProcessed++;
-        options.onProgress?.({
-          phase: 'indexing',
-          message: 'Processing files...',
-          filesTotal: files.length,
-          filesProcessed,
-        });
-      }),
-    ),
-  );
-
-  options.onProgress?.({
-    phase: 'complete',
-    message: 'Chunk-only indexing complete',
-    filesTotal: files.length,
-    filesProcessed,
-    chunksProcessed: allChunks.length,
-  });
-
-  return {
-    success: true,
-    filesIndexed: filesProcessed,
-    chunksCreated: allChunks.length,
-    durationMs: Date.now() - startTime,
-    incremental: false,
-    chunks: allChunks,
-  };
+  const enabled = await resolveEmbeddingsEnabled(rootDir, options.config);
+  return !enabled;
 }
 
 /**
@@ -702,6 +618,15 @@ async function performChunkOnlyIndex(
  * - Tries incremental indexing first (if not forced)
  * - Falls back to full indexing if needed
  * - Provides progress callbacks for UI integration
+ *
+ * When embeddings are disabled (explicitly via `skipEmbeddings: true`, or
+ * via the project config's `embeddings.enabled: false`), indexing still
+ * runs the normal chunking + persistence pipeline — it just substitutes a
+ * `NullEmbeddings` service that writes zero-vector placeholders instead of
+ * computing real embeddings. This is structural-only mode: no model
+ * download, no embedding worker, and every structural tool
+ * (`get_files_context`, `get_dependents`, `list_functions`,
+ * `get_complexity`) keeps working against the persisted index.
  *
  * @param options - Indexing options
  * @returns Indexing result with stats
@@ -721,30 +646,23 @@ async function performChunkOnlyIndex(
  * const embeddings = new WorkerEmbeddings();
  * await embeddings.initialize();
  * const result = await indexCodebase({ embeddings });
+ *
+ * // Structural-only mode (no embeddings)
+ * const result = await indexCodebase({ skipEmbeddings: true });
  * ```
  */
 export async function indexCodebase(options: IndexingOptions = {}): Promise<IndexingResult> {
   const rootDir = options.rootDir ?? process.cwd();
   const startTime = Date.now();
 
-  // Fast path: skip embeddings and VectorDB, return raw chunks
-  if (options.skipEmbeddings) {
-    try {
-      return await performChunkOnlyIndex(rootDir, options, startTime);
-    } catch (error) {
-      return {
-        success: false,
-        filesIndexed: 0,
-        chunksCreated: 0,
-        durationMs: Date.now() - startTime,
-        incremental: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-
   try {
     options.onProgress?.({ phase: 'initializing', message: 'Loading configuration...' });
+
+    const skipEmbeddings = await resolveSkipEmbeddings(options, rootDir);
+    const effectiveOptions: IndexingOptions =
+      skipEmbeddings && !options.embeddings
+        ? { ...options, embeddings: new NullEmbeddings() }
+        : options;
 
     // Initialize vector database (use factory to select backend from global config)
     options.onProgress?.({ phase: 'initializing', message: 'Initializing vector database...' });
@@ -753,14 +671,19 @@ export async function indexCodebase(options: IndexingOptions = {}): Promise<Inde
 
     // Try incremental indexing first (unless forced)
     if (!options.force) {
-      const incrementalResult = await tryIncrementalIndex(rootDir, vectorDB, options, startTime);
+      const incrementalResult = await tryIncrementalIndex(
+        rootDir,
+        vectorDB,
+        effectiveOptions,
+        startTime,
+      );
       if (incrementalResult) {
         return incrementalResult;
       }
     }
 
     // Fall back to full index
-    return await performFullIndex(rootDir, vectorDB, options, startTime);
+    return await performFullIndex(rootDir, vectorDB, effectiveOptions, startTime);
   } catch (error) {
     return {
       success: false,

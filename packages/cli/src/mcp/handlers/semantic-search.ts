@@ -90,6 +90,11 @@ function processResults(
   return { results, notes };
 }
 
+/** Message returned by semantic_search/find_similar when embeddings are disabled. */
+const EMBEDDINGS_DISABLED_NOTE =
+  'Semantic search is disabled (structural-only mode). Re-enable with ' +
+  '`lien config set embeddings.enabled true` and run `lien index --force` to compute embeddings.';
+
 /**
  * Handle semantic_search tool calls.
  * Searches the codebase by meaning using embeddings.
@@ -102,6 +107,14 @@ export async function handleSemanticSearch(
   const { vectorDB, embeddings, log, checkAndReconnect, getIndexMetadata } = ctx;
 
   return await wrapToolHandler(SemanticSearchSchema, async validatedArgs => {
+    if (ctx.embeddingsEnabled === false) {
+      return {
+        indexInfo: getIndexMetadata(),
+        results: [],
+        note: EMBEDDINGS_DISABLED_NOTE,
+      };
+    }
+
     const { crossRepo, repoIds, query, limit } = validatedArgs;
 
     log(`Searching for: "${query}"${crossRepo ? ' (cross-repo)' : ''}`);

@@ -32,6 +32,13 @@ export interface ToolContext {
   getIndexMetadata: () => IndexMetadata;
   /** Get current reindex state */
   getReindexState: () => ReindexState;
+  /**
+   * Whether embeddings are enabled for this session (structural-only mode
+   * when false — see config `embeddings.enabled`). Defaults to `true` when
+   * omitted so existing callers/tests are unaffected. semantic_search and
+   * find_similar check this before querying; the other four tools ignore it.
+   */
+  embeddingsEnabled?: boolean;
 }
 
 /**

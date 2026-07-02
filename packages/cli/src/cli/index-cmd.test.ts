@@ -159,4 +159,31 @@ describe('indexCommand', () => {
       }),
     );
   });
+
+  describe('--no-embeddings', () => {
+    it('should pass skipEmbeddings: true when --no-embeddings is set', async () => {
+      // Commander's negatable flag sets `embeddings: false` when --no-embeddings is passed.
+      await indexCommand({ embeddings: false });
+
+      expect(mockIndexCodebase).toHaveBeenCalledWith(
+        expect.objectContaining({ skipEmbeddings: true }),
+      );
+    });
+
+    it('should leave skipEmbeddings undefined when the flag is not passed', async () => {
+      // Commander defaults negatable flags to true when omitted; indexCodebase
+      // must fall back to the project config rather than force embeddings on.
+      await indexCommand({ embeddings: true });
+
+      const call = mockIndexCodebase.mock.calls[0][0];
+      expect(call.skipEmbeddings).toBeUndefined();
+    });
+
+    it('should leave skipEmbeddings undefined when embeddings option is absent entirely', async () => {
+      await indexCommand({});
+
+      const call = mockIndexCodebase.mock.calls[0][0];
+      expect(call.skipEmbeddings).toBeUndefined();
+    });
+  });
 });

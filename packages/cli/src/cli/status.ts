@@ -10,6 +10,7 @@ import {
   getCurrentBranch,
   getCurrentCommit,
   readVersionFile,
+  resolveEmbeddingsEnabled,
   DEFAULT_CONCURRENCY,
   DEFAULT_EMBEDDING_BATCH_SIZE,
   DEFAULT_GIT_POLL_INTERVAL_MS,
@@ -137,6 +138,27 @@ function printWatchStatus() {
   console.log(chalk.dim('  Disable with:'), chalk.bold('lien serve --no-watch'));
 }
 
+async function printEmbeddingsStatus(rootDir: string) {
+  const enabled = await resolveEmbeddingsEnabled(rootDir);
+  if (enabled) {
+    console.log(chalk.dim('Embeddings:'), chalk.green('✓ Enabled'));
+    console.log(
+      chalk.dim('  Disable with:'),
+      chalk.bold('lien config set embeddings.enabled false'),
+    );
+  } else {
+    console.log(chalk.dim('Embeddings:'), chalk.yellow('✗ Disabled (structural-only mode)'));
+    console.log(
+      chalk.dim('  semantic_search / find_similar are unavailable; structural tools still work.'),
+    );
+    console.log(
+      chalk.dim('  Re-enable with:'),
+      chalk.bold('lien config set embeddings.enabled true'),
+    );
+    console.log(chalk.dim('  Then reindex with:'), chalk.bold('lien index --force'));
+  }
+}
+
 function printIndexingSettings() {
   console.log(chalk.bold('\nIndexing Settings (defaults):'));
   console.log(chalk.dim('Concurrency:'), DEFAULT_CONCURRENCY);
@@ -167,16 +189,14 @@ export async function statusCommand(options: { verbose?: boolean; format?: strin
 
   showCompactBanner();
   console.log(chalk.bold('Status\n'));
-  console.log(
-    chalk.dim('Configuration:'),
-    chalk.green('✓ Using defaults (no per-project config needed)'),
-  );
+  console.log(chalk.dim('Configuration:'), chalk.green('✓ Using defaults'));
 
   await printIndexStatus(indexPath);
 
   console.log(chalk.bold('\nFeatures:'));
   await printGitStatus(rootDir, indexPath);
   printWatchStatus();
+  await printEmbeddingsStatus(rootDir);
 
   if (options.verbose) {
     printIndexingSettings();
@@ -195,6 +215,7 @@ async function outputJson(rootDir: string, indexPath: string) {
     lastReindex: null as string | null,
     git: { enabled: false, branch: null, commit: null },
     features: { fileWatching: true, gitDetection: true },
+    embeddings: { enabled: await resolveEmbeddingsEnabled(rootDir) },
     settings: {
       concurrency: DEFAULT_CONCURRENCY,
       batchSize: DEFAULT_EMBEDDING_BATCH_SIZE,
