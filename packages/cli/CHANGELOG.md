@@ -1,5 +1,11 @@
 # @liendev/lien
 
+## 0.48.1
+
+### Patch Changes
+
+- 9df4535: fix: remove unpublished @liendev/review from dependencies; npm install was failing with E404.
+
 ## 0.48.0
 
 ### Minor Changes
