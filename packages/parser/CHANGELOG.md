@@ -1,5 +1,11 @@
 # @liendev/parser
 
+## 0.48.2
+
+### Patch Changes
+
+- 48e0fab: Deduplicate the identical JS/TS complexity configuration into a shared `jsTsComplexityConfig` const referenced by both language definitions. No behavior change.
+
 ## 0.48.0
 
 ### Minor Changes
