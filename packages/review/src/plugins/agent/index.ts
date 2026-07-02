@@ -176,22 +176,37 @@ export class AgentReviewPlugin implements ReviewPlugin {
     const archFindings = findings.filter(f => f.category === 'architectural');
     const summaryFinding = findings.find(f => f.category === 'summary');
 
-    // 1. Post inline comments for bug findings on the diff
-    //    Minimize outdated comments only when we have new ones to replace them
+    // 1. Post bug findings. GitHub only anchors inline review comments to lines
+    //    inside the PR's diff hunks, so split findings by whether their line is
+    //    in the diff. Anchorable findings become inline comments. The rest — a
+    //    finding whose *cause* is in the diff but whose *manifestation* is in
+    //    untouched code, often the sharpest findings the engine produces — are
+    //    promoted to a visible, above-the-fold review comment instead of
+    //    silently degrading into the collapsed "Prompt for AI Agents" block.
+    //    Minimize outdated comments only when we have new ones to replace them.
     if (bugFindings.length > 0 && context.postInlineComments) {
       if (context.minimizeOutdatedComments) {
         await context.minimizeOutdatedComments(marker);
       }
-      const reviewBody = buildFixPrompt(bugFindings, marker);
-      const result = await context.postInlineComments(bugFindings, reviewBody);
 
-      // If some findings were outside the diff, post them as a review comment
-      if (result && result.skipped > 0 && context.postReviewComment) {
-        const outsideDiff = bugFindings.filter(f => !context.pr?.patches?.has(f.filepath));
-        if (outsideDiff.length > 0) {
-          const outsideBody = `${marker}outside-diff -->\n**⚠️ Issues found outside the diff:**\n\n${outsideDiff.map(f => `- 🔴 **${f.filepath}:${f.line}**${f.symbolName ? ` in \`${f.symbolName}\`` : ''}\n  ${f.message}${f.suggestion ? `\n  💡 *${f.suggestion}*` : ''}`).join('\n\n')}`;
-          await context.postReviewComment(outsideBody);
-        }
+      const { anchorable, unanchorable } = partitionByDiffAnchorability(
+        bugFindings,
+        context.pr?.diffLines,
+      );
+
+      // Inline comments for findings anchorable to a changed line. The collapsed
+      // "fix all" prompt keeps listing every bug finding, as before.
+      if (anchorable.length > 0) {
+        const reviewBody = buildFixPrompt(bugFindings, marker);
+        await context.postInlineComments(anchorable, reviewBody);
+      }
+
+      // Promote unanchorable findings to a visible review comment.
+      if (unanchorable.length > 0 && context.postReviewComment) {
+        context.logger.info(
+          `[${this.id}] ${unanchorable.length} finding(s) outside the diff promoted to the review body`,
+        );
+        await context.postReviewComment(buildOutOfDiffReviewBody(unanchorable, marker));
       }
     }
 
@@ -489,6 +504,68 @@ function buildDescription(
   parts.push(footer);
 
   return parts.join('\n\n');
+}
+
+/**
+ * Split bug findings by whether GitHub can anchor an inline comment to them.
+ * GitHub only accepts inline review comments on lines inside the PR's diff
+ * hunks; `diffLines` maps each changed file to that set of line numbers.
+ *
+ * A finding is `anchorable` when its (filepath, line) is a changed line.
+ * Everything else is `unanchorable` — typically a finding whose *cause* is in
+ * the diff but whose *manifestation* is in untouched code. Those are promoted
+ * to a visible review comment rather than dropped from inline posting.
+ *
+ * When `diffLines` is absent (e.g. the runner failed to fetch patch data) the
+ * determination can't be made, so every finding is treated as anchorable and
+ * the inline-posting path does its own diff-line filtering. Nothing is promoted
+ * in that case — matching the pre-existing degradation.
+ */
+export interface AnchorabilityPartition {
+  anchorable: ReviewFinding[];
+  unanchorable: ReviewFinding[];
+}
+
+export function partitionByDiffAnchorability(
+  findings: ReviewFinding[],
+  diffLines: Map<string, Set<number>> | undefined,
+): AnchorabilityPartition {
+  if (!diffLines || diffLines.size === 0) {
+    return { anchorable: [...findings], unanchorable: [] };
+  }
+  const anchorable: ReviewFinding[] = [];
+  const unanchorable: ReviewFinding[] = [];
+  for (const f of findings) {
+    if (diffLines.get(f.filepath)?.has(f.line)) anchorable.push(f);
+    else unanchorable.push(f);
+  }
+  return { anchorable, unanchorable };
+}
+
+/**
+ * Render findings that can't be anchored to a diff line as a visible,
+ * above-the-fold PR review comment. Each renders as a marked bullet naming the
+ * severity, category, symbol, and exact `file:line`, flagged "(outside this
+ * diff)" so a reviewer understands why it isn't an inline comment.
+ *
+ * The dedup marker (`…:outside-diff`) shares the plugin marker prefix, so
+ * `minimizeOutdatedComments(marker)` collapses the previous run's promoted
+ * comment before a fresh one is posted — no double-posting across re-runs.
+ */
+export function buildOutOfDiffReviewBody(findings: ReviewFinding[], marker: string): string {
+  const count = findings.length;
+  const headline = `**⚠️ ${count} issue${count === 1 ? '' : 's'} relating to your changes, outside this diff**`;
+  const intro =
+    'Caused by changes in this PR but on lines GitHub cannot attach an inline ' +
+    'comment to (outside the diff hunks):';
+  const bullets = findings.map(f => {
+    const emoji = f.severity === 'error' ? '🔴' : f.severity === 'warning' ? '🟡' : 'ℹ️';
+    const category = f.category.replace(/_/g, ' ');
+    const symbol = f.symbolName ? ` in \`${f.symbolName}\`` : '';
+    const suggestion = f.suggestion ? `\n  💡 *${f.suggestion}*` : '';
+    return `- ${emoji} **${category}**${symbol} — \`${f.filepath}:${f.line}\` *(outside this diff)*\n  ${f.message}${suggestion}`;
+  });
+  return `${marker}outside-diff -->\n${headline}\n\n${intro}\n\n${bullets.join('\n\n')}`;
 }
 
 /**
