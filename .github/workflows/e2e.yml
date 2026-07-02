@@ -87,6 +87,9 @@ jobs:
           - project: SwiftyJSON
             language: Swift
             script: test:e2e:swift
+          - project: MCP Round Trip
+            language: Protocol
+            script: test:e2e:mcp
 
     steps:
       - name: Checkout code
