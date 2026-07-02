@@ -193,3 +193,57 @@ The action ships as a Docker container action pulling a prebuilt image from
 `ghcr.io/getlien/lien-review` (tree-sitter's native bindings rule out a
 JavaScript/composite action), so each run pulls the image rather than building
 it.
+
+## Publishing the Action (maintainer runbook)
+
+This section is for Lien maintainers cutting a release, not action consumers.
+
+Until the one-time human setup below is done, `.github/workflows/publish-action.yml`
+publishes the GHCR image but **cannot** yet update the public
+`getlien/lien-review` dist repo that `uses: getlien/lien-review@v1` resolves
+to — the sync step detects the missing secret and no-ops with a
+`::notice::` log line instead of failing the build.
+
+### One-time human setup
+
+1. **Create the `getlien/lien-review` repo** in the `getlien` GitHub org
+   (public, empty — the workflow pushes `action.yml` + `README.md` to it; the
+   image itself lives in GHCR, not this repo).
+2. **Create a `GH_DIST_TOKEN` secret** on this repo (Settings → Secrets and
+   variables → Actions), a PAT or fine-grained token with `contents:write` on
+   `getlien/lien-review`.
+3. **First publish**: once both exist, either
+   - land the next changeset release as usual (see below), or
+   - run `publish-action.yml` manually via **Actions → Publish Action → Run
+     workflow** (`workflow_dispatch`) — note this path only pushes the
+     immutable `sha-<commit>` image tag, not `:v1`/`:latest`/a version tag, so
+     follow it with a tagged release to move those.
+
+### How the trigger fires
+
+`publish-action.yml` triggers on push of an `@liendev/lien@*` tag. That's the
+tag `changesets/action` creates on this repo's normal release flow
+(`.github/workflows/release.yml`, `npm run release` on merge to `main`) —
+`@liendev/parser`, `@liendev/core`, and `@liendev/lien` are version-linked
+(`.changeset/config.json`), so every monorepo release bumps `@liendev/lien`
+and creates that tag exactly once. `packages/action` and `packages/review` are
+private/unpublished, so changesets versions them but (by design —
+`privatePackages.tag` defaults to `false`) never tags them independently;
+piggybacking on the CLI's tag avoids adding a dedicated tag scheme.
+
+**Caveat:** an action-only change that doesn't also bump `@liendev/lien`'s
+version won't auto-trigger a publish. Include a changeset that touches
+`@liendev/lien` (even a patch-level one) when you want a release to carry an
+action-only fix, or trigger `workflow_dispatch` manually.
+
+### What gets published where
+
+| Artifact | Tag/ref | Where |
+| --- | --- | --- |
+| Docker image | `<version>` (e.g. `0.51.0`), `v1`, `latest`, `sha-<commit>` | `ghcr.io/getlien/lien-review` |
+| `action.yml` + `README.md` | `v1` (floating major) | `getlien/lien-review` (dist repo) |
+
+`v1` is the Action's own public-interface major version (its `inputs:`/
+`outputs:` contract) — it's a fixed literal in the workflow, not derived from
+the CLI's semver, and is bumped manually (to `v2`, ...) only on a breaking
+`action.yml` change, the same convention as `actions/checkout@v4` and similar.
