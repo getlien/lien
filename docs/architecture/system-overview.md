@@ -62,6 +62,13 @@ graph TB
         GITCMD[Git CLI]
     end
 
+    subgraph "Lien Review (packages/review + packages/action)"
+        GHACTION[GitHub Action Entry]
+        REVIEWENGINE[Review Engine]
+        COMPLEXITYCHECK[Complexity Plugin]
+        AGENTREVIEW[Agent Bug/Summary Review]
+    end
+
     %% CLI to Core
     CLI --> CONFIG
     INIT --> CONFIG
@@ -120,6 +127,13 @@ graph TB
     GIT --> GITCMD
     WATCHER --> INDEXER
 
+    %% Lien Review — separate product surface, shares only the parser
+    %% package (AST + complexity). Does not depend on core/embeddings/vectordb.
+    GHACTION --> REVIEWENGINE
+    REVIEWENGINE --> COMPLEXITYCHECK
+    REVIEWENGINE --> AGENTREVIEW
+    REVIEWENGINE -.->|uses parser AST + complexity, not core| AST
+
     %% Styling
     classDef cliClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px
     classDef mcpClass fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
@@ -127,6 +141,7 @@ graph TB
     classDef dataClass fill:#fff3e0,stroke:#e65100,stroke-width:2px
     classDef optionalClass fill:#fce4ec,stroke:#880e4f,stroke-width:2px
     classDef externalClass fill:#f5f5f5,stroke:#424242,stroke-width:2px
+    classDef reviewClass fill:#ede7f6,stroke:#311b92,stroke-width:2px
 
     class CLI,INIT,INDEX,SERVE,STATUS,CONFIGCMD,COMPLX cliClass
     class MCP,TOOLS,SEMANTIC,SIMILAR,CONTEXT,LIST,DEPENDENTS,COMPLEXITY mcpClass
@@ -134,6 +149,7 @@ graph TB
     class EMBEDDINGS,VECTORDB,QUERY,BATCHINS,MAINT,CACHE dataClass
     class GIT,WATCHER,ECOSYSTEM optionalClass
     class TRANSFORMERS,LANCEDB,GITCMD externalClass
+    class GHACTION,REVIEWENGINE,COMPLEXITYCHECK,AGENTREVIEW reviewClass
 ```
 
 ## Component Descriptions
@@ -188,6 +204,18 @@ graph TB
 - **transformers.js**: Local embedding generation (all-MiniLM-L6-v2 model, runs in worker thread — see [ADR-008](decisions/0008-keep-transformers-js-worker-embeddings.md))
 - **LanceDB**: Vector database for semantic search (local, zero-config)
 - **Git CLI**: For repository state tracking
+
+### Lien Review (packages/review + packages/action)
+Lien Review is a separate product surface from the CLI/MCP pipeline above: a self-hostable GitHub Action that reviews pull requests in CI rather than serving a local AI assistant.
+
+- **GitHub Action Entry** (`packages/action`): Docker container action; reads the `pull_request` event, self-clones the PR head (and base, for complexity deltas) by SHA, and posts results — no `actions/checkout`, no server, no database.
+- **Review Engine** (`packages/review`): Orchestrates the enabled review passes and posts inline PR comments, workflow annotations, and a step summary.
+- **Complexity Plugin**: Flags new/worsened cyclomatic, cognitive, and Halstead complexity violations on the diff.
+- **Agent Bug/Summary Review**: LLM-driven review (OpenRouter or Anthropic) for correctness bugs, architectural concerns, and a PR summary.
+
+Critically, `packages/review` depends on **`@liendev/parser` only** — it does not import `@liendev/core`, so it carries none of the embeddings/vectordb/LanceDB dependency weight (this is the point of [ADR-009](decisions/0009-extract-parser-package.md)). See [`packages/action/README.md`](../../packages/action/README.md) for the full setup guide, or the [Lien Review site page](../../packages/site/docs/guide/lien-review.md).
+
+**Retired**: the earlier hosted-SaaS shape for review — `packages/runner` (a NATS-based review runner) and `platform/` (a Laravel 12 control plane + its K8s infra) — was removed in favor of this self-hostable Action. There's no ADR for this pivot (it predates the ADR log's review coverage); see the retirement commit for the full rationale.
 
 ## Data Flow
 
@@ -261,6 +289,17 @@ Non-essential features (git tracking, file watching) are optional and can be dis
 
 ## Recent Architectural Improvements
 
+### Qdrant Backend Retirement
+- **Removed**: The experimental Qdrant vector DB backend, its config keys, and its untested-in-CI test suite
+- **Kept**: The `VectorDBInterface` seam and `createVectorDB` factory, so a future backend can be reintroduced without touching call sites
+- **Benefit**: One backend (LanceDB), fully tested in CI; three latent bugs eliminated at the root
+- **Details**: See [ADR-010](decisions/0010-retire-qdrant-backend.md)
+
+### Parser Package Extraction
+- **Extracted**: `@liendev/parser` from `@liendev/core` — all AST parsing, chunking, complexity, and scanning code
+- **Benefit**: `@liendev/review` (and the Lien Review GitHub Action) now depends on parsing only, dropping ~100MB of embeddings/vectordb/LanceDB dependency weight it never used
+- **Details**: See [ADR-009](decisions/0009-extract-parser-package.md)
+
 ### Ecosystem Presets (Replaced Framework Detection)
 - **Replaced**: Rigid per-framework detection with lightweight ecosystem presets
 - **Benefit**: Zero-config auto-detection of project type; simpler codebase without framework-specific code
@@ -317,4 +356,6 @@ All major architectural decisions are documented in [docs/architecture/decisions
 - [ADR-006: Consolidated Language Files with Import Extractors](decisions/0006-consolidated-language-files-with-import-extractors.md)
 - [ADR-007: Replace Framework Detection with Ecosystem Presets](decisions/0007-replace-framework-detection-with-ecosystem-presets.md)
 - [ADR-008: Keep transformers.js WorkerEmbeddings as Sole Embedding Backend](decisions/0008-keep-transformers-js-worker-embeddings.md)
+- [ADR-009: Extract `@liendev/parser` from `@liendev/core`](decisions/0009-extract-parser-package.md)
+- [ADR-010: Retire the Qdrant Backend](decisions/0010-retire-qdrant-backend.md)
 
