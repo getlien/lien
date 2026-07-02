@@ -62,6 +62,14 @@ jobs:
         # as a known environmental issue; run it manually with
         # `npm run test -w @liendev/core -- src/embeddings/worker-embeddings.test.ts`
         # when validating WorkerEmbeddings changes by hand.
+        #
+        # This --exclude flag is intentionally duplicated in the root `test`
+        # script in package.json rather than moved into
+        # packages/core/vitest.config.ts: a config-level `exclude` removes
+        # the file from vitest's file-discovery set entirely, which breaks
+        # the manual re-run command above ("No test files found" -- verified
+        # empirically). Keeping the exclude as a CLI flag preserves that
+        # escape hatch. If you change one occurrence, change the other.
         run: npm run test --workspace=packages/core -- --exclude '**/worker-embeddings.test.ts'
 
       - name: Run tests (CLI)
@@ -88,6 +96,8 @@ jobs:
     name: Release smoke test (npm pack -> external install)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
 
     # Every other job installs via the npm workspace protocol (`npm ci` at
     # the repo root), which resolves @liendev/core and @liendev/parser from
@@ -103,6 +113,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -148,6 +160,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
