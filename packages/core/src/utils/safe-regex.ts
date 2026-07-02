@@ -19,45 +19,72 @@
  *     confirmed via live repro: `(a|a)+$`.test() against a 26-char string
  *     took ~3.5s, growing exponentially per added character.
  *
+ *     Walks the `ret` AST (already a transitive dependency of safe-regex2,
+ *     which uses it internally for its own star-height check) instead of
+ *     pattern-matching the source string. That fixes two real bugs a
+ *     string-based check can't: it sees through any number of
+ *     non-quantified wrapper groups around the alternation — `((a|a))+`
+ *     is exploitable exactly like `(a|a)+` — and it compares real
+ *     alternation branches instead of `|`-delimited substrings, so a `|`
+ *     inside a character class (`[a|b]`) or escaped (`\|`) can't be
+ *     mistaken for a branch boundary.
+ *
  * Returns null for invalid syntax, oversized patterns, or patterns
  * rejected by either ReDoS check.
  */
 
 import safeRegex2 from 'safe-regex2';
+import tokenizer, { types, reconstruct } from 'ret';
+import type { Token } from 'ret';
 
 /** Hard cap on pattern length, enforced before any analysis runs. */
 const MAX_PATTERN_LENGTH = 256;
 
-/**
- * Matches a parenthesized group immediately followed by a quantifier
- * (`+`, `*`, `?`, or `{m,n}`) — e.g. the `(a|a)+` in `(a|a)+$`.
- *
- * Only matches non-nested groups. Nested-quantifier ReDoS (`(a+)+`) is
- * caught separately by `safe-regex2`, and this regex itself has no
- * quantifier-of-quantifier or ambiguous-alternation shape, so it can't
- * exhibit the same catastrophic backtracking it's built to detect.
- */
-const QUANTIFIED_GROUP = /\(([^()]*)\)\s*(?:[+*?]|\{\d*,?\d*\})/g;
-
-/** Strips a leading non-capturing/named/lookaround group marker (e.g.
- * `?:`, `?<name>`, `?=`, `?!`, `?<=`, `?<!`) so the remainder can be split
- * on top-level `|` branches. */
-function stripGroupMarker(groupBody: string): string {
-  return groupBody.replace(/^\?(?:[:=!]|<[=!]?[^>]*>)/, '');
+/** Renders an alternation branch (a token sequence) back to source text so
+ * branches can be compared case-insensitively (patterns here always
+ * compile with the `i` flag). */
+function renderBranch(branch: Token[]): string {
+  return reconstruct({ type: types.ROOT, stack: branch }).toLowerCase();
 }
 
 /**
- * True if any quantified group contains two alternation branches that are
- * identical once case is normalized (patterns here always compile with the
- * `i` flag), e.g. `(a|a)+` or `(a|A)+`.
+ * True if `token`'s subtree contains a group with two alternation branches
+ * that render to the same text, e.g. `(a|a)` or `(a|A)` — but only once
+ * `insideRepetition` is true, since a duplicate branch is only exploitable
+ * once something repeats it. Recurses through groups and repetitions (the
+ * only token kinds that hold nested tokens) so a duplicate stays "in
+ * danger" through any depth of plain wrapper groups, e.g. `((a|a))+`.
  */
+function hasDangerousDuplicateBranch(token: Token, insideRepetition: boolean): boolean {
+  if (token.type === types.GROUP) {
+    if (token.options) {
+      if (insideRepetition) {
+        const branches = token.options.map(renderBranch);
+        if (new Set(branches).size !== branches.length) {
+          return true;
+        }
+      }
+      return token.options.some(branch =>
+        branch.some(t => hasDangerousDuplicateBranch(t, insideRepetition)),
+      );
+    }
+    return (token.stack ?? []).some(t => hasDangerousDuplicateBranch(t, insideRepetition));
+  }
+  if (token.type === types.REPETITION) {
+    return hasDangerousDuplicateBranch(token.value, true);
+  }
+  return false;
+}
+
 function hasDuplicateAlternationBranch(pattern: string): boolean {
-  return [...pattern.matchAll(QUANTIFIED_GROUP)].some(match => {
-    const branches = stripGroupMarker(match[1])
-      .split('|')
-      .map(branch => branch.toLowerCase());
-    return new Set(branches).size !== branches.length;
-  });
+  try {
+    const root = tokenizer(pattern);
+    const tokens = root.stack ?? root.options?.flat() ?? [];
+    return tokens.some(token => hasDangerousDuplicateBranch(token, false));
+  } catch {
+    // Invalid syntax is handled by the `new RegExp` call below.
+    return false;
+  }
 }
 
 export function safeRegex(pattern: string): RegExp | null {
