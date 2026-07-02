@@ -54,16 +54,6 @@ export {
   silentLogger,
 } from './test-helpers.js';
 
-// Config
-export {
-  type ReviewYamlConfig,
-  loadConfig,
-  resolveLLMApiKey,
-  getPluginConfig,
-  loadPlugin,
-  loadPlugins,
-} from './config.js';
-
 // ─── Shared types ───────────────────────────────────────────────────────────
 
 export type {
