@@ -16,34 +16,15 @@ import type {
   TurnTrace,
   ToolInvocation,
 } from './types.js';
-
-/** Cap a single tool's recorded output so traces stay readable. */
-const TRACE_TOOL_OUTPUT_MAX = 4096;
-
-/** Cap per-turn reasoning/output printed to CI logs. */
-const AGENT_LOG_MAX = 4000;
-
-/**
- * Cap a single tool result fed back to the model. A large file read or
- * batched get_files_context can otherwise return tens of thousands of tokens
- * in one turn, blowing the whole budget before the wrap-up nudge can fire.
- * ~16K chars ≈ 4K tokens — enough context for a review, bounded per call.
- */
-const TOOL_RESULT_MAX_CHARS = 16_000;
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
-}
-
-/**
- * Parse a boolean-ish env *disable* flag. Per-turn agent logging is ON by
- * default; only an explicit '0'/'false' (case-insensitive) disables it.
- * Parsed precisely so an unrelated value doesn't accidentally silence it.
- */
-function envDisabled(value: string | undefined): boolean {
-  const v = value?.trim().toLowerCase();
-  return v === '0' || v === 'false';
-}
+import {
+  TRACE_TOOL_OUTPUT_MAX,
+  TOOL_RESULT_MAX_CHARS,
+  WRAP_UP_NUDGE,
+  truncate,
+  envDisabled,
+  logTurn,
+  extractFindingsFromText,
+} from './agent-client-shared.js';
 
 /** Extract the assistant's text content from an Anthropic response for trace. */
 function joinTextBlocks(content: Anthropic.Messages.ContentBlock[]): string {
@@ -225,7 +206,7 @@ export class AnthropicAgentClient {
         outputTokens: turnOutputTokens,
       };
       turnTraces.push(turnTrace);
-      if (this.logAgentTurns) this.logTurn(turnTrace);
+      if (this.logAgentTurns) logTurn(this.logger, turnTrace);
 
       // Done: model finished naturally
       if (response.stop_reason === 'end_turn') {
@@ -311,7 +292,7 @@ export class AnthropicAgentClient {
         `[agent] Review incomplete (stopReason=${stopReason}, no verdict/summary after ${turn} turns)`,
       );
       // Always surface what the agent was doing when it bailed.
-      this.logTurn(lastLoopTurn, 'last turn before bail');
+      logTurn(this.logger, lastLoopTurn, 'last turn before bail');
     }
 
     return {
@@ -341,28 +322,6 @@ export class AnthropicAgentClient {
    * tool_result blocks. Pulled out of `run()` to keep its
    * time-to-understand under the complexity threshold.
    */
-  /**
-   * Print a turn's reasoning + output to the logger so CI logs show what the
-   * agent was actually thinking. Truncated to keep logs readable.
-   */
-  private logTurn(turn: TurnTrace | undefined, label?: string): void {
-    if (!turn) return;
-    const tag = label ? ` (${label})` : '';
-    // Guard on trimmed content: tool-call turns emit tool calls (logged
-    // separately) and often whitespace-only text, which would otherwise print
-    // a blank, confusing "output:" line.
-    if (turn.reasoning?.trim()) {
-      this.logger.info(
-        `[agent] Turn ${turn.turnNumber} reasoning${tag}:\n${truncate(turn.reasoning.trim(), AGENT_LOG_MAX)}`,
-      );
-    }
-    if (turn.responseText?.trim()) {
-      this.logger.info(
-        `[agent] Turn ${turn.turnNumber} output${tag}:\n${truncate(turn.responseText.trim(), AGENT_LOG_MAX)}`,
-      );
-    }
-  }
-
   private async dispatchToolUseBlocks(
     toolUseBlocks: Anthropic.Messages.ToolUseBlock[],
     responseContent: Anthropic.Messages.ContentBlock[],
@@ -506,9 +465,6 @@ function appendRetryPrompt(
   messages.push({ role: 'user', content: retryContent });
 }
 
-const WRAP_UP_NUDGE =
-  'You are running low on budget. Stop investigating and output your findings JSON now. Do not make any more tool calls. If you found no issues, output an empty findings array.';
-
 const RETRY_SYSTEM_PROMPT =
   'Output only a ```json code fence with findings and summary. No other text.';
 
@@ -518,83 +474,14 @@ const RETRY_USER_PROMPT =
 /**
  * Extract findings from the model's final response content.
  *
- * Looks for a ```json ... ``` block in text content and parses it as
- * the agent's structured output containing findings and summary.
+ * Concatenates ALL text blocks — Anthropic can split a response across blocks,
+ * so the verdict may not live in the last one — then hands the joined text to
+ * the shared fence-priority recovery pipeline (see `extractFindingsFromText`).
  */
 function extractResponse(content: Anthropic.Messages.ContentBlock[]): {
   findings: AgentFinding[];
   summary?: AgentSummary;
 } {
-  const textBlocks = content.filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text');
-
-  if (textBlocks.length === 0) {
-    return { findings: [] };
-  }
-
-  // Concatenate ALL text blocks — Anthropic can split a response across blocks,
-  // so the verdict may not live in the last one.
-  const text = textBlocks.map(b => b.text).join('\n');
-
-  // Candidate JSON strings, in priority order: each ```json fence LAST first (a
-  // few-shot/example fence precedes the real verdict), then the raw body, then a
-  // JSON object embedded in prose. Prefer a candidate carrying a `summary` (the
-  // verdict marker) so an example can't beat the real verdict; fall back to the
-  // first findings-only candidate if nothing carries a summary.
-  const fences = [...text.matchAll(/```json\s*\n([\s\S]*?)\n\s*```/g)].map(m => m[1]).reverse();
-  const candidates = [...fences, text.trim(), embeddedJsonObject(text)];
-
-  let fallback: { findings: AgentFinding[] } | undefined;
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(candidate);
-    } catch {
-      continue; // not parseable — try the next candidate
-    }
-    const { findings, summary } = readVerdict(parsed);
-    if (summary) return { findings, summary };
-    if (findings.length > 0 && !fallback) fallback = { findings };
-  }
-  return fallback ?? { findings: [] };
-}
-
-/** Pull validated findings + summary out of one parsed JSON verdict (array or object). */
-function readVerdict(parsed: unknown): { findings: AgentFinding[]; summary?: AgentSummary } {
-  const obj = (parsed ?? {}) as { findings?: unknown; summary?: unknown };
-  const rawFindings = Array.isArray(parsed) ? parsed : obj.findings;
-  const findings = (Array.isArray(rawFindings) ? rawFindings : []).filter(isValidFinding);
-  const summary = isValidSummary(obj.summary) ? obj.summary : undefined;
-  return { findings, summary };
-}
-
-/** First `{`…last `}` slice — recovers a JSON object wrapped in prose. */
-function embeddedJsonObject(content: string): string | undefined {
-  const start = content.indexOf('{');
-  const end = content.lastIndexOf('}');
-  return start !== -1 && end > start ? content.slice(start, end + 1) : undefined;
-}
-
-/** Type guard to validate a summary object. */
-function isValidSummary(value: unknown): value is AgentSummary {
-  if (typeof value !== 'object' || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.riskLevel === 'string' &&
-    typeof obj.overview === 'string' &&
-    Array.isArray(obj.keyChanges)
-  );
-}
-
-/** Type guard to validate an agent finding has required fields. */
-function isValidFinding(value: unknown): value is AgentFinding {
-  if (typeof value !== 'object' || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.filepath === 'string' &&
-    typeof obj.line === 'number' &&
-    (obj.severity === 'error' || obj.severity === 'warning') &&
-    typeof obj.category === 'string' &&
-    typeof obj.message === 'string'
-  );
+  const text = joinTextBlocks(content);
+  return text ? extractFindingsFromText(text) : { findings: [] };
 }

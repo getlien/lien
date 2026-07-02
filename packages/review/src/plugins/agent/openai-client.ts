@@ -15,23 +15,20 @@ import type {
   TurnTrace,
   ToolInvocation,
 } from './types.js';
+import {
+  TRACE_TOOL_OUTPUT_MAX,
+  TOOL_RESULT_MAX_CHARS,
+  WRAP_UP_NUDGE,
+  truncate,
+  envDisabled,
+  logTurn,
+  extractFindingsFromText,
+} from './agent-client-shared.js';
 
-/** Cap a single tool's recorded output so traces stay readable. */
-const TRACE_TOOL_OUTPUT_MAX = 4096;
-
-/** Cap per-turn reasoning/output printed to CI logs. */
-const AGENT_LOG_MAX = 4000;
-
-/**
- * Cap a single tool result fed back to the model. A large file read or
- * batched get_files_context can otherwise return tens of thousands of tokens
- * in one turn, blowing the whole budget before the wrap-up nudge can fire.
- * ~16K chars ≈ 4K tokens — enough context for a review, bounded per call.
- */
-const TOOL_RESULT_MAX_CHARS = 16_000;
-
-const WRAP_UP_NUDGE =
-  'You are running low on budget. Stop investigating and output your findings JSON now. Do not make any more tool calls. If you found no issues, output an empty findings array.';
+// `envDisabled` is re-exported so its existing test import path
+// (`plugins-agent-budget.test.ts`) stays valid after the move to the shared
+// module — the parsing behavior it guards is unchanged.
+export { envDisabled };
 
 const RETRY_NUDGE =
   'You ran out of budget. Output ONLY the JSON block now with your findings and summary. No tool calls.';
@@ -73,21 +70,6 @@ export function formatChatTimeout(opts: {
     `request was ${opts.bodyBytes} bytes (~${approxTokens(opts.bodyBytes)} input tokens) ` +
     `across ${opts.messageCount} message(s)`
   );
-}
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
-}
-
-/**
- * Parse a boolean-ish env *disable* flag. Per-turn agent logging is ON by
- * default (so every review is diagnosable); only an explicit '0'/'false'
- * (case-insensitive) disables it. Parsed precisely so an unrelated value
- * doesn't accidentally silence the trace.
- */
-export function envDisabled(value: string | undefined): boolean {
-  const v = value?.trim().toLowerCase();
-  return v === '0' || v === 'false';
 }
 
 /**
@@ -357,7 +339,7 @@ export class OpenAIAgentClient {
       lastContent = choice.message.content;
       const turnTrace = buildTurnTrace(turn, choice, turnInputTokens, turnOutputTokens);
       turnTraces.push(turnTrace);
-      if (this.logAgentTurns) this.logTurn(turnTrace);
+      if (this.logAgentTurns) logTurn(this.logger, turnTrace);
 
       // Done: model finished naturally
       if (choice.finish_reason === 'stop') {
@@ -447,7 +429,7 @@ export class OpenAIAgentClient {
       );
       // Always surface what the agent was doing when it bailed — the single
       // most useful datum for diagnosing an incomplete run in CI logs.
-      this.logTurn(lastLoopTurn, 'last turn before bail');
+      logTurn(this.logger, lastLoopTurn, 'last turn before bail');
     }
 
     return {
@@ -552,29 +534,6 @@ export class OpenAIAgentClient {
         `[agent] Summary retry failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return null;
-    }
-  }
-
-  /**
-   * Print a turn's reasoning + output to the logger so CI logs show what the
-   * agent was actually thinking. Truncated so a verbose reasoning model (Kimi)
-   * doesn't flood the log.
-   */
-  private logTurn(turn: TurnTrace | undefined, label?: string): void {
-    if (!turn) return;
-    const tag = label ? ` (${label})` : '';
-    // Guard on trimmed content: on tool-call turns the model emits tool calls
-    // (logged separately) and often a whitespace-only `content`, which would
-    // otherwise print a blank, confusing "output:" line.
-    if (turn.reasoning?.trim()) {
-      this.logger.info(
-        `[agent] Turn ${turn.turnNumber} reasoning${tag}:\n${truncate(turn.reasoning.trim(), AGENT_LOG_MAX)}`,
-      );
-    }
-    if (turn.responseText?.trim()) {
-      this.logger.info(
-        `[agent] Turn ${turn.turnNumber} output${tag}:\n${truncate(turn.responseText.trim(), AGENT_LOG_MAX)}`,
-      );
     }
   }
 
@@ -751,76 +710,17 @@ export function toOpenAITools(
 }
 
 // ---------------------------------------------------------------------------
-// Response parsing (same as anthropic-client.ts)
+// Response parsing
 // ---------------------------------------------------------------------------
 
-/** Pull validated findings + summary out of one parsed JSON verdict (array or object). */
-function readVerdict(parsed: unknown): { findings: AgentFinding[]; summary?: AgentSummary } {
-  const obj = (parsed ?? {}) as { findings?: unknown; summary?: unknown };
-  const rawFindings = Array.isArray(parsed) ? parsed : obj.findings;
-  const findings = (Array.isArray(rawFindings) ? rawFindings : []).filter(isValidFinding);
-  const summary = isValidSummary(obj.summary) ? obj.summary : undefined;
-  return { findings, summary };
-}
-
+/**
+ * Extract findings from a chat completion's message content, delegating to the
+ * shared fence-priority recovery pipeline (see `extractFindingsFromText`). A
+ * null/empty content (e.g. a tool-calls turn) yields no findings.
+ */
 function extractResponse(content: string | null): {
   findings: AgentFinding[];
   summary?: AgentSummary;
 } {
-  if (!content) return { findings: [] };
-
-  // Candidate JSON strings, in priority order:
-  //  1. each ```json fence, LAST first — the model emits its verdict last, so a
-  //     few-shot/example fence earlier in the prose must not win;
-  //  2. the raw body (response_format:json_object forced-verdict turn);
-  //  3. a JSON object embedded in surrounding prose (model ignored json_object).
-  const fences = [...content.matchAll(/```json\s*\n([\s\S]*?)\n\s*```/g)].map(m => m[1]).reverse();
-  const candidates = [...fences, content.trim(), embeddedJsonObject(content)];
-
-  // Prefer a candidate carrying a `summary` (the verdict marker) so an
-  // `{"findings": [...]}`-only example can't beat the real verdict; fall back to
-  // the first findings-only candidate if nothing carries a summary.
-  let fallback: { findings: AgentFinding[] } | undefined;
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(candidate);
-    } catch {
-      continue; // not parseable — try the next candidate
-    }
-    const { findings, summary } = readVerdict(parsed);
-    if (summary) return { findings, summary };
-    if (findings.length > 0 && !fallback) fallback = { findings };
-  }
-  return fallback ?? { findings: [] };
-}
-
-/** First `{`…last `}` slice — recovers a JSON object wrapped in prose. */
-function embeddedJsonObject(content: string): string | undefined {
-  const start = content.indexOf('{');
-  const end = content.lastIndexOf('}');
-  return start !== -1 && end > start ? content.slice(start, end + 1) : undefined;
-}
-
-function isValidSummary(value: unknown): value is AgentSummary {
-  if (typeof value !== 'object' || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.riskLevel === 'string' &&
-    typeof obj.overview === 'string' &&
-    Array.isArray(obj.keyChanges)
-  );
-}
-
-function isValidFinding(value: unknown): value is AgentFinding {
-  if (typeof value !== 'object' || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.filepath === 'string' &&
-    typeof obj.line === 'number' &&
-    (obj.severity === 'error' || obj.severity === 'warning') &&
-    typeof obj.category === 'string' &&
-    typeof obj.message === 'string'
-  );
+  return content ? extractFindingsFromText(content) : { findings: [] };
 }
