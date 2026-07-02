@@ -275,6 +275,13 @@ interface RepoScanResult {
  * Split out of {@link scanRepoForStaleSites} so the triple-nested scan (chunks
  * x lines x values-on-a-line) reads as two single-purpose passes instead of
  * one deeply nested one.
+ *
+ * `seenSites` dedupes by `file:line:value`: repoChunks can contain overlapping
+ * ranges for the same file (e.g. an enclosing chunk and a nested one), which
+ * would otherwise revisit the same physical line more than once and record
+ * the same survivor twice — filling the per-literal cap with duplicates and
+ * skewing confidence scoring toward literals that just happen to sit in
+ * overlapping chunks.
  */
 function recordSurvivorsForLine(
   line: string,
@@ -283,6 +290,7 @@ function recordSurvivorsForLine(
   isTest: boolean,
   touchedValues: Set<string>,
   sitesByLiteral: Map<string, StaleSite[]>,
+  seenSites: Set<string>,
 ): void {
   const values = extractQuotedValues(line);
   if (!values) return;
@@ -292,6 +300,10 @@ function recordSurvivorsForLine(
     if (!touchedValues.has(value)) continue;
     const sites = sitesByLiteral.get(value);
     if (sites && sites.length >= MAX_SITES_PER_LITERAL) continue; // this literal is already capped
+
+    const siteKey = `${file}:${absLine}:${value}`;
+    if (seenSites.has(siteKey)) continue; // already recorded via an overlapping chunk
+    seenSites.add(siteKey);
 
     classified ??= classifySnippet(line);
     const site: StaleSite = { file, line: absLine, ...classified, isTest };
@@ -320,6 +332,7 @@ function scanRepoForStaleSites(
   deadline: number,
 ): RepoScanResult {
   const sitesByLiteral = new Map<string, StaleSite[]>();
+  const seenSites = new Set<string>();
   let timedOut = false;
   let chunksScanned = 0;
 
@@ -339,7 +352,15 @@ function scanRepoForStaleSites(
       const absLine = chunk.metadata.startLine + i;
       if (fileChanged?.has(absLine)) continue; // a line this PR touched — not a survivor
 
-      recordSurvivorsForLine(lines[i], absLine, file, isTest, touchedValues, sitesByLiteral);
+      recordSurvivorsForLine(
+        lines[i],
+        absLine,
+        file,
+        isTest,
+        touchedValues,
+        sitesByLiteral,
+        seenSites,
+      );
     }
   }
 
@@ -432,25 +453,38 @@ function logScanTimeout(
   );
 }
 
+/** Result of a full scan pass: the ranked candidates plus whether the budget was exceeded. */
+interface StaleLiteralScanResult {
+  candidates: StaleLiteralCandidate[];
+  timedOut: boolean;
+  /** Chunks actually scanned before the deadline (or the full count when not timed out). */
+  chunksScanned: number;
+  /** Total chunks available to scan (0 when no repo index was provided). */
+  totalChunks: number;
+}
+
 /**
- * Same as {@link computeStaleLiteralCandidates}, but with an explicit
- * absolute deadline (a value comparable to `Date.now()`) instead of the
- * default budget. Exposed for testing the budget-exceeded path
- * deterministically — pass an already-past deadline — without relying on
- * real elapsed time.
+ * Does the actual scan work shared by {@link computeStaleLiteralCandidatesWithDeadline}
+ * and {@link renderStaleLiteralSection}. Unlike the exported candidate-only
+ * entry points, this also surfaces `timedOut` — rendering needs it to avoid
+ * asserting "scan complete, nothing found" when the scan actually aborted
+ * before finishing (see `renderStaleLiteralSection`).
  */
-export function computeStaleLiteralCandidatesWithDeadline(
-  context: ReviewContext,
-  deadline: number,
-): StaleLiteralCandidate[] {
+function computeStaleLiteralScan(context: ReviewContext, deadline: number): StaleLiteralScanResult {
   const startedAt = Date.now();
   const patches = context.pr?.patches;
   const repoChunks = context.repoChunks;
-  if (!patches || patches.size === 0) return [];
-  if (!repoChunks || repoChunks.length === 0) return [];
+  if (!patches || patches.size === 0) {
+    return { candidates: [], timedOut: false, chunksScanned: 0, totalChunks: 0 };
+  }
+  if (!repoChunks || repoChunks.length === 0) {
+    return { candidates: [], timedOut: false, chunksScanned: 0, totalChunks: 0 };
+  }
 
   const { literals, touchedLinesByFile } = scanPatches(patches);
-  if (literals.length === 0) return [];
+  if (literals.length === 0) {
+    return { candidates: [], timedOut: false, chunksScanned: 0, totalChunks: repoChunks.length };
+  }
 
   // Exclude the diff's own touched lines so a literal conditionalized in place
   // doesn't report its own `+` line as a survivor. Derived from the patch, so
@@ -475,7 +509,26 @@ export function computeStaleLiteralCandidatesWithDeadline(
     );
   }
 
-  return buildRankedCandidates(literals, sitesByLiteral);
+  return {
+    candidates: buildRankedCandidates(literals, sitesByLiteral),
+    timedOut,
+    chunksScanned,
+    totalChunks: repoChunks.length,
+  };
+}
+
+/**
+ * Same as {@link computeStaleLiteralCandidates}, but with an explicit
+ * absolute deadline (a value comparable to `Date.now()`) instead of the
+ * default budget. Exposed for testing the budget-exceeded path
+ * deterministically — pass an already-past deadline — without relying on
+ * real elapsed time.
+ */
+export function computeStaleLiteralCandidatesWithDeadline(
+  context: ReviewContext,
+  deadline: number,
+): StaleLiteralCandidate[] {
+  return computeStaleLiteralScan(context, deadline).candidates;
 }
 
 // ---------------------------------------------------------------------------
@@ -520,29 +573,60 @@ export function renderStaleLiteralCandidates(candidates: StaleLiteralCandidate[]
 }
 
 /**
- * Emitted when the deterministic scan ran but found nothing. Distinguishes
- * "scan completed, clean" from "scan never ran" — without it, an omitted block
- * is ambiguous and the rule would force a redundant grep fallback even after a
- * clean scan.
+ * Emitted when the deterministic scan ran to completion but found nothing.
+ * Distinguishes "scan completed, clean" from "scan never ran" — without it,
+ * an omitted block is ambiguous and the rule would force a redundant grep
+ * fallback even after a clean scan.
  */
 const STALE_LITERAL_NONE_BLOCK = `<stale_literal_candidates>
 None — the deterministic scan found no changed literal surviving unchanged elsewhere. The stale-duplicate discovery step is complete; you do not need to grep for the diff's literals.
 </stale_literal_candidates>`;
 
 /**
- * Build the `<stale_literal_candidates>` section for the agent's initial
- * message. Returns the candidate block when there are candidates, an explicit
- * "None" block when the scan ran but was clean, or '' when no scan was possible
- * (no diff or no repo index — e.g. CLI mode). Callers append unconditionally.
+ * Emitted when the scan hit its time budget before finding any survivors.
+ * Deliberately distinct from {@link STALE_LITERAL_NONE_BLOCK}: an incomplete
+ * scan must never claim discovery is "complete" — that would tell the agent
+ * it can skip grepping exactly when the scan didn't get to look everywhere.
  */
-export function renderStaleLiteralSection(context: ReviewContext): string {
+function renderStaleLiteralTimeoutBlock(chunksScanned: number, totalChunks: number): string {
+  return `<stale_literal_candidates>
+Scan incomplete (time budget exceeded after ${chunksScanned} of ${totalChunks} chunks) — the deterministic pre-scan did not finish checking the repo, so no "clean" verdict can be given. Grep for the diff's changed literals yourself if you suspect a stale duplicate.
+</stale_literal_candidates>`;
+}
+
+/**
+ * Same as {@link renderStaleLiteralSection}, but with an explicit absolute
+ * deadline instead of the default budget. Exposed for testing the
+ * timeout-path rendering deterministically — pass an already-past deadline —
+ * mirroring {@link computeStaleLiteralCandidatesWithDeadline}.
+ */
+export function renderStaleLiteralSectionWithDeadline(
+  context: ReviewContext,
+  deadline: number,
+): string {
   const patches = context.pr?.patches;
   const repoChunks = context.repoChunks;
   const scanPossible = !!patches && patches.size > 0 && !!repoChunks && repoChunks.length > 0;
   if (!scanPossible) return '';
 
-  const candidates = computeStaleLiteralCandidates(context);
-  return candidates.length > 0
-    ? renderStaleLiteralCandidates(candidates)
+  const { candidates, timedOut, chunksScanned, totalChunks } = computeStaleLiteralScan(
+    context,
+    deadline,
+  );
+  if (candidates.length > 0) return renderStaleLiteralCandidates(candidates);
+  return timedOut
+    ? renderStaleLiteralTimeoutBlock(chunksScanned, totalChunks)
     : STALE_LITERAL_NONE_BLOCK;
+}
+
+/**
+ * Build the `<stale_literal_candidates>` section for the agent's initial
+ * message. Returns the candidate block when there are candidates, an explicit
+ * "None" block when the scan ran to completion and was clean, an explicit
+ * "incomplete" block when the scan hit its time budget before finding any
+ * survivors, or '' when no scan was possible (no diff or no repo index — e.g.
+ * CLI mode). Callers append unconditionally.
+ */
+export function renderStaleLiteralSection(context: ReviewContext): string {
+  return renderStaleLiteralSectionWithDeadline(context, Date.now() + STALE_LITERAL_TIME_BUDGET_MS);
 }

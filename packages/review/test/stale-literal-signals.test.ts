@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { CodeChunk } from '@liendev/parser';
 import type { ReviewContext } from '../src/plugin-types.js';
 import {
@@ -7,6 +7,7 @@ import {
   computeStaleLiteralCandidatesWithDeadline,
   renderStaleLiteralCandidates,
   renderStaleLiteralSection,
+  renderStaleLiteralSectionWithDeadline,
 } from '../src/stale-literal-signals.js';
 import { buildInitialMessage } from '../src/plugins/agent/system-prompt.js';
 import { silentLogger } from '../src/test-helpers.js';
@@ -385,6 +386,27 @@ describe('scanRepoForStaleSites (single-pass restructure)', () => {
     expect(candidates).toHaveLength(1);
     expect(warnings).toHaveLength(0);
   });
+
+  it('dedupes survivors when repoChunks contain overlapping ranges for the same file', () => {
+    // Two chunks both cover src/dup.ts:6 (e.g. an enclosing chunk and a
+    // nested one indexed separately). Without dedup, the single-pass scan
+    // would revisit that physical line twice and record the same survivor
+    // twice, filling the per-literal cap with duplicates.
+    const patch =
+      '@@ -1,1 +1,1 @@\n' + "-const old = 'shared-token-abc';\n" + '+const old = compute();';
+    const patches = new Map([['src/a.ts', patch]]);
+    const repoChunks = [
+      makeChunk('src/dup.ts', 5, "const a = 1;\nconst other = 'shared-token-abc';"), // lines 5-6
+      makeChunk('src/dup.ts', 6, "const other = 'shared-token-abc';\nconst b = 2;"), // lines 6-7, overlaps at line 6
+    ];
+
+    const candidates = computeStaleLiteralCandidates(makeContext({ patches, repoChunks }));
+    const cand = candidates.find(c => c.literal === "'shared-token-abc'");
+    expect(cand).toBeDefined();
+    // Exactly one site for src/dup.ts:6, not two.
+    expect(cand!.staleSites).toHaveLength(1);
+    expect(cand!.staleSites[0]).toMatchObject({ file: 'src/dup.ts', line: 6 });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -487,5 +509,61 @@ describe('renderStaleLiteralSection', () => {
     const section = renderStaleLiteralSection(makeContext({ patches, repoChunks }));
     expect(section).toContain("'claude-sonnet-4-6'");
     expect(section).not.toContain('None —');
+  });
+
+  it('emits an incomplete-scan notice — not the "None" claim — when the budget is exceeded before finding any survivors', () => {
+    // A survivor exists (src/other.ts), but an already-past deadline trips
+    // the very first check deterministically, so the scan never gets to see
+    // it. Rendering must not tell the agent "discovery is complete" here.
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'timeout-none-literal';\n+const x = compute();"],
+    ]);
+    const repoChunks = [makeChunk('src/other.ts', 1, "const y = 'timeout-none-literal';")];
+
+    const section = renderStaleLiteralSectionWithDeadline(
+      makeContext({ patches, repoChunks }),
+      Date.now() - 1,
+    );
+
+    expect(section).toContain('<stale_literal_candidates>');
+    expect(section).toContain('Scan incomplete');
+    expect(section).not.toContain('None —');
+    expect(section).not.toContain('discovery step is complete');
+  });
+
+  it('still renders the normal candidate block (no incomplete-scan notice) when the scan finds survivors before timing out on a later chunk', () => {
+    // Deliberate design choice: the candidate block never claims completeness
+    // ("no grep needed" only covers the listed candidates), so a timeout that
+    // still yields candidates does not need the incomplete-scan notice — only
+    // the zero-candidate "None" claim was ever misleading.
+    const patches = new Map([
+      ['src/a.ts', "@@ -1,1 +1,1 @@\n-const x = 'timeout-partial-literal';\n+const x = compute();"],
+    ]);
+    const repoChunks = [
+      makeChunk('src/found.ts', 1, "const y = 'timeout-partial-literal';"), // survivor found here
+      makeChunk('src/unreached.ts', 1, "const z = 'timeout-partial-literal';"), // scan never gets here
+    ];
+
+    const deadline = 2_000;
+    let call = 0;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => {
+      call++;
+      if (call === 1) return 1_000; // startedAt
+      if (call === 2) return 1_500; // deadline check for src/found.ts's line — not yet exceeded
+      return 3_000; // deadline check for src/unreached.ts's line, and any later call — exceeded
+    });
+
+    try {
+      const section = renderStaleLiteralSectionWithDeadline(
+        makeContext({ patches, repoChunks }),
+        deadline,
+      );
+      expect(section).toContain("'timeout-partial-literal'");
+      expect(section).toContain('src/found.ts:1');
+      expect(section).not.toContain('src/unreached.ts');
+      expect(section).not.toContain('Scan incomplete');
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });
