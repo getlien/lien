@@ -1,0 +1,6 @@
+# Generated benchmark artifacts — reproducible via the scripts, not committed.
+corpus.json
+query-inputs.json
+.data/
+*.log
+/tmp/
