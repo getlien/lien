@@ -20,12 +20,17 @@ import { calculateComplexity } from '../complexity/index.js';
 // =============================================================================
 
 /**
- * TypeScript/JavaScript AST traverser
+ * JavaScript AST traverser
  *
- * Handles TypeScript and JavaScript AST node types and traversal patterns.
- * Both languages share the same AST structure (via tree-sitter-typescript).
+ * Handles JavaScript AST node types and traversal patterns. TypeScript shares
+ * this same base (via tree-sitter-typescript, a superset grammar) and extends
+ * it below to recognize TS-only container node types.
+ *
+ * Container-node checks (`getContainerBody`, `findParentContainerName`) key
+ * off `containerTypes` rather than hardcoding 'class_declaration', so a
+ * subclass can widen what counts as a container just by extending that array.
  */
-export class TypeScriptTraverser implements LanguageTraverser {
+export class JavaScriptTraverser implements LanguageTraverser {
   targetNodeTypes = [
     'function_declaration',
     'function',
@@ -55,7 +60,7 @@ export class TypeScriptTraverser implements LanguageTraverser {
   }
 
   getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
-    if (node.type === 'class_declaration') {
+    if (this.containerTypes.includes(node.type)) {
       return node.childForFieldName('body');
     }
     return null;
@@ -70,7 +75,7 @@ export class TypeScriptTraverser implements LanguageTraverser {
   findParentContainerName(node: Parser.SyntaxNode): string | undefined {
     let current = node.parent;
     while (current) {
-      if (current.type === 'class_declaration') {
+      if (this.containerTypes.includes(current.type)) {
         const nameNode = current.childForFieldName('name');
         return nameNode?.text;
       }
@@ -104,9 +109,28 @@ export class TypeScriptTraverser implements LanguageTraverser {
 }
 
 /**
- * JavaScript uses the same traverser as TypeScript
+ * TypeScript AST traverser
+ *
+ * tree-sitter-typescript parses `abstract class Foo {}` as a distinct
+ * `abstract_class_declaration` node — separate from `class_declaration` —
+ * even though its shape (a `name` and a `class_body`) is identical. Without
+ * this, an abstract class falls through every container/traversal check in
+ * the JS base and collapses into a single anonymous chunk, hiding its
+ * methods. Widening `containerTypes` here is enough: `getContainerBody` and
+ * `findParentContainerName` both key off that array already, and its body
+ * node type is still `class_body`, which `shouldTraverseChildren` already
+ * recognizes.
  */
-export class JavaScriptTraverser extends TypeScriptTraverser {}
+export class TypeScriptTraverser extends JavaScriptTraverser {
+  constructor() {
+    super();
+    // Widen (not replace) the JS base's lists — done in the constructor,
+    // rather than as same-named field initializers, so TypeScript doesn't
+    // treat this as a self-referential read of an uninitialized field.
+    this.targetNodeTypes = [...this.targetNodeTypes, 'abstract_method_signature'];
+    this.containerTypes = [...this.containerTypes, 'abstract_class_declaration'];
+  }
+}
 
 // =============================================================================
 // EXPORT EXTRACTORS
@@ -565,7 +589,9 @@ export class TypeScriptImportExtractor extends JavaScriptImportExtractor {}
  * Also handles call site extraction for call_expression and new_expression.
  */
 export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
-  readonly symbolNodeTypes = [
+  // Not `readonly`: TypeScriptSymbolExtractor widens this list in its
+  // constructor to add TS-only node types (see below).
+  symbolNodeTypes = [
     'function_declaration',
     'function',
     'arrow_function',
@@ -669,7 +695,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractMethodInfo(
+  protected extractMethodInfo(
     node: Parser.SyntaxNode,
     content: string,
     parentClass?: string,
@@ -690,7 +716,7 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
     };
   }
 
-  private extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
+  protected extractClassInfo(node: Parser.SyntaxNode): SymbolInfo | null {
     const nameNode = node.childForFieldName('name');
     if (!nameNode) return null;
 
@@ -718,9 +744,41 @@ export class JavaScriptSymbolExtractor implements LanguageSymbolExtractor {
 }
 
 /**
- * TypeScript uses the same symbol extraction as JavaScript
+ * TypeScript symbol extractor
+ *
+ * Extends the JS base with the two TS-only node types tree-sitter-typescript
+ * produces for abstract classes: the class itself parses as
+ * `abstract_class_declaration` (not `class_declaration`), and an abstract
+ * method (declared but not implemented) parses as `abstract_method_signature`
+ * (not `method_definition`). Both otherwise have the same shape as their
+ * concrete counterparts, so this reuses `extractClassInfo`/`extractMethodInfo`
+ * from the JS base rather than duplicating them.
  */
-export class TypeScriptSymbolExtractor extends JavaScriptSymbolExtractor {}
+export class TypeScriptSymbolExtractor extends JavaScriptSymbolExtractor {
+  constructor() {
+    super();
+    this.symbolNodeTypes = [
+      ...this.symbolNodeTypes,
+      'abstract_class_declaration',
+      'abstract_method_signature',
+    ];
+  }
+
+  override extractSymbol(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string,
+  ): SymbolInfo | null {
+    switch (node.type) {
+      case 'abstract_class_declaration':
+        return this.extractClassInfo(node);
+      case 'abstract_method_signature':
+        return this.extractMethodInfo(node, content, parentClass);
+      default:
+        return super.extractSymbol(node, content, parentClass);
+    }
+  }
+}
 
 // =============================================================================
 // LANGUAGE DEFINITION
