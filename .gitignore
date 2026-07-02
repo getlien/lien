@@ -65,6 +65,14 @@ target/
 # Misc
 *.orig
 
+# Ad-hoc screenshots dropped at repo root (competitive analysis, dogfooding,
+# manual QA) — not build output, just scratch. Root-only (not recursive) so
+# real image assets under packages/*/public etc. are unaffected.
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+
 # Private documentation
 .private/
 

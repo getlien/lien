@@ -1,0 +1,71 @@
+# Lien Review
+
+Lien Review is a self-hostable **GitHub Action** that reviews pull requests: complexity analysis, an agent-driven bug review, and a PR summary — posted back to GitHub as inline comments and workflow annotations. There's no server, no database, and no recurring bill: the action clones the PR by SHA, reviews it, and writes results straight to GitHub using the workflow's built-in `GITHUB_TOKEN`.
+
+This page covers setup. For the complete input/output reference, fork-PR handling, and security notes, see [`packages/action/README.md`](https://github.com/getlien/lien/blob/main/packages/action/README.md) in the repo.
+
+## Quick start
+
+Add a workflow at `.github/workflows/lien-review.yml`:
+
+```yaml
+name: Lien Review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: getlien/lien-review@v1
+        with:
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+```
+
+That single `uses:` line is the whole integration — **no `actions/checkout` step is needed**. Lien self-clones the PR head (and base, for complexity deltas) by SHA using the same token.
+
+## Required permissions
+
+The workflow must grant these or the comment writes will 403:
+
+```yaml
+permissions:
+  contents: read # clone the PR head/base by SHA
+  pull-requests: write # post inline review comments
+```
+
+## LLM key setup
+
+The agent (bug) review needs an LLM key, provided as a workflow **secret**:
+
+1. Get an [OpenRouter](https://openrouter.ai/) API key (preferred — cheaper Gemini path) or an Anthropic API key.
+2. Add it under **Settings → Secrets and variables → Actions → New repository secret** as `OPENROUTER_API_KEY` (or `ANTHROPIC_API_KEY`).
+3. Pass it through the action's `with:` block, as shown above.
+
+If both keys are omitted, the review still runs but **complexity-only** — the agent bug/summary/architectural passes are skipped.
+
+## What it checks
+
+| Feature | Description |
+|---------|-------------|
+| Complexity analysis | Flags new/worsened cyclomatic, cognitive, and Halstead complexity violations |
+| Agent bug review | LLM-driven review for correctness bugs (OpenRouter or Anthropic) |
+| PR summary | A concise summary of the change, posted as a step summary |
+| Advisory by default | `fail-on: never` — the check never blocks a PR unless you opt in |
+
+## Blocking a PR on the review
+
+By default the review is **advisory** — it never fails CI. To gate merges on it, set `fail-on: error` (or `any`) and mark the workflow's job as a **Required status check** in your branch protection rules. See the [inputs table](https://github.com/getlien/lien/blob/main/packages/action/README.md#inputs) for the full set of options (`threshold`, `review-types`, `block-on-new-errors`, `fail-on`).
+
+## Fork PRs
+
+On a `pull_request` event from a fork, GitHub forces the built-in `GITHUB_TOKEN` to read-only, so Lien can still review the code but can't post inline comments (findings still show up as workflow annotations and in the step summary). To get inline comments on fork PRs, opt into the `pull_request_target` variant documented in [`packages/action/README.md`](https://github.com/getlien/lien/blob/main/packages/action/README.md#fork-prs) — read the security note there first.
+
+## Relationship to the MCP tools
+
+Lien Review is a separate product surface from the [MCP tools](/guide/mcp-tools): the MCP tools run locally inside your AI assistant, while Lien Review runs in CI against a pull request. Both share the same underlying AST parsing and complexity analysis (`@liendev/parser`), but Lien Review needs no local index and no `lien init` — it's a drop-in GitHub Action.

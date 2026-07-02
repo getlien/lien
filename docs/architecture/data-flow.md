@@ -12,7 +12,7 @@ flowchart TB
     
     subgraph "Configuration Loading"
         LOAD_CONFIG[Load Configuration]
-        DETECT_FW[Detect Frameworks]
+        DETECT_FW[Detect Ecosystems]
         MERGE_CONFIG[Merge with Defaults]
     end
     
@@ -20,7 +20,7 @@ flowchart TB
         SCAN_START[Start File Scanning]
         READ_GITIGNORE[Read .gitignore]
         APPLY_PATTERNS[Apply Include/Exclude Patterns]
-        FILTER_FRAMEWORK[Filter by Framework Boundaries]
+        FILTER_FRAMEWORK[Apply Ecosystem Exclude Patterns]
         FILE_LIST[Generate File List]
     end
     

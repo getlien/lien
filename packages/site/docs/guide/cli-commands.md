@@ -14,8 +14,9 @@ lien init [options]
 
 | Option | Description |
 |--------|-------------|
-| `--editor <editor>` | Editor to configure MCP for (`cursor`, `claude-code`, `windsurf`, `opencode`, `kilo-code`, `antigravity`) |
-| `--path <path>` | Path to initialize (defaults to current directory) |
+| `-e, --editor <editor>` | Editor to configure MCP for (`cursor`, `claude-code`, `windsurf`, `opencode`, `kilo-code`, `antigravity`) |
+| `-p, --path <path>` | Path to initialize (defaults to current directory) |
+| `--legacy` | Use legacy per-project setup for Claude Code instead of recommending the plugin |
 
 ### Behavior
 
@@ -54,8 +55,8 @@ lien index [options]
 
 | Option | Description |
 |--------|-------------|
-| `--force` | Clear existing index and rebuild from scratch |
-| `--verbose` | Show detailed logging during indexing |
+| `-f, --force` | Clear existing index and rebuild from scratch |
+| `-v, --verbose` | Show detailed logging during indexing |
 
 ### Behavior
 
@@ -124,8 +125,9 @@ lien serve [options]
 
 | Option | Description |
 |--------|-------------|
+| `-p, --port <port>` | Port number (reserved for future use; the MCP server runs over stdio) |
 | `--no-watch` | Disable file watching for this session |
-| `--root <path>` | Root directory to serve (defaults to current directory) |
+| `-r, --root <path>` | Root directory to serve (defaults to current directory) |
 
 ### Behavior
 
@@ -215,32 +217,39 @@ Windsurf uses a global config file, so `lien init` automatically includes `--roo
 Show indexing status and statistics.
 
 ```bash
-lien status
+lien status [options]
 ```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-v, --verbose` | Also show indexing settings (concurrency, batch size, chunk size/overlap defaults) |
+| `--format <type>` | Output format: `text` (default) or `json` |
 
 ### Output
 
 ```
-📊 Lien Status
+Status
 
-Project: /path/to/your/project
+Configuration: ✓ Using defaults (no per-project config needed)
+Index location: ~/.lien/indices/abc123
+Index status: ✓ Exists
+Index files: 1,234
+Last modified: 7/2/2026, 9:41:03 AM
+Last reindex: 7/2/2026, 9:40:12 AM
 
-Index Status:
-  Location: ~/.lien/indices/abc123
-  Last indexed: 2 hours ago
-  Files indexed: 1,234
-  Chunks created: 5,678
-  Test associations: 234
-  Disk usage: 142 MB
-
-Frameworks:
-  • nodejs (.)
-    - 1,100 files
-    - 5,200 chunks
-  • laravel (backend)
-    - 134 files
-    - 478 chunks
+Features:
+Git detection: ✓ Enabled
+  Poll interval: 2s
+  Current branch: main
+  Current commit: a1b2c3d4
+File watching: ✓ Enabled (default)
+  Batch window: 500ms (collects rapid changes, force-flush after 5s)
+  Disable with: lien serve --no-watch
 ```
+
+With `--verbose`, an additional "Indexing Settings (defaults)" block prints the concurrency, batch size, and chunk size/overlap defaults. With `--format json`, the same data is emitted as a single JSON object (`version`, `indexPath`, `indexStatus`, `indexFiles`, `git`, `features`, `settings`) for scripting.
 
 ## lien config
 
@@ -435,6 +444,57 @@ lien complexity --format json --fail-on error
 git diff --name-only HEAD~1 | xargs lien complexity --files
 ```
 
+## lien path
+
+Print Lien storage paths and supported extensions. This is a plumbing command intended for **hook scripts** (e.g. a Claude Code `PostToolUse` hook) rather than everyday interactive use.
+
+```bash
+lien path [options]
+```
+
+### Options
+
+Exactly one of the following is required — they are mutually exclusive:
+
+| Option | Description |
+|--------|-------------|
+| `--store` | Print the storage root for the current repo (e.g. `~/.lien/indices/abc123`) |
+| `--extensions` | Print the indexed-file extensions, one per line |
+| `--root` | Print the resolved project root (walks up the directory tree looking for `.git`) |
+
+### Examples
+
+```bash
+lien path --root
+# /Users/you/projects/my-app
+
+lien path --store
+# /Users/you/.lien/indices/a1b2c3d4
+
+lien path --extensions
+# .ts
+# .tsx
+# .js
+# ...
+```
+
+## lien annotate
+
+Print a short impact summary for a single file: dependent count and blast-radius risk, test coverage, and complexity warnings. This is a plumbing command intended for **hook scripts** — for example, a `PostToolUse` hook that annotates a just-edited file — rather than everyday interactive use. It never throws: on any error (missing index, unresolvable path) it exits 0 with empty output, so it never breaks a hook pipeline. Output is also empty when the impact is trivial (0-1 dependents, no complexity warnings, existing test coverage).
+
+```bash
+lien annotate <file>
+```
+
+### Example
+
+```bash
+lien annotate packages/cli/src/cli/status.ts
+# Lien impact for packages/cli/src/cli/status.ts:
+#   • 3 files import this — packages/cli/src/cli/index.ts, ...; risk: low.
+#   • Test coverage: packages/cli/src/cli/status.test.ts.
+```
+
 ## lien --version
 
 Show installed version.
@@ -453,22 +513,26 @@ lien --help
 ```
 
 ```
+Quick start: run 'lien serve' in your project directory
+
 Usage: lien [options] [command]
 
-Local semantic code search for AI assistants
+Local semantic code search for AI assistants via MCP
 
 Options:
-  -V, --version      output the version number
-  -h, --help         display help for command
+  -V, --version         output the version number
+  -h, --help            display help for command
 
 Commands:
-  init [options]     Initialize Lien in current directory
-  index [options]    Index your codebase
-  serve [options]    Start MCP server
-  status             Show indexing status
-  config             Manage global configuration
-  complexity         Analyze code complexity
-  help [command]     display help for command
+  init [options]        Initialize Lien in the current directory
+  index [options]       Index the codebase for semantic search
+  serve [options]       Start the MCP server (works with Cursor, Claude Code, Windsurf, and any MCP client)
+  status [options]      Show indexing status and statistics
+  complexity [options]  Analyze code complexity
+  config                Manage global configuration (~/.lien/config.json)
+  path [options]        Print Lien storage paths and supported extensions (for hook scripts)
+  annotate <file>       Print a short impact summary for a single file (for hook annotation)
+  help [command]        display help for command
 ```
 
 ## Environment Variables

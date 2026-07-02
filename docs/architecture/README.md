@@ -14,6 +14,7 @@ A bird's-eye view of Lien's architecture showing:
 - Data layer (embeddings, VectorDB factory with the LanceDB backend)
 - Optional services (git tracking, file watching, ecosystem presets)
 - External dependencies
+- Lien Review — the separate GitHub Action product surface (`packages/review` + `packages/action`)
 
 **Read this first** to understand the overall system structure.
 
@@ -186,39 +187,44 @@ All processing happens locally. No cloud services required. Your code never leav
 
 ## 🔍 Code Organization
 
-```
-packages/cli/src/
-├── cli/              # CLI commands (init, index, serve, status, config, complexity)
-├── mcp/              # MCP server, tools, and handlers
-│   ├── handlers/     # Tool handlers (semantic-search, find-similar, get-files-context, etc.)
-│   ├── schemas/      # Zod schemas for tool input validation
-│   └── utils/        # Response budgeting, metadata shaping, path matching
-├── indexer/          # File scanning, chunking, test associations
-├── embeddings/       # Local embedding generation with cache
-├── vectordb/         # LanceDB integration
-├── config/           # Per-project configuration (ConfigService)
-├── git/              # Git state tracking
-├── watcher/          # File watching (uses ecosystem presets for patterns)
-├── types/            # Shared TypeScript types
-├── utils/            # Utilities (banner, etc.)
-├── errors/           # Custom error classes
-└── constants.ts      # Centralized constants
+See `CLAUDE.md`'s "Package Structure" section for the canonical, actively-maintained version of this map. Summary:
 
-packages/core/src/
+```
+packages/parser/src/     # @liendev/parser — zero deps on core; AST, chunking, complexity, scanning
+├── ast/
+│   ├── languages/    # Per-language definitions (JS, TS, Python, PHP, Rust, etc.)
+│   ├── traversers/   # Language-specific AST traversal
+│   ├── extractors/   # Import/export/symbol extraction
+│   └── complexity/   # Cyclomatic, cognitive, Halstead analyzers
+├── risk/             # Blast-radius risk scoring
+├── insights/         # Complexity report types
+├── ecosystem-presets.ts  # Project-type detection (see ADR-007)
+└── scanner.ts, chunker.ts, dependency-analyzer.ts, test-associations.ts, ...
+
+packages/core/src/       # @liendev/core — depends on parser; embeddings, vector DB, config, git
 ├── config/           # GlobalConfig + per-project ConfigService + schema
-├── indexer/          # Scanner, chunker, manifest, ecosystem presets, dependency analyzer
-│   └── ast/          # AST parser, chunker, symbols, complexity metrics
-│       ├── languages/  # Per-language definitions (JS, TS, Python, PHP, Rust)
-│       ├── traversers/ # Language-specific AST traversal
-│       ├── extractors/ # Import/export/symbol extraction
-│       └── complexity/ # Cyclomatic, cognitive, Halstead analyzers
-├── insights/         # Complexity analyzer and formatters (text, JSON, SARIF)
+├── indexer/          # Indexing orchestration: manifest, incremental updates
+├── insights/         # ComplexityAnalyzer (VectorDB-aware wrapper) and formatters (text, JSON, SARIF)
 ├── vectordb/         # VectorDB factory, LanceDB, query, batch-insert, maintenance
 ├── embeddings/       # WorkerEmbeddings (transformers.js in worker thread)
 ├── git/              # Git tracker and utilities
 ├── errors/           # Error codes and classes
 ├── types/            # Shared types (CodeChunk, etc.)
 └── utils/            # Result type, versioning, path matching
+
+packages/cli/src/        # @liendev/lien — depends on core and parser
+├── cli/              # CLI commands (init, index, serve, status, config, complexity, path, annotate)
+├── mcp/              # MCP server, tools, and handlers
+│   ├── handlers/     # Tool handlers (semantic-search, find-similar, get-files-context, etc.)
+│   ├── schemas/      # Zod schemas for tool input validation
+│   └── utils/        # Response budgeting, metadata shaping, path matching
+├── watcher/          # File watching (uses ecosystem presets for patterns)
+├── types/            # Shared TypeScript types
+└── utils/            # Utilities (banner, etc.)
+
+packages/review/src/     # @liendev/review (private) — depends on parser only, not core
+packages/action/src/     # @liendev/action (private) — GitHub Action entry wrapping @liendev/review
+packages/site/           # @liendev/site (private) — VitePress docs site (lien.dev)
 ```
 
 ## 🚀 Performance Characteristics
@@ -283,11 +289,18 @@ Our Mermaid diagrams follow these conventions:
 
 ## 🔄 Version History
 
-### v0.35.0 (Current)
+### v0.49.x (Current)
+- ✅ Docs resynced to match current package layout and product surface
+- ✅ `@liendev/parser` extracted from `@liendev/core` (ADR-009)
+- ✅ Qdrant backend retired; LanceDB is the only backend (ADR-010)
+- ✅ Lien Review shipped as a self-hostable GitHub Action (`packages/review` + `packages/action`), replacing the retired hosted runner/platform
+- ✅ `lien path` and `lien annotate` commands added (hook-facing)
+- ✅ ADR-009, ADR-010 added
+
+### v0.35.0
 - ✅ Docs updated to match current state of codebase
 - ✅ Six MCP tools documented (`get_dependents`, `get_complexity` added)
 - ✅ Ecosystem presets replace framework detection (ADR-007)
-- ✅ VectorDB factory pattern (Qdrant backend retired in v0.49 — ADR-0010)
 - ✅ Global configuration system (`lien config`)
 - ✅ Complexity analyzer and `lien complexity` CLI
 - ✅ Embedding backend simplified to WorkerEmbeddings only (ADR-008)
@@ -332,7 +345,7 @@ If something in the architecture is unclear:
 
 ---
 
-**Last Updated:** February 10, 2026
+**Last Updated:** July 2, 2026
 **Maintained By:** Lien contributors
-**Status:** ✅ Complete and up-to-date (v0.35.0)
+**Status:** ✅ Complete and up-to-date (v0.49.x)
 

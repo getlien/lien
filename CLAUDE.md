@@ -10,28 +10,43 @@ Local-first semantic code search tool providing context to AI coding assistants 
 - License: AGPL-3.0 | Domain: lien.dev
 
 **Monorepo Structure:**
-- `packages/` — TypeScript packages (parser, core, review, cli, action, site)
+- `packages/` — TypeScript packages: `parser` and `core` publish as `@liendev/parser`/`@liendev/core`; `cli` publishes as `@liendev/lien`; `review`, `action`, and `site` are private (unpublished).
+- Dependency chain: `parser` ← `core` ← `cli`; `review` depends on `parser` only (not `core`); `action` wraps `review` as a self-hostable GitHub Action ([ADR-009](docs/architecture/decisions/0009-extract-parser-package.md)).
 
 **Package Structure:**
 ```
-packages/cli/src/
-├── cli/         # Commands (init, index, serve, status)
-├── mcp/         # MCP server
-├── indexer/     # Chunking, scanning, test associations
-├── embeddings/  # Local embeddings (transformers.js)
-├── vectordb/    # LanceDB vector storage
-├── config/      # Config management & migration
-├── frameworks/  # Framework detection (Node.js, Laravel)
-└── git/         # Git integration
+packages/parser/src/        # AST parsing, chunking, complexity, scanning — zero deps on core
+├── ast/
+│   ├── languages/   # Per-language definitions (single source of truth)
+│   ├── traversers/  # Language-specific AST traversal classes
+│   ├── extractors/  # Language-specific import/export/symbol extraction classes
+│   └── complexity/  # Complexity metrics (cyclomatic, cognitive, Halstead)
+├── risk/            # Blast-radius risk scoring
+├── insights/        # Complexity report types
+├── ecosystem-presets.ts  # Project-type detection — replaced the old frameworks/
+│                         # plugin system (ADR-007); NOT a `frameworks/` directory
+└── scanner.ts, gitignore.ts, chunker.ts, dependency-analyzer.ts,
+    test-associations.ts, symbol-extractor.ts, content-hash.ts
 
-packages/core/src/indexer/ast/
-├── languages/   # Per-language definitions (single source of truth)
-├── traversers/  # Language-specific AST traversal classes
-├── extractors/  # Language-specific export extraction classes
-├── complexity/  # Complexity metrics (cyclomatic, cognitive, Halstead)
-├── parser.ts    # Tree-sitter parser wrapper
-├── chunker.ts   # AST-based semantic chunking
-└── symbols.ts   # Symbol extraction
+packages/core/src/          # Embeddings, vector DB, config, git — depends on parser
+├── indexer/     # Indexing orchestration: manifest, incremental updates, scanning glue
+├── embeddings/  # Local embeddings (transformers.js, worker thread)
+├── vectordb/    # LanceDB vector storage
+├── config/      # Config management & migration (GlobalConfig + per-project ConfigService)
+├── git/         # Git state tracking
+└── insights/    # ComplexityAnalyzer + formatters (text/JSON/SARIF)
+
+packages/cli/src/           # CLI + MCP server — depends on core and parser
+├── cli/         # Commands: init, index, serve, status, config, complexity, path, annotate
+├── mcp/         # MCP server and tool handlers (semantic_search, get_dependents, etc.)
+├── watcher/     # File watching
+├── types/       # Shared TypeScript types
+└── utils/       # CLI utilities
+
+packages/review/src/        # PR review engine (plugins, blast-radius render, prompt building)
+                             # — depends on parser only, not core
+packages/action/src/        # Self-hostable GitHub Action wrapping @liendev/review
+packages/site/              # VitePress docs site (lien.dev)
 ```
 
 ---

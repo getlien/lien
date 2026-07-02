@@ -51,6 +51,7 @@ export default withMermaid(
             items: [
               { text: 'MCP Tools', link: '/guide/mcp-tools' },
               { text: 'CLI Commands', link: '/guide/cli-commands' },
+              { text: 'Lien Review', link: '/guide/lien-review' },
             ]
           },
         ]
