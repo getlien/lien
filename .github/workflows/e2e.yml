@@ -101,6 +101,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache HuggingFace embedding model
+        # Indexing (WorkerEmbeddings, see packages/core/src/embeddings/worker.ts)
+        # downloads the embedding model to ~/.cache/huggingface on first use.
+        # Without a cache, all 11 matrix jobs re-download it from HuggingFace
+        # in parallel every run -- real run 28366970070 (2026-06-29) failed on
+        # 'fetch failed' mid-download and misreported 154 tests as skipped.
+        # Keyed on the lockfile (bumps on @huggingface/transformers upgrades)
+        # and constants.ts (bumps if DEFAULT_EMBEDDING_MODEL changes).
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: huggingface-${{ runner.os }}-${{ hashFiles('package-lock.json', 'packages/core/src/constants.ts') }}
+          restore-keys: |
+            huggingface-${{ runner.os }}-
+
       - name: Build Lien
         run: npm run build
 

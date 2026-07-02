@@ -45,6 +45,25 @@ jobs:
       - name: Type check (Action)
         run: npm run typecheck --workspace=packages/action
 
+      - name: Run tests (Parser)
+        run: npm run test --workspace=packages/parser
+
+      - name: Run tests (Core)
+        # worker-embeddings.test.ts is excluded here (root `npm test` mirrors
+        # this same exclude): its "parity with LocalEmbeddings" case runs
+        # onnxruntime-node inference in both the main thread (LocalEmbeddings)
+        # and a real worker_thread (WorkerEmbeddings) at once, which
+        # reproducibly segfaults the process on teardown ("FATAL ERROR:
+        # v8::HandleScope::CreateHandle() Cannot create a handle without a
+        # HandleScope") even when run in isolation as the only file in the
+        # suite. This is a native cross-isolate onnxruntime-node conflict,
+        # not a vitest pool/isolate scheduling issue -- config-only fixes
+        # (singleFork, isolate:false, pool:'threads') don't touch it. Tracked
+        # as a known environmental issue; run it manually with
+        # `npm run test -w @liendev/core -- src/embeddings/worker-embeddings.test.ts`
+        # when validating WorkerEmbeddings changes by hand.
+        run: npm run test --workspace=packages/core -- --exclude '**/worker-embeddings.test.ts'
+
       - name: Run tests (CLI)
         run: npm run test --workspace=packages/cli
 
@@ -64,3 +83,80 @@ jobs:
 
       - name: Build Action image (Dockerfile smoke test)
         run: docker build -f packages/action/Dockerfile -t lien-review:ci .
+
+  release-smoke-test:
+    name: Release smoke test (npm pack -> external install)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Every other job installs via the npm workspace protocol (`npm ci` at
+    # the repo root), which resolves @liendev/core and @liendev/parser from
+    # the local workspace and never touches the public registry for our own
+    # packages. That means a phantom/unpublished/private dependency in
+    # packages/cli/package.json (like the @liendev/review dependency that
+    # broke `npm install` for real users until #620) is invisible to CI.
+    # This job packs the CLI exactly as it will be published and installs
+    # the tarball into a scratch project with no workspace and no monorepo
+    # lockfile -- the same resolution path an external `npm install
+    # @liendev/lien` gets -- so a phantom dependency fails the PR instead of
+    # shipping.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build packages required for the CLI tarball
+        run: npm run build:core && npm run build -w packages/cli
+
+      - name: Pack @liendev/lien tarball
+        run: npm pack -w @liendev/lien
+
+      - name: Install tarball as an external consumer
+        run: |
+          set -euo pipefail
+          TARBALL="$(pwd)/$(ls liendev-lien-*.tgz)"
+          SCRATCH="$(mktemp -d)"
+          echo "SCRATCH_DIR=$SCRATCH" >> "$GITHUB_ENV"
+          cd "$SCRATCH"
+          npm init -y >/dev/null
+          npm install "$TARBALL"
+
+      - name: Run the installed CLI binary
+        run: |
+          set -euo pipefail
+          "$SCRATCH_DIR/node_modules/.bin/lien" --version
+          "$SCRATCH_DIR/node_modules/.bin/lien" --help
+
+  docs-build:
+    name: Docs build (VitePress)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # packages/site is a workspace but is NOT part of the root `build`
+    # script, so a broken VitePress build (bad frontmatter, a dead internal
+    # link, a markdown-it/mermaid plugin error) only ever surfaced after
+    # merge, on the push-to-main deploy-docs.yml run. Wiring the same build
+    # command into this PR-triggered workflow catches it before merge.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build docs (VitePress)
+        run: npm run docs:build

@@ -1,0 +1,62 @@
+name: Harness Attestation Gate
+
+# Cheap, no-LLM audit trail for CLAUDE.md's mandatory harness-calibration
+# rule: any PR touching packages/review/src/plugins/agent/** must show
+# evidence of having cleared the >= 9/10 harness bar (a link to a
+# harness.yml run or artifact, or a pasted harness-result.json summary, in
+# the PR body) or explicitly opt out via the `skip-harness-gate` label for
+# non-behavioral changes (docs, comments, refactors with no prompt/rule
+# behavior change).
+#
+# This does NOT run the paid OpenRouter calibration itself -- that's
+# .github/workflows/harness.yml (workflow_dispatch only, costs real money).
+# This job only checks that a PR *says* it ran the gate; it is an audit
+# trail, not a re-verification.
+#
+# Deliberately triggers on EVERY PR (no top-level `paths:` filter) and
+# no-ops internally via a git-diff check instead: a `required` status check
+# tied to a path-filtered workflow trigger never reports for PRs that don't
+# touch the path, which leaves those PRs' required check stuck "pending"
+# forever. Always running and conditionally passing keeps this safe to mark
+# required in branch protection.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+jobs:
+  attestation:
+    name: Require harness evidence or bypass label
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check whether this PR touches an agent-review rule
+        id: touch
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          if git diff --name-only "origin/$BASE_REF...HEAD" | grep -qE '^packages/review/src/plugins/agent/'; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check PR body for harness evidence
+        if: steps.touch.outputs.touched == 'true' && !contains(github.event.pull_request.labels.*.name, 'skip-harness-gate')
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          if printf '%s' "$PR_BODY" | grep -qEi 'harness-result|actions/runs/[0-9]+|calibrate'; then
+            echo "Found harness evidence in PR body."
+            exit 0
+          fi
+
+          echo "::error::This PR touches packages/review/src/plugins/agent/** but the PR body has no harness evidence (a link to a harness.yml run/artifact, or a 'calibrate' mention) and no 'skip-harness-gate' label. Per CLAUDE.md, rule/prompt changes need a >=9/10 calibration run (npm run test:harness -- --rule <rule-id> --calibrate 10) before merging. Paste the harness.yml run link (or harness-result.json summary) in the PR description, or add the 'skip-harness-gate' label for non-behavioral changes."
+          exit 1
