@@ -16,12 +16,6 @@ import {
   TEST_ASSOCIATIONS_COLUMNS,
 } from './columns.js';
 
-/**
- * Maximum number of chunks to scan for test association analysis.
- * Larger codebases may have incomplete results if they exceed this limit.
- */
-const SCAN_LIMIT = 10000;
-
 // ============================================================================
 // Types
 // ============================================================================
@@ -48,6 +42,70 @@ interface FileData {
 
 /** Path cache for normalized path lookups */
 type PathCache = Map<string, string>;
+
+// ============================================================================
+// Test-Association Scan Cache
+// ============================================================================
+
+/**
+ * Cached full-table scan results used for test-association lookups, keyed
+ * by indexVersion. Mirrors the `scanCache` pattern in dependency-analyzer.ts:
+ * a module-level cache invalidated whenever the index is rebuilt (the
+ * indexVersion signal changes), so repeated get_files_context calls within
+ * one session skip the full-table scan when nothing has changed.
+ *
+ * Implemented as a small parallel cache rather than sharing
+ * dependency-analyzer's `scanCache` directly — that cache stores a much
+ * richer shape (an import index plus a per-file chunk map built for BFS
+ * dependency walks) that this handler doesn't need; it only reads the flat
+ * chunk list that `findTestAssociations` consumes.
+ */
+let testAssociationScanCache: {
+  indexVersion: number;
+  chunks: SearchResult[];
+} | null = null;
+
+/**
+ * Clear the test-association scan cache. Exported for testing.
+ */
+export function clearTestAssociationScanCache(): void {
+  testAssociationScanCache = null;
+}
+
+/**
+ * Scan all chunks for test-association analysis, using the indexVersion-keyed
+ * cache when available.
+ *
+ * Uses `scanAll` — a direct column-projected `table.query()` — instead of
+ * `scanWithFilter` with no file filter. Without a file filter,
+ * `scanWithFilter` routes through a full-table zero-vector ANN search
+ * (`table.search(...).where(...)`), which is roughly 10x slower than
+ * `scanAll`'s direct scan on large indexes (see the fast-path comment on
+ * `scanAll` in packages/core/src/vectordb/query.ts).
+ */
+async function getOrScanAllChunksForTestAssociations(
+  vectorDB: VectorDBInterface,
+  indexVersion: number | undefined,
+  log: LogFn,
+): Promise<SearchResult[]> {
+  if (
+    indexVersion !== undefined &&
+    testAssociationScanCache !== null &&
+    testAssociationScanCache.indexVersion === indexVersion
+  ) {
+    log(`Using cached chunk scan for test associations (version ${indexVersion})`);
+    return testAssociationScanCache.chunks;
+  }
+
+  const chunks = await vectorDB.scanAll({ columns: TEST_ASSOCIATIONS_COLUMNS });
+
+  if (indexVersion !== undefined) {
+    testAssociationScanCache = { indexVersion, chunks };
+  }
+
+  log(`Scanned ${chunks.length} chunks for test associations`);
+  return chunks;
+}
 
 // ============================================================================
 // Helper Functions (Exported for Testing)
@@ -267,15 +325,6 @@ export function buildFilesData(
   return filesData;
 }
 
-/**
- * Build warning note when scan limit is reached.
- */
-function buildScanLimitNote(hitScanLimit: boolean): string | undefined {
-  return hitScanLimit
-    ? 'Scanned 10,000 chunks (limit reached). Test associations may be incomplete for large codebases.'
-    : undefined;
-}
-
 /** Index metadata shape from context */
 interface IndexInfo {
   indexVersion: number;
@@ -361,6 +410,10 @@ export async function handleGetFilesContext(
     // Check if index has been updated and reconnect if needed
     await checkAndReconnect();
 
+    // Capture index metadata once: used both for the response and as the
+    // cache key for the test-association scan below (mirrors get_dependents).
+    const indexInfo = getIndexMetadata();
+
     // Compute workspace root for path matching
     const workspaceRoot = process.cwd().replace(/\\/g, '/');
 
@@ -381,19 +434,15 @@ export async function handleGetFilesContext(
       relatedChunksMap = await findRelatedChunks(filepaths, fileChunksMap, handlerCtx);
     }
 
-    // Step 3: Scan for test associations
-    const allChunks = await vectorDB.scanWithFilter({
-      limit: SCAN_LIMIT,
-      columns: TEST_ASSOCIATIONS_COLUMNS,
-    });
-    const hitScanLimit = allChunks.length === SCAN_LIMIT;
-
-    if (hitScanLimit) {
-      log(
-        `Scanned ${SCAN_LIMIT} chunks (limit reached). Test associations may be incomplete for large codebases.`,
-        'warning',
-      );
-    }
+    // Step 3: Scan for test associations. Uses the fast column-projected
+    // scanAll path (cached by indexVersion) instead of an unfiltered
+    // scanWithFilter, which is ~10x slower on large indexes — see
+    // getOrScanAllChunksForTestAssociations for details.
+    const allChunks = await getOrScanAllChunksForTestAssociations(
+      vectorDB,
+      indexInfo.indexVersion,
+      log,
+    );
 
     const testAssociationsMap = findTestAssociations(filepaths, allChunks, handlerCtx);
 
@@ -409,11 +458,8 @@ export async function handleGetFilesContext(
     log(`Found ${totalChunks} total chunks`);
 
     // Step 5: Build and return response
-    const note = buildScanLimitNote(hitScanLimit);
-    const indexInfo = getIndexMetadata();
-
     return isSingleFile
-      ? buildSingleFileResponse(filepaths[0], filesData, indexInfo, note)
-      : buildMultiFileResponse(filesData, indexInfo, note);
+      ? buildSingleFileResponse(filepaths[0], filesData, indexInfo)
+      : buildMultiFileResponse(filesData, indexInfo);
   })(args);
 }
