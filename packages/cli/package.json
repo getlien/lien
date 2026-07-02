@@ -38,6 +38,7 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "vitest run test/e2e/real-projects.test.ts --reporter=verbose",
+    "test:e2e:mcp": "vitest run test/e2e/mcp-roundtrip.test.ts --reporter=verbose",
     "test:e2e:python": "vitest run test/e2e/real-projects.test.ts -t 'Requests'",
     "test:e2e:typescript": "vitest run test/e2e/real-projects.test.ts -t 'Zod'",
     "test:e2e:javascript": "vitest run test/e2e/real-projects.test.ts -t 'Express'",
