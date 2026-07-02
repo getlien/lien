@@ -8,7 +8,11 @@ import type {
   LanguageImportExtractor,
   LanguageSymbolExtractor,
 } from '../extractors/types.js';
-import { extractSignature, extractParameters } from '../extractors/symbol-helpers.js';
+import {
+  extractSignature,
+  extractParameters,
+  clampSignatureLength,
+} from '../extractors/symbol-helpers.js';
 import { calculateComplexity } from '../complexity/index.js';
 
 // =============================================================================
@@ -52,6 +56,14 @@ export class PythonTraverser implements LanguageTraverser {
 
   containerTypes = [
     'class_definition', // We extract methods, not the class itself
+    // `decorated_definition` wraps either a function or a class (tree-sitter-python
+    // puts the decorator(s) and the definition under one node, unlike Java/Kotlin/
+    // Swift/C#/PHP/Rust where annotations are a sibling field on the declaration
+    // itself). Routing it through the container path lets getContainerBody() decide,
+    // per-node, whether it behaves like a leaf (decorated function/method - no body
+    // to recurse into) or like a container (decorated class - recurse into its body
+    // so its methods still get chunked).
+    'decorated_definition',
   ];
 
   declarationTypes: string[] = [];
@@ -69,6 +81,12 @@ export class PythonTraverser implements LanguageTraverser {
   getContainerBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
     if (node.type === 'class_definition') {
       return node.childForFieldName('body');
+    }
+    if (node.type === 'decorated_definition') {
+      const definition = node.childForFieldName('definition');
+      // Only a decorated class has more to recurse into. A decorated function/method
+      // is chunked whole (via shouldExtractChildren pushing the node itself below).
+      return definition?.type === 'class_definition' ? definition.childForFieldName('body') : null;
     }
     return null;
   }
@@ -309,6 +327,7 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
     'function_definition',
     'async_function_definition',
     'class_definition',
+    'decorated_definition',
   ];
 
   extractSymbol(node: Parser.SyntaxNode, content: string, parentClass?: string): SymbolInfo | null {
@@ -318,9 +337,39 @@ export class PythonSymbolExtractor implements LanguageSymbolExtractor {
         return this.extractFunctionInfo(node, content, parentClass);
       case 'class_definition':
         return this.extractClassInfo(node);
+      case 'decorated_definition':
+        return this.extractDecoratedInfo(node, content, parentClass);
       default:
         return null;
     }
+  }
+
+  /**
+   * Unwrap `decorated_definition` (decorator(s) + a function/class field) to the
+   * inner definition's symbol info, so decorated functions/methods/classes carry
+   * the same name/type/complexity/callSites as their undecorated counterparts.
+   * The decorator source is folded into `signature` so it isn't silently dropped -
+   * mirrors how e.g. Java's `@Override` naturally stays part of the signature text
+   * (there it's a sibling child of the same node, not a separate wrapper node).
+   */
+  private extractDecoratedInfo(
+    node: Parser.SyntaxNode,
+    content: string,
+    parentClass?: string,
+  ): SymbolInfo | null {
+    const definition = node.childForFieldName('definition');
+    if (!definition) return null;
+
+    const inner = this.extractSymbol(definition, content, parentClass);
+    if (!inner) return null;
+
+    const decoratorPrefix = node.namedChildren
+      .filter(child => child.type === 'decorator')
+      .map(child => child.text)
+      .join(' ');
+    if (!decoratorPrefix || !inner.signature) return inner;
+
+    return { ...inner, signature: clampSignatureLength(`${decoratorPrefix} ${inner.signature}`) };
   }
 
   extractCallSite(node: Parser.SyntaxNode): { symbol: string; line: number; key: string } | null {

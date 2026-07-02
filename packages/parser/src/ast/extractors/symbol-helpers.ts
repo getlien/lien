@@ -45,7 +45,7 @@ export function extractSignature(node: Parser.SyntaxNode, content: string): stri
 /**
  * Truncate an over-long signature to keep stored chunks compact.
  */
-function clampSignatureLength(signature: string): string {
+export function clampSignatureLength(signature: string): string {
   return signature.length > 200 ? signature.substring(0, 197) + '...' : signature;
 }
 
