@@ -26,6 +26,7 @@ For more information, see [adr.github.io](https://adr.github.io/).
 | [ADR-007](0007-replace-framework-detection-with-ecosystem-presets.md) | Replace Framework Detection with Ecosystem Presets | 2026-02-07 | Accepted |
 | [ADR-008](0008-keep-transformers-js-worker-embeddings.md) | Keep transformers.js WorkerEmbeddings as Sole Embedding Backend | 2026-02-10 | Accepted |
 | [ADR-009](0009-extract-parser-package.md) | Extract `@liendev/parser` from `@liendev/core` | 2026-02-19 | Accepted |
+| [ADR-010](0010-retire-qdrant-backend.md) | Retire the Qdrant Backend | 2026-07-02 | Accepted |
 
 ## ADR Format
 

@@ -262,17 +262,11 @@ lien config <command> [key] [value]
 
 | Key | Values | Description |
 |-----|--------|-------------|
-| `backend` | `lancedb`, `qdrant` | Vector database backend |
-| `qdrant.url` | any URL | Qdrant server URL |
-| `qdrant.apiKey` | any string | Qdrant API key (set `qdrant.url` first) |
+| `backend` | `lancedb` | Vector database backend |
 
 ### Examples
 
 ```bash
-# Switch to Qdrant backend for cross-repo search
-lien config set backend qdrant
-lien config set qdrant.url http://localhost:6333
-
 # Check current backend
 lien config get backend
 
@@ -280,7 +274,7 @@ lien config get backend
 lien config list
 ```
 
-Config is stored in `~/.lien/config.json`. Environment variables (`LIEN_BACKEND`, `LIEN_QDRANT_URL`, `LIEN_QDRANT_API_KEY`) take precedence over the config file.
+Config is stored in `~/.lien/config.json`. The `LIEN_BACKEND` environment variable takes precedence over the config file.
 
 ## lien complexity
 

@@ -14,7 +14,7 @@ Search your codebase using natural language queries.
 |-----------|------|----------|---------|-------------|
 | `query` | string | Yes | - | Natural language search query |
 | `limit` | number | No | 5 | Maximum number of results to return |
-| `crossRepo` | boolean | No | false | Search across all repos in the organization. Requires a cross-repo-capable backend (currently Qdrant); other backends fall back to single-repo search |
+| `crossRepo` | boolean | No | false | Search across all repos in the organization. Requires a cross-repo-capable backend (the bundled LanceDB backend is single-repo); unsupported backends fall back to single-repo search |
 | `repoIds` | string[] | No | - | Restrict cross-repo search to these repo IDs. Only applied when `crossRepo=true` with a supporting backend; ignored otherwise |
 
 ### Usage
@@ -287,7 +287,7 @@ Find all files that depend on a given file (reverse dependency lookup). Essentia
 | `filepath` | string | Yes | - | Path to file (relative to project root) |
 | `depth` | number | No | 1 | Dependency depth (currently only 1 supported) |
 | `symbol` | string | No | - | Specific exported symbol to find usages of (returns call sites instead of just importing files) |
-| `crossRepo` | boolean | No | false | Find dependents across all repos. Requires a cross-repo-capable backend (currently Qdrant) |
+| `crossRepo` | boolean | No | false | Find dependents across all repos. Requires a cross-repo-capable backend (the bundled LanceDB backend is single-repo) |
 
 ### Usage
 
@@ -366,7 +366,7 @@ Analyze code complexity for tech debt identification and refactoring prioritizat
 | `files` | string[] | No | - | Specific files to analyze (analyzes all if omitted) |
 | `top` | number | No | 10 | Return top N most complex functions |
 | `threshold` | number | No | config | Only return functions above this complexity |
-| `crossRepo` | boolean | No | false | Analyze across all repos in the organization. Requires a cross-repo-capable backend (currently Qdrant) |
+| `crossRepo` | boolean | No | false | Analyze across all repos in the organization. Requires a cross-repo-capable backend (the bundled LanceDB backend is single-repo) |
 | `repoIds` | string[] | No | - | Filter to specific repos when `crossRepo=true` |
 
 ### Usage

@@ -681,25 +681,25 @@ describe('findDependents', () => {
     });
   });
 
-  describe('cross-repo with QdrantDB', () => {
+  describe('cross-repo with a cross-repo-capable backend', () => {
     it('should call scanCrossRepo when vectorDB supports cross-repo and crossRepo=true', async () => {
-      const mockQdrantDB: any = {
+      const mockCrossRepoDB: any = {
         scanAll: vi.fn().mockResolvedValue([]),
         scanCrossRepo: vi.fn().mockResolvedValue([]),
         supportsCrossRepo: true,
       };
 
-      await findDependents(mockQdrantDB, 'src/target.ts', true, mockLog);
+      await findDependents(mockCrossRepoDB, 'src/target.ts', true, mockLog);
 
-      expect(mockQdrantDB.scanCrossRepo).toHaveBeenCalledWith(
+      expect(mockCrossRepoDB.scanCrossRepo).toHaveBeenCalledWith(
         expect.objectContaining({ limit: 100000 }),
       );
-      expect(mockQdrantDB.scanAll).not.toHaveBeenCalled();
+      expect(mockCrossRepoDB.scanAll).not.toHaveBeenCalled();
     });
   });
 
-  describe('cross-repo fallback for non-QdrantDB', () => {
-    it('should log warning and use scanAll when vectorDB is not QdrantDB', async () => {
+  describe('cross-repo fallback for unsupported backends', () => {
+    it('should log warning and use scanAll when vectorDB lacks cross-repo support', async () => {
       await findDependents(mockDB as any, 'src/target.ts', true, mockLog);
 
       expect(mockLog).toHaveBeenCalledWith(

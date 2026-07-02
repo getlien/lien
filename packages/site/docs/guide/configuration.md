@@ -8,7 +8,6 @@ If Lien is working well for you, skip this page! Configuration is only needed fo
 
 ## When You Might Need Configuration
 
-- **Qdrant backend**: For cross-repository search across your organization
 - **Custom exclusions**: To ignore specific directories beyond defaults
 - **Performance tuning**: For very large codebases (50k+ files)
 - **Complexity thresholds**: To customize code quality analysis
@@ -18,8 +17,6 @@ If Lien is working well for you, skip this page! Configuration is only needed fo
 Global settings live in `~/.lien/config.json` and control the vector database backend. You can manage them via the CLI:
 
 ```bash
-lien config set backend qdrant
-lien config set qdrant.url http://localhost:6333
 lien config get backend
 lien config list
 ```
@@ -28,19 +25,17 @@ Or edit the file directly:
 
 ```json
 {
-  "backend": "lancedb",
-  "qdrant": {
-    "url": "http://localhost:6333",
-    "apiKey": "your-api-key"
-  }
+  "backend": "lancedb"
 }
 ```
 
 | Key | Values | Description |
 |-----|--------|-------------|
-| `backend` | `lancedb` (default), `qdrant` | Vector database backend |
-| `qdrant.url` | any URL | Qdrant server URL |
-| `qdrant.apiKey` | any string | Qdrant API key |
+| `backend` | `lancedb` (default) | Vector database backend |
+
+::: info Qdrant backend removed
+The experimental Qdrant backend was removed in v0.49. Lien is local-first — LanceDB is the only backend. Existing configs with `backend: "qdrant"` or `qdrant.*` keys keep working: Lien warns once and falls back to local LanceDB.
+:::
 
 ## Per-Project Configuration
 
@@ -68,11 +63,7 @@ You can also configure Lien via environment variables:
 
 ```bash
 # Backend selection
-export LIEN_BACKEND=qdrant
-
-# Qdrant configuration
-export LIEN_QDRANT_URL=http://localhost:6333
-export LIEN_QDRANT_API_KEY=your-api-key
+export LIEN_BACKEND=lancedb
 
 # Index location
 export LIEN_HOME=/custom/path
@@ -251,32 +242,6 @@ These settings go in per-project `.lien.config.json` under the `core` key:
 | Modern machine (SSD, 8+ cores) | 6 | 75 |
 | Default (works for most) | 4 | 50 |
 
-## Qdrant Backend (Cross-Repo Search)
-
-For cross-repository search across your organization:
-
-```json
-{
-  "backend": "qdrant",
-  "qdrant": {
-    "url": "http://localhost:6333",
-    "apiKey": "your-api-key"
-  }
-}
-```
-
-Or via environment variables:
-
-```bash
-export LIEN_BACKEND=qdrant
-export LIEN_QDRANT_URL=http://localhost:6333
-export LIEN_QDRANT_API_KEY=your-api-key
-```
-
-::: tip
-The `orgId` is automatically extracted from your git remote URL. Cross-repo search requires all repos to share the same `orgId`.
-:::
-
 ## Migrating from Old Config Files
 
 If you have an existing `.lien.config.json` with a `frameworks` array from older versions, the `frameworks` field is deprecated. Lien now uses:
@@ -284,7 +249,6 @@ If you have an existing `.lien.config.json` with a `frameworks` array from older
 1. **Ecosystem presets** for auto-detecting project type and patterns
 2. **Global config** at `~/.lien/config.json` for backend selection (managed via `lien config`)
 3. **Per-project config** at `.lien.config.json` for indexing/chunking tuning (optional)
-4. **Environment variables** for Qdrant configuration
 
 Your indices will continue to work—no need to re-index.
 

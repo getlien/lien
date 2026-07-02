@@ -1,6 +1,6 @@
 # Configuration System
 
-> **Note:** Lien's configuration has been split into two layers. **Global configuration** (`GlobalConfig`) manages backend choice and Qdrant settings via `~/.lien/config.json` and the `lien config` CLI. **Per-project configuration** (`ConfigService`) manages indexing, chunking, MCP, and file-watching settings via `.lien.config.json` in the project root. The framework-based organization described in the legacy sections below has been replaced by ecosystem presets (see [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md)).
+> **Note:** Lien's configuration has been split into two layers. **Global configuration** (`GlobalConfig`) manages backend choice via `~/.lien/config.json` and the `lien config` CLI. **Per-project configuration** (`ConfigService`) manages indexing, chunking, MCP, and file-watching settings via `.lien.config.json` in the project root. The framework-based organization described in the legacy sections below has been replaced by ecosystem presets (see [ADR-007](decisions/0007-replace-framework-detection-with-ecosystem-presets.md)).
 
 ## Global Configuration (Current)
 
@@ -10,26 +10,20 @@ The global config manages settings that apply across all projects — primarily 
 
 ```typescript
 interface GlobalConfig {
-  backend?: 'lancedb' | 'qdrant';  // Default: 'lancedb'
-  qdrant?: {
-    url: string;        // e.g., "http://localhost:6333"
-    apiKey?: string;    // Optional, required for Qdrant Cloud
-  };
+  backend?: 'lancedb'; // Default: 'lancedb'
 }
 ```
 
 ### Load Precedence
 
-1. **Environment variables** (highest priority): `LIEN_BACKEND`, `LIEN_QDRANT_URL`, `LIEN_QDRANT_API_KEY`
+1. **Environment variables** (highest priority): `LIEN_BACKEND`
 2. **Global config file**: `~/.lien/config.json`
 3. **Defaults**: `{ backend: 'lancedb' }`
 
 ### CLI: `lien config`
 
 ```bash
-lien config set backend qdrant     # Set vector DB backend
-lien config set qdrant.url http://localhost:6333
-lien config set qdrant.apiKey sk-...
+lien config set backend lancedb    # Set vector DB backend
 lien config get backend            # Read a config value
 lien config list                   # Show all config values
 ```
@@ -38,9 +32,9 @@ lien config list                   # Show all config values
 
 | Key | Values | Description |
 |-----|--------|-------------|
-| `backend` | `lancedb`, `qdrant` | Vector database backend |
-| `qdrant.url` | any URL | Qdrant server URL |
-| `qdrant.apiKey` | any string | Qdrant API key (set `qdrant.url` first) |
+| `backend` | `lancedb` | Vector database backend |
+
+> **Note:** The experimental Qdrant backend was retired in v0.49 (see [ADR-0010](decisions/0010-retire-qdrant-backend.md)). Existing configs with `backend: "qdrant"` or `qdrant.*` keys do not crash: Lien warns once and falls back to local LanceDB.
 
 ---
 

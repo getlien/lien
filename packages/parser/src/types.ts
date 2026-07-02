@@ -67,26 +67,25 @@ export interface ChunkMetadata {
   // Multi-tenant fields (optional for backward compatibility)
   /**
    * Unique repository identifier for multi-tenant scenarios.
-   * Used for cross-repo search and tenant isolation in Qdrant backend.
+   * Used for cross-repo search and tenant isolation in cross-repo-capable backends.
    * Typically derived from project root path or GitHub repository identifier.
    */
   repoId?: string;
 
   /**
    * Organization identifier for multi-tenant scenarios.
-   * Used for tenant isolation in Qdrant backend.
-   * Set from config.storage.qdrant.orgId when using Qdrant backend.
+   * Used for tenant isolation in cross-repo-capable backends.
    */
   orgId?: string;
 
   /**
-   * Git branch name for branch/commit tracking in Qdrant backend.
+   * Git branch name for branch/commit tracking in cross-repo-capable backends.
    * Used to isolate indexes by branch (e.g., main vs PR branches).
    */
   branch?: string;
 
   /**
-   * Git commit SHA for branch/commit tracking in Qdrant backend.
+   * Git commit SHA for branch/commit tracking in cross-repo-capable backends.
    * Used to isolate indexes by commit (e.g., for PR analysis).
    */
   commitSha?: string;

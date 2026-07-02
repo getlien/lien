@@ -11,7 +11,7 @@ When you run `lien index`, Lien scans your codebase and breaks it down into mana
 Each code chunk is converted into a **vector embedding** - a mathematical representation that captures its semantic meaning. This happens entirely on your machine using a local ML model (all-MiniLM-L6-v2). No external API calls, no cloud services.
 
 ### 3. 💾 Storage
-These embeddings are stored in a vector database — LanceDB locally in `~/.lien/indices/`, or optionally in Qdrant for cross-repo search. Think of it as a semantic index of your entire codebase that enables lightning-fast searches.
+These embeddings are stored in a vector database — LanceDB, locally in `~/.lien/indices/`. Think of it as a semantic index of your entire codebase that enables lightning-fast searches.
 
 ### 4. 🎯 Search
 When you ask your AI assistant a question like "how does authentication work?", Lien:
@@ -42,7 +42,7 @@ Everything runs locally:
 Lien is built with modern, performant tools:
 - **TypeScript** for type-safe development
 - **@huggingface/transformers** for local embeddings (runs in worker thread)
-- **LanceDB** for local vector storage (default), **Qdrant** for cross-repo search (optional)
+- **LanceDB** for local vector storage
 - **Model Context Protocol (MCP)** for AI assistant integration (Cursor, Claude Code, etc.)
 
 ## Want to Learn More?

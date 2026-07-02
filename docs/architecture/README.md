@@ -11,7 +11,7 @@ A bird's-eye view of Lien's architecture showing:
 - CLI layer and commands (including `lien config` and `lien complexity`)
 - MCP server and all six tools
 - Core services (indexer, scanner, chunker, complexity analyzer, manifest manager, etc.)
-- Data layer (embeddings, VectorDB factory with LanceDB + Qdrant backends)
+- Data layer (embeddings, VectorDB factory with the LanceDB backend)
 - Optional services (git tracking, file watching, ecosystem presets)
 - External dependencies
 
@@ -89,7 +89,7 @@ Detailed diagrams of:
 **Global config and per-project config management**
 
 Documentation of Lien's two-layer configuration:
-- Global configuration (`GlobalConfig`) for backend choice and Qdrant settings
+- Global configuration (`GlobalConfig`) for backend choice
 - Per-project configuration (`ConfigService`) for indexing, chunking, MCP settings
 - `lien config` CLI (set/get/list)
 - Legacy config migration and validation rules
@@ -179,7 +179,7 @@ All processing happens locally. No cloud services required. Your code never leav
 - **Language:** TypeScript (ESM modules)
 - **CLI Framework:** Commander.js
 - **MCP Protocol:** @modelcontextprotocol/sdk
-- **Vector Database:** LanceDB (default) or Qdrant (optional, for cross-repo search)
+- **Vector Database:** LanceDB (local)
 - **Embeddings:** @huggingface/transformers v4 (all-MiniLM-L6-v2, worker thread)
 - **Testing:** Vitest
 - **Build:** tsup
@@ -213,7 +213,7 @@ packages/core/src/
 │       ├── extractors/ # Import/export/symbol extraction
 │       └── complexity/ # Cyclomatic, cognitive, Halstead analyzers
 ├── insights/         # Complexity analyzer and formatters (text, JSON, SARIF)
-├── vectordb/         # VectorDB factory, LanceDB, Qdrant, query, batch-insert, maintenance
+├── vectordb/         # VectorDB factory, LanceDB, query, batch-insert, maintenance
 ├── embeddings/       # WorkerEmbeddings (transformers.js in worker thread)
 ├── git/              # Git tracker and utilities
 ├── errors/           # Error codes and classes
@@ -241,8 +241,8 @@ packages/core/src/
 - **Memory:** ~500MB with model loaded
 
 ### Current Scaling
-- **Multi-repo search**: Supported via Qdrant backend with `crossRepo=true` on search tools
-- **VectorDB factory**: Switch between LanceDB (local) and Qdrant (remote) via global config
+- **Single-repo, local-first**: LanceDB is the only backend (the Qdrant backend was retired — see [ADR-0010](decisions/0010-retire-qdrant-backend.md))
+- **VectorDB factory**: The `createVectorDB` factory and `VectorDBInterface` seam are retained so an alternative backend can be reintroduced
 
 ### Future Scaling
 - Cloud sync option (planned)
@@ -287,7 +287,7 @@ Our Mermaid diagrams follow these conventions:
 - ✅ Docs updated to match current state of codebase
 - ✅ Six MCP tools documented (`get_dependents`, `get_complexity` added)
 - ✅ Ecosystem presets replace framework detection (ADR-007)
-- ✅ Qdrant backend and VectorDB factory pattern
+- ✅ VectorDB factory pattern (Qdrant backend retired in v0.49 — ADR-0010)
 - ✅ Global configuration system (`lien config`)
 - ✅ Complexity analyzer and `lien complexity` CLI
 - ✅ Embedding backend simplified to WorkerEmbeddings only (ADR-008)

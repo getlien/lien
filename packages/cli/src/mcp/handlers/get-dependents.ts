@@ -171,7 +171,7 @@ function buildDependentsResponse(
     response.note = notes.join(' ');
   }
 
-  // Group by repo if cross-repo search with Qdrant
+  // Group by repo if cross-repo search on a cross-repo-capable backend
   if (crossRepo && vectorDB.supportsCrossRepo) {
     response.groupedByRepo = groupDependentsByRepo(analysis.dependents, analysis.allChunks);
   }
