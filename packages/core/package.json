@@ -1,6 +1,6 @@
 {
   "name": "@liendev/core",
-  "version": "0.48.3",
+  "version": "0.49.0",
   "description": "Core indexing and analysis engine for Lien",
   "type": "module",
   "main": "./dist/index.js",
