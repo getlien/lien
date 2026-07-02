@@ -319,7 +319,8 @@ export interface ReviewPlugin {
 
   /**
    * Optional Zod schema for validating this plugin's config section.
-   * Used by the config module to validate .lien/review.yml.
+   * Used by the engine (see `resolvePluginConfig` in engine.ts) to validate
+   * the entry in `ReviewContext.pluginConfigs[plugin.id]`.
    */
   configSchema?: z.ZodType;
 
