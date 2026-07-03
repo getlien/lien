@@ -225,7 +225,7 @@ const changed = await getChangedFiles('./my-project');
 > interface and the `embeddings` indexing option are retained for back-compat
 > but are inert; any service passed to `indexCodebase` is discarded.
 
-`EmbeddingService` interface (retained for back-compat):
+`EmbeddingService` interface (legacy/back-compat only; indexing ignores it):
 
 ```typescript
 interface EmbeddingService {

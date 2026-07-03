@@ -1,7 +1,7 @@
 export const EXPLORE_AGENT_CONTENT = `---
 name: Explore
 description: >-
-  Fast codebase explorer enhanced with Lien semantic search. Use for questions
+  Fast codebase explorer enhanced with Lien lexical code search. Use for questions
   like "where is X?", "how does X work?", "what depends on X?", "find all
   controllers", "what are the most complex functions?", and any codebase
   discovery or exploration task.
