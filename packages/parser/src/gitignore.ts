@@ -15,6 +15,12 @@ export const ALWAYS_IGNORE_PATTERNS = [
   '.git/**',
   '**/.git/**',
   '.lien/**',
+  // Claude Code agent worktrees: full nested repo clones used as scratch
+  // space by CC agents. Indexing them duplicates the entire project once
+  // per worktree (seen in production: ~30 worktrees -> 21 GB index, 8 CPU
+  // cores pegged). Never index these regardless of user config.
+  '.claude/worktrees/**',
+  '**/.claude/worktrees/**',
   'dist/**',
   '**/dist/**',
   'build/**',
@@ -98,8 +104,8 @@ function matchesScopedIgnore(normalized: string, prefix: string, ig: Ignore): bo
  * Create a filter function that checks if a file path is gitignored.
  * Discovers .gitignore files throughout the directory tree and applies
  * each at its appropriate scope, plus built-in exclusions (node_modules,
- * vendor, .git, .lien, dist, build, minified assets) to match the full scan
- * behavior in scanner.ts.
+ * vendor, .git, .lien, .claude/worktrees, dist, build, minified assets) to
+ * match the full scan behavior in scanner.ts.
  *
  * Limitation: scoped evaluation is OR across .gitignore files, so a nested
  * .gitignore cannot un-ignore a pattern from a parent. Cross-scope negation

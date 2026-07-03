@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { detectFileType, detectLanguage } from './scanner.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { detectFileType, detectLanguage, scanCodebase } from './scanner.js';
 
 describe('detectFileType', () => {
   it('should export detectLanguage as a backwards-compat alias', () => {
@@ -119,5 +122,55 @@ describe('detectFileType', () => {
     expect(detectFileType('../src/index.ts')).toBe('typescript');
     expect(detectFileType('/usr/local/bin/script.py')).toBe('python');
     expect(detectFileType('./components/Button.tsx')).toBe('typescript');
+  });
+});
+
+describe('scanCodebase', () => {
+  let testDir: string;
+
+  afterEach(async () => {
+    if (!testDir) return;
+    try {
+      await fs.rm(testDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  // Regression test for the .claude/worktrees exclusion (ALWAYS_IGNORE_PATTERNS
+  // in gitignore.ts). That exclusion is matched against path.relative(rootDir, file),
+  // so it must only fire when .claude/worktrees is BELOW the scan root — never when
+  // a worktree itself IS the scan root. Guards against a future over-broad rewrite
+  // (e.g. absolute-path matching, or a wider '**/.claude/**' pattern) silently making
+  // Lien unable to index a repo checked out under .claude/worktrees/.
+  it('excludes a nested .claude/worktrees checkout when scanning the parent, but fully indexes it when scanned as its own root', async () => {
+    testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lien-test-scanner-worktrees-'));
+
+    const worktreeDir = path.join(testDir, '.claude', 'worktrees', 'agent-x');
+
+    await fs.mkdir(path.join(testDir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(testDir, 'src', 'real.ts'), 'export const real = true;\n');
+
+    await fs.mkdir(path.join(worktreeDir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(worktreeDir, 'src', 'foo.ts'), 'export const foo = true;\n');
+    await fs.writeFile(path.join(worktreeDir, 'package.json'), '{"name":"agent-x"}\n');
+
+    // 1. Scanning the parent repo excludes the nested worktree entirely.
+    const parentFiles = await scanCodebase({ rootDir: testDir });
+    const parentRelative = parentFiles.map(f => path.relative(testDir, f));
+
+    expect(parentRelative).toContain(path.join('src', 'real.ts'));
+    expect(parentRelative).not.toContain(
+      path.join('.claude', 'worktrees', 'agent-x', 'src', 'foo.ts'),
+    );
+    expect(parentRelative.some(f => f.includes('.claude'))).toBe(false);
+
+    // 2. Scanning the worktree AS ITS OWN ROOT is unaffected by the exclusion —
+    // relative paths from this root never contain '.claude/worktrees', so the
+    // pattern does not fire and the worktree is fully indexed.
+    const worktreeFiles = await scanCodebase({ rootDir: worktreeDir });
+    const worktreeRelative = worktreeFiles.map(f => path.relative(worktreeDir, f));
+
+    expect(worktreeRelative).toContain(path.join('src', 'foo.ts'));
   });
 });

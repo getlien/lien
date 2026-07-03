@@ -83,10 +83,25 @@ describe('createGitignoreFilter', () => {
     expect(isIgnored('styles/main.min.css')).toBe(true);
   });
 
+  it('should always ignore Claude Code agent worktrees (.claude/worktrees)', async () => {
+    const isIgnored = await createGitignoreFilter(testDir);
+
+    // Direct child of the project root — the exact incident shape (full
+    // nested repo clone with source files under packages/*/src)
+    expect(isIgnored('.claude/worktrees/agent-x/packages/cli/src/foo.ts')).toBe(true);
+    expect(isIgnored('.claude/worktrees/agent-x/package.json')).toBe(true);
+    // Nested under a subdirectory (monorepo-in-monorepo scenario)
+    expect(isIgnored('packages/app/.claude/worktrees/agent-y/src/index.ts')).toBe(true);
+    // Sibling .claude paths that are NOT worktrees are unaffected — only
+    // the worktrees subdirectory (full repo clones) is excluded
+    expect(isIgnored('.claude/settings.json')).toBe(false);
+    expect(isIgnored('.claude/agents/reviewer.md')).toBe(false);
+  });
+
   it('should not allow .gitignore negations to override built-in patterns', async () => {
     await fs.writeFile(
       path.join(testDir, '.gitignore'),
-      '!node_modules/\n!.lien/\n!vendor/\n!.git/\n',
+      '!node_modules/\n!.lien/\n!vendor/\n!.git/\n!.claude/\n',
     );
 
     const isIgnored = await createGitignoreFilter(testDir);
@@ -95,6 +110,7 @@ describe('createGitignoreFilter', () => {
     expect(isIgnored('.lien/indices/abc123')).toBe(true);
     expect(isIgnored('vendor/autoload.php')).toBe(true);
     expect(isIgnored('.git/HEAD')).toBe(true);
+    expect(isIgnored('.claude/worktrees/agent-x/src/index.ts')).toBe(true);
   });
 
   it('should handle negation patterns', async () => {
